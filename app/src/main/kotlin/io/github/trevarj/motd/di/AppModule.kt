@@ -7,6 +7,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.SettingsRepository
@@ -69,6 +70,10 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun pushPrefs(impl: DataStoreSettingsRepository): PushPrefs
+
+    /** TOFU cert-pin store (plans/12); same DataStore-backed impl. */
+    @Binds @Singleton
+    abstract fun certTrustStore(impl: DataStoreSettingsRepository): CertTrustStore
 
     // -- data/sync (WP5) --
     @Binds @Singleton

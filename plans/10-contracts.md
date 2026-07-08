@@ -612,3 +612,54 @@ interface UnifiedPushApi {
     fun unregisterApp(instance: String)
 }
 ```
+
+## Round 3 amendments
+
+Landed by WP-S1/WP-S2 (round 3). Full design in `plans/12-round3.md`.
+
+### Transport (`irc/transport/Transport.kt`) — additive
+
+`OkioLineTransport` gains a trailing constructor param; `TransportFactory` interface unchanged.
+
+```kotlin
+class OkioLineTransport(
+    host: String, port: Int, tls: Boolean,
+    sslContext: SSLContext? = null,
+    verifyHostname: Boolean = true,   // false → skip endpointIdentificationAlgorithm (pinned certs)
+) : IrcTransport
+```
+
+### ConnectionManager (`service/ServiceSeam.kt`) — TOFU cert surface
+
+```kotlin
+data class CertPrompt(
+    val networkId: Long, val host: String, val port: Int,
+    val sha256: String,            // lowercase hex of the leaf cert
+    val subject: String, val issuer: String,
+    val notBefore: Long, val notAfter: Long,  // epoch ms
+    val changed: Boolean,          // true = a previously-pinned cert differs (warn/MITM)
+)
+
+interface ConnectionManager {
+    // ... existing members ...
+    val certPrompts: StateFlow<List<CertPrompt>>
+    suspend fun trustCert(prompt: CertPrompt)     // pin + reconnect that network
+    fun dismissCertPrompt(prompt: CertPrompt)     // drop prompt; network stays disconnected
+}
+```
+
+### New: CertTrustStore (`data/prefs/`)
+
+```kotlin
+interface CertTrustStore {
+    suspend fun pinnedFor(host: String, port: Int): String?
+    suspend fun isPinned(host: String, port: Int, sha256: String): Boolean
+    suspend fun pin(host: String, port: Int, sha256: String)
+    suspend fun unpin(host: String, port: Int)
+}
+```
+DataStore key `cert_pins` = JSON `{"host:port":"<sha256 hex>"}`.
+
+`CertUntrustedException` and `PinningTrustManager` are `:app` service internals, not contracts.
+
+Bouncer-auth simplification (feature 2) is entirely inside `ui/onboarding/` (no contract change).

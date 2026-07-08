@@ -16,7 +16,6 @@ import java.io.EOFException
 import java.net.InetSocketAddress
 import java.net.Socket
 import javax.net.ssl.SSLContext
-import javax.net.ssl.SSLParameters
 import javax.net.ssl.SSLSocket
 
 interface IrcTransport {
@@ -42,6 +41,12 @@ class OkioLineTransport(
     private val tls: Boolean,
     /** Optional client certificate for SASL EXTERNAL; app supplies via its own factory. */
     private val sslContext: SSLContext? = null,
+    /**
+     * Enforce TLS hostname verification (endpoint identification). Default true. The app factory
+     * sets this false for leaf-pinned hosts, where the exact-cert pin is a stronger guarantee than
+     * hostname matching and lets bare-IP / self-signed bouncer certs connect. SNI is unaffected.
+     */
+    private val verifyHostname: Boolean = true,
 ) : IrcTransport {
 
     private companion object {
@@ -66,9 +71,12 @@ class OkioLineTransport(
             val finalSocket: Socket = if (tls) {
                 val ctx = sslContext ?: SSLContext.getDefault()
                 val ssl = ctx.socketFactory.createSocket(raw, host, port, true) as SSLSocket
-                // SNI + hostname verification via endpoint identification.
-                ssl.sslParameters = ssl.sslParameters.apply {
-                    endpointIdentificationAlgorithm = "HTTPS"
+                // createSocket(host, ...) sets SNI; endpoint identification adds hostname
+                // verification on top, which we skip for leaf-pinned hosts (verifyHostname=false).
+                if (verifyHostname) {
+                    ssl.sslParameters = ssl.sslParameters.apply {
+                        endpointIdentificationAlgorithm = "HTTPS"
+                    }
                 }
                 ssl.startHandshake()
                 ssl

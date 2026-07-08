@@ -47,6 +47,10 @@ class WebPushRegistrarTest {
         override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 0L
         override suspend fun markRead(bufferId: Long, upToTime: Long) = Unit
         override suspend fun evaluatePushMode() = Unit
+        override val certPrompts: StateFlow<List<io.github.trevarj.motd.service.CertPrompt>> =
+            MutableStateFlow(emptyList())
+        override suspend fun trustCert(prompt: io.github.trevarj.motd.service.CertPrompt) = Unit
+        override fun dismissCertPrompt(prompt: io.github.trevarj.motd.service.CertPrompt) = Unit
     }
 
     @Test

@@ -114,6 +114,20 @@
     <string name="channelinfo_section_regular">Members</string>
     <string name="chat_jump_not_loaded">Message not loaded</string>
 
+    <!-- TLS cert trust (TOFU, WP-S1) -->
+    <string name="cert_trust_title">Trust this certificate?</string>
+    <string name="cert_trust_changed_title">Certificate changed</string>
+    <string name="cert_trust_changed_warning">The certificate for this server has changed since you trusted it. This can mean the certificate was rotated — or that someone is intercepting the connection. Only trust it if you expected this change.</string>
+    <string name="cert_trust_message">This server presented a certificate that is not verified by a trusted authority. Review the details before trusting it.</string>
+    <string name="cert_trust_host">Server</string>
+    <string name="cert_trust_fingerprint">SHA-256 fingerprint</string>
+    <string name="cert_trust_subject">Subject</string>
+    <string name="cert_trust_issuer">Issuer</string>
+    <string name="cert_trust_valid_from">Valid from</string>
+    <string name="cert_trust_valid_to">Valid until</string>
+    <string name="cert_trust_accept">Trust</string>
+    <string name="cert_trust_cancel">Cancel</string>
+
     <!-- About (WP-R3) -->
     <string name="about_title">About</string>
     <string name="about_license">License</string>

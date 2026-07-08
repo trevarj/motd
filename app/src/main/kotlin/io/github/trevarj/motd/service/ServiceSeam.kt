@@ -6,6 +6,23 @@ import kotlinx.coroutines.flow.StateFlow
 
 enum class DeliveryMode { PERSISTENT_SOCKET, UNIFIED_PUSH }
 
+/**
+ * A pending TOFU cert-trust decision surfaced to the UI (plans/12). Published when a TLS handshake
+ * hit an untrusted (self-signed / bare-IP / changed) leaf certificate. [changed] = true means a
+ * previously-pinned cert now differs (possible MITM or rotation) and warrants a warning.
+ */
+data class CertPrompt(
+    val networkId: Long,
+    val host: String,
+    val port: Int,
+    val sha256: String,            // lowercase hex of the presented leaf cert
+    val subject: String,
+    val issuer: String,
+    val notBefore: Long,           // epoch ms
+    val notAfter: Long,            // epoch ms
+    val changed: Boolean,
+)
+
 interface ConnectionManager {
     /** Connection state per network row id. */
     val connectionStates: StateFlow<Map<Long, IrcClientState>>
@@ -35,6 +52,17 @@ interface ConnectionManager {
     /** Re-evaluate push-mode socket teardown after per-network endpoint changes.
      *  No-op unless deliveryMode == UNIFIED_PUSH. Called by MotdPushReceiver.onNewEndpoint. */
     suspend fun evaluatePushMode()
+
+    // -- TOFU cert trust (plans/12) --
+
+    /** Pending cert-trust prompts (deduped by networkId). Observed by the global dialog host. */
+    val certPrompts: StateFlow<List<CertPrompt>>
+
+    /** Trust: pin the leaf SHA-256, drop the prompt, and reconnect that network. */
+    suspend fun trustCert(prompt: CertPrompt)
+
+    /** Dismiss: drop the prompt; the network stays disconnected until manually reconnected. */
+    fun dismissCertPrompt(prompt: CertPrompt)
 }
 
 /** Sole IRC→Room write path. Implemented by EventProcessor (WP5); ConnectionManager delegates

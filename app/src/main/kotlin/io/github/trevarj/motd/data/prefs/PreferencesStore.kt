@@ -29,6 +29,7 @@ internal object PrefKeys {
     val PUSH_ENDPOINTS = stringPreferencesKey("push_endpoints")
     val PUSH_KEYS = stringPreferencesKey("push_keys")
     val STS_POLICIES = stringPreferencesKey("sts_policies")
+    val CERT_PINS = stringPreferencesKey("cert_pins")
 }
 
 // Implements SettingsRepository, PushPrefs, and exposes STS-policy JSON storage (internal, for
@@ -36,7 +37,7 @@ internal object PrefKeys {
 @Singleton
 class DataStoreSettingsRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-) : SettingsRepository, PushPrefs {
+) : SettingsRepository, PushPrefs, CertTrustStore {
     private val store get() = context.settingsDataStore
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -126,6 +127,47 @@ class DataStoreSettingsRepository @Inject constructor(
         }.toString()
         store.edit { it[PrefKeys.PUSH_KEYS] = encoded }
     }
+
+    // -- CertTrustStore (TOFU cert pins; JSON {"host:port":"<sha256 hex>"} under one key) --
+
+    override suspend fun pinnedFor(host: String, port: Int): String? =
+        decodeCertPins(store.data.first()[PrefKeys.CERT_PINS])[pinKey(host, port)]
+
+    override suspend fun isPinned(host: String, port: Int, sha256: String): Boolean =
+        pinnedFor(host, port)?.equals(sha256, ignoreCase = true) == true
+
+    override suspend fun pin(host: String, port: Int, sha256: String) {
+        store.edit { prefs ->
+            val current = decodeCertPins(prefs[PrefKeys.CERT_PINS]).toMutableMap()
+            current[pinKey(host, port)] = sha256.lowercase()
+            prefs[PrefKeys.CERT_PINS] = encodeCertPins(current)
+        }
+    }
+
+    override suspend fun unpin(host: String, port: Int) {
+        store.edit { prefs ->
+            val current = decodeCertPins(prefs[PrefKeys.CERT_PINS]).toMutableMap()
+            current.remove(pinKey(host, port))
+            if (current.isEmpty()) prefs.remove(PrefKeys.CERT_PINS)
+            else prefs[PrefKeys.CERT_PINS] = encodeCertPins(current)
+        }
+    }
+
+    // host:port composite key; host lowercased so pins are case-insensitive on the hostname.
+    private fun pinKey(host: String, port: Int): String = "${host.lowercase()}:$port"
+
+    private fun decodeCertPins(raw: String?): Map<String, String> {
+        if (raw == null) return emptyMap()
+        return runCatching {
+            val obj = json.parseToJsonElement(raw) as kotlinx.serialization.json.JsonObject
+            obj.entries.associate { (k, v) -> k to v.jsonPrimitive.content }
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun encodeCertPins(map: Map<String, String>): String =
+        buildJsonObject {
+            for ((k, v) in map) put(k, v)
+        }.toString()
 
     // -- STS policy storage (internal accessor for WP5) --
 

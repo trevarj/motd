@@ -32,3 +32,22 @@ interface PushPrefs {
     suspend fun keys(): PushKeys?                      // one shared keypair
     suspend fun setKeys(keys: PushKeys)
 }
+
+/**
+ * TOFU cert pins for self-signed / bare-IP TLS bouncers (plans/12). Persists the accepted leaf
+ * SHA-256 (lowercase hex) per host:port. A pinned host skips CA/hostname validation; a pin mismatch
+ * later triggers a change warning. DataStore key `cert_pins` = JSON `{"host:port":"<sha256 hex>"}`.
+ */
+interface CertTrustStore {
+    /** Pinned lowercase-hex SHA-256 for [host]:[port], or null when unpinned. */
+    suspend fun pinnedFor(host: String, port: Int): String?
+
+    /** True when [sha256] (case-insensitive) matches the pin for [host]:[port]. */
+    suspend fun isPinned(host: String, port: Int, sha256: String): Boolean
+
+    /** Pin (or re-pin) [sha256] for [host]:[port]; stored lowercase. */
+    suspend fun pin(host: String, port: Int, sha256: String)
+
+    /** Remove any pin for [host]:[port]. */
+    suspend fun unpin(host: String, port: Int)
+}

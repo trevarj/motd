@@ -52,6 +52,14 @@ class ConnectionActor(
     private val onEvent: suspend (Long, IrcEvent) -> Unit,
     private val onReady: suspend (ManagedConnection) -> Unit,
     private val random: () -> Double = { Random.nextDouble() },
+    /**
+     * Returns the pending TOFU cert failure for this network, if the last connect attempt failed on
+     * an untrusted/changed leaf cert. When present, the actor parks in a quiescent "awaiting trust"
+     * state instead of backoff-looping (which would spam prompts). Cleared by the manager.
+     */
+    private val pendingCertFailure: () -> CertUntrustedException? = { null },
+    /** Publishes a cert prompt for this network when a cert failure parks the actor. */
+    private val onCertUntrusted: suspend (Long, CertUntrustedException) -> Unit = { _, _ -> },
 ) {
     @Volatile var connection: ManagedConnection? = null
         private set
@@ -90,6 +98,14 @@ class ConnectionActor(
             collector.cancel()
             conn.stop()
             connection = null
+
+            // TOFU: a cert failure parks the actor (awaiting user trust) rather than backoff-looping.
+            val certFailure = pendingCertFailure()
+            if (certFailure != null) {
+                onState(networkId, IrcClientState.Failed("certificate not trusted", fatal = false))
+                onCertUntrusted(networkId, certFailure)
+                return
+            }
 
             when (outcome) {
                 Outcome.Fatal -> return

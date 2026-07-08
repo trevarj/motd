@@ -8,9 +8,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.trevarj.motd.data.db.MotdDatabase
@@ -19,6 +21,8 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.service.ConnectionManagerImpl
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.IrcForegroundService
+import io.github.trevarj.motd.ui.components.CertPromptViewModel
+import io.github.trevarj.motd.ui.components.CertTrustDialog
 import io.github.trevarj.motd.ui.nav.MotdNavGraph
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import javax.inject.Inject
@@ -47,6 +51,9 @@ class MainActivity : ComponentActivity() {
             val settings by settingsRepository.settings.collectAsState(initial = Settings())
             MotdTheme(themeMode = settings.themeMode, dynamicColor = settings.dynamicColor) {
                 MotdNavGraph()
+                // Global TOFU cert-trust dialog host: shows above the whole nav graph so it works
+                // for onboarding connect-tests, chat-list reconnects, etc. (plans/12).
+                CertTrustDialogHost()
             }
         }
     }
@@ -77,4 +84,16 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+/** Collects the ConnectionManager's cert prompts and shows the dialog for the first pending one. */
+@Composable
+private fun CertTrustDialogHost(viewModel: CertPromptViewModel = hiltViewModel()) {
+    val prompts by viewModel.certPrompts.collectAsState()
+    val prompt = prompts.firstOrNull() ?: return
+    CertTrustDialog(
+        prompt = prompt,
+        onTrust = { viewModel.trust(prompt) },
+        onCancel = { viewModel.dismiss(prompt) },
+    )
 }

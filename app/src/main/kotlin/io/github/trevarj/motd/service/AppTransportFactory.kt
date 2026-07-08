@@ -2,6 +2,7 @@ package io.github.trevarj.motd.service
 
 import android.content.Context
 import android.security.KeyChain
+import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.irc.transport.IrcTransport
 import io.github.trevarj.motd.irc.transport.OkioLineTransport
@@ -15,6 +16,7 @@ import java.security.PrivateKey
 import java.security.cert.X509Certificate
 import javax.net.ssl.KeyManager
 import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
 import javax.net.ssl.X509KeyManager
 
 /**
@@ -64,30 +66,47 @@ class StsPolicyStore(private val prefs: DataStoreSettingsRepository) {
 }
 
 /**
- * App-side [TransportFactory] wrapping [OkioLineTransport]. Injects an [SSLContext] carrying the
- * network's Android KeyChain client certificate (for SASL EXTERNAL), and rewrites (port, tls) to
- * satisfy any live STS policy for the host before connecting.
+ * App-side [TransportFactory] wrapping [OkioLineTransport]. For TLS it always builds an
+ * [SSLContext] pairing the optional Android KeyChain client-cert [KeyManager] (SASL EXTERNAL) with
+ * a per-connection [PinningTrustManager] for TOFU leaf pinning (plans/12). It also rewrites
+ * (port, tls) to satisfy any live STS policy before connecting.
+ *
+ * The pin is looked up (via [runBlocking], mirroring the STS lookup) at create() time. A pinned
+ * host skips hostname verification (`verifyHostname = false`) because the exact-leaf pin is a
+ * stronger guarantee and enables bare-IP / self-signed bouncer certs. Unpinned hosts keep full
+ * CA + hostname validation, so Libera etc. stay prompt-free.
  */
 class AppTransportFactory(
     private val appContext: Context,
     private val stsStore: StsPolicyStore,
+    private val certStore: CertTrustStore,
     private val clientCertAlias: String?,
+    /** Called from the handshake when an untrusted/changed leaf cert is hit; lets the connection
+     *  layer publish a TOFU prompt even though IrcClient flattens the failure into a state string. */
+    private val onCertUntrusted: (CertUntrustedException) -> Unit = {},
 ) : TransportFactory {
     override fun create(host: String, port: Int, tls: Boolean): IrcTransport {
         // STS enforcement: a live policy forces TLS on the pinned port.
         val policy = runBlocking { stsStore.policyFor(host) }
         val effTls = tls || policy != null
         val effPort = policy?.port ?: port
-        val sslContext = if (effTls && clientCertAlias != null) buildClientCertContext(clientCertAlias) else null
-        return OkioLineTransport(host, effPort, effTls, sslContext)
+        if (!effTls) return OkioLineTransport(host, effPort, tls = false)
+
+        val pinned = runBlocking { certStore.pinnedFor(host, effPort) }
+        val trustManager = PinningTrustManager(host, effPort, pinned, onCertUntrusted)
+        val sslContext = buildTlsContext(clientCertAlias, trustManager)
+        // Pinned leaf → skip hostname verification (bare-IP certs); unpinned → enforce it.
+        return OkioLineTransport(host, effPort, tls = true, sslContext = sslContext, verifyHostname = pinned == null)
     }
 
-    /** SSLContext with a KeyManager exposing the KeyChain client cert; default trust managers. */
-    private fun buildClientCertContext(alias: String): SSLContext? = runCatching {
-        val km = KeyChainKeyManager(appContext, alias).also { it.resolve() }
-        val keyManagers: Array<KeyManager> = arrayOf(km)
-        SSLContext.getInstance("TLS").apply { init(keyManagers, null, null) }
-    }.getOrNull()
+    /** SSLContext with the optional KeyChain client-cert KeyManager + the pinning trust manager. */
+    private fun buildTlsContext(alias: String?, trustManager: TrustManager): SSLContext {
+        val keyManagers: Array<KeyManager>? = alias?.let {
+            val km = KeyChainKeyManager(appContext, it).also { m -> m.resolve() }
+            arrayOf(km)
+        }
+        return SSLContext.getInstance("TLS").apply { init(keyManagers, arrayOf(trustManager), null) }
+    }
 }
 
 /**

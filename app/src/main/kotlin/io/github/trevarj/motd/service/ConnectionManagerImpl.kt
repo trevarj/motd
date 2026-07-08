@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
@@ -45,6 +46,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val eventProcessor: EventProcessor,
     private val settings: DataStoreSettingsRepository,
     private val pushPrefs: PushPrefs,
+    private val certStore: CertTrustStore,
     private val baseTransportFactory: TransportFactory,
     // Lazy to break the WebPushRegistrar <-> ConnectionManager ctor cycle.
     private val webPushRegistrar: dagger.Lazy<WebPushRegistrar>,
@@ -64,6 +66,13 @@ class ConnectionManagerImpl @Inject constructor(
 
     private val stsStore = StsPolicyStore(settings)
     private val pendingEchoTimeouts = HashMap<String, Job>()
+
+    private val _certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
+    override val certPrompts: StateFlow<List<CertPrompt>> = _certPrompts.asStateFlow()
+
+    // Latest untrusted-cert failure per network, set from the handshake trust manager and consumed
+    // by the actor to park in "awaiting trust" instead of backoff-looping.
+    private val certFailures = java.util.concurrent.ConcurrentHashMap<Long, CertUntrustedException>()
 
     @Volatile private var started = false
     private var reconcileJob: Job? = null
@@ -160,6 +169,8 @@ class ConnectionManagerImpl @Inject constructor(
             onState = { id, state -> _states.value = _states.value + (id to state) },
             onEvent = { id, event -> eventProcessor.process(id, event) },
             onReady = { conn -> onReady(row, (conn as IrcClientConnection).client) },
+            pendingCertFailure = { certFailures.remove(row.id) },
+            onCertUntrusted = { id, ex -> publishCertPrompt(id, ex) },
         )
         actors[row.id] = actor
         fingerprints[row.id] = fp
@@ -188,7 +199,14 @@ class ConnectionManagerImpl @Inject constructor(
             saslPassword = effective.saslPassword,
             bouncerNetId = if (effective.role == NetworkRole.BOUNCER_CHILD) effective.bouncerNetId else null,
         )
-        val factory = AppTransportFactory(appContext, stsStore, effective.clientCertAlias)
+        val factory = AppTransportFactory(
+            appContext = appContext,
+            stsStore = stsStore,
+            certStore = certStore,
+            clientCertAlias = effective.clientCertAlias,
+            // Stash the failure keyed by network so the actor can park on it; unwrap defensively.
+            onCertUntrusted = { ex -> certFailures[row.id] = ex },
+        )
         return IrcClient(config, factory, scope)
     }
 
@@ -330,6 +348,40 @@ class ConnectionManagerImpl @Inject constructor(
         // Re-run the push teardown check after per-network endpoint changes; no-op off push mode.
         // Fixes v1: the settings-collect fired before any endpoint existed and never re-ran.
         if (settings.settings.first().deliveryMode == DeliveryMode.UNIFIED_PUSH) maybeStopForPush()
+    }
+
+    // -- TOFU cert trust (plans/12) -----------------------------------------
+
+    /** Publish a prompt for [networkId], deduping so re-attempts don't stack duplicates. */
+    private fun publishCertPrompt(networkId: Long, ex: CertUntrustedException) {
+        val prompt = CertPrompt(
+            networkId = networkId,
+            host = ex.host,
+            port = ex.port,
+            sha256 = ex.sha256,
+            subject = ex.subject,
+            issuer = ex.issuer,
+            notBefore = ex.notBefore,
+            notAfter = ex.notAfter,
+            changed = ex.changed,
+        )
+        _certPrompts.value = _certPrompts.value.filterNot { it.networkId == networkId } + prompt
+    }
+
+    override suspend fun trustCert(prompt: CertPrompt) {
+        certStore.pin(prompt.host, prompt.port, prompt.sha256)
+        _certPrompts.value = _certPrompts.value.filterNot { it.networkId == prompt.networkId }
+        certFailures.remove(prompt.networkId)
+        // Rebuild the parked actor fresh so it picks up the new pin and reconnects.
+        actors.remove(prompt.networkId)?.stop()
+        fingerprints.remove(prompt.networkId)
+        connect(prompt.networkId)
+    }
+
+    override fun dismissCertPrompt(prompt: CertPrompt) {
+        _certPrompts.value = _certPrompts.value.filterNot { it.networkId == prompt.networkId }
+        certFailures.remove(prompt.networkId)
+        // Network stays disconnected; the actor already parked itself.
     }
 
     // -- connectivity callback ----------------------------------------------
