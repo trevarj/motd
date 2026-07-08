@@ -1,0 +1,361 @@
+package io.github.trevarj.motd.service
+
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.PushPrefs
+import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.irc.client.IrcClient
+import io.github.trevarj.motd.irc.client.IrcClientConfig
+import io.github.trevarj.motd.irc.client.ChatHistoryRequest
+import io.github.trevarj.motd.irc.client.SaslMechanism
+import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.transport.TransportFactory
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+/**
+ * Hilt @Singleton connection subsystem (plans/05). Outlives the foreground service — the service
+ * is merely its keeper. Spawns one [ConnectionActor] per connectable network row (BOUNCER_ROOT
+ * gets the root actor; each BOUNCER_CHILD a bound actor copying the root host/SASL with its
+ * bouncerNetId; DIRECT one each), reconciles on networkDao changes, and reacts to deliveryMode.
+ */
+@Singleton
+class ConnectionManagerImpl @Inject constructor(
+    @ApplicationContext private val appContext: Context,
+    private val db: MotdDatabase,
+    private val eventProcessor: EventProcessor,
+    private val settings: DataStoreSettingsRepository,
+    private val pushPrefs: PushPrefs,
+    private val baseTransportFactory: TransportFactory,
+) : ConnectionManager {
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val networkDao get() = db.networkDao()
+    private val bufferDao get() = db.bufferDao()
+    private val messageDao get() = db.messageDao()
+
+    private val actors = HashMap<Long, ConnectionActor>()
+    // Fingerprint of the config each actor was built from, so config changes trigger a restart.
+    private val fingerprints = HashMap<Long, String>()
+
+    private val _states = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
+    override val connectionStates: StateFlow<Map<Long, IrcClientState>> = _states.asStateFlow()
+
+    private val stsStore = StsPolicyStore(settings)
+    private val pendingEchoTimeouts = HashMap<String, Job>()
+
+    @Volatile private var started = false
+    private var reconcileJob: Job? = null
+    private var connectivityCallback: ConnectivityManager.NetworkCallback? = null
+
+    override fun clientFor(networkId: Long): IrcClient? =
+        (actors[networkId]?.connection as? IrcClientConnection)?.client
+
+    // -- lifecycle ----------------------------------------------------------
+
+    override suspend fun startAll() {
+        if (started) return
+        started = true
+        registerConnectivityCallback()
+        // Seed actors from the current connectable set, then keep reconciling on changes.
+        reconcile(networkDao.connectable())
+        reconcileJob = scope.launch {
+            networkDao.observeAll().collect { all ->
+                reconcile(all.filter { it.autoConnect })
+            }
+        }
+        // Delivery-mode reaction: UNIFIED_PUSH tears the sockets down once webpush is confirmed.
+        scope.launch {
+            settings.settings.collect { s ->
+                if (s.deliveryMode == DeliveryMode.UNIFIED_PUSH) maybeStopForPush()
+            }
+        }
+    }
+
+    /** Under UNIFIED_PUSH: once an endpoint is registered on a webpush-capable client, stop sockets. */
+    private suspend fun maybeStopForPush() {
+        val endpoint = pushPrefs.endpoint() ?: return
+        val registered = actors.keys.any { id -> clientFor(id)?.hasCap(WEBPUSH_CAP) == true }
+        if (endpoint.isNotEmpty() && registered) {
+            for (actor in actors.values) actor.stop()
+            actors.clear(); fingerprints.clear()
+            _states.value = emptyMap()
+            appContext.stopService(android.content.Intent(appContext, IrcForegroundService::class.java))
+        }
+    }
+
+    override suspend fun stopAll() {
+        started = false
+        reconcileJob?.cancel(); reconcileJob = null
+        unregisterConnectivityCallback()
+        for (actor in actors.values) actor.stop()
+        actors.clear(); fingerprints.clear()
+        _states.value = emptyMap()
+    }
+
+    override suspend fun connect(networkId: Long) {
+        val row = networkDao.byId(networkId) ?: return
+        ensureActor(row)
+    }
+
+    override suspend fun disconnect(networkId: Long) {
+        actors.remove(networkId)?.stop()
+        fingerprints.remove(networkId)
+        _states.value = _states.value - networkId
+    }
+
+    /** Add/remove/restart actors so the live set matches [rows] (only connectable networks). */
+    private fun reconcile(rows: List<NetworkEntity>) {
+        val wanted = rows.filter { it.role != NetworkRole.BOUNCER_CHILD || it.parentId != null }
+        val wantedIds = wanted.map { it.id }.toSet()
+        // Remove actors whose network vanished.
+        for (id in actors.keys.toList()) {
+            if (id !in wantedIds) {
+                actors.remove(id)?.stop()
+                fingerprints.remove(id)
+                _states.value = _states.value - id
+            }
+        }
+        for (row in wanted) ensureActor(row)
+    }
+
+    private fun ensureActor(row: NetworkEntity) {
+        val fp = fingerprint(row)
+        val existing = actors[row.id]
+        if (existing != null && fingerprints[row.id] == fp) return
+        existing?.stop()
+        val actor = ConnectionActor(
+            networkId = row.id,
+            scope = scope,
+            connectionFactory = { IrcClientConnection(buildClient(row)) },
+            onState = { id, state -> _states.value = _states.value + (id to state) },
+            onEvent = { id, event -> eventProcessor.process(id, event) },
+            onReady = { conn -> onReady(row, (conn as IrcClientConnection).client) },
+        )
+        actors[row.id] = actor
+        fingerprints[row.id] = fp
+        actor.start()
+    }
+
+    private fun fingerprint(row: NetworkEntity): String =
+        "${row.host}:${row.port}:${row.tls}:${row.nick}:${row.saslMechanism}:${row.bouncerNetId}:${row.clientCertAlias}"
+
+    private fun buildClient(row: NetworkEntity): IrcClient {
+        // BOUNCER_CHILD copies the root host/SASL and binds via bouncerNetId.
+        val effective = if (row.role == NetworkRole.BOUNCER_CHILD && row.parentId != null) {
+            row // child rows are materialized with root host/nick already (EventProcessor mirror)
+        } else {
+            row
+        }
+        val config = IrcClientConfig(
+            host = effective.host,
+            port = effective.port,
+            tls = effective.tls,
+            nick = effective.nick,
+            username = effective.username,
+            realname = effective.realname,
+            sasl = runCatching { SaslMechanism.valueOf(effective.saslMechanism) }.getOrDefault(SaslMechanism.NONE),
+            saslUser = effective.saslUser,
+            saslPassword = effective.saslPassword,
+            bouncerNetId = if (effective.role == NetworkRole.BOUNCER_CHILD) effective.bouncerNetId else null,
+        )
+        val factory = AppTransportFactory(appContext, stsStore, effective.clientCertAlias)
+        return IrcClient(config, factory, scope)
+    }
+
+    /** On Ready: persist any STS policy, then run reconnect catch-up (plans/04). */
+    private suspend fun onReady(row: NetworkEntity, client: IrcClient) {
+        // Persist STS policy if the server advertised one.
+        val stsValue = client.caps.firstOrNull { it == "sts" || it.startsWith("sts=") }?.substringAfter('=', "")
+        stsStore.parse(row.host, stsValue?.ifEmpty { null }, row.tls, row.port)?.let { stsStore.upsert(it) }
+        catchUp(row.id, client)
+    }
+
+    // -- catch-up (plans/04) -------------------------------------------------
+
+    private suspend fun catchUp(networkId: Long, client: IrcClient) {
+        val catchUp = CatchUp(
+            bufferDao = bufferDao,
+            messageDao = messageDao,
+            processor = eventProcessor,
+            history = clientHistorySource(client),
+            normalize = { client.isupport.normalize(it) },
+        )
+        catchUp.run(networkId, openBuffers(networkId))
+    }
+
+    /** Adapt a live [IrcClient] to the [CatchUp.HistorySource] seam. */
+    private fun clientHistorySource(client: IrcClient): CatchUp.HistorySource =
+        object : CatchUp.HistorySource {
+            override fun hasCap(cap: String): Boolean = client.hasCap(cap)
+            override suspend fun chathistory(req: ChatHistoryRequest): io.github.trevarj.motd.irc.client.ChatHistoryResult =
+                client.chathistory(req)
+            override suspend fun fetchReadMarker(target: String) = client.fetchReadMarker(target)
+        }
+
+    private suspend fun openBuffers(networkId: Long): List<Pair<Long, String>> =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val q = androidx.sqlite.db.SimpleSQLiteQuery(
+                "SELECT id, name FROM buffers WHERE networkId = ? AND type != 'SERVER'",
+                arrayOf<Any>(networkId),
+            )
+            db.query(q).use { c ->
+                val out = ArrayList<Pair<Long, String>>(c.count)
+                while (c.moveToNext()) out.add(c.getLong(0) to c.getString(1))
+                out
+            }
+        }
+
+    private suspend fun normalize(networkId: Long, name: String): String {
+        // Delegate normalization to the live client's isupport when available; else lowercase.
+        val client = clientFor(networkId)
+        return client?.isupport?.normalize(name) ?: name.lowercase()
+    }
+
+    // -- send paths ---------------------------------------------------------
+
+    override suspend fun sendMessage(bufferId: Long, text: String, replyToMsgid: String?) {
+        val buffer = bufferDao.observeById(bufferId) ?: return
+        val client = clientFor(buffer.networkId) ?: return
+        val target = buffer.name
+
+        // /me → CTCP ACTION; kind recorded for the pending row.
+        val isAction = text.startsWith("/me ")
+        val body = if (isAction) "ACTION ${text.removePrefix("/me ")}" else text
+        val kind = if (isAction) MessageKind.ACTION else MessageKind.PRIVMSG
+
+        // Split >400-byte UTF-8 payloads on word boundaries; each chunk gets its own pending row.
+        val chunks = splitUtf8(body, MAX_BYTES)
+        for (chunk in chunks) {
+            val label = client.sendMessage(target, chunk, replyToMsgid)
+            if (label.isEmpty()) {
+                // No labeled-response: insert an already-confirmed self row (best effort dedup key).
+                continue
+            }
+            val displayText = if (isAction) text.removePrefix("/me ") else chunk
+            eventProcessor.insertPending(bufferId, label, buffer_meNick(client), displayText, replyToMsgid, kind)
+            armEchoTimeout(bufferId, label)
+        }
+    }
+
+    private fun buffer_meNick(client: IrcClient): String =
+        (client.state.value as? IrcClientState.Ready)?.nick ?: client.config.nick
+
+    private fun armEchoTimeout(bufferId: Long, label: String) {
+        val key = "$bufferId:$label"
+        pendingEchoTimeouts[key]?.cancel()
+        pendingEchoTimeouts[key] = scope.launch {
+            kotlinx.coroutines.delay(ECHO_TIMEOUT_MS)
+            eventProcessor.failIfStillPending(bufferId, label)
+            pendingEchoTimeouts.remove(key)
+        }
+    }
+
+    override suspend fun sendTyping(bufferId: Long, state: String) {
+        val buffer = bufferDao.observeById(bufferId) ?: return
+        clientFor(buffer.networkId)?.sendTyping(buffer.name, state)
+    }
+
+    override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) {
+        val buffer = bufferDao.observeById(bufferId) ?: return
+        clientFor(buffer.networkId)?.sendReact(buffer.name, msgid, emoji)
+    }
+
+    override suspend fun joinChannel(networkId: Long, channel: String) {
+        val client = clientFor(networkId) ?: return
+        client.send(io.github.trevarj.motd.irc.proto.IrcMessage(command = "JOIN", params = listOf(channel)))
+    }
+
+    override suspend fun partChannel(bufferId: Long) {
+        val buffer = bufferDao.observeById(bufferId) ?: return
+        clientFor(buffer.networkId)?.send(
+            io.github.trevarj.motd.irc.proto.IrcMessage(command = "PART", params = listOf(buffer.name)),
+        )
+    }
+
+    override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long {
+        val norm = normalize(networkId, nick)
+        bufferDao.byName(networkId, norm)?.let { return it.id }
+        return bufferDao.insert(
+            io.github.trevarj.motd.data.db.BufferEntity(
+                networkId = networkId,
+                name = norm,
+                displayName = nick,
+                type = BufferType.QUERY,
+            ),
+        )
+    }
+
+    override suspend fun markRead(bufferId: Long, upToTime: Long) {
+        bufferDao.advanceReadMarker(bufferId, upToTime)
+        val buffer = bufferDao.observeById(bufferId) ?: return
+        clientFor(buffer.networkId)?.markRead(buffer.name, upToTime)
+    }
+
+    // -- connectivity callback ----------------------------------------------
+
+    private fun registerConnectivityCallback() {
+        val cm = appContext.getSystemService(ConnectivityManager::class.java) ?: return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) { for (a in actors.values) a.onNetworkAvailable() }
+            override fun onLost(network: Network) { for (a in actors.values) a.onNetworkLost() }
+        }
+        connectivityCallback = cb
+        runCatching { cm.registerDefaultNetworkCallback(cb) }
+    }
+
+    private fun unregisterConnectivityCallback() {
+        val cm = appContext.getSystemService(ConnectivityManager::class.java) ?: return
+        connectivityCallback?.let { runCatching { cm.unregisterNetworkCallback(it) } }
+        connectivityCallback = null
+    }
+
+    // -- utils --------------------------------------------------------------
+
+    /** Split [text] into chunks of at most [maxBytes] UTF-8 bytes, preferring word boundaries. */
+    internal fun splitUtf8(text: String, maxBytes: Int): List<String> {
+        if (text.toByteArray(Charsets.UTF_8).size <= maxBytes) return listOf(text)
+        val out = ArrayList<String>()
+        var remaining = text
+        while (remaining.toByteArray(Charsets.UTF_8).size > maxBytes) {
+            var cut = remaining.length
+            // Shrink until the prefix fits.
+            while (remaining.substring(0, cut).toByteArray(Charsets.UTF_8).size > maxBytes) cut--
+            // Prefer the last space within the fitting prefix.
+            val space = remaining.lastIndexOf(' ', cut - 1)
+            val split = if (space > 0) space else cut
+            out.add(remaining.substring(0, split).trimEnd())
+            remaining = remaining.substring(split).trimStart()
+        }
+        if (remaining.isNotEmpty()) out.add(remaining)
+        return out
+    }
+
+    companion object {
+        const val CHATHISTORY_CAP = "draft/chathistory"
+        const val WEBPUSH_CAP = "soju.im/webpush"
+        const val ECHO_TIMEOUT_MS = 30_000L
+        const val MAX_BYTES = 400
+
+        /** Whether MainActivity/BootReceiver should keep the foreground service alive. */
+        fun shouldRunService(deliveryPersistent: Boolean, hasNetworks: Boolean): Boolean =
+            deliveryPersistent && hasNetworks
+    }
+}

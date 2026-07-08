@@ -1,13 +1,74 @@
 package io.github.trevarj.motd.service
 
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.lifecycleScope
+import dagger.hilt.android.AndroidEntryPoint
+import io.github.trevarj.motd.irc.event.IrcClientState
+import javax.inject.Inject
+import kotlinx.coroutines.launch
 
-// No-op shell so the manifest's class reference lints clean. WP5 fills in the
-// foreground-service lifecycle (startForeground + ConnectionManager.startAll/stopAll).
+/**
+ * Foreground-service keeper for the connection subsystem (plans/05). Thin [LifecycleService]:
+ * onStartCommand → startForeground(status) + connectionManager.startAll(); onDestroy → stopAll().
+ * START_STICKY so Android restarts it after a kill while PERSISTENT_SOCKET is in effect.
+ */
+@AndroidEntryPoint
 class IrcForegroundService : LifecycleService() {
+
+    @Inject lateinit var connectionManager: ConnectionManager
+    @Inject lateinit var notifications: MotdNotifications
+
+    override fun onCreate() {
+        super.onCreate()
+        // Reflect live connection state in the status notification.
+        lifecycleScope.launch {
+            (connectionManager as? ConnectionManagerImpl)?.connectionStates?.collect { states ->
+                updateStatus(states)
+            }
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        if (intent?.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        startAsForeground()
+        lifecycleScope.launch { connectionManager.startAll() }
         return START_STICKY
+    }
+
+    private fun startAsForeground() {
+        val notification = notifications.statusNotification(connectedCount = 0, reconnecting = true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(STATUS_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(STATUS_ID, notification)
+        }
+    }
+
+    private fun updateStatus(states: Map<Long, IrcClientState>) {
+        val connected = states.values.count { it is IrcClientState.Ready }
+        val reconnecting = states.isEmpty() || states.values.any {
+            it is IrcClientState.Connecting || it is IrcClientState.Registering
+        }
+        val notification = notifications.statusNotification(connected, reconnecting && connected == 0)
+        runCatching {
+            androidx.core.app.NotificationManagerCompat.from(this).notify(STATUS_ID, notification)
+        }
+    }
+
+    override fun onDestroy() {
+        lifecycleScope.launch { connectionManager.stopAll() }
+        super.onDestroy()
+    }
+
+    companion object {
+        const val STATUS_ID = 1
+        const val ACTION_STOP = "io.github.trevarj.motd.service.STOP"
     }
 }

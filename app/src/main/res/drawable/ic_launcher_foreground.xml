@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive-icon foreground: white "M" monogram centered within the 108dp safe zone. -->
+<!-- Adaptive-icon foreground: text-free terminal/chat mark inside the 108dp safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -7,5 +7,28 @@
     android:viewportHeight="108">
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M38,38 L46,38 L54,58 L62,38 L70,38 L70,72 L63,72 L63,51 L56,68 L52,68 L45,51 L45,72 L38,72 Z" />
+        android:pathData="M34,23 L74,23 Q86,23 86,35 L86,59 Q86,71 74,71 L57,71 L45,82 L47,71 L34,71 Q22,71 22,59 L22,35 Q22,23 34,23 Z" />
+    <path
+        android:fillColor="#111318"
+        android:pathData="M37,35 L71,35 Q77,35 77,41 L77,56 Q77,62 71,62 L37,62 Q31,62 31,56 L31,41 Q31,35 37,35 Z" />
+    <path
+        android:fillColor="#5B6EE1"
+        android:fillAlpha="0.18"
+        android:pathData="M37,35 L71,35 Q77,35 77,41 L77,43 L31,43 L31,41 Q31,35 37,35 Z" />
+    <path
+        android:strokeColor="#39D98A"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M41,47 L47,52 L41,57" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M53,57 L65,57" />
+    <path
+        android:fillColor="#39D98A"
+        android:pathData="M67,53 L72,53 L72,61 L67,61 Z" />
 </vector>

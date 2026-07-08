@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Horizontal lockup: brand mark plus monospaced /motd wordmark. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="240dp"
+    android:height="80dp"
+    android:viewportWidth="240"
+    android:viewportHeight="80">
+    <path
+        android:fillColor="#5B6EE1"
+        android:pathData="M24,14 L58,14 Q68,14 68,24 L68,47 Q68,57 58,57 L46,57 L35,68 L37,57 L24,57 Q14,57 14,47 L14,24 Q14,14 24,14 Z" />
+    <path
+        android:fillColor="#111318"
+        android:pathData="M27,27 L55,27 Q60,27 60,32 L60,45 Q60,50 55,50 L27,50 Q22,50 22,45 L22,32 Q22,27 27,27 Z" />
+    <path
+        android:strokeColor="#39D98A"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M31,36 L36,39 L31,43" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M41,43 L51,43" />
+    <path
+        android:strokeColor="#111318"
+        android:strokeWidth="6"
+        android:strokeLineCap="square"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M89,58 L103,22 M115,56 L115,31 Q115,26 120,26 Q125,26 125,31 L125,56 M125,31 Q125,26 130,26 Q135,26 135,31 L135,56 M151,26 L164,26 Q170,26 170,32 L170,50 Q170,56 164,56 L151,56 Q145,56 145,50 L145,32 Q145,26 151,26 M181,26 L201,26 M191,20 L191,51 Q191,56 196,56 L201,56 M213,20 L213,56 M213,30 Q217,26 224,26 Q231,26 231,33 L231,49 Q231,56 224,56 Q217,56 213,52" />
+    <path
+        android:fillColor="#39D98A"
+        android:pathData="M234,51 L240,51 L240,58 L234,58 Z" />
+</vector>

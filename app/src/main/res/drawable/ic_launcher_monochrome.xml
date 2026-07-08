@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android themed-icon variant: single-color terminal/chat silhouette. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M34,23 L74,23 Q86,23 86,35 L86,59 Q86,71 74,71 L57,71 L45,82 L47,71 L34,71 Q22,71 22,59 L22,35 Q22,23 34,23 Z M37,35 Q31,35 31,41 L31,56 Q31,62 37,62 L71,62 Q77,62 77,56 L77,41 Q77,35 71,35 Z M41,46 L49,52 L41,58 L41,53 L45,52 L41,51 Z M53,55 L70,55 L70,59 L53,59 Z" />
+</vector>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reusable brand mark: terminal window fused with a chat bubble. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <path
+        android:fillColor="#5B6EE1"
+        android:pathData="M29,17 L67,17 Q79,17 79,29 L79,55 Q79,67 67,67 L52,67 L39,80 L42,67 L29,67 Q17,67 17,55 L17,29 Q17,17 29,17 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.2"
+        android:pathData="M31,19 L65,19 Q76,19 76,30 L76,35 Q54,29 22,40 L22,30 Q22,19 31,19 Z" />
+    <path
+        android:fillColor="#111318"
+        android:pathData="M31,31 L65,31 Q71,31 71,37 L71,53 Q71,59 65,59 L31,59 Q25,59 25,53 L25,37 Q25,31 31,31 Z" />
+    <path
+        android:fillColor="#5B6EE1"
+        android:fillAlpha="0.2"
+        android:pathData="M31,31 L65,31 Q71,31 71,37 L71,39 L25,39 L25,37 Q25,31 31,31 Z" />
+    <path
+        android:strokeColor="#39D98A"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M35,43 L41,48 L35,53" />
+    <path
+        android:strokeColor="#F6F7FB"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M47,53 L59,53" />
+    <path
+        android:fillColor="#39D98A"
+        android:pathData="M61,49 L66,49 L66,57 L61,57 Z" />
+</vector>

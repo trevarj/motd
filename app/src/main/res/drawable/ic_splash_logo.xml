@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 splash artwork: icon mark plus /motd command wordmark. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+    <group
+        android:translateX="61"
+        android:translateY="68">
+        <path
+            android:fillColor="#5B6EE1"
+            android:pathData="M50,0 L90,0 Q102,0 102,12 L102,38 Q102,50 90,50 L74,50 L60,64 L63,50 L50,50 Q38,50 38,38 L38,12 Q38,0 50,0 Z" />
+        <path
+            android:fillColor="#111318"
+            android:pathData="M54,13 L86,13 Q92,13 92,19 L92,34 Q92,40 86,40 L54,40 Q48,40 48,34 L48,19 Q48,13 54,13 Z" />
+        <path
+            android:strokeColor="#39D98A"
+            android:strokeWidth="4"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:fillColor="@android:color/transparent"
+            android:pathData="M58,24 L64,28 L58,33" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="4"
+            android:strokeLineCap="round"
+            android:fillColor="@android:color/transparent"
+            android:pathData="M70,33 L82,33" />
+        <path
+            android:fillColor="#39D98A"
+            android:pathData="M84,29 L89,29 L89,37 L84,37 Z" />
+        <path
+            android:strokeColor="#111318"
+            android:strokeWidth="6"
+            android:strokeLineCap="square"
+            android:fillColor="@android:color/transparent"
+            android:pathData="M19,124 L33,88 M46,122 L46,97 Q46,92 51,92 Q56,92 56,97 L56,122 M56,97 Q56,92 61,92 Q66,92 66,97 L66,122 M82,92 L95,92 Q101,92 101,98 L101,116 Q101,122 95,122 L82,122 Q76,122 76,116 L76,98 Q76,92 82,92 M112,92 L132,92 M122,86 L122,117 Q122,122 127,122 L132,122 M144,86 L144,122 M144,96 Q148,92 155,92 Q162,92 162,99 L162,115 Q162,122 155,122 Q148,122 144,118" />
+        <path
+            android:fillColor="#39D98A"
+            android:pathData="M165,117 L171,117 L171,124 L165,124 Z" />
+    </group>
+</vector>
