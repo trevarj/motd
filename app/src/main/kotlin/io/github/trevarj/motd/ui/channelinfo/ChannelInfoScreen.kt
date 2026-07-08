@@ -13,8 +13,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.automirrored.outlined.Message
 import androidx.compose.material.icons.outlined.AlternateEmail
-import androidx.compose.material.icons.outlined.Message
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.PushPin
@@ -156,7 +156,7 @@ fun ChannelInfoContent(
             )
             ListItem(
                 headlineContent = { Text(stringResource(R.string.channelinfo_member_message)) },
-                leadingContent = { Icon(Icons.Outlined.Message, contentDescription = null) },
+                leadingContent = { Icon(Icons.AutoMirrored.Outlined.Message, contentDescription = null) },
                 modifier = Modifier.clickable { onMessageMember(nick); sheetMember = null },
             )
             ListItem(
