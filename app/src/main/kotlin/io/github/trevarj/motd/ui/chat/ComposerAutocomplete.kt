@@ -27,6 +27,10 @@ fun autocompleteFor(
     }
 
     val token = nickTokenAt(text, cursor) ?: return emptyList()
+    // Reduce noise: require >=2 chars before suggesting, unless the user explicitly typed `@`
+    // (plans/15 #30). The `@` sigil is stripped from token.text, so detect it from the raw source.
+    val atPrefixed = token.start < text.length && text[token.start] == '@'
+    if (token.text.length < 2 && !atPrefixed) return emptyList()
     return rankNickCompletions(token.text, members, recentSpeakers, normalize)
         .map { Completion(it, isCommand = false) }
 }

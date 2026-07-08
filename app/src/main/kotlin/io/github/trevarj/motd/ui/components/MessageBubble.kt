@@ -1,12 +1,14 @@
 package io.github.trevarj.motd.ui.components
 
+import android.text.format.DateFormat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -20,27 +22,35 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.nickColor
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.text.DateFormat as JavaDateFormat
 
 /**
  * One chat bubble. Handles the four rendered kinds (PRIVMSG bubble, NOTICE labelled bubble, ACTION
@@ -72,22 +82,48 @@ fun MessageBubble(
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
 ) {
-    // ACTION renders as centered-left italic text, no bubble (plans/07).
+    val actionsLabel = stringResource(R.string.chat_bubble_actions)
+    // A shared no-op onClick with a null indication removes the dead ripple on plain taps; long-press
+    // is the only action entry, labeled for TalkBack (plans/15 #31).
+    val interaction = remember { MutableInteractionSource() }
+
+    // ACTION renders as centered-left italic text, no bubble (plans/07). Still carries reactions +
+    // failed + timestamp decorations (plans/15 #16).
     if (kind == MessageKind.ACTION) {
-        Text(
-            text = "* $sender $text",
-            style = MaterialTheme.typography.bodyMedium,
-            fontStyle = FontStyle.Italic,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Column(
             modifier = modifier
                 .fillMaxWidth()
-                .combinedClickable(onClick = {}, onLongClick = onLongPress)
+                .combinedClickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = {},
+                    onLongClick = onLongPress,
+                    onLongClickLabel = actionsLabel,
+                )
                 .padding(horizontal = 16.dp, vertical = 3.dp),
-        )
+        ) {
+            reply?.let { ReplyMiniBubble(it, isAppliedThemeDark()) }
+            Text(
+                text = "* $sender $text",
+                style = MaterialTheme.typography.bodyMedium,
+                fontStyle = FontStyle.Italic,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (failed) FailedIcon()
+                Text(
+                    text = formatTime(timeMs),
+                    fontSize = 10.sp,
+                    color = if (failed) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+            }
+            ReactionRow(reactions = reactions, onReact = onReact)
+        }
         return
     }
 
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppliedThemeDark()
     // Window width in dp = container px / density; keeps the 0.78 bubble max-width behavior.
     val containerWidthPx = LocalWindowInfo.current.containerSize.width
     val density = LocalDensity.current
@@ -122,7 +158,13 @@ fun MessageBubble(
                 .widthIn(max = maxWidth)
                 .clip(shape)
                 .background(bubbleColor)
-                .combinedClickable(onClick = {}, onLongClick = onLongPress)
+                .combinedClickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = {},
+                    onLongClick = onLongPress,
+                    onLongClickLabel = actionsLabel,
+                )
                 .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
             if (showSender && !isSelf) {
@@ -135,7 +177,7 @@ fun MessageBubble(
             }
             if (kind == MessageKind.NOTICE) {
                 Text(
-                    text = "notice",
+                    text = stringResource(R.string.chat_notice_label),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.tertiary,
                     fontWeight = FontWeight.Medium,
@@ -149,17 +191,26 @@ fun MessageBubble(
                     model = url,
                     contentDescription = null,
                     contentScale = ContentScale.FillWidth,
+                    // Reserve a 4:3 box until the bitmap lands so rows don't jump the reversed-list
+                    // anchor (plans/15 #34).
                     modifier = Modifier
                         .padding(vertical = 2.dp)
                         .widthIn(max = maxWidth)
                         .heightIn(max = 280.dp)
+                        .aspectRatio(4f / 3f)
                         .clip(RoundedCornerShape(12.dp))
                         .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
                 )
             }
 
             if (text.isNotBlank()) {
-                Text(text = text, color = textColor, style = MaterialTheme.typography.bodyLarge)
+                // Linkify http(s) URLs so the body is tappable even when the preview fails
+                // (plans/15 #11); LinkAnnotation.Url uses the platform URI open handler.
+                Text(
+                    text = linkifiedBody(text, MaterialTheme.colorScheme.primary),
+                    color = textColor,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
             }
 
             if (linkPreview != null || linkPreviewLoading) {
@@ -173,17 +224,7 @@ fun MessageBubble(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (failed) {
-                    Icon(
-                        Icons.Filled.Error,
-                        contentDescription = "Failed",
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            .heightIn(max = 14.dp)
-                            .width(14.dp),
-                    )
-                }
+                if (failed) FailedIcon()
                 Text(
                     text = formatTime(timeMs),
                     fontSize = 10.sp,
@@ -195,6 +236,43 @@ fun MessageBubble(
 
             ReactionRow(reactions = reactions, onReact = onReact)
         }
+    }
+}
+
+/** Small error glyph shown next to the timestamp of a failed message. */
+@Composable
+private fun FailedIcon() {
+    Icon(
+        Icons.Filled.Error,
+        contentDescription = stringResource(R.string.chat_failed),
+        tint = MaterialTheme.colorScheme.error,
+        modifier = Modifier
+            .padding(end = 4.dp)
+            .heightIn(max = 14.dp)
+            .width(14.dp),
+    )
+}
+
+/**
+ * Build an [AnnotatedString] where each http(s) URL in [text] is a tappable [LinkAnnotation.Url]
+ * (plans/15 #11). URL boundaries come from [extractUrls], matched left-to-right in the raw text.
+ */
+private fun linkifiedBody(text: String, linkColor: androidx.compose.ui.graphics.Color): AnnotatedString {
+    val urls = extractUrls(text)
+    if (urls.isEmpty()) return AnnotatedString(text)
+    val linkStyle = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)
+    return buildAnnotatedString {
+        var cursor = 0
+        for (url in urls) {
+            val at = text.indexOf(url, cursor)
+            if (at < 0) continue
+            append(text.substring(cursor, at))
+            withLink(LinkAnnotation.Url(url)) {
+                withStyle(linkStyle) { append(url) }
+            }
+            cursor = at + url.length
+        }
+        if (cursor < text.length) append(text.substring(cursor))
     }
 }
 
@@ -232,8 +310,22 @@ private fun ReplyMiniBubble(reply: ReplyPreviewData, isDark: Boolean) {
     }
 }
 
-private fun formatTime(ms: Long): String =
-    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))
+/**
+ * Format [ms] as a short clock time honoring the device 12/24-hour preference (plans/15 #28). The
+ * [JavaDateFormat] is hoisted per Compose context via [LocalContext] and rebuilt only when the
+ * device setting/locale changes, avoiding a per-row/per-recomposition allocation.
+ */
+@Composable
+private fun formatTime(ms: Long): String {
+    val context = LocalContext.current
+    val is24 = DateFormat.is24HourFormat(context)
+    val formatter = remember(is24, java.util.Locale.getDefault()) {
+        // getTimeFormat honors the 12/24h system setting; not thread-safe but only used on the UI thread.
+        DateFormat.getTimeFormat(context) as? JavaDateFormat
+            ?: JavaDateFormat.getTimeInstance(JavaDateFormat.SHORT)
+    }
+    return formatter.format(java.util.Date(ms))
+}
 
 @Preview
 @Composable

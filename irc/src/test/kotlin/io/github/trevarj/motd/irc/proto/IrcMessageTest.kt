@@ -262,4 +262,39 @@ class IrcMessageTest {
         val wire = m.serialize() // must not throw
         assertEquals(510, wire.toByteArray(Charsets.UTF_8).size)
     }
+
+    // -- CR/LF line-injection rejection (#6) --
+
+    @Test
+    fun `serialize rejects LF in a param`() {
+        val m = IrcMessage(command = "PRIVMSG", params = listOf("#a", "hi\nJOIN #evil"))
+        assertThrows(IllegalArgumentException::class.java) { m.serialize() }
+    }
+
+    @Test
+    fun `serialize rejects CR in a param`() {
+        val m = IrcMessage(command = "PRIVMSG", params = listOf("#a", "hi\rQUIT"))
+        assertThrows(IllegalArgumentException::class.java) { m.serialize() }
+    }
+
+    @Test
+    fun `serialize rejects CRLF in a param`() {
+        val m = IrcMessage(command = "PRIVMSG", params = listOf("#a", "hi\r\nJOIN #evil"))
+        assertThrows(IllegalArgumentException::class.java) { m.serialize() }
+    }
+
+    @Test
+    fun `serialize rejects CR or LF in the command`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            IrcMessage(command = "PING\nQUIT").serialize()
+        }
+    }
+
+    @Test
+    fun `serialize allows CR and LF escaped inside tag values`() {
+        // Tag values are backslash-escaped, so a newline there is safe and must NOT be rejected.
+        val m = IrcMessage(tags = mapOf("k" to "a\nb"), command = "PING")
+        val wire = m.serialize()
+        assertTrue(wire.startsWith("@k=a\\nb "))
+    }
 }

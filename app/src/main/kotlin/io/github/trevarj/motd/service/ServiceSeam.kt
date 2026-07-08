@@ -41,7 +41,9 @@ interface ConnectionManager {
     suspend fun sendTyping(bufferId: Long, state: String)
     suspend fun sendReact(bufferId: Long, msgid: String, emoji: String)
     suspend fun joinChannel(networkId: Long, channel: String)
-    suspend fun partChannel(bufferId: Long)
+
+    /** Part the buffer's channel; [reason] (from `/part <reason>`) becomes the PART trailing param. */
+    suspend fun partChannel(bufferId: Long, reason: String? = null)
 
     /** Find-or-create a QUERY buffer for a DM (name Isupport-normalized); returns bufferId. */
     suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long

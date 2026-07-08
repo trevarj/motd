@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -53,7 +55,9 @@ private fun ReactionChipView(chip: ReactionChip, onClick: () -> Unit) {
     val fg = if (chip.mine) MaterialTheme.colorScheme.onPrimaryContainer
     else MaterialTheme.colorScheme.onSurfaceVariant
     androidx.compose.foundation.layout.Row(
+        // >=48dp touch target (plans/15 #24) while the visible chip stays compact.
         modifier = Modifier
+            .minimumInteractiveComponentSize()
             .wrapContentWidth()
             .background(bg, RoundedCornerShape(50))
             .then(
@@ -63,6 +67,7 @@ private fun ReactionChipView(chip: ReactionChip, onClick: () -> Unit) {
             .clickable { onClick() }
             .padding(horizontal = 8.dp, vertical = 3.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text = chip.emoji, color = Color.Unspecified, style = MaterialTheme.typography.bodySmall)
         Text(

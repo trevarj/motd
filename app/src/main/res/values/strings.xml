@@ -136,4 +136,31 @@
     <string name="about_license">License</string>
     <string name="about_license_mit">MIT</string>
     <string name="about_blurb">An IRCv3 client for Android — see plans/ for the design docs.</string>
+
+    <!-- Chat components (WP7 review, plans/15 #25) -->
+    <string name="chat_typing_one">%1$s is typing…</string>
+    <string name="chat_typing_two">%1$s and %2$s are typing…</string>
+    <string name="chat_typing_many">%1$s, %2$s and others are typing…</string>
+    <string name="chat_notice_label">notice</string>
+    <string name="chat_failed">Failed</string>
+    <string name="chat_day_today">Today</string>
+    <string name="chat_day_yesterday">Yesterday</string>
+    <string name="chat_composer_placeholder">Message</string>
+    <string name="chat_composer_send">Send</string>
+    <string name="chat_composer_replying_to">Replying to %1$s</string>
+    <string name="chat_composer_cancel_reply">Cancel reply</string>
+    <string name="chat_action_reply">Reply</string>
+    <string name="chat_action_copy">Copy</string>
+    <string name="chat_action_quote">Quote</string>
+    <string name="chat_action_more_reactions">More reactions</string>
+    <string name="chat_bubble_actions">Message actions</string>
+    <!-- Image viewer (WP7) -->
+    <string name="image_viewer_content_description">Full-screen image</string>
+    <string name="image_viewer_back">Back</string>
+    <string name="image_viewer_share">Share</string>
+    <string name="image_viewer_save">Save</string>
+    <string name="image_viewer_share_chooser">Share image</string>
+    <string name="image_viewer_saved">Saved to Pictures/MOTD</string>
+    <string name="image_viewer_save_failed">Couldn\'t save image</string>
+    <string name="image_viewer_load_failed">Couldn\'t load image</string>
 </resources>

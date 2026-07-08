@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.imageviewer
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
@@ -15,10 +16,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -34,18 +37,31 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
-import coil.compose.AsyncImage
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.foundation.Image
+import coil.compose.AsyncImagePainter
+import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
+import io.github.trevarj.motd.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URL
 
+private const val MAX_SCALE = 5f
+private const val DOUBLE_TAP_SCALE = 2.5f
+private const val SAVE_TIMEOUT_MS = 15_000
+
 /**
  * Full-screen image viewer (plans/07): black background, Coil image, hand-rolled pinch-zoom/pan via
  * [detectTransformGestures] + [graphicsLayer], share/save (MediaStore) actions, tap toggles chrome.
+ *
+ * Gestures are focal-point anchored: pinch and double-tap zoom around the touch point, and pan is
+ * clamped to the scaled bounds so the image can't be flung off-screen (plans/15 #26).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,16 +77,34 @@ fun ImageViewerScreen(
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
+    // Container size in px; used to clamp pan to the scaled bounds.
+    var boxSize by remember { mutableStateOf(IntSize.Zero) }
+
+    // Clamp pan so the (scaled) image edges never move inside the viewport.
+    fun clampOffsets() {
+        val maxX = ((scale - 1f) * boxSize.width / 2f).coerceAtLeast(0f)
+        val maxY = ((scale - 1f) * boxSize.height / 2f).coerceAtLeast(0f)
+        offsetX = offsetX.coerceIn(-maxX, maxX)
+        offsetY = offsetY.coerceIn(-maxY, maxY)
+    }
+
+    val painter = rememberAsyncImagePainter(
+        model = ImageRequest.Builder(context).data(url).crossfade(true).build(),
+    )
+    val imageState = painter.state
+
+    val contentDesc = stringResource(R.string.image_viewer_content_description)
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(Color.Black)
+            .onSizeChanged { boxSize = it },
         contentAlignment = Alignment.Center,
     ) {
-        AsyncImage(
-            model = ImageRequest.Builder(context).data(url).crossfade(true).build(),
-            contentDescription = null,
+        Image(
+            painter = painter,
+            contentDescription = contentDesc,
             contentScale = ContentScale.Fit,
             modifier = Modifier
                 .fillMaxSize()
@@ -81,29 +115,57 @@ fun ImageViewerScreen(
                     translationY = offsetY,
                 )
                 .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(1f, 5f)
-                        if (scale > 1f) {
-                            offsetX += pan.x
-                            offsetY += pan.y
+                    detectTransformGestures { centroid, pan, zoom, _ ->
+                        val newScale = (scale * zoom).coerceIn(1f, MAX_SCALE)
+                        if (newScale > 1f) {
+                            // Anchor the zoom on the gesture centroid relative to the box center.
+                            val focusX = centroid.x - size.width / 2f
+                            val focusY = centroid.y - size.height / 2f
+                            val factor = newScale / scale
+                            offsetX = (offsetX + pan.x - focusX) * factor + focusX
+                            offsetY = (offsetY + pan.y - focusY) * factor + focusY
                         } else {
                             offsetX = 0f
                             offsetY = 0f
                         }
+                        scale = newScale
+                        clampOffsets()
                     }
                 }
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { chromeVisible = !chromeVisible },
-                        onDoubleTap = {
-                            // Reset zoom/pan on double-tap.
-                            scale = if (scale > 1f) 1f else 2.5f
-                            offsetX = 0f
-                            offsetY = 0f
+                        onDoubleTap = { tap ->
+                            if (scale > 1f) {
+                                scale = 1f
+                                offsetX = 0f
+                                offsetY = 0f
+                            } else {
+                                // Zoom toward the tapped point, not the center (plans/15 #26).
+                                val focusX = tap.x - size.width / 2f
+                                val focusY = tap.y - size.height / 2f
+                                scale = DOUBLE_TAP_SCALE
+                                offsetX = -focusX * (DOUBLE_TAP_SCALE - 1f)
+                                offsetY = -focusY * (DOUBLE_TAP_SCALE - 1f)
+                                clampOffsets()
+                            }
                         },
                     )
                 },
         )
+
+        // Loading / error affordances (plans/15 #26).
+        when (imageState) {
+            is AsyncImagePainter.State.Loading ->
+                CircularProgressIndicator(color = Color.White)
+            is AsyncImagePainter.State.Error ->
+                Text(
+                    text = stringResource(R.string.image_viewer_load_failed),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            else -> Unit
+        }
 
         AnimatedVisibility(
             visible = chromeVisible,
@@ -115,19 +177,29 @@ fun ImageViewerScreen(
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.image_viewer_back),
                             tint = Color.White,
                         )
                     }
                 },
                 actions = {
                     IconButton(onClick = { shareImage(context, url) }) {
-                        Icon(Icons.Filled.Share, contentDescription = "Share", tint = Color.White)
+                        Icon(
+                            Icons.Filled.Share,
+                            contentDescription = stringResource(R.string.image_viewer_share),
+                            tint = Color.White,
+                        )
                     }
-                    IconButton(onClick = {
-                        scope.launch { saveImage(context, url) }
-                    }) {
-                        Icon(Icons.Filled.Download, contentDescription = "Save", tint = Color.White)
+                    // MediaStore RELATIVE_PATH is API 29+; pre-29 would need WRITE_EXTERNAL_STORAGE,
+                    // so hide Save there rather than request a legacy permission (plans/15 #26).
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        IconButton(onClick = { scope.launch { saveImage(context, url) } }) {
+                            Icon(
+                                Icons.Filled.Download,
+                                contentDescription = stringResource(R.string.image_viewer_save),
+                                tint = Color.White,
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -142,14 +214,23 @@ private fun shareImage(context: Context, url: String) {
         type = "text/plain"
         putExtra(Intent.EXTRA_TEXT, url)
     }
-    context.startActivity(Intent.createChooser(intent, "Share image"))
+    context.startActivity(
+        Intent.createChooser(intent, context.getString(R.string.image_viewer_share_chooser)),
+    )
 }
 
-/** Download the image bytes and insert them into the shared Pictures collection via MediaStore. */
+/**
+ * Download the image bytes and insert them into the shared Pictures collection via MediaStore.
+ * Only called on API 29+ (the caller hides Save below Q). A read timeout bounds a stalled fetch.
+ */
+@androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
 private suspend fun saveImage(context: Context, url: String) {
     val ok = withContext(Dispatchers.IO) {
         runCatching {
-            val bytes = URL(url).openStream().use { it.readBytes() }
+            val bytes = URL(url).openConnection().apply {
+                connectTimeout = SAVE_TIMEOUT_MS
+                readTimeout = SAVE_TIMEOUT_MS
+            }.getInputStream().use { it.readBytes() }
             val name = url.substringAfterLast('/').substringBefore('?').ifEmpty { "image" }
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, name)
@@ -166,7 +247,8 @@ private suspend fun saveImage(context: Context, url: String) {
     withContext(Dispatchers.Main) {
         Toast.makeText(
             context,
-            if (ok) "Saved to Pictures/MOTD" else "Couldn't save image",
+            if (ok) context.getString(R.string.image_viewer_saved)
+            else context.getString(R.string.image_viewer_save_failed),
             Toast.LENGTH_SHORT,
         ).show()
     }

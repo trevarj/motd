@@ -7,7 +7,29 @@ private val IMAGE_EXT = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic"
 
 /** All http(s) URLs in [text], in order of appearance. */
 fun extractUrls(text: String): List<String> =
-    URL_REGEX.findAll(text).map { it.value.trimEnd('.', ',', ')', ']', '}', '!', '?') }.toList()
+    URL_REGEX.findAll(text).map { trimUrl(it.value) }.toList()
+
+/**
+ * Trim trailing punctuation that commonly abuts a URL in prose. A closing `)` is only stripped when
+ * the URL contains no matching `(` — otherwise Wikipedia-style paths like `…/Foo_(bar)` would break
+ * (plans/15 #29). Brackets/braces get the same balance check.
+ */
+private fun trimUrl(raw: String): String {
+    var url = raw
+    while (url.isNotEmpty()) {
+        val last = url.last()
+        val strip = when (last) {
+            '.', ',', '!', '?' -> true
+            ')' -> url.count { it == '(' } < url.count { it == ')' }
+            ']' -> url.count { it == '[' } < url.count { it == ']' }
+            '}' -> url.count { it == '{' } < url.count { it == '}' }
+            else -> false
+        }
+        if (!strip) break
+        url = url.dropLast(1)
+    }
+    return url
+}
 
 /** True when [url]'s path ends in a known image extension. */
 fun isImageUrl(url: String): Boolean {

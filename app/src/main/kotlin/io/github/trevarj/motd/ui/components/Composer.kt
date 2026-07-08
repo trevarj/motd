@@ -22,12 +22,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.nickColor
 
@@ -72,7 +74,7 @@ fun Composer(
                     value = value,
                     onValueChange = onValueChange,
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Message") },
+                    placeholder = { Text(stringResource(R.string.chat_composer_placeholder)) },
                     maxLines = 6,
                     shape = RoundedCornerShape(24.dp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
@@ -85,7 +87,7 @@ fun Composer(
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
+                        contentDescription = stringResource(R.string.chat_composer_send),
                         tint = if (canSend) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                     )
@@ -97,7 +99,7 @@ fun Composer(
 
 @Composable
 private fun ReplyBar(reply: ComposerReply, onCancel: () -> Unit) {
-    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val isDark = isAppliedThemeDark()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -112,7 +114,7 @@ private fun ReplyBar(reply: ComposerReply, onCancel: () -> Unit) {
         )
         Column(modifier = Modifier.weight(1f).padding(start = 8.dp, top = 2.dp, bottom = 2.dp)) {
             Text(
-                text = "Replying to ${reply.sender}",
+                text = stringResource(R.string.chat_composer_replying_to, reply.sender),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = nickColor(reply.sender, isDark),
@@ -126,7 +128,7 @@ private fun ReplyBar(reply: ComposerReply, onCancel: () -> Unit) {
             )
         }
         IconButton(onClick = onCancel) {
-            Icon(Icons.Filled.Close, contentDescription = "Cancel reply")
+            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.chat_composer_cancel_reply))
         }
     }
 }

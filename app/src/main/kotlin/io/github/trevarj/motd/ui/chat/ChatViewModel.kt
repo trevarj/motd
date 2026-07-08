@@ -153,7 +153,7 @@ class ChatViewModel @Inject constructor(
                 connectionManager.sendTyping(bufferId, "done")
             }
             is ChatCommand.Join -> networkId?.let { connectionManager.joinChannel(it, cmd.channel) }
-            is ChatCommand.Part -> connectionManager.partChannel(bufferId)
+            is ChatCommand.Part -> connectionManager.partChannel(bufferId, cmd.reason)
             is ChatCommand.Msg -> networkId?.let { nid ->
                 val target = connectionManager.ensureQueryBuffer(nid, cmd.nick)
                 connectionManager.sendMessage(target, cmd.text)

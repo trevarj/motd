@@ -165,6 +165,18 @@ data class IrcMessage(
 
     /** Serialize to wire format WITHOUT trailing CRLF. Escapes tag values. */
     fun serialize(): String {
+        // Reject embedded CR/LF in the command/params: a bare newline would split the wire stream
+        // and let the tail be parsed as a separate command (line injection). Callers must split
+        // multiline bodies into separate messages first. Tag values are escaped, so they are safe.
+        if (command.any { it == '\r' || it == '\n' }) {
+            throw IllegalArgumentException("command contains CR/LF")
+        }
+        for (param in params) {
+            if (param.any { it == '\r' || it == '\n' }) {
+                throw IllegalArgumentException("param contains CR/LF (split multiline messages first)")
+            }
+        }
+
         val sb = StringBuilder()
 
         if (tags.isNotEmpty()) {

@@ -271,23 +271,82 @@ class ConnectionManagerImpl @Inject constructor(
         val client = clientFor(buffer.networkId) ?: return
         val target = buffer.name
 
-        // /me → CTCP ACTION; kind recorded for the pending row.
+        // /me → CTCP ACTION wrapped in \x01. Only the FIRST physical line of a multiline
+        // paste can carry the /me action; the rest are plain PRIVMSGs.
         val isAction = text.startsWith("/me ")
-        val body = if (isAction) "ACTION ${text.removePrefix("/me ")}" else text
-        val kind = if (isAction) MessageKind.ACTION else MessageKind.PRIVMSG
 
-        // Split >400-byte UTF-8 payloads on word boundaries; each chunk gets its own pending row.
-        val chunks = splitUtf8(body, MAX_BYTES)
-        for (chunk in chunks) {
-            val label = client.sendMessage(target, chunk, replyToMsgid)
-            if (label.isEmpty()) {
-                // No labeled-response: insert an already-confirmed self row (best effort dedup key).
-                continue
+        // A composer can contain embedded newlines (multiline paste); each physical line must be
+        // its own IRC message or the server would parse the tail as a raw command (line injection).
+        // Split on CR/LF first, then apply the >400-byte UTF-8 word-boundary split per line.
+        val lines = text.split(Regex("\r\n|\r|\n")).filter { it.isNotEmpty() }
+        if (lines.isEmpty()) return
+
+        for ((lineIndex, line) in lines.withIndex()) {
+            val lineIsAction = isAction && lineIndex == 0
+            val displayLine = if (lineIsAction) line.removePrefix("/me ") else line
+            val body = if (lineIsAction) "ACTION $displayLine" else line
+            val kind = if (lineIsAction) MessageKind.ACTION else MessageKind.PRIVMSG
+
+            // Split >400-byte UTF-8 payloads on word boundaries; each chunk gets its own row.
+            val chunks = splitUtf8(body, MAX_BYTES)
+            for (chunk in chunks) {
+                val label = client.sendMessage(target, chunk, replyToMsgid)
+                // Stored display text = wire chunk minus the CTCP ACTION \x01 wrapper.
+                val displayChunk = if (lineIsAction) {
+                    chunk.removePrefix("ACTION ").removeSuffix("")
+                } else {
+                    chunk
+                }
+                if (label.isEmpty()) {
+                    // No labeled-response: the pending row could never be confirmed (its echo
+                    // cannot be correlated). If echo-message is also absent nothing surfaces at
+                    // all, so insert an already-confirmed self row now (plans/03 echo degradation,
+                    // plans/04 echo flow) with the sha1(serverTime|sender|text) dedup key. When
+                    // echo-message IS present the returning self ChatMessage carries the same key
+                    // -> INSERT IGNORE no-ops, so we stay at one row either way.
+                    insertConfirmedSelf(buffer.networkId, target, displayChunk, replyToMsgid, kind)
+                    continue
+                }
+                eventProcessor.insertPending(bufferId, label, buffer_meNick(client), displayChunk, replyToMsgid, kind)
+                armEchoTimeout(bufferId, label)
             }
-            val displayText = if (isAction) text.removePrefix("/me ") else chunk
-            eventProcessor.insertPending(bufferId, label, buffer_meNick(client), displayText, replyToMsgid, kind)
-            armEchoTimeout(bufferId, label)
         }
+    }
+
+    /**
+     * Insert a confirmed self message row for the no-labeled-response path (#7 / plans/03). Fed
+     * through the sole IRC->Room writer as a synthetic self [IrcEvent.ChatMessage] so buffer
+     * routing, kind mapping, and the sha1 dedup key all match the echo-message path exactly.
+     */
+    private suspend fun insertConfirmedSelf(
+        networkId: Long,
+        target: String,
+        displayText: String,
+        replyToMsgid: String?,
+        kind: MessageKind,
+    ) {
+        val client = clientFor(networkId) ?: return
+        val chatKind = when (kind) {
+            MessageKind.ACTION -> IrcEvent.ChatKind.ACTION
+            MessageKind.NOTICE -> IrcEvent.ChatKind.NOTICE
+            else -> IrcEvent.ChatKind.PRIVMSG
+        }
+        val event = IrcEvent.ChatMessage(
+            ctx = io.github.trevarj.motd.irc.event.MessageContext(
+                msgid = null,
+                serverTime = System.currentTimeMillis(),
+                account = null,
+                batchId = null,
+                label = null,
+            ),
+            kind = chatKind,
+            source = io.github.trevarj.motd.irc.proto.Prefix(nick = buffer_meNick(client)),
+            target = target,
+            text = displayText,
+            isSelf = true,
+            replyToMsgid = replyToMsgid,
+        )
+        eventProcessor.process(networkId, event)
     }
 
     private fun buffer_meNick(client: IrcClient): String =
@@ -318,10 +377,12 @@ class ConnectionManagerImpl @Inject constructor(
         client.send(io.github.trevarj.motd.irc.proto.IrcMessage(command = "JOIN", params = listOf(channel)))
     }
 
-    override suspend fun partChannel(bufferId: Long) {
+    override suspend fun partChannel(bufferId: Long, reason: String?) {
         val buffer = bufferDao.observeById(bufferId) ?: return
+        // Append the reason as the PART trailing param when the user supplied one (/part <reason>).
+        val params = if (reason.isNullOrBlank()) listOf(buffer.name) else listOf(buffer.name, reason)
         clientFor(buffer.networkId)?.send(
-            io.github.trevarj.motd.irc.proto.IrcMessage(command = "PART", params = listOf(buffer.name)),
+            io.github.trevarj.motd.irc.proto.IrcMessage(command = "PART", params = params),
         )
     }
 

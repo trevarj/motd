@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.chat
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,9 +30,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.trevarj.motd.R
 
 /** Quick-reaction row shown at the top of the action sheet (plans/07). */
 val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢")
@@ -75,22 +84,35 @@ fun MessageActionSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 QUICK_REACTIONS.forEach { emoji ->
-                    Text(
-                        text = emoji,
-                        fontSize = 28.sp,
+                    Box(
+                        // >=48dp touch target (plans/15 #24).
                         modifier = Modifier
-                            .clickable { onReact(emoji) }
-                            .padding(4.dp),
+                            .minimumInteractiveComponentSize()
+                            .clickable { onReact(emoji) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(text = emoji, fontSize = 28.sp)
+                    }
+                }
+                val moreLabel = stringResource(R.string.chat_action_more_reactions)
+                Box(
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        // Expander a11y: label + expanded/collapsed state (plans/15 #31).
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = moreLabel
+                            stateDescription = if (showGrid) "Expanded" else "Collapsed"
+                        }
+                        .clickable { showGrid = !showGrid },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "＋",
+                        fontSize = 24.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Text(
-                    text = "＋",
-                    fontSize = 24.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .clickable { showGrid = !showGrid }
-                        .padding(4.dp),
-                )
             }
 
             if (showGrid) {
@@ -102,21 +124,21 @@ fun MessageActionSheet(
                         .padding(horizontal = 12.dp),
                 ) {
                     items(EMOJI_GRID) { emoji ->
-                        Text(
-                            text = emoji,
-                            fontSize = 24.sp,
-                            textAlign = TextAlign.Center,
+                        Box(
                             modifier = Modifier
-                                .clickable { onReact(emoji) }
-                                .padding(6.dp),
-                        )
+                                .minimumInteractiveComponentSize()
+                                .clickable { onReact(emoji) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(text = emoji, fontSize = 24.sp, textAlign = TextAlign.Center)
+                        }
                     }
                 }
             }
 
-            ActionItem(Icons.AutoMirrored.Filled.Reply, "Reply", onReply)
-            ActionItem(Icons.Filled.ContentCopy, "Copy", onCopy)
-            ActionItem(Icons.Filled.FormatQuote, "Quote", onQuote)
+            ActionItem(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_action_reply), onReply)
+            ActionItem(Icons.Filled.ContentCopy, stringResource(R.string.chat_action_copy), onCopy)
+            ActionItem(Icons.Filled.FormatQuote, stringResource(R.string.chat_action_quote), onQuote)
         }
     }
 }
