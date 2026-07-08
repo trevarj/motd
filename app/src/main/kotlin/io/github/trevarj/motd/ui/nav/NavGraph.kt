@@ -40,6 +40,8 @@ fun MotdNavGraph(
                 onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
                 onOpenSearch = { navController.navigate(SearchRoute(it)) },
                 onOpenImage = { navController.navigate(ImageViewerRoute(it)) },
+                // /msg and /query navigate to the resolved QUERY buffer.
+                onOpenBuffer = { navController.navigate(ChatRoute(it)) },
             )
         }
         composable<OnboardingRoute> {
@@ -65,7 +67,12 @@ fun MotdNavGraph(
         }
         composable<ChannelInfoRoute> { entry ->
             val route = entry.toRoute<ChannelInfoRoute>()
-            ChannelInfoScreen(bufferId = route.bufferId, onBack = { navController.popBackStack() })
+            ChannelInfoScreen(
+                bufferId = route.bufferId,
+                onBack = { navController.popBackStack() },
+                // Member "Message" action opens the DM's QUERY buffer.
+                onOpenBuffer = { navController.navigate(ChatRoute(it)) },
+            )
         }
         composable<ImageViewerRoute> { entry ->
             val route = entry.toRoute<ImageViewerRoute>()

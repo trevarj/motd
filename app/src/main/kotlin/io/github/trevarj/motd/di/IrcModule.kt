@@ -8,23 +8,25 @@ import dagger.hilt.components.SingletonComponent
 import io.github.trevarj.motd.irc.transport.OkioLineTransport
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.service.ConnectionManager
-import io.github.trevarj.motd.service.IrcEventSink
+import io.github.trevarj.motd.service.ConnectionManagerImpl
 import javax.inject.Singleton
 
-// IRC/service seam wiring. WP1 stub-binds ConnectionManager + IrcEventSink; WP5 rebinds.
-@Suppress("DEPRECATION")
+/**
+ * IRC/service seam wiring. [ConnectionManager] → [ConnectionManagerImpl] (WP5). The
+ * [IrcEventSink] binding lives in [AppModule] (EventProcessor).
+ */
 @Module
 @InstallIn(SingletonComponent::class)
 internal abstract class IrcModule {
     @Binds @Singleton
-    abstract fun connectionManager(impl: StubConnectionManager): ConnectionManager
-
-    @Binds @Singleton
-    abstract fun ircEventSink(impl: StubIrcEventSink): IrcEventSink
+    abstract fun connectionManager(impl: ConnectionManagerImpl): ConnectionManager
 
     companion object {
-        // Default JVM transport factory from :irc. The app supplies TLS/client-cert config
-        // via its own SSLContext in a later WP; the plain factory is fine for the skeleton.
+        /**
+         * Base JVM transport factory (plain okio-over-Socket/SSLSocket). ConnectionManagerImpl
+         * builds a per-network TLS/client-cert-aware AppTransportFactory itself; this binding
+         * satisfies its injected fallback factory.
+         */
         @Provides
         @Singleton
         fun transportFactory(): TransportFactory =

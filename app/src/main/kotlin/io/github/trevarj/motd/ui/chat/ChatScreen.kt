@@ -66,6 +66,8 @@ fun ChatScreen(
     onOpenChannelInfo: (Long) -> Unit = {},
     onOpenSearch: (Long) -> Unit = {},
     onOpenImage: (String) -> Unit = {},
+    // /msg and /query resolve-or-create a QUERY buffer via the VM, then navigate to it.
+    onOpenBuffer: (Long) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -100,7 +102,7 @@ fun ChatScreen(
         onOpenSearch = onOpenSearch,
         onOpenImage = onOpenImage,
         nickNormalizer = viewModel.nickNormalizer(),
-        onSubmit = { raw -> viewModel.submit(raw, onOpenBuffer = { /* handled by nav-less VM */ }) },
+        onSubmit = { raw -> viewModel.submit(raw, onOpenBuffer = onOpenBuffer) },
         onTyping = viewModel::sendTyping,
         onSetReply = viewModel::setReply,
         onReact = viewModel::react,

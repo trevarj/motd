@@ -57,8 +57,16 @@ class IrcForegroundService : LifecycleService() {
             it is IrcClientState.Connecting || it is IrcClientState.Registering
         }
         val notification = notifications.statusNotification(connected, reconnecting && connected == 0)
-        runCatching {
-            androidx.core.app.NotificationManagerCompat.from(this).notify(STATUS_ID, notification)
+        // POST_NOTIFICATIONS is only a runtime permission on API 33+; guard so lint's flow
+        // analysis is satisfied and we don't attempt to post the status update without it.
+        val canPost = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (canPost) {
+            runCatching {
+                androidx.core.app.NotificationManagerCompat.from(this).notify(STATUS_ID, notification)
+            }
         }
     }
 

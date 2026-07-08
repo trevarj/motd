@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ platform SplashScreen: brand background + centered splash logo. Supersedes
+         the pre-31 windowBackground splash. -->
+    <style name="Theme.Motd.Splash" parent="Theme.Motd">
+        <item name="android:windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+    </style>
+</resources>

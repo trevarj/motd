@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pre-API-31 splash: brand-colored window with the centered splash logo. On API 31+ the
+     platform SplashScreen (Theme.Motd.Splash in values-v31) supersedes this. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/ic_launcher_background" />
+    <item
+        android:width="180dp"
+        android:height="180dp"
+        android:drawable="@drawable/ic_splash_logo"
+        android:gravity="center" />
+</layer-list>

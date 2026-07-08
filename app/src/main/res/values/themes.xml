@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App theme: transparent status/nav handled by Compose; parent matches the prior manifest
+         theme so behavior is unchanged post-splash. -->
+    <style name="Theme.Motd" parent="@android:style/Theme.Material.Light.NoActionBar" />
+
+    <!-- Launch/splash theme. Pre-API-31 shows the brand window background; API 31+ overrides in
+         values-v31 with the platform SplashScreen. MainActivity swaps to Theme.Motd on create. -->
+    <style name="Theme.Motd.Splash" parent="Theme.Motd">
+        <item name="android:windowBackground">@drawable/splash_window_background</item>
+    </style>
+</resources>

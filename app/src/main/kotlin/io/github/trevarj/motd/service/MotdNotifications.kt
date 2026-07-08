@@ -67,7 +67,7 @@ class MotdNotifications @Inject constructor(
         )
         val text = if (reconnecting) "Reconnecting…" else "Connected to $connectedCount networks"
         return NotificationCompat.Builder(context, CHANNEL_STATUS)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
             .setContentTitle("MOTD")
             .setContentText(text)
             .setOngoing(true)
@@ -123,20 +123,23 @@ class MotdNotifications @Inject constructor(
         ).build()
 
         val notification = NotificationCompat.Builder(context, channel)
-            .setSmallIcon(android.R.drawable.stat_notify_chat)
+            .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
             .setStyle(style)
             .setAutoCancel(true)
             .addAction(replyAction)
             .addAction(markReadAction)
             .build()
 
-        if (hasPostPermission()) {
+        // POST_NOTIFICATIONS is only a runtime permission on API 33+; below that it is granted
+        // at install. Inlined here (not extracted) so lint's flow analysis recognizes the guard.
+        val canPost = android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (canPost) {
             manager.notify(bufferId.toInt(), notification)
         }
     }
-
-    private fun hasPostPermission(): Boolean =
-        NotificationManagerCompat.from(context).areNotificationsEnabled()
 
     companion object {
         const val CHANNEL_STATUS = "status"
