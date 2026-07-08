@@ -1,0 +1,102 @@
+# 08 — CI & release (WP1 authors workflows; runbook for the human)
+
+CI is the canonical build environment: `ubuntu-latest` with its preinstalled Android SDK.
+No Nix in CI (the flake is for local dev only). AGP accepts licenses non-interactively on
+hosted runners; no extra license step needed.
+
+## `.github/workflows/ci.yml`
+
+```yaml
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests
+        run: ./gradlew :irc:test :app:testDebugUnitTest --stacktrace
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: motd-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+```
+
+## `.github/workflows/release.yml`
+
+```yaml
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Decode keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/keystore.jks"
+      - name: Build signed release APK
+        env:
+          MOTD_KEYSTORE_PATH: ${{ runner.temp }}/keystore.jks
+          MOTD_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          MOTD_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          MOTD_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          MOTD_VERSION_NAME: ${{ github.ref_name }}
+          MOTD_VERSION_CODE: ${{ github.run_number }}
+        run: ./gradlew :app:assembleRelease --stacktrace
+      - name: Rename artifact
+        run: cp app/build/outputs/apk/release/app-release.apk motd-${{ github.ref_name }}.apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: motd-${{ github.ref_name }}.apk
+          generate_release_notes: true
+```
+
+Note: `MOTD_VERSION_NAME` receives the raw tag (`v0.1.0`); `app/build.gradle.kts` uses it
+as-is — acceptable for v1 (versionName "v0.1.0"). Strip the `v` there later if it bothers
+anyone.
+
+## Versioning scheme
+
+- Tags: `v<semver>` (`v0.1.0` first release). `versionCode` = GitHub run number
+  (monotonic per workflow). Local builds: `0.0.0-dev` / 1.
+
+## One-time signing setup (human runbook — requires the repo to exist on GitHub)
+
+```sh
+# 1. generate a keystore (25+ year validity), store it OUTSIDE the repo
+keytool -genkeypair -v -keystore ~/secrets/motd-release.jks -alias motd \
+  -keyalg RSA -keysize 4096 -validity 10000
+
+# 2. upload secrets
+gh secret set KEYSTORE_BASE64 --repo trevarj/motd < <(base64 -w0 ~/secrets/motd-release.jks)
+gh secret set KEYSTORE_PASSWORD --repo trevarj/motd
+gh secret set KEY_ALIAS --repo trevarj/motd --body motd
+gh secret set KEY_PASSWORD --repo trevarj/motd
+
+# 3. release
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+Losing the keystore means users must uninstall/reinstall (signature mismatch) — back it up.

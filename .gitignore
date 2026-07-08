@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+*/build/
+
+# Android / IDE
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing (never commit)
+*.jks
+*.keystore
+keystore.properties
+
+# direnv
+.direnv/
