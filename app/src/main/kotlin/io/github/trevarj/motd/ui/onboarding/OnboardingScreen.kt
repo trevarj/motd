@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -109,7 +110,13 @@ fun OnboardingContent(
                 OnboardingStep.WELCOME -> WelcomePage()
                 OnboardingStep.CHOICE -> ChoicePage(state, onChoose, onLibera)
                 OnboardingStep.SERVER -> ServerPage(state, onServerChange, onAuthChange, authOnly = false)
-                OnboardingStep.AUTH -> ServerPage(state, onServerChange, onAuthChange, authOnly = true)
+                OnboardingStep.AUTH ->
+                    // soju always uses SASL PLAIN: show only user/password, no mechanism picker.
+                    if (state.isSoju) {
+                        SojuAuthPage(state, onAuthChange)
+                    } else {
+                        ServerPage(state, onServerChange, onAuthChange, authOnly = true)
+                    }
                 OnboardingStep.CONNECT -> ConnectPage(state, onRetry, onToggleBouncer, onAddBouncer)
                 OnboardingStep.FINISH -> FinishPage()
             }
@@ -273,6 +280,42 @@ private fun ServerPage(
             auth = state.auth,
             onServerChange = onServerChange,
             onAuthChange = onAuthChange,
+        )
+    }
+}
+
+/**
+ * Simplified AUTH page for the soju bouncer path: only username + password, always SASL PLAIN.
+ * No mechanism picker (NONE/EXTERNAL are meaningless for soju login).
+ */
+@Composable
+private fun SojuAuthPage(
+    state: OnboardingState,
+    onAuthChange: (AuthForm) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            stringResource(R.string.onboarding_auth_title),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+        )
+        OutlinedTextField(
+            value = state.auth.saslUser,
+            onValueChange = { onAuthChange(state.auth.copy(saslUser = it)) },
+            label = { Text(stringResource(R.string.onboarding_auth_soju_username)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = state.auth.saslPassword,
+            onValueChange = { onAuthChange(state.auth.copy(saslPassword = it)) },
+            label = { Text(stringResource(R.string.onboarding_auth_soju_password)) },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }

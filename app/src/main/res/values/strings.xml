@@ -50,6 +50,9 @@
     <string name="onboarding_auth_sasl_password">Password</string>
     <string name="onboarding_auth_choose_cert">Choose certificate</string>
     <string name="onboarding_auth_cert_selected">Certificate: %1$s</string>
+    <!-- soju bouncer auth: always SASL PLAIN, no picker (WP-S2) -->
+    <string name="onboarding_auth_soju_username">Username</string>
+    <string name="onboarding_auth_soju_password">Password</string>
     <string name="onboarding_connect_title">Connecting</string>
     <string name="onboarding_connect_retry">Retry</string>
     <string name="onboarding_connect_networks_title">Bouncer networks</string>

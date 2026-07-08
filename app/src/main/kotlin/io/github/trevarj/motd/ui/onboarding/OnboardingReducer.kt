@@ -149,7 +149,16 @@ fun onboardingReducer(state: OnboardingState, action: OnboardingAction): Onboard
         is OnboardingAction.GoTo -> state.copy(step = action.step)
 
         is OnboardingAction.ChooseConnection ->
-            state.copy(choice = action.choice)
+            // soju logs in with SASL PLAIN (bouncer user + password); force the mode so the
+            // AUTH step only needs to collect the two fields and the entity persists as PLAIN.
+            state.copy(
+                choice = action.choice,
+                auth = if (action.choice == ConnectionChoice.SOJU) {
+                    state.auth.copy(mode = AuthMode.PLAIN)
+                } else {
+                    state.auth
+                },
+            )
 
         is OnboardingAction.ApplyLiberaPreset ->
             state.copy(

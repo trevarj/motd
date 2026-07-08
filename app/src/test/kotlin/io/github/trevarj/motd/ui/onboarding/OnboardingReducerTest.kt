@@ -51,6 +51,44 @@ class OnboardingReducerTest {
     }
 
     @Test
+    fun `soju choice forces SASL PLAIN auth mode`() {
+        val s = onboardingReducer(
+            OnboardingState(step = OnboardingStep.CHOICE),
+            OnboardingAction.ChooseConnection(ConnectionChoice.SOJU),
+        )
+        assertEquals(AuthMode.PLAIN, s.auth.mode)
+    }
+
+    @Test
+    fun `soju AUTH advance requires both username and password`() {
+        // After choosing soju, mode is PLAIN so AUTH validity gates on both fields.
+        val base = reduce(
+            OnboardingState(step = OnboardingStep.CHOICE),
+            OnboardingAction.ChooseConnection(ConnectionChoice.SOJU),
+        ).copy(step = OnboardingStep.AUTH)
+
+        assertFalse(base.canAdvance)
+        assertFalse(base.copy(auth = base.auth.copy(saslUser = "u")).canAdvance)
+        val complete = base.copy(auth = base.auth.copy(saslUser = "u", saslPassword = "p"))
+        assertTrue(complete.canAdvance)
+        assertEquals(OnboardingStep.CONNECT, onboardingReducer(complete, OnboardingAction.Next).step)
+    }
+
+    @Test
+    fun `network choice leaves auth mode untouched`() {
+        // Direct path keeps the full picker: NONE stays valid, EXTERNAL still selectable.
+        val s = onboardingReducer(
+            OnboardingState(step = OnboardingStep.CHOICE),
+            OnboardingAction.ChooseConnection(ConnectionChoice.NETWORK),
+        )
+        assertEquals(AuthMode.NONE, s.auth.mode)
+        val none = s.copy(step = OnboardingStep.AUTH)
+        assertTrue(none.canAdvance)
+        val external = none.copy(auth = none.auth.copy(mode = AuthMode.EXTERNAL, certAlias = "a"))
+        assertTrue(external.canAdvance)
+    }
+
+    @Test
     fun `libera preset fills host port tls and selects network path`() {
         val s = onboardingReducer(
             OnboardingState(step = OnboardingStep.CHOICE),
