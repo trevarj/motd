@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
+import android.content.ClipData
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.scaleIn
@@ -41,10 +42,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.Clipboard
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -156,7 +158,7 @@ fun ChatContent(
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val clipboard = LocalClipboardManager.current
+    val clipboard: Clipboard = LocalClipboard.current
     val ctx = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     // rememberSaveable survives ChannelInfo round-trips + config changes (fixes v1 draft loss).
@@ -347,7 +349,9 @@ fun ChatContent(
                 sheetTarget = null
             },
             onCopy = {
-                clipboard.setText(AnnotatedString(target.text))
+                scope.launch {
+                    clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("message", target.text)))
+                }
                 sheetTarget = null
             },
             onQuote = {
