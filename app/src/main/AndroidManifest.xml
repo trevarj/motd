@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Connectivity-aware reconnect: ConnectionManagerImpl.registerDefaultNetworkCallback. -->
@@ -14,7 +15,7 @@
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Motd">
 
@@ -42,9 +43,12 @@
         <receiver android:name=".service.ReplyReceiver" android:exported="false" />
 
         <!-- UnifiedPush entry point (WP9). Distributors deliver endpoint lifecycle + push bodies. -->
+        <!-- UnifiedPush distributors deliver by explicit broadcast; the receiver MUST be exported
+             per the UnifiedPush spec, so ExportedReceiver's permission requirement cannot apply. -->
         <receiver
             android:name=".push.MotdPushReceiver"
-            android:exported="true">
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
             <intent-filter>
                 <action android:name="org.unifiedpush.android.connector.MESSAGE" />
                 <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />

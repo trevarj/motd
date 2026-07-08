@@ -44,7 +44,9 @@ class IrcForegroundService : LifecycleService() {
 
     private fun startAsForeground() {
         val notification = notifications.statusNotification(connectedCount = 0, reconnecting = true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is an API 34 constant; only pass the type on 34+.
+        // On 29-33 use the 2-arg overload (the manifest still declares foregroundServiceType).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(STATUS_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(STATUS_ID, notification)

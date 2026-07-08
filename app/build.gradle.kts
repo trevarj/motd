@@ -34,6 +34,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Distinct applicationId so a debug build can coexist with the released APK
+            // (they carry different signing keys; same id + different key = install failure).
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             isMinifyEnabled = false      // deliberate: zero R8 risk in v1
             if (keystorePath != null) signingConfig = signingConfigs.getByName("release")
@@ -41,6 +47,14 @@ android {
     }
     buildFeatures { compose = true }
     testOptions { unitTests { isIncludeAndroidResources = true } }  // Robolectric
+
+    lint {
+        warningsAsErrors = true
+        // Dependency versions are pinned by policy (plans/01); upgrade nags are intentional noise.
+        disable += "GradleDependency"
+        // AGP version is pinned by policy (plans/01); the upgrade nag is intentional noise.
+        disable += "AndroidGradlePluginVersion"
+    }
 }
 
 kotlin { jvmToolchain(17) }

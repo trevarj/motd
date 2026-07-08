@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Horizontal lockup: brand mark plus monospaced /motd wordmark. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="240dp"
-    android:height="80dp"
+    android:width="200dp"
+    android:height="67dp"
     android:viewportWidth="240"
     android:viewportHeight="80">
     <path

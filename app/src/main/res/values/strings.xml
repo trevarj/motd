@@ -10,7 +10,6 @@
     <string name="chatlist_pinned">Pinned</string>
     <string name="chatlist_empty_title">No conversations yet</string>
     <string name="chatlist_empty_message">Connect to a network to start chatting.</string>
-    <string name="chatlist_empty_action">Get started</string>
 
     <!-- New-conversation bottom sheet (WP6) -->
     <string name="new_sheet_join_channel">Join channel</string>
@@ -20,7 +19,6 @@
     <string name="new_sheet_nick_hint">Nickname</string>
     <string name="new_sheet_join">Join</string>
     <string name="new_sheet_message">Message</string>
-    <string name="new_sheet_cancel">Cancel</string>
 
     <!-- Onboarding (WP8) -->
     <string name="onboarding_welcome_title">Welcome to MOTD</string>
@@ -63,7 +61,6 @@
     <!-- Settings (WP8) -->
     <string name="settings_title">Settings</string>
     <string name="settings_appearance">Appearance</string>
-    <string name="settings_theme">Theme</string>
     <string name="settings_theme_system">System default</string>
     <string name="settings_theme_light">Light</string>
     <string name="settings_theme_dark">Dark</string>
@@ -79,9 +76,7 @@
     <string name="settings_battery">Battery optimization</string>
     <string name="settings_battery_desc">Exempt MOTD to keep connections reliable.</string>
     <string name="settings_networks">Networks</string>
-    <string name="settings_add_network">Add network</string>
     <string name="settings_about">About</string>
-    <string name="settings_version">Version</string>
     <string name="settings_github">GitHub</string>
     <string name="settings_github_url">https://github.com/trevarj/motd</string>
     <string name="network_settings_title">Network</string>
@@ -103,7 +98,10 @@
 
     <!-- Channel info (WP8) -->
     <string name="channelinfo_title">Channel info</string>
-    <string name="channelinfo_members">%1$d members</string>
+    <plurals name="channelinfo_members">
+        <item quantity="one">%1$d member</item>
+        <item quantity="other">%1$d members</item>
+    </plurals>
     <string name="channelinfo_mute">Mute</string>
     <string name="channelinfo_unmute">Unmute</string>
     <string name="channelinfo_pin">Pin</string>

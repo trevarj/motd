@@ -18,6 +18,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Unit tests
         run: ./gradlew :irc:test :app:testDebugUnitTest --stacktrace
+      - name: Android lint (warnings as errors)
+        run: ./gradlew :app:lintDebug --stacktrace
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4

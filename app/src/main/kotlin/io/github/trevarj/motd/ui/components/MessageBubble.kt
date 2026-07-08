@@ -25,7 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -87,7 +88,10 @@ fun MessageBubble(
     }
 
     val isDark = isSystemInDarkTheme()
-    val maxWidth = (LocalConfiguration.current.screenWidthDp * 0.78f).dp
+    // Window width in dp = container px / density; keeps the 0.78 bubble max-width behavior.
+    val containerWidthPx = LocalWindowInfo.current.containerSize.width
+    val density = LocalDensity.current
+    val maxWidth = with(density) { (containerWidthPx * 0.78f).toDp() }
     val bubbleColor = if (isSelf) MaterialTheme.colorScheme.primaryContainer
     else MaterialTheme.colorScheme.surfaceContainerHigh
     val textColor = if (isSelf) MaterialTheme.colorScheme.onPrimaryContainer

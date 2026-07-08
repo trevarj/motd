@@ -108,7 +108,9 @@ class ConnectionManagerImpl @Inject constructor(
         for (actor in actors.values) actor.stop()
         actors.clear(); fingerprints.clear()
         _states.value = emptyMap()
-        appContext.stopService(android.content.Intent(appContext, IrcForegroundService::class.java))
+        // Hoist the Intent to a local so lint doesn't read it as an implicit SAM instance.
+        val stopIntent = android.content.Intent(appContext, IrcForegroundService::class.java)
+        appContext.stopService(stopIntent)
     }
 
     override suspend fun stopAll() {
