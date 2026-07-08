@@ -13,7 +13,9 @@ import io.github.trevarj.motd.ui.chatlist.ChatListScreen
 import io.github.trevarj.motd.ui.imageviewer.ImageViewerScreen
 import io.github.trevarj.motd.ui.onboarding.OnboardingScreen
 import io.github.trevarj.motd.ui.search.SearchScreen
+import io.github.trevarj.motd.ui.settings.ManageNicksScreen
 import io.github.trevarj.motd.ui.settings.NetworkSettingsScreen
+import io.github.trevarj.motd.ui.settings.NickListKind
 import io.github.trevarj.motd.ui.settings.SettingsScreen
 
 /**
@@ -53,7 +55,19 @@ fun MotdNavGraph(
                 onBack = { navController.popBackStack() },
                 onOpenNetwork = { navController.navigate(NetworkSettingsRoute(it)) },
                 onOpenAbout = { navController.navigate(AboutRoute) },
+                onOpenFriends = { navController.navigate(FriendsRoute) },
+                onOpenFools = { navController.navigate(FoolsRoute) },
+                onOpenNickColors = { navController.navigate(NickColorsRoute) },
             )
+        }
+        composable<FriendsRoute> {
+            ManageNicksScreen(NickListKind.FRIENDS, onBack = { navController.popBackStack() })
+        }
+        composable<FoolsRoute> {
+            ManageNicksScreen(NickListKind.FOOLS, onBack = { navController.popBackStack() })
+        }
+        composable<NickColorsRoute> {
+            ManageNicksScreen(NickListKind.COLORS, onBack = { navController.popBackStack() })
         }
         composable<NetworkSettingsRoute> { entry ->
             val route = entry.toRoute<NetworkSettingsRoute>()

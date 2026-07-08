@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,8 +10,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -18,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -28,11 +32,16 @@ import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.NetworkChip
 import io.github.trevarj.motd.ui.components.UnreadBadge
+import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /**
  * One chat-list row: avatar, display name (+ network chip when multi-network), last-message
  * one-liner, relative time, unread/mention badges. Muted rows render dimmed with a bell-off glyph.
+ *
+ * Round 4 (plans/13 §3.5, Confirmed decision #4): a friend row gets a trailing [Icons.Filled.Star]
+ * plus a subtle primary-tinted rounded background behind the display name (theme-aware, layered
+ * under the nick color).
  */
 @Composable
 fun ChatListRowItem(
@@ -41,7 +50,10 @@ fun ChatListRowItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isFriend: Boolean = false,
 ) {
+    // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
+    val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -57,14 +69,35 @@ fun ChatListRowItem(
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Subtle theme-aware primary tint behind a friend's name (Confirmed decision #4).
+                val nameModifier = if (isFriend) {
+                    Modifier
+                        .weight(1f, fill = false)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                } else {
+                    Modifier.weight(1f, fill = false)
+                }
                 Text(
                     text = row.displayName,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
+                    color = if (isFriend) nickColor else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = nameModifier,
                 )
+                if (isFriend) {
+                    Icon(
+                        imageVector = Icons.Filled.Star,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(start = 4.dp)
+                            .size(14.dp),
+                        tint = nickColor,
+                    )
+                }
                 if (row.muted) {
                     Icon(
                         imageVector = Icons.Filled.NotificationsOff,

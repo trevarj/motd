@@ -13,10 +13,30 @@ import androidx.core.app.RemoteInput
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.irc.event.IrcEvent
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/**
+ * Final notification suppression decision (plans/13 §2.6). Pure and unit-tested.
+ *
+ * Precedence (highest first): foreground buffer suppresses everything; a fool sender is fully
+ * silenced (even in an un-muted DM/mention); a friend sender bypasses the muted-buffer
+ * suppression; otherwise a muted buffer suppresses. The `(DM || mention)` gate lives upstream in
+ * [io.github.trevarj.motd.data.sync.EventProcessor.maybeNotify], so by the time this runs the
+ * message already qualifies as a DM or a mention.
+ */
+fun shouldPostNotification(
+    foreground: Boolean,
+    muted: Boolean,
+    senderIsFriend: Boolean,
+    senderIsFool: Boolean,
+): Boolean = !foreground && !senderIsFool && (!muted || senderIsFriend)
 
 /**
  * MessagingStyle notifications (plans/05). Owns the notification channels and applies the final
@@ -29,6 +49,7 @@ class MotdNotifications @Inject constructor(
     @ApplicationContext private val context: Context,
     private val db: MotdDatabase,
     private val foregroundBufferTracker: ForegroundBufferTracker,
+    private val settingsRepository: SettingsRepository,
 ) : MessageNotifier {
 
     private val manager = NotificationManagerCompat.from(context)
@@ -80,13 +101,25 @@ class MotdNotifications @Inject constructor(
     // -- MessageNotifier (message/mention notifications) --
 
     override fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage) {
-        // Suppression: buffer currently foregrounded → no notification.
-        if (foregroundBufferTracker.foregroundBufferId.value == bufferId) return
-        // Muted-buffer suppression (Room read is blocking-safe here — off the collector's hot path).
+        // Room read is blocking-safe here — off the collector's hot path.
         val buffer = runCatching {
             kotlinx.coroutines.runBlocking { db.bufferDao().observeById(bufferId) }
         }.getOrNull()
-        if (buffer?.muted == true) return
+        // Friends/fools sets (single bounded DataStore read; null settings ⇒ empty sets).
+        val settings = runCatching {
+            kotlinx.coroutines.runBlocking { settingsRepository.settings.first() }
+        }.getOrNull() ?: Settings()
+        val sender = normalizeNick(message.source.nick)
+
+        // Round 4 (plans/13 §2.3/§2.4/§2.6): fools are fully silenced; friends bypass the
+        // muted-buffer suppression. Foreground suppression still applies to everyone.
+        val decision = shouldPostNotification(
+            foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId,
+            muted = buffer?.muted == true,
+            senderIsFriend = sender in settings.friends,
+            senderIsFool = sender in settings.fools,
+        )
+        if (!decision) return
 
         val channel = if (hasMention) CHANNEL_MENTIONS else CHANNEL_MESSAGES
         val title = buffer?.displayName ?: message.target

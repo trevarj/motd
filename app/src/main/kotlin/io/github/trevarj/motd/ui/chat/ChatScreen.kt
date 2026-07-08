@@ -62,6 +62,7 @@ import io.github.trevarj.motd.R
 import kotlinx.coroutines.flow.first
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AutocompletePanel
@@ -110,11 +111,16 @@ fun ChatScreen(
     val jumpFailed by viewModel.jumpFailed.collectAsStateWithLifecycle()
     // Read marker frozen on entry so the divider/badge don't flash away (plans/15 #2).
     val readMarkerSnapshot by viewModel.readMarkerSnapshot.collectAsStateWithLifecycle()
+    // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
 
     ChatContent(
         state = state,
         items = items,
         composerEnabled = state.connState is IrcClientState.Ready,
+        friends = settings.friends,
+        fools = settings.fools,
+        foolsMode = settings.foolsMode,
         reactionChips = { msgid -> chipsByMsgid[msgid].orEmpty() },
         readMarkerSnapshot = readMarkerSnapshot,
         onMarkRead = viewModel::markRead,
@@ -157,6 +163,9 @@ fun ChatContent(
     onRetry: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> io.github.trevarj.motd.data.repo.LinkPreview?,
     reactionChips: (String) -> List<io.github.trevarj.motd.ui.components.ReactionChip> = { emptyList() },
+    friends: Set<String> = emptySet(),
+    fools: Set<String> = emptySet(),
+    foolsMode: FoolsMode = FoolsMode.COLLAPSE,
     readMarkerSnapshot: Long? = null,
     onMarkRead: (Long) -> Unit = {},
     onDelete: (MessageEntity) -> Unit = {},
@@ -169,6 +178,9 @@ fun ChatContent(
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    // Expanded fool rows (plans/13 §2.4): keyed by MessageEntity.id, expand-only for the session.
+    // Ephemeral by design (lost on config change; accepted per plans/13 Risks #6).
+    var expandedFools by remember { mutableStateOf(setOf<Long>()) }
     val clipboard: Clipboard = LocalClipboard.current
     val ctx = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -340,6 +352,11 @@ fun ChatContent(
                         // Link-preview tap opens the URL in the system browser.
                         onOpenLink = { ctx.startActivity(Intent(Intent.ACTION_VIEW, it.toUri())) },
                         highlightMsgid = highlightMsgid,
+                        friends = friends,
+                        fools = fools,
+                        foolsMode = foolsMode,
+                        expandedFools = expandedFools,
+                        onToggleFool = { id -> expandedFools = expandedFools + id },
                     )
 
                     // Empty buffer once the first refresh settles → placeholder (plans/15 #27).

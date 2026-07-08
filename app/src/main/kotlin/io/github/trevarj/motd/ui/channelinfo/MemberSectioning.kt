@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.channelinfo
 
 import io.github.trevarj.motd.data.db.MemberEntity
+import io.github.trevarj.motd.data.prefs.normalizeNick
 
 /**
  * Pure member-list sectioning by highest channel prefix. Fully unit-testable; no Android deps.
@@ -58,3 +59,26 @@ fun sectionMembers(
 fun prefixOrderFrom(prefixModes: List<Pair<Char, Char>>): String =
     if (prefixModes.isEmpty()) DEFAULT_PREFIX_ORDER
     else prefixModes.joinToString("") { it.second.toString() }
+
+/**
+ * Prefix sections with fools pulled out into a trailing bucket (plans/13 §3.6). Fool members
+ * (by `normalizeNick(nick)`) are removed from every prefix section and returned separately,
+ * sorted case-insensitively. Friends are NOT moved — they stay in their prefix section (they
+ * only gain a star on the row). Empty [fools] reproduces the plain [sectionMembers] result.
+ */
+data class SocialSections(
+    val sections: List<MemberSection>,
+    val fools: List<MemberEntity>,
+)
+
+fun sectionMembersSocial(
+    members: List<MemberEntity>,
+    prefixOrder: String = DEFAULT_PREFIX_ORDER,
+    fools: Set<String> = emptySet(),
+): SocialSections {
+    val (foolMembers, rest) = members.partition { normalizeNick(it.nick) in fools }
+    return SocialSections(
+        sections = sectionMembers(rest, prefixOrder),
+        fools = foolMembers.sortedBy { it.nick.lowercase() },
+    )
+}

@@ -18,8 +18,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.ui.theme.nickColor
 
 /**
  * Darkness of the *applied* theme, derived from the resolved background luminance rather than
@@ -47,7 +47,9 @@ fun Avatar(
     size: Dp = 44.dp,
     isChannel: Boolean = false,
 ) {
-    val bg = nickColor(name, isAppliedThemeDark())
+    // Avatars keep their generated/override color even when nick coloring is disabled (an all-gray
+    // avatar column would be unusable, plans/13 confirmed decision #5); avatar() ignores the flag.
+    val bg = LocalNickColors.current.avatar(name)
     Box(
         modifier = modifier
             .size(size)

@@ -30,8 +30,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.ui.theme.nickColor
 
 /** Reply target shown in the composer's reply-preview bar. */
 data class ComposerReply(val sender: String, val text: String)
@@ -99,7 +99,7 @@ fun Composer(
 
 @Composable
 private fun ReplyBar(reply: ComposerReply, onCancel: () -> Unit) {
-    val isDark = isAppliedThemeDark()
+    val accent = LocalNickColors.current.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -110,14 +110,14 @@ private fun ReplyBar(reply: ComposerReply, onCancel: () -> Unit) {
             Modifier
                 .width(3.dp)
                 .padding(vertical = 2.dp)
-                .background(nickColor(reply.sender, isDark)),
+                .background(accent),
         )
         Column(modifier = Modifier.weight(1f).padding(start = 8.dp, top = 2.dp, bottom = 2.dp)) {
             Text(
                 text = stringResource(R.string.chat_composer_replying_to, reply.sender),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
-                color = nickColor(reply.sender, isDark),
+                color = accent,
             )
             Text(
                 text = reply.text,

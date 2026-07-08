@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,10 +18,17 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -31,6 +39,8 @@ import androidx.paging.compose.itemKey
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.NewMessagesDivider
@@ -79,6 +89,13 @@ fun MessageList(
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
     onDelete: (MessageEntity) -> Unit = {},
     highlightMsgid: String? = null,
+    // Behavioral settings threaded from viewModel.settings (plans/13 §2.3/§2.4). Style-only
+    // concerns (density, nick color) flow through CompositionLocals instead.
+    friends: Set<String> = emptySet(),
+    fools: Set<String> = emptySet(),
+    foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    expandedFools: Set<Long> = emptySet(),
+    onToggleFool: (Long) -> Unit = {},
 ) {
     LazyColumn(
         state = listState,
@@ -107,6 +124,22 @@ fun MessageList(
                 return@items
             }
 
+            // Fool COLLAPSE (plans/13 §2.4): render a tap-to-expand placeholder in place of the
+            // bubble until its id is expanded. HIDE mode is filtered upstream so it never reaches
+            // here; system-kind rows are handled above and never fool-treated.
+            val isCollapsedFool = foolsMode == FoolsMode.COLLAPSE &&
+                isFoolSender(msg.sender, msg.isSelf, fools) &&
+                msg.id !in expandedFools
+            if (isCollapsedFool) {
+                FoolPlaceholderRow(
+                    msg = msg,
+                    older = older,
+                    readMarkerTime = readMarkerTime,
+                    onExpand = { onToggleFool(msg.id) },
+                )
+                return@items
+            }
+
             // Deep-jump pulse: fade a highlight tint in then back out on the target row (~1.6s).
             val highlighted = highlightMsgid != null && msg.msgid == highlightMsgid
             val highlightColor by animateColorAsState(
@@ -124,6 +157,7 @@ fun MessageList(
                 msg = msg,
                 older = older,
                 readMarkerTime = readMarkerTime,
+                senderIsFriend = !msg.isSelf && normalizeNick(msg.sender) in friends,
                 reactions = msg.msgid?.let(reactionChips).orEmpty(),
                 onLongPress = onLongPress,
                 onReact = onReact,
@@ -226,6 +260,7 @@ private fun MessageRow(
     msg: MessageEntity,
     older: MessageEntity?,
     readMarkerTime: Long?,
+    senderIsFriend: Boolean,
     reactions: List<ReactionChip>,
     onLongPress: (MessageEntity) -> Unit,
     onReact: (String, String) -> Unit,
@@ -269,6 +304,7 @@ private fun MessageRow(
         isSelf = msg.isSelf,
         kind = msg.kind,
         showSender = showsSender(msg, older),
+        senderIsFriend = senderIsFriend,
         failed = msg.failed,
         // Subtle "sending…" state before the 30s failure flip (plans/15 #21).
         pending = msg.pendingLabel != null,
@@ -284,6 +320,50 @@ private fun MessageRow(
     )
     if (msg.failed) {
         RetryRow(onRetry = { onRetry(msg) }, onDelete = { onDelete(msg) })
+    }
+
+    if (showNewDivider) NewMessagesDivider(label = stringResource(R.string.chat_new_messages))
+    if (showDay) DaySeparator(timeMs = msg.serverTime)
+}
+
+/**
+ * COLLAPSE placeholder for a fool's message (plans/13 §2.4): a dimmed one-line "nick · hidden" row
+ * that expands to the full bubble on tap for the rest of the session. Day-separator and read-marker
+ * dividers are drawn exactly as [MessageRow] does so grouping boundaries stay intact whether or not
+ * the row is expanded.
+ */
+@Composable
+private fun FoolPlaceholderRow(
+    msg: MessageEntity,
+    older: MessageEntity?,
+    readMarkerTime: Long?,
+    onExpand: () -> Unit,
+) {
+    val showNewDivider = readMarkerTime != null &&
+        msg.serverTime > readMarkerTime &&
+        (older == null || older.serverTime <= readMarkerTime)
+    val showDay = older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onExpand() }
+            .alpha(0.7f)
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.VisibilityOff,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.size(6.dp))
+        Text(
+            text = stringResource(R.string.chat_fool_hidden, msg.sender),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 
     if (showNewDivider) NewMessagesDivider(label = stringResource(R.string.chat_new_messages))

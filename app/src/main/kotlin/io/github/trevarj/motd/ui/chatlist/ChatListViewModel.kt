@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -22,6 +23,9 @@ data class ChatListState(
     val connection: Map<Long, IrcClientState> = emptyMap(),
     val networks: List<NetworkEntity> = emptyList(),
     val loading: Boolean = true,
+    // Round 4 (plans/13 §3.5): global friend/fool sets drive chat-list sectioning.
+    val friends: Set<String> = emptySet(),
+    val fools: Set<String> = emptySet(),
 )
 
 @HiltViewModel
@@ -29,6 +33,7 @@ class ChatListViewModel @Inject constructor(
     private val bufferRepository: BufferRepository,
     private val networkRepository: NetworkRepository,
     private val connectionManager: ConnectionManager,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     val state: StateFlow<ChatListState> =
@@ -36,12 +41,15 @@ class ChatListViewModel @Inject constructor(
             bufferRepository.observeChatList(),
             networkRepository.observeNetworks(),
             connectionManager.connectionStates,
-        ) { rows, networks, connection ->
+            settingsRepository.settings,
+        ) { rows, networks, connection, settings ->
             ChatListState(
                 rows = rows,
                 connection = connection,
                 networks = networks,
                 loading = false,
+                friends = settings.friends,
+                fools = settings.fools,
             )
         }.stateIn(
             scope = viewModelScope,

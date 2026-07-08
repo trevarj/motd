@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
+import androidx.paging.filter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.MemberEntity
@@ -13,6 +14,8 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
+import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -29,7 +32,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import io.github.trevarj.motd.ui.components.ReactionChip
@@ -67,14 +72,28 @@ class ChatViewModel @Inject constructor(
     private val linkPreviewRepository: LinkPreviewRepository,
     private val draftStore: ComposerDraftStore,
     private val eventSink: IrcEventSink,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     private val route: ChatRoute = savedStateHandle.toRoute<ChatRoute>()
     val bufferId: Long = route.bufferId
 
-    /** Cached Paging stream; collected once in the screen. */
+    // Behavioral filter (JPQ visibility + fools HIDE). Distinct so unrelated settings edits don't
+    // re-emit the paging stream (plans/13 §2.5). ChatState is untouched — the screen collects
+    // [settings] separately (mirrors R1 keeping the 5-ary combine stable).
+    private val filterSpec = settingsRepository.settings
+        .map { MessageFilterSpec(it.showJoinPartQuit, it.fools, it.foolsMode) }
+        .distinctUntilChanged()
+
+    /** Cached Paging stream filtered per [MessageFilterSpec]; collected once in the screen. */
     val messages: Flow<PagingData<MessageEntity>> =
-        messageRepository.messages(bufferId).cachedIn(viewModelScope)
+        messageRepository.messages(bufferId)
+            .combine(filterSpec) { paging, spec -> paging.filter { keepMessage(it, spec) } }
+            .cachedIn(viewModelScope)
+
+    /** Full settings for the timeline (friends/fools/foolsMode/nick styling); collected in the screen. */
+    val settings: StateFlow<Settings> = settingsRepository.settings
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Settings())
 
     private val replyTo = MutableStateFlow<MessageEntity?>(null)
 

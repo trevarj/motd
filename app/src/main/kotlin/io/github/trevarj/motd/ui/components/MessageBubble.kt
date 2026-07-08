@@ -12,12 +12,14 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -49,8 +51,10 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.ui.chat.extractUrls
+import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.ui.theme.nickColor
+import io.github.trevarj.motd.ui.theme.NickColorScheme
 import java.text.DateFormat as JavaDateFormat
 
 /**
@@ -72,6 +76,7 @@ fun MessageBubble(
     kind: MessageKind,
     showSender: Boolean,
     modifier: Modifier = Modifier,
+    senderIsFriend: Boolean = false,
     failed: Boolean = false,
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
@@ -88,6 +93,9 @@ fun MessageBubble(
     // A shared no-op onClick with a null indication removes the dead ripple on plain taps; long-press
     // is the only action entry, labeled for TalkBack (plans/15 #31).
     val interaction = remember { MutableInteractionSource() }
+    // Density tokens + nick-color scheme flow through CompositionLocals; no signature churn.
+    val spacing = LocalSpacing.current
+    val nickColors = LocalNickColors.current
 
     // ACTION renders as centered-left italic text, no bubble (plans/07). Still carries reactions +
     // failed + timestamp decorations (plans/15 #16).
@@ -102,9 +110,9 @@ fun MessageBubble(
                     onLongClick = onLongPress,
                     onLongClickLabel = actionsLabel,
                 )
-                .padding(horizontal = 16.dp, vertical = 3.dp),
+                .padding(horizontal = 16.dp, vertical = spacing.actionVPad),
         ) {
-            reply?.let { ReplyMiniBubble(it, isAppliedThemeDark()) }
+            reply?.let { ReplyMiniBubble(it, nickColors) }
             Text(
                 text = "* $sender $text",
                 style = MaterialTheme.typography.bodyMedium,
@@ -126,7 +134,6 @@ fun MessageBubble(
         return
     }
 
-    val isDark = isAppliedThemeDark()
     // Window width in dp = container px / density; keeps the 0.78 bubble max-width behavior.
     val containerWidthPx = LocalWindowInfo.current.containerSize.width
     val density = LocalDensity.current
@@ -136,23 +143,23 @@ fun MessageBubble(
     val textColor = if (isSelf) MaterialTheme.colorScheme.onPrimaryContainer
     else MaterialTheme.colorScheme.onSurface
     // Tighten the inner (grouped) top corner: 4dp when this bubble continues a group.
-    val topCorner = if (showSender) 18.dp else 4.dp
+    val topCorner = if (showSender) spacing.bubbleCorner else 4.dp
     val shape = if (isSelf) {
-        RoundedCornerShape(topStart = 18.dp, topEnd = topCorner, bottomEnd = 4.dp, bottomStart = 18.dp)
+        RoundedCornerShape(topStart = spacing.bubbleCorner, topEnd = topCorner, bottomEnd = 4.dp, bottomStart = spacing.bubbleCorner)
     } else {
-        RoundedCornerShape(topStart = topCorner, topEnd = 18.dp, bottomEnd = 18.dp, bottomStart = 4.dp)
+        RoundedCornerShape(topStart = topCorner, topEnd = spacing.bubbleCorner, bottomEnd = spacing.bubbleCorner, bottomStart = 4.dp)
     }
 
     Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 1.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = spacing.bubbleRowVPad),
         horizontalArrangement = if (isSelf) Arrangement.End else Arrangement.Start,
     ) {
         // Left avatar column for others, only on a group's first bubble.
         if (!isSelf) {
             if (showSender) {
-                Avatar(name = sender, size = 32.dp, modifier = Modifier.padding(end = 8.dp, top = 2.dp))
+                Avatar(name = sender, size = spacing.bubbleAvatar, modifier = Modifier.padding(end = 8.dp, top = 2.dp))
             } else {
-                Box(Modifier.width(40.dp))
+                Box(Modifier.width(spacing.bubbleAvatarColumn))
             }
         }
 
@@ -168,15 +175,31 @@ fun MessageBubble(
                     onLongClick = onLongPress,
                     onLongClickLabel = actionsLabel,
                 )
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
         ) {
             if (showSender && !isSelf) {
-                Text(
-                    text = sender,
-                    color = nickColor(sender, isDark),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = sender,
+                        color = nameColor,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        // Friend tint: a subtle theme-primary rounded background behind the name,
+                        // layered under the nick color (plans/13 confirmed decision #4).
+                        modifier = if (senderIsFriend) Modifier.friendNickTint() else Modifier,
+                    )
+                    if (senderIsFriend) {
+                        Icon(
+                            Icons.Filled.Star,
+                            contentDescription = null,
+                            tint = nameColor,
+                            modifier = Modifier
+                                .padding(start = 4.dp)
+                                .size(12.dp),
+                        )
+                    }
+                }
             }
             if (kind == MessageKind.NOTICE) {
                 Text(
@@ -187,7 +210,7 @@ fun MessageBubble(
                 )
             }
 
-            reply?.let { ReplyMiniBubble(it, isDark) }
+            reply?.let { ReplyMiniBubble(it, nickColors) }
 
             imageUrl?.let { url ->
                 AsyncImage(
@@ -212,7 +235,8 @@ fun MessageBubble(
                 Text(
                     text = linkifiedBody(text, MaterialTheme.colorScheme.primary),
                     color = textColor,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = if (spacing.messageBodyLarge) MaterialTheme.typography.bodyLarge
+                    else MaterialTheme.typography.bodyMedium,
                 )
             }
 
@@ -294,11 +318,23 @@ private fun linkifiedBody(text: String, linkColor: androidx.compose.ui.graphics.
     }
 }
 
+/**
+ * Subtle friend highlight behind the sender name (plans/13 confirmed decision #4): a low-alpha
+ * theme-primary rounded pill layered under the nick color. Distinct enough to spot, quiet enough
+ * not to fight the nick color or the bubble background.
+ */
+@Composable
+private fun Modifier.friendNickTint(): Modifier = this
+    .clip(RoundedCornerShape(4.dp))
+    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+    .padding(horizontal = 4.dp, vertical = 1.dp)
+
 /** Resolved reply target for the quoted mini-bubble. */
 data class ReplyPreviewData(val sender: String, val text: String)
 
 @Composable
-private fun ReplyMiniBubble(reply: ReplyPreviewData, isDark: Boolean) {
+private fun ReplyMiniBubble(reply: ReplyPreviewData, nickColors: NickColorScheme) {
+    val accent = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
     Row(
         modifier = Modifier
             .padding(vertical = 2.dp)
@@ -309,12 +345,12 @@ private fun ReplyMiniBubble(reply: ReplyPreviewData, isDark: Boolean) {
             Modifier
                 .width(3.dp)
                 .heightIn(min = 28.dp)
-                .background(nickColor(reply.sender, isDark)),
+                .background(accent),
         )
         Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)) {
             Text(
                 text = reply.sender,
-                color = nickColor(reply.sender, isDark),
+                color = accent,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
             )

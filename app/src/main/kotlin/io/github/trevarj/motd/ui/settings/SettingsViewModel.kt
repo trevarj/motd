@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
@@ -55,5 +58,26 @@ class SettingsViewModel @Inject constructor(
 
     fun setDeliveryMode(mode: DeliveryMode) = viewModelScope.launch {
         settingsRepository.setDeliveryMode(mode)
+    }
+
+    // Round 4 (plans/13): appearance/chat/people settings.
+    fun setLayoutDensity(density: LayoutDensity) = viewModelScope.launch {
+        settingsRepository.setLayoutDensity(density)
+    }
+
+    fun setNickColorsEnabled(enabled: Boolean) = viewModelScope.launch {
+        settingsRepository.setNickColorsEnabled(enabled)
+    }
+
+    fun setNickColorPalette(palette: NickColorPalette) = viewModelScope.launch {
+        settingsRepository.setNickColorPalette(palette)
+    }
+
+    fun setShowJoinPartQuit(show: Boolean) = viewModelScope.launch {
+        settingsRepository.setShowJoinPartQuit(show)
+    }
+
+    fun setFoolsMode(mode: FoolsMode) = viewModelScope.launch {
+        settingsRepository.setFoolsMode(mode)
     }
 }

@@ -34,12 +34,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.service.DeliveryMode
@@ -52,6 +56,9 @@ fun SettingsScreen(
     onBack: () -> Unit = {},
     onOpenNetwork: (Long) -> Unit = {},
     onOpenAbout: () -> Unit = {},
+    onOpenFriends: () -> Unit = {},
+    onOpenFools: () -> Unit = {},
+    onOpenNickColors: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -60,9 +67,17 @@ fun SettingsScreen(
         onBack = onBack,
         onOpenNetwork = onOpenNetwork,
         onOpenAbout = onOpenAbout,
+        onOpenFriends = onOpenFriends,
+        onOpenFools = onOpenFools,
+        onOpenNickColors = onOpenNickColors,
         onThemeMode = viewModel::setThemeMode,
         onDynamicColor = viewModel::setDynamicColor,
         onDeliveryMode = viewModel::setDeliveryMode,
+        onLayoutDensity = viewModel::setLayoutDensity,
+        onNickColorsEnabled = viewModel::setNickColorsEnabled,
+        onNickColorPalette = viewModel::setNickColorPalette,
+        onShowJoinPartQuit = viewModel::setShowJoinPartQuit,
+        onFoolsMode = viewModel::setFoolsMode,
     )
 }
 
@@ -73,9 +88,17 @@ fun SettingsContent(
     onBack: () -> Unit,
     onOpenNetwork: (Long) -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenFriends: () -> Unit,
+    onOpenFools: () -> Unit,
+    onOpenNickColors: () -> Unit,
     onThemeMode: (ThemeMode) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onDeliveryMode: (DeliveryMode) -> Unit,
+    onLayoutDensity: (LayoutDensity) -> Unit,
+    onNickColorsEnabled: (Boolean) -> Unit,
+    onNickColorPalette: (NickColorPalette) -> Unit,
+    onShowJoinPartQuit: (Boolean) -> Unit,
+    onFoolsMode: (FoolsMode) -> Unit,
 ) {
     val context = LocalContext.current
     Scaffold(
@@ -102,6 +125,52 @@ fun SettingsContent(
                 checked = state.settings.dynamicColor,
                 onCheckedChange = onDynamicColor,
             )
+            SubLabel(stringResource(R.string.settings_density))
+            DensityGroup(current = state.settings.layoutDensity, onSelect = onLayoutDensity)
+
+            HorizontalDivider()
+
+            // Chat -------------------------------------------------------------------------
+            SectionHeader(stringResource(R.string.settings_chat))
+            SwitchRow(
+                title = stringResource(R.string.settings_nick_colors),
+                subtitle = stringResource(R.string.settings_nick_colors_desc),
+                checked = state.settings.nickColorsEnabled,
+                onCheckedChange = onNickColorsEnabled,
+            )
+            PaletteGroup(
+                current = state.settings.nickColorPalette,
+                enabled = state.settings.nickColorsEnabled,
+                onSelect = onNickColorPalette,
+            )
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_nick_color_overrides)) },
+                supportingContent = countText(state.settings.nickColorOverrides.size),
+                modifier = Modifier.clickable { onOpenNickColors() },
+            )
+            SwitchRow(
+                title = stringResource(R.string.settings_show_jpq),
+                subtitle = stringResource(R.string.settings_show_jpq_desc),
+                checked = state.settings.showJoinPartQuit,
+                onCheckedChange = onShowJoinPartQuit,
+            )
+
+            HorizontalDivider()
+
+            // People -----------------------------------------------------------------------
+            SectionHeader(stringResource(R.string.settings_people))
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_friends)) },
+                supportingContent = countText(state.settings.friends.size),
+                modifier = Modifier.clickable { onOpenFriends() },
+            )
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_fools)) },
+                supportingContent = countText(state.settings.fools.size),
+                modifier = Modifier.clickable { onOpenFools() },
+            )
+            SubLabel(stringResource(R.string.settings_fools_mode))
+            FoolsModeGroup(current = state.settings.foolsMode, onSelect = onFoolsMode)
 
             HorizontalDivider()
 
@@ -167,6 +236,77 @@ private fun ThemeModeGroup(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
         }
     }
 }
+
+@Composable
+private fun DensityGroup(current: LayoutDensity, onSelect: (LayoutDensity) -> Unit) {
+    val options = listOf(
+        LayoutDensity.COMPACT to R.string.settings_density_compact,
+        LayoutDensity.COMFORTABLE to R.string.settings_density_comfortable,
+        LayoutDensity.COZY to R.string.settings_density_cozy,
+    )
+    Column(Modifier.selectableGroup()) {
+        options.forEach { (density, labelRes) ->
+            RadioRow(
+                label = stringResource(labelRes),
+                selected = current == density,
+                enabled = true,
+                onClick = { onSelect(density) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun PaletteGroup(
+    current: NickColorPalette,
+    enabled: Boolean,
+    onSelect: (NickColorPalette) -> Unit,
+) {
+    val options = listOf(
+        NickColorPalette.DEFAULT to R.string.settings_palette_default,
+        NickColorPalette.VIVID to R.string.settings_palette_vivid,
+        NickColorPalette.PASTEL to R.string.settings_palette_pastel,
+    )
+    Column(Modifier.selectableGroup()) {
+        options.forEach { (palette, labelRes) ->
+            RadioRow(
+                label = stringResource(labelRes),
+                selected = current == palette,
+                enabled = enabled,
+                onClick = { onSelect(palette) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun FoolsModeGroup(current: FoolsMode, onSelect: (FoolsMode) -> Unit) {
+    Column(Modifier.selectableGroup()) {
+        RadioRow(
+            label = stringResource(R.string.settings_fools_collapse),
+            subtitle = stringResource(R.string.settings_fools_collapse_desc),
+            selected = current == FoolsMode.COLLAPSE,
+            enabled = true,
+            onClick = { onSelect(FoolsMode.COLLAPSE) },
+        )
+        RadioRow(
+            label = stringResource(R.string.settings_fools_hide),
+            subtitle = stringResource(R.string.settings_fools_hide_desc),
+            selected = current == FoolsMode.HIDE,
+            enabled = true,
+            onClick = { onSelect(FoolsMode.HIDE) },
+        )
+    }
+}
+
+/** Supporting text showing the pluralized nick count, or null when the list is empty. */
+@Composable
+private fun countText(count: Int): (@Composable () -> Unit)? =
+    if (count > 0) {
+        { Text(pluralStringResource(R.plurals.settings_nick_count, count, count)) }
+    } else {
+        null
+    }
 
 @Composable
 private fun DeliveryGroup(
@@ -247,13 +387,30 @@ private fun SectionHeader(text: String) {
     )
 }
 
+/** Dimmed sub-section label above an inline radio group (density, fools mode). */
+@Composable
+private fun SubLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp),
+    )
+}
+
 @Preview
 @Composable
 private fun SettingsContentPreview() {
     MotdTheme {
         SettingsContent(
             state = SettingsUiState(
-                settings = Settings(themeMode = ThemeMode.DARK, dynamicColor = true),
+                settings = Settings(
+                    themeMode = ThemeMode.DARK,
+                    dynamicColor = true,
+                    friends = setOf("alice"),
+                    fools = setOf("bob", "carol"),
+                    nickColorOverrides = mapOf("alice" to 210),
+                ),
                 networks = listOf(
                     NetworkEntity(
                         id = 1, name = "Libera", role = NetworkRole.DIRECT,
@@ -263,7 +420,11 @@ private fun SettingsContentPreview() {
                 ),
                 pushAvailable = false,
             ),
-            onBack = {}, onOpenNetwork = {}, onOpenAbout = {}, onThemeMode = {}, onDynamicColor = {}, onDeliveryMode = {},
+            onBack = {}, onOpenNetwork = {}, onOpenAbout = {},
+            onOpenFriends = {}, onOpenFools = {}, onOpenNickColors = {},
+            onThemeMode = {}, onDynamicColor = {}, onDeliveryMode = {},
+            onLayoutDensity = {}, onNickColorsEnabled = {}, onNickColorPalette = {},
+            onShowJoinPartQuit = {}, onFoolsMode = {},
         )
     }
 }

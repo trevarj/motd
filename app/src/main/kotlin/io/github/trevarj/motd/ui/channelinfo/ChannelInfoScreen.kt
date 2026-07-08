@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.channelinfo
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,10 +15,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.automirrored.outlined.Message
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -38,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +56,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
+import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -71,6 +80,8 @@ fun ChannelInfoScreen(
         onMessageMember = { nick -> viewModel.messageMember(nick, onOpenBuffer) },
         // Queue "$nick: " on the chat's composer draft, then pop back to the chat.
         onMentionMember = { nick -> viewModel.mentionMember(nick, onDone = onBack) },
+        onToggleFriend = viewModel::toggleFriend,
+        onToggleFool = viewModel::toggleFool,
     )
 }
 
@@ -84,9 +95,13 @@ fun ChannelInfoContent(
     onLeave: () -> Unit,
     onMessageMember: (String) -> Unit,
     onMentionMember: (String) -> Unit,
+    onToggleFriend: (String) -> Unit = {},
+    onToggleFool: (String) -> Unit = {},
 ) {
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var sheetMember by remember { mutableStateOf<String?>(null) }
+    // Fools section is collapsed by default; state is local to the screen (plans/13 §3.6).
+    var foolsExpanded by remember { mutableStateOf(false) }
     val buffer = state.buffer
 
     Scaffold(
@@ -124,7 +139,27 @@ fun ChannelInfoContent(
                     )
                 }
                 items(section.members, key = { "${section.prefix}-${it.nick}" }) { member ->
-                    MemberRow(member = member, onClick = { sheetMember = member.nick })
+                    MemberRow(
+                        member = member,
+                        isFriend = normalizeNick(member.nick) in state.friends,
+                        onClick = { sheetMember = member.nick },
+                    )
+                }
+            }
+            if (state.foolMembers.isNotEmpty()) {
+                item(key = "fools-header") {
+                    FoolsSectionHeader(
+                        count = state.foolMembers.size,
+                        expanded = foolsExpanded,
+                        onToggle = { foolsExpanded = !foolsExpanded },
+                    )
+                }
+                if (foolsExpanded) {
+                    items(state.foolMembers, key = { "fool-${it.nick}" }) { member ->
+                        Box(modifier = Modifier.alpha(0.55f)) {
+                            MemberRow(member = member, isFriend = false, onClick = { sheetMember = member.nick })
+                        }
+                    }
                 }
             }
         }
@@ -149,6 +184,9 @@ fun ChannelInfoContent(
     }
 
     sheetMember?.let { nick ->
+        val norm = normalizeNick(nick)
+        val isFriend = norm in state.friends
+        val isFool = norm in state.fools
         ModalBottomSheet(onDismissRequest = { sheetMember = null }) {
             ListItem(
                 headlineContent = { Text(nick) },
@@ -164,7 +202,50 @@ fun ChannelInfoContent(
                 leadingContent = { Icon(Icons.Outlined.AlternateEmail, contentDescription = null) },
                 modifier = Modifier.clickable { onMentionMember(nick); sheetMember = null },
             )
+            // Sheet stays open on toggle so the label/icon flips in place (plans/13 §3.6).
+            ListItem(
+                headlineContent = {
+                    Text(stringResource(if (isFriend) R.string.channelinfo_remove_friend else R.string.channelinfo_add_friend))
+                },
+                leadingContent = {
+                    Icon(if (isFriend) Icons.Filled.Star else Icons.Outlined.StarBorder, contentDescription = null)
+                },
+                modifier = Modifier.clickable { onToggleFriend(nick) },
+            )
+            ListItem(
+                headlineContent = {
+                    Text(stringResource(if (isFool) R.string.channelinfo_remove_fool else R.string.channelinfo_add_fool))
+                },
+                leadingContent = {
+                    Icon(if (isFool) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff, contentDescription = null)
+                },
+                modifier = Modifier.clickable { onToggleFool(nick) },
+            )
         }
+    }
+}
+
+@Composable
+private fun FoolsSectionHeader(count: Int, expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.channelinfo_fools_section, count),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
     }
 }
 
@@ -248,10 +329,22 @@ private fun ActionItem(
 }
 
 @Composable
-private fun MemberRow(member: MemberEntity, onClick: () -> Unit) {
+private fun MemberRow(member: MemberEntity, isFriend: Boolean, onClick: () -> Unit) {
     ListItem(
         headlineContent = { Text(member.prefixes.take(1) + member.nick) },
         leadingContent = { Avatar(name = member.nick, size = 36.dp) },
+        trailingContent = if (isFriend) {
+            {
+                Icon(
+                    imageVector = Icons.Filled.Star,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        } else {
+            null
+        },
         modifier = Modifier.clickable(onClick = onClick),
     )
 }

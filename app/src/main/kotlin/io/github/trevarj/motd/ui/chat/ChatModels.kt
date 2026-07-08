@@ -1,7 +1,43 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.ui.components.ReactionChip
+
+// --- timeline message filtering (plans/13 §2.4/§2.5) ---
+
+/** JOIN/PART/QUIT kinds hidden when `showJoinPartQuit == false`. */
+val JPQ_KINDS: Set<MessageKind> = setOf(MessageKind.JOIN, MessageKind.PART, MessageKind.QUIT)
+
+/**
+ * Behavioral filter spec fed into [keepMessage]. Derived from the observed Settings in
+ * [ChatViewModel]; passed to `PagingData.filter` so grouping/day-separator/read-marker math only
+ * sees visible rows.
+ */
+data class MessageFilterSpec(
+    val showJoinPartQuit: Boolean = true,
+    val fools: Set<String> = emptySet(),
+    val foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+)
+
+/** True when [sender] is a fool (never for own messages). Normalized, case-insensitive compare. */
+fun isFoolSender(sender: String, isSelf: Boolean, fools: Set<String>): Boolean =
+    !isSelf && normalizeNick(sender) in fools
+
+/**
+ * `PagingData.filter` predicate: drops JPQ rows when hidden, and drops fool rows only in HIDE mode.
+ * System-event kinds are never fool-treated (JPQ visibility governs those). COLLAPSE keeps the row
+ * so it can render as a tap-to-expand placeholder in the timeline.
+ */
+fun keepMessage(msg: MessageEntity, spec: MessageFilterSpec): Boolean =
+    !(msg.kind in JPQ_KINDS && !spec.showJoinPartQuit) &&
+        !(
+            spec.foolsMode == FoolsMode.HIDE && !isSystemKind(msg.kind) &&
+                isFoolSender(msg.sender, msg.isSelf, spec.fools)
+            )
 
 /** Grouping window: consecutive same-sender messages within this span share one header. */
 const val GROUP_WINDOW_MS: Long = 3 * 60 * 1000

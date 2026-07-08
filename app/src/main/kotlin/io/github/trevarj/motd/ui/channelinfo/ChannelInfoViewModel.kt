@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.MemberEntity
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
@@ -23,6 +24,10 @@ data class ChannelInfoUiState(
     val buffer: BufferEntity? = null,
     val sections: List<MemberSection> = emptyList(),
     val memberCount: Int = 0,
+    // Round 4 (plans/13 §3.6): global friend/fool sets. Fools are pulled into their own section.
+    val foolMembers: List<MemberEntity> = emptyList(),
+    val friends: Set<String> = emptySet(),
+    val fools: Set<String> = emptySet(),
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -31,6 +36,7 @@ class ChannelInfoViewModel @Inject constructor(
     private val bufferRepository: BufferRepository,
     private val connectionManager: ConnectionManager,
     private val draftStore: ComposerDraftStore,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     private val bufferIdFlow = MutableStateFlow<Long?>(null)
@@ -46,12 +52,16 @@ class ChannelInfoViewModel @Inject constructor(
     }
 
     val state: StateFlow<ChannelInfoUiState> =
-        combine(bufferFlow, membersFlow) { buffer, members ->
+        combine(bufferFlow, membersFlow, settingsRepository.settings) { buffer, members, settings ->
             val order = prefixOrderForBuffer(buffer)
+            val social = sectionMembersSocial(members, order, settings.fools)
             ChannelInfoUiState(
                 buffer = buffer,
-                sections = sectionMembers(members, order),
+                sections = social.sections,
                 memberCount = members.size,
+                foolMembers = social.fools,
+                friends = settings.friends,
+                fools = settings.fools,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -93,5 +103,15 @@ class ChannelInfoViewModel @Inject constructor(
     fun mentionMember(nick: String, onDone: () -> Unit) {
         state.value.buffer?.let { draftStore.push(it.id, "$nick: ") }
         onDone()
+    }
+
+    /** Toggle [nick]'s friend membership (adding removes it from fools; see SettingsRepository). */
+    fun toggleFriend(nick: String) = viewModelScope.launch {
+        settingsRepository.setFriend(nick, io.github.trevarj.motd.data.prefs.normalizeNick(nick) !in state.value.friends)
+    }
+
+    /** Toggle [nick]'s fool membership (adding removes it from friends). */
+    fun toggleFool(nick: String) = viewModelScope.launch {
+        settingsRepository.setFool(nick, io.github.trevarj.motd.data.prefs.normalizeNick(nick) !in state.value.fools)
     }
 }
