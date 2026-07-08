@@ -1,0 +1,59 @@
+package io.github.trevarj.motd.ui.settings
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.ThemeMode
+import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.service.DeliveryMode
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+data class SettingsUiState(
+    val settings: Settings = Settings(),
+    val networks: List<NetworkEntity> = emptyList(),
+    val pushAvailable: Boolean = false,
+)
+
+@HiltViewModel
+class SettingsViewModel @Inject constructor(
+    private val settingsRepository: SettingsRepository,
+    private val networkRepository: NetworkRepository,
+    private val pushAvailability: PushAvailabilityProvider,
+) : ViewModel() {
+
+    val state: StateFlow<SettingsUiState> =
+        combine(
+            settingsRepository.settings,
+            networkRepository.observeNetworks(),
+        ) { settings, networks ->
+            SettingsUiState(
+                settings = settings,
+                networks = networks,
+                pushAvailable = pushAvailability.isUnifiedPushAvailable(),
+            )
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = SettingsUiState(pushAvailable = pushAvailability.isUnifiedPushAvailable()),
+        )
+
+    fun setThemeMode(mode: ThemeMode) = viewModelScope.launch {
+        settingsRepository.setThemeMode(mode)
+    }
+
+    fun setDynamicColor(enabled: Boolean) = viewModelScope.launch {
+        settingsRepository.setDynamicColor(enabled)
+    }
+
+    fun setDeliveryMode(mode: DeliveryMode) = viewModelScope.launch {
+        settingsRepository.setDeliveryMode(mode)
+    }
+}

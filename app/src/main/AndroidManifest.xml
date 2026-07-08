@@ -37,6 +37,18 @@
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
         </receiver>
         <receiver android:name=".service.ReplyReceiver" android:exported="false" />
+
+        <!-- UnifiedPush entry point (WP9). Distributors deliver endpoint lifecycle + push bodies. -->
+        <receiver
+            android:name=".push.MotdPushReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.MESSAGE" />
+                <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />
+                <action android:name="org.unifiedpush.android.connector.REGISTRATION_FAILED" />
+                <action android:name="org.unifiedpush.android.connector.UNREGISTERED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

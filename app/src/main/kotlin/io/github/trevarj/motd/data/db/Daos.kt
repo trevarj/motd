@@ -42,10 +42,53 @@ interface NetworkDao {
 
 @Dao
 interface BufferDao {
-    fun observeChatList(): Flow<List<ChatListRow>>   // @Query join: buffer + last msg + unread/mention counts
+    // Chat-list projection: each non-SERVER buffer joined with its latest message (correlated
+    // subqueries on the (bufferId, serverTime, id) index) plus unread/mention counts relative to
+    // the buffer's readMarkerTime. Chat kinds only (PRIVMSG/NOTICE/ACTION); self messages never
+    // count as unread. Sort: pinned first, then latest activity DESC (nulls last).
+    @Transaction
+    @Query(
+        """
+        SELECT
+            b.id AS bufferId,
+            b.networkId AS networkId,
+            n.name AS networkName,
+            b.displayName AS displayName,
+            b.type AS type,
+            b.pinned AS pinned,
+            b.muted AS muted,
+            (SELECT m.text FROM messages m WHERE m.bufferId = b.id
+                ORDER BY m.serverTime DESC, m.id DESC LIMIT 1) AS lastMessageText,
+            (SELECT m.sender FROM messages m WHERE m.bufferId = b.id
+                ORDER BY m.serverTime DESC, m.id DESC LIMIT 1) AS lastMessageSender,
+            (SELECT m.serverTime FROM messages m WHERE m.bufferId = b.id
+                ORDER BY m.serverTime DESC, m.id DESC LIMIT 1) AS lastMessageTime,
+            (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
+                AND m.serverTime > COALESCE(b.readMarkerTime, 0)
+                AND m.isSelf = 0
+                AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS unreadCount,
+            (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
+                AND m.serverTime > COALESCE(b.readMarkerTime, 0)
+                AND m.isSelf = 0
+                AND m.hasMention = 1
+                AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS mentionCount
+        FROM buffers b
+        JOIN networks n ON n.id = b.networkId
+        WHERE b.type != 'SERVER'
+        ORDER BY b.pinned DESC,
+                 (lastMessageTime IS NULL) ASC,
+                 lastMessageTime DESC,
+                 b.id DESC
+        """
+    )
+    fun observeChatList(): Flow<List<ChatListRow>>
 
     @Query("SELECT * FROM buffers WHERE id = :id")
     fun observe(id: Long): Flow<BufferEntity?>
+
+    // Point read for read-modify-write toggles (pin/mute); not part of the frozen surface.
+    @Query("SELECT * FROM buffers WHERE id = :id")
+    suspend fun observeById(id: Long): BufferEntity?
 
     @Query("SELECT * FROM buffers WHERE networkId = :nid AND name = :normName")
     suspend fun byName(nid: Long, normName: String): BufferEntity?
@@ -89,6 +132,21 @@ interface MessageDao {
     @Query("SELECT MIN(serverTime) FROM messages WHERE bufferId = :bufferId")
     suspend fun oldestTime(bufferId: Long): Long?
 
+    // FTS4 external-content search over (text, sender). :query is already sanitized (each token
+    // quoted + prefixed with *) by SearchRepository. Chat kinds only; optional buffer scope.
+    @Query(
+        """
+        SELECT m.*, b.displayName AS bufferDisplayName, n.name AS networkName
+        FROM messages m
+        JOIN messages_fts f ON m.id = f.rowid
+        JOIN buffers b ON b.id = m.bufferId
+        JOIN networks n ON n.id = b.networkId
+        WHERE f.messages_fts MATCH :query
+          AND (:bufferId IS NULL OR m.bufferId = :bufferId)
+          AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+        ORDER BY m.serverTime DESC LIMIT 200
+        """
+    )
     fun search(query: String, bufferId: Long?): Flow<List<SearchHit>>  // @Query over messages_fts MATCH
 }
 
@@ -99,8 +157,18 @@ interface MemberDao {
     @Query("SELECT * FROM members WHERE bufferId = :bufferId")
     fun observe(bufferId: Long): Flow<List<MemberEntity>>
 
+    @Query("DELETE FROM members WHERE bufferId = :bufferId")
+    suspend fun clear(bufferId: Long)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(members: List<MemberEntity>)
+
+    // Atomic member snapshot swap (NAMES replay): clear then bulk-insert in one transaction.
     @Transaction
-    suspend fun replaceAll(bufferId: Long, members: List<MemberEntity>)
+    suspend fun replaceAll(bufferId: Long, members: List<MemberEntity>) {
+        clear(bufferId)
+        insertAll(members)
+    }
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(m: MemberEntity)

@@ -8,16 +8,23 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import io.github.trevarj.motd.data.prefs.ThemeMode
 
-// Placeholder theme; WP6 replaces the internals. Signature is stable for MainActivity/NavGraph.
-private val Indigo = Color(0xFF5B6EE1)
-
+// Static schemes seeded from the indigo brand color; used when dynamic color is off or pre-API-31.
 private val LightColors = lightColorScheme(primary = Indigo)
 private val DarkColors = darkColorScheme(primary = Indigo)
-private val AmoledColors = darkColorScheme(primary = Indigo, background = Color.Black, surface = Color.Black)
+
+// AMOLED = dark scheme with true-black background/surface and near-black surface containers.
+private val AmoledColors = DarkColors.copy(
+    background = AmoledBackground,
+    surface = AmoledSurface,
+    surfaceContainerLowest = AmoledSurfaceContainerLowest,
+    surfaceContainerLow = AmoledSurfaceContainerLow,
+    surfaceContainer = AmoledSurfaceContainer,
+    surfaceContainerHigh = AmoledSurfaceContainerHigh,
+    surfaceContainerHighest = AmoledSurfaceContainerHighest,
+)
 
 @Composable
 fun MotdTheme(
@@ -31,9 +38,23 @@ fun MotdTheme(
         ThemeMode.DARK, ThemeMode.AMOLED -> true
     }
     val colorScheme = when {
+        // Material You dynamic color, API 31+. AMOLED still forces true-black surfaces below.
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val ctx = LocalContext.current
-            if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+            val scheme = if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+            if (themeMode == ThemeMode.AMOLED) {
+                scheme.copy(
+                    background = AmoledBackground,
+                    surface = AmoledSurface,
+                    surfaceContainerLowest = AmoledSurfaceContainerLowest,
+                    surfaceContainerLow = AmoledSurfaceContainerLow,
+                    surfaceContainer = AmoledSurfaceContainer,
+                    surfaceContainerHigh = AmoledSurfaceContainerHigh,
+                    surfaceContainerHighest = AmoledSurfaceContainerHighest,
+                )
+            } else {
+                scheme
+            }
         }
         themeMode == ThemeMode.AMOLED -> AmoledColors
         dark -> DarkColors

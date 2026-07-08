@@ -95,8 +95,9 @@ WHERE f.messages_fts MATCH :query
 ORDER BY m.serverTime DESC LIMIT 200
 ```
 
-- Sanitize user input: wrap each whitespace token in double quotes + `*` suffix
-  (prefix search), join with spaces.
+- Sanitize user input: strip FTS operator chars (`" * ^ : ( ) -`) from each whitespace token,
+  append a bare `*` (prefix search), join with spaces. (Quoted `"token"*` silently drops the
+  wildcard in FTS4 — verified during WP4.)
 
 ## Chat list projection (WP4)
 

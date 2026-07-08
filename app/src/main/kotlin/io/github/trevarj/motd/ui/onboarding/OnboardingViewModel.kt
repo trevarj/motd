@@ -1,0 +1,155 @@
+package io.github.trevarj.motd.ui.onboarding
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.irc.client.SaslMechanism
+import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.ui.settings.buildNetworkEntity
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+/**
+ * Drives the onboarding wizard's side effects and folds their results back through the pure
+ * [onboardingReducer]. All wizard state lives in [OnboardingState]; the ViewModel only orchestrates.
+ */
+@HiltViewModel
+class OnboardingViewModel @Inject constructor(
+    private val networkRepository: NetworkRepository,
+    private val connectionManager: ConnectionManager,
+) : ViewModel() {
+
+    private val _state = MutableStateFlow(OnboardingState())
+    val state: StateFlow<OnboardingState> = _state.asStateFlow()
+
+    private fun dispatch(action: OnboardingAction) {
+        _state.value = onboardingReducer(_state.value, action)
+    }
+
+    // -- pure navigation / edits ---------------------------------------------------------------
+
+    fun next() {
+        val before = _state.value
+        dispatch(OnboardingAction.Next)
+        // Kick off the connect test when entering the CONNECT step.
+        if (before.step == OnboardingStep.AUTH && _state.value.step == OnboardingStep.CONNECT) {
+            runConnectTest()
+        }
+    }
+
+    fun back() = dispatch(OnboardingAction.Back)
+    fun chooseConnection(choice: ConnectionChoice) = dispatch(OnboardingAction.ChooseConnection(choice))
+    fun applyLiberaPreset() = dispatch(OnboardingAction.ApplyLiberaPreset)
+    fun editServer(server: ServerForm) = dispatch(OnboardingAction.EditServer(server))
+    fun editAuth(auth: AuthForm) = dispatch(OnboardingAction.EditAuth(auth))
+    fun toggleBouncerNetwork(netId: String) = dispatch(OnboardingAction.ToggleBouncerNetwork(netId))
+
+    // -- side effects --------------------------------------------------------------------------
+
+    private fun runConnectTest() = viewModelScope.launch {
+        val s = _state.value
+        val entity = buildNetworkEntity(
+            server = s.server,
+            auth = s.auth,
+            role = s.role,
+            name = s.server.host,
+        )
+        val networkId = networkRepository.addNetwork(entity)
+        dispatch(OnboardingAction.NetworkCreated(networkId))
+
+        connectionManager.connect(networkId)
+
+        // Mirror this network's live IrcClientState into the wizard state log.
+        connectionManager.connectionStates.collect { states ->
+            val cs = states[networkId] ?: return@collect
+            if (cs != _state.value.connState) {
+                dispatch(OnboardingAction.ConnStateChanged(cs))
+                if (cs is IrcClientState.Ready && s.isSoju && !_state.value.bouncerListLoaded) {
+                    loadBouncerNetworks(networkId)
+                }
+            }
+        }
+    }
+
+    /** Retry after a failed connect test: delete the half-created row and rerun. */
+    fun retryConnect() = viewModelScope.launch {
+        _state.value.networkId?.let { networkRepository.deleteNetwork(it) }
+        dispatch(OnboardingAction.Error(null))
+        _state.value = _state.value.copy(
+            networkId = null,
+            connState = null,
+            stateLog = emptyList(),
+            bouncerNetworks = emptyList(),
+            bouncerListLoaded = false,
+        )
+        runConnectTest()
+    }
+
+    private fun loadBouncerNetworks(networkId: Long) = viewModelScope.launch {
+        val client = connectionManager.clientFor(networkId) ?: return@launch
+        val rows = runCatching { client.bouncerListNetworks() }.getOrDefault(emptyList())
+            .map { bn ->
+                BouncerNetworkRow(
+                    netId = bn.netId,
+                    name = bn.attrs["name"] ?: bn.attrs["host"] ?: bn.netId,
+                    selected = false,
+                )
+            }
+        dispatch(OnboardingAction.BouncerListed(rows))
+    }
+
+    /** Add a bouncer network via `bouncerAddNetwork`, then append it to the import list. */
+    fun addBouncerNetwork(name: String, host: String) = viewModelScope.launch {
+        val networkId = _state.value.networkId ?: return@launch
+        val client = connectionManager.clientFor(networkId) ?: return@launch
+        val attrs = mapOf("name" to name, "host" to host)
+        val netId = runCatching { client.bouncerAddNetwork(attrs) }.getOrNull() ?: return@launch
+        dispatch(OnboardingAction.BouncerAdded(BouncerNetworkRow(netId, name, selected = true)))
+    }
+
+    /**
+     * Persist selected bouncer child networks as BOUNCER_CHILD rows, then finish.
+     * For direct networks this is a no-op beyond finishing.
+     */
+    fun finish(onDone: () -> Unit) = viewModelScope.launch {
+        val s = _state.value
+        val rootId = s.networkId
+        if (s.isSoju && rootId != null) {
+            // Import selected bouncer networks as children of the root row.
+            s.bouncerNetworks.filter { it.selected }.forEach { row ->
+                networkRepository.addNetwork(
+                    childEntity(rootParentId = rootId, row = row, seed = s),
+                )
+            }
+        }
+        onDone()
+    }
+
+    private fun childEntity(rootParentId: Long, row: BouncerNetworkRow, seed: OnboardingState) =
+        NetworkEntity(
+            name = row.name,
+            role = io.github.trevarj.motd.data.db.NetworkRole.BOUNCER_CHILD,
+            parentId = rootParentId,
+            bouncerNetId = row.netId,
+            // Children share the root's transport identity; host/port carried for display.
+            host = seed.server.host,
+            port = seed.server.port.toIntOrNull() ?: 6697,
+            tls = seed.server.tls,
+            nick = seed.server.nick,
+            username = seed.server.effectiveUsername,
+            realname = seed.server.realname.ifBlank { seed.server.nick },
+            saslMechanism = seed.auth.mode.toSasl().name,
+        )
+
+    private fun AuthMode.toSasl(): SaslMechanism = when (this) {
+        AuthMode.NONE -> SaslMechanism.NONE
+        AuthMode.PLAIN -> SaslMechanism.PLAIN
+        AuthMode.EXTERNAL -> SaslMechanism.EXTERNAL
+    }
+}
