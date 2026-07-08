@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -72,6 +73,7 @@ fun MessageBubble(
     showSender: Boolean,
     modifier: Modifier = Modifier,
     failed: Boolean = false,
+    pending: Boolean = false,
     reply: ReplyPreviewData? = null,
     imageUrl: String? = null,
     linkPreview: LinkPreview? = null,
@@ -111,6 +113,7 @@ fun MessageBubble(
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (failed) FailedIcon()
+                if (pending && !failed) PendingIcon()
                 Text(
                     text = formatTime(timeMs),
                     fontSize = 10.sp,
@@ -225,6 +228,7 @@ fun MessageBubble(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (failed) FailedIcon()
+                if (pending && !failed) PendingIcon()
                 Text(
                     text = formatTime(timeMs),
                     fontSize = 10.sp,
@@ -237,6 +241,20 @@ fun MessageBubble(
             ReactionRow(reactions = reactions, onReact = onReact)
         }
     }
+}
+
+/** Small clock glyph shown next to the timestamp while a message is still sending (plans/15 #21). */
+@Composable
+private fun PendingIcon() {
+    Icon(
+        Icons.Filled.Schedule,
+        contentDescription = stringResource(R.string.chat_sending),
+        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        modifier = Modifier
+            .padding(end = 4.dp)
+            .heightIn(max = 12.dp)
+            .width(12.dp),
+    )
 }
 
 /** Small error glyph shown next to the timestamp of a failed message. */

@@ -154,6 +154,22 @@
     <string name="chat_action_quote">Quote</string>
     <string name="chat_action_more_reactions">More reactions</string>
     <string name="chat_bubble_actions">Message actions</string>
+    <!-- Chat screen / message list (plans/15 #25) -->
+    <string name="chat_back">Back</string>
+    <string name="chat_search">Search</string>
+    <string name="chat_scroll_to_bottom">Scroll to bottom</string>
+    <string name="chat_new_messages">— New messages —</string>
+    <string name="chat_retry">Retry</string>
+    <string name="chat_delete_failed">Delete</string>
+    <string name="chat_sending">Sending…</string>
+    <string name="chat_empty_title">No messages yet</string>
+    <string name="chat_empty_message">Say hello to start the conversation.</string>
+    <string name="chat_history_error">Couldn\'t load older messages</string>
+    <string name="chat_history_start">Beginning of history</string>
+    <plurals name="chat_member_count">
+        <item quantity="one">%1$d member</item>
+        <item quantity="other">%1$d members</item>
+    </plurals>
     <!-- Image viewer (WP7) -->
     <string name="image_viewer_content_description">Full-screen image</string>
     <string name="image_viewer_back">Back</string>

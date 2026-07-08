@@ -32,8 +32,13 @@ interface MessageRepository {
     /** Paging 3 stream wired to ChatHistoryRemoteMediator (WP5 supplies mediator via factory). */
     fun messages(bufferId: Long): Flow<PagingData<MessageEntity>>
     fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>>
+    /** Buffer-scoped reactions (no per-msgid IN list); callers filter to the visible window
+     *  in memory to avoid SQLite's bind-variable overflow on large windows (plans/15 #5, #18). */
+    fun reactionsForBuffer(bufferId: Long): Flow<List<ReactionEntity>>
     suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
     suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int
+    /** Delete a locally-stored row by id (failed-echo cleanup on retry/delete, plans/15 #10). */
+    suspend fun deleteMessage(id: Long)
 }
 
 /** WP4 injects this to build its Pager; WP1 stub-binds a no-op (immediate endOfPagination),

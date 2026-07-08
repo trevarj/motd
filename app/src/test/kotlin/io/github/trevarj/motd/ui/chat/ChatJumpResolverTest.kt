@@ -19,6 +19,11 @@ private class FakeMessageRepository(rows: List<MessageEntity> = emptyList()) : M
     override fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>> =
         flowOf(emptyList())
 
+    override fun reactionsForBuffer(bufferId: Long): Flow<List<ReactionEntity>> =
+        flowOf(emptyList())
+
+    override suspend fun deleteMessage(id: Long) { store.removeAll { it.id == id } }
+
     override suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity? =
         store.firstOrNull { it.bufferId == bufferId && it.msgid == msgid }
 

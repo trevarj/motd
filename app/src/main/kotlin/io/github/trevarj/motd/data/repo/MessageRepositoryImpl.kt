@@ -31,12 +31,21 @@ class MessageRepositoryImpl @Inject constructor(
             pagingSourceFactory = { messageDao.pagingSource(bufferId) },
         ).flow
 
+    // Kept for the frozen contract; scopes to a small, fixed msgid set (safe under 999 vars).
     override fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>> =
         reactionDao.observeFor(bufferId, msgids)
+
+    // Buffer-scoped observe: one stable query regardless of how far the user scrolls back, so the
+    // per-msgid IN(...) list can never exceed SQLite's ~999 bind-variable cap (plans/15 #5). The
+    // screen aggregates only the visible msgids from this stream.
+    override fun reactionsForBuffer(bufferId: Long): Flow<List<ReactionEntity>> =
+        reactionDao.observeForBuffer(bufferId)
 
     override suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity? =
         messageDao.byMsgid(bufferId, msgid)
 
     override suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int =
         messageDao.countNewerThan(bufferId, serverTime, id)
+
+    override suspend fun deleteMessage(id: Long) = messageDao.deleteById(id)
 }

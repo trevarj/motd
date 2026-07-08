@@ -9,7 +9,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
-import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
@@ -25,17 +24,15 @@ import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import androidx.navigation.toRoute
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import io.github.trevarj.motd.ui.components.ReactionChip
 import java.time.Instant
 import javax.inject.Inject
 
@@ -50,6 +47,14 @@ data class ChatState(
     val replyTo: MessageEntity? = null,
     val connState: IrcClientState = IrcClientState.Disconnected,
 )
+
+/**
+ * Wire text for resending a failed row. An ACTION is stored with its `/me ` prefix stripped, so
+ * re-prefix it; the manager rewrites `/me ` back into a CTCP ACTION. Non-ACTION kinds resend
+ * verbatim (plans/15 #10).
+ */
+fun resendText(kind: io.github.trevarj.motd.data.db.MessageKind, text: String): String =
+    if (kind == io.github.trevarj.motd.data.db.MessageKind.ACTION) "/me $text" else text
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
@@ -95,9 +100,38 @@ class ChatViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatState())
 
-    /** Reactions for the currently visible msgids; the screen supplies the id set. */
-    fun reactions(msgids: List<String>): Flow<List<ReactionEntity>> =
-        messageRepository.reactions(bufferId, msgids)
+    // --- reactions aggregation (plans/15 #5, #18) ---
+
+    /** Msgids currently visible in the paging window; the screen keeps this current. */
+    private val visibleMsgids = MutableStateFlow<List<String>>(emptyList())
+
+    fun setVisibleMsgids(ids: List<String>) {
+        if (visibleMsgids.value != ids) visibleMsgids.value = ids
+    }
+
+    /**
+     * Reaction chips keyed by msgid, aggregated in the VM so the value survives across message
+     * arrivals (no blank frame from an emptyList re-seed) and picks up echo-confirm msgid swaps as
+     * soon as [visibleMsgids] changes. Buffer-scoped reactions avoid the SQLite IN(...) overflow
+     * (plans/15 #5); we filter to the visible window here.
+     */
+    val reactionChips: StateFlow<Map<String, List<ReactionChip>>> = combine(
+        messageRepository.reactionsForBuffer(bufferId),
+        visibleMsgids,
+        connState,
+    ) { all, visible, conn ->
+        val visibleSet = visible.toHashSet()
+        val relevant = all.filter { it.targetMsgid in visibleSet }
+        val myNick = (conn as? IrcClientState.Ready)?.nick
+        aggregateReactions(relevant, myNick, nickNormalizer())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    // --- read marker snapshot (plans/15 #2) ---
+
+    // Frozen on buffer entry so the "— New messages —" divider and the FAB unread badge keep a
+    // stable boundary instead of flashing/vanishing as markRead advances the live marker.
+    private val _readMarkerSnapshot = MutableStateFlow<Long?>(null)
+    val readMarkerSnapshot: StateFlow<Long?> = _readMarkerSnapshot.asStateFlow()
 
     // --- lifecycle: foreground tracker + mark-read (plans/07) ---
 
@@ -133,8 +167,19 @@ class ChatViewModel @Inject constructor(
         connectionManager.sendReact(bufferId, msgid, emoji)
     }
 
+    /**
+     * Retry a failed message: drop the old failed row first (no permanent duplicate), then resend.
+     * An ACTION is stored with its display text stripped of the `/me ` prefix, so re-prefix it to
+     * resend as an ACTION rather than a plain PRIVMSG (plans/15 #10).
+     */
     fun retry(message: MessageEntity) = viewModelScope.launch {
-        connectionManager.sendMessage(bufferId, message.text, message.replyToMsgid)
+        messageRepository.deleteMessage(message.id)
+        connectionManager.sendMessage(bufferId, resendText(message.kind, message.text), message.replyToMsgid)
+    }
+
+    /** Delete a failed local row without resending (action-sheet delete affordance, plans/15 #10). */
+    fun deleteFailed(message: MessageEntity) = viewModelScope.launch {
+        messageRepository.deleteMessage(message.id)
     }
 
     suspend fun linkPreview(url: String): LinkPreview? = linkPreviewRepository.preview(url)
@@ -214,14 +259,25 @@ class ChatViewModel @Inject constructor(
     /** Resolved jump target (index + optional highlight msgid); null when nothing to jump to. */
     val jumpTarget: StateFlow<ChatJumpResolver.Result.Target?> = _jumpTarget.asStateFlow()
 
-    private val _jumpFailed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    /** Emits when a jump could not be resolved (cap miss / not loaded) → snackbar. */
-    val jumpFailed: SharedFlow<Unit> = _jumpFailed.asSharedFlow()
+    // Nullable-event StateFlow instead of a replay-less SharedFlow so a NotFound resolved in init
+    // (before the screen subscribes) is not dropped; the UI clears it via [onJumpFailedShown]
+    // (plans/15 #13).
+    private val _jumpFailed = MutableStateFlow(false)
+    val jumpFailed: StateFlow<Boolean> = _jumpFailed.asStateFlow()
+
+    // Re-resolve is allowed exactly once per navigation; a second index shift falls through to the
+    // not-loaded snackbar rather than looping (plans/15 #12).
+    private var reresolveUsed = false
 
     init {
         if (jumpTime > 0 && savedStateHandle.get<Boolean>(JUMP_CONSUMED_KEY) != true) {
             savedStateHandle[JUMP_CONSUMED_KEY] = true
             resolveJump()
+        }
+        // Freeze the read-marker once, on the first buffer emission, so the unread divider/badge
+        // stay put instead of collapsing as markRead advances the live marker (plans/15 #2).
+        viewModelScope.launch {
+            _readMarkerSnapshot.value = bufferRepository.observeBuffer(bufferId).firstOrNull()?.readMarkerTime
         }
     }
 
@@ -229,9 +285,21 @@ class ChatViewModel @Inject constructor(
         // The buffer name (chathistory target) may not be in `state` yet on first composition;
         // read it directly from the repo so the AROUND fallback has a target.
         val name = bufferRepository.observeBuffer(bufferId).firstOrNull()?.name
+        publishResolve(name)
+    }
+
+    private suspend fun publishResolve(name: String?) {
         when (val r = resolver.resolve(bufferId, jumpMsgid, jumpTime, name)) {
-            is ChatJumpResolver.Result.Target -> _jumpTarget.value = r
-            ChatJumpResolver.Result.NotFound -> _jumpFailed.tryEmit(Unit)
+            is ChatJumpResolver.Result.Target -> {
+                // Force a distinct emission so the screen's LaunchedEffect(jumpTarget) always
+                // re-runs, even when the re-resolved index equals the previous one (plans/15 #12).
+                _jumpTarget.value = null
+                _jumpTarget.value = r
+            }
+            ChatJumpResolver.Result.NotFound -> {
+                _jumpTarget.value = null
+                _jumpFailed.value = true
+            }
         }
     }
 
@@ -240,16 +308,24 @@ class ChatViewModel @Inject constructor(
         _jumpTarget.value = null
     }
 
-    /** Re-resolve the same target once when a live message shifted indices mid-jump. */
+    /** Screen calls this after showing the not-loaded snackbar so it does not re-fire. */
+    fun onJumpFailedShown() {
+        _jumpFailed.value = false
+    }
+
+    /**
+     * Re-resolve the same target once when a live message shifted indices mid-jump. The single-shot
+     * guard means the screen can always call [onJumpHandled] after it; a repeat request just clears
+     * the target so the not-loaded path takes over (plans/15 #12).
+     */
     fun reresolveJumpOnce() = viewModelScope.launch {
-        val name = state.value.buffer?.name
-        when (val r = resolver.resolve(bufferId, jumpMsgid, jumpTime, name)) {
-            is ChatJumpResolver.Result.Target -> _jumpTarget.value = r
-            ChatJumpResolver.Result.NotFound -> {
-                _jumpTarget.value = null
-                _jumpFailed.tryEmit(Unit)
-            }
+        if (reresolveUsed) {
+            _jumpTarget.value = null
+            _jumpFailed.value = true
+            return@launch
         }
+        reresolveUsed = true
+        publishResolve(state.value.buffer?.name)
     }
 
     /**

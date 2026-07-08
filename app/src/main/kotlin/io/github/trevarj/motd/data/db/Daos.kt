@@ -135,6 +135,11 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND msgid = :msgid LIMIT 1")
     suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
 
+    // Delete a single row by primary key. Used to drop a failed local-echo row on retry/delete so
+    // the resend does not leave a permanent duplicate "failed" bubble (plans/15 #10).
+    @Query("DELETE FROM messages WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
     /** 0-based reverse-list index: strict complement of pagingSource ORDER BY serverTime DESC, id DESC. */
     @Query(
         """SELECT COUNT(*) FROM messages WHERE bufferId = :bufferId
@@ -191,6 +196,13 @@ interface MemberDao {
 interface ReactionDao {
     @Query("SELECT * FROM reactions WHERE bufferId = :bufferId AND targetMsgid IN (:msgids)")
     fun observeFor(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>>
+
+    // Buffer-scoped observe with no per-msgid IN(...) list. Scrolling back accumulates >999 loaded
+    // msgids, which would overflow SQLite's bind-variable limit in observeFor and crash; scoping by
+    // bufferId keeps one stable query and the repository filters to the visible window in memory
+    // (plans/15 #5). A buffer's reaction table is small relative to its message history.
+    @Query("SELECT * FROM reactions WHERE bufferId = :bufferId")
+    fun observeForBuffer(bufferId: Long): Flow<List<ReactionEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(r: ReactionEntity)
