@@ -19,9 +19,11 @@ import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.transport.TransportFactory
+import io.github.trevarj.motd.push.WebPushRegistrar
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -44,6 +46,8 @@ class ConnectionManagerImpl @Inject constructor(
     private val settings: DataStoreSettingsRepository,
     private val pushPrefs: PushPrefs,
     private val baseTransportFactory: TransportFactory,
+    // Lazy to break the WebPushRegistrar <-> ConnectionManager ctor cycle.
+    private val webPushRegistrar: dagger.Lazy<WebPushRegistrar>,
 ) : ConnectionManager {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -89,16 +93,22 @@ class ConnectionManagerImpl @Inject constructor(
         }
     }
 
-    /** Under UNIFIED_PUSH: once an endpoint is registered on a webpush-capable client, stop sockets. */
+    /**
+     * Under UNIFIED_PUSH: tear the sockets down only once EVERY live webpush-capable client
+     * holds a persisted endpoint (and at least one such client exists). This gates teardown on
+     * push actually being armed on all push-eligible networks, so a network still awaiting its
+     * endpoint keeps its socket. Non-webpush DIRECT networks are ignored here (documented
+     * limitation — plans/11 risk 6).
+     */
     private suspend fun maybeStopForPush() {
-        val endpoint = pushPrefs.endpoint() ?: return
-        val registered = actors.keys.any { id -> clientFor(id)?.hasCap(WEBPUSH_CAP) == true }
-        if (endpoint.isNotEmpty() && registered) {
-            for (actor in actors.values) actor.stop()
-            actors.clear(); fingerprints.clear()
-            _states.value = emptyMap()
-            appContext.stopService(android.content.Intent(appContext, IrcForegroundService::class.java))
-        }
+        val webpushClients = actors.keys.filter { id -> clientFor(id)?.hasCap(WEBPUSH_CAP) == true }
+        if (webpushClients.isEmpty()) return
+        val allArmed = webpushClients.all { id -> pushPrefs.endpointFor(id) != null }
+        if (!allArmed) return
+        for (actor in actors.values) actor.stop()
+        actors.clear(); fingerprints.clear()
+        _states.value = emptyMap()
+        appContext.stopService(android.content.Intent(appContext, IrcForegroundService::class.java))
     }
 
     override suspend fun stopAll() {
@@ -185,6 +195,11 @@ class ConnectionManagerImpl @Inject constructor(
         // Persist STS policy if the server advertised one.
         val stsValue = client.caps.firstOrNull { it == "sts" || it.startsWith("sts=") }?.substringAfter('=', "")
         stsStore.parse(row.host, stsValue?.ifEmpty { null }, row.tls, row.port)?.let { stsStore.upsert(it) }
+        // In push mode, re-arm webpush on this network if we already hold its endpoint (the
+        // socket just reached Ready after a reconnect / quick foreground connect).
+        if (settings.settings.first().deliveryMode == DeliveryMode.UNIFIED_PUSH) {
+            webPushRegistrar.get().reRegisterIfNeeded(row.id)
+        }
         catchUp(row.id, client)
     }
 
@@ -310,7 +325,9 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     override suspend fun evaluatePushMode() {
-        // R2: real impl (re-run maybeStopForPush() iff deliveryMode == UNIFIED_PUSH).
+        // Re-run the push teardown check after per-network endpoint changes; no-op off push mode.
+        // Fixes v1: the settings-collect fired before any endpoint existed and never re-ran.
+        if (settings.settings.first().deliveryMode == DeliveryMode.UNIFIED_PUSH) maybeStopForPush()
     }
 
     // -- connectivity callback ----------------------------------------------

@@ -22,6 +22,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -33,18 +35,25 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
+import io.github.trevarj.motd.R
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.first
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -92,6 +101,8 @@ fun ChatScreen(
     val myNick = (state.connState as? IrcClientState.Ready)?.nick
     val chipsByMsgid = remember(reactions, myNick) { aggregateReactions(reactions, myNick) }
 
+    val jumpTarget by viewModel.jumpTarget.collectAsStateWithLifecycle()
+
     ChatContent(
         state = state,
         items = items,
@@ -108,6 +119,11 @@ fun ChatScreen(
         onReact = viewModel::react,
         onRetry = viewModel::retry,
         loadPreview = viewModel::linkPreview,
+        consumePrefill = viewModel::consumePrefill,
+        jumpTarget = jumpTarget,
+        jumpFailed = viewModel.jumpFailed,
+        onJumpHandled = viewModel::onJumpHandled,
+        onReresolveJump = viewModel::reresolveJumpOnce,
     )
 }
 
@@ -129,11 +145,69 @@ fun ChatContent(
     onRetry: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> io.github.trevarj.motd.data.repo.LinkPreview?,
     reactionChips: (String) -> List<io.github.trevarj.motd.ui.components.ReactionChip> = { emptyList() },
+    consumePrefill: () -> String? = { null },
+    jumpTarget: ChatJumpResolver.Result.Target? = null,
+    jumpFailed: SharedFlow<Unit>? = null,
+    onJumpHandled: () -> Unit = {},
+    onReresolveJump: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
-    var composerText by remember { mutableStateOf(TextFieldValue("")) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    // rememberSaveable survives ChannelInfo round-trips + config changes (fixes v1 draft loss).
+    var composerText by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
+    var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Consume any mention prefill queued by ChannelInfo. Runs once per composition entry; the
+    // store is already emptied by consume() and the text survives via rememberSaveable, so a
+    // config change cannot double-prefill.
+    LaunchedEffect(Unit) {
+        consumePrefill()?.let { composerText = appendPrefill(composerText, it) }
+    }
+
+    // Cap-miss / not-loaded → transient snackbar.
+    val jumpNotLoaded = stringResource(R.string.chat_jump_not_loaded)
+    LaunchedEffect(jumpFailed) {
+        jumpFailed?.collect { snackbarHostState.showSnackbar(jumpNotLoaded) }
+    }
+
+    // Deep-jump scroll: bounded APPEND loop (placeholders OFF, so tail loads never shift indices).
+    LaunchedEffect(jumpTarget) {
+        val j = jumpTarget ?: return@LaunchedEffect
+        var rounds = 0
+        while (items.itemCount <= j.index &&
+            rounds++ < 64 &&
+            !items.loadState.append.endOfPaginationReached
+        ) {
+            items[items.itemCount - 1] // touch tail → triggers APPEND
+            snapshotFlow { items.loadState.append }.first { it is LoadState.NotLoading }
+        }
+        if (items.itemCount > j.index) {
+            listState.scrollToItem(j.index)
+            highlightMsgid = j.highlightMsgid
+            // A live message may have shifted indices between resolve and scroll; re-resolve once.
+            if (j.highlightMsgid != null && items.peek(j.index)?.msgid != j.highlightMsgid) {
+                onReresolveJump()
+            } else {
+                onJumpHandled()
+            }
+        } else {
+            // Ran past the cap / end of pagination without reaching the target.
+            snackbarHostState.showSnackbar(jumpNotLoaded)
+            onJumpHandled()
+        }
+    }
+
+    // Clear the highlight after the pulse settles (~1.6s).
+    LaunchedEffect(highlightMsgid) {
+        if (highlightMsgid != null) {
+            kotlinx.coroutines.delay(1_600)
+            highlightMsgid = null
+        }
+    }
 
     // Long-press action sheet target.
     var sheetTarget by remember { mutableStateOf<MessageEntity?>(null) }
@@ -149,6 +223,7 @@ fun ChatContent(
     val memberNicks = state.members.map { it.nick }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -206,6 +281,7 @@ fun ChatContent(
                         onRetry = onRetry,
                         loadPreview = loadPreview,
                         onOpenLink = onOpenImage, // link preview tap opens the URL viewer as a fallback
+                        highlightMsgid = highlightMsgid,
                     )
 
                     // Scroll-to-bottom FAB with unread count.
@@ -275,6 +351,17 @@ fun ChatContent(
             },
         )
     }
+}
+
+/**
+ * Append [prefill] to [value], inserting a single space when the current text is non-empty and
+ * doesn't already end in whitespace. Places the cursor at the end (plans/11 §A).
+ */
+fun appendPrefill(value: TextFieldValue, prefill: String): TextFieldValue {
+    val current = value.text
+    val sep = if (current.isNotEmpty() && !current.last().isWhitespace()) " " else ""
+    val text = current + sep + prefill
+    return TextFieldValue(text = text, selection = androidx.compose.ui.text.TextRange(text.length))
 }
 
 /** Header subtitle: typing summary if anyone is typing, else member count for channels. */

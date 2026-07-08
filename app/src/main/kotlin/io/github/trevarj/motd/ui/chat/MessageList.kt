@@ -1,8 +1,12 @@
 package io.github.trevarj.motd.ui.chat
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.paging.compose.LazyPagingItems
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -65,6 +70,7 @@ fun MessageList(
     onOpenLink: (String) -> Unit,
     modifier: Modifier = Modifier,
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
+    highlightMsgid: String? = null,
 ) {
     LazyColumn(
         state = listState,
@@ -76,6 +82,19 @@ fun MessageList(
             val msg = items[index] ?: return@items
             val older = if (index + 1 < items.itemCount) items.peek(index + 1) else null
 
+            // Deep-jump pulse: fade a highlight tint in then back out on the target row (~1.6s).
+            val highlighted = highlightMsgid != null && msg.msgid == highlightMsgid
+            val highlightColor by animateColorAsState(
+                targetValue = if (highlighted) {
+                    androidx.compose.material3.MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                } else {
+                    Color.Transparent
+                },
+                animationSpec = tween(durationMillis = 800),
+                label = "jumpHighlight",
+            )
+
+            Box(modifier = Modifier.background(highlightColor)) {
             MessageRow(
                 msg = msg,
                 older = older,
@@ -96,6 +115,7 @@ fun MessageList(
                         ?.let { ReplyPreviewData(it.sender, it.text) }
                 },
             )
+            }
         }
     }
 }

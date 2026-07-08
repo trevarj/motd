@@ -53,7 +53,12 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 fun SearchScreen(
     bufferId: Long? = null,
     onBack: () -> Unit = {},
+    // Legacy plain-open (bufferId only). Kept until R3 rewires NavGraph to onOpenHit; onOpenHit
+    // defaults to delegating here so the current NavGraph call site stays source-compatible.
     onOpenBuffer: (Long) -> Unit = {},
+    // Deep-jump: NavGraph (R3) routes to ChatRoute(bufferId, msgid, serverTime).
+    onOpenHit: (bufferId: Long, msgid: String?, serverTime: Long) -> Unit =
+        { b, _, _ -> onOpenBuffer(b) },
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(bufferId) { viewModel.init(bufferId) }
@@ -64,8 +69,7 @@ fun SearchScreen(
         onQueryChange = viewModel::onQueryChange,
         onScopeChange = viewModel::onScopeChange,
         onBack = onBack,
-        // TODO(post-v1): deep-jump via CHATHISTORY AROUND to scroll to the hit; for now just open.
-        onOpenHit = { hit -> onOpenBuffer(hit.message.bufferId) },
+        onOpenHit = { hit -> onOpenHit(hit.message.bufferId, hit.message.msgid, hit.message.serverTime) },
     )
 }
 

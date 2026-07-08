@@ -16,18 +16,27 @@ import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.irc.client.ChatHistoryRequest
+import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
+import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import androidx.navigation.toRoute
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
 import javax.inject.Inject
 
 /**
@@ -44,16 +53,19 @@ data class ChatState(
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     private val messageRepository: MessageRepository,
     private val bufferRepository: BufferRepository,
     private val connectionManager: ConnectionManager,
     private val typingTracker: TypingTracker,
     private val foregroundBufferTracker: ForegroundBufferTracker,
     private val linkPreviewRepository: LinkPreviewRepository,
+    private val draftStore: ComposerDraftStore,
+    private val eventSink: IrcEventSink,
 ) : ViewModel() {
 
-    val bufferId: Long = savedStateHandle.toRoute<ChatRoute>().bufferId
+    private val route: ChatRoute = savedStateHandle.toRoute<ChatRoute>()
+    val bufferId: Long = route.bufferId
 
     /** Cached Paging stream; collected once in the screen. */
     val messages: Flow<PagingData<MessageEntity>> =
@@ -164,6 +176,82 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    // --- composer prefill (mention → draft, plans/11 §A) ---
+
+    /** Consume-once composer prefill queued by ChannelInfo before popping back; null when none. */
+    fun consumePrefill(): String? = draftStore.consume(bufferId)
+
+    // --- search deep-jump (plans/11 §C) ---
+
+    private val jumpMsgid: String? = route.jumpToMsgid
+    private val jumpTime: Long = route.jumpToTime
+
+    /**
+     * CHATHISTORY AROUND fetch used by [ChatJumpResolver] when a msgid target is not yet local:
+     * requires a live client with `draft/chathistory`, fetches ~100 messages around [timeMs], and
+     * feeds them through the sole IRC→Room writer. Returns true when events were persisted.
+     */
+    private val resolver = ChatJumpResolver(messageRepository) { name, timeMs, limit ->
+        val networkId = state.value.buffer?.networkId ?: return@ChatJumpResolver false
+        val client = connectionManager.clientFor(networkId) ?: return@ChatJumpResolver false
+        if (!client.hasCap("draft/chathistory")) return@ChatJumpResolver false
+        val result = runCatching {
+            client.chathistory(
+                ChatHistoryRequest(
+                    subcommand = ChatHistoryRequest.Subcommand.AROUND,
+                    target = name,
+                    bound1 = "timestamp=${Instant.ofEpochMilli(timeMs)}",
+                    limit = limit,
+                ),
+            )
+        }.getOrNull() ?: return@ChatJumpResolver false
+        if (result.events.isEmpty()) return@ChatJumpResolver false
+        eventSink.process(networkId, IrcEvent.HistoryBatch(name, result.events))
+        true
+    }
+
+    private val _jumpTarget = MutableStateFlow<ChatJumpResolver.Result.Target?>(null)
+    /** Resolved jump target (index + optional highlight msgid); null when nothing to jump to. */
+    val jumpTarget: StateFlow<ChatJumpResolver.Result.Target?> = _jumpTarget.asStateFlow()
+
+    private val _jumpFailed = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /** Emits when a jump could not be resolved (cap miss / not loaded) → snackbar. */
+    val jumpFailed: SharedFlow<Unit> = _jumpFailed.asSharedFlow()
+
+    init {
+        if (jumpTime > 0 && savedStateHandle.get<Boolean>(JUMP_CONSUMED_KEY) != true) {
+            savedStateHandle[JUMP_CONSUMED_KEY] = true
+            resolveJump()
+        }
+    }
+
+    private fun resolveJump() = viewModelScope.launch {
+        // The buffer name (chathistory target) may not be in `state` yet on first composition;
+        // read it directly from the repo so the AROUND fallback has a target.
+        val name = bufferRepository.observeBuffer(bufferId).firstOrNull()?.name
+        when (val r = resolver.resolve(bufferId, jumpMsgid, jumpTime, name)) {
+            is ChatJumpResolver.Result.Target -> _jumpTarget.value = r
+            ChatJumpResolver.Result.NotFound -> _jumpFailed.tryEmit(Unit)
+        }
+    }
+
+    /** Screen calls this after it has scrolled to (or given up on) the current target. */
+    fun onJumpHandled() {
+        _jumpTarget.value = null
+    }
+
+    /** Re-resolve the same target once when a live message shifted indices mid-jump. */
+    fun reresolveJumpOnce() = viewModelScope.launch {
+        val name = state.value.buffer?.name
+        when (val r = resolver.resolve(bufferId, jumpMsgid, jumpTime, name)) {
+            is ChatJumpResolver.Result.Target -> _jumpTarget.value = r
+            ChatJumpResolver.Result.NotFound -> {
+                _jumpTarget.value = null
+                _jumpFailed.tryEmit(Unit)
+            }
+        }
+    }
+
     /**
      * Isupport-normalized nick folding for autocomplete; lowercase fallback when no live client.
      */
@@ -171,5 +259,10 @@ class ChatViewModel @Inject constructor(
         val nid = state.value.buffer?.networkId
         val isupport = nid?.let { connectionManager.clientFor(it)?.isupport }
         return isupport?.let { { name: String -> it.normalize(name) } } ?: { it.lowercase() }
+    }
+
+    private companion object {
+        // Survives config changes so a jump resolves exactly once per navigation.
+        const val JUMP_CONSUMED_KEY = "jump_consumed"
     }
 }

@@ -114,4 +114,5 @@
     <string name="channelinfo_member_message">Message</string>
     <string name="channelinfo_member_mention">Mention</string>
     <string name="channelinfo_section_regular">Members</string>
+    <string name="chat_jump_not_loaded">Message not loaded</string>
 </resources>

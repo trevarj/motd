@@ -55,8 +55,6 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 fun ChannelInfoScreen(
     bufferId: Long,
     onBack: () -> Unit = {},
-    // TODO(WP10): NavGraph currently passes only bufferId + onBack; wire onOpenBuffer for the
-    // member "Message" action and onMention for composer prefill.
     onOpenBuffer: (Long) -> Unit = {},
     viewModel: ChannelInfoViewModel = hiltViewModel(),
 ) {
@@ -70,8 +68,8 @@ fun ChannelInfoScreen(
         onSetMuted = viewModel::setMuted,
         onLeave = { viewModel.part(onBack) },
         onMessageMember = { nick -> viewModel.messageMember(nick, onOpenBuffer) },
-        // TODO(WP10): wire mention to composer prefill in the target chat.
-        onMentionMember = {},
+        // Queue "$nick: " on the chat's composer draft, then pop back to the chat.
+        onMentionMember = { nick -> viewModel.mentionMember(nick, onDone = onBack) },
     )
 }
 

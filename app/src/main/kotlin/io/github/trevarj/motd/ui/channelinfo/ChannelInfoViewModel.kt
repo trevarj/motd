@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -29,6 +30,7 @@ data class ChannelInfoUiState(
 class ChannelInfoViewModel @Inject constructor(
     private val bufferRepository: BufferRepository,
     private val connectionManager: ConnectionManager,
+    private val draftStore: ComposerDraftStore,
 ) : ViewModel() {
 
     private val bufferIdFlow = MutableStateFlow<Long?>(null)
@@ -82,5 +84,14 @@ class ChannelInfoViewModel @Inject constructor(
         val networkId = state.value.buffer?.networkId ?: return@launch
         val bufferId = connectionManager.ensureQueryBuffer(networkId, nick)
         onOpen(bufferId)
+    }
+
+    /**
+     * Queue a "$nick: " prefill on the current buffer's composer draft, then [onDone] (pops back
+     * to the chat). ChatScreen reads it via [ComposerDraftStore.consume] on re-entry (plans/11 §A).
+     */
+    fun mentionMember(nick: String, onDone: () -> Unit) {
+        state.value.buffer?.let { draftStore.push(it.id, "$nick: ") }
+        onDone()
     }
 }

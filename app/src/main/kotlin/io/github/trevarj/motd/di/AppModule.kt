@@ -27,6 +27,8 @@ import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.push.PushEventHandler
 import io.github.trevarj.motd.push.PushNotifier
+import io.github.trevarj.motd.push.UnifiedPushApi
+import io.github.trevarj.motd.push.UnifiedPushApiImpl
 import io.github.trevarj.motd.push.WebPushCryptoFacade
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
@@ -87,9 +89,13 @@ internal abstract class AppModule {
     @Binds @Singleton
     abstract fun foregroundBufferTracker(impl: ForegroundBufferTrackerImpl): ForegroundBufferTracker
 
-    // -- push (WP9) --
+    // -- push (WP9 / WP-R2) --
     @Binds @Singleton
     abstract fun pushNotifier(impl: PushNotifierImpl): PushNotifier
+
+    /** UnifiedPush static-connector seam → real impl (WP-R2). */
+    @Binds @Singleton
+    abstract fun unifiedPushApi(impl: UnifiedPushApiImpl): UnifiedPushApi
 
     companion object {
         /**

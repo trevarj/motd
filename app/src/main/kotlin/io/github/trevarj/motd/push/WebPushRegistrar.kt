@@ -6,12 +6,12 @@ import io.github.trevarj.motd.service.ConnectionManager
 import javax.inject.Inject
 
 /**
- * Web Push endpoint + client keypair persistence and per-network REGISTER/UNREGISTER
- * orchestration against every connected network advertising `soju.im/webpush`.
+ * Per-network Web Push endpoint persistence and REGISTER/UNREGISTER orchestration against the
+ * live client of a single network advertising `soju.im/webpush`.
  *
- * Consumes only WP1 contracts ([PushPrefs], [ConnectionManager]). The full connection wiring
- * (which network ids are the soju root connections) is provided by WP5/WP10; here we iterate
- * the manager's current connection states and register on any client that has the cap.
+ * The UnifiedPush instance scheme is `instance = networkId.toString()`, so each network owns its
+ * own endpoint. The client keypair is shared across networks — the server encrypts to our public
+ * key regardless of endpoint, so one keypair covers all subscriptions.
  */
 class WebPushRegistrar @Inject constructor(
     private val pushPrefs: PushPrefs,
@@ -29,45 +29,48 @@ class WebPushRegistrar @Inject constructor(
         return fresh
     }
 
-    /** The current subscription endpoint, if any (set by UnifiedPush onNewEndpoint). */
-    suspend fun currentEndpoint(): String? = pushPrefs.endpoint()
-
     /**
-     * Handle a new/updated UnifiedPush endpoint: persist it, ensure key material exists, and
-     * WEBPUSH REGISTER it on every currently connected network that supports the cap.
-     * Returns the number of networks a registration was sent to.
+     * Handle a new/updated UnifiedPush endpoint for [networkId]: persist it, ensure key material
+     * exists, and WEBPUSH REGISTER it on that network's live client if the cap is present.
+     * Returns true when a REGISTER was actually sent to the live client.
      */
-    suspend fun onNewEndpoint(endpoint: String): Int {
-        pushPrefs.setEndpoint(endpoint)
+    suspend fun onNewEndpoint(networkId: Long, endpoint: String): Boolean {
+        pushPrefs.setEndpointFor(networkId, endpoint)
         val keys = loadOrCreateKeys()
-        return registerOnAll(endpoint, keys)
-    }
-
-    private suspend fun registerOnAll(endpoint: String, keys: WebPushCrypto.KeyMaterial): Int {
-        var count = 0
-        for (networkId in connectionManager.connectionStates.value.keys) {
-            val client = connectionManager.clientFor(networkId) ?: continue
-            if (!client.hasCap(WEBPUSH_CAP)) continue
-            client.webpushRegister(endpoint, keys.publicUncompressed, keys.auth)
-            count++
-        }
-        return count
+        return registerOn(networkId, endpoint, keys)
     }
 
     /**
-     * Handle UnifiedPush unregistration: WEBPUSH UNREGISTER on every supporting network and
-     * clear the persisted endpoint. Key material is retained (re-usable for a future endpoint).
+     * Client for [networkId] reached Ready while we hold its endpoint: re-send WEBPUSH REGISTER
+     * so a reconnected socket re-arms push. Returns true when a REGISTER was sent.
      */
-    suspend fun onUnregistered() {
-        val endpoint = pushPrefs.endpoint()
+    suspend fun reRegisterIfNeeded(networkId: Long): Boolean {
+        val endpoint = pushPrefs.endpointFor(networkId) ?: return false
+        val keys = loadOrCreateKeys()
+        return registerOn(networkId, endpoint, keys)
+    }
+
+    private suspend fun registerOn(networkId: Long, endpoint: String, keys: WebPushCrypto.KeyMaterial): Boolean {
+        val client = connectionManager.clientFor(networkId) ?: return false
+        if (!client.hasCap(WEBPUSH_CAP)) return false
+        client.webpushRegister(endpoint, keys.publicUncompressed, keys.auth)
+        return true
+    }
+
+    /**
+     * Per-network unregistration: best-effort WEBPUSH UNREGISTER on the live client and drop the
+     * persisted endpoint for [networkId]. Key material is retained (re-usable for a future
+     * endpoint on any network).
+     */
+    suspend fun onUnregisteredNetwork(networkId: Long) {
+        val endpoint = pushPrefs.endpointFor(networkId)
         if (endpoint != null) {
-            for (networkId in connectionManager.connectionStates.value.keys) {
-                val client = connectionManager.clientFor(networkId) ?: continue
-                if (!client.hasCap(WEBPUSH_CAP)) continue
-                client.webpushUnregister(endpoint)
+            val client = connectionManager.clientFor(networkId)
+            if (client != null && client.hasCap(WEBPUSH_CAP)) {
+                runCatching { client.webpushUnregister(endpoint) }
             }
         }
-        pushPrefs.setEndpoint(null)
+        pushPrefs.setEndpointFor(networkId, null)
     }
 }
 

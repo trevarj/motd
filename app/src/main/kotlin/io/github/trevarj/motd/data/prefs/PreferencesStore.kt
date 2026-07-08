@@ -26,7 +26,6 @@ internal object PrefKeys {
     val THEME_MODE = stringPreferencesKey("theme_mode")
     val DYNAMIC_COLOR = stringPreferencesKey("dynamic_color")
     val DELIVERY_MODE = stringPreferencesKey("delivery_mode")
-    val PUSH_ENDPOINT = stringPreferencesKey("push_endpoint")
     val PUSH_ENDPOINTS = stringPreferencesKey("push_endpoints")
     val PUSH_KEYS = stringPreferencesKey("push_keys")
     val STS_POLICIES = stringPreferencesKey("sts_policies")
@@ -103,16 +102,6 @@ class DataStoreSettingsRepository @Inject constructor(
         buildJsonObject {
             for ((id, url) in map) put(id.toString(), url)
         }.toString()
-
-    override suspend fun endpoint(): String? =
-        store.data.first()[PrefKeys.PUSH_ENDPOINT]
-
-    override suspend fun setEndpoint(endpoint: String?) {
-        store.edit {
-            if (endpoint == null) it.remove(PrefKeys.PUSH_ENDPOINT)
-            else it[PrefKeys.PUSH_ENDPOINT] = endpoint
-        }
-    }
 
     // PushKeys is a frozen contract data class (no @Serializable), so (de)serialize it manually
     // as a plain JSON object.
