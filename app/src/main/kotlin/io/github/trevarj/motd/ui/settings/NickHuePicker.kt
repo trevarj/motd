@@ -84,7 +84,7 @@ fun NickHuePickerDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.onboarding_back))
+                Text(stringResource(R.string.dialog_cancel))
             }
         },
     )

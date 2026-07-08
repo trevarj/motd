@@ -36,8 +36,8 @@ internal fun onColorFor(bg: Color): Color =
     if (bg.luminance() < 0.5f) Color.White else Color.Black
 
 /**
- * Circular avatar: initials (first two significant chars) over a [nickColor] background derived
- * from [name]. [isChannel] uses the name as-is (channels keep the leading `#`); queries fall back
+ * Circular avatar: initials (first two significant chars) over a color background derived
+ * from [name] via the current LocalNickColors scheme. [isChannel] uses the name as-is (channels keep the leading `#`); queries fall back
  * to their nick.
  */
 @Composable
