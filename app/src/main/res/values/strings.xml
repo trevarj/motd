@@ -115,4 +115,10 @@
     <string name="channelinfo_member_mention">Mention</string>
     <string name="channelinfo_section_regular">Members</string>
     <string name="chat_jump_not_loaded">Message not loaded</string>
+
+    <!-- About (WP-R3) -->
+    <string name="about_title">About</string>
+    <string name="about_license">License</string>
+    <string name="about_license_mit">MIT</string>
+    <string name="about_blurb">An IRCv3 client for Android — see plans/ for the design docs.</string>
 </resources>

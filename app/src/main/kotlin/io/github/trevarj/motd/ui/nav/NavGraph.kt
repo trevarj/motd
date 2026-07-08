@@ -6,6 +6,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import io.github.trevarj.motd.ui.about.AboutScreen
 import io.github.trevarj.motd.ui.channelinfo.ChannelInfoScreen
 import io.github.trevarj.motd.ui.chat.ChatScreen
 import io.github.trevarj.motd.ui.chatlist.ChatListScreen
@@ -51,6 +52,7 @@ fun MotdNavGraph(
             SettingsScreen(
                 onBack = { navController.popBackStack() },
                 onOpenNetwork = { navController.navigate(NetworkSettingsRoute(it)) },
+                onOpenAbout = { navController.navigate(AboutRoute) },
             )
         }
         composable<NetworkSettingsRoute> { entry ->
@@ -62,7 +64,9 @@ fun MotdNavGraph(
             SearchScreen(
                 bufferId = route.bufferId,
                 onBack = { navController.popBackStack() },
-                onOpenBuffer = { navController.navigate(ChatRoute(it)) },
+                onOpenHit = { bufferId, msgid, time ->
+                    navController.navigate(ChatRoute(bufferId, msgid, time))
+                },
             )
         }
         composable<ChannelInfoRoute> { entry ->
@@ -77,6 +81,9 @@ fun MotdNavGraph(
         composable<ImageViewerRoute> { entry ->
             val route = entry.toRoute<ImageViewerRoute>()
             ImageViewerScreen(url = route.url, onBack = { navController.popBackStack() })
+        }
+        composable<AboutRoute> {
+            AboutScreen(onBack = { navController.popBackStack() })
         }
     }
 }

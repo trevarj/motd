@@ -1,7 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
 import android.content.Intent
-import android.net.Uri
 import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -44,6 +43,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.service.DeliveryMode
+import io.github.trevarj.motd.ui.about.appVersion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Stateful entry: wires the ViewModel and drives navigation. */
@@ -51,6 +51,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 fun SettingsScreen(
     onBack: () -> Unit = {},
     onOpenNetwork: (Long) -> Unit = {},
+    onOpenAbout: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -58,6 +59,7 @@ fun SettingsScreen(
         state = state,
         onBack = onBack,
         onOpenNetwork = onOpenNetwork,
+        onOpenAbout = onOpenAbout,
         onThemeMode = viewModel::setThemeMode,
         onDynamicColor = viewModel::setDynamicColor,
         onDeliveryMode = viewModel::setDeliveryMode,
@@ -70,6 +72,7 @@ fun SettingsContent(
     state: SettingsUiState,
     onBack: () -> Unit,
     onOpenNetwork: (Long) -> Unit,
+    onOpenAbout: () -> Unit,
     onThemeMode: (ThemeMode) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onDeliveryMode: (DeliveryMode) -> Unit,
@@ -137,16 +140,9 @@ fun SettingsContent(
             // About --------------------------------------------------------------------------
             SectionHeader(stringResource(R.string.settings_about))
             ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_version)) },
+                headlineContent = { Text(stringResource(R.string.settings_about)) },
                 supportingContent = { Text(appVersion(context)) },
-            )
-            val githubUrl = stringResource(R.string.settings_github_url)
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_github)) },
-                supportingContent = { Text(githubUrl) },
-                modifier = Modifier.clickable {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(githubUrl)))
-                },
+                modifier = Modifier.clickable { onOpenAbout() },
             )
         }
     }
@@ -251,11 +247,6 @@ private fun SectionHeader(text: String) {
     )
 }
 
-private fun appVersion(context: android.content.Context): String =
-    runCatching {
-        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?"
-    }.getOrDefault("?")
-
 @Preview
 @Composable
 private fun SettingsContentPreview() {
@@ -272,7 +263,7 @@ private fun SettingsContentPreview() {
                 ),
                 pushAvailable = false,
             ),
-            onBack = {}, onOpenNetwork = {}, onThemeMode = {}, onDynamicColor = {}, onDeliveryMode = {},
+            onBack = {}, onOpenNetwork = {}, onOpenAbout = {}, onThemeMode = {}, onDynamicColor = {}, onDeliveryMode = {},
         )
     }
 }
