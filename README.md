@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" alt="/motd" width="640">
+</p>
+
 # MOTD
 
 A modern native Android IRCv3 client. Telegram-grade UI, IRC under the hood.
