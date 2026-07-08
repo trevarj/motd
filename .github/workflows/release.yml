@@ -1,0 +1,33 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Decode keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/keystore.jks"
+      - name: Build signed release APK
+        env:
+          MOTD_KEYSTORE_PATH: ${{ runner.temp }}/keystore.jks
+          MOTD_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          MOTD_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          MOTD_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          MOTD_VERSION_NAME: ${{ github.ref_name }}
+          MOTD_VERSION_CODE: ${{ github.run_number }}
+        run: ./gradlew :app:assembleRelease --stacktrace
+      - name: Rename artifact
+        run: cp app/build/outputs/apk/release/app-release.apk motd-${{ github.ref_name }}.apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: motd-${{ github.ref_name }}.apk
+          generate_release_notes: true
