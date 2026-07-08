@@ -3,6 +3,9 @@ package io.github.trevarj.motd.push
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.PushKeys
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.Settings
@@ -53,6 +56,15 @@ class PushInstanceCoordinatorTest {
         override suspend fun setDeliveryMode(m: DeliveryMode) {
             settings.value = settings.value.copy(deliveryMode = m)
         }
+        // Round 4 members: unused by this test.
+        override suspend fun setLayoutDensity(d: LayoutDensity) = Unit
+        override suspend fun setNickColorsEnabled(enabled: Boolean) = Unit
+        override suspend fun setNickColorPalette(p: NickColorPalette) = Unit
+        override suspend fun setNickColorOverride(nick: String, hue: Int?) = Unit
+        override suspend fun setFriend(nick: String, isFriend: Boolean) = Unit
+        override suspend fun setFool(nick: String, isFool: Boolean) = Unit
+        override suspend fun setFoolsMode(m: FoolsMode) = Unit
+        override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
     }
 
     private class FakeNetworkDao(nets: List<NetworkEntity>) : NetworkDao {

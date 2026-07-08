@@ -14,7 +14,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
@@ -30,7 +35,47 @@ internal object PrefKeys {
     val PUSH_KEYS = stringPreferencesKey("push_keys")
     val STS_POLICIES = stringPreferencesKey("sts_policies")
     val CERT_PINS = stringPreferencesKey("cert_pins")
+    // Round 4 (plans/13)
+    val LAYOUT_DENSITY = stringPreferencesKey("layout_density")
+    val NICK_COLORS_ENABLED = stringPreferencesKey("nick_colors_enabled")
+    val NICK_COLOR_PALETTE = stringPreferencesKey("nick_color_palette")
+    val NICK_COLOR_OVERRIDES = stringPreferencesKey("nick_color_overrides")
+    val FRIEND_NICKS = stringPreferencesKey("friend_nicks")
+    val FOOL_NICKS = stringPreferencesKey("fool_nicks")
+    val FOOLS_MODE = stringPreferencesKey("fools_mode")
+    val SHOW_JOIN_PART_QUIT = stringPreferencesKey("show_join_part_quit")
 }
+
+// -- Round 4 nick-set / hue-override JSON codecs (top-level + internal so they are unit-testable
+// without a DataStore instance). Same manual-JSON style as the endpoint/cert-pin helpers. --
+
+private val nickJson = Json { ignoreUnknownKeys = true }
+
+/** Decode a JSON array of nicks into a set; garbage/absent -> empty. */
+internal fun decodeNickSet(raw: String?): Set<String> {
+    if (raw == null) return emptySet()
+    return runCatching {
+        val arr = nickJson.parseToJsonElement(raw) as JsonArray
+        arr.map { (it as JsonPrimitive).content }.toSet()
+    }.getOrDefault(emptySet())
+}
+
+/** Encode a set of nicks as a JSON array (insertion order). */
+internal fun encodeNickSet(nicks: Set<String>): String =
+    buildJsonArray { for (n in nicks) add(JsonPrimitive(n)) }.toString()
+
+/** Decode a JSON object {"nick": hue} into a map; hues coerced into 0..359, garbage -> empty. */
+internal fun decodeHueOverrides(raw: String?): Map<String, Int> {
+    if (raw == null) return emptyMap()
+    return runCatching {
+        val obj = nickJson.parseToJsonElement(raw) as JsonObject
+        obj.entries.associate { (k, v) -> k to v.jsonPrimitive.int.coerceIn(0, 359) }
+    }.getOrDefault(emptyMap())
+}
+
+/** Encode a nick->hue map as a JSON object (hues coerced into 0..359). */
+internal fun encodeHueOverrides(map: Map<String, Int>): String =
+    buildJsonObject { for ((k, v) in map) put(k, v.coerceIn(0, 359)) }.toString()
 
 // Implements SettingsRepository, PushPrefs, and exposes STS-policy JSON storage (internal, for
 // WP5) all over the one DataStore. Constructor-injectable so WP10 can rebind the interfaces.
@@ -50,6 +95,18 @@ class DataStoreSettingsRepository @Inject constructor(
             dynamicColor = prefs[PrefKeys.DYNAMIC_COLOR]?.toBooleanStrictOrNull() ?: true,
             deliveryMode = prefs[PrefKeys.DELIVERY_MODE]?.let { runCatching { DeliveryMode.valueOf(it) }.getOrNull() }
                 ?: DeliveryMode.PERSISTENT_SOCKET,
+            // Round 4: invalid enum strings fall back to defaults.
+            layoutDensity = prefs[PrefKeys.LAYOUT_DENSITY]?.let { runCatching { LayoutDensity.valueOf(it) }.getOrNull() }
+                ?: LayoutDensity.COMFORTABLE,
+            nickColorsEnabled = prefs[PrefKeys.NICK_COLORS_ENABLED]?.toBooleanStrictOrNull() ?: true,
+            nickColorPalette = prefs[PrefKeys.NICK_COLOR_PALETTE]?.let { runCatching { NickColorPalette.valueOf(it) }.getOrNull() }
+                ?: NickColorPalette.DEFAULT,
+            nickColorOverrides = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]),
+            friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]),
+            fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]),
+            foolsMode = prefs[PrefKeys.FOOLS_MODE]?.let { runCatching { FoolsMode.valueOf(it) }.getOrNull() }
+                ?: FoolsMode.COLLAPSE,
+            showJoinPartQuit = prefs[PrefKeys.SHOW_JOIN_PART_QUIT]?.toBooleanStrictOrNull() ?: true,
         )
     }
 
@@ -63,6 +120,76 @@ class DataStoreSettingsRepository @Inject constructor(
 
     override suspend fun setDeliveryMode(m: DeliveryMode) {
         store.edit { it[PrefKeys.DELIVERY_MODE] = m.name }
+    }
+
+    // -- Round 4 (plans/13): appearance/behavior settings --
+
+    override suspend fun setLayoutDensity(d: LayoutDensity) {
+        store.edit { it[PrefKeys.LAYOUT_DENSITY] = d.name }
+    }
+
+    override suspend fun setNickColorsEnabled(enabled: Boolean) {
+        store.edit { it[PrefKeys.NICK_COLORS_ENABLED] = enabled.toString() }
+    }
+
+    override suspend fun setNickColorPalette(p: NickColorPalette) {
+        store.edit { it[PrefKeys.NICK_COLOR_PALETTE] = p.name }
+    }
+
+    override suspend fun setNickColorOverride(nick: String, hue: Int?) {
+        val key = normalizeNick(nick)
+        store.edit { prefs ->
+            val current = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]).toMutableMap()
+            if (hue == null) current.remove(key) else current[key] = hue.coerceIn(0, 359)
+            if (current.isEmpty()) prefs.remove(PrefKeys.NICK_COLOR_OVERRIDES)
+            else prefs[PrefKeys.NICK_COLOR_OVERRIDES] = encodeHueOverrides(current)
+        }
+    }
+
+    override suspend fun setFriend(nick: String, isFriend: Boolean) {
+        val key = normalizeNick(nick)
+        // One transaction keeps friends/fools disjoint: adding a friend drops it from fools.
+        store.edit { prefs ->
+            val friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]).toMutableSet()
+            val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]).toMutableSet()
+            if (isFriend) {
+                friends.add(key)
+                fools.remove(key)
+            } else {
+                friends.remove(key)
+            }
+            writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
+            writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)
+        }
+    }
+
+    override suspend fun setFool(nick: String, isFool: Boolean) {
+        val key = normalizeNick(nick)
+        store.edit { prefs ->
+            val friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]).toMutableSet()
+            val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]).toMutableSet()
+            if (isFool) {
+                fools.add(key)
+                friends.remove(key)
+            } else {
+                fools.remove(key)
+            }
+            writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
+            writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)
+        }
+    }
+
+    override suspend fun setFoolsMode(m: FoolsMode) {
+        store.edit { it[PrefKeys.FOOLS_MODE] = m.name }
+    }
+
+    override suspend fun setShowJoinPartQuit(show: Boolean) {
+        store.edit { it[PrefKeys.SHOW_JOIN_PART_QUIT] = show.toString() }
+    }
+
+    // Empty set removes its key (mirrors setEndpointFor); non-empty writes the JSON array.
+    private fun writeNickSet(prefs: androidx.datastore.preferences.core.MutablePreferences, key: Preferences.Key<String>, nicks: Set<String>) {
+        if (nicks.isEmpty()) prefs.remove(key) else prefs[key] = encodeNickSet(nicks)
     }
 
     // -- PushPrefs (values base64url; keys stored as JSON) --

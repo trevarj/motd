@@ -663,3 +663,141 @@ DataStore key `cert_pins` = JSON `{"host:port":"<sha256 hex>"}`.
 `CertUntrustedException` and `PinningTrustManager` are `:app` service internals, not contracts.
 
 Bouncer-auth simplification (feature 2) is entirely inside `ui/onboarding/` (no contract change).
+
+## Round 4 amendments
+
+Landed by WP-U0 (serial) so the parallel round-4 agents build against stable signatures. Full
+design in `plans/13-uisettings.md`.
+
+### Settings (`data/prefs/Settings.kt`) — additive
+
+```kotlin
+enum class LayoutDensity { COMPACT, COMFORTABLE, COZY }
+enum class NickColorPalette { DEFAULT, VIVID, PASTEL }
+enum class FoolsMode { COLLAPSE, HIDE }
+
+data class Settings(
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val dynamicColor: Boolean = true,
+    val deliveryMode: DeliveryMode = DeliveryMode.PERSISTENT_SOCKET,
+    // Round 4 (plans/13)
+    val layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
+    val nickColorsEnabled: Boolean = true,
+    val nickColorPalette: NickColorPalette = NickColorPalette.DEFAULT,
+    /** Normalized nick -> hue 0..359. Rendered with the active palette's S/L. */
+    val nickColorOverrides: Map<String, Int> = emptyMap(),
+    /** Normalized nicks. friends and fools are kept disjoint by the repository. */
+    val friends: Set<String> = emptySet(),
+    val fools: Set<String> = emptySet(),
+    val foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    val showJoinPartQuit: Boolean = true,
+)
+
+/** Canonical key for friends/fools/override lookups: trimmed + lowercased. */
+fun normalizeNick(nick: String): String = nick.trim().lowercase()
+
+interface SettingsRepository {
+    val settings: Flow<Settings>
+    suspend fun setThemeMode(m: ThemeMode)
+    suspend fun setDynamicColor(enabled: Boolean)
+    suspend fun setDeliveryMode(m: DeliveryMode)
+    // Round 4
+    suspend fun setLayoutDensity(d: LayoutDensity)
+    suspend fun setNickColorsEnabled(enabled: Boolean)
+    suspend fun setNickColorPalette(p: NickColorPalette)
+    /** hue 0..359 (coerced); null removes. [nick] is normalized internally. */
+    suspend fun setNickColorOverride(nick: String, hue: Int?)
+    /** Adding a friend removes the nick from fools, and vice versa. */
+    suspend fun setFriend(nick: String, isFriend: Boolean)
+    suspend fun setFool(nick: String, isFool: Boolean)
+    suspend fun setFoolsMode(m: FoolsMode)
+    suspend fun setShowJoinPartQuit(show: Boolean)
+}
+```
+
+All existing `Settings(...)` construction sites stay source-compatible via defaults.
+
+### Storage (`data/prefs/PreferencesStore.kt`)
+
+New `PrefKeys` in the single `settings` DataStore, manual-JSON style (as `push_endpoints`):
+`layout_density`/`nick_color_palette`/`fools_mode` = enum `.name`; `nick_colors_enabled`/
+`show_join_part_quit` = `"true"/"false"`; `nick_color_overrides` = JSON object `{"nick":210}`;
+`friend_nicks`/`fool_nicks` = JSON arrays. Invalid enum strings fall back to defaults; empty
+set/map removes its key. `setFriend`/`setFool` write both keys in one transaction (disjoint).
+Codecs are internal top-level functions (unit-testable without DataStore):
+
+```kotlin
+internal fun decodeNickSet(raw: String?): Set<String>
+internal fun encodeNickSet(nicks: Set<String>): String
+internal fun decodeHueOverrides(raw: String?): Map<String, Int>   // hues coerced into 0..359
+internal fun encodeHueOverrides(map: Map<String, Int>): String
+```
+
+### Routes (`ui/nav/Routes.kt`) — add
+
+```kotlin
+@Serializable data object FriendsRoute
+@Serializable data object FoolsRoute
+@Serializable data object NickColorsRoute
+```
+
+### Theme contracts (`ui/theme/`)
+
+```kotlin
+// ui/theme/Spacing.kt (new)
+@Immutable
+data class MotdSpacing(
+    val bubbleRowVPad: Dp, val bubbleInnerVPad: Dp, val bubbleInnerHPad: Dp,
+    val bubbleCorner: Dp, val bubbleAvatar: Dp, val bubbleAvatarColumn: Dp,
+    val actionVPad: Dp, val systemPillVPad: Dp, val chatListVPad: Dp,
+    val chatListAvatar: Dp, val memberAvatar: Dp, val messageBodyLarge: Boolean,
+)
+fun spacingFor(density: LayoutDensity): MotdSpacing
+val LocalSpacing: ProvidableCompositionLocal<MotdSpacing>   // staticCompositionLocalOf { spacingFor(COMFORTABLE) }
+```
+
+```kotlin
+// ui/theme/NickColor.kt — additions (existing nickColor(nick, isDark) kept unchanged;
+// hslColor changes private -> internal)
+@Immutable
+class NickColorScheme(
+    val enabled: Boolean, val palette: NickColorPalette,
+    val overrides: Map<String, Int>, val isDark: Boolean,
+) {
+    fun nick(nick: String, fallback: Color): Color   // fallback when disabled
+    fun avatar(name: String): Color                  // override + palette always apply
+}
+val LocalNickColors: ProvidableCompositionLocal<NickColorScheme>
+    // staticCompositionLocalOf { NickColorScheme(true, DEFAULT, emptyMap(), false) }
+
+/** Resolution order: disabled -> fallback; override hue -> hueColor; else palette hash. Pure. */
+fun resolveNickColor(
+    nick: String, isDark: Boolean, enabled: Boolean,
+    palette: NickColorPalette, overrides: Map<String, Int>, fallback: Color,
+): Color
+fun paletteNickColor(nick: String, isDark: Boolean, palette: NickColorPalette): Color
+fun hueColor(hue: Int, isDark: Boolean, palette: NickColorPalette): Color
+```
+
+DEFAULT palette (no override) == existing `nickColor(nick, isDark)` (test-asserted).
+
+```kotlin
+// ui/theme/MotdTheme.kt — amended signature (all new params defaulted)
+@Composable
+fun MotdTheme(
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    dynamicColor: Boolean = true,
+    layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
+    nickColorsEnabled: Boolean = true,
+    nickColorPalette: NickColorPalette = NickColorPalette.DEFAULT,
+    nickColorOverrides: Map<String, Int> = emptyMap(),
+    content: @Composable () -> Unit,
+)
+```
+
+`MotdTheme` computes `dark` as before and provides `LocalSpacing`/`LocalNickColors`.
+`MainActivity.setContent` passes the four new values from the collected `Settings`.
+
+**Plumbing split:** style-only concerns (spacing, nick colors) flow through the two
+CompositionLocals; behavioral concerns (friends/fools/foolsMode/showJoinPartQuit) flow through
+ViewModel state as explicit parameters.

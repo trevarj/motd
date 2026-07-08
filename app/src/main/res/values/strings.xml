@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">MOTD</string>
 
     <!-- Chat list (WP6) -->
@@ -179,4 +179,51 @@
     <string name="image_viewer_saved">Saved to Pictures/MOTD</string>
     <string name="image_viewer_save_failed">Couldn\'t save image</string>
     <string name="image_viewer_load_failed">Couldn\'t load image</string>
+
+    <!-- Round 4: customizable UI settings (plans/13). Consumers land in WP-U1/U2/U3; each entry is
+         tagged tools:ignore="UnusedResources" so lint (warningsAsErrors) stays green mid-wave.
+         WP-U4 strips the markers once the usages exist. -->
+    <string name="settings_density" tools:ignore="UnusedResources">Layout density</string>
+    <string name="settings_density_compact" tools:ignore="UnusedResources">Compact</string>
+    <string name="settings_density_comfortable" tools:ignore="UnusedResources">Comfortable</string>
+    <string name="settings_density_cozy" tools:ignore="UnusedResources">Cozy</string>
+    <string name="settings_chat" tools:ignore="UnusedResources">Chat</string>
+    <string name="settings_nick_colors" tools:ignore="UnusedResources">Colored nicknames</string>
+    <string name="settings_nick_colors_desc" tools:ignore="UnusedResources">Color sender names in chats.</string>
+    <string name="settings_palette_default" tools:ignore="UnusedResources">Default palette</string>
+    <string name="settings_palette_vivid" tools:ignore="UnusedResources">Vivid palette</string>
+    <string name="settings_palette_pastel" tools:ignore="UnusedResources">Pastel palette</string>
+    <string name="settings_nick_color_overrides" tools:ignore="UnusedResources">Nick color overrides</string>
+    <string name="settings_show_jpq" tools:ignore="UnusedResources">Show join/part messages</string>
+    <string name="settings_show_jpq_desc" tools:ignore="UnusedResources">Show join, part, and quit events in channels.</string>
+    <string name="settings_people" tools:ignore="UnusedResources">People</string>
+    <string name="settings_friends" tools:ignore="UnusedResources">Friends</string>
+    <string name="settings_fools" tools:ignore="UnusedResources">Fools</string>
+    <string name="settings_fools_mode" tools:ignore="UnusedResources">Fools’ messages</string>
+    <string name="settings_fools_collapse" tools:ignore="UnusedResources">Collapse</string>
+    <string name="settings_fools_collapse_desc" tools:ignore="UnusedResources">Show a tappable placeholder.</string>
+    <string name="settings_fools_hide" tools:ignore="UnusedResources">Hide</string>
+    <string name="settings_fools_hide_desc" tools:ignore="UnusedResources">Remove their messages entirely.</string>
+    <string name="friends_title" tools:ignore="UnusedResources">Friends</string>
+    <string name="fools_title" tools:ignore="UnusedResources">Fools</string>
+    <string name="nick_colors_title" tools:ignore="UnusedResources">Nick colors</string>
+    <string name="manage_add_nick_hint" tools:ignore="UnusedResources">Nickname</string>
+    <string name="manage_add" tools:ignore="UnusedResources">Add</string>
+    <string name="manage_remove" tools:ignore="UnusedResources">Remove</string>
+    <string name="manage_color_auto" tools:ignore="UnusedResources">Auto (no override)</string>
+    <string name="manage_empty_friends" tools:ignore="UnusedResources">No friends yet. Add a nick above or use a member’s profile.</string>
+    <string name="manage_empty_fools" tools:ignore="UnusedResources">No fools yet. Add a nick above or use a member’s profile.</string>
+    <string name="manage_empty_colors" tools:ignore="UnusedResources">No overrides yet. Add a nick to pick its color.</string>
+    <string name="chat_fool_hidden" tools:ignore="UnusedResources">%1$s · hidden</string>
+    <string name="chatlist_friends" tools:ignore="UnusedResources">Friends</string>
+    <string name="chatlist_fools" tools:ignore="UnusedResources">Fools (%1$d)</string>
+    <string name="channelinfo_fools_section" tools:ignore="UnusedResources">Fools (%1$d)</string>
+    <string name="channelinfo_add_friend" tools:ignore="UnusedResources">Add to friends</string>
+    <string name="channelinfo_remove_friend" tools:ignore="UnusedResources">Remove from friends</string>
+    <string name="channelinfo_add_fool" tools:ignore="UnusedResources">Add to fools</string>
+    <string name="channelinfo_remove_fool" tools:ignore="UnusedResources">Remove from fools</string>
+    <plurals name="settings_nick_count" tools:ignore="UnusedResources">
+        <item quantity="one">%d nick</item>
+        <item quantity="other">%d nicks</item>
+    </plurals>
 </resources>

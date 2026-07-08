@@ -755,3 +755,16 @@ usage) rather than re-ignoring.
    chat list.
 6. **Pinned + friend/fool precedence** — **Recommended: pinned wins** (explicit user action
    outranks list membership); a pinned fool stays visible under Pinned.
+
+## Confirmed decisions (user, binding for implementation)
+
+1. Friends/fools scope: **global**.
+2. Fools default: **COLLAPSE** (tap-to-expand); HIDE is a user-switchable mode.
+3. Per-nick override: **hue-only** (saturation/lightness from palette + light/dark).
+4. Friends: **bypass buffer mute** for notifications (do not notify on un-mentioned channel
+   messages) AND render the friend's **nick with a subtle highlight/tint** wherever the nick
+   appears (chat sender name, member list, chat-list preview). The tint is an additional
+   requirement beyond the design's emphasis notes — implement it as a small, theme-aware
+   background/underline tint on the nick, distinct from (and layered under) nick color.
+5. Nick-coloring-off affects **sender-name text only**; avatars keep their colors.
+6. **Pinned wins** over friend/fool in chat-list sectioning.

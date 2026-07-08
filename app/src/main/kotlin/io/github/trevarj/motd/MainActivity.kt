@@ -53,7 +53,14 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val settings by settingsRepository.settings.collectAsState(initial = Settings())
-            MotdTheme(themeMode = settings.themeMode, dynamicColor = settings.dynamicColor) {
+            MotdTheme(
+                themeMode = settings.themeMode,
+                dynamicColor = settings.dynamicColor,
+                layoutDensity = settings.layoutDensity,
+                nickColorsEnabled = settings.nickColorsEnabled,
+                nickColorPalette = settings.nickColorPalette,
+                nickColorOverrides = settings.nickColorOverrides,
+            ) {
                 // Root Surface paints the themed background under every screen (incl. non-Scaffold
                 // ones like onboarding) so the window follows the color scheme instead of white.
                 Surface(

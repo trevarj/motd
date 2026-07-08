@@ -5,17 +5,48 @@ import kotlinx.coroutines.flow.Flow
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK, AMOLED }
 
+// Round 4 (plans/13): user-customizable UI settings.
+enum class LayoutDensity { COMPACT, COMFORTABLE, COZY }
+enum class NickColorPalette { DEFAULT, VIVID, PASTEL }
+enum class FoolsMode { COLLAPSE, HIDE }
+
 data class Settings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,
     val deliveryMode: DeliveryMode = DeliveryMode.PERSISTENT_SOCKET,
+    // Round 4 (plans/13)
+    val layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
+    val nickColorsEnabled: Boolean = true,
+    val nickColorPalette: NickColorPalette = NickColorPalette.DEFAULT,
+    /** Normalized nick -> hue 0..359. Rendered with the active palette's S/L. */
+    val nickColorOverrides: Map<String, Int> = emptyMap(),
+    /** Normalized nicks. friends and fools are kept disjoint by the repository. */
+    val friends: Set<String> = emptySet(),
+    val fools: Set<String> = emptySet(),
+    val foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    val showJoinPartQuit: Boolean = true,
 )
+
+/** Canonical key for friends/fools/override lookups: trimmed + lowercased.
+ *  Deliberate simplification of RFC 1459 casemapping (see plans/13 Risks). */
+fun normalizeNick(nick: String): String = nick.trim().lowercase()
 
 interface SettingsRepository {
     val settings: Flow<Settings>
     suspend fun setThemeMode(m: ThemeMode)
     suspend fun setDynamicColor(enabled: Boolean)
     suspend fun setDeliveryMode(m: DeliveryMode)
+    // Round 4
+    suspend fun setLayoutDensity(d: LayoutDensity)
+    suspend fun setNickColorsEnabled(enabled: Boolean)
+    suspend fun setNickColorPalette(p: NickColorPalette)
+    /** hue 0..359 (coerced); null removes. [nick] is normalized internally. */
+    suspend fun setNickColorOverride(nick: String, hue: Int?)
+    /** Adding a friend removes the nick from fools, and vice versa. */
+    suspend fun setFriend(nick: String, isFriend: Boolean)
+    suspend fun setFool(nick: String, isFool: Boolean)
+    suspend fun setFoolsMode(m: FoolsMode)
+    suspend fun setShowJoinPartQuit(show: Boolean)
 }
 
 /** Webpush endpoint + client keypair persistence (DataStore). Implemented by WP4 alongside

@@ -8,7 +8,10 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
+import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.ThemeMode
 
 // Static schemes seeded from the indigo brand color; used when dynamic color is off or pre-API-31.
@@ -30,6 +33,11 @@ private val AmoledColors = DarkColors.copy(
 fun MotdTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
     dynamicColor: Boolean = true,
+    // Round 4 (plans/13); all defaulted so existing call sites (incl. previews) stay unchanged.
+    layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
+    nickColorsEnabled: Boolean = true,
+    nickColorPalette: NickColorPalette = NickColorPalette.DEFAULT,
+    nickColorOverrides: Map<String, Int> = emptyMap(),
     content: @Composable () -> Unit,
 ) {
     val dark = when (themeMode) {
@@ -60,5 +68,13 @@ fun MotdTheme(
         dark -> DarkColors
         else -> LightColors
     }
-    MaterialTheme(colorScheme = colorScheme, content = content)
+    // Style-only concerns (spacing, nick colors) flow through CompositionLocals so components never
+    // receive them as parameters (plans/13 plumbing split).
+    MaterialTheme(colorScheme = colorScheme) {
+        CompositionLocalProvider(
+            LocalSpacing provides spacingFor(layoutDensity),
+            LocalNickColors provides NickColorScheme(nickColorsEnabled, nickColorPalette, nickColorOverrides, dark),
+            content = content,
+        )
+    }
 }
