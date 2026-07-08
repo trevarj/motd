@@ -75,6 +75,37 @@ class OnboardingReducerTest {
     }
 
     @Test
+    fun `soju EditAuth stays PLAIN even if a non-PLAIN mode is submitted`() {
+        val soju = reduce(
+            OnboardingState(step = OnboardingStep.CHOICE),
+            OnboardingAction.ChooseConnection(ConnectionChoice.SOJU),
+        )
+        // A stray NONE/EXTERNAL edit must be coerced back to PLAIN on the soju path.
+        val none = onboardingReducer(soju, OnboardingAction.EditAuth(AuthForm(mode = AuthMode.NONE)))
+        assertEquals(AuthMode.PLAIN, none.auth.mode)
+        val external = onboardingReducer(
+            soju,
+            OnboardingAction.EditAuth(AuthForm(mode = AuthMode.EXTERNAL, saslUser = "u", saslPassword = "p")),
+        )
+        assertEquals(AuthMode.PLAIN, external.auth.mode)
+        assertEquals("u", external.auth.saslUser)
+        assertEquals("p", external.auth.saslPassword)
+    }
+
+    @Test
+    fun `network EditAuth preserves submitted mode`() {
+        val network = reduce(
+            OnboardingState(step = OnboardingStep.CHOICE),
+            OnboardingAction.ChooseConnection(ConnectionChoice.NETWORK),
+        )
+        val s = onboardingReducer(
+            network,
+            OnboardingAction.EditAuth(AuthForm(mode = AuthMode.EXTERNAL, certAlias = "a")),
+        )
+        assertEquals(AuthMode.EXTERNAL, s.auth.mode)
+    }
+
+    @Test
     fun `network choice leaves auth mode untouched`() {
         // Direct path keeps the full picker: NONE stays valid, EXTERNAL still selectable.
         val s = onboardingReducer(

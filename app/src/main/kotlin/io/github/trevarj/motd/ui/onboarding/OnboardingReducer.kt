@@ -173,7 +173,12 @@ fun onboardingReducer(state: OnboardingState, action: OnboardingAction): Onboard
 
         is OnboardingAction.EditServer -> state.copy(server = action.server)
 
-        is OnboardingAction.EditAuth -> state.copy(auth = action.auth)
+        is OnboardingAction.EditAuth ->
+            // soju is always SASL PLAIN: pin the mode so a residual NONE/EXTERNAL can't leak into
+            // the persisted saslMechanism even if the picker path is bypassed.
+            state.copy(
+                auth = if (state.isSoju) action.auth.copy(mode = AuthMode.PLAIN) else action.auth,
+            )
 
         is OnboardingAction.NetworkCreated -> state.copy(networkId = action.networkId)
 

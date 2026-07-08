@@ -34,6 +34,9 @@ import io.github.trevarj.motd.ui.onboarding.ServerForm
 /**
  * Reusable server + auth edit form, shared by onboarding steps 3-4 and NetworkSettings. Stateless:
  * the caller owns the [ServerForm]/[AuthForm] state and receives edits via callbacks.
+ *
+ * [showServer]/[showAuth] let onboarding render server-only (step 3) or auth-only (step 4);
+ * NetworkSettings leaves both on to show the full combined form.
  */
 @Composable
 fun NetworkForm(
@@ -42,64 +45,75 @@ fun NetworkForm(
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
     modifier: Modifier = Modifier,
+    showServer: Boolean = true,
+    showAuth: Boolean = true,
 ) {
     Column(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        OutlinedTextField(
-            value = server.host,
-            onValueChange = { onServerChange(server.copy(host = it)) },
-            label = { Text(stringResource(R.string.onboarding_field_host)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = server.port,
-            onValueChange = { onServerChange(server.copy(port = it.filter(Char::isDigit))) },
-            label = { Text(stringResource(R.string.onboarding_field_port)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(stringResource(R.string.onboarding_field_tls), modifier = Modifier.weight(1f))
-            Switch(checked = server.tls, onCheckedChange = { onServerChange(server.copy(tls = it)) })
+        if (showServer) {
+            ServerFields(server = server, onServerChange = onServerChange)
         }
-        OutlinedTextField(
-            value = server.nick,
-            onValueChange = { onServerChange(server.copy(nick = it)) },
-            label = { Text(stringResource(R.string.onboarding_field_nick)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = server.username,
-            onValueChange = { onServerChange(server.copy(username = it)) },
-            label = { Text(stringResource(R.string.onboarding_field_username)) },
-            placeholder = { Text(stringResource(R.string.onboarding_field_username_hint)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = server.realname,
-            onValueChange = { onServerChange(server.copy(realname = it)) },
-            label = { Text(stringResource(R.string.onboarding_field_realname)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Text(
-            stringResource(R.string.onboarding_auth_title),
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(top = 8.dp),
-        )
-        AuthSection(auth = auth, onAuthChange = onAuthChange)
+        if (showAuth) {
+            Text(
+                stringResource(R.string.onboarding_auth_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            AuthSection(auth = auth, onAuthChange = onAuthChange)
+        }
     }
+}
+
+/** Server-only fields (host/port/TLS/nick/username/realname). */
+@Composable
+private fun ServerFields(server: ServerForm, onServerChange: (ServerForm) -> Unit) {
+    OutlinedTextField(
+        value = server.host,
+        onValueChange = { onServerChange(server.copy(host = it)) },
+        label = { Text(stringResource(R.string.onboarding_field_host)) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = server.port,
+        onValueChange = { onServerChange(server.copy(port = it.filter(Char::isDigit))) },
+        label = { Text(stringResource(R.string.onboarding_field_port)) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(stringResource(R.string.onboarding_field_tls), modifier = Modifier.weight(1f))
+        Switch(checked = server.tls, onCheckedChange = { onServerChange(server.copy(tls = it)) })
+    }
+    OutlinedTextField(
+        value = server.nick,
+        onValueChange = { onServerChange(server.copy(nick = it)) },
+        label = { Text(stringResource(R.string.onboarding_field_nick)) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = server.username,
+        onValueChange = { onServerChange(server.copy(username = it)) },
+        label = { Text(stringResource(R.string.onboarding_field_username)) },
+        placeholder = { Text(stringResource(R.string.onboarding_field_username_hint)) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = server.realname,
+        onValueChange = { onServerChange(server.copy(realname = it)) },
+        label = { Text(stringResource(R.string.onboarding_field_realname)) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable
@@ -132,6 +146,7 @@ private fun AuthSection(auth: AuthForm, onAuthChange: (AuthForm) -> Unit) {
                 label = { Text(stringResource(R.string.onboarding_auth_sasl_password)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 modifier = Modifier.fillMaxWidth(),
             )
         }

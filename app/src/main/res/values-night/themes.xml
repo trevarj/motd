@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark-mode app theme: framework Material dark parent so the launch window and system bars
+         match system dark mode (no AppCompat/Material-Components dep; framework themes only).
+         Theme.Motd.Splash inherits this in dark mode with no override needed. -->
+    <style name="Theme.Motd" parent="@android:style/Theme.Material.NoActionBar" />
+</resources>

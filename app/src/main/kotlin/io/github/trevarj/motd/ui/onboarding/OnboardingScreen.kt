@@ -19,6 +19,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -30,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,10 +44,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -115,6 +117,7 @@ fun OnboardingContent(
                     if (state.isSoju) {
                         SojuAuthPage(state, onAuthChange)
                     } else {
+                        // Direct path AUTH step: mechanism picker only (server fields live on step 3).
                         ServerPage(state, onServerChange, onAuthChange, authOnly = true)
                     }
                 OnboardingStep.CONNECT -> ConnectPage(state, onRetry, onToggleBouncer, onAddBouncer)
@@ -256,8 +259,8 @@ private fun ChoiceCard(title: String, desc: String, selected: Boolean, onClick: 
 }
 
 /**
- * Steps 3 (server) and 4 (auth) share the [NetworkForm]. [authOnly] scrolls emphasis to auth;
- * both render the full form so a user can revise either without leaving the wizard.
+ * Steps 3 (server) and 4 (auth) share the [NetworkForm], but render disjoint sections: the SERVER
+ * step shows server fields only, the direct-path AUTH step shows the mechanism picker only.
  */
 @Composable
 private fun ServerPage(
@@ -280,6 +283,8 @@ private fun ServerPage(
             auth = state.auth,
             onServerChange = onServerChange,
             onAuthChange = onAuthChange,
+            showServer = !authOnly,
+            showAuth = authOnly,
         )
     }
 }
@@ -315,6 +320,7 @@ private fun SojuAuthPage(
             label = { Text(stringResource(R.string.onboarding_auth_soju_password)) },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -342,7 +348,7 @@ private fun ConnectPage(
         }
         val failed = state.connState as? IrcClientState.Failed
         if (failed != null) {
-            failed.reason.let { Text(it, color = Color.Red) }
+            failed.reason.let { Text(it, color = MaterialTheme.colorScheme.error) }
             OutlinedButton(onClick = onRetry) { Text(stringResource(R.string.onboarding_connect_retry)) }
         }
 
@@ -357,8 +363,10 @@ private fun StateIndicator(connState: IrcClientState?) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         AnimatedContent(targetState = connState, label = "connState") { cs ->
             when (cs) {
-                is IrcClientState.Ready -> Icon(Icons.Filled.Check, contentDescription = null, tint = Color(0xFF2E7D32))
-                is IrcClientState.Failed -> Icon(Icons.Filled.Close, contentDescription = null, tint = Color.Red)
+                is IrcClientState.Ready ->
+                    Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                is IrcClientState.Failed ->
+                    Icon(Icons.Filled.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                 null -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 else -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             }
@@ -465,12 +473,15 @@ private fun FinishPage() {
 @Composable
 private fun OnboardingChoicePreview() {
     MotdTheme {
-        OnboardingContent(
-            state = OnboardingState(step = OnboardingStep.CHOICE, choice = ConnectionChoice.NETWORK),
-            onNext = {}, onBack = {}, onChoose = {}, onLibera = {},
-            onServerChange = {}, onAuthChange = {}, onRetry = {},
-            onToggleBouncer = {}, onAddBouncer = { _, _ -> }, onFinish = {},
-        )
+        // Surface so the preview reflects the runtime themed background under the wizard.
+        Surface {
+            OnboardingContent(
+                state = OnboardingState(step = OnboardingStep.CHOICE, choice = ConnectionChoice.NETWORK),
+                onNext = {}, onBack = {}, onChoose = {}, onLibera = {},
+                onServerChange = {}, onAuthChange = {}, onRetry = {},
+                onToggleBouncer = {}, onAddBouncer = { _, _ -> }, onFinish = {},
+            )
+        }
     }
 }
 
@@ -478,21 +489,23 @@ private fun OnboardingChoicePreview() {
 @Composable
 private fun OnboardingConnectPreview() {
     MotdTheme {
-        OnboardingContent(
-            state = OnboardingState(
-                step = OnboardingStep.CONNECT,
-                choice = ConnectionChoice.SOJU,
-                connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
-                stateLog = listOf(IrcClientState.Connecting, IrcClientState.Registering),
-                bouncerListLoaded = true,
-                bouncerNetworks = listOf(
-                    BouncerNetworkRow("1", "Libera", selected = true),
-                    BouncerNetworkRow("2", "OFTC", selected = false),
+        Surface {
+            OnboardingContent(
+                state = OnboardingState(
+                    step = OnboardingStep.CONNECT,
+                    choice = ConnectionChoice.SOJU,
+                    connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
+                    stateLog = listOf(IrcClientState.Connecting, IrcClientState.Registering),
+                    bouncerListLoaded = true,
+                    bouncerNetworks = listOf(
+                        BouncerNetworkRow("1", "Libera", selected = true),
+                        BouncerNetworkRow("2", "OFTC", selected = false),
+                    ),
                 ),
-            ),
-            onNext = {}, onBack = {}, onChoose = {}, onLibera = {},
-            onServerChange = {}, onAuthChange = {}, onRetry = {},
-            onToggleBouncer = {}, onAddBouncer = { _, _ -> }, onFinish = {},
-        )
+                onNext = {}, onBack = {}, onChoose = {}, onLibera = {},
+                onServerChange = {}, onAuthChange = {}, onRetry = {},
+                onToggleBouncer = {}, onAddBouncer = { _, _ -> }, onFinish = {},
+            )
+        }
     }
 }

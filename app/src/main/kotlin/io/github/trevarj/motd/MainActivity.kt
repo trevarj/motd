@@ -8,9 +8,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
@@ -50,10 +54,17 @@ class MainActivity : ComponentActivity() {
         setContent {
             val settings by settingsRepository.settings.collectAsState(initial = Settings())
             MotdTheme(themeMode = settings.themeMode, dynamicColor = settings.dynamicColor) {
-                MotdNavGraph()
-                // Global TOFU cert-trust dialog host: shows above the whole nav graph so it works
-                // for onboarding connect-tests, chat-list reconnects, etc. (plans/12).
-                CertTrustDialogHost()
+                // Root Surface paints the themed background under every screen (incl. non-Scaffold
+                // ones like onboarding) so the window follows the color scheme instead of white.
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
+                    MotdNavGraph()
+                    // Global TOFU cert-trust dialog host: shows above the whole nav graph so it works
+                    // for onboarding connect-tests, chat-list reconnects, etc. (plans/12).
+                    CertTrustDialogHost()
+                }
             }
         }
     }
