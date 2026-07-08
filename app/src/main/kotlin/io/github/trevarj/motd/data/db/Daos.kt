@@ -132,6 +132,16 @@ interface MessageDao {
     @Query("SELECT MIN(serverTime) FROM messages WHERE bufferId = :bufferId")
     suspend fun oldestTime(bufferId: Long): Long?
 
+    @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND msgid = :msgid LIMIT 1")
+    suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
+
+    /** 0-based reverse-list index: strict complement of pagingSource ORDER BY serverTime DESC, id DESC. */
+    @Query(
+        """SELECT COUNT(*) FROM messages WHERE bufferId = :bufferId
+          AND (serverTime > :serverTime OR (serverTime = :serverTime AND id > :id))"""
+    )
+    suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int
+
     // FTS4 external-content search over (text, sender). :query is already sanitized (each token
     // quoted + prefixed with *) by SearchRepository. Chat kinds only; optional buffer scope.
     @Query(

@@ -33,4 +33,10 @@ class MessageRepositoryImpl @Inject constructor(
 
     override fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>> =
         reactionDao.observeFor(bufferId, msgids)
+
+    override suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity? =
+        messageDao.byMsgid(bufferId, msgid)
+
+    override suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int =
+        messageDao.countNewerThan(bufferId, serverTime, id)
 }

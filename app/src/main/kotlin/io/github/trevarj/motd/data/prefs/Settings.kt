@@ -23,8 +23,17 @@ interface SettingsRepository {
 data class PushKeys(val privateKey: String, val publicUncompressed: String, val auth: String)
 
 interface PushPrefs {
+    // Per-network endpoints (keyed by network row id). Round 2: replaces the single-endpoint
+    // API below, which WP-R2 deletes once callers migrate. Both coexist mid-wave to stay green.
+    suspend fun endpoints(): Map<Long, String>
+    suspend fun endpointFor(networkId: Long): String?
+    suspend fun setEndpointFor(networkId: Long, endpoint: String?)  // null removes
+    suspend fun clearEndpoints()
+
+    // Legacy single-endpoint API (removed by WP-R2 — kept so v1 push callers still compile).
     suspend fun endpoint(): String?
     suspend fun setEndpoint(endpoint: String?)
-    suspend fun keys(): PushKeys?
+
+    suspend fun keys(): PushKeys?                      // unchanged: one shared keypair
     suspend fun setKeys(keys: PushKeys)
 }

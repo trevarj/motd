@@ -27,6 +27,7 @@ internal object PrefKeys {
     val DYNAMIC_COLOR = stringPreferencesKey("dynamic_color")
     val DELIVERY_MODE = stringPreferencesKey("delivery_mode")
     val PUSH_ENDPOINT = stringPreferencesKey("push_endpoint")
+    val PUSH_ENDPOINTS = stringPreferencesKey("push_endpoints")
     val PUSH_KEYS = stringPreferencesKey("push_keys")
     val STS_POLICIES = stringPreferencesKey("sts_policies")
 }
@@ -65,6 +66,43 @@ class DataStoreSettingsRepository @Inject constructor(
     }
 
     // -- PushPrefs (values base64url; keys stored as JSON) --
+
+    // Per-network endpoints persisted as a JSON object {"<networkId>": "<url>"} under one key,
+    // using the same manual-JSON approach as push_keys.
+    override suspend fun endpoints(): Map<Long, String> =
+        decodeEndpoints(store.data.first()[PrefKeys.PUSH_ENDPOINTS])
+
+    override suspend fun endpointFor(networkId: Long): String? =
+        endpoints()[networkId]
+
+    override suspend fun setEndpointFor(networkId: Long, endpoint: String?) {
+        store.edit { prefs ->
+            val current = decodeEndpoints(prefs[PrefKeys.PUSH_ENDPOINTS]).toMutableMap()
+            if (endpoint == null) current.remove(networkId) else current[networkId] = endpoint
+            if (current.isEmpty()) prefs.remove(PrefKeys.PUSH_ENDPOINTS)
+            else prefs[PrefKeys.PUSH_ENDPOINTS] = encodeEndpoints(current)
+        }
+    }
+
+    override suspend fun clearEndpoints() {
+        store.edit { it.remove(PrefKeys.PUSH_ENDPOINTS) }
+    }
+
+    private fun decodeEndpoints(raw: String?): Map<Long, String> {
+        if (raw == null) return emptyMap()
+        return runCatching {
+            val obj = json.parseToJsonElement(raw) as kotlinx.serialization.json.JsonObject
+            obj.entries.mapNotNull { (k, v) ->
+                val id = k.toLongOrNull() ?: return@mapNotNull null
+                id to v.jsonPrimitive.content
+            }.toMap()
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun encodeEndpoints(map: Map<Long, String>): String =
+        buildJsonObject {
+            for ((id, url) in map) put(id.toString(), url)
+        }.toString()
 
     override suspend fun endpoint(): String? =
         store.data.first()[PrefKeys.PUSH_ENDPOINT]

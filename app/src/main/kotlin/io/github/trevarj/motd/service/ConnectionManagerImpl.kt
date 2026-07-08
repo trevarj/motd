@@ -309,6 +309,10 @@ class ConnectionManagerImpl @Inject constructor(
         clientFor(buffer.networkId)?.markRead(buffer.name, upToTime)
     }
 
+    override suspend fun evaluatePushMode() {
+        // R2: real impl (re-run maybeStopForPush() iff deliveryMode == UNIFIED_PUSH).
+    }
+
     // -- connectivity callback ----------------------------------------------
 
     private fun registerConnectivityCallback() {

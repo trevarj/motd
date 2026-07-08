@@ -535,3 +535,80 @@ inside `internal` stub impl classes registered in Hilt modules, never in the con
 themselves). `IrcClient` is declared by WP1 as the class shell with `TODO()` bodies and
 implemented in-place by WP3 (WP3 owns `irc/client/` and `irc/ext/` after WP1 hands off — the
 public signatures above must not change).
+
+## Round 2 amendments
+
+Landed by WP-R0 (serial) so parallel round-2 agents build against stable signatures. Full
+design in `plans/11-round2.md`.
+
+### Routes (`ui/nav/Routes.kt`) — amend + add
+
+```kotlin
+@Serializable data class ChatRoute(
+    val bufferId: Long,
+    val jumpToMsgid: String? = null,   // search deep-jump target
+    val jumpToTime: Long = 0,          // epoch ms of target; 0 = no jump
+)
+@Serializable data object AboutRoute
+```
+Defaults keep every existing `ChatRoute(bufferId)` call site source-compatible.
+
+### PushPrefs (`data/prefs/Settings.kt`) — per-network
+
+```kotlin
+interface PushPrefs {
+    suspend fun endpoints(): Map<Long, String>        // by network row id
+    suspend fun endpointFor(networkId: Long): String?
+    suspend fun setEndpointFor(networkId: Long, endpoint: String?)  // null removes
+    suspend fun clearEndpoints()
+    suspend fun keys(): PushKeys?                      // unchanged: one shared keypair
+    suspend fun setKeys(keys: PushKeys)
+}
+```
+Storage: DataStore key `push_endpoints` = JSON `{"<networkId>": "<url>"}`. Legacy
+`endpoint()`/`setEndpoint()` + `push_endpoint` key deleted by WP-R2 (no migration —
+pre-release). WP-R0 adds the new members alongside the old two to stay green mid-wave.
+
+### MessageDao (`data/db/Daos.kt`) — two additions
+
+```kotlin
+@Query("SELECT * FROM messages WHERE bufferId = :bufferId AND msgid = :msgid LIMIT 1")
+suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
+
+/** 0-based reverse-list index: strict complement of pagingSource ORDER BY serverTime DESC, id DESC. */
+@Query("""SELECT COUNT(*) FROM messages WHERE bufferId = :bufferId
+          AND (serverTime > :serverTime OR (serverTime = :serverTime AND id > :id))""")
+suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int
+```
+Mirrored on `MessageRepository`:
+```kotlin
+suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
+suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int
+```
+
+### ConnectionManager (`service/ServiceSeam.kt`) — one addition
+
+```kotlin
+/** Re-evaluate push-mode socket teardown after per-network endpoint changes.
+ *  No-op unless deliveryMode == UNIFIED_PUSH. Called by MotdPushReceiver.onNewEndpoint. */
+suspend fun evaluatePushMode()
+```
+
+### New round-2 types
+
+```kotlin
+// ui/chat/ComposerDraftStore.kt — process-lifetime, memory-only, consume-once
+@Singleton class ComposerDraftStore @Inject constructor() {
+    fun push(bufferId: Long, text: String)   // concatenates with any queued text
+    fun consume(bufferId: Long): String?      // returns and removes; null when empty
+}
+
+// push/UnifiedPushApi.kt — testable seam over the static UnifiedPush connector API
+interface UnifiedPushApi {
+    fun getDistributors(): List<String>
+    fun getAckDistributor(): String?
+    fun saveDistributor(distributor: String)
+    fun registerApp(instance: String)
+    fun unregisterApp(instance: String)
+}
+```

@@ -20,6 +20,13 @@ class WebPushRegistrarTest {
     private class FakePushPrefs : PushPrefs {
         var endpoint: String? = null
         var keys: PushKeys? = null
+        private val perNetwork = mutableMapOf<Long, String>()
+        override suspend fun endpoints(): Map<Long, String> = perNetwork.toMap()
+        override suspend fun endpointFor(networkId: Long): String? = perNetwork[networkId]
+        override suspend fun setEndpointFor(networkId: Long, endpoint: String?) {
+            if (endpoint == null) perNetwork.remove(networkId) else perNetwork[networkId] = endpoint
+        }
+        override suspend fun clearEndpoints() { perNetwork.clear() }
         override suspend fun endpoint(): String? = endpoint
         override suspend fun setEndpoint(endpoint: String?) { this.endpoint = endpoint }
         override suspend fun keys(): PushKeys? = keys
@@ -41,6 +48,7 @@ class WebPushRegistrarTest {
         override suspend fun partChannel(bufferId: Long) = Unit
         override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 0L
         override suspend fun markRead(bufferId: Long, upToTime: Long) = Unit
+        override suspend fun evaluatePushMode() = Unit
     }
 
     @Test

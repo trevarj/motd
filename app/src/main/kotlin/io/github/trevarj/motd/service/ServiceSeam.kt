@@ -31,6 +31,10 @@ interface ConnectionManager {
 
     /** THE mark-read entry point: advances Room (max-only) and sends MARKREAD when supported. */
     suspend fun markRead(bufferId: Long, upToTime: Long)
+
+    /** Re-evaluate push-mode socket teardown after per-network endpoint changes.
+     *  No-op unless deliveryMode == UNIFIED_PUSH. Called by MotdPushReceiver.onNewEndpoint. */
+    suspend fun evaluatePushMode()
 }
 
 /** Sole IRC→Room write path. Implemented by EventProcessor (WP5); ConnectionManager delegates

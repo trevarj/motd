@@ -32,6 +32,8 @@ interface MessageRepository {
     /** Paging 3 stream wired to ChatHistoryRemoteMediator (WP5 supplies mediator via factory). */
     fun messages(bufferId: Long): Flow<PagingData<MessageEntity>>
     fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>>
+    suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
+    suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int
 }
 
 /** WP4 injects this to build its Pager; WP1 stub-binds a no-op (immediate endOfPagination),
