@@ -54,6 +54,9 @@ android {
         disable += "GradleDependency"
         // AGP version is pinned by policy (plans/01); the upgrade nag is intentional noise.
         disable += "AndroidGradlePluginVersion"
+        // SDK levels are pinned by policy (plans/01). CI runners ship a newer SDK than the
+        // pinned platform, so lint flags targetSdk 35 as "old"; that nag is intentional noise.
+        disable += "OldTargetApi"
     }
 }
 

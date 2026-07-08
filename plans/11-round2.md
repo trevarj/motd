@@ -163,7 +163,9 @@ android { lint {
     disable += "GradleDependency"
 } }
 ```
-Dispositions: VectorRaster ×3 → reduce declared width/height ≤200dp keeping viewport (usages
+`OldTargetApi` is also disabled: CI runners ship a newer SDK than the pinned platform (35),
+so lint flags targetSdk 35 as "old" only on CI — same pinned-by-policy category as the version
+nags. Dispositions: VectorRaster ×3 → reduce declared width/height ≤200dp keeping viewport (usages
 size via Modifier); UnusedResources → `roundIcon="@mipmap/ic_launcher_round"` (real fix),
 lockup/mark used by About, remove the 2 named unused strings; ImplicitSamInstance
 (IrcModule.kt TransportFactory) → typed local; InlinedApi → raise FGS-type guard to API 34
