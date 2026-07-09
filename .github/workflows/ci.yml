@@ -42,7 +42,7 @@ jobs:
         run: |
           for attempt in 1 2; do
             echo "::group::lint attempt $attempt"
-            ./gradlew :app:lintDebug --stacktrace --no-daemon \
+            ./gradlew :app:lintDebug --stacktrace \
               -Dorg.gradle.workers.max=1 && { echo "::endgroup::"; exit 0; }
             echo "::endgroup::"
             echo "lint attempt $attempt failed; retrying" >&2
