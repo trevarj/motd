@@ -31,7 +31,12 @@ interface IrcTransport {
 }
 
 fun interface TransportFactory {
-    fun create(host: String, port: Int, tls: Boolean): IrcTransport
+    /**
+     * Build a transport for [host]:[port]. When [wsUrl] is non-null (plans/19 §3.3) the factory may
+     * return an IRC-over-WebSocket transport dialing that URL instead of a raw TCP/TLS socket; the
+     * pure-JVM default factory ignores it. TLS/pinning still key on the real [host]:[port].
+     */
+    fun create(host: String, port: Int, tls: Boolean, wsUrl: String?): IrcTransport
 }
 
 /** okio-over-Socket/SSLSocket implementation lives in :irc (JVM default factory). */

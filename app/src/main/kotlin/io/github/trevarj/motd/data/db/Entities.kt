@@ -24,6 +24,9 @@ data class NetworkEntity(
     val clientCertAlias: String? = null,
     val autoConnect: Boolean = true,
     val ordering: Int = 0,
+    // Opt-in IRC-over-WebSocket endpoint (plans/19 §3.3). When set (e.g. wss://bnc.example.com:443/)
+    // the connection tunnels over a WebSocket to blend with HTTPS; null uses the TCP/TLS transport.
+    val wsUrl: String? = null,
 ) {
     // redact saslPassword from logs
     override fun toString() = "NetworkEntity(id=$id, name=$name, role=$role, host=$host:$port)"

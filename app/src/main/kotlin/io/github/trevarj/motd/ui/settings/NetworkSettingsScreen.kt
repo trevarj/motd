@@ -71,6 +71,7 @@ fun NetworkSettingsScreen(
         state = state,
         onBack = onBack,
         onDisplayNameChange = viewModel::editDisplayName,
+        onWsUrlChange = viewModel::editWsUrl,
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
         onSave = { viewModel.save(onBack) },
@@ -89,6 +90,7 @@ fun NetworkSettingsContent(
     state: NetworkSettingsUiState,
     onBack: () -> Unit,
     onDisplayNameChange: (String) -> Unit = {},
+    onWsUrlChange: (String) -> Unit = {},
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
     onSave: () -> Unit,
@@ -139,6 +141,25 @@ fun NetworkSettingsContent(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("network_display_name"),
             )
+            // Opt-in IRC-over-WebSocket URL (plans/19 §3.3). A bound child inherits its bouncer
+            // root's transport, so the field is only shown for the endpoint-owning rows.
+            if (state.entity?.role != NetworkRole.BOUNCER_CHILD) {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    OutlinedTextField(
+                        value = state.wsUrl,
+                        onValueChange = onWsUrlChange,
+                        label = { Text(stringResource(R.string.network_settings_ws_url)) },
+                        placeholder = { Text("wss://bnc.example.com:443/") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("network_ws_url"),
+                    )
+                    Text(
+                        stringResource(R.string.network_settings_ws_url_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             // autoConnect toggle — persisted immediately.
             AutoConnectRow(checked = state.autoConnect, onCheckedChange = onSetAutoConnect)
             when (state.entity?.role) {

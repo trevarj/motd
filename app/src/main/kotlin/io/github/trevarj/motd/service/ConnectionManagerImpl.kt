@@ -214,8 +214,7 @@ class ConnectionManagerImpl @Inject constructor(
         actor.start()
     }
 
-    private fun fingerprint(row: NetworkEntity): String =
-        "${row.host}:${row.port}:${row.tls}:${row.nick}:${row.saslMechanism}:${row.bouncerNetId}:${row.clientCertAlias}"
+    private fun fingerprint(row: NetworkEntity): String = networkFingerprint(row)
 
     private fun buildClient(row: NetworkEntity): IrcClient {
         // A BOUNCER_CHILD is a *bound connection to the bouncer*, not a direct socket to the
@@ -579,8 +578,19 @@ internal fun buildChildConfig(row: NetworkEntity, root: NetworkEntity?): IrcClie
         saslUser = endpoint.saslUser,
         saslPassword = endpoint.saslPassword,
         bouncerNetId = if (row.role == NetworkRole.BOUNCER_CHILD) row.bouncerNetId else null,
+        // WSS transport follows the physical endpoint: the bouncer's wsUrl for a bound child.
+        wsUrl = endpoint.wsUrl,
     )
 }
+
+/**
+ * Connection-affecting fingerprint for one network row. Any change here restarts the actor
+ * (rebuilds the socket): endpoint, identity, SASL, bouncer bind, client-cert alias, and the opt-in
+ * WSS URL (plans/19 §3.3), so toggling/editing the WebSocket transport reconnects. Extracted for
+ * unit tests.
+ */
+internal fun networkFingerprint(row: NetworkEntity): String =
+    "${row.host}:${row.port}:${row.tls}:${row.nick}:${row.saslMechanism}:${row.bouncerNetId}:${row.clientCertAlias}:${row.wsUrl}"
 
 internal fun wantedNetworkIds(
     all: List<NetworkEntity>,

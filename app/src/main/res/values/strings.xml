@@ -90,6 +90,8 @@
     <string name="settings_github_url">https://github.com/trevarj/motd</string>
     <string name="network_settings_title">Network</string>
     <string name="network_settings_display_name">Network name</string>
+    <string name="network_settings_ws_url">WebSocket URL (wss://)</string>
+    <string name="network_settings_ws_url_desc">Optional. Tunnels IRC over a WebSocket (e.g. wss://bnc.example.com:443/) to look like ordinary HTTPS and bypass networks that block IRC. Requires a WebSocket listener on your soju server. Leave blank for a normal TCP/TLS connection.</string>
     <string name="network_settings_delete">Delete network</string>
     <string name="network_settings_delete_confirm_title">Delete network?</string>
     <string name="network_settings_delete_confirm_message">This removes the network and all of its buffers and history.</string>

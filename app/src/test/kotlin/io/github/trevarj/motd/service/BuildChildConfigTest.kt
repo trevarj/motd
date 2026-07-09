@@ -4,6 +4,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -95,5 +96,43 @@ class BuildChildConfigTest {
         assertEquals("irc.libera.chat", cfg.host)
         // Still emits a BIND so a later-resolved bouncer would select the right network.
         assertEquals("7", cfg.bouncerNetId)
+    }
+
+    // -- WSS transport threading (plans/19 §3.3) ------------------------------
+
+    @Test
+    fun `direct network threads its own wsUrl into the config`() {
+        val direct = child().copy(
+            role = NetworkRole.DIRECT, parentId = null, bouncerNetId = null,
+            wsUrl = "wss://irc.example.org:443/",
+        )
+        val cfg = buildChildConfig(direct, root = null)
+        assertEquals("wss://irc.example.org:443/", cfg.wsUrl)
+    }
+
+    @Test
+    fun `child inherits the bouncer root's wsUrl, not its own`() {
+        // The physical socket is the bouncer's, so the WSS URL follows the root endpoint.
+        val cfg = buildChildConfig(
+            child().copy(wsUrl = "wss://upstream.example:443/"),
+            root().copy(wsUrl = "wss://bnc.example.org:443/"),
+        )
+        assertEquals("wss://bnc.example.org:443/", cfg.wsUrl)
+    }
+
+    @Test
+    fun `null wsUrl leaves the config on the default TCP transport`() {
+        val cfg = buildChildConfig(child(), root())
+        assertNull(cfg.wsUrl)
+    }
+
+    @Test
+    fun `fingerprint changes when wsUrl changes so the actor restarts`() {
+        val base = root()
+        val fp1 = networkFingerprint(base)
+        val fp2 = networkFingerprint(base.copy(wsUrl = "wss://bnc.example.org:443/"))
+        assertNotEquals(fp1, fp2)
+        // Same wsUrl -> stable fingerprint (no spurious restart).
+        assertEquals(fp2, networkFingerprint(base.copy(wsUrl = "wss://bnc.example.org:443/")))
     }
 }

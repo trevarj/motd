@@ -381,6 +381,8 @@ fun buildNetworkEntity(
     name: String = server.host,
     parentId: Long? = null,
     bouncerNetId: String? = null,
+    // Opt-in IRC-over-WebSocket endpoint (plans/19 §3.3); null keeps the TCP/TLS transport.
+    wsUrl: String? = null,
 ): NetworkEntity {
     val isSoju = role == NetworkRole.BOUNCER_ROOT || role == NetworkRole.BOUNCER_CHILD
     // Trim leading/trailing whitespace: paste artefacts break host resolution and NICK/USER.
@@ -411,6 +413,7 @@ fun buildNetworkEntity(
         saslUser = auth.saslUser.trim().ifBlank { null },
         saslPassword = auth.saslPassword.ifBlank { null },
         clientCertAlias = if (isSoju) null else auth.certAlias,
+        wsUrl = wsUrl?.trim()?.ifBlank { null },
     )
 }
 

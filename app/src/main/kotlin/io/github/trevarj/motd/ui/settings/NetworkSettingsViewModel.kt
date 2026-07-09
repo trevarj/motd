@@ -20,6 +20,8 @@ data class NetworkSettingsUiState(
     val entity: NetworkEntity? = null,
     // User-facing display name (alias). Editable so a bouncer root need not show its raw host/IP.
     val displayName: String = "",
+    // Opt-in IRC-over-WebSocket URL (plans/19 §3.3); blank = default TCP/TLS transport.
+    val wsUrl: String = "",
     val server: ServerForm = ServerForm(),
     val auth: AuthForm = AuthForm(),
     // Round 5 (plans/16 §5.3): live status + autoConnect editing.
@@ -51,6 +53,7 @@ class NetworkSettingsViewModel @Inject constructor(
                 loaded = true,
                 entity = n,
                 displayName = n?.name.orEmpty(),
+                wsUrl = n?.wsUrl.orEmpty(),
                 server = n?.toServerForm() ?: ServerForm(),
                 auth = n?.toAuthForm() ?: AuthForm(),
                 autoConnect = n?.autoConnect ?: true,
@@ -70,6 +73,7 @@ class NetworkSettingsViewModel @Inject constructor(
     fun editServer(server: ServerForm) { _state.value = _state.value.copy(server = server) }
     fun editAuth(auth: AuthForm) { _state.value = _state.value.copy(auth = auth) }
     fun editDisplayName(name: String) { _state.value = _state.value.copy(displayName = name) }
+    fun editWsUrl(url: String) { _state.value = _state.value.copy(wsUrl = url) }
 
     fun connect() = viewModelScope.launch { connectionManager.connect(networkId) }
     fun disconnect() = viewModelScope.launch { connectionManager.disconnect(networkId) }
@@ -95,6 +99,8 @@ class NetworkSettingsViewModel @Inject constructor(
             name = _state.value.displayName.trim().ifBlank { current.name },
             parentId = current.parentId,
             bouncerNetId = current.bouncerNetId,
+            // Blank clears the WSS override, reverting to the default TCP/TLS transport.
+            wsUrl = _state.value.wsUrl.trim().ifBlank { null },
             // Persist the current autoConnect value alongside the form fields.
         ).copy(autoConnect = _state.value.autoConnect)
         networkRepository.updateNetwork(updated)

@@ -10,14 +10,17 @@ import io.github.trevarj.motd.irc.transport.TransportFactory
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.Socket
 import java.security.Principal
 import java.security.PrivateKey
 import java.security.cert.X509Certificate
+import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.KeyManager
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509KeyManager
+import javax.net.ssl.X509TrustManager
 
 /**
  * One persisted STS policy per host (plans/03): pins a TLS port and a `until` expiry (epoch ms).
@@ -85,7 +88,12 @@ class AppTransportFactory(
      *  layer publish a TOFU prompt even though IrcClient flattens the failure into a state string. */
     private val onCertUntrusted: (CertUntrustedException) -> Unit = {},
 ) : TransportFactory {
-    override fun create(host: String, port: Int, tls: Boolean): IrcTransport {
+    override fun create(host: String, port: Int, tls: Boolean, wsUrl: String?): IrcTransport {
+        // Opt-in IRC-over-WebSocket transport (plans/19 §3.3). When a wsUrl is configured the
+        // physical connection is a WebSocket to that URL instead of a raw TCP/TLS socket; TLS,
+        // pinning, and hostname verification still key on the wsUrl's REAL host/port.
+        if (!wsUrl.isNullOrBlank()) return createWs(wsUrl)
+
         // STS enforcement: a live policy forces TLS on the pinned port.
         val policy = runBlocking { stsStore.policyFor(host) }
         val effTls = tls || policy != null
@@ -98,6 +106,44 @@ class AppTransportFactory(
         // Pinned leaf → skip hostname verification (bare-IP certs); unpinned → enforce it.
         return OkioLineTransport(host, effPort, tls = true, sslContext = sslContext, verifyHostname = pinned == null)
     }
+
+    /**
+     * Build a [WsLineTransport] for [wsUrl] (`wss://host:443/`). Reuses the exact TLS stack of the
+     * TCP path: an [SSLContext] pairing the client-cert [KeyManager] with a [PinningTrustManager]
+     * keyed on the WS URL's real host/port, and hostname verification that a pinned leaf skips
+     * (matching `verifyHostname = false` above). Plaintext `ws://`/`ws+insecure://` (behind a
+     * reverse proxy terminating TLS) connects without an SSL stack.
+     */
+    private fun createWs(wsUrl: String): IrcTransport {
+        // OkHttp's HttpUrl parses ws/wss and fills the default port (443 for wss, 80 for ws).
+        val httpUrl = wsUrl.replaceFirst("wss://", "https://")
+            .replaceFirst("ws+insecure://", "http://")
+            .replaceFirst("ws://", "http://")
+            .toHttpUrlOrNull()
+        val wsHost = httpUrl?.host ?: hostOf(wsUrl)
+        val wsPort = httpUrl?.port ?: (if (wsUrl.startsWith("wss://")) 443 else 80)
+        val secure = wsUrl.startsWith("wss://")
+        if (!secure) return WsLineTransport(url = wsUrl)
+
+        val pinned = runBlocking { certStore.pinnedFor(wsHost, wsPort) }
+        val trustManager = PinningTrustManager(wsHost, wsPort, pinned, onCertUntrusted)
+        val sslContext = buildTlsContext(clientCertAlias, trustManager)
+        // Pinned leaf → skip hostname verification (bare-IP/self-signed bouncer certs), mirroring the
+        // TCP path's verifyHostname=false; the exact-leaf pin is the stronger guarantee. Unpinned →
+        // pass null so OkHttp keeps its default verifier (full CA + hostname).
+        val verifier: HostnameVerifier? =
+            if (pinned == null) null else HostnameVerifier { _, _ -> true }
+        return WsLineTransport(
+            url = wsUrl,
+            sslSocketFactory = sslContext.socketFactory,
+            trustManager = trustManager as X509TrustManager,
+            hostnameVerifier = verifier,
+        )
+    }
+
+    /** Bare-bones host extraction fallback if HttpUrl parsing fails (e.g. an odd scheme). */
+    private fun hostOf(wsUrl: String): String =
+        wsUrl.substringAfter("://").substringBefore('/').substringBefore(':')
 
     /** SSLContext with the optional KeyChain client-cert KeyManager + the pinning trust manager. */
     private fun buildTlsContext(alias: String?, trustManager: TrustManager): SSLContext {

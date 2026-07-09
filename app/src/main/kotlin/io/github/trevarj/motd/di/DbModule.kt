@@ -10,6 +10,7 @@ import dagger.hilt.components.SingletonComponent
 import io.github.trevarj.motd.data.db.BufferDao
 import io.github.trevarj.motd.data.db.MemberDao
 import io.github.trevarj.motd.data.db.MessageDao
+import io.github.trevarj.motd.data.db.MIGRATION_1_2
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.ReactionDao
@@ -23,7 +24,10 @@ internal object DbModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MotdDatabase =
-        Room.databaseBuilder(context, MotdDatabase::class.java, "motd.db").build()
+        // Non-destructive migrations only (plans/04): the release app holds real user history.
+        Room.databaseBuilder(context, MotdDatabase::class.java, "motd.db")
+            .addMigrations(MIGRATION_1_2)
+            .build()
 
     @Provides fun provideNetworkDao(db: MotdDatabase): NetworkDao = db.networkDao()
     @Provides fun provideBufferDao(db: MotdDatabase): BufferDao = db.bufferDao()

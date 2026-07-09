@@ -87,6 +87,9 @@ dependencies {
     implementation(libs.paging.compose)
     implementation(libs.datastore.preferences)
     implementation(libs.coil.compose)
+    // Explicit for the IRC-over-WebSocket transport (plans/19 §3.3); already present transitively
+    // via Coil, pinned to the same resolved version in libs.versions.toml so nothing new resolves.
+    implementation(libs.okhttp)
     implementation(libs.coroutines.android)
     implementation(libs.serialization.json)
     implementation(libs.unifiedpush.connector)
@@ -95,4 +98,6 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    // Real WebSocket handshake for the WSS transport framing test (plans/19 §3.3).
+    testImplementation(libs.okhttp.mockwebserver)
 }
