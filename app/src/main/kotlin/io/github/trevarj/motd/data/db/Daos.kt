@@ -38,6 +38,13 @@ interface NetworkDao {
 
     @Query("SELECT * FROM networks WHERE parentId = :rootId")
     suspend fun childrenOf(rootId: Long): List<NetworkEntity>
+
+    // Snapshot of all rows for the app-level duplicate check in NetworkRepositoryImpl.addNetwork.
+    // A one-shot read (not the observed Flow) so dedup is a simple suspend call; the networks
+    // table is tiny (a handful of rows) so a full scan is cheap and avoids a per-identity index
+    // that would need a schema bump (DB is v1, no migrations).
+    @Query("SELECT * FROM networks")
+    suspend fun allNow(): List<NetworkEntity>
 }
 
 @Dao
@@ -154,6 +161,19 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND msgid = :msgid LIMIT 1")
     suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
+
+    /**
+     * Newest local self row for [bufferId] matching [text] within [lo]..[hi] serverTime, to collapse
+     * an un-labeled echo into a pending/confirmed-local row (plans/03 echo heuristic). Un-confirmed
+     * (pendingLabel set) rows rank first. A suspend @Query runs off the main thread and is
+     * transaction-safe (both the live onChat path and the HistoryBatch withTransaction path).
+     */
+    @Query(
+        """SELECT * FROM messages WHERE bufferId = :bufferId AND isSelf = 1 AND text = :text
+          AND serverTime BETWEEN :lo AND :hi
+          ORDER BY (pendingLabel IS NOT NULL) DESC, serverTime DESC, id DESC LIMIT 1"""
+    )
+    suspend fun findSelfEchoCandidate(bufferId: Long, text: String, lo: Long, hi: Long): MessageEntity?
 
     // Delete a single row by primary key. Used to drop a failed local-echo row on retry/delete so
     // the resend does not leave a permanent duplicate "failed" bubble (plans/15 #10).

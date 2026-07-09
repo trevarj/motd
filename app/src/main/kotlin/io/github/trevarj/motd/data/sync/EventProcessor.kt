@@ -515,40 +515,16 @@ class EventProcessor @Inject constructor(
      * strongest match); a confirmed-local row (from the no-labeled-response send path) also matches
      * so its self-clock dedupKey collapses with the server echo. Returns null when nothing matches.
      */
-    private suspend fun findSelfEchoCandidate(bufferId: Long, text: String, echoTime: Long): MessageEntity? {
-        // Run synchronously on the calling coroutine (no Dispatchers.IO switch): this can execute
-        // inside a Room withTransaction (HistoryBatch), where hopping threads violates Room's
-        // transaction confinement and throws. db.query() is a plain blocking cursor read.
-        val lo = echoTime - ECHO_MATCH_WINDOW_MS
-        val hi = echoTime + ECHO_MATCH_WINDOW_MS
-        val q = androidx.sqlite.db.SimpleSQLiteQuery(
-            "SELECT * FROM messages WHERE bufferId = ? AND isSelf = 1 AND text = ? " +
-                "AND serverTime BETWEEN ? AND ? " +
-                // Un-confirmed rows first (pendingLabel set), then newest.
-                "ORDER BY (pendingLabel IS NOT NULL) DESC, serverTime DESC, id DESC LIMIT 1",
-            arrayOf<Any>(bufferId, text, lo, hi),
+    private suspend fun findSelfEchoCandidate(bufferId: Long, text: String, echoTime: Long): MessageEntity? =
+        // Delegates to a suspend @Query: Room runs it off the main thread (the events collector runs
+        // on Dispatchers.Main) and handles it correctly inside the HistoryBatch withTransaction too —
+        // the previous raw db.query() ran synchronously on the caller's thread and crashed on send.
+        messageDao.findSelfEchoCandidate(
+            bufferId,
+            text,
+            echoTime - ECHO_MATCH_WINDOW_MS,
+            echoTime + ECHO_MATCH_WINDOW_MS,
         )
-        return db.query(q).use { c ->
-            if (!c.moveToFirst()) return@use null
-            fun col(name: String) = c.getColumnIndexOrThrow(name)
-            MessageEntity(
-                id = c.getLong(col("id")),
-                bufferId = c.getLong(col("bufferId")),
-                msgid = c.getString(col("msgid")),
-                serverTime = c.getLong(col("serverTime")),
-                sender = c.getString(col("sender")),
-                senderAccount = c.getString(col("senderAccount")),
-                kind = MessageKind.valueOf(c.getString(col("kind"))),
-                text = c.getString(col("text")),
-                isSelf = c.getInt(col("isSelf")) != 0,
-                hasMention = c.getInt(col("hasMention")) != 0,
-                replyToMsgid = c.getString(col("replyToMsgid")),
-                pendingLabel = c.getString(col("pendingLabel")),
-                failed = c.getInt(col("failed")) != 0,
-                dedupKey = c.getString(col("dedupKey")),
-            )
-        }
-    }
 
     /** Buffer ids where [nick] is currently a member on [networkId] (for quit/nick fan-out). */
     private suspend fun buffersOfNick(networkId: Long, nick: String): List<Long> =

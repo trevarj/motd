@@ -2,17 +2,31 @@ package io.github.trevarj.motd.data.repo
 
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 
 // Thin pass-through over NetworkDao. Delete resolves the row by id first (Dao.delete takes an
-// entity); a missing row is a no-op.
+// entity); a missing row is a no-op. addNetwork additionally dedups against existing rows so
+// re-running onboarding / "Add network" for a server the user already has does not create a
+// duplicate NetworkEntity (which would spawn a second actor + socket for the same server).
 class NetworkRepositoryImpl @Inject constructor(
     private val networkDao: NetworkDao,
 ) : NetworkRepository {
     override fun observeNetworks(): Flow<List<NetworkEntity>> = networkDao.observeAll()
 
-    override suspend fun addNetwork(n: NetworkEntity): Long = networkDao.insert(n)
+    /**
+     * Insert [n], or return the id of an existing equivalent network instead of creating a
+     * duplicate. Two rows are "the same server" when [networkIdentityKey] matches (see there for
+     * the per-role key). The dedup is at the data layer so every add path (onboarding, Add
+     * network, soju child import) is covered transparently and callers keep the "returns the row
+     * id" contract — they just get the pre-existing id on a duplicate.
+     */
+    override suspend fun addNetwork(n: NetworkEntity): Long {
+        val key = networkIdentityKey(n)
+        networkDao.allNow().firstOrNull { networkIdentityKey(it) == key }?.let { return it.id }
+        return networkDao.insert(n)
+    }
 
     override suspend fun updateNetwork(n: NetworkEntity) = networkDao.update(n)
 
@@ -23,4 +37,32 @@ class NetworkRepositoryImpl @Inject constructor(
     override suspend fun networkById(id: Long): NetworkEntity? = networkDao.byId(id)
 
     override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = networkDao.childrenOf(rootId)
+}
+
+/** Normalize a host for identity comparison: trim, drop a trailing dot, lowercase (DNS is
+ *  case-insensitive). Hostnames are ASCII so [lowercase] with the default locale is safe. */
+internal fun normalizeHost(host: String): String =
+    host.trim().trimEnd('.').lowercase()
+
+/**
+ * Stable identity key deciding whether two [NetworkEntity] rows are the same server, used by
+ * [NetworkRepositoryImpl.addNetwork] to reject duplicates. Keyed per role:
+ *
+ * - **BOUNCER_CHILD**: `(parentId, bouncerNetId)` — a child is one bouncer-side network under one
+ *   root, regardless of host (the mirror may not know the host yet). Guards both the onboarding
+ *   import loop and the notify-mirror racing to insert the same child.
+ * - **BOUNCER_ROOT**: `(host, port, saslUser)` — one soju account (login) per host:port. Adding
+ *   the same bouncer account twice reuses the existing root.
+ * - **DIRECT**: `(host, port, nick)` — the same server with the same nick is the same connection;
+ *   a different nick is intentionally a distinct network (two identities on one server).
+ *
+ * A `null` sub-key element is kept distinct (encoded as an empty segment) so under-specified rows
+ * don't collapse onto each other.
+ */
+internal fun networkIdentityKey(n: NetworkEntity): String = when (n.role) {
+    NetworkRole.BOUNCER_CHILD -> "child|${n.parentId}|${n.bouncerNetId.orEmpty()}"
+    NetworkRole.BOUNCER_ROOT ->
+        "root|${normalizeHost(n.host)}|${n.port}|${n.saslUser.orEmpty()}"
+    NetworkRole.DIRECT ->
+        "direct|${normalizeHost(n.host)}|${n.port}|${n.nick}"
 }

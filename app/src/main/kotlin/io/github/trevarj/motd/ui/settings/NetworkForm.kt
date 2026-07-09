@@ -47,16 +47,23 @@ fun NetworkForm(
     modifier: Modifier = Modifier,
     showServer: Boolean = true,
     showAuth: Boolean = true,
-    // soju bouncer: identity (nick/username/realname) is managed per-network by soju via SASL,
-    // so the root form collects only host/port/TLS and hides the identity fields.
+    // Full USER-ident identity (nick + username + realname): the direct-network path shows all
+    // three. The soju root shows only [showNick] (its nick), since the bouncer SASL user/password
+    // live on the AUTH step and username/realname default to the nick.
     showIdentity: Boolean = true,
+    showNick: Boolean = false,
 ) {
     Column(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (showServer) {
-            ServerFields(server = server, onServerChange = onServerChange, showIdentity = showIdentity)
+            ServerFields(
+                server = server,
+                onServerChange = onServerChange,
+                showIdentity = showIdentity,
+                showNick = showNick,
+            )
         }
         if (showAuth) {
             Text(
@@ -71,14 +78,16 @@ fun NetworkForm(
 }
 
 /**
- * Server fields. [showIdentity] gates nick/username/realname: soju manages those per bound
- * network via SASL, so its root form shows only host/port/TLS.
+ * Server fields. [showIdentity] gates the full nick/username/realname block (direct networks);
+ * [showNick] surfaces just the nick (soju root), whose username/realname default to the nick and
+ * whose SASL login lives on the AUTH step.
  */
 @Composable
 private fun ServerFields(
     server: ServerForm,
     onServerChange: (ServerForm) -> Unit,
     showIdentity: Boolean = true,
+    showNick: Boolean = false,
 ) {
     OutlinedTextField(
         value = server.host,
@@ -103,7 +112,8 @@ private fun ServerFields(
         // withTls re-defaults the port (6697<->6667) unless the user typed a custom one.
         Switch(checked = server.tls, onCheckedChange = { onServerChange(server.withTls(it)) })
     }
-    if (showIdentity) {
+    // Nick is shown for the full-identity direct path and for the nick-only soju root.
+    if (showIdentity || showNick) {
         OutlinedTextField(
             value = server.nick,
             onValueChange = { onServerChange(server.copy(nick = it)) },
@@ -111,6 +121,8 @@ private fun ServerFields(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+    if (showIdentity) {
         OutlinedTextField(
             value = server.username,
             onValueChange = { onServerChange(server.copy(username = it)) },
@@ -220,9 +232,10 @@ fun buildNetworkEntity(
     parentId: Long? = null,
     bouncerNetId: String? = null,
 ): NetworkEntity {
-    // soju manages per-network identity itself; its root form collects no nick/username/realname,
-    // but :irc still sends USER/NICK on the root socket, so seed them from the SASL login username
-    // (falling back to a placeholder) to keep the registration lines well-formed.
+    // :irc sends NICK/USER on every socket (incl. the soju root). The nick is now collected on
+    // both paths, so prefer it; fall back to the SASL login user, then a placeholder, only as a
+    // last resort to keep the registration lines well-formed. username/realname default to the
+    // nick when not surfaced.
     val identitySeed = server.nick.ifBlank { auth.saslUser.ifBlank { DEFAULT_IDENTITY } }
     return NetworkEntity(
         id = id,

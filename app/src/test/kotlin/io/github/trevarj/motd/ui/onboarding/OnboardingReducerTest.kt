@@ -161,21 +161,24 @@ class OnboardingReducerTest {
     }
 
     @Test
-    fun `soju server needs only host and valid port, no nick`() {
-        // soju collects no nick/username/realname on SERVER — identity comes from SASL.
+    fun `soju server now requires host, valid port, and a nick`() {
+        // soju collects a nick on SERVER (the IRC NICK the bouncer registers with); the bouncer
+        // SASL username/password are gathered on AUTH.
         val soju = reduce(
             OnboardingState(step = OnboardingStep.CHOICE),
             OnboardingAction.ChooseConnection(ConnectionChoice.SOJU),
         ).copy(step = OnboardingStep.SERVER)
 
-        assertFalse(soju.canAdvance) // blank host
-        val withHost = soju.copy(server = ServerForm(host = "bnc.example.org"))
-        // Valid for soju despite a blank nick.
-        assertTrue(withHost.server.isValidForSoju)
-        assertFalse(withHost.server.isValid) // direct-path validity still needs a nick
-        assertTrue(withHost.canAdvance)
-        // Bad port blocks even soju.
-        assertFalse(withHost.copy(server = withHost.server.copy(port = "70000")).canAdvance)
+        assertFalse(soju.canAdvance) // blank host + nick
+        val hostOnly = soju.copy(server = ServerForm(host = "bnc.example.org"))
+        assertTrue(hostOnly.server.hostAndPortValid) // transport is fine
+        assertFalse(hostOnly.server.isValid) // but a nick is now required
+        assertFalse(hostOnly.canAdvance)
+        val withNick = hostOnly.copy(server = hostOnly.server.copy(nick = "trev"))
+        assertTrue(withNick.server.isValid)
+        assertTrue(withNick.canAdvance)
+        // Bad port blocks even with a nick.
+        assertFalse(withNick.copy(server = withNick.server.copy(port = "70000")).canAdvance)
     }
 
     @Test

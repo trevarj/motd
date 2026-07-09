@@ -51,6 +51,14 @@ class ConnectionIntentsTest {
     }
 
     @Test
+    fun `wanted set collapses duplicate ids to one actor key`() {
+        // reconcile keys actors by networkId and iterates the wanted SET, so even if two rows
+        // carried the same id (defensive), only one actor would ever be ensured for it.
+        val all = listOf(net(1, autoConnect = true), net(1, autoConnect = true))
+        assertEquals(setOf(1L), wantedNetworkIds(all, emptyMap()))
+    }
+
+    @Test
     fun `orphan BOUNCER_CHILD is excluded even when wanted`() {
         val orphan = net(1, autoConnect = true, role = NetworkRole.BOUNCER_CHILD, parentId = null)
         val bound = net(2, autoConnect = true, role = NetworkRole.BOUNCER_CHILD, parentId = 9L)

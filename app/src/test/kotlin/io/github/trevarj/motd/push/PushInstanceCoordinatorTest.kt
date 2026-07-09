@@ -76,6 +76,7 @@ class PushInstanceCoordinatorTest {
         override suspend fun update(n: NetworkEntity) = Unit
         override suspend fun delete(n: NetworkEntity) = Unit
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = emptyList()
+        override suspend fun allNow(): List<NetworkEntity> = flow.value
     }
 
     private fun net(id: Long, autoConnect: Boolean = true) = NetworkEntity(

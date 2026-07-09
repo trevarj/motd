@@ -13,34 +13,40 @@ import org.junit.Test
 class NetworkFormTest {
 
     @Test
-    fun `soju root seeds identity from the SASL username`() {
-        // soju form collects only host/port/TLS + SASL user/password; nick/username/realname blank.
+    fun `soju root uses the collected nick, not the SASL username`() {
+        // soju form now collects host/port/TLS + nick, plus SASL user/password for the bouncer.
         val entity = buildNetworkEntity(
-            server = ServerForm(host = "bnc.example.org", port = "6697", tls = true),
-            auth = AuthForm(mode = AuthMode.PLAIN, saslUser = "trev", saslPassword = "secret"),
+            server = ServerForm(host = "bnc.example.org", port = "6697", tls = true, nick = "trev"),
+            auth = AuthForm(mode = AuthMode.PLAIN, saslUser = "trevbnc", saslPassword = "secret"),
             role = NetworkRole.BOUNCER_ROOT,
         )
         assertEquals("PLAIN", entity.saslMechanism)
-        assertEquals("trev", entity.saslUser)
+        assertEquals("trevbnc", entity.saslUser) // bouncer SASL login
         assertEquals("secret", entity.saslPassword)
-        // USER/NICK still sent on the root socket -> seed identity from the SASL login username.
+        // NICK/USER on the root socket use the collected nick (not the SASL login user).
         assertEquals("trev", entity.nick)
-        assertEquals("trev", entity.username)
+        assertEquals("trev", entity.username) // ident defaults to nick
         assertEquals("trev", entity.realname)
         assertNull(entity.clientCertAlias)
     }
 
     @Test
-    fun `soju root falls back to placeholder identity when no SASL user`() {
-        val entity = buildNetworkEntity(
+    fun `soju root falls back to SASL user then placeholder when nick blank`() {
+        // Defensive: if a nick somehow reaches building blank, prefer the SASL user, else "motd",
+        // so the NICK/USER registration lines are never blank.
+        val fromSasl = buildNetworkEntity(
+            server = ServerForm(host = "bnc.example.org"),
+            auth = AuthForm(mode = AuthMode.PLAIN, saslUser = "trevbnc", saslPassword = "p"),
+            role = NetworkRole.BOUNCER_ROOT,
+        )
+        assertEquals("trevbnc", fromSasl.nick)
+
+        val placeholder = buildNetworkEntity(
             server = ServerForm(host = "bnc.example.org"),
             auth = AuthForm(mode = AuthMode.PLAIN),
             role = NetworkRole.BOUNCER_ROOT,
         )
-        // No nick, no SASL user -> non-blank placeholder so USER/NICK stay well-formed.
-        assertEquals("motd", entity.nick)
-        assertEquals("motd", entity.username)
-        assertEquals("motd", entity.realname)
+        assertEquals("motd", placeholder.nick)
     }
 
     @Test

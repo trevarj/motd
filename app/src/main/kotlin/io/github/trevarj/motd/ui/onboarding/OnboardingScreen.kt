@@ -285,8 +285,10 @@ private fun ServerPage(
             onAuthChange = onAuthChange,
             showServer = !authOnly,
             showAuth = authOnly,
-            // soju SERVER step: host/port/TLS only; identity is managed by the bouncer via SASL.
+            // Direct path shows the full identity (nick/username/realname); the soju root shows
+            // only the nick here (its bouncer SASL user/password live on the AUTH step).
             showIdentity = !state.isSoju,
+            showNick = state.isSoju,
         )
     }
 }

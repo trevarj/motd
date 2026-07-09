@@ -55,14 +55,15 @@ data class ServerForm(
     )
 
     /**
-     * Minimal validity for enabling "next" on the direct-network SERVER step: host, valid port,
-     * and a nick. The soju path validates against [isValidForSoju] (no nick collected there).
+     * SERVER-step validity for both paths: host, a valid port, and a nick. The soju root now
+     * collects a nick too (it is the IRC NICK the bouncer registers with); its bouncer SASL
+     * username/password are gathered on the AUTH step.
      */
     val isValid: Boolean
-        get() = isValidForSoju && nick.isNotBlank()
+        get() = hostAndPortValid && nick.isNotBlank()
 
-    /** soju SERVER step needs only host + a valid port (identity comes from SASL). */
-    val isValidForSoju: Boolean
+    /** Transport-only validity (host + valid port), independent of identity. */
+    val hostAndPortValid: Boolean
         get() = host.isNotBlank() &&
             port.toIntOrNull()?.let { it in 1..65535 } == true
 }
@@ -117,8 +118,8 @@ data class OnboardingState(
         get() = when (step) {
             OnboardingStep.WELCOME -> true
             OnboardingStep.CHOICE -> choice != null
-            // soju collects only host/port on SERVER (identity is SASL); direct also needs a nick.
-            OnboardingStep.SERVER -> if (isSoju) server.isValidForSoju else server.isValid
+            // Both paths collect host/port/nick on SERVER; soju's SASL user/password gate AUTH.
+            OnboardingStep.SERVER -> server.isValid
             OnboardingStep.AUTH -> auth.isValid
             OnboardingStep.CONNECT -> isReady
             OnboardingStep.FINISH -> true
