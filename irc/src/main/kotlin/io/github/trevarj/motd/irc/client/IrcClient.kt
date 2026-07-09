@@ -323,18 +323,31 @@ class IrcClient(
         }
     }
 
-    /** Convenience: PRIVMSG with label; returns the label used (for echo dedup). */
-    suspend fun sendMessage(target: String, text: String, replyToMsgid: String?): String {
+    /**
+     * Convenience: PRIVMSG with label; returns the label used (for echo dedup). [beforeSend] runs
+     * with the resolved label ("" when labeled-response is unavailable) IMMEDIATELY before the
+     * message hits the wire, so the caller can persist its pending/optimistic row before any echo
+     * can come back — on a fast (e.g. local) connection the echo-message reply otherwise races ahead
+     * of the insert and the self-send duplicates.
+     */
+    suspend fun sendMessage(
+        target: String,
+        text: String,
+        replyToMsgid: String?,
+        beforeSend: suspend (String) -> Unit = {},
+    ): String {
         val t = transport ?: return ""
         val tags = buildMap { if (replyToMsgid != null) put("+draft/reply", replyToMsgid) }
         val base = IrcMessage(tags = tags, command = "PRIVMSG", params = listOf(target, text))
         if (!hasCap("labeled-response")) {
+            beforeSend("")
             t.send(base.serialize())
             return ""
         }
         // Do NOT register a correlator deferred: the labeled echo must flow through as a normal
         // self ChatMessage event (carrying label in ctx) so the app can dedup the pending row.
         val label = labels.next()
+        beforeSend(label)
         t.send(base.copy(tags = base.tags + ("label" to label)).serialize())
         return label
     }

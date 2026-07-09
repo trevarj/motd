@@ -358,12 +358,18 @@ class ConnectionManagerImpl @Inject constructor(
             // Split >400-byte UTF-8 payloads on word boundaries; each chunk gets its own row.
             val chunks = splitUtf8(body, MAX_BYTES)
             for (chunk in chunks) {
-                val label = client.sendMessage(target, chunk, replyToMsgid)
                 // Stored display text = wire chunk minus the CTCP ACTION \x01 wrapper.
                 val displayChunk = if (lineIsAction) {
                     chunk.removePrefix("ACTION ").removeSuffix("")
                 } else {
                     chunk
+                }
+                // Persist the pending row in beforeSend — BEFORE the PRIVMSG hits the wire — so a
+                // fast labeled echo can't be processed ahead of the insert and duplicate the send.
+                val label = client.sendMessage(target, chunk, replyToMsgid) { lbl ->
+                    if (lbl.isNotEmpty()) {
+                        eventProcessor.insertPending(bufferId, lbl, buffer_meNick(client), displayChunk, replyToMsgid, kind)
+                    }
                 }
                 if (label.isEmpty()) {
                     // No labeled-response: the pending row could never be confirmed (its echo
@@ -375,7 +381,6 @@ class ConnectionManagerImpl @Inject constructor(
                     insertConfirmedSelf(buffer.networkId, target, displayChunk, replyToMsgid, kind)
                     continue
                 }
-                eventProcessor.insertPending(bufferId, label, buffer_meNick(client), displayChunk, replyToMsgid, kind)
                 armEchoTimeout(bufferId, label)
             }
         }
