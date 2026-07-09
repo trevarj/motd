@@ -1,0 +1,94 @@
+name: E2E (hermetic emulator)
+
+# Slow, KVM-backed end-to-end acceptance run: boots a headless Android emulator,
+# stands up a self-contained soju+ergo bouncer stack, installs the debug APK, and
+# drives the app via the device runbook (test/e2e/runbook.sh) against the LOCAL
+# bouncer. No external network, no secrets.
+#
+# Not run on every PR (it's slow). Manual dispatch + a nightly schedule.
+on:
+  workflow_dispatch:
+    inputs:
+      phases:
+        description: 'Phases to run (space-separated, e.g. "a b c" or "a b c d e f g h i")'
+        required: false
+        default: 'a b c'
+  schedule:
+    # Nightly at 04:17 UTC (odd minute to avoid the top-of-hour stampede).
+    - cron: '17 4 * * *'
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Build the debug APK (mirrors ci.yml's Java/SDK setup) -------------
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      # --- KVM for a fast, hardware-accelerated emulator --------------------
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # --- Stand up the hermetic bouncer stack ------------------------------
+      - name: Start hermetic bouncer stack
+        run: |
+          # `up --wait` blocks until every service is healthy AND the one-shot
+          # ergo-provision / ergo-seed containers have completed successfully
+          # (their depends_on chain gates soju + the seed on the right order).
+          docker compose -f test/e2e/hermetic/docker-compose.yml up --build -d --wait
+      - name: Dump stack logs (provisioning + seed)
+        run: docker compose -f test/e2e/hermetic/docker-compose.yml logs --no-color
+
+      # --- CI env for the runbook (runbook.sh sources test/e2e/.env) --------
+      - name: Install CI env
+        run: |
+          cp test/e2e/.env.ci test/e2e/.env
+          # Allow the workflow input to widen/narrow phase coverage.
+          if [ -n "${{ github.event.inputs.phases }}" ]; then
+            echo "E2E_PHASES=${{ github.event.inputs.phases }}" >> test/e2e/.env
+          fi
+
+      # --- Headless emulator + runbook --------------------------------------
+      # AOSP (target: default) image — NOT google_apis — so Play Protect never
+      # interferes with the debug install / uiautomator driving.
+      - name: Run e2e runbook on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            adb install -r -g app/build/outputs/apk/debug/app-debug.apk
+            ./test/e2e/runbook.sh
+
+      # --- Artifacts on failure ---------------------------------------------
+      - name: Upload e2e artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: test/e2e/artifacts/**
+          if-no-files-found: ignore
+      - name: Dump stack logs on failure
+        if: failure()
+        run: docker compose -f test/e2e/hermetic/docker-compose.yml logs --no-color || true
+      - name: Tear down stack
+        if: always()
+        run: docker compose -f test/e2e/hermetic/docker-compose.yml down -v || true

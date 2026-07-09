@@ -1,0 +1,9 @@
+# test/e2e/hermetic/ergo/Dockerfile.provision — one-shot ergo provisioner/seeder.
+#
+# A tiny alpine image carrying the raw-IRC seed script (provision.sh) plus its
+# only deps: busybox `nc` (netcat) and `base64` (coreutils, for the SASL blob).
+FROM alpine:3.21
+RUN apk add --no-cache coreutils
+COPY provision.sh /usr/local/bin/provision.sh
+RUN chmod +x /usr/local/bin/provision.sh
+ENTRYPOINT ["/usr/local/bin/provision.sh"]

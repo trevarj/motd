@@ -1,0 +1,126 @@
+# test/e2e/hermetic/docker-compose.yml — self-contained bouncer stack for the
+# MOTD end-to-end run. No external network, no secrets.
+#
+# Topology:
+#   ergo            upstream IRCd (plaintext :6667, internal only)
+#   ergo-provision  one-shot: registers ergo accounts + the ##motdtest channel
+#   soju            app-facing bouncer (TLS :6697 published to host); proxies
+#                   ergo as the bouncer network "libera"
+#   ergo-seed       one-shot: posts the seed messages AFTER soju is connected
+#                   (so soju logs them into its message-store for CHATHISTORY)
+#
+# The Android emulator reaches the host at 10.0.2.2, so the app connects to
+# 10.0.2.2:6697 (soju). See test/e2e/.env.ci for the matching runbook config.
+#
+# Boot order (enforced via depends_on + healthchecks):
+#   ergo healthy
+#     → ergo-provision (register accounts + channel) completes
+#       → soju starts (identifies to the upstream `motd` account, joins
+#         ##motdtest) and becomes healthy
+#         → ergo-seed posts messages that soju observes + persists.
+#
+# Wait for BOTH soju healthy AND ergo-seed completed before running the runbook
+# (the workflow gates on ergo-seed).
+#
+# Local iteration:
+#   docker compose -f test/e2e/hermetic/docker-compose.yml up --build -d
+#   docker compose -f test/e2e/hermetic/docker-compose.yml logs -f soju
+#   docker compose -f test/e2e/hermetic/docker-compose.yml down -v   # wipe state
+
+name: motd-e2e-hermetic
+
+services:
+  ergo:
+    image: ghcr.io/ergochat/ergo:v2.18.0
+    restart: unless-stopped
+    volumes:
+      - ./ergo/ircd.yaml:/ircd/ircd.yaml:ro
+      - ergo-data:/ircd
+    # ergo's default entrypoint runs `ergo run --conf /ircd/ircd.yaml`.
+    healthcheck:
+      # The ergo image is alpine-based, so busybox `nc` is available. Probe the
+      # plaintext IRC port to confirm the daemon is accepting connections.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 6667 || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  # One-shot: register the ergo accounts + the ##motdtest channel BEFORE soju
+  # connects, so soju can identify to the upstream `motd` account.
+  ergo-provision:
+    build:
+      context: ./ergo
+      dockerfile: Dockerfile.provision
+    command: ["register"]
+    depends_on:
+      ergo:
+        condition: service_healthy
+    environment: &ergo_seed_env
+      ERGO_HOST: ergo
+      ERGO_PORT: "6667"
+      TEST_CHANNEL: "##motdtest"
+      APP_NICK: motdadb
+      UP_ACCOUNT: motd
+      UP_PASS: motdupstream
+      SEED_NICK: motdadb2
+      SEED_PASS: motdadb2pass
+    restart: "no"
+
+  soju:
+    build:
+      context: ./soju
+      dockerfile: Dockerfile
+      args:
+        SOJU_VERSION: v0.10.1
+    depends_on:
+      ergo:
+        condition: service_healthy
+      ergo-provision:
+        condition: service_completed_successfully
+    ports:
+      # Publish soju's TLS listener on the host so the emulator hits 10.0.2.2:6697.
+      - "6697:6697"
+    environment:
+      ERGO_ADDR: "ergo:6667"
+      ERGO_ACCOUNT: motd
+      ERGO_PASSWORD: motdupstream
+      SOJU_USER: motd
+      SOJU_PASS: motdtest
+      NETWORK_NAME: libera
+      TEST_CHANNEL: "##motdtest"
+      NICK: motdadb
+    volumes:
+      - soju-data:/var/lib/soju
+    healthcheck:
+      # Healthy only once the UPSTREAM network is actually connected (and thus
+      # joined ##motdtest via the connect-command). Gating ergo-seed on this
+      # avoids the race where seed messages are posted before soju is in the
+      # channel to observe + log them. `network status` prints "[connected]"
+      # per network — match the bracketed token so it doesn't spuriously match
+      # the "connected" substring inside "[disconnected]" (validated).
+      test:
+        - CMD-SHELL
+        - "sojuctl -config /etc/soju/soju.config user run motd network status 2>/dev/null | grep -q '\\[connected\\]' || exit 1"
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  # One-shot: post the seed messages AFTER soju is healthy (connected + joined
+  # ##motdtest), so soju observes them live and writes them to its message-store.
+  # This is what makes the app's CHATHISTORY backfill (Phase C) return content.
+  ergo-seed:
+    build:
+      context: ./ergo
+      dockerfile: Dockerfile.provision
+    command: ["seed"]
+    depends_on:
+      soju:
+        condition: service_healthy
+    environment: *ergo_seed_env
+    restart: "no"
+
+volumes:
+  ergo-data:
+  soju-data:
