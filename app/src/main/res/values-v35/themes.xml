@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 15 (API 35) edge-to-edge opt-out. targetSdk 35 forces every window edge-to-edge,
+         which turns windowSoftInputMode=adjustResize into a no-op (the framework stops resizing the
+         window for the IME). This app is intentionally NOT edge-to-edge (MainActivity paints a root
+         Surface, no enableEdgeToEdge, no WindowInsets handling), so we opt back out to restore the
+         pre-15 resize behavior: the window shrinks when the keyboard opens and the chat composer
+         rides up above it with no imePadding. The attribute is API 35, so it lives here in
+         values-v35 to avoid a lint NewApi flag on older SDKs. Applied to Theme.Motd (base of
+         Theme.Motd.Splash and the theme MainActivity swaps to at runtime) so the opt-out is on the
+         activity window regardless of which of the two themes is active at window creation.
+         Light-mode parent matches values/themes.xml. -->
+    <style name="Theme.Motd" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+    </style>
+</resources>

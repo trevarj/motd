@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark-mode Android 15 (API 35) edge-to-edge opt-out. Resource qualifiers do not merge across
+         configs: without this file a night + v35 device would resolve Theme.Motd from values-night/
+         (which lacks the opt-out) instead of values-v35/, leaving edge-to-edge enforced and
+         adjustResize a no-op in dark mode. Duplicating the opt-out here keeps IME resize working in
+         both light and dark. Dark-mode parent matches values-night/themes.xml. -->
+    <style name="Theme.Motd" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+    </style>
+</resources>
