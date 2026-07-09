@@ -478,12 +478,25 @@ class ConnectionManagerImpl @Inject constructor(
 
     override suspend fun trustCert(prompt: CertPrompt) {
         certStore.pin(prompt.host, prompt.port, prompt.sha256)
-        _certPrompts.value = _certPrompts.value.filterNot { it.networkId == prompt.networkId }
-        certFailures.remove(prompt.networkId)
-        // Rebuild the parked actor fresh so it picks up the new pin and reconnects.
-        actors.remove(prompt.networkId)?.stop()
-        fingerprints.remove(prompt.networkId)
-        connect(prompt.networkId)
+        // Pinning is keyed by host:port, so trusting one cert unblocks EVERY network parked on that
+        // same endpoint: a soju bouncer root plus all its bound children tunnel through the same
+        // host:port. Reconnect all cert-failed networks whose recorded failure targets this
+        // endpoint, not just the one whose prompt was shown — otherwise siblings stay Failed until
+        // an app restart (#48). The prompt's own network is always included because its recorded
+        // failure carries this host:port.
+        // Always include the prompt's own network: its failure is normally in certFailures, but a
+        // concurrent reconcile could have cleared it, and Trust must still reconnect it.
+        val affected = networksSharingCertEndpoint(prompt.host, prompt.port, certFailures) + prompt.networkId
+        for (id in affected) {
+            _certPrompts.value = _certPrompts.value.filterNot { it.networkId == id }
+            certFailures.remove(id)
+            // Rebuild each parked actor fresh so it picks up the new pin and reconnects. connect()
+            // already force-drops the stale actor, but drop here too so a concurrent reconcile can't
+            // re-observe the parked (completed-job) actor between removal and the connect() call.
+            actors.remove(id)?.stop()
+            fingerprints.remove(id)
+            connect(id)
+        }
     }
 
     override fun dismissCertPrompt(prompt: CertPrompt) {
@@ -591,6 +604,24 @@ internal fun buildChildConfig(row: NetworkEntity, root: NetworkEntity?): IrcClie
  */
 internal fun networkFingerprint(row: NetworkEntity): String =
     "${row.host}:${row.port}:${row.tls}:${row.nick}:${row.saslMechanism}:${row.bouncerNetId}:${row.clientCertAlias}:${row.wsUrl}"
+
+/**
+ * Network ids parked on the given `host:port` cert endpoint (plans/12, #48). When a TOFU cert is
+ * trusted, the pin is stored keyed by host:port, so every network whose latest untrusted-cert
+ * failure targets that same endpoint becomes reconnectable — a soju bouncer root and all its bound
+ * children share one physical host:port, so trusting once must reconnect the whole set, not only the
+ * network whose prompt was shown. Host match is case-insensitive to mirror the cert store's pin key.
+ * Extracted for unit tests.
+ */
+internal fun networksSharingCertEndpoint(
+    host: String,
+    port: Int,
+    certFailures: Map<Long, CertUntrustedException>,
+): Set<Long> =
+    certFailures.asSequence()
+        .filter { (_, ex) -> ex.host.equals(host, ignoreCase = true) && ex.port == port }
+        .map { it.key }
+        .toSet()
 
 internal fun wantedNetworkIds(
     all: List<NetworkEntity>,
