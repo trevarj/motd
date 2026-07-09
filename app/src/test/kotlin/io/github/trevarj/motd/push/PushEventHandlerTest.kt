@@ -20,7 +20,7 @@ class PushEventHandlerTest {
 
     private class RecordingNotifier : PushNotifier {
         val notified = mutableListOf<Pair<Long, IrcEvent.ChatMessage>>()
-        override fun notify(networkId: Long, message: IrcEvent.ChatMessage) {
+        override suspend fun notify(networkId: Long, message: IrcEvent.ChatMessage) {
             notified.add(networkId to message)
         }
     }

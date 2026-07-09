@@ -130,10 +130,12 @@ fun interface WebPushCryptoFacade {
  * so the handler stays testable without an Android context.
  */
 fun interface PushNotifier {
-    fun notify(networkId: Long, message: IrcEvent.ChatMessage)
+    // suspend so the buffer lookup + notification decision use plain suspend Room/DataStore reads
+    // (which dispatch off the main thread) instead of runBlocking. handle() is already suspend.
+    suspend fun notify(networkId: Long, message: IrcEvent.ChatMessage)
 }
 
 /** No-op notifier for contexts where notifications are not wanted (e.g. tests / not yet wired). */
 object NoopPushNotifier : PushNotifier {
-    override fun notify(networkId: Long, message: IrcEvent.ChatMessage) = Unit
+    override suspend fun notify(networkId: Long, message: IrcEvent.ChatMessage) = Unit
 }

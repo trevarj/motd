@@ -264,7 +264,7 @@ class EventProcessorTest {
         // A recording notifier; a MOTD line containing our nick must not fire.
         var fired = false
         val recProcessor = EventProcessor(db, TypingTrackerImpl(), object : MessageNotifier {
-            override fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage) {
+            override suspend fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage) {
                 fired = true
             }
         })

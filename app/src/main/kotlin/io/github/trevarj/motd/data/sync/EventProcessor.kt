@@ -600,10 +600,14 @@ class EventProcessor @Inject constructor(
  * remaining suppression rules (muted buffer, foregrounded buffer) and posts MessagingStyle.
  */
 interface MessageNotifier {
-    fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage)
+    // suspend so implementations read Room / DataStore with plain suspend calls (which dispatch
+    // off the main thread). The events collector runs on Dispatchers.Main, so a blocking read here
+    // (runBlocking { suspend Room query }) deadlocks/crashes the main thread — same class of bug as
+    // the findSelfEchoCandidate fix. Callers are already in suspend context.
+    suspend fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage)
 
     /** No-op notifier for tests / headless contexts. */
     object Noop : MessageNotifier {
-        override fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage) = Unit
+        override suspend fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage) = Unit
     }
 }

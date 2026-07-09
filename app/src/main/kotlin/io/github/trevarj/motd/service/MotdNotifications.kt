@@ -100,15 +100,13 @@ class MotdNotifications @Inject constructor(
 
     // -- MessageNotifier (message/mention notifications) --
 
-    override fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage) {
-        // Room read is blocking-safe here — off the collector's hot path.
-        val buffer = runCatching {
-            kotlinx.coroutines.runBlocking { db.bufferDao().observeById(bufferId) }
-        }.getOrNull()
+    override suspend fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage) {
+        // Plain suspend reads: Room and DataStore dispatch off the main thread on their own. The
+        // events collector runs on Dispatchers.Main, so the previous runBlocking { suspend query }
+        // blocked the main thread and crashed once a (freshly-added) fool's message arrived.
+        val buffer = runCatching { db.bufferDao().observeById(bufferId) }.getOrNull()
         // Friends/fools sets (single bounded DataStore read; null settings ⇒ empty sets).
-        val settings = runCatching {
-            kotlinx.coroutines.runBlocking { settingsRepository.settings.first() }
-        }.getOrNull() ?: Settings()
+        val settings = runCatching { settingsRepository.settings.first() }.getOrNull() ?: Settings()
         val sender = normalizeNick(message.source.nick)
 
         // Round 4 (plans/13 §2.3/§2.4/§2.6): fools are fully silenced; friends bypass the
