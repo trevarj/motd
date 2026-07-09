@@ -94,7 +94,9 @@ fun MessageList(
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
-    expandedFools: Set<Long> = emptySet(),
+    // Effective per-row expansion (global expand-all + per-row overrides live in the caller); toggle
+    // flips a single fool row either way so expand/re-collapse is bidirectional (bug #9).
+    foolExpanded: (Long) -> Boolean = { false },
     onToggleFool: (Long) -> Unit = {},
     // Tapping a non-self sender's name/avatar opens the nick sheet (plans/16 §5.8).
     onSenderClick: (String) -> Unit = {},
@@ -129,10 +131,8 @@ fun MessageList(
             // Fool COLLAPSE (plans/13 §2.4): render a tap-to-expand placeholder in place of the
             // bubble until its id is expanded. HIDE mode is filtered upstream so it never reaches
             // here; system-kind rows are handled above and never fool-treated.
-            val isCollapsedFool = foolsMode == FoolsMode.COLLAPSE &&
-                isFoolSender(msg.sender, msg.isSelf, fools) &&
-                msg.id !in expandedFools
-            if (isCollapsedFool) {
+            val isFool = foolsMode == FoolsMode.COLLAPSE && isFoolSender(msg.sender, msg.isSelf, fools)
+            if (isFool && !foolExpanded(msg.id)) {
                 FoolPlaceholderRow(
                     msg = msg,
                     older = older,
@@ -159,6 +159,9 @@ fun MessageList(
                 msg = msg,
                 older = older,
                 readMarkerTime = readMarkerTime,
+                // An expanded fool row shows a small tap-to-re-collapse chip above its bubble so the
+                // toggle is bidirectional without stealing the bubble's long-press/link taps (#9).
+                onCollapseFool = if (isFool) ({ onToggleFool(msg.id) }) else null,
                 senderIsFriend = !msg.isSelf && normalizeNick(msg.sender) in friends,
                 reactions = msg.msgid?.let(reactionChips).orEmpty(),
                 onLongPress = onLongPress,
@@ -274,6 +277,8 @@ private fun MessageRow(
     onOpenLink: (String) -> Unit,
     onSenderClick: (String) -> Unit,
     resolveReply: (String) -> ReplyPreviewData?,
+    // Non-null for an expanded fool row: renders a "hide" chip above the bubble that re-collapses it.
+    onCollapseFool: (() -> Unit)? = null,
 ) {
     // Read-marker divider sits below the first message newer than the marker (drawn after the
     // bubble because the list is reversed => "above" the newer message visually).
@@ -300,6 +305,8 @@ private fun MessageRow(
     }
     val preview = (previewState as? PreviewState.Done)?.preview
     val previewLoading = linkUrl != null && previewState is PreviewState.Loading
+
+    onCollapseFool?.let { FoolCollapseChip(sender = msg.sender, onCollapse = it) }
 
     MessageBubble(
         sender = msg.sender,
@@ -374,6 +381,35 @@ private fun FoolPlaceholderRow(
 
     if (showNewDivider) NewMessagesDivider(label = stringResource(R.string.chat_new_messages))
     if (showDay) DaySeparator(timeMs = msg.serverTime)
+}
+
+/**
+ * Tap-to-re-collapse chip drawn above an expanded fool's bubble (bug #9). Mirrors the dimmed
+ * placeholder styling of [FoolPlaceholderRow] so the toggle reads as its inverse, and keeps the
+ * bubble's own long-press/link taps intact by owning a separate tap target.
+ */
+@Composable
+private fun FoolCollapseChip(sender: String, onCollapse: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clickable { onCollapse() }
+            .alpha(0.7f)
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.VisibilityOff,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.size(6.dp))
+        Text(
+            text = stringResource(R.string.chat_fool_collapse, sender),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 /** Append-load footer: spinner while loading older history, error, or end-of-history (plans/15 #27). */

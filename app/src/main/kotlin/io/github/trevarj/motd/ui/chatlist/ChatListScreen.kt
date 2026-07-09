@@ -1,7 +1,9 @@
 package io.github.trevarj.motd.ui.chatlist
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -18,12 +20,14 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
@@ -36,9 +40,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -96,6 +104,7 @@ fun ChatListScreen(
         onOpenSearch = onOpenSearch,
         onSetPinned = viewModel::setPinned,
         onSetMuted = viewModel::setMuted,
+        onDeleteBuffer = viewModel::deleteBuffer,
         onJoinChannel = viewModel::joinChannel,
         onMessageUser = { networkId, nick -> viewModel.messageUser(networkId, nick, onOpenBuffer) },
         // Round 5: drawer selection + connectivity + nav.
@@ -122,6 +131,7 @@ fun ChatListContent(
     onSetMuted: (Long, Boolean) -> Unit,
     onJoinChannel: (Long, String) -> Unit,
     onMessageUser: (Long, String) -> Unit,
+    onDeleteBuffer: (ChatListRow) -> Unit = {},
     // Round 5 (plans/16 §3): drawer + scoping. Defaulted so previews stay terse.
     onSelectNetwork: (Long?) -> Unit = {},
     onConnect: (Long) -> Unit = {},
@@ -262,6 +272,7 @@ fun ChatListContent(
                         onOpenBuffer = onOpenBuffer,
                         onSetPinned = onSetPinned,
                         onSetMuted = onSetMuted,
+                        onDeleteBuffer = onDeleteBuffer,
                     )
                 }
             }
@@ -317,6 +328,7 @@ private fun ChatList(
     onOpenBuffer: (Long) -> Unit,
     onSetPinned: (Long, Boolean) -> Unit,
     onSetMuted: (Long, Boolean) -> Unit,
+    onDeleteBuffer: (ChatListRow) -> Unit,
 ) {
     // Precedence: pinned > friend > fool > regular (plans/13 §3.5, Confirmed decision #6).
     val sections = sectionChatList(rows, friends, fools)
@@ -333,7 +345,7 @@ private fun ChatList(
             }
             items(sections.pinned, key = { "p-${it.bufferId}" }) { row ->
                 // A pinned friend keeps its star even while under Pinned.
-                RowWithMenu(row, isFriend(row, friends), multiNetwork, onOpenBuffer, onSetPinned, onSetMuted)
+                RowWithMenu(row, isFriend(row, friends), multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
             }
         }
         if (sections.friends.isNotEmpty()) {
@@ -341,11 +353,11 @@ private fun ChatList(
                 SectionHeader(stringResource(R.string.chatlist_friends))
             }
             items(sections.friends, key = { "f-${it.bufferId}" }) { row ->
-                RowWithMenu(row, isFriend = true, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted)
+                RowWithMenu(row, isFriend = true, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
             }
         }
         items(sections.regular, key = { it.bufferId }) { row ->
-            RowWithMenu(row, isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted)
+            RowWithMenu(row, isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
         }
         if (sections.fools.isNotEmpty()) {
             item(key = "fools-header") {
@@ -358,7 +370,7 @@ private fun ChatList(
             if (foolsExpanded) {
                 items(sections.fools, key = { "o-${it.bufferId}" }) { row ->
                     Box(modifier = Modifier.alpha(0.55f)) {
-                        RowWithMenu(row, isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted)
+                        RowWithMenu(row, isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
                     }
                 }
             }
@@ -394,6 +406,7 @@ private fun FoolsSectionHeader(count: Int, expanded: Boolean, onToggle: () -> Un
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RowWithMenu(
     row: ChatListRow,
@@ -402,43 +415,144 @@ private fun RowWithMenu(
     onOpenBuffer: (Long) -> Unit,
     onSetPinned: (Long, Boolean) -> Unit,
     onSetMuted: (Long, Boolean) -> Unit,
+    onDeleteBuffer: (ChatListRow) -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    ChatListRowItem(
-        row = row,
-        showNetworkChip = multiNetwork,
-        onClick = { onOpenBuffer(row.bufferId) },
-        onLongClick = { menuOpen = true },
-        isFriend = isFriend,
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    // Swipe end-to-start reveals a destructive red background; releasing arms the confirm dialog
+    // (deleting drops history + parts a joined channel, so we never delete silently). We do NOT
+    // let the box settle into the dismissed state — confirmValueChange returns false so the row
+    // snaps back and the dialog drives the actual delete.
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                confirmDelete = true
+            }
+            false
+        },
     )
-    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-        DropdownMenuItem(
-            text = { Text(if (row.pinned) "Unpin" else "Pin") },
-            leadingIcon = {
-                Icon(
-                    if (row.pinned) Icons.Outlined.PushPin else Icons.Filled.PushPin,
-                    contentDescription = null,
+
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = { DeleteSwipeBackground() },
+    ) {
+        // Row background must be opaque so the swipe background stays hidden until swiped.
+        Box(modifier = Modifier.background(MaterialTheme.colorScheme.background)) {
+            ChatListRowItem(
+                row = row,
+                showNetworkChip = multiNetwork,
+                onClick = { onOpenBuffer(row.bufferId) },
+                onLongClick = { menuOpen = true },
+                isFriend = isFriend,
+            )
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text(if (row.pinned) "Unpin" else "Pin") },
+                    leadingIcon = {
+                        Icon(
+                            if (row.pinned) Icons.Outlined.PushPin else Icons.Filled.PushPin,
+                            contentDescription = null,
+                        )
+                    },
+                    onClick = {
+                        onSetPinned(row.bufferId, !row.pinned)
+                        menuOpen = false
+                    },
                 )
-            },
-            onClick = {
-                onSetPinned(row.bufferId, !row.pinned)
-                menuOpen = false
-            },
-        )
-        DropdownMenuItem(
-            text = { Text(if (row.muted) "Unmute" else "Mute") },
-            leadingIcon = {
-                Icon(
-                    if (row.muted) Icons.Outlined.Notifications else Icons.Outlined.NotificationsOff,
-                    contentDescription = null,
+                DropdownMenuItem(
+                    text = { Text(if (row.muted) "Unmute" else "Mute") },
+                    leadingIcon = {
+                        Icon(
+                            if (row.muted) Icons.Outlined.Notifications else Icons.Outlined.NotificationsOff,
+                            contentDescription = null,
+                        )
+                    },
+                    onClick = {
+                        onSetMuted(row.bufferId, !row.muted)
+                        menuOpen = false
+                    },
                 )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.chatlist_delete)) },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Outlined.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    },
+                    onClick = {
+                        menuOpen = false
+                        confirmDelete = true
+                    },
+                )
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        DeleteConfirmDialog(
+            row = row,
+            onConfirm = {
+                confirmDelete = false
+                onDeleteBuffer(row)
             },
-            onClick = {
-                onSetMuted(row.bufferId, !row.muted)
-                menuOpen = false
-            },
+            onDismiss = { confirmDelete = false },
         )
     }
+}
+
+/** Red end-aligned trash background revealed while swiping a chat-list row toward delete. */
+@Composable
+private fun DeleteSwipeBackground() {
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(horizontal = 24.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Delete,
+            contentDescription = stringResource(R.string.chatlist_delete),
+            tint = MaterialTheme.colorScheme.onErrorContainer,
+        )
+    }
+}
+
+/** Destructive-delete confirmation; channel copy mentions the implicit part/leave. */
+@Composable
+private fun DeleteConfirmDialog(
+    row: ChatListRow,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val message = if (row.type == BufferType.CHANNEL) {
+        stringResource(R.string.chatlist_delete_confirm_channel, row.displayName)
+    } else {
+        stringResource(R.string.chatlist_delete_confirm_message, row.displayName)
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.chatlist_delete_confirm_title)) },
+        text = { Text(message) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(
+                    stringResource(R.string.action_delete),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
 }
 
 @Composable

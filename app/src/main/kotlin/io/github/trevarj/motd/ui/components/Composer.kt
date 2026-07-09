@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -79,7 +80,12 @@ fun Composer(
                     placeholder = { Text(placeholder) },
                     maxLines = 6,
                     shape = RoundedCornerShape(24.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                    // Sentence capitalization: the IME uppercases the first letter of each sentence
+                    // (bug #10). Autocomplete/commands are unaffected — a leading "/" isn't a letter.
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Default,
+                    ),
                 )
                 val canSend = enabled && value.text.isNotBlank()
                 IconButton(

@@ -77,7 +77,8 @@
     <string name="settings_delivery_socket_desc">Keeps a foreground connection alive.</string>
     <string name="settings_delivery_push">Push (UnifiedPush)</string>
     <string name="settings_delivery_push_desc">Battery-friendly push via your bouncer.</string>
-    <string name="settings_delivery_push_unavailable">No push distributor or bouncer webpush available.</string>
+    <string name="settings_delivery_push_unavailable">Requires a bouncer with Web Push (connect to your soju bouncer first).</string>
+    <string name="settings_delivery_push_needs_distributor">Install a UnifiedPush distributor like ntfy to receive push.</string>
     <string name="settings_battery">Battery optimization</string>
     <string name="settings_battery_desc">Exempt MOTD to keep connections reliable.</string>
     <string name="settings_networks">Networks</string>
@@ -216,6 +217,9 @@
     <string name="manage_empty_fools">No fools yet. Add a nick above or use a member’s profile.</string>
     <string name="manage_empty_colors">No overrides yet. Add a nick to pick its color.</string>
     <string name="chat_fool_hidden">%1$s · hidden</string>
+    <string name="chat_fool_collapse">%1$s · hide again</string>
+    <string name="chat_fool_expand_all">Show fools\' messages</string>
+    <string name="chat_fool_collapse_all">Hide fools\' messages</string>
     <string name="chatlist_friends">Friends</string>
     <string name="chatlist_fools">Fools (%1$d)</string>
     <string name="channelinfo_fools_section">Fools (%1$d)</string>
@@ -339,4 +343,11 @@
     <string name="channelinfo_topic_edit_action">Edit topic</string>
     <string name="channelinfo_topic_edit_hint">Channel topic</string>
     <string name="channelinfo_topic_edit_save">Save</string>
+
+    <!-- Delete chat/buffer from the chat list (swipe-to-dismiss + long-press menu). Appended at
+         end to avoid a same-file clobber with the parallel webpush-strings agent. -->
+    <string name="chatlist_delete">Delete chat</string>
+    <string name="chatlist_delete_confirm_title">Delete chat?</string>
+    <string name="chatlist_delete_confirm_channel">This leaves %1$s and permanently removes its history from this device.</string>
+    <string name="chatlist_delete_confirm_message">This permanently removes %1$s and its history from this device.</string>
 </resources>

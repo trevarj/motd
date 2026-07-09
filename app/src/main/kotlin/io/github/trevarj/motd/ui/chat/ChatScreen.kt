@@ -10,12 +10,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Badge
@@ -231,6 +232,24 @@ fun ChatContent(
         mutableStateOf(TextFieldValue(""))
     }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
+    // Global fool expand/collapse toggle (plans/13 §2.4): when true every collapsed fool row in the
+    // buffer renders expanded; per-row toggles still override individually via [expandedFools] and
+    // [collapsedFools]. Ephemeral per composition, like expandedFools.
+    var expandAllFools by remember { mutableStateOf(false) }
+    // Rows the user explicitly re-collapsed while expand-all is on (so a global expand is still
+    // individually reversible). Cleared whenever expand-all is toggled off.
+    var collapsedFools by remember { mutableStateOf(setOf<Long>()) }
+
+    // Initial anchor: on channel open with no deep-jump, park the reverse list at index 0 (newest)
+    // once the first page settles. reverseLayout already starts at 0, but an explicit scroll after
+    // the first non-empty refresh guards against a Paging prepend nudging the anchor before layout.
+    if (jumpTarget == null) {
+        LaunchedEffect(Unit) {
+            snapshotFlow { items.loadState.refresh to items.itemCount }
+                .first { (refresh, count) -> refresh is LoadState.NotLoading && count > 0 }
+            if (listState.firstVisibleItemIndex <= 1) listState.scrollToItem(0)
+        }
+    }
 
     // Consume any mention prefill queued by ChannelInfo. Runs once per composition entry; the
     // store is already emptied by consume() and the text survives via rememberSaveable, so a
@@ -373,6 +392,23 @@ fun ChatContent(
                     }
                 },
                 actions = {
+                    // Global fool expand/collapse (bug #9): only meaningful with configured fools in
+                    // COLLAPSE mode. Toggling clears the per-row overrides so it acts as a clean reset.
+                    if (foolsMode == FoolsMode.COLLAPSE && fools.isNotEmpty()) {
+                        IconButton(onClick = {
+                            expandAllFools = !expandAllFools
+                            expandedFools = emptySet()
+                            collapsedFools = emptySet()
+                        }) {
+                            Icon(
+                                if (expandAllFools) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = stringResource(
+                                    if (expandAllFools) R.string.chat_fool_collapse_all
+                                    else R.string.chat_fool_expand_all,
+                                ),
+                            )
+                        }
+                    }
                     IconButton(onClick = { buffer?.let { onOpenSearch(it.id) } }) {
                         Icon(
                             Icons.Outlined.Search,
@@ -383,9 +419,12 @@ fun ChatContent(
             )
         },
     ) { padding ->
-        // imePadding keeps the composer above the soft keyboard under targetSdk 35 edge-to-edge
-        // (plans/15 #9).
-        Box(modifier = Modifier.fillMaxSize().padding(padding).imePadding()) {
+        // The activity is NOT edge-to-edge (decor fits system windows) and the manifest sets
+        // windowSoftInputMode=adjustResize, so the window itself shrinks when the IME opens: the
+        // Scaffold content area gets smaller and the composer stays pinned at the new bottom while
+        // the reverse list stays anchored at index 0. An imePadding() here would double-count the
+        // IME inset (window already resized) and shove the whole column up above the keyboard.
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.weight(1f)) {
                     MessageList(
@@ -406,8 +445,21 @@ fun ChatContent(
                         friends = friends,
                         fools = fools,
                         foolsMode = foolsMode,
-                        expandedFools = expandedFools,
-                        onToggleFool = { id -> expandedFools = expandedFools + id },
+                        // Effective expansion: global expand-all default, minus rows the user
+                        // re-collapsed; otherwise only individually expanded rows show (bug #9).
+                        foolExpanded = { id ->
+                            if (expandAllFools) id !in collapsedFools else id in expandedFools
+                        },
+                        // Bidirectional per-row toggle, respecting the global default.
+                        onToggleFool = { id ->
+                            if (expandAllFools) {
+                                collapsedFools =
+                                    if (id in collapsedFools) collapsedFools - id else collapsedFools + id
+                            } else {
+                                expandedFools =
+                                    if (id in expandedFools) expandedFools - id else expandedFools + id
+                            }
+                        },
                         onSenderClick = onSenderClick,
                     )
 
@@ -421,9 +473,16 @@ fun ChatContent(
                     }
 
                     // Scroll-to-bottom FAB with unread count (against the frozen marker, plans/15 #2).
+                    // Viewport-aware: only messages below the fold (newer than the topmost visible
+                    // row) and past the read marker count, so the badge shrinks as the user scrolls
+                    // down and clears at the bottom — it isn't a monotonic "arrived since entry"
+                    // tally. firstVisibleItemIndex is read reactively so scrolls recompute it.
+                    val firstVisible by remember {
+                        derivedStateOf { listState.firstVisibleItemIndex }
+                    }
                     ScrollToBottomFab(
                         visible = !atBottom,
-                        unread = unreadCount(items, readMarkerSnapshot),
+                        unread = unreadBelowViewport(items, readMarkerSnapshot, firstVisible),
                         onClick = { scope.launch { listState.animateScrollToItem(0) } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     )
@@ -447,6 +506,9 @@ fun ChatContent(
                         if (text.isNotBlank()) {
                             onSubmit(text)
                             composerText = TextFieldValue("")
+                            // Sending should always reveal the just-sent message: snap the reverse
+                            // list back to the newest row (index 0) even if the user had scrolled up.
+                            scope.launch { listState.animateScrollToItem(0) }
                         }
                     },
                     enabled = composerEnabled,
@@ -531,15 +593,23 @@ private fun chatSubtitle(state: ChatState, context: android.content.Context): St
     }
 }
 
-/** Unread estimate for the FAB badge: messages newer than the frozen read marker. */
-private fun unreadCount(items: LazyPagingItems<MessageEntity>, marker: Long?): Int {
-    if (marker == null) return 0
-    var count = 0
-    for (i in 0 until items.itemCount) {
-        val t = items.peek(i)?.serverTime ?: continue
-        if (t > marker) count++ else break
-    }
-    return count
+/**
+ * Unread count for the FAB badge, viewport-aware. In the reversed list, rows with index <
+ * [firstVisibleIndex] are below the fold (newer than the topmost visible row, scrolled off toward
+ * the bottom). We count those that are also newer than the frozen read [marker]. At the bottom
+ * (firstVisibleIndex == 0) this is 0, and it shrinks as the user scrolls down toward the newest
+ * message — never a monotonic "arrived since entry" tally. Delegates to the pure
+ * [unreadBelowViewport] helper for unit testing.
+ */
+private fun unreadBelowViewport(
+    items: LazyPagingItems<MessageEntity>,
+    marker: Long?,
+    firstVisibleIndex: Int,
+): Int {
+    if (marker == null || firstVisibleIndex <= 0) return 0
+    val times = (0 until firstVisibleIndex.coerceAtMost(items.itemCount))
+        .mapNotNull { items.peek(it)?.serverTime }
+    return unreadBelowViewport(times, marker)
 }
 
 @Composable

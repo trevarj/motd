@@ -101,6 +101,26 @@ interface BufferDao {
 
     @Query("UPDATE buffers SET readMarkerTime = :ts WHERE id = :id AND (readMarkerTime IS NULL OR readMarkerTime < :ts)")
     suspend fun advanceReadMarker(id: Long, ts: Long)
+
+    // Delete a buffer and all of its content. messages (and their messages_fts rows via Room's
+    // FTS sync triggers) cascade off the buffers->messages FK ON DELETE CASCADE. members and
+    // reactions have no FK to buffers, so they are cleared explicitly here in one transaction to
+    // avoid orphaned rows (plans/04 cascade note; verified in DeleteBufferDaoTest).
+    @Query("DELETE FROM members WHERE bufferId = :id")
+    suspend fun deleteMembersForBuffer(id: Long)
+
+    @Query("DELETE FROM reactions WHERE bufferId = :id")
+    suspend fun deleteReactionsForBuffer(id: Long)
+
+    @Query("DELETE FROM buffers WHERE id = :id")
+    suspend fun deleteBufferRow(id: Long)
+
+    @Transaction
+    suspend fun deleteBuffer(id: Long) {
+        deleteMembersForBuffer(id)
+        deleteReactionsForBuffer(id)
+        deleteBufferRow(id) // cascades to messages + messages_fts
+    }
 }
 
 /** Projection for the chat list screen. */

@@ -43,6 +43,15 @@ fun keepMessage(msg: MessageEntity, spec: MessageFilterSpec): Boolean =
 const val GROUP_WINDOW_MS: Long = 3 * 60 * 1000
 
 /**
+ * Count how many of the below-the-fold [serverTimes] are newer than the frozen read [marker].
+ * [serverTimes] are the reverse-list rows scrolled off toward the bottom (indices `0 until
+ * firstVisibleIndex`, newest first). Returns the FAB unread badge value: 0 at the bottom, shrinking
+ * as the user scrolls down — viewport/read aware rather than a monotonic arrival tally (bug #7).
+ */
+fun unreadBelowViewport(serverTimes: List<Long>, marker: Long): Int =
+    serverTimes.count { it > marker }
+
+/**
  * Aggregate raw [ReactionEntity] rows into per-msgid chip lists: one chip per emoji with its count
  * and whether [myNick] is among the reactors. Ordered by first appearance for stability.
  *

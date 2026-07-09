@@ -183,7 +183,7 @@ fun SettingsContent(
             SectionHeader(stringResource(R.string.settings_delivery))
             DeliveryGroup(
                 current = state.settings.deliveryMode,
-                pushAvailable = state.pushAvailable,
+                availability = state.pushAvailability,
                 onSelect = onDeliveryMode,
             )
             ListItem(
@@ -339,7 +339,7 @@ private fun countText(count: Int): (@Composable () -> Unit)? =
 @Composable
 private fun DeliveryGroup(
     current: DeliveryMode,
-    pushAvailable: Boolean,
+    availability: PushAvailability,
     onSelect: (DeliveryMode) -> Unit,
 ) {
     Column(Modifier.selectableGroup()) {
@@ -350,12 +350,19 @@ private fun DeliveryGroup(
             enabled = true,
             onClick = { onSelect(DeliveryMode.PERSISTENT_SOCKET) },
         )
+        // Selectable once the bouncer advertises webpush; a missing distributor is surfaced as
+        // actionable guidance rather than a silently-disabled control (registration self-heals when
+        // a distributor is installed). Only the missing-webpush case disables the control.
+        val subtitle = when {
+            availability.needsDistributor -> stringResource(R.string.settings_delivery_push_needs_distributor)
+            availability.selectable -> stringResource(R.string.settings_delivery_push_desc)
+            else -> stringResource(R.string.settings_delivery_push_unavailable)
+        }
         RadioRow(
             label = stringResource(R.string.settings_delivery_push),
-            subtitle = if (pushAvailable) stringResource(R.string.settings_delivery_push_desc)
-            else stringResource(R.string.settings_delivery_push_unavailable),
+            subtitle = subtitle,
             selected = current == DeliveryMode.UNIFIED_PUSH,
-            enabled = pushAvailable,
+            enabled = availability.selectable,
             onClick = { onSelect(DeliveryMode.UNIFIED_PUSH) },
         )
     }
@@ -446,7 +453,7 @@ private fun SettingsContentPreview() {
                         nick = "me", username = "me", realname = "Me",
                     ),
                 ),
-                pushAvailable = false,
+                pushAvailability = PushAvailability(),
             ),
             onBack = {}, onOpenNetwork = {}, onOpenAbout = {},
             onOpenFriends = {}, onOpenFools = {}, onOpenNickColors = {}, onOpenAddNetwork = {},

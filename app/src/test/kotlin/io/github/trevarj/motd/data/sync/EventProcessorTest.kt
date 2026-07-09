@@ -279,6 +279,129 @@ class EventProcessorTest {
         assertNotNull(serverBuffer())
     }
 
+    // --- own-message single-row across the three echo scenarios (plans/03/04, bug 4) ---
+
+    /** Buffer id for a self-send target, creating the query/channel buffer as onChat would. */
+    private suspend fun selfBuffer(target: String): Long {
+        // A channel target starts with '#'; DMs key by the other party but self-sends key by target.
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = null, time = 500), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = target, text = "__seed__", isSelf = true, replyToMsgid = null,
+        ))
+        val name = if (target.startsWith("#")) target else target
+        return db.bufferDao().byName(networkId, name)!!.id
+    }
+
+    @Test
+    fun ownMessage_echoWithLabeledResponse_singleRow() = runTest {
+        val bufferId = selfBuffer("#chan")
+        // Pending insert (labeled send).
+        processor.insertPending(bufferId, "lbl1", "me", "hey there", null, MessageKind.PRIVMSG)
+        // Labeled echo confirms in place.
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "srv1", time = 2000, label = "lbl1"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "#chan", text = "hey there", isSelf = true, replyToMsgid = null,
+        ))
+        val rows = pagingList(bufferId).filter { it.text == "hey there" }
+        assertEquals(1, rows.size)
+        assertEquals("srv1", rows.single().msgid)
+        assertNull(rows.single().pendingLabel)
+    }
+
+    @Test
+    fun ownMessage_echoOnly_noLabel_collapsesToSingleRow() = runTest {
+        val bufferId = selfBuffer("#chan")
+        // (c/b) Confirmed-local insert as the no-labeled-response send path does: self ChatMessage,
+        // no msgid, no label, local clock.
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = null, time = 1000, label = null), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "#chan", text = "echo test", isSelf = true, replyToMsgid = null,
+        ))
+        // Server echo-message arrives with a real msgid and a slightly different (server) time.
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "srv2", time = 1200, label = null), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "#chan", text = "echo test", isSelf = true, replyToMsgid = null,
+        ))
+        val rows = pagingList(bufferId).filter { it.text == "echo test" }
+        assertEquals(1, rows.size)
+        assertEquals("srv2", rows.single().msgid)
+        // A later CHATHISTORY replay of the same msgid is ignored.
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "srv2", time = 1200, label = null), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "#chan", text = "echo test", isSelf = true, replyToMsgid = null,
+        ))
+        assertEquals(1, pagingList(bufferId).count { it.text == "echo test" })
+    }
+
+    @Test
+    fun ownMessage_pendingThenUnlabeledEcho_collapsesAndConfirms() = runTest {
+        val bufferId = selfBuffer("bob") // DM query buffer
+        // Labeled send inserts a pending row (serverTime = wall-clock now, like production)...
+        processor.insertPending(bufferId, "lblx", "me", "dm body", null, MessageKind.PRIVMSG)
+        // ...but the echo comes back WITHOUT the label (server dropped labeled-response mid-flight).
+        // Its serverTime is the server clock, ~now (within the 30s echo window of the pending row).
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "srv3", time = System.currentTimeMillis(), label = null), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "bob", text = "dm body", isSelf = true, replyToMsgid = null,
+        ))
+        val rows = pagingList(bufferId).filter { it.text == "dm body" }
+        assertEquals(1, rows.size)
+        assertEquals("srv3", rows.single().msgid)
+        assertNull(rows.single().pendingLabel)
+    }
+
+    @Test
+    fun ownMessage_localInsertOnly_neitherEchoNorLabel_singleRow() = runTest {
+        val bufferId = selfBuffer("#chan")
+        // (c) No echo-message, no labeled-response: only the confirmed-local insert exists.
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = null, time = 1000, label = null), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "#chan", text = "lonely", isSelf = true, replyToMsgid = null,
+        ))
+        val rows = pagingList(bufferId).filter { it.text == "lonely" }
+        assertEquals(1, rows.size)
+        assertNull(rows.single().pendingLabel)
+    }
+
+    @Test
+    fun ownMessage_distinctSelfSendsSameText_notMerged_outsideWindow() = runTest {
+        val bufferId = selfBuffer("#chan")
+        // Two genuinely separate self-sends of the same text far apart in time must stay separate.
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "a1", time = 1000, label = null), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "#chan", text = "same", isSelf = true, replyToMsgid = null,
+        ))
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "a2", time = 1000 + 60_000, label = null), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "#chan", text = "same", isSelf = true, replyToMsgid = null,
+        ))
+        assertEquals(2, pagingList(bufferId).count { it.text == "same" })
+    }
+
+    // --- self-join idempotency across replays (bug 8) ---
+
+    @Test
+    fun selfJoin_idempotent_acrossReplaysAndReconnects() = runTest {
+        // Live self-join (no msgid).
+        processor.process(networkId, IrcEvent.Joined(ctx(msgid = null, time = 1000), "me", "#chan", null, null, isSelf = true))
+        val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
+        // Buffer reopen → CHATHISTORY event-playback replays the self-join with a msgid + new time.
+        processor.process(networkId, IrcEvent.Joined(ctx(msgid = "j-play", time = 1000), "me", "#chan", null, null, isSelf = true))
+        // Reconnect → another live self-join, no msgid, different time.
+        processor.process(networkId, IrcEvent.Joined(ctx(msgid = null, time = 9999), "me", "#chan", null, null, isSelf = true))
+        val joins = pagingList(bufferId).filter { it.kind == MessageKind.JOIN }
+        assertEquals(1, joins.size)
+    }
+
+    @Test
+    fun otherJoin_notCollapsedBySelfJoinKey() = runTest {
+        // A self-join and someone else's join to the same buffer must both appear.
+        processor.process(networkId, IrcEvent.Joined(ctx(msgid = null, time = 1000), "me", "#chan", null, null, isSelf = true))
+        processor.process(networkId, IrcEvent.Joined(ctx(msgid = "oj", time = 1001), "alice", "#chan", null, null, isSelf = false))
+        val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
+        assertEquals(2, pagingList(bufferId).count { it.kind == MessageKind.JOIN })
+    }
+
     @Test
     fun history_pushedThroughInOneBatch_isIdempotent() = runTest {
         val batch = IrcEvent.HistoryBatch("#chan", listOf(

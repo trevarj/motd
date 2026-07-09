@@ -30,4 +30,7 @@ class BufferRepositoryImpl @Inject constructor(
         val current = bufferDao.observeById(id) ?: return
         bufferDao.update(current.copy(muted = muted))
     }
+
+    // Drop the buffer row (messages cascade via FK) plus its members/reactions in one transaction.
+    override suspend fun deleteBuffer(id: Long) = bufferDao.deleteBuffer(id)
 }

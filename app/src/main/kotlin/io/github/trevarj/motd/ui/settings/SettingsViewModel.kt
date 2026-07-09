@@ -22,7 +22,7 @@ import javax.inject.Inject
 data class SettingsUiState(
     val settings: Settings = Settings(),
     val networks: List<NetworkEntity> = emptyList(),
-    val pushAvailable: Boolean = false,
+    val pushAvailability: PushAvailability = PushAvailability(),
 )
 
 @HiltViewModel
@@ -36,16 +36,19 @@ class SettingsViewModel @Inject constructor(
         combine(
             settingsRepository.settings,
             networkRepository.observeNetworks(),
-        ) { settings, networks ->
+            // Reactive: recomputes as connections reach Ready / distributors appear, so the push
+            // toggle enables live once the soju bouncer advertises webpush.
+            pushAvailability.availability(),
+        ) { settings, networks, availability ->
             SettingsUiState(
                 settings = settings,
                 networks = networks,
-                pushAvailable = pushAvailability.isUnifiedPushAvailable(),
+                pushAvailability = availability,
             )
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = SettingsUiState(pushAvailable = pushAvailability.isUnifiedPushAvailable()),
+            initialValue = SettingsUiState(),
         )
 
     fun setThemeMode(mode: ThemeMode) = viewModelScope.launch {

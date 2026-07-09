@@ -156,20 +156,67 @@ class EventProcessor @Inject constructor(
             dedupKey = EchoDeduper.keyFor(e.ctx, e.source.nick, e.text),
         )
 
-        // Labeled echo of a pending self-send: update the pending row in place instead of insert.
-        val label = e.ctx.label
-        if (e.isSelf && label != null) {
-            val pending = messageDao.byPendingLabel(bufferId, label)
-            if (pending != null) {
-                messageDao.update(
-                    pending.copy(
-                        msgid = e.ctx.msgid,
-                        serverTime = e.ctx.serverTime,
-                        dedupKey = EchoDeduper.keyFor(e.ctx, e.source.nick, e.text),
-                        pendingLabel = null,
-                        failed = false,
-                    ),
-                )
+        // Own message dedup (plans/03 echo degradation, plans/04 echo flow). A self-send surfaces
+        // as exactly ONE row across all three server-capability scenarios:
+        //  (a) echo-message + labeled-response: labeled echo updates the pending row in place;
+        //  (b) echo-message only: no label to correlate, so the heuristic collapses the echo into
+        //      the most recent matching local row (pending or already-confirmed-local);
+        //  (c) neither: ConnectionManager's local insert is the only row (no echo ever arrives).
+        // Later CHATHISTORY replays carry the confirmed msgid → dedupKey matches → INSERT IGNORE.
+        if (e.isSelf) {
+            // Idempotent replay short-circuit: a self message whose msgid already exists (e.g. a
+            // CHATHISTORY replay of an already-confirmed row) is a no-op. Checked first with the
+            // plain suspend DAO so the raw-query heuristic below never runs inside the history
+            // transaction for the common replay case (transaction-thread safe).
+            val incomingMsgid = e.ctx.msgid
+            if (incomingMsgid != null && messageDao.byMsgid(bufferId, incomingMsgid) != null) return
+            // (a) Labeled echo of a pending self-send: update the pending row in place.
+            val label = e.ctx.label
+            if (label != null) {
+                val pending = messageDao.byPendingLabel(bufferId, label)
+                if (pending != null) {
+                    messageDao.update(
+                        pending.copy(
+                            msgid = e.ctx.msgid,
+                            serverTime = e.ctx.serverTime,
+                            dedupKey = EchoDeduper.keyFor(e.ctx, e.source.nick, e.text),
+                            pendingLabel = null,
+                            failed = false,
+                        ),
+                    )
+                    return
+                }
+            }
+            // (b) No labeled correlation: the incoming self ChatMessage may be the echo of a row we
+            // already inserted locally (a still-pending row, or a confirmed-local row from the
+            // no-labeled-response send path whose dedupKey is a sha1 over our LOCAL clock and thus
+            // will never match the server echo's key). Match to the newest local self row for this
+            // buffer with the same text inside the echo window and collapse into it, promoting the
+            // real msgid/serverTime when the echo carries one. If none matches this is a genuinely
+            // new self message (e.g. sent from another client) → fall through to a normal insert.
+            val candidate = findSelfEchoCandidate(bufferId, e.text, e.ctx.serverTime)
+            if (candidate != null) {
+                // Only rewrite the dedupKey/time forward when the echo brings a real msgid; a
+                // bare echo (no msgid) keeps the existing row so a later msgid-bearing CHATHISTORY
+                // replay still dedups against it (its key was our local sha1 either way). Promoting
+                // the dedupKey to the msgid cannot collide on the UNIQUE(bufferId, dedupKey) index:
+                // the idempotent short-circuit above already returned if that msgid existed.
+                val echoMsgid = e.ctx.msgid
+                if (echoMsgid != null) {
+                    messageDao.update(
+                        candidate.copy(
+                            msgid = echoMsgid,
+                            serverTime = e.ctx.serverTime,
+                            dedupKey = echoMsgid,
+                            pendingLabel = null,
+                            failed = false,
+                        ),
+                    )
+                } else if (candidate.pendingLabel != null || candidate.failed) {
+                    // Confirm a still-pending/failed row even without a msgid so the UI stops
+                    // showing "sending…"/retry; keep its local dedupKey.
+                    messageDao.update(candidate.copy(pendingLabel = null, failed = false))
+                }
                 return
             }
         }
@@ -221,7 +268,16 @@ class EventProcessor @Inject constructor(
         if (e.isSelf) markJoined(bufferId, true)
         memberDao.upsert(MemberEntity(bufferId, e.nick))
         upsertUser(networkId, e.nick) { it.copy(account = e.account ?: it.account, realname = e.realname ?: it.realname) }
-        insertSystem(bufferId, e.ctx, MessageKind.JOIN, e.nick, "${e.nick} joined")
+        if (e.isSelf) {
+            // Bug: our own JOIN was re-inserted every time the buffer was (re)opened — CHATHISTORY
+            // event-playback and each live re-JOIN produced a fresh "you joined" row because the
+            // default hash key folds in the volatile serverTime. Make the self-join idempotent per
+            // buffer: a stable dedupKey ("selfjoin:<bufferId>") collapses all self-joins to this
+            // buffer (live re-joins AND playbacks) into a single system row via INSERT IGNORE.
+            insertSystem(bufferId, e.ctx, MessageKind.JOIN, e.nick, "${e.nick} joined", dedupKey = "selfjoin:$bufferId")
+        } else {
+            insertSystem(bufferId, e.ctx, MessageKind.JOIN, e.nick, "${e.nick} joined")
+        }
     }
 
     private suspend fun onParted(networkId: Long, e: IrcEvent.Parted) {
@@ -430,7 +486,16 @@ class EventProcessor @Inject constructor(
         if (b.joined != joined) bufferDao.update(b.copy(joined = joined))
     }
 
-    private suspend fun insertSystem(bufferId: Long, ctx: MessageContext, kind: MessageKind, sender: String, text: String) {
+    private suspend fun insertSystem(
+        bufferId: Long,
+        ctx: MessageContext,
+        kind: MessageKind,
+        sender: String,
+        text: String,
+        // Override for idempotent system rows (e.g. self-join) that must collapse across replays
+        // regardless of serverTime. Falls back to msgid ?: sha1(serverTime|sender|text).
+        dedupKey: String? = null,
+    ) {
         val row = MessageEntity(
             bufferId = bufferId,
             msgid = ctx.msgid,
@@ -438,9 +503,51 @@ class EventProcessor @Inject constructor(
             sender = sender,
             kind = kind,
             text = text,
-            dedupKey = EchoDeduper.keyFor(ctx.msgid, ctx.serverTime, sender, text),
+            dedupKey = dedupKey ?: EchoDeduper.keyFor(ctx.msgid, ctx.serverTime, sender, text),
         )
         messageDao.insertAll(listOf(row))
+    }
+
+    /**
+     * Echo-dedup heuristic (plans/03) for own messages arriving without a labeled correlation:
+     * the newest self row in [bufferId] with identical [text] whose serverTime is within
+     * [ECHO_MATCH_WINDOW_MS] of the incoming echo. Pending/failed rows are preferred (they are the
+     * strongest match); a confirmed-local row (from the no-labeled-response send path) also matches
+     * so its self-clock dedupKey collapses with the server echo. Returns null when nothing matches.
+     */
+    private suspend fun findSelfEchoCandidate(bufferId: Long, text: String, echoTime: Long): MessageEntity? {
+        // Run synchronously on the calling coroutine (no Dispatchers.IO switch): this can execute
+        // inside a Room withTransaction (HistoryBatch), where hopping threads violates Room's
+        // transaction confinement and throws. db.query() is a plain blocking cursor read.
+        val lo = echoTime - ECHO_MATCH_WINDOW_MS
+        val hi = echoTime + ECHO_MATCH_WINDOW_MS
+        val q = androidx.sqlite.db.SimpleSQLiteQuery(
+            "SELECT * FROM messages WHERE bufferId = ? AND isSelf = 1 AND text = ? " +
+                "AND serverTime BETWEEN ? AND ? " +
+                // Un-confirmed rows first (pendingLabel set), then newest.
+                "ORDER BY (pendingLabel IS NOT NULL) DESC, serverTime DESC, id DESC LIMIT 1",
+            arrayOf<Any>(bufferId, text, lo, hi),
+        )
+        return db.query(q).use { c ->
+            if (!c.moveToFirst()) return@use null
+            fun col(name: String) = c.getColumnIndexOrThrow(name)
+            MessageEntity(
+                id = c.getLong(col("id")),
+                bufferId = c.getLong(col("bufferId")),
+                msgid = c.getString(col("msgid")),
+                serverTime = c.getLong(col("serverTime")),
+                sender = c.getString(col("sender")),
+                senderAccount = c.getString(col("senderAccount")),
+                kind = MessageKind.valueOf(c.getString(col("kind"))),
+                text = c.getString(col("text")),
+                isSelf = c.getInt(col("isSelf")) != 0,
+                hasMention = c.getInt(col("hasMention")) != 0,
+                replyToMsgid = c.getString(col("replyToMsgid")),
+                pendingLabel = c.getString(col("pendingLabel")),
+                failed = c.getInt(col("failed")) != 0,
+                dedupKey = c.getString(col("dedupKey")),
+            )
+        }
     }
 
     /** Buffer ids where [nick] is currently a member on [networkId] (for quit/nick fan-out). */
@@ -481,6 +588,11 @@ class EventProcessor @Inject constructor(
     private companion object {
         // Isupport CHANTYPES default; DM detection uses the first-char rule.
         const val CHANTYPES = "#&"
+
+        // Echo-match window (plans/03): an own message arriving without a labeled correlation is
+        // matched to a local row whose serverTime is within this many ms. Symmetric because the
+        // local clock (send time) and the server clock (echo time) can differ in either direction.
+        const val ECHO_MATCH_WINDOW_MS = 30_000L
 
         /**
          * Informational numerics persisted to the SERVER buffer as SERVER_INFO (plans/16 §5.6.3):

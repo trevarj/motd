@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.prefs.SettingsRepository
@@ -95,6 +96,21 @@ class ChatListViewModel @Inject constructor(
 
     fun joinChannel(networkId: Long, channel: String) = viewModelScope.launch {
         connectionManager.joinChannel(networkId, channel)
+    }
+
+    /**
+     * Delete a chat/buffer from the list. A CHANNEL is PARTed first (no-op when not connected —
+     * [ConnectionManager.partChannel] only sends when a live client exists), then the buffer and all
+     * of its content (messages/members/reactions) are removed. QUERY/SERVER rows just remove.
+     *
+     * Scope note: list scoping keys off networkId, never a bufferId, so deleting a buffer cannot be
+     * the scoped selection — no scope reset is needed here.
+     */
+    fun deleteBuffer(row: ChatListRow) = viewModelScope.launch {
+        if (row.type == BufferType.CHANNEL) {
+            connectionManager.partChannel(row.bufferId)
+        }
+        bufferRepository.deleteBuffer(row.bufferId)
     }
 
     /** Find-or-create a query buffer, then hand the id to [onOpen] for navigation. */

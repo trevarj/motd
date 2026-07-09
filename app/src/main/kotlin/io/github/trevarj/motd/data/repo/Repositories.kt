@@ -31,6 +31,9 @@ interface BufferRepository {
     fun observeMembers(bufferId: Long): Flow<List<MemberEntity>>
     suspend fun setPinned(id: Long, pinned: Boolean)
     suspend fun setMuted(id: Long, muted: Boolean)
+    /** Remove a buffer and all of its content (messages/members/reactions). Destructive: the
+     *  parting of a joined CHANNEL is handled upstream by the caller (ChatListViewModel). */
+    suspend fun deleteBuffer(id: Long)
     // NOTE: mark-read goes through ConnectionManager.markRead (single entry point) —
     // it advances Room via BufferDao.advanceReadMarker AND sends MARKREAD when supported.
 }
