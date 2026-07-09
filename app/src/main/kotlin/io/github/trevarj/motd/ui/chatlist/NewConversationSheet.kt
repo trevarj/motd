@@ -75,9 +75,16 @@ private fun NewConversationSheetContent(
     onBrowseChannels: (networkId: Long) -> Unit = {},
 ) {
     var tab by remember { mutableIntStateOf(0) }
-    var selectedNetwork by remember {
+    // Joining channels / messaging users only works on bound child networks or direct networks;
+    // the soju BOUNCER_ROOT is just the control connection, so exclude it from selection (a JOIN
+    // there silently does nothing). Browse was already gated out for the same reason.
+    val selectableNetworks = remember(networks) {
+        networks.filter { it.role != NetworkRole.BOUNCER_ROOT }
+    }
+    var selectedNetwork by remember(selectableNetworks) {
         mutableStateOf(
-            networks.firstOrNull { it.id == preselectedNetworkId } ?: networks.firstOrNull(),
+            selectableNetworks.firstOrNull { it.id == preselectedNetworkId }
+                ?: selectableNetworks.firstOrNull(),
         )
     }
     var input by remember { mutableStateOf("") }
@@ -103,7 +110,7 @@ private fun NewConversationSheetContent(
         }
 
         NetworkDropdown(
-            networks = networks,
+            networks = selectableNetworks,
             selected = selectedNetwork,
             onSelect = { selectedNetwork = it },
         )
