@@ -4,111 +4,79 @@
 
 # motd
 
-A native Android IRCv3 client with a Telegram-style UI. Written in Kotlin with
-Jetpack Compose and Material 3.
+motd is a native Android IRC client with a Telegram-style chat UI, built in
+Kotlin with Jetpack Compose and Material 3. It speaks IRCv3 and works best
+paired with a [soju](https://soju.im) bouncer, but connects fine to plain
+networks too.
 
-Connects directly to IRC networks or through a [soju](https://soju.im) bouncer.
-Bouncer capabilities are detected via CAP and enabled when present: infinite
-scrollback (`draft/chathistory`), cross-device read state (`draft/read-marker`),
-multi-network over one account (`soju.im/bouncer-networks`), and push
-(`soju.im/webpush` + UnifiedPush). Plain networks degrade to local-only history
-and a persistent-socket connection.
+When connected through a bouncer, motd detects capabilities over CAP and turns
+them on automatically: infinite scrollback (`draft/chathistory`), cross-device
+read state (`draft/read-marker`), several networks over one account
+(`soju.im/bouncer-networks`), and push (`soju.im/webpush` + UnifiedPush). On a
+plain network it falls back to local-only history and a persistent socket.
 
 ## Features
 
 | Feature | Description |
 |---|---|
-| Chat UI | Unified chat list with unread/mention badges; grouped message bubbles, day separators, event pills, inline images, and OG link previews. |
+| Chat UI | Unified chat list with unread/mention badges; grouped bubbles, day separators, event pills, inline images, and OG link previews. |
 | Composer | Nick autocomplete, replies (`+draft/reply`), reactions (`+draft/react`), typing (`+typing`), and slash commands (`/msg`, `/query`, `/join`, `/me`). |
 | Search | FTS4 full-text search over history, global or scoped to one buffer, with deep-jump to the matched message. |
 | Scrollback | Paging 3 backed by a `draft/chathistory` RemoteMediator; local-only fallback on plain networks. |
 | Read state | `draft/read-marker` (MARKREAD) sync through a single `ConnectionManager` entry point. |
-| Multi-network | `soju.im/bouncer-networks` (BOUNCER BIND) with one root connection plus per-network child bindings. |
-| Delivery modes | Persistent-socket foreground service, or UnifiedPush + `soju.im/webpush` with on-device RFC 8291 (aes128gcm) decryption. |
+| Multi-network | `soju.im/bouncer-networks` (BOUNCER BIND): one root connection plus per-network child bindings. |
+| Delivery | Persistent-socket foreground service, or UnifiedPush + `soju.im/webpush` with on-device RFC 8291 (aes128gcm) decryption. |
 | Theming | Material You dynamic color on Android 12+, plus SYSTEM/LIGHT/DARK/AMOLED themes. |
 | Transport | okio over `SSLSocket`, SASL PLAIN/EXTERNAL, client certificates via Android KeyChain, IRCv3 STS pinning. |
 
-## Architecture
-
-Two modules: `:app` (Android) and `:irc` (pure JVM, zero Android dependencies).
-
-```mermaid
-flowchart TD
-    subgraph app[":app (Android)"]
-        ui["ui/* (Compose, MVVM)"]
-        repo["data/repo/*"]
-        db["data/db (Room + FTS)"]
-        proc["data/sync/EventProcessor"]
-        push["push/* (UnifiedPush, RFC 8291)"]
-        cm["service/ConnectionManager"]
-    end
-    subgraph irc[":irc (pure JVM)"]
-        client["client/IrcClient (CAP/SASL, labels, batches)"]
-        ircproto["proto/ (parser/serializer)"]
-        transport["transport/ (okio + TLS)"]
-    end
-
-    ui -->|actions| cm
-    ui -->|Flow / PagingData| repo
-    repo --> db
-    proc -->|sole Room writer| db
-    cm -->|per-network| client
-    client -->|IrcEvent| proc
-    push --> proc
-    client --> ircproto
-    client --> transport
-```
-
-- `EventProcessor` is the only component that writes IRC-derived state to Room.
-- UI reads only repositories and sends actions only through `ConnectionManager`.
-- TLS policy and client certs are injected into `:irc` via `TransportFactory`.
-
-Design documents live in [`plans/`](plans/).
-
-## Screenshots
-
-_Placeholder — add device captures here._
-
-| Chat list | Chat screen | Search | Settings |
-|-----------|-------------|--------|----------|
-| _TODO_    | _TODO_      | _TODO_ | _TODO_   |
+Requires Android 8.0 (API 26) or newer.
 
 ## Building
 
-CI is the canonical build environment (see
-[`.github/workflows/`](.github/workflows/)). Locally, the Nix flake provides
-JDK 17 and the Android SDK; direnv loads it via `.envrc`.
+The canonical build environment is CI (see
+[`.github/workflows/`](.github/workflows/)). For local work, the Nix flake
+provides JDK 17 and the Android SDK; direnv loads it via `.envrc`, or run the
+commands under `nix develop`.
 
 ```sh
-nix develop -c ./gradlew :irc:test               # :irc protocol tests (pure JVM)
-nix develop -c ./gradlew :app:testDebugUnitTest  # :app unit tests (Robolectric)
+nix develop -c ./gradlew :irc:test               # protocol tests (pure JVM)
+nix develop -c ./gradlew :app:testDebugUnitTest  # app unit tests (Robolectric)
 nix develop -c ./gradlew :app:assembleDebug      # debug APK
 nix develop -c ./gradlew build                   # tests + lint + APKs
 ```
 
-APKs land in `app/build/outputs/apk/`.
+The debug APK lands in `app/build/outputs/apk/debug/app-debug.apk`. Install it
+with `adb install`. The debug build carries the `.debug` application-id suffix,
+so it can coexist with a release install.
 
-## Manual smoke checklist
+## Connecting
 
-Run against Libera.Chat after installing the debug APK:
+On first launch the empty chat list routes you to onboarding. Add a network and
+connect.
 
-1. Install (`adb install app/build/outputs/apk/debug/app-debug.apk`) and launch;
-   grant the POST_NOTIFICATIONS prompt.
-2. Onboard: the empty chat list routes to onboarding. Add a network — host
-   `irc.libera.chat`, port `6697`, TLS on, a nick, SASL PLAIN with NickServ
-   credentials (or SASL NONE).
-3. Connect: the banner reaches "Ready" and a status notification appears.
-4. Join `#libera`. The buffer opens with its member list populated.
-5. Send and receive: post a message and confirm the echo dedups to one row;
-   others' messages arrive live. Try `/me`, a reply, and a reaction.
-6. Search: query a word you sent; the hit jumps to it.
-7. Theme: toggle LIGHT/DARK/AMOLED and dynamic color; the UI recolors.
-8. DM: `/msg <nick> hi` opens a new QUERY buffer.
+To connect directly to Libera.Chat:
+
+- Host `irc.libera.chat`, port `6697`, TLS on
+- A nick, and SASL PLAIN with your NickServ credentials (or SASL NONE)
+
+To connect through a soju bouncer, point the network at your bouncer's host and
+port and authenticate with your bouncer account. motd then negotiates bouncer
+capabilities and, with `soju.im/bouncer-networks`, manages your upstream
+networks from a single connection.
+
+## Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Community
+
+Questions, bug reports, and feedback: join `#motd` on
+[Libera.Chat](https://libera.chat) (`irc.libera.chat`).
 
 ## Releasing
 
 Releases are cut by pushing a `v*` tag; `release.yml` builds and uploads a
-signed APK. `versionName` comes from the tag; `versionCode` from the CI run
+signed APK. `versionName` comes from the tag and `versionCode` from the CI run
 number.
 
 ```sh
@@ -123,5 +91,5 @@ the signing env (`MOTD_KEYSTORE_PATH`, `MOTD_KEYSTORE_PASSWORD`,
 secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`
 (see [`plans/08-ci-release.md`](plans/08-ci-release.md)).
 
-To dry-run locally: `nix develop -c ./gradlew :app:assembleRelease` with the
+To dry-run locally, run `nix develop -c ./gradlew :app:assembleRelease` with the
 signing env set (or the debug signing config).
