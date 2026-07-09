@@ -325,6 +325,22 @@ class OnboardingReducerTest {
     }
 
     @Test
+    fun `edit server threads the wss url through state`() {
+        // The soju SERVER page collects an optional wss:// endpoint; EditServer must carry it so the
+        // ViewModel can pass it to buildNetworkEntity for the connect test (plans/19 §3.3).
+        val s = reduce(
+            OnboardingState(step = OnboardingStep.CHOICE),
+            OnboardingAction.ChooseConnection(ConnectionChoice.SOJU),
+            OnboardingAction.EditServer(
+                ServerForm(host = "bnc.example.org", nick = "trev", wsUrl = "wss://bnc.example.org:443/"),
+            ),
+        )
+        assertEquals("wss://bnc.example.org:443/", s.server.wsUrl)
+        // The transport-only field does not affect SERVER validity.
+        assertTrue(s.server.isValid)
+    }
+
+    @Test
     fun `goto jumps directly`() {
         assertEquals(
             OnboardingStep.CONNECT,
