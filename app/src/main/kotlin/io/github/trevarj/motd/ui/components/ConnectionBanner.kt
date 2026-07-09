@@ -82,10 +82,12 @@ private fun bannerStatus(
     states.entries.firstOrNull { (_, s) -> s is IrcClientState.Failed }?.let { (id, s) ->
         val failed = s as IrcClientState.Failed
         val name = networkName(id)
+        val prefix = name?.let { "$it: " } ?: ""
         return if (failed.fatal) {
-            BannerStatus(name?.let { "$it: ${failed.reason}" } ?: failed.reason, error = true)
+            BannerStatus("$prefix${failed.reason}", error = true)
         } else {
-            BannerStatus("Offline — reconnecting", error = true)
+            // Non-fatal: still surface the reason so a retry loop is diagnosable, not just "Offline".
+            BannerStatus("${prefix}reconnecting — ${failed.reason}", error = true)
         }
     }
 

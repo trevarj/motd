@@ -1,0 +1,99 @@
+package io.github.trevarj.motd.service
+
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.irc.client.SaslMechanism
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+/**
+ * Unit tests for [buildChildConfig] (#40). A soju BOUNCER_CHILD is a *bound connection to the
+ * bouncer*, not a direct socket to the upstream network: it must connect on the bouncer's
+ * host/port/tls and authenticate with the root account's SASL credentials (bare user, never a
+ * `user/network` form), then select the upstream via `BOUNCER BIND <bouncerNetId>`.
+ */
+class BuildChildConfigTest {
+
+    private fun root() = NetworkEntity(
+        id = 1,
+        name = "soju",
+        role = NetworkRole.BOUNCER_ROOT,
+        host = "bouncer.example.org",
+        port = 6697,
+        tls = true,
+        nick = "motd",
+        username = "motd",
+        realname = "MOTD",
+        saslMechanism = SaslMechanism.PLAIN.name,
+        saslUser = "motd",
+        saslPassword = "s3cret",
+    )
+
+    /** Child materialized from a soju BOUNCER NETWORK notify: carries the UPSTREAM host/port. */
+    private fun child() = NetworkEntity(
+        id = 2,
+        name = "libera",
+        role = NetworkRole.BOUNCER_CHILD,
+        parentId = 1,
+        bouncerNetId = "7",
+        // soju's BOUNCER NETWORK attrs report the upstream server here — the bug source.
+        host = "irc.libera.chat",
+        port = 6697,
+        tls = true,
+        nick = "motd",
+        username = "motd",
+        realname = "MOTD",
+        // A wrongly-mirrored child could even carry NO SASL; the fix pulls creds from the root.
+        saslMechanism = SaslMechanism.NONE.name,
+        saslUser = null,
+        saslPassword = null,
+    )
+
+    @Test
+    fun `child connects to the bouncer endpoint, not the upstream host`() {
+        val cfg = buildChildConfig(child(), root())
+        assertEquals("bouncer.example.org", cfg.host)
+        assertEquals(6697, cfg.port)
+        assertEquals(true, cfg.tls)
+    }
+
+    @Test
+    fun `child authenticates with the root account SASL creds`() {
+        val cfg = buildChildConfig(child(), root())
+        assertEquals(SaslMechanism.PLAIN, cfg.sasl)
+        // Bare account user — NOT "motd/libera": network selection is via BOUNCER BIND.
+        assertEquals("motd", cfg.saslUser)
+        assertEquals("s3cret", cfg.saslPassword)
+    }
+
+    @Test
+    fun `child binds the upstream network via bouncerNetId`() {
+        val cfg = buildChildConfig(child(), root())
+        assertEquals("7", cfg.bouncerNetId)
+    }
+
+    @Test
+    fun `child keeps its own nick and username identity`() {
+        val cfg = buildChildConfig(child().copy(nick = "trev", username = "trev"), root())
+        assertEquals("trev", cfg.nick)
+        assertEquals("trev", cfg.username)
+    }
+
+    @Test
+    fun `direct network uses its own fields and no bind`() {
+        val direct = child().copy(role = NetworkRole.DIRECT, parentId = null, bouncerNetId = null)
+        val cfg = buildChildConfig(direct, root = null)
+        assertEquals("irc.libera.chat", cfg.host)
+        assertNull(cfg.bouncerNetId)
+    }
+
+    @Test
+    fun `orphan child with unresolved root falls back to its own fields`() {
+        // Defensive: reconcile excludes orphan children, but buildChildConfig must not crash.
+        val cfg = buildChildConfig(child(), root = null)
+        assertEquals("irc.libera.chat", cfg.host)
+        // Still emits a BIND so a later-resolved bouncer would select the right network.
+        assertEquals("7", cfg.bouncerNetId)
+    }
+}

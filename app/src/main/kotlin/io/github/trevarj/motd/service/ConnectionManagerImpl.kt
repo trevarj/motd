@@ -61,6 +61,10 @@ class ConnectionManagerImpl @Inject constructor(
     // Fingerprint of the config each actor was built from, so config changes trigger a restart.
     private val fingerprints = HashMap<Long, String>()
 
+    // Latest full network set, kept so buildClient can resolve a BOUNCER_CHILD's root row (its
+    // bouncer endpoint + account SASL) without a suspend DB read. Updated on every reconcile.
+    @Volatile private var networksById: Map<Long, NetworkEntity> = emptyMap()
+
     // Sticky in-memory user intent per network (plans/16 §4): true = force-connect,
     // false = force-disconnect, absent = follow autoConnect. Survives reconcile emissions so a
     // manual disconnect/connect is not undone by the next DB write. Reset by stopAll (not persisted).
@@ -142,6 +146,13 @@ class ConnectionManagerImpl @Inject constructor(
 
     override suspend fun connect(networkId: Long) {
         val row = networkDao.byId(networkId) ?: return
+        // Seed the network snapshot so buildClient can resolve a child's root even before the
+        // first reconcile emission (e.g. connecting a freshly imported BOUNCER_CHILD).
+        if (row.role == NetworkRole.BOUNCER_CHILD && row.parentId != null && networksById[row.parentId] == null) {
+            networkDao.byId(row.parentId)?.let { parent ->
+                networksById = networksById + (parent.id to parent) + (row.id to row)
+            }
+        }
         // Record the sticky intent BEFORE touching actors so a concurrent reconcile honors it.
         userIntents[networkId] = true
         // Force-rebuild: a parked fatal-Failed actor sits in `actors` with a completed job and an
@@ -162,6 +173,8 @@ class ConnectionManagerImpl @Inject constructor(
     /** Add/remove/restart actors so the live set matches the wanted set derived from [all] rows
      *  and the sticky user-intent map (plans/16 §4). */
     private fun reconcile(all: List<NetworkEntity>) {
+        // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
+        networksById = all.associateBy { it.id }
         val wantedIds = wantedNetworkIds(all, userIntents)
         // Remove actors whose network is no longer wanted (deleted, autoConnect off, user-disconnected).
         for (id in actors.keys.toList()) {
@@ -183,7 +196,14 @@ class ConnectionManagerImpl @Inject constructor(
             networkId = row.id,
             scope = scope,
             connectionFactory = { IrcClientConnection(buildClient(row)) },
-            onState = { id, state -> _states.value = _states.value + (id to state) },
+            onState = { id, state ->
+                // Surface failures to logcat for on-device diagnosis (#43): the UI only shows a
+                // terse "Failed", so log the network id + reason + fatality under a stable tag.
+                if (state is IrcClientState.Failed) {
+                    android.util.Log.w(CONN_LOG_TAG, "network $id Failed: ${state.reason} (fatal=${state.fatal})")
+                }
+                _states.value = _states.value + (id to state)
+            },
             onEvent = { id, event -> eventProcessor.process(id, event) },
             onReady = { conn -> onReady(row, (conn as IrcClientConnection).client) },
             pendingCertFailure = { certFailures.remove(row.id) },
@@ -198,29 +218,24 @@ class ConnectionManagerImpl @Inject constructor(
         "${row.host}:${row.port}:${row.tls}:${row.nick}:${row.saslMechanism}:${row.bouncerNetId}:${row.clientCertAlias}"
 
     private fun buildClient(row: NetworkEntity): IrcClient {
-        // BOUNCER_CHILD copies the root host/SASL and binds via bouncerNetId.
-        val effective = if (row.role == NetworkRole.BOUNCER_CHILD && row.parentId != null) {
-            row // child rows are materialized with root host/nick already (EventProcessor mirror)
+        // A BOUNCER_CHILD is a *bound connection to the bouncer*, not a direct socket to the
+        // upstream network. Its own host/port/tls/SASL may carry the upstream server's details
+        // (soju's BOUNCER NETWORK attrs report the upstream host), so connecting on them would
+        // SASL the bouncer account against the upstream server and fail (SASL 904, #40). Resolve
+        // the root row and build the config from the bouncer endpoint + account SASL, binding the
+        // network via bouncerNetId.
+        val root = if (row.role == NetworkRole.BOUNCER_CHILD) {
+            row.parentId?.let { networksById[it] }
         } else {
-            row
+            null
         }
-        val config = IrcClientConfig(
-            host = effective.host,
-            port = effective.port,
-            tls = effective.tls,
-            nick = effective.nick,
-            username = effective.username,
-            realname = effective.realname,
-            sasl = runCatching { SaslMechanism.valueOf(effective.saslMechanism) }.getOrDefault(SaslMechanism.NONE),
-            saslUser = effective.saslUser,
-            saslPassword = effective.saslPassword,
-            bouncerNetId = if (effective.role == NetworkRole.BOUNCER_CHILD) effective.bouncerNetId else null,
-        )
+        val config = buildChildConfig(row, root)
         val factory = AppTransportFactory(
             appContext = appContext,
             stsStore = stsStore,
             certStore = certStore,
-            clientCertAlias = effective.clientCertAlias,
+            // TLS/cert trust follows the transport endpoint: the bouncer's for a bound child.
+            clientCertAlias = (root ?: row).clientCertAlias,
             // Stash the failure keyed by network so the actor can park on it; unwrap defensively.
             onCertUntrusted = { ex -> certFailures[row.id] = ex },
         )
@@ -518,6 +533,8 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     companion object {
+        // Stable logcat tag for connection failures (#43).
+        const val CONN_LOG_TAG = "MotdConn"
         const val CHATHISTORY_CAP = "draft/chathistory"
         const val WEBPUSH_CAP = "soju.im/webpush"
         const val ECHO_TIMEOUT_MS = 30_000L
@@ -537,6 +554,34 @@ class ConnectionManagerImpl @Inject constructor(
  * its `autoConnect` flag is true — and it is not an orphan BOUNCER_CHILD (a child with no parentId
  * has no root connection to bind through and must be excluded).
  */
+/**
+ * Build the [IrcClientConfig] for one network row (plans/05 §soju bouncer-networks). For a
+ * BOUNCER_CHILD the physical socket is the *bouncer's*, not the upstream network's: the transport
+ * endpoint (host/port/tls) and the account SASL credentials are taken from the resolved [root]
+ * row, and the upstream network is selected with `BOUNCER BIND <bouncerNetId>` during
+ * registration. Falls back to the child's own fields when the root cannot be resolved (orphan
+ * rows are excluded from the wanted set upstream, so this is defensive only). Extracted for tests.
+ */
+internal fun buildChildConfig(row: NetworkEntity, root: NetworkEntity?): IrcClientConfig {
+    // The endpoint + account identity a bound child inherits from its bouncer root.
+    val endpoint = if (row.role == NetworkRole.BOUNCER_CHILD) (root ?: row) else row
+    return IrcClientConfig(
+        host = endpoint.host,
+        port = endpoint.port,
+        tls = endpoint.tls,
+        // Identity (NICK/USER) stays the child's so the drawer/nick reflect the bound network.
+        nick = row.nick,
+        username = row.username,
+        realname = row.realname,
+        // SASL authenticates the bouncer *account* (bare user), never a per-network user/network
+        // form — network selection is done by BOUNCER BIND below, not by the SASL authcid.
+        sasl = runCatching { SaslMechanism.valueOf(endpoint.saslMechanism) }.getOrDefault(SaslMechanism.NONE),
+        saslUser = endpoint.saslUser,
+        saslPassword = endpoint.saslPassword,
+        bouncerNetId = if (row.role == NetworkRole.BOUNCER_CHILD) row.bouncerNetId else null,
+    )
+}
+
 internal fun wantedNetworkIds(
     all: List<NetworkEntity>,
     userIntents: Map<Long, Boolean>,

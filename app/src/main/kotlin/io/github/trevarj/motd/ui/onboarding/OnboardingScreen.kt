@@ -351,11 +351,31 @@ private fun ConnectPage(
         )
         StateIndicator(state.connState)
         state.stateLog.forEach { s ->
-            Text("• ${s::class.simpleName}", style = MaterialTheme.typography.bodySmall)
+            // Annotate a Failed entry with its own reason so a diagnosis is possible even mid-loop.
+            val label = if (s is IrcClientState.Failed) {
+                "Failed: ${s.reason}"
+            } else {
+                s::class.simpleName.orEmpty()
+            }
+            Text(
+                "• $label",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (s is IrcClientState.Failed) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
         }
-        val failed = state.connState as? IrcClientState.Failed
-        if (failed != null) {
-            failed.reason.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        // The connection retries, so `connState` may already be back to Connecting after a failure;
+        // surface the latest captured failure reason (reducer's `error`) so it stays visible (#43).
+        val failureReason = (state.connState as? IrcClientState.Failed)?.reason ?: state.error
+        if (failureReason != null) {
+            Text(
+                failureReason,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
             OutlinedButton(onClick = onRetry) { Text(stringResource(R.string.onboarding_connect_retry)) }
         }
 
