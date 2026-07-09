@@ -22,9 +22,12 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicReference
 
 enum class SaslMechanism { NONE, PLAIN, EXTERNAL }
@@ -78,6 +81,13 @@ class IrcClient(
     )
     val events: SharedFlow<IrcEvent> = _events.asSharedFlow()
 
+    // Live snapshot of the bouncer's networks (netId -> attrs), fed by BOUNCER NETWORK
+    // notifications. soju advertises no labeled-response, so the LISTNETWORKS reply and the
+    // passive soju.im/bouncer-networks-notify pushes both arrive as ordinary events; we
+    // accumulate them here so bouncerListNetworks() has real data to return.
+    private val _bouncerNetworks = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
+    val bouncerNetworks: StateFlow<Map<String, Map<String, String>>> = _bouncerNetworks.asStateFlow()
+
     private val selfNick = AtomicReference(config.nick)
     private val _isupport = AtomicReference(Isupport())
     private val ackedCaps = AtomicReference<Set<String>>(emptySet())
@@ -97,6 +107,7 @@ class IrcClient(
     fun start() {
         stop()
         registered = false
+        _bouncerNetworks.value = emptyMap()   // drop any stale networks from a prior connection
         _state.value = IrcClientState.Connecting
         runJob = scope.launch { run() }
     }
@@ -222,9 +233,20 @@ class IrcClient(
                     // CTCP auto-reply (e.g. VERSION) — fire and forget on the client scope.
                     scope.launch { runCatching { t.send(reply.serialize()) } }
                 }
-                if (ev != null) _events.emit(ev)
+                if (ev != null) emitEvent(ev)
             }
         }
+    }
+
+    /** Emit an event, accumulating bouncer-network snapshots as a side effect. */
+    private suspend fun emitEvent(ev: IrcEvent) {
+        if (ev is IrcEvent.BouncerNetworkState) {
+            _bouncerNetworks.update { cur ->
+                // Empty attrs is soju's `BOUNCER NETWORK <id> *` deletion marker.
+                if (ev.attrs.isEmpty()) cur - ev.netId else cur + (ev.netId to ev.attrs)
+            }
+        }
+        _events.emit(ev)
     }
 
     private suspend fun emitBatch(closed: BatchAssembler.Outcome.Closed) {
@@ -237,7 +259,7 @@ class IrcClient(
             // Unknown batch type: flatten, emit contents as if live (still tagged with batchId).
             for (m in content) {
                 val ev = eventMapper.map(m, batchId = closed.ref)
-                if (ev != null) _events.emit(ev)
+                if (ev != null) emitEvent(ev)
             }
         }
     }
@@ -367,10 +389,21 @@ class IrcClient(
     // -- soju bouncer-networks --
 
     suspend fun bouncerListNetworks(): List<BouncerNetwork> {
-        val response = sendLabeled(BouncerCommands.listNetworks())
-        return response.mapNotNull { BouncerCommands.parseNetworkLine(it) }
-            .map { (id, attrs) -> BouncerNetwork(id, attrs) }
+        val t = transport ?: return snapshotBouncerNetworks()
+        // soju advertises no labeled-response, so sendLabeled would return empty. It instead
+        // pushes BOUNCER NETWORK notifications (soju.im/bouncer-networks-notify) that we already
+        // accumulate in _bouncerNetworks. Send an explicit LISTNETWORKS to force a refresh for
+        // servers that do not push, then return the snapshot once it settles (notifications
+        // usually arrive by the time the caller reaches Ready).
+        runCatching { t.send(BouncerCommands.listNetworks().serialize()) }
+        if (_bouncerNetworks.value.isEmpty()) {
+            withTimeoutOrNull(2000) { while (_bouncerNetworks.value.isEmpty()) delay(50) }
+        }
+        return snapshotBouncerNetworks()
     }
+
+    private fun snapshotBouncerNetworks(): List<BouncerNetwork> =
+        _bouncerNetworks.value.map { (id, attrs) -> BouncerNetwork(id, attrs) }
 
     suspend fun bouncerAddNetwork(attrs: Map<String, String>): String {
         val response = sendLabeled(BouncerCommands.addNetwork(attrs))
