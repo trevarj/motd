@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.settings
 
 import android.content.Intent
+import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -202,10 +203,20 @@ fun SettingsContent(
                 headlineContent = { Text(stringResource(R.string.settings_battery)) },
                 supportingContent = { Text(stringResource(R.string.settings_battery_desc)) },
                 modifier = Modifier.clickable {
-                    // Ask the OS to exempt MOTD from battery optimizations.
-                    context.startActivity(
-                        Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
-                    )
+                    // Directly request the Doze exemption for this app (keeps the persistent socket
+                    // alive in the background). If already exempt, open the OS list so the user can
+                    // review/revoke it.
+                    val pm = context.getSystemService(PowerManager::class.java)
+                    if (pm?.isIgnoringBatteryOptimizations(context.packageName) == true) {
+                        context.startActivity(
+                            Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                        )
+                    } else {
+                        context.startActivity(
+                            Intent(AndroidSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                .setData("package:${context.packageName}".toUri()),
+                        )
+                    }
                 },
             )
 

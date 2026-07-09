@@ -57,6 +57,9 @@ android {
         // SDK levels are pinned by policy (plans/01). CI runners ship a newer SDK than the
         // pinned platform, so lint flags targetSdk 35 as "old"; that nag is intentional noise.
         disable += "OldTargetApi"
+        // The Doze battery-exemption request is a justified core use: an always-on IRC/bouncer
+        // connection is the app's primary function. Distributed outside the Play Store.
+        disable += "BatteryLife"
     }
 }
 
