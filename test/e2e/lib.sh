@@ -418,6 +418,13 @@ wait_for_any_text() {
 # (install + onboard + connect), then re-run any later phase(s) alone via E2E_PHASES without
 # repeating onboarding. Returns non-zero if the chat list can't be reached (app not onboarded).
 reset_to_chatlist() {
+  # Foreground the app first: a prior phase's BACK presses can walk all the way out to the
+  # launcher, and reset can't navigate an app that isn't on screen. am start resumes a running
+  # app (possibly on a sub-screen) or cold-starts it; with networks already configured a cold
+  # start lands directly on the chat list.
+  local activity="${MOTD_ACTIVITY:-${MOTD_PKG}/io.github.trevarj.motd.MainActivity}"
+  adb_shell am start -n "$activity" >/dev/null 2>&1 || true
+  sleep 1
   local i
   for i in 1 2 3 4 5 6 7 8; do
     dump || true

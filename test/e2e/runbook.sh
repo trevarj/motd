@@ -884,6 +884,13 @@ main() {
   echo "${_C_CYA}MOTD E2E run — pkg=${MOTD_PKG} device=${SERIAL}${_C_RST}"
   echo "${_C_CYA}bouncer=${MOTD_SOJU_HOST}:${MOTD_SOJU_PORT} nick=${MOTD_NICK} channel=${MOTD_TEST_CHANNEL}${_C_RST}"
 
+  # Freeze animations so uiautomator can reach an idle state. Compose's blinking text cursor and
+  # ripple/transition animations otherwise keep the window perpetually non-idle, and `uiautomator
+  # dump` fails with "could not get idle state" (cascades through later phases).
+  adb_shell settings put global window_animation_scale 0 >/dev/null 2>&1 || true
+  adb_shell settings put global transition_animation_scale 0 >/dev/null 2>&1 || true
+  adb_shell settings put global animator_duration_scale 0 >/dev/null 2>&1 || true
+
   # Phases run in order. Phase 'a' owns the expensive setup (install + onboard + connect) and
   # leaves durable device state (networks, joined channel). Every later phase begins from the
   # chat-list anchor via reset_to_chatlist, so a subset run — e.g. E2E_PHASES="c" — picks up
