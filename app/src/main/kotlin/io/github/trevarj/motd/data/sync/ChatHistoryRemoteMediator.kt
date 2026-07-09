@@ -9,7 +9,7 @@ import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
-import io.github.trevarj.motd.irc.client.IrcClient
+import io.github.trevarj.motd.irc.client.ChatHistoryResult
 import io.github.trevarj.motd.service.ConnectionManager
 import java.time.Instant
 import javax.inject.Inject
@@ -20,19 +20,36 @@ import javax.inject.Singleton
  * APPEND fetches OLDER messages via CHATHISTORY BEFORE; PREPEND has nothing to fetch live-side.
  *
  * REFRESH → if the buffer is empty and the network advertises chathistory, pull LATEST once.
- * APPEND  → older boundary; stop when historyComplete/no cap; otherwise BEFORE the oldest local
- *           serverTime, insert (IGNORE), set historyComplete when the server returns nothing,
+ * APPEND  → older boundary; stop when historyComplete/no cap; when the buffer is empty (no oldest
+ *           boundary yet) pull LATEST once to backfill on first open; otherwise BEFORE the oldest
+ *           local serverTime, insert (IGNORE), set historyComplete when the server returns nothing,
  *           and advance oldestFetchedTime bookkeeping.
+ *
+ * We use SKIP_INITIAL_REFRESH so the cached DB paints instantly, which means Paging never calls
+ * load(REFRESH) on open. On an empty store the local PagingSource yields an empty page and Paging
+ * drives an APPEND past the end boundary — so the empty-buffer LATEST backfill lives in APPEND, not
+ * only REFRESH, or a freshly-connected/cleared buffer would never fetch its recent history.
  */
 @OptIn(ExperimentalPagingApi::class)
 class ChatHistoryRemoteMediator(
     private val bufferId: Long,
-    private val connectionManager: ConnectionManager,
     private val bufferDao: BufferDao,
     private val messageDao: MessageDao,
     private val processor: EventProcessor,
+    private val history: HistorySource,
     private val pageSize: Int = 50,
 ) : RemoteMediator<Int, MessageEntity>() {
+
+    /**
+     * Minimal seam over the live [io.github.trevarj.motd.irc.client.IrcClient] (mirrors
+     * [io.github.trevarj.motd.service.CatchUp.HistorySource]) so the load logic is unit-testable
+     * against scripted responses without a socket. Resolved per-load so a client that connects after
+     * the buffer opens is picked up on the next boundary hit.
+     */
+    interface HistorySource {
+        suspend fun hasCap(cap: String): Boolean
+        suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResult
+    }
 
     override suspend fun initialize(): InitializeAction =
         // Local cache is authoritative for the initial paint; only fetch on explicit boundary hit.
@@ -43,38 +60,42 @@ class ChatHistoryRemoteMediator(
             val buffer = bufferDao.observeById(bufferId)
                 ?: return MediatorResult.Success(endOfPaginationReached = true)
             val networkId = buffer.networkId
-            val client = connectionManager.clientFor(networkId)
-                ?: return MediatorResult.Success(endOfPaginationReached = true)
-            if (!client.hasCap(CHATHISTORY_CAP)) {
+            if (!history.hasCap(CHATHISTORY_CAP)) {
                 return MediatorResult.Success(endOfPaginationReached = true)
             }
             when (loadType) {
-                LoadType.REFRESH -> refresh(networkId, buffer.name, client)
+                LoadType.REFRESH -> refresh(networkId, buffer.name)
                 LoadType.PREPEND -> MediatorResult.Success(endOfPaginationReached = true)
-                LoadType.APPEND -> append(networkId, buffer.name, buffer.historyComplete, client)
+                LoadType.APPEND -> append(networkId, buffer.name, buffer.historyComplete)
             }
         } catch (e: Throwable) {
             MediatorResult.Error(e)
         }
     }
 
-    private suspend fun refresh(networkId: Long, target: String, client: IrcClient): MediatorResult {
+    private suspend fun refresh(networkId: Long, target: String): MediatorResult {
         val newest = messageDao.newestTime(bufferId)
         if (newest != null) {
             // Already have local history; the local PagingSource paints it. APPEND drives older.
             return MediatorResult.Success(endOfPaginationReached = false)
         }
-        val result = client.chathistory(ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = pageSize))
-        for (ev in result.events) processor.process(networkId, ev)
+        fetchLatest(networkId, target)
         return MediatorResult.Success(endOfPaginationReached = false)
     }
 
-    private suspend fun append(networkId: Long, target: String, historyComplete: Boolean, client: IrcClient): MediatorResult {
+    private suspend fun append(networkId: Long, target: String, historyComplete: Boolean): MediatorResult {
         if (historyComplete) return MediatorResult.Success(endOfPaginationReached = true)
         val oldest = messageDao.oldestTime(bufferId)
-            ?: return MediatorResult.Success(endOfPaginationReached = true)
+        if (oldest == null) {
+            // Empty local store hit the end boundary on first open. With SKIP_INITIAL_REFRESH the
+            // REFRESH backfill never fires, so seed the newest page here via LATEST. If the server
+            // has history the inserted rows re-run the PagingSource; a later APPEND then pages older.
+            fetchLatest(networkId, target)
+            val seeded = messageDao.oldestTime(bufferId) != null
+            return MediatorResult.Success(endOfPaginationReached = !seeded)
+        }
         val bound = "timestamp=${Instant.ofEpochMilli(oldest)}"
-        val result = client.chathistory(
+        val result = history.chathistory(
             ChatHistoryRequest(ChatHistoryRequest.Subcommand.BEFORE, target, bound1 = bound, limit = pageSize),
         )
         for (ev in result.events) processor.process(networkId, ev)
@@ -86,6 +107,12 @@ class ChatHistoryRemoteMediator(
         val newOldest = messageDao.oldestTime(bufferId)
         buffer?.let { bufferDao.update(it.copy(oldestFetchedTime = newOldest)) }
         return MediatorResult.Success(endOfPaginationReached = false)
+    }
+
+    /** Pull the most recent page for [target] and persist it through the sole IRC→Room writer. */
+    private suspend fun fetchLatest(networkId: Long, target: String) {
+        val result = history.chathistory(ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = pageSize))
+        for (ev in result.events) processor.process(networkId, ev)
     }
 
     companion object {
@@ -106,5 +133,19 @@ class ChatHistoryMediatorFactoryImpl @Inject constructor(
     private val processor: EventProcessor,
 ) : ChatHistoryMediatorFactory {
     override fun create(bufferId: Long): RemoteMediator<Int, MessageEntity> =
-        ChatHistoryRemoteMediator(bufferId, connectionManager, bufferDao, messageDao, processor)
+        ChatHistoryRemoteMediator(bufferId, bufferDao, messageDao, processor, historyFor(bufferId))
+
+    // Resolve the live client lazily per call: the buffer can open before its network reaches
+    // Ready, and clientFor(...) is only stable once connected. A missing client presents as
+    // "no chathistory cap" so the mediator falls back to plain local paging until it reconnects.
+    private fun historyFor(bufferId: Long): ChatHistoryRemoteMediator.HistorySource =
+        object : ChatHistoryRemoteMediator.HistorySource {
+            private suspend fun client() =
+                bufferDao.observeById(bufferId)?.networkId?.let { connectionManager.clientFor(it) }
+
+            override suspend fun hasCap(cap: String): Boolean = client()?.hasCap(cap) ?: false
+
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResult =
+                client()?.chathistory(req) ?: ChatHistoryResult(events = emptyList(), targets = emptyList())
+        }
 }

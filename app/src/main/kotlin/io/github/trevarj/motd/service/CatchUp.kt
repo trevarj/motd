@@ -62,8 +62,24 @@ class CatchUp(
 
     private suspend fun pageAfter(networkId: Long, target: String) {
         var localNewest = bufferDao.byName(networkId, normalize(target))?.let { messageDao.newestTime(it.id) }
+        // Empty local store: there is no lower bound to page AFTER (an AFTER epoch walks forward from
+        // the oldest retained message and can miss recent history on retention-limited bouncers).
+        // Pull the most recent page via LATEST first so the buffer paints newest-first (plans/04:
+        // "null → LATEST each joined buffer"). Subsequent AFTER pages then fill any gap forward.
+        if (localNewest == null) {
+            val latest = runCatching {
+                history.chathistory(ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = pageLimit))
+            }.getOrNull()
+            if (latest != null && latest.events.isNotEmpty()) {
+                processor.process(networkId, IrcEvent.HistoryBatch(target, latest.events))
+                localNewest = bufferDao.byName(networkId, normalize(target))?.let { messageDao.newestTime(it.id) }
+                if (latest.events.size < pageLimit) return // short page: nothing newer to page AFTER
+            } else {
+                return // no history for this target
+            }
+        }
         while (true) {
-            val bound = if (localNewest != null) "timestamp=${Instant.ofEpochMilli(localNewest)}" else "timestamp=${Instant.EPOCH}"
+            val bound = "timestamp=${Instant.ofEpochMilli(localNewest!!)}"
             val result = runCatching {
                 history.chathistory(ChatHistoryRequest(ChatHistoryRequest.Subcommand.AFTER, target, bound1 = bound, limit = pageLimit))
             }.getOrNull() ?: break

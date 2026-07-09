@@ -49,17 +49,23 @@ class CatchUpTest {
         isSelf = false, replyToMsgid = null,
     )
 
-    /** Scripts AFTER pages per target and records TARGETS + MARKREAD calls. */
+    /** Scripts LATEST (empty-buffer seed) + AFTER pages per target and records TARGETS + MARKREAD. */
     private class FakeHistory(
         val hasChatHistory: Boolean = true,
         val targets: List<Pair<String, Long>> = emptyList(),
         val afterPages: MutableMap<String, ArrayDeque<List<IrcEvent>>> = mutableMapOf(),
+        val latestPages: MutableMap<String, List<IrcEvent>> = mutableMapOf(),
     ) : CatchUp.HistorySource {
         val markReadFetched = mutableListOf<String>()
         val afterCalls = mutableListOf<String>()
+        val latestCalls = mutableListOf<String>()
         override fun hasCap(cap: String) = hasChatHistory
         override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResult = when (req.subcommand) {
             ChatHistoryRequest.Subcommand.TARGETS -> ChatHistoryResult(emptyList(), targets)
+            ChatHistoryRequest.Subcommand.LATEST -> {
+                latestCalls += req.target
+                ChatHistoryResult(latestPages[req.target] ?: emptyList(), emptyList())
+            }
             ChatHistoryRequest.Subcommand.AFTER -> {
                 afterCalls += req.target
                 val page = afterPages[req.target]?.removeFirstOrNull() ?: emptyList()
@@ -100,6 +106,57 @@ class CatchUpTest {
     }
 
     @Test
+    fun emptyBuffer_seedsWithLatest_thenPagesAfter() = runTest {
+        // Fresh connect / cleared DB: the buffer exists but has no local messages, so `since` is
+        // null and there is no AFTER lower bound. Catch-up must LATEST-seed the newest page instead
+        // of AFTER-epoch (which walks forward from the oldest retained message).
+        db.bufferDao().insert(BufferEntity(networkId = networkId, name = "#chan", displayName = "#chan", type = BufferType.CHANNEL))
+
+        val history = FakeHistory(
+            latestPages = mutableMapOf(
+                // full page (pageLimit=2) → seed newest, then AFTER paginates newer.
+                "#chan" to listOf(chatMsg("a", "#chan", 100), chatMsg("b", "#chan", 200)),
+            ),
+            afterPages = mutableMapOf(
+                "#chan" to ArrayDeque(listOf(listOf(chatMsg("c", "#chan", 300)))),
+            ),
+        )
+        val catchUp = CatchUp(db.bufferDao(), db.messageDao(), processor, history, normalize = { it.lowercase() }, pageLimit = 2)
+        catchUp.run(networkId, listOf(db.bufferDao().byName(networkId, "#chan")!!.id to "#chan"))
+
+        val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
+        val rows = db.messageDao().pagingSource(bufferId).load(
+            androidx.paging.PagingSource.LoadParams.Refresh(null, 100, false),
+        ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data }
+        // LATEST seeded a + b, AFTER added c.
+        assertEquals(3, rows.size)
+        assertEquals(listOf("#chan"), history.latestCalls)
+        assertEquals(listOf("#chan"), history.afterCalls)
+        assertEquals(listOf("#chan"), history.markReadFetched)
+    }
+
+    @Test
+    fun emptyBuffer_shortLatestPage_skipsAfter() = runTest {
+        // A short LATEST page means the bouncer returned everything it has → no newer messages to
+        // page AFTER, so we must not issue a redundant AFTER for the just-seeded newest boundary.
+        db.bufferDao().insert(BufferEntity(networkId = networkId, name = "#chan", displayName = "#chan", type = BufferType.CHANNEL))
+
+        val history = FakeHistory(
+            latestPages = mutableMapOf("#chan" to listOf(chatMsg("a", "#chan", 100))),
+        )
+        val catchUp = CatchUp(db.bufferDao(), db.messageDao(), processor, history, normalize = { it.lowercase() }, pageLimit = 2)
+        catchUp.run(networkId, listOf(db.bufferDao().byName(networkId, "#chan")!!.id to "#chan"))
+
+        val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
+        val rows = db.messageDao().pagingSource(bufferId).load(
+            androidx.paging.PagingSource.LoadParams.Refresh(null, 100, false),
+        ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data }
+        assertEquals(1, rows.size)
+        assertEquals(listOf("#chan"), history.latestCalls)
+        assertTrue(history.afterCalls.isEmpty())
+    }
+
+    @Test
     fun targets_createMissingBuffers() = runTest {
         // Existing buffer with a message so `since` is non-null → TARGETS is issued.
         db.bufferDao().insert(BufferEntity(networkId = networkId, name = "#known", displayName = "#known", type = BufferType.CHANNEL))
@@ -107,17 +164,16 @@ class CatchUpTest {
 
         val history = FakeHistory(
             targets = listOf("#new" to 500L),
-            afterPages = mutableMapOf(
-                "#new" to ArrayDeque(listOf(listOf(chatMsg("n1", "#new", 500)))),
-            ),
+            // #new has no local buffer/messages yet, so catch-up LATEST-seeds it (empty store path).
+            latestPages = mutableMapOf("#new" to listOf(chatMsg("n1", "#new", 500))),
         )
         val catchUp = CatchUp(db.bufferDao(), db.messageDao(), processor, history, normalize = { it.lowercase() }, pageLimit = 100)
         catchUp.run(networkId, listOf(db.bufferDao().byName(networkId, "#known")!!.id to "#known"))
 
-        // TARGETS-discovered #new got its history fetched, which auto-created the buffer.
+        // TARGETS-discovered #new got its history fetched (LATEST-seeded), which auto-created the buffer.
         val created = db.bufferDao().byName(networkId, "#new")
         assertTrue(created != null)
-        assertTrue(history.afterCalls.contains("#new"))
+        assertTrue(history.latestCalls.contains("#new"))
     }
 
     @Test
