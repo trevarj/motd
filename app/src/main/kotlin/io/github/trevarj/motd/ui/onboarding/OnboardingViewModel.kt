@@ -3,9 +3,7 @@ package io.github.trevarj.motd.ui.onboarding
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.repo.NetworkRepository
-import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.settings.buildNetworkEntity
@@ -131,25 +129,16 @@ class OnboardingViewModel @Inject constructor(
         onDone()
     }
 
+    // Children share the root's transport identity + SASL; buildNetworkEntity applies the same
+    // soju identity-seed defaults (nick/username/realname from the SASL login username) so the
+    // child's USER/NICK lines are well-formed, then binds via bouncerNetId.
     private fun childEntity(rootParentId: Long, row: BouncerNetworkRow, seed: OnboardingState) =
-        NetworkEntity(
-            name = row.name,
+        buildNetworkEntity(
+            server = seed.server,
+            auth = seed.auth,
             role = io.github.trevarj.motd.data.db.NetworkRole.BOUNCER_CHILD,
+            name = row.name,
             parentId = rootParentId,
             bouncerNetId = row.netId,
-            // Children share the root's transport identity; host/port carried for display.
-            host = seed.server.host,
-            port = seed.server.port.toIntOrNull() ?: 6697,
-            tls = seed.server.tls,
-            nick = seed.server.nick,
-            username = seed.server.effectiveUsername,
-            realname = seed.server.realname.ifBlank { seed.server.nick },
-            saslMechanism = seed.auth.mode.toSasl().name,
         )
-
-    private fun AuthMode.toSasl(): SaslMechanism = when (this) {
-        AuthMode.NONE -> SaslMechanism.NONE
-        AuthMode.PLAIN -> SaslMechanism.PLAIN
-        AuthMode.EXTERNAL -> SaslMechanism.EXTERNAL
-    }
 }

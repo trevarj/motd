@@ -42,6 +42,7 @@
     <string name="onboarding_field_username">Username</string>
     <string name="onboarding_field_username_hint">Defaults to nickname</string>
     <string name="onboarding_field_realname">Real name</string>
+    <string name="onboarding_field_realname_hint">Defaults to nickname</string>
     <string name="onboarding_auth_title">Authentication</string>
     <string name="onboarding_auth_none">None</string>
     <string name="onboarding_auth_plain">SASL PLAIN (password)</string>

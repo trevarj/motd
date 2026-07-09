@@ -26,10 +26,14 @@ enum class ConnectionChoice { SOJU, NETWORK }
 /** Auth mechanism selected on the AUTH page. Mirrors SaslMechanism names for persistence. */
 enum class AuthMode { NONE, PLAIN, EXTERNAL }
 
+/** Default IRC ports: 6697 for TLS, 6667 for plaintext. */
+const val PORT_TLS = "6697"
+const val PORT_PLAIN = "6667"
+
 /** Editable server-form fields (step 3). */
 data class ServerForm(
     val host: String = "",
-    val port: String = "6697",
+    val port: String = PORT_TLS,
     val tls: Boolean = true,
     val nick: String = "",
     val username: String = "",
@@ -38,9 +42,28 @@ data class ServerForm(
     /** Effective username: explicit value, else falls back to nick (spec default). */
     val effectiveUsername: String get() = username.ifBlank { nick }
 
-    /** Minimal validity for enabling "next": host, valid port, and a nick. */
+    /** True when [port] holds the default value for either TLS state (so a toggle may re-default it). */
+    val portIsDefault: Boolean get() = port.isBlank() || port == PORT_TLS || port == PORT_PLAIN
+
+    /**
+     * Toggle TLS and re-default the port when the user hasn't typed a custom one, so 6697/6667
+     * track the switch without clobbering an explicit port.
+     */
+    fun withTls(enabled: Boolean): ServerForm = copy(
+        tls = enabled,
+        port = if (portIsDefault) (if (enabled) PORT_TLS else PORT_PLAIN) else port,
+    )
+
+    /**
+     * Minimal validity for enabling "next" on the direct-network SERVER step: host, valid port,
+     * and a nick. The soju path validates against [isValidForSoju] (no nick collected there).
+     */
     val isValid: Boolean
-        get() = host.isNotBlank() && nick.isNotBlank() &&
+        get() = isValidForSoju && nick.isNotBlank()
+
+    /** soju SERVER step needs only host + a valid port (identity comes from SASL). */
+    val isValidForSoju: Boolean
+        get() = host.isNotBlank() &&
             port.toIntOrNull()?.let { it in 1..65535 } == true
 }
 
@@ -94,7 +117,8 @@ data class OnboardingState(
         get() = when (step) {
             OnboardingStep.WELCOME -> true
             OnboardingStep.CHOICE -> choice != null
-            OnboardingStep.SERVER -> server.isValid
+            // soju collects only host/port on SERVER (identity is SASL); direct also needs a nick.
+            OnboardingStep.SERVER -> if (isSoju) server.isValidForSoju else server.isValid
             OnboardingStep.AUTH -> auth.isValid
             OnboardingStep.CONNECT -> isReady
             OnboardingStep.FINISH -> true

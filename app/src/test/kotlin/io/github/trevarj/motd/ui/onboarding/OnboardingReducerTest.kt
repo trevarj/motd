@@ -161,6 +161,60 @@ class OnboardingReducerTest {
     }
 
     @Test
+    fun `soju server needs only host and valid port, no nick`() {
+        // soju collects no nick/username/realname on SERVER — identity comes from SASL.
+        val soju = reduce(
+            OnboardingState(step = OnboardingStep.CHOICE),
+            OnboardingAction.ChooseConnection(ConnectionChoice.SOJU),
+        ).copy(step = OnboardingStep.SERVER)
+
+        assertFalse(soju.canAdvance) // blank host
+        val withHost = soju.copy(server = ServerForm(host = "bnc.example.org"))
+        // Valid for soju despite a blank nick.
+        assertTrue(withHost.server.isValidForSoju)
+        assertFalse(withHost.server.isValid) // direct-path validity still needs a nick
+        assertTrue(withHost.canAdvance)
+        // Bad port blocks even soju.
+        assertFalse(withHost.copy(server = withHost.server.copy(port = "70000")).canAdvance)
+    }
+
+    @Test
+    fun `direct server still requires a nick`() {
+        val direct = reduce(
+            OnboardingState(step = OnboardingStep.CHOICE),
+            OnboardingAction.ChooseConnection(ConnectionChoice.NETWORK),
+        ).copy(step = OnboardingStep.SERVER, server = ServerForm(host = "irc.example.org"))
+        assertFalse(direct.canAdvance) // no nick yet
+        assertTrue(direct.copy(server = direct.server.copy(nick = "me")).canAdvance)
+    }
+
+    @Test
+    fun `tls toggle re-defaults port but not a custom one`() {
+        // Default TLS port -> plaintext default when TLS turned off, and back.
+        val tlsDefault = ServerForm()
+        assertEquals(PORT_TLS, tlsDefault.port)
+        val plain = tlsDefault.withTls(false)
+        assertFalse(plain.tls)
+        assertEquals(PORT_PLAIN, plain.port)
+        assertEquals(PORT_TLS, plain.withTls(true).port)
+
+        // A user-entered custom port survives the toggle.
+        val custom = ServerForm(port = "6789").withTls(false)
+        assertEquals("6789", custom.port)
+        assertEquals("6789", custom.withTls(true).port)
+    }
+
+    @Test
+    fun `external auth needs a cert but no password`() {
+        // EXTERNAL identity is the client cert: no saslUser/saslPassword required.
+        assertFalse(AuthForm(AuthMode.EXTERNAL).isValid)
+        val withCert = AuthForm(AuthMode.EXTERNAL, certAlias = "alias")
+        assertTrue(withCert.isValid)
+        // A password is neither required nor consulted for EXTERNAL validity.
+        assertTrue(AuthForm(AuthMode.EXTERNAL, certAlias = "alias", saslPassword = "").isValid)
+    }
+
+    @Test
     fun `effective username falls back to nick`() {
         assertEquals("me", ServerForm(nick = "me").effectiveUsername)
         assertEquals("bot", ServerForm(nick = "me", username = "bot").effectiveUsername)

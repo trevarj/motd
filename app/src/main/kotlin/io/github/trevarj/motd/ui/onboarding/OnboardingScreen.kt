@@ -285,6 +285,8 @@ private fun ServerPage(
             onAuthChange = onAuthChange,
             showServer = !authOnly,
             showAuth = authOnly,
+            // soju SERVER step: host/port/TLS only; identity is managed by the bouncer via SASL.
+            showIdentity = !state.isSoju,
         )
     }
 }

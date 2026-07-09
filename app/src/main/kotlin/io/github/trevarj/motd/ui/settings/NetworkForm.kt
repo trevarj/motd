@@ -47,13 +47,16 @@ fun NetworkForm(
     modifier: Modifier = Modifier,
     showServer: Boolean = true,
     showAuth: Boolean = true,
+    // soju bouncer: identity (nick/username/realname) is managed per-network by soju via SASL,
+    // so the root form collects only host/port/TLS and hides the identity fields.
+    showIdentity: Boolean = true,
 ) {
     Column(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (showServer) {
-            ServerFields(server = server, onServerChange = onServerChange)
+            ServerFields(server = server, onServerChange = onServerChange, showIdentity = showIdentity)
         }
         if (showAuth) {
             Text(
@@ -67,9 +70,16 @@ fun NetworkForm(
     }
 }
 
-/** Server-only fields (host/port/TLS/nick/username/realname). */
+/**
+ * Server fields. [showIdentity] gates nick/username/realname: soju manages those per bound
+ * network via SASL, so its root form shows only host/port/TLS.
+ */
 @Composable
-private fun ServerFields(server: ServerForm, onServerChange: (ServerForm) -> Unit) {
+private fun ServerFields(
+    server: ServerForm,
+    onServerChange: (ServerForm) -> Unit,
+    showIdentity: Boolean = true,
+) {
     OutlinedTextField(
         value = server.host,
         onValueChange = { onServerChange(server.copy(host = it)) },
@@ -90,30 +100,34 @@ private fun ServerFields(server: ServerForm, onServerChange: (ServerForm) -> Uni
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(stringResource(R.string.onboarding_field_tls), modifier = Modifier.weight(1f))
-        Switch(checked = server.tls, onCheckedChange = { onServerChange(server.copy(tls = it)) })
+        // withTls re-defaults the port (6697<->6667) unless the user typed a custom one.
+        Switch(checked = server.tls, onCheckedChange = { onServerChange(server.withTls(it)) })
     }
-    OutlinedTextField(
-        value = server.nick,
-        onValueChange = { onServerChange(server.copy(nick = it)) },
-        label = { Text(stringResource(R.string.onboarding_field_nick)) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    OutlinedTextField(
-        value = server.username,
-        onValueChange = { onServerChange(server.copy(username = it)) },
-        label = { Text(stringResource(R.string.onboarding_field_username)) },
-        placeholder = { Text(stringResource(R.string.onboarding_field_username_hint)) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    OutlinedTextField(
-        value = server.realname,
-        onValueChange = { onServerChange(server.copy(realname = it)) },
-        label = { Text(stringResource(R.string.onboarding_field_realname)) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
+    if (showIdentity) {
+        OutlinedTextField(
+            value = server.nick,
+            onValueChange = { onServerChange(server.copy(nick = it)) },
+            label = { Text(stringResource(R.string.onboarding_field_nick)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = server.username,
+            onValueChange = { onServerChange(server.copy(username = it)) },
+            label = { Text(stringResource(R.string.onboarding_field_username)) },
+            placeholder = { Text(stringResource(R.string.onboarding_field_username_hint)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = server.realname,
+            onValueChange = { onServerChange(server.copy(realname = it)) },
+            label = { Text(stringResource(R.string.onboarding_field_realname)) },
+            placeholder = { Text(stringResource(R.string.onboarding_field_realname_hint)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 @Composable
@@ -205,23 +219,32 @@ fun buildNetworkEntity(
     name: String = server.host,
     parentId: Long? = null,
     bouncerNetId: String? = null,
-): NetworkEntity = NetworkEntity(
-    id = id,
-    name = name,
-    role = role,
-    parentId = parentId,
-    bouncerNetId = bouncerNetId,
-    host = server.host,
-    port = server.port.toIntOrNull() ?: 6697,
-    tls = server.tls,
-    nick = server.nick,
-    username = server.effectiveUsername,
-    realname = server.realname.ifBlank { server.nick },
-    saslMechanism = auth.mode.toSaslMechanism().name,
-    saslUser = auth.saslUser.ifBlank { null },
-    saslPassword = auth.saslPassword.ifBlank { null },
-    clientCertAlias = auth.certAlias,
-)
+): NetworkEntity {
+    // soju manages per-network identity itself; its root form collects no nick/username/realname,
+    // but :irc still sends USER/NICK on the root socket, so seed them from the SASL login username
+    // (falling back to a placeholder) to keep the registration lines well-formed.
+    val identitySeed = server.nick.ifBlank { auth.saslUser.ifBlank { DEFAULT_IDENTITY } }
+    return NetworkEntity(
+        id = id,
+        name = name,
+        role = role,
+        parentId = parentId,
+        bouncerNetId = bouncerNetId,
+        host = server.host,
+        port = server.port.toIntOrNull() ?: 6697,
+        tls = server.tls,
+        nick = identitySeed,
+        username = server.username.ifBlank { identitySeed },
+        realname = server.realname.ifBlank { identitySeed },
+        saslMechanism = auth.mode.toSaslMechanism().name,
+        saslUser = auth.saslUser.ifBlank { null },
+        saslPassword = auth.saslPassword.ifBlank { null },
+        clientCertAlias = auth.certAlias,
+    )
+}
+
+/** Placeholder identity for the soju root socket when no nick/SASL user is available. */
+private const val DEFAULT_IDENTITY = "motd"
 
 /** Inverse: seed the forms from an existing entity for editing. */
 fun NetworkEntity.toServerForm(): ServerForm = ServerForm(
