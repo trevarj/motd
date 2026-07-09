@@ -151,6 +151,9 @@ fun NetworkSettingsContent(
                 auth = state.auth,
                 onServerChange = onServerChange,
                 onAuthChange = onAuthChange,
+                // Bouncer root/child edit uses the collapsed soju form (username/password only).
+                soju = state.entity?.role == NetworkRole.BOUNCER_ROOT ||
+                    state.entity?.role == NetworkRole.BOUNCER_CHILD,
                 modifier = Modifier.padding(top = 8.dp),
             )
             OutlinedButton(

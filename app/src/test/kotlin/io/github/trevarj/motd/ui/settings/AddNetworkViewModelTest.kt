@@ -97,6 +97,30 @@ class AddNetworkViewModelTest {
     }
 
     @Test
+    fun valid_soju_config_is_submittable() = runTest {
+        val vm = vm(FakeNetworkRepository(), FakeConnectionManager())
+        vm.setKind(ConnectionChoice.SOJU)
+        // Fill the collapsed soju form: host/port/TLS + nick, then username/password (SASL PLAIN).
+        vm.editServer(ServerForm(host = "soju.example", port = "6697", tls = true, nick = "trev"))
+        vm.editAuth(vm.state.value.auth.copy(saslUser = "motd/libera", saslPassword = "pw"))
+        assertTrue(vm.state.value.canSubmit)
+    }
+
+    @Test
+    fun soju_missing_password_or_nick_is_not_submittable() = runTest {
+        val vm = vm(FakeNetworkRepository(), FakeConnectionManager())
+        vm.setKind(ConnectionChoice.SOJU)
+        // Missing password.
+        vm.editServer(ServerForm(host = "soju.example", port = "6697", nick = "trev"))
+        vm.editAuth(vm.state.value.auth.copy(saslUser = "motd/libera", saslPassword = ""))
+        assertFalse(vm.state.value.canSubmit)
+        // Password present but nick missing.
+        vm.editServer(ServerForm(host = "soju.example", port = "6697", nick = ""))
+        vm.editAuth(vm.state.value.auth.copy(saslUser = "motd/libera", saslPassword = "pw"))
+        assertFalse(vm.state.value.canSubmit)
+    }
+
+    @Test
     fun ready_direct_pops_and_keeps_row() = runTest {
         val repo = FakeNetworkRepository()
         val cm = FakeConnectionManager()

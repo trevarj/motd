@@ -8,20 +8,32 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
@@ -37,6 +49,10 @@ import io.github.trevarj.motd.ui.onboarding.ServerForm
  *
  * [showServer]/[showAuth] let onboarding render server-only (step 3) or auth-only (step 4);
  * NetworkSettings leaves both on to show the full combined form.
+ *
+ * [soju] collapses everything into the bouncer-login form: host/port/TLS/nick + a single
+ * Username/Password pair (the soju SASL login, always PLAIN). No mechanism picker, no separate
+ * USER-ident username / real name — those are derived internally by [buildNetworkEntity].
  */
 @Composable
 fun NetworkForm(
@@ -47,6 +63,7 @@ fun NetworkForm(
     modifier: Modifier = Modifier,
     showServer: Boolean = true,
     showAuth: Boolean = true,
+    soju: Boolean = false,
     // Full USER-ident identity (nick + username + realname): the direct-network path shows all
     // three. The soju root shows only [showNick] (its nick), since the bouncer SASL user/password
     // live on the AUTH step and username/realname default to the nick.
@@ -57,12 +74,24 @@ fun NetworkForm(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // soju: single collapsed form (host/port/TLS/nick + username/password), no picker.
+        if (soju) {
+            SojuFields(
+                server = server,
+                auth = auth,
+                onServerChange = onServerChange,
+                onAuthChange = onAuthChange,
+            )
+            return@Column
+        }
         if (showServer) {
             ServerFields(
                 server = server,
                 onServerChange = onServerChange,
                 showIdentity = showIdentity,
                 showNick = showNick,
+                // Last server field is Done unless the auth section follows it.
+                lastImeAction = if (showAuth) ImeAction.Next else ImeAction.Done,
             )
         }
         if (showAuth) {
@@ -78,6 +107,42 @@ fun NetworkForm(
 }
 
 /**
+ * soju bouncer form: host/port/TLS/nick + one Username + one Password. The Username/Password map
+ * to the SASL login ([AuthForm.saslUser]/[AuthForm.saslPassword]); mechanism is always PLAIN.
+ */
+@Composable
+private fun SojuFields(
+    server: ServerForm,
+    auth: AuthForm,
+    onServerChange: (ServerForm) -> Unit,
+    onAuthChange: (AuthForm) -> Unit,
+) {
+    HostField(server, onServerChange)
+    PortField(server, onServerChange)
+    TlsRow(server, onServerChange)
+    NickField(server, onServerChange, imeAction = ImeAction.Next)
+    // Bouncer login username — case-sensitive, no auto-capitalise/correct.
+    OutlinedTextField(
+        value = auth.saslUser,
+        onValueChange = { onAuthChange(auth.copy(saslUser = it)) },
+        label = { Text(stringResource(R.string.onboarding_field_username)) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.None,
+            autoCorrectEnabled = false,
+            imeAction = ImeAction.Next,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    PasswordField(
+        value = auth.saslPassword,
+        onValueChange = { onAuthChange(auth.copy(saslPassword = it)) },
+        label = stringResource(R.string.onboarding_auth_sasl_password),
+        imeAction = ImeAction.Done,
+    )
+}
+
+/**
  * Server fields. [showIdentity] gates the full nick/username/realname block (direct networks);
  * [showNick] surfaces just the nick (soju root), whose username/realname default to the nick and
  * whose SASL login lives on the AUTH step.
@@ -88,38 +153,18 @@ private fun ServerFields(
     onServerChange: (ServerForm) -> Unit,
     showIdentity: Boolean = true,
     showNick: Boolean = false,
+    lastImeAction: ImeAction = ImeAction.Done,
 ) {
-    OutlinedTextField(
-        value = server.host,
-        onValueChange = { onServerChange(server.copy(host = it)) },
-        label = { Text(stringResource(R.string.onboarding_field_host)) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    OutlinedTextField(
-        value = server.port,
-        onValueChange = { onServerChange(server.copy(port = it.filter(Char::isDigit))) },
-        label = { Text(stringResource(R.string.onboarding_field_port)) },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = Modifier.fillMaxWidth(),
-    )
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(stringResource(R.string.onboarding_field_tls), modifier = Modifier.weight(1f))
-        // withTls re-defaults the port (6697<->6667) unless the user typed a custom one.
-        Switch(checked = server.tls, onCheckedChange = { onServerChange(server.withTls(it)) })
-    }
+    val hasIdentity = showIdentity || showNick
+    HostField(server, onServerChange)
+    PortField(server, onServerChange)
+    TlsRow(server, onServerChange)
     // Nick is shown for the full-identity direct path and for the nick-only soju root.
-    if (showIdentity || showNick) {
-        OutlinedTextField(
-            value = server.nick,
-            onValueChange = { onServerChange(server.copy(nick = it)) },
-            label = { Text(stringResource(R.string.onboarding_field_nick)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+    if (hasIdentity) {
+        NickField(
+            server,
+            onServerChange,
+            imeAction = if (showIdentity) ImeAction.Next else lastImeAction,
         )
     }
     if (showIdentity) {
@@ -129,6 +174,11 @@ private fun ServerFields(
             label = { Text(stringResource(R.string.onboarding_field_username)) },
             placeholder = { Text(stringResource(R.string.onboarding_field_username_hint)) },
             singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                autoCorrectEnabled = false,
+                imeAction = ImeAction.Next,
+            ),
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
@@ -137,9 +187,107 @@ private fun ServerFields(
             label = { Text(stringResource(R.string.onboarding_field_realname)) },
             placeholder = { Text(stringResource(R.string.onboarding_field_realname_hint)) },
             singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = lastImeAction),
             modifier = Modifier.fillMaxWidth(),
         )
     }
+}
+
+// ---- Shared field composables ----------------------------------------------------------------
+
+@Composable
+private fun HostField(server: ServerForm, onServerChange: (ServerForm) -> Unit) {
+    OutlinedTextField(
+        value = server.host,
+        onValueChange = { onServerChange(server.copy(host = it)) },
+        label = { Text(stringResource(R.string.onboarding_field_host)) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Uri,
+            autoCorrectEnabled = false,
+            imeAction = ImeAction.Next,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun PortField(server: ServerForm, onServerChange: (ServerForm) -> Unit) {
+    OutlinedTextField(
+        value = server.port,
+        onValueChange = { onServerChange(server.copy(port = it.filter(Char::isDigit))) },
+        label = { Text(stringResource(R.string.onboarding_field_port)) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Number,
+            imeAction = ImeAction.Next,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun TlsRow(server: ServerForm, onServerChange: (ServerForm) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(stringResource(R.string.onboarding_field_tls), modifier = Modifier.weight(1f))
+        // withTls re-defaults the port (6697<->6667) unless the user typed a custom one.
+        Switch(checked = server.tls, onCheckedChange = { onServerChange(server.withTls(it)) })
+    }
+}
+
+@Composable
+private fun NickField(
+    server: ServerForm,
+    onServerChange: (ServerForm) -> Unit,
+    imeAction: ImeAction,
+) {
+    // IRC nicks are case-sensitive: no auto-capitalise/correct.
+    OutlinedTextField(
+        value = server.nick,
+        onValueChange = { onServerChange(server.copy(nick = it)) },
+        label = { Text(stringResource(R.string.onboarding_field_nick)) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.None,
+            autoCorrectEnabled = false,
+            imeAction = imeAction,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** Password field with a trailing show/hide eye that toggles the visual transformation. */
+@Composable
+fun PasswordField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    imeAction: ImeAction = ImeAction.Done,
+) {
+    var visible by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        singleLine = true,
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = imeAction),
+        trailingIcon = {
+            IconButton(onClick = { visible = !visible }) {
+                Icon(
+                    imageVector = if (visible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                    contentDescription = stringResource(
+                        if (visible) R.string.password_hide else R.string.password_show,
+                    ),
+                )
+            }
+        },
+        modifier = modifier.fillMaxWidth(),
+    )
 }
 
 @Composable
@@ -164,16 +312,18 @@ private fun AuthSection(auth: AuthForm, onAuthChange: (AuthForm) -> Unit) {
                 onValueChange = { onAuthChange(auth.copy(saslUser = it)) },
                 label = { Text(stringResource(R.string.onboarding_auth_sasl_user)) },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrectEnabled = false,
+                    imeAction = ImeAction.Next,
+                ),
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedTextField(
+            PasswordField(
                 value = auth.saslPassword,
                 onValueChange = { onAuthChange(auth.copy(saslPassword = it)) },
-                label = { Text(stringResource(R.string.onboarding_auth_sasl_password)) },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                modifier = Modifier.fillMaxWidth(),
+                label = stringResource(R.string.onboarding_auth_sasl_password),
+                imeAction = ImeAction.Done,
             )
         }
 
@@ -232,27 +382,35 @@ fun buildNetworkEntity(
     parentId: Long? = null,
     bouncerNetId: String? = null,
 ): NetworkEntity {
-    // :irc sends NICK/USER on every socket (incl. the soju root). The nick is now collected on
-    // both paths, so prefer it; fall back to the SASL login user, then a placeholder, only as a
-    // last resort to keep the registration lines well-formed. username/realname default to the
-    // nick when not surfaced.
-    val identitySeed = server.nick.ifBlank { auth.saslUser.ifBlank { DEFAULT_IDENTITY } }
+    val isSoju = role == NetworkRole.BOUNCER_ROOT || role == NetworkRole.BOUNCER_CHILD
+    // Trim leading/trailing whitespace: paste artefacts break host resolution and NICK/USER.
+    val host = server.host.trim()
+    val nick = server.nick.trim()
+    val saslUser = auth.saslUser.trim()
+    // :irc sends NICK/USER on every socket (incl. the soju root). Prefer the collected nick; fall
+    // back to the SASL login user, then a placeholder, only as a last resort so the registration
+    // lines stay well-formed.
+    val identitySeed = nick.ifBlank { saslUser.ifBlank { DEFAULT_IDENTITY } }
+    // soju is always SASL PLAIN (the bouncer login); the direct path uses the picked mechanism.
+    val mechanism = if (isSoju) SaslMechanism.PLAIN else auth.mode.toSaslMechanism()
     return NetworkEntity(
         id = id,
         name = name,
         role = role,
         parentId = parentId,
         bouncerNetId = bouncerNetId,
-        host = server.host,
+        host = host,
         port = server.port.toIntOrNull() ?: 6697,
         tls = server.tls,
         nick = identitySeed,
-        username = server.username.ifBlank { identitySeed },
-        realname = server.realname.ifBlank { identitySeed },
-        saslMechanism = auth.mode.toSaslMechanism().name,
-        saslUser = auth.saslUser.ifBlank { null },
+        // soju: USER ident = nick; there is no separate ident field. Direct: explicit ident or nick.
+        username = if (isSoju) identitySeed else server.username.trim().ifBlank { identitySeed },
+        // soju: assume the login username is the real name (fallback nick). Direct: explicit or nick.
+        realname = if (isSoju) saslUser.ifBlank { identitySeed } else server.realname.trim().ifBlank { identitySeed },
+        saslMechanism = mechanism.name,
+        saslUser = auth.saslUser.trim().ifBlank { null },
         saslPassword = auth.saslPassword.ifBlank { null },
-        clientCertAlias = auth.certAlias,
+        clientCertAlias = if (isSoju) null else auth.certAlias,
     )
 }
 

@@ -55,6 +55,9 @@
     <!-- soju bouncer auth: always SASL PLAIN, no picker (WP-S2) -->
     <string name="onboarding_auth_soju_username">Username</string>
     <string name="onboarding_auth_soju_password">Password</string>
+    <!-- Password field show/hide toggle -->
+    <string name="password_show">Show password</string>
+    <string name="password_hide">Hide password</string>
     <string name="onboarding_connect_title">Connecting</string>
     <string name="onboarding_connect_retry">Retry</string>
     <string name="onboarding_connect_networks_title">Bouncer networks</string>

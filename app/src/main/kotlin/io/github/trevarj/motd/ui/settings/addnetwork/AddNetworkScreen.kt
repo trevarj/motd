@@ -112,6 +112,8 @@ fun AddNetworkContent(
                 auth = state.auth,
                 onServerChange = onServerChange,
                 onAuthChange = onAuthChange,
+                // soju collapses to host/port/TLS/nick + username/password (no picker/ident).
+                soju = state.isSoju,
             )
             Button(
                 onClick = onSubmit,

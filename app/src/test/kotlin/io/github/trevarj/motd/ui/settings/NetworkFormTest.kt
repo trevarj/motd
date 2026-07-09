@@ -25,8 +25,9 @@ class NetworkFormTest {
         assertEquals("secret", entity.saslPassword)
         // NICK/USER on the root socket use the collected nick (not the SASL login user).
         assertEquals("trev", entity.nick)
-        assertEquals("trev", entity.username) // ident defaults to nick
-        assertEquals("trev", entity.realname)
+        assertEquals("trev", entity.username) // soju ident derives from nick
+        // soju: assume the login username is the real name.
+        assertEquals("trevbnc", entity.realname)
         assertNull(entity.clientCertAlias)
     }
 
@@ -47,6 +48,32 @@ class NetworkFormTest {
             role = NetworkRole.BOUNCER_ROOT,
         )
         assertEquals("motd", placeholder.nick)
+    }
+
+    @Test
+    fun `soju forces sasl plain even when auth mode is none`() {
+        // The collapsed soju form never surfaces a mechanism picker; PLAIN is derived from the role.
+        val entity = buildNetworkEntity(
+            server = ServerForm(host = "bnc.example.org", port = "6697", nick = "trev"),
+            auth = AuthForm(mode = AuthMode.NONE, saslUser = "trevbnc", saslPassword = "secret"),
+            role = NetworkRole.BOUNCER_ROOT,
+        )
+        assertEquals("PLAIN", entity.saslMechanism)
+        assertEquals("trevbnc", entity.saslUser)
+        assertEquals("secret", entity.saslPassword)
+    }
+
+    @Test
+    fun `soju trims whitespace on host nick and username`() {
+        val entity = buildNetworkEntity(
+            server = ServerForm(host = "  bnc.example.org  ", port = "6697", nick = "  trev  "),
+            auth = AuthForm(mode = AuthMode.PLAIN, saslUser = "  trevbnc  ", saslPassword = "secret"),
+            role = NetworkRole.BOUNCER_ROOT,
+        )
+        assertEquals("bnc.example.org", entity.host)
+        assertEquals("trev", entity.nick)
+        assertEquals("trevbnc", entity.saslUser)
+        assertEquals("trevbnc", entity.realname) // username assumed to be the real name
     }
 
     @Test
