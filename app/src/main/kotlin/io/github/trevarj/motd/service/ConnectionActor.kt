@@ -67,6 +67,14 @@ class ConnectionActor(
     private var job: Job? = null
     private val retryNow = Channel<Unit>(Channel.CONFLATED)
 
+    /**
+     * True while the reconnect loop coroutine is still running. Goes false once the loop returns —
+     * i.e. a fatal Failed or a cert-untrusted park completed the [job]. The manager uses this as a
+     * liveness signal: an actor sitting in [ConnectionManagerImpl]'s actor map with a dead job
+     * cannot recover on its own, so a self-healing reconcile must drop and rebuild it.
+     */
+    val isAlive: Boolean get() = job?.isActive == true
+
     fun start() {
         if (job?.isActive == true) return
         job = scope.launch { loop() }

@@ -36,6 +36,14 @@ interface ConnectionManager {
     suspend fun connect(networkId: Long)
     suspend fun disconnect(networkId: Long)
 
+    /**
+     * Re-drive the wanted set and revive any actor that died/parked in the background (Doze/network
+     * drop leaves it terminally Failed with a completed job). Canonical app-foreground reconnect,
+     * invoked from ProcessLifecycleOwner's onStart. No-op unless the subsystem is started; leaves
+     * healthy/connecting/retrying/cert-parked actors untouched, so it never storms reconnects.
+     */
+    suspend fun reconnectStale()
+
     /** High-level send: resolves buffer -> network/target, handles pending insert + echo. */
     suspend fun sendMessage(bufferId: Long, text: String, replyToMsgid: String? = null)
     suspend fun sendTyping(bufferId: Long, state: String)

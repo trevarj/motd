@@ -170,6 +170,16 @@ class ConnectionManagerImpl @Inject constructor(
         _states.value = _states.value - networkId
     }
 
+    override suspend fun reconnectStale() {
+        // Canonical app-foreground reconnect entry (registered on ProcessLifecycleOwner in
+        // MotdApplication). Re-runs the self-healing reconcile against the current DB snapshot so any
+        // actor that died/parked in the background (Doze/network drop) is dropped and rebuilt; a
+        // healthy/connecting/retrying/cert-parked actor is left untouched (see [ensureActor] /
+        // [shouldRebuildActor]), so this cannot cause a reconnect storm. No-op until started.
+        if (!started) return
+        reconcile(networkDao.observeAll().first())
+    }
+
     /** Add/remove/restart actors so the live set matches the wanted set derived from [all] rows
      *  and the sticky user-intent map (plans/16 §4). */
     private fun reconcile(all: List<NetworkEntity>) {
@@ -190,7 +200,22 @@ class ConnectionManagerImpl @Inject constructor(
     private fun ensureActor(row: NetworkEntity) {
         val fp = fingerprint(row)
         val existing = actors[row.id]
-        if (existing != null && fingerprints[row.id] == fp) return
+        // A live actor whose fingerprint is unchanged is left alone (healthy / connecting /
+        // actively retrying / parked awaiting cert trust). Only rebuild on a config change OR when
+        // the existing actor is stale — its reconnect loop finished (fatal Failed / cert park with a
+        // completed job) so it can never recover on its own. Force-rebuilding a stale actor here is
+        // what makes a plain reconcile() self-healing after a background outage (#43): the actor no
+        // longer no-ops purely on unchanged fingerprint. See [shouldRebuildActor].
+        if (existing != null &&
+            !shouldRebuildActor(
+                fingerprintChanged = fingerprints[row.id] != fp,
+                actorAlive = existing.isAlive,
+                lastState = _states.value[row.id],
+                awaitingCertTrust = _certPrompts.value.any { it.networkId == row.id },
+            )
+        ) {
+            return
+        }
         existing?.stop()
         val actor = ConnectionActor(
             networkId = row.id,
@@ -634,6 +659,43 @@ internal fun networksSharingCertEndpoint(
         .filter { (_, ex) -> ex.host.equals(host, ignoreCase = true) && ex.port == port }
         .map { it.key }
         .toSet()
+
+/**
+ * Whether [ConnectionManagerImpl.ensureActor] must drop and rebuild an *existing* actor for a
+ * wanted network. Extracted as a pure decision so the "stay/reconnect smoothly" logic (#43) is unit
+ * tested in isolation (same style as [wantedNetworkIds] / [childrenToReconnect]).
+ *
+ * Rebuild when:
+ *  - the connection-affecting config changed ([fingerprintChanged]) — the pre-existing restart-on-edit
+ *    behavior; or
+ *  - the actor is stale: its reconnect loop finished ([actorAlive] == false) so it can never recover
+ *    on its own. The actor's loop only exits on a fatal Failed or a cert-untrust park, so a dead loop
+ *    that is NOT [awaitingCertTrust] is a terminally-Failed actor that a plain reconcile must revive.
+ *    [lastState] is passed for clarity/testability of that terminal condition.
+ *
+ * Never rebuild when [awaitingCertTrust]: that park is intentional and is resolved by
+ * [ConnectionManagerImpl.trustCert] / dismiss, not by reconcile — rebuilding would re-loop the
+ * handshake and re-spam the prompt.
+ *
+ * A healthy actor (Ready), one still Connecting/Registering, or one actively backing-off between
+ * retries all report [actorAlive] == true and are left alone, so reconcile can never storm them.
+ */
+internal fun shouldRebuildActor(
+    fingerprintChanged: Boolean,
+    actorAlive: Boolean,
+    lastState: IrcClientState?,
+    awaitingCertTrust: Boolean,
+): Boolean {
+    // The cert-trust park is owned by trustCert/dismiss; never rebuild it from reconcile.
+    if (awaitingCertTrust) return false
+    if (fingerprintChanged) return true
+    // A live loop owns its own recovery (Connecting/Registering/Ready or backing-off between
+    // retries); only a dead loop is stuck and needs reviving.
+    if (actorAlive) return false
+    // Dead loop, not a cert park: it terminated on a Failed (typically fatal, e.g. SASL) and sits
+    // parked with a completed job. lastState reflects that terminal Failed; rebuild to revive it.
+    return lastState is IrcClientState.Failed || lastState == null
+}
 
 internal fun wantedNetworkIds(
     all: List<NetworkEntity>,

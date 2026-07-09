@@ -34,6 +34,7 @@ class RealPushAvailabilityProviderTest {
         override suspend fun stopAll() = Unit
         override suspend fun connect(networkId: Long) = Unit
         override suspend fun disconnect(networkId: Long) = Unit
+        override suspend fun reconnectStale() = Unit
         override suspend fun sendMessage(bufferId: Long, text: String, replyToMsgid: String?) = Unit
         override suspend fun sendTyping(bufferId: Long, state: String) = Unit
         override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
