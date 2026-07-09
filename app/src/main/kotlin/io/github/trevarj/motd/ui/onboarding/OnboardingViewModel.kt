@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.settings.buildNetworkEntity
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,7 +42,16 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    fun back() = dispatch(OnboardingAction.Back)
+    fun back() {
+        // Leaving the connect test tears down the half-created network + its state collector, so
+        // editing settings (e.g. toggling TLS) and reconnecting doesn't leave a stale actor
+        // retrying with the old config — otherwise a failed TLS attempt keeps spamming
+        // "Unable to parse TLS packet header" behind a later plaintext retry.
+        val leavingConnect = _state.value.step == OnboardingStep.CONNECT
+        dispatch(OnboardingAction.Back)
+        if (leavingConnect) cleanupConnectTest()
+    }
+
     fun chooseConnection(choice: ConnectionChoice) = dispatch(OnboardingAction.ChooseConnection(choice))
     fun applyLiberaPreset() = dispatch(OnboardingAction.ApplyLiberaPreset)
     fun editServer(server: ServerForm) = dispatch(OnboardingAction.EditServer(server))
@@ -50,35 +60,47 @@ class OnboardingViewModel @Inject constructor(
 
     // -- side effects --------------------------------------------------------------------------
 
-    private fun runConnectTest() = viewModelScope.launch {
-        val s = _state.value
-        val entity = buildNetworkEntity(
-            server = s.server,
-            auth = s.auth,
-            role = s.role,
-            name = s.server.host,
-        )
-        val networkId = networkRepository.addNetwork(entity)
-        dispatch(OnboardingAction.NetworkCreated(networkId))
+    // Tracks the in-flight connect-test coroutine (creates the network + collects its state) so a
+    // new attempt or a Back cancels it — otherwise each attempt leaks a never-ending collector.
+    private var connectTestJob: Job? = null
 
-        connectionManager.connect(networkId)
+    private fun runConnectTest() {
+        // Drop any network + collector from a prior attempt first, so reconnecting after a settings
+        // change (e.g. TLS) rebuilds cleanly rather than piling up stale actors.
+        connectTestJob?.cancel()
+        val prior = _state.value.networkId
+        connectTestJob = viewModelScope.launch {
+            if (prior != null) networkRepository.deleteNetwork(prior)
+            val s = _state.value
+            val entity = buildNetworkEntity(
+                server = s.server,
+                auth = s.auth,
+                role = s.role,
+                name = s.server.host,
+            )
+            val networkId = networkRepository.addNetwork(entity)
+            dispatch(OnboardingAction.NetworkCreated(networkId))
 
-        // Mirror this network's live IrcClientState into the wizard state log.
-        connectionManager.connectionStates.collect { states ->
-            val cs = states[networkId] ?: return@collect
-            if (cs != _state.value.connState) {
-                dispatch(OnboardingAction.ConnStateChanged(cs))
-                if (cs is IrcClientState.Ready && s.isSoju && !_state.value.bouncerListLoaded) {
-                    loadBouncerNetworks(networkId)
+            connectionManager.connect(networkId)
+
+            // Mirror this network's live IrcClientState into the wizard state log.
+            connectionManager.connectionStates.collect { states ->
+                val cs = states[networkId] ?: return@collect
+                if (cs != _state.value.connState) {
+                    dispatch(OnboardingAction.ConnStateChanged(cs))
+                    if (cs is IrcClientState.Ready && s.isSoju && !_state.value.bouncerListLoaded) {
+                        loadBouncerNetworks(networkId)
+                    }
                 }
             }
         }
     }
 
-    /** Retry after a failed connect test: delete the half-created row and rerun. */
-    fun retryConnect() = viewModelScope.launch {
-        _state.value.networkId?.let { networkRepository.deleteNetwork(it) }
-        dispatch(OnboardingAction.Error(null))
+    /** Cancel the connect-test collector and delete its half-created network; reset connect state. */
+    private fun cleanupConnectTest() {
+        connectTestJob?.cancel()
+        connectTestJob = null
+        _state.value.networkId?.let { id -> viewModelScope.launch { networkRepository.deleteNetwork(id) } }
         _state.value = _state.value.copy(
             networkId = null,
             connState = null,
@@ -86,6 +108,11 @@ class OnboardingViewModel @Inject constructor(
             bouncerNetworks = emptyList(),
             bouncerListLoaded = false,
         )
+    }
+
+    /** Retry after a failed connect test: rerun (runConnectTest drops the prior half-created row). */
+    fun retryConnect() {
+        dispatch(OnboardingAction.Error(null))
         runConnectTest()
     }
 
