@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -43,6 +44,10 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
 import androidx.compose.ui.res.stringResource
 
+/** Alpha for the per-nick row background wash in COMPACT density: strong enough to band messages
+ *  by speaker, faint enough to stay readable in light and dark themes. */
+private const val COMPACT_ROW_TINT_ALPHA = 0.10f
+
 /**
  * Classic single-line IRC rendering used in COMPACT density: `nick: text` on one wrapping line,
  * nick colored via [NickColorScheme.nick] (friend tint preserved), a small trailing timestamp, no
@@ -85,6 +90,9 @@ internal fun CompactMessageRow(
     val linkColor = MaterialTheme.colorScheme.primary
     // Friend highlight: a low-alpha primary background behind the nick, layered under the nick color.
     val friendTint = if (senderIsFriend) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Unspecified
+    // Per-nick row wash: a faint tint of the sender's own nick color behind the whole row so runs of
+    // messages are visually trackable by speaker (stable per nick — no fragile list-wide parity).
+    val rowTint = nameColor.copy(alpha = COMPACT_ROW_TINT_ALPHA)
 
     // The `nick: text` (or `* nick text`) content is a single flowing AnnotatedString so it wraps as
     // one paragraph like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
@@ -95,6 +103,9 @@ internal fun CompactMessageRow(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            // Tint fills the full row width (behind the horizontal padding) so the speaker band is
+            // unbroken edge to edge.
+            .background(rowTint)
             .combinedClickable(
                 interactionSource = interaction,
                 indication = null,
