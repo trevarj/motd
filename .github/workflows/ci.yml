@@ -9,17 +9,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  # Pure-JVM protocol module: fast, no Android SDK needed. Runs in parallel
+  # with the app job so a slow/hanging app build never blocks irc feedback.
+  irc:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
-      - name: Unit tests
-        run: ./gradlew :irc:test :app:testDebugUnitTest --stacktrace
+      - name: irc unit tests
+        run: ./gradlew :irc:test --stacktrace
+
+  # Android app: unit tests, lint, and debug APK. Uses the preinstalled
+  # Android SDK on ubuntu-latest (no SDK download) plus the Gradle cache.
+  app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: App unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+      # Lint runs isolated with a single worker and no daemon to avoid the
+      # flaky Gradle-worker classloader race that surfaces as
+      # NoClassDefFoundError in ModifierDeclarationDetector. A bounded retry
+      # (2 attempts) covers the rare case it still races.
       - name: Android lint (warnings as errors)
-        run: ./gradlew :app:lintDebug --stacktrace
+        run: |
+          for attempt in 1 2; do
+            echo "::group::lint attempt $attempt"
+            ./gradlew :app:lintDebug --stacktrace --no-daemon \
+              -Dorg.gradle.workers.max=1 && { echo "::endgroup::"; exit 0; }
+            echo "::endgroup::"
+            echo "lint attempt $attempt failed; retrying" >&2
+          done
+          exit 1
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4

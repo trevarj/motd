@@ -1,10 +1,14 @@
 # 08 — CI & release (WP1 authors workflows; runbook for the human)
 
 CI is the canonical build environment: `ubuntu-latest` with its preinstalled Android SDK.
-No Nix in CI (the flake is for local dev only). AGP accepts licenses non-interactively on
-hosted runners; no extra license step needed.
+No Nix in CI (the flake is for local dev only; the Nix-caching option was evaluated and
+rejected — see plans/17). AGP accepts licenses non-interactively on hosted runners; no extra
+license step needed.
 
-## `.github/workflows/ci.yml`
+The CI workflow is split into two parallel jobs (`irc`, `app`), has per-job `timeout-minutes`
+so a hang fails fast, and runs lint isolated (`--no-daemon -Dorg.gradle.workers.max=1`) with a
+bounded retry to dodge the flaky `ModifierDeclarationDetector` classloader race. Rationale and
+the Nix verdict are in plans/17. The current workflow is `.github/workflows/ci.yml`:
 
 ```yaml
 name: CI
@@ -18,15 +22,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  irc:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
-      - name: Unit tests
-        run: ./gradlew :irc:test :app:testDebugUnitTest --stacktrace
+      - name: irc unit tests
+        run: ./gradlew :irc:test --stacktrace
+
+  app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: App unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+      - name: Android lint (warnings as errors)
+        run: |
+          for attempt in 1 2; do
+            echo "::group::lint attempt $attempt"
+            ./gradlew :app:lintDebug --stacktrace --no-daemon \
+              -Dorg.gradle.workers.max=1 && { echo "::endgroup::"; exit 0; }
+            echo "::endgroup::"
+            echo "lint attempt $attempt failed; retrying" >&2
+          done
+          exit 1
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
@@ -49,6 +75,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
