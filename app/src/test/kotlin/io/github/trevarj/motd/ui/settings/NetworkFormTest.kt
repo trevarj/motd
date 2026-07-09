@@ -118,29 +118,4 @@ class NetworkFormTest {
         assertNull(entity.saslUser)
         assertNull(entity.saslPassword)
     }
-
-    @Test
-    fun `soju root persists a trimmed wss url when provided`() {
-        // The onboarding SERVER page can supply a wss:// endpoint so the connect test tunnels over
-        // HTTPS-looking WebSocket (plans/19 §3.3); it must survive into the entity, trimmed.
-        val entity = buildNetworkEntity(
-            server = ServerForm(host = "bnc.example.org", port = "6697", nick = "trev"),
-            auth = AuthForm(mode = AuthMode.PLAIN, saslUser = "trevbnc", saslPassword = "secret"),
-            role = NetworkRole.BOUNCER_ROOT,
-            wsUrl = "  wss://bnc.example.org:443/  ",
-        )
-        assertEquals("wss://bnc.example.org:443/", entity.wsUrl)
-    }
-
-    @Test
-    fun `blank wss url leaves the tcp transport in place`() {
-        // Blank means normal TCP/TLS: the column is nulled so the WsLineTransport is not selected.
-        val entity = buildNetworkEntity(
-            server = ServerForm(host = "bnc.example.org", nick = "trev"),
-            auth = AuthForm(mode = AuthMode.PLAIN, saslUser = "trevbnc", saslPassword = "secret"),
-            role = NetworkRole.BOUNCER_ROOT,
-            wsUrl = "",
-        )
-        assertNull(entity.wsUrl)
-    }
 }

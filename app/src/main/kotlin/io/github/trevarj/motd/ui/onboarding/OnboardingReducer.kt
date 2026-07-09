@@ -38,9 +38,6 @@ data class ServerForm(
     val nick: String = "",
     val username: String = "",
     val realname: String = "",
-    // Opt-in IRC-over-WebSocket endpoint (plans/19 §3.3). Blank keeps the TCP/TLS transport; set to
-    // a wss:// URL to tunnel the connection over HTTPS-looking WebSocket (soju bouncer path).
-    val wsUrl: String = "",
 ) {
     /** Effective username: explicit value, else falls back to nick (spec default). */
     val effectiveUsername: String get() = username.ifBlank { nick }

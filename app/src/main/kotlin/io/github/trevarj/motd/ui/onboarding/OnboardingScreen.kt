@@ -50,7 +50,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -306,34 +305,6 @@ private fun ServerPage(
             showIdentity = !state.isSoju,
             showNick = state.isSoju,
         )
-        // Optional WSS endpoint for the soju bouncer path: tunnels IRC over an HTTPS-looking
-        // WebSocket so a user whose ISP blocks the IRC protocol can onboard over 443 (plans/19
-        // §3.3). Only shown on the soju SERVER page; blank keeps the TCP/TLS transport.
-        if (state.isSoju && !authOnly) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                OutlinedTextField(
-                    value = state.server.wsUrl,
-                    onValueChange = { onServerChange(state.server.copy(wsUrl = it)) },
-                    label = { Text(stringResource(R.string.network_settings_ws_url)) },
-                    placeholder = { Text("wss://bnc.example.com:443/") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        autoCorrectEnabled = false,
-                        imeAction = ImeAction.Done,
-                    ),
-                    modifier = Modifier.fillMaxWidth().testTag("onboarding_ws_url"),
-                )
-                Text(
-                    stringResource(R.string.network_settings_ws_url_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
     }
 }
 

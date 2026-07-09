@@ -57,9 +57,6 @@ class OnboardingViewModel @Inject constructor(
             auth = s.auth,
             role = s.role,
             name = s.server.host,
-            // Tunnel the connect test over WSS when the soju SERVER page collected a wss:// URL, so a
-            // user whose ISP blocks IRC can complete onboarding over 443 (plans/19 §3.3).
-            wsUrl = s.server.wsUrl,
         )
         val networkId = networkRepository.addNetwork(entity)
         dispatch(OnboardingAction.NetworkCreated(networkId))
