@@ -19,4 +19,8 @@ class NetworkRepositoryImpl @Inject constructor(
     override suspend fun deleteNetwork(id: Long) {
         networkDao.byId(id)?.let { networkDao.delete(it) }
     }
+
+    override suspend fun networkById(id: Long): NetworkEntity? = networkDao.byId(id)
+
+    override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = networkDao.childrenOf(rootId)
 }

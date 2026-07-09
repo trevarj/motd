@@ -16,6 +16,13 @@ interface NetworkRepository {
     suspend fun addNetwork(n: NetworkEntity): Long
     suspend fun updateNetwork(n: NetworkEntity)
     suspend fun deleteNetwork(id: Long)
+
+    // Round 5 (plans/16): point reads for the network-management screens.
+    /** Point read (drives NetworkSettings/Bouncer screens; delegates to NetworkDao.byId). */
+    suspend fun networkById(id: Long): NetworkEntity?
+
+    /** Local BOUNCER_CHILD mirrors of a soju root (delegates to NetworkDao.childrenOf). */
+    suspend fun childrenOf(rootId: Long): List<NetworkEntity>
 }
 
 interface BufferRepository {

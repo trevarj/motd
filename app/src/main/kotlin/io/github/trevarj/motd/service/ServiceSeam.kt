@@ -48,6 +48,10 @@ interface ConnectionManager {
     /** Find-or-create a QUERY buffer for a DM (name Isupport-normalized); returns bufferId. */
     suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long
 
+    /** Find-or-create the per-network SERVER buffer (name "*", displayName = network name);
+     *  returns bufferId. UI entry for the server-messages timeline (plans/16). */
+    suspend fun ensureServerBuffer(networkId: Long): Long
+
     /** THE mark-read entry point: advances Room (max-only) and sends MARKREAD when supported. */
     suspend fun markRead(bufferId: Long, upToTime: Long)
 

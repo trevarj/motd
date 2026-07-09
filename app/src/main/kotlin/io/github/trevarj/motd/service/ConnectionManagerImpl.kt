@@ -61,6 +61,11 @@ class ConnectionManagerImpl @Inject constructor(
     // Fingerprint of the config each actor was built from, so config changes trigger a restart.
     private val fingerprints = HashMap<Long, String>()
 
+    // Sticky in-memory user intent per network (plans/16 §4): true = force-connect,
+    // false = force-disconnect, absent = follow autoConnect. Survives reconcile emissions so a
+    // manual disconnect/connect is not undone by the next DB write. Reset by stopAll (not persisted).
+    private val userIntents = java.util.concurrent.ConcurrentHashMap<Long, Boolean>()
+
     private val _states = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
     override val connectionStates: StateFlow<Map<Long, IrcClientState>> = _states.asStateFlow()
 
@@ -87,11 +92,13 @@ class ConnectionManagerImpl @Inject constructor(
         if (started) return
         started = true
         registerConnectivityCallback()
-        // Seed actors from the current connectable set, then keep reconciling on changes.
-        reconcile(networkDao.connectable())
+        // Seed actors from the current full set (reconcile applies autoConnect + sticky intent),
+        // then keep reconciling on every DB change. The collector no longer pre-filters: reconcile
+        // owns the wanted-set computation so manual connect/disconnect intents survive DB writes.
+        reconcile(networkDao.observeAll().first())
         reconcileJob = scope.launch {
             networkDao.observeAll().collect { all ->
-                reconcile(all.filter { it.autoConnect })
+                reconcile(all)
             }
         }
         // Delivery-mode reaction: UNIFIED_PUSH tears the sockets down once webpush is confirmed.
@@ -128,25 +135,35 @@ class ConnectionManagerImpl @Inject constructor(
         unregisterConnectivityCallback()
         for (actor in actors.values) actor.stop()
         actors.clear(); fingerprints.clear()
+        // Service teardown resets sticky user intent (in-memory only).
+        userIntents.clear()
         _states.value = emptyMap()
     }
 
     override suspend fun connect(networkId: Long) {
         val row = networkDao.byId(networkId) ?: return
+        // Record the sticky intent BEFORE touching actors so a concurrent reconcile honors it.
+        userIntents[networkId] = true
+        // Force-rebuild: a parked fatal-Failed actor sits in `actors` with a completed job and an
+        // unchanged fingerprint, so plain ensureActor would no-op. Drop it first to actually reconnect.
+        actors.remove(networkId)?.stop()
+        fingerprints.remove(networkId)
         ensureActor(row)
     }
 
     override suspend fun disconnect(networkId: Long) {
+        // Record intent before removal so the next reconcile does not re-create the actor.
+        userIntents[networkId] = false
         actors.remove(networkId)?.stop()
         fingerprints.remove(networkId)
         _states.value = _states.value - networkId
     }
 
-    /** Add/remove/restart actors so the live set matches [rows] (only connectable networks). */
-    private fun reconcile(rows: List<NetworkEntity>) {
-        val wanted = rows.filter { it.role != NetworkRole.BOUNCER_CHILD || it.parentId != null }
-        val wantedIds = wanted.map { it.id }.toSet()
-        // Remove actors whose network vanished.
+    /** Add/remove/restart actors so the live set matches the wanted set derived from [all] rows
+     *  and the sticky user-intent map (plans/16 §4). */
+    private fun reconcile(all: List<NetworkEntity>) {
+        val wantedIds = wantedNetworkIds(all, userIntents)
+        // Remove actors whose network is no longer wanted (deleted, autoConnect off, user-disconnected).
         for (id in actors.keys.toList()) {
             if (id !in wantedIds) {
                 actors.remove(id)?.stop()
@@ -154,7 +171,7 @@ class ConnectionManagerImpl @Inject constructor(
                 _states.value = _states.value - id
             }
         }
-        for (row in wanted) ensureActor(row)
+        for (row in all) if (row.id in wantedIds) ensureActor(row)
     }
 
     private fun ensureActor(row: NetworkEntity) {
@@ -399,9 +416,25 @@ class ConnectionManagerImpl @Inject constructor(
         )
     }
 
+    override suspend fun ensureServerBuffer(networkId: Long): Long {
+        // "*" is stable under both casemapping normalizers, so no normalize() needed.
+        bufferDao.byName(networkId, SERVER_BUFFER_NAME)?.let { return it.id }
+        return bufferDao.insert(
+            io.github.trevarj.motd.data.db.BufferEntity(
+                networkId = networkId,
+                name = SERVER_BUFFER_NAME,
+                displayName = networkDao.byId(networkId)?.name ?: "Server",
+                type = BufferType.SERVER,
+            ),
+        )
+    }
+
     override suspend fun markRead(bufferId: Long, upToTime: Long) {
         bufferDao.advanceReadMarker(bufferId, upToTime)
         val buffer = bufferDao.observeById(bufferId) ?: return
+        // SERVER buffers use "*" as their name, which is not a valid MARKREAD target; the Room
+        // read-marker advance above still runs. Skip the wire send for them (plans/16 §4).
+        if (buffer.type == BufferType.SERVER) return
         clientFor(buffer.networkId)?.markRead(buffer.name, upToTime)
     }
 
@@ -489,9 +522,27 @@ class ConnectionManagerImpl @Inject constructor(
         const val WEBPUSH_CAP = "soju.im/webpush"
         const val ECHO_TIMEOUT_MS = 30_000L
         const val MAX_BYTES = 400
+        // Stable, casemapping-invariant name for the per-network SERVER buffer.
+        const val SERVER_BUFFER_NAME = "*"
 
         /** Whether MainActivity/BootReceiver should keep the foreground service alive. */
         fun shouldRunService(deliveryPersistent: Boolean, hasNetworks: Boolean): Boolean =
             deliveryPersistent && hasNetworks
     }
 }
+
+/**
+ * Pure wanted-set computation for [ConnectionManagerImpl.reconcile] (plans/16 §4), extracted for
+ * unit tests. A network is wanted when the sticky user intent (if present) or, absent an intent,
+ * its `autoConnect` flag is true — and it is not an orphan BOUNCER_CHILD (a child with no parentId
+ * has no root connection to bind through and must be excluded).
+ */
+internal fun wantedNetworkIds(
+    all: List<NetworkEntity>,
+    userIntents: Map<Long, Boolean>,
+): Set<Long> =
+    all.asSequence()
+        .filter { userIntents[it.id] ?: it.autoConnect }
+        .filter { it.role != NetworkRole.BOUNCER_CHILD || it.parentId != null }
+        .map { it.id }
+        .toSet()

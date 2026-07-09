@@ -20,3 +20,8 @@ import kotlinx.serialization.Serializable
 @Serializable data object FriendsRoute
 @Serializable data object FoolsRoute
 @Serializable data object NickColorsRoute
+
+// Round 5 (plans/16): app shell / network management.
+@Serializable data object AddNetworkRoute
+@Serializable data class BouncerNetworksRoute(val rootNetworkId: Long)
+@Serializable data class ChannelListRoute(val networkId: Long)

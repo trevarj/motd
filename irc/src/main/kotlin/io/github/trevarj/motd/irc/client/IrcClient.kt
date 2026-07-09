@@ -59,6 +59,9 @@ data class ChatHistoryResult(
 
 data class BouncerNetwork(val netId: String, val attrs: Map<String, String>) // attrs: name,host,state,nickname,...
 
+/** One RPL_LIST (322) row. */
+data class ChannelListing(val name: String, val userCount: Int, val topic: String)
+
 /** One instance per physical socket. Restartable: start() after stop() reconnects fresh. */
 class IrcClient(
     val config: IrcClientConfig,
@@ -378,6 +381,59 @@ class IrcClient(
         sendLabeled(BouncerCommands.deleteNetwork(netId))
     }
 
+    // -- channel list (LIST / ELIST) --
+
+    /**
+     * LIST. [mask] filters server-side when given; [minUsers] appends the ELIST ">n" filter only
+     * when ISUPPORT ELIST contains 'U'. Uses labeled-response when available; otherwise collects
+     * raw 322s until 323 or a 15s timeout. Result truncated to [cap] rows.
+     */
+    suspend fun listChannels(mask: String? = null, minUsers: Int? = null, cap: Int = 2000): List<ChannelListing> {
+        val params = buildList {
+            mask?.takeIf { it.isNotBlank() }?.let { add(it) }
+            // The user-count filter is only appended when the server advertises ELIST 'U'.
+            val elistU = _isupport.get()["ELIST"]?.contains('U', ignoreCase = true) == true
+            if (minUsers != null && elistU) add(">$minUsers")
+        }
+        val msg = IrcMessage(command = "LIST", params = params)
+
+        if (hasCap("labeled-response")) {
+            val response = sendLabeled(msg)
+            return response.mapNotNull { parseListLine(it) }.take(cap)
+        }
+
+        // Raw fallback: subscribe BEFORE sending so no 322/323 lines are missed, then collect until
+        // the 323 terminator or a 15s timeout. Implemented inside IrcClient so the raw-numeric
+        // fallback does not leak protocol into :app.
+        val out = ArrayList<ChannelListing>()
+        val collector = scope.launch {
+            events.collect { ev ->
+                if (ev !is IrcEvent.Raw) return@collect
+                when (ev.message.command) {
+                    "322" -> parseListMessage(ev.message)?.let { if (out.size < cap) out.add(it) }
+                    "323" -> throw kotlinx.coroutines.CancellationException("LIST end")
+                }
+            }
+        }
+        transport?.send(msg.serialize())
+        kotlinx.coroutines.withTimeoutOrNull(LIST_TIMEOUT_MS) { collector.join() }
+        collector.cancel()
+        return out.take(cap)
+    }
+
+    /** Parse an [IrcMessage] that is (or wraps) an RPL_LIST 322 into a [ChannelListing]. */
+    private fun parseListLine(msg: IrcMessage): ChannelListing? =
+        if (msg.command == "322") parseListMessage(msg) else null
+
+    /** RPL_LIST: params = [me, channel, count, topic]. */
+    private fun parseListMessage(msg: IrcMessage): ChannelListing? {
+        if (msg.command != "322") return null
+        val channel = msg.params.getOrNull(1) ?: return null
+        val count = msg.params.getOrNull(2)?.toIntOrNull() ?: 0
+        val topic = msg.params.getOrNull(3).orEmpty()
+        return ChannelListing(channel, count, topic)
+    }
+
     // -- soju webpush --
 
     suspend fun webpushRegister(endpoint: String, p256dh: ByteArray, auth: ByteArray) {
@@ -418,6 +474,7 @@ class IrcClient(
 
     private companion object {
         const val LABEL_TIMEOUT_MS = 30_000L
+        const val LIST_TIMEOUT_MS = 15_000L
     }
 }
 

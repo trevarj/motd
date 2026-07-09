@@ -44,6 +44,9 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 fun NetworkSettingsScreen(
     networkId: Long,
     onBack: () -> Unit = {},
+    // Round 5 (plans/16): soju bouncer manager + server-messages buffer. Bodies land in WP-V2.
+    onOpenBouncerNetworks: (Long) -> Unit = {},
+    onOpenBuffer: (Long) -> Unit = {},
     viewModel: NetworkSettingsViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(networkId) { viewModel.init(networkId) }

@@ -45,6 +45,7 @@ class WebPushRegistrarTest {
         override suspend fun joinChannel(networkId: Long, channel: String) = Unit
         override suspend fun partChannel(bufferId: Long, reason: String?) = Unit
         override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 0L
+        override suspend fun ensureServerBuffer(networkId: Long): Long = 0L
         override suspend fun markRead(bufferId: Long, upToTime: Long) = Unit
         override suspend fun evaluatePushMode() = Unit
         override val certPrompts: StateFlow<List<io.github.trevarj.motd.service.CertPrompt>> =

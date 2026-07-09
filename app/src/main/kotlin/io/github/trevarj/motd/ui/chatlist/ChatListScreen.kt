@@ -67,6 +67,10 @@ fun ChatListScreen(
     onOpenSettings: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onOpenOnboarding: () -> Unit = {},
+    // Round 5 (plans/16): drawer/network-management pass-throughs. Bodies land in WP-V1.
+    onOpenNetworkSettings: (Long) -> Unit = {},
+    onOpenAddNetwork: () -> Unit = {},
+    onOpenChannelList: (Long) -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()

@@ -59,6 +59,8 @@ fun SettingsScreen(
     onOpenFriends: () -> Unit = {},
     onOpenFools: () -> Unit = {},
     onOpenNickColors: () -> Unit = {},
+    // Round 5 (plans/16): add-network entry. Body lands in WP-V2.
+    onOpenAddNetwork: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()

@@ -83,6 +83,8 @@ fun ChatScreen(
     onOpenImage: (String) -> Unit = {},
     // /msg and /query resolve-or-create a QUERY buffer via the VM, then navigate to it.
     onOpenBuffer: (Long) -> Unit = {},
+    // Round 5 (plans/16): /list opens the channel browser. Body lands in WP-V3.
+    onOpenChannelList: (Long) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()

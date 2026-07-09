@@ -801,3 +801,66 @@ fun MotdTheme(
 **Plumbing split:** style-only concerns (spacing, nick colors) flow through the two
 CompositionLocals; behavioral concerns (friends/fools/foolsMode/showJoinPartQuit) flow through
 ViewModel state as explicit parameters.
+
+## Round 5 amendments
+
+Landed by WP-V0 (serial) so the parallel round-5 agents build against stable signatures. Full
+design in `plans/16-app-shell.md`.
+
+### Routes (`ui/nav/Routes.kt`) — add
+
+```kotlin
+// Round 5 (plans/16): app shell / network management.
+@Serializable data object AddNetworkRoute
+@Serializable data class BouncerNetworksRoute(val rootNetworkId: Long)
+@Serializable data class ChannelListRoute(val networkId: Long)
+```
+
+### NetworkRepository (`data/repo/Repositories.kt`) — add
+
+```kotlin
+interface NetworkRepository {
+    // ... existing members ...
+    /** Point read (drives NetworkSettings/Bouncer screens; delegates to NetworkDao.byId). */
+    suspend fun networkById(id: Long): NetworkEntity?
+    /** Local BOUNCER_CHILD mirrors of a soju root (delegates to NetworkDao.childrenOf). */
+    suspend fun childrenOf(rootId: Long): List<NetworkEntity>
+}
+```
+
+### ConnectionManager (`service/ServiceSeam.kt`) — add
+
+```kotlin
+/** Find-or-create the per-network SERVER buffer (name "*", displayName = network name);
+ *  returns bufferId. UI entry for the server-messages timeline (plans/16). */
+suspend fun ensureServerBuffer(networkId: Long): Long
+```
+
+### IrcClient (`irc/client/IrcClient.kt`) — add
+
+```kotlin
+/** One RPL_LIST (322) row. */
+data class ChannelListing(val name: String, val userCount: Int, val topic: String)
+
+class IrcClient {
+    // ... existing members ...
+    /**
+     * LIST. [mask] filters server-side when given; [minUsers] appends the ELIST ">n" filter
+     * only when ISUPPORT ELIST contains 'U'. Uses labeled-response when available; otherwise
+     * collects raw 322s until 323 or a 15s timeout. Result truncated to [cap] rows.
+     */
+    suspend fun listChannels(mask: String? = null, minUsers: Int? = null, cap: Int = 2000): List<ChannelListing>
+}
+```
+
+### Behavior amendments (no signature change)
+
+- `ConnectionManagerImpl.connect(id)` force-rebuilds the actor (a fatal-Failed actor must
+  reconnect); `disconnect(id)`/`connect(id)` record a sticky in-memory user intent that
+  `reconcile` honors over `autoConnect` (cleared by `stopAll()`; not persisted).
+- `ConnectionManagerImpl.markRead` skips the MARKREAD send (Room-only) for SERVER buffers.
+- `EventProcessor` now persists: server-sourced NOTICEs (source nick empty or containing `.`),
+  `ServerError` (kind ERROR), a whitelist of informational numerics from `Raw` (kind
+  SERVER_INFO), and `Disconnected` markers — all into the per-network SERVER buffer.
+  `maybeNotify` never fires for SERVER buffers. (`Raw`/`ServerError` remain "not persisted"
+  outside the whitelist.) — realized by WP-V3.
