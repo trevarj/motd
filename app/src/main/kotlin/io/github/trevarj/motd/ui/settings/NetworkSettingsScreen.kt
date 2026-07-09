@@ -41,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -200,19 +201,23 @@ private fun StatusCard(
                     .background(statusColor(connState)),
             )
         },
-        headlineContent = { Text(statusLabel(connState)) },
+        headlineContent = {
+            Text(statusLabel(connState), modifier = Modifier.testTag("network_settings_status"))
+        },
         trailingContent = {
+            // Single stable handle; the label varies Connect/Disconnect/Reconnect by state.
+            val connButton = Modifier.testTag("network_settings_conn_button")
             when (connState) {
                 is IrcClientState.Disconnected ->
-                    FilledTonalButton(onClick = onConnect) {
+                    FilledTonalButton(onClick = onConnect, modifier = connButton) {
                         Text(stringResource(R.string.network_settings_status_connect))
                     }
                 is IrcClientState.Failed ->
-                    FilledTonalButton(onClick = onConnect) {
+                    FilledTonalButton(onClick = onConnect, modifier = connButton) {
                         Text(stringResource(R.string.network_settings_status_reconnect))
                     }
                 else ->
-                    FilledTonalButton(onClick = onDisconnect) {
+                    FilledTonalButton(onClick = onDisconnect, modifier = connButton) {
                         Text(stringResource(R.string.network_settings_status_disconnect))
                     }
             }

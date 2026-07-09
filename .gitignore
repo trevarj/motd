@@ -21,3 +21,7 @@ keystore.properties
 
 # Kotlin compiler session files
 .kotlin/
+
+# E2E harness local secrets + artifacts
+test/e2e/.env
+test/e2e/artifacts/

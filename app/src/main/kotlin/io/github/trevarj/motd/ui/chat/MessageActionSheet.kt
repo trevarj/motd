@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -75,7 +76,12 @@ fun MessageActionSheet(
     isServerBuffer: Boolean = false,
 ) {
     var showGrid by remember { mutableStateOf(false) }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        // Root tag disambiguates from NickActionSheet when both could be open.
+        modifier = Modifier.testTag("message_action_sheet"),
+    ) {
         Column(modifier = Modifier.padding(bottom = 24.dp)) {
             if (!isServerBuffer) {
             // Quick reactions + "more".
@@ -100,6 +106,7 @@ fun MessageActionSheet(
                 val moreLabel = stringResource(R.string.chat_action_more_reactions)
                 Box(
                     modifier = Modifier
+                        .testTag("message_more_reactions")
                         .minimumInteractiveComponentSize()
                         // Expander a11y: label + expanded/collapsed state (plans/15 #31).
                         .semantics {

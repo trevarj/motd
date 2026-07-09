@@ -36,7 +36,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -178,6 +181,8 @@ private fun DrawerNetworkItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                // Per-network handle so the harness targets a specific drawer row.
+                .testTag("drawer_network_row_${row.networkId}")
                 .padding(horizontal = 12.dp, vertical = 2.dp)
                 // Selected row gets the M3 pill background.
                 .background(background, RoundedCornerShape(28.dp))
@@ -188,8 +193,13 @@ private fun DrawerNetworkItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // State is color-only in the dot; expose it as a CD ("status:Ready") + tag so the
+            // harness can read a per-network connection state from a text dump (plans/18 §4).
+            val statusCd = "status:${statusName(row.state)}"
             Box(
                 modifier = Modifier
+                    .testTag("drawer_status_dot_${row.networkId}")
+                    .semantics { contentDescription = statusCd }
                     .size(10.dp)
                     .background(statusColor(row.state), CircleShape),
             )
@@ -250,6 +260,15 @@ private fun DrawerNetworkItem(
             )
         }
     }
+}
+
+/** Stable, non-localized state token for the status-dot CD (harness matches "status:Ready" etc.). */
+private fun statusName(state: IrcClientState): String = when (state) {
+    is IrcClientState.Ready -> "Ready"
+    IrcClientState.Connecting -> "Connecting"
+    IrcClientState.Registering -> "Registering"
+    is IrcClientState.Failed -> "Failed"
+    IrcClientState.Disconnected -> "Disconnected"
 }
 
 @Composable

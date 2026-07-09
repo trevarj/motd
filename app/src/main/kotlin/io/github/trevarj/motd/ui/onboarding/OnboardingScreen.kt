@@ -44,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -147,18 +148,23 @@ private fun WizardBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (state.step != OnboardingStep.WELCOME) {
-            TextButton(onClick = onBack) { Text(stringResource(R.string.onboarding_back)) }
+            // Stable handle: Back is icon-agnostic across steps (plans/18 §4).
+            TextButton(onClick = onBack, modifier = Modifier.testTag("onboarding_back_button")) {
+                Text(stringResource(R.string.onboarding_back))
+            }
         } else {
             Spacer(Modifier.size(1.dp))
         }
+        // Single stable handle for the forward button whose label varies (Get started/Next/Finish).
+        val forwardTag = Modifier.testTag("onboarding_forward_button")
         when (state.step) {
-            OnboardingStep.WELCOME -> Button(onClick = onNext) {
+            OnboardingStep.WELCOME -> Button(onClick = onNext, modifier = forwardTag) {
                 Text(stringResource(R.string.onboarding_get_started))
             }
-            OnboardingStep.FINISH -> Button(onClick = onFinish) {
+            OnboardingStep.FINISH -> Button(onClick = onFinish, modifier = forwardTag) {
                 Text(stringResource(R.string.onboarding_finish))
             }
-            else -> Button(onClick = onNext, enabled = state.canAdvance) {
+            else -> Button(onClick = onNext, enabled = state.canAdvance, modifier = forwardTag) {
                 Text(stringResource(R.string.onboarding_next))
             }
         }
@@ -214,12 +220,14 @@ private fun ChoicePage(
             desc = stringResource(R.string.onboarding_choice_soju_desc),
             selected = state.choice == ConnectionChoice.SOJU,
             onClick = { onChoose(ConnectionChoice.SOJU) },
+            modifier = Modifier.testTag("onboarding_choice_soju"),
         )
         ChoiceCard(
             title = stringResource(R.string.onboarding_choice_network_title),
             desc = stringResource(R.string.onboarding_choice_network_desc),
             selected = state.choice == ConnectionChoice.NETWORK,
             onClick = { onChoose(ConnectionChoice.NETWORK) },
+            modifier = Modifier.testTag("onboarding_choice_network"),
         )
         OutlinedButton(onClick = onLibera, modifier = Modifier.fillMaxWidth()) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -234,9 +242,15 @@ private fun ChoicePage(
 }
 
 @Composable
-private fun ChoiceCard(title: String, desc: String, selected: Boolean, onClick: () -> Unit) {
+private fun ChoiceCard(
+    title: String,
+    desc: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .then(
@@ -387,7 +401,12 @@ private fun ConnectPage(
 
 @Composable
 private fun StateIndicator(connState: IrcClientState?) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(
+        // Stable handle for the connect-step status line (label varies: Connecting…/Connected as …).
+        modifier = Modifier.testTag("onboarding_state_indicator"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         AnimatedContent(targetState = connState, label = "connState") { cs ->
             when (cs) {
                 is IrcClientState.Ready ->
@@ -432,12 +451,17 @@ private fun BouncerNetworksSection(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag("onboarding_bouncer_row_${row.netId}")
                     .clickable { onToggleBouncer(row.netId) }
                     .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(row.name, modifier = Modifier.weight(1f))
-                Switch(checked = row.selected, onCheckedChange = { onToggleBouncer(row.netId) })
+                Switch(
+                    checked = row.selected,
+                    onCheckedChange = { onToggleBouncer(row.netId) },
+                    modifier = Modifier.testTag("onboarding_bouncer_switch_${row.netId}"),
+                )
             }
         }
     }

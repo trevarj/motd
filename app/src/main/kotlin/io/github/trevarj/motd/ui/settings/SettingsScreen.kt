@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -129,6 +130,7 @@ fun SettingsContent(
                 subtitle = stringResource(R.string.settings_dynamic_color_desc),
                 checked = state.settings.dynamicColor,
                 onCheckedChange = onDynamicColor,
+                switchTag = "settings_switch_dynamic_color",
             )
             SubLabel(stringResource(R.string.settings_density))
             DensityGroup(current = state.settings.layoutDensity, onSelect = onLayoutDensity)
@@ -142,6 +144,7 @@ fun SettingsContent(
                 subtitle = stringResource(R.string.settings_nick_colors_desc),
                 checked = state.settings.nickColorsEnabled,
                 onCheckedChange = onNickColorsEnabled,
+                switchTag = "settings_switch_nick_colors",
             )
             PaletteGroup(
                 current = state.settings.nickColorPalette,
@@ -158,6 +161,7 @@ fun SettingsContent(
                 subtitle = stringResource(R.string.settings_show_jpq_desc),
                 checked = state.settings.showJoinPartQuit,
                 onCheckedChange = onShowJoinPartQuit,
+                switchTag = "settings_switch_show_jpq",
             )
 
             HorizontalDivider()
@@ -401,7 +405,13 @@ private fun RadioRow(
 }
 
 @Composable
-private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun SwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    switchTag: String? = null,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -410,7 +420,12 @@ private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onCheck
             Text(title)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        // Stable handle so the harness reads/sets the checked state directly (plans/18 §4).
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = if (switchTag != null) Modifier.testTag(switchTag) else Modifier,
+        )
     }
 }
 

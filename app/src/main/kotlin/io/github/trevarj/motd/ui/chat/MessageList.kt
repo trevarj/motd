@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.paging.LoadState
@@ -58,6 +59,9 @@ private val SYSTEM_KINDS = setOf(
 )
 
 fun isSystemKind(kind: MessageKind): Boolean = kind in SYSTEM_KINDS
+
+/** Stable per-message testTag id: server msgid when present, else the local entity id (pending). */
+private fun messageTag(msg: MessageEntity): String = "chat_message_${msg.msgid ?: msg.id}"
 
 /**
  * True when [current] should show its sender header: it opens a new same-sender ≤3-min group.
@@ -222,7 +226,7 @@ private fun SystemEventRun(
     val lines = run.map { it.text }
     val summary = if (run.size == 1) newest.text else summarizeSystemRun(run)
 
-    SystemEventPill(summary = summary, lines = lines)
+    SystemEventPill(summary = summary, lines = lines, modifier = Modifier.testTag("chat_system_pill"))
 
     // Divider below the run when the run's newest crosses the marker and its older neighbor doesn't.
     val showNewDivider = readMarkerTime != null &&
@@ -230,7 +234,12 @@ private fun SystemEventRun(
         (olderThanRun == null || olderThanRun.serverTime <= readMarkerTime)
     val showDay = olderThanRun == null || dayStart(oldest.serverTime) != dayStart(olderThanRun.serverTime)
 
-    if (showNewDivider) NewMessagesDivider(label = stringResource(R.string.chat_new_messages))
+    if (showNewDivider) {
+        NewMessagesDivider(
+            label = stringResource(R.string.chat_new_messages),
+            modifier = Modifier.testTag("chat_read_marker_divider"),
+        )
+    }
     if (showDay) DaySeparator(timeMs = oldest.serverTime)
 }
 
@@ -309,6 +318,9 @@ private fun MessageRow(
     onCollapseFool?.let { FoolCollapseChip(sender = msg.sender, onCollapse = it) }
 
     MessageBubble(
+        // Per-message handle for long-press/react/reply/deep-jump. Prefer the stable server msgid;
+        // pending rows (null msgid) fall back to the local entity id (plans/18 §4).
+        modifier = Modifier.testTag(messageTag(msg)),
         sender = msg.sender,
         text = msg.text,
         timeMs = msg.serverTime,
@@ -335,7 +347,12 @@ private fun MessageRow(
         RetryRow(onRetry = { onRetry(msg) }, onDelete = { onDelete(msg) })
     }
 
-    if (showNewDivider) NewMessagesDivider(label = stringResource(R.string.chat_new_messages))
+    if (showNewDivider) {
+        NewMessagesDivider(
+            label = stringResource(R.string.chat_new_messages),
+            modifier = Modifier.testTag("chat_read_marker_divider"),
+        )
+    }
     if (showDay) DaySeparator(timeMs = msg.serverTime)
 }
 
@@ -360,6 +377,8 @@ private fun FoolPlaceholderRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // Collapsed fool row is still a message container; keep it selectable/tappable.
+            .testTag(messageTag(msg))
             .clickable { onExpand() }
             .alpha(0.7f)
             .padding(horizontal = 16.dp, vertical = 2.dp),
@@ -379,7 +398,12 @@ private fun FoolPlaceholderRow(
         )
     }
 
-    if (showNewDivider) NewMessagesDivider(label = stringResource(R.string.chat_new_messages))
+    if (showNewDivider) {
+        NewMessagesDivider(
+            label = stringResource(R.string.chat_new_messages),
+            modifier = Modifier.testTag("chat_read_marker_divider"),
+        )
+    }
     if (showDay) DaySeparator(timeMs = msg.serverTime)
 }
 

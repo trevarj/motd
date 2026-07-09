@@ -11,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -35,6 +36,7 @@ fun CertTrustDialog(
     onCancel: () -> Unit,
 ) {
     AlertDialog(
+        modifier = Modifier.testTag("cert_trust_dialog"),
         onDismissRequest = onCancel,
         title = {
             Text(
@@ -63,7 +65,12 @@ fun CertTrustDialog(
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 CertField(stringResource(R.string.cert_trust_host), "${prompt.host}:${prompt.port}")
-                CertField(stringResource(R.string.cert_trust_fingerprint), formatFingerprint(prompt.sha256), monospace = true)
+                CertField(
+                    stringResource(R.string.cert_trust_fingerprint),
+                    formatFingerprint(prompt.sha256),
+                    modifier = Modifier.testTag("cert_trust_fingerprint"),
+                    monospace = true,
+                )
                 CertField(stringResource(R.string.cert_trust_subject), prompt.subject)
                 CertField(stringResource(R.string.cert_trust_issuer), prompt.issuer)
                 CertField(stringResource(R.string.cert_trust_valid_from), formatDate(prompt.notBefore))
@@ -80,7 +87,12 @@ fun CertTrustDialog(
 }
 
 @Composable
-private fun CertField(label: String, value: String, monospace: Boolean = false) {
+private fun CertField(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    monospace: Boolean = false,
+) {
     Column(modifier = Modifier.padding(top = 4.dp)) {
         Text(
             text = label,
@@ -92,6 +104,8 @@ private fun CertField(label: String, value: String, monospace: Boolean = false) 
             text = value,
             style = MaterialTheme.typography.bodySmall,
             fontFamily = if (monospace) FontFamily.Monospace else null,
+            // Applied to the value Text so the harness can assert the specific fingerprint.
+            modifier = modifier,
         )
     }
 }

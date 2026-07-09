@@ -449,7 +449,13 @@ private fun RowWithMenu(
             )
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(
-                    text = { Text(if (row.pinned) "Unpin" else "Pin") },
+                    text = {
+                        Text(
+                            stringResource(
+                                if (row.pinned) R.string.chatlist_unpin else R.string.chatlist_pin,
+                            ),
+                        )
+                    },
                     leadingIcon = {
                         Icon(
                             if (row.pinned) Icons.Outlined.PushPin else Icons.Filled.PushPin,
@@ -462,7 +468,13 @@ private fun RowWithMenu(
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text(if (row.muted) "Unmute" else "Mute") },
+                    text = {
+                        Text(
+                            stringResource(
+                                if (row.muted) R.string.chatlist_unmute else R.string.chatlist_mute,
+                            ),
+                        )
+                    },
                     leadingIcon = {
                         Icon(
                             if (row.muted) Icons.Outlined.Notifications else Icons.Outlined.NotificationsOff,

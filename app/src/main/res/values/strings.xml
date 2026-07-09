@@ -359,4 +359,22 @@
     <string name="settings_density_compact_desc">Classic IRC: single-line, no bubbles.</string>
     <string name="settings_density_comfortable_desc">Modern chat bubbles with avatars.</string>
     <string name="settings_density_cozy_desc">Chat bubbles with extra spacing.</string>
+
+    <!-- Chat-list row long-press menu (previously inline literals; moved to resources so they are
+         localizable and stable for the e2e harness, plans/18 §4). -->
+    <string name="chatlist_pin">Pin</string>
+    <string name="chatlist_unpin">Unpin</string>
+    <string name="chatlist_mute">Mute</string>
+    <string name="chatlist_unmute">Unmute</string>
+
+    <!-- Badge content-descriptions: carry the real (uncapped) count for the e2e harness (plans/18
+         §4). The visible badge text caps at "99+" / "@". -->
+    <plurals name="badge_unread">
+        <item quantity="one">%1$d unread</item>
+        <item quantity="other">%1$d unread</item>
+    </plurals>
+    <plurals name="badge_mention">
+        <item quantity="one">%1$d mention</item>
+        <item quantity="other">%1$d mentions</item>
+    </plurals>
 </resources>

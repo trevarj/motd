@@ -1,0 +1,870 @@
+#!/usr/bin/env bash
+# test/e2e/runbook.sh — device-driven E2E acceptance run for MOTD.
+#
+# Implements the ordered traversal in plans/18-e2e-runbook.md §2 (Phases A–I)
+# against a real physical device + a real soju test bouncer. Drives the app via
+# adb + uiautomator using the helpers in lib.sh.
+#
+# Run inside the project dev shell so adb is on PATH:
+#   nix develop -c ./test/e2e/runbook.sh
+#
+# Config comes from the environment (see .env.example). NEVER hardcode secrets.
+# If test/e2e/.env exists (gitignored) it is sourced automatically.
+#
+# Selectors: text/content-desc today, testTags from §4 as they land. Where a §4
+# testTag is not yet merged, we fall back to a text/desc selector with a TODO.
+set -euo pipefail
+
+E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# --- config / secrets ------------------------------------------------------
+
+# Source untracked local overrides first so they can set every var below.
+if [ -f "${E2E_DIR}/.env" ]; then
+  # shellcheck disable=SC1091 # runtime-provided, untracked file
+  . "${E2E_DIR}/.env"
+fi
+
+# Package + APK.
+: "${MOTD_PKG:=io.github.trevarj.motd.debug}"
+: "${MOTD_APK:=}"                 # path to app-debug.apk; required for install
+MOTD_ACTIVITY="io.github.trevarj.motd/io.github.trevarj.motd.MainActivity"
+
+# Bouncer / account (see §0). No defaults for secrets.
+: "${MOTD_SOJU_HOST:=}"
+: "${MOTD_SOJU_PORT:=6697}"
+: "${MOTD_SOJU_USER:=}"
+: "${MOTD_SOJU_PASS:=}"
+: "${MOTD_NICK:=motdadb}"
+: "${MOTD_TEST_CHANNEL:=##motdtest}"
+
+# Optional second identity (drives DM/mention/typing). When unset those steps
+# are skipped without failing (§2 note, §5).
+: "${MOTD_SECOND_NICK:=}"
+
+export MOTD_PKG
+
+# lib.sh reads MOTD_PKG, SERIAL, E2E_OUT_DIR.
+# shellcheck source=test/e2e/lib.sh disable=SC1091
+. "${E2E_DIR}/lib.sh"
+
+# --- preconditions ---------------------------------------------------------
+
+require_env() {
+  local missing=0 v
+  for v in "$@"; do
+    if [ -z "${!v:-}" ]; then
+      echo "${_C_RED}Missing required env: ${v}${_C_RST}" >&2
+      missing=1
+    fi
+  done
+  [ "$missing" -eq 0 ] || {
+    echo "Set them in the environment or test/e2e/.env (see .env.example)." >&2
+    exit 2
+  }
+}
+
+require_env MOTD_SOJU_HOST MOTD_SOJU_USER MOTD_SOJU_PASS
+
+# --- teardown / summary trap ----------------------------------------------
+
+_final() {
+  local rc=$?
+  # Print the tally; preserve a non-zero rc if the run body already failed.
+  if e2e_summary; then
+    exit "$rc"
+  else
+    exit 1
+  fi
+}
+trap _final EXIT
+
+# ==========================================================================
+# Phase A — clean install & onboard the soju bouncer
+# ==========================================================================
+phase_a() {
+  echo ""
+  echo "${_C_CYA}########## Phase A: clean install & onboarding ##########${_C_RST}"
+
+  # 1. Reset + launch.
+  step "Reset app state and launch into onboarding"
+  if [ -n "$MOTD_APK" ] && [ -f "$MOTD_APK" ]; then
+    note "installing APK: $MOTD_APK"
+    adb_ install -r -g "$MOTD_APK" >/dev/null 2>&1 || \
+      note "install -r failed (already installed?); continuing"
+  else
+    note "MOTD_APK unset/absent; assuming app already installed"
+  fi
+  adb_shell pm clear "$MOTD_PKG" >/dev/null
+  clear_crash
+  adb_shell am start -n "$MOTD_ACTIVITY" >/dev/null
+  wait_for_text "Welcome to motd" 20 || true
+  assert_text "Welcome to motd"          # redirected into onboarding (§1.1)
+  assert_no_crash
+
+  # 2. Welcome -> Choice.
+  step "Advance from Welcome to Choice"
+  tap_text "Get started"                 # TODO tag: onboarding_forward_button (§4)
+  assert_text "How do you connect?"
+  assert_no_crash
+
+  # 3. Choose soju.
+  step "Choose the soju bouncer path"
+  tap_text "I have a soju bouncer"       # TODO tag: onboarding_choice_soju (§4)
+  tap_text "Next"                        # TODO tag: onboarding_forward_button (§4)
+  assert_text "Host"                     # SERVER page fields present
+  assert_no_crash
+
+  # 4. Server fields (re-dump after each IME open, §2).
+  step "Fill server host/port/nick"
+  input_by_text_label "Host" "$MOTD_SOJU_HOST"
+  redump
+  input_by_text_label "Port" "$MOTD_SOJU_PORT"
+  redump
+  input_by_text_label "Nickname" "$MOTD_NICK"
+  redump
+  assert_text "Use TLS"                  # TLS toggle present (default on)
+  assert_no_crash
+
+  # 5. Advance to auth.
+  step "Advance to Authentication"
+  tap_text "Next"
+  assert_text "Authentication"
+  assert_text "Username"
+  assert_text "Password"
+  assert_no_crash
+
+  # 6. Auth creds.
+  step "Fill soju SASL PLAIN credentials"
+  input_by_text_label "Username" "$MOTD_SOJU_USER"
+  redump
+  input_by_text_label "Password" "$MOTD_SOJU_PASS"
+  redump
+  assert_no_crash
+
+  # 7. Connect.
+  step "Start connect test"
+  tap_text "Next"
+  wait_for_text "Connecting" 10 || true
+  assert_text "Connecting"
+  assert_no_crash
+
+  # 8. Trust cert (TOFU). Every pm clear re-triggers this (§5, §7).
+  step "Handle TOFU cert-trust prompt"
+  if wait_for_text "Trust this certificate?" 25; then
+    assert_text "SHA-256 fingerprint"
+    tap_text "Trust"                     # buttons carry text (§4 note)
+    note "trusted cert"
+  else
+    note "cert dialog did not appear (already trusted or fast connect); continuing"
+  fi
+  # Wait for either the ready indicator or the bouncer section.
+  if wait_for_any_text 30 "Connected as " "Bouncer networks" >/dev/null; then
+    ok "connect settled (ready or bouncer section shown)"
+  else
+    fail "connect did not reach Ready / Bouncer networks within timeout"
+  fi
+  assert_no_crash
+
+  # 9. Bouncer import.
+  step "Import bouncer network 'libera'"
+  wait_for_text "Bouncer networks" 20 || true
+  assert_text "Bouncer networks"
+  assert_text "libera"                   # TODO tag: onboarding_bouncer_row_<id> (§4)
+  # Enabling the libera switch is best-effort: the switch handle
+  # (onboarding_bouncer_switch_<id>, §4) does not exist yet, so we cannot read
+  # its checked state reliably. libera is selected by default on most builds.
+  note "libera switch defaults on; switch tag pending (§4)"
+  assert_no_crash
+
+  # 10. Finish.
+  step "Finish onboarding -> ChatList"
+  tap_text "Next" || true                # to FINISH page
+  tap_text "Finish"                      # TODO tag: onboarding_forward_button (§4)
+  wait_for_text "motd" 15 || true
+  assert_text "motd"                     # top bar on ChatList (§1.2)
+  assert_no_text "Welcome to motd"
+  assert_no_crash
+}
+
+# ==========================================================================
+# Phase B — chat list, drawer, connectivity
+# ==========================================================================
+phase_b() {
+  echo ""
+  echo "${_C_CYA}########## Phase B: chat list & drawer ##########${_C_RST}"
+
+  # 11. Drawer open.
+  step "Open the navigation drawer"
+  tap_desc "Open navigation drawer"
+  assert_text "All chats"
+  assert_text "libera"
+  assert_text "Add network"
+  assert_text "Settings"
+  assert_no_crash
+
+  # 12. Network subtitle (Ready as nick, or a state string).
+  step "Check libera network subtitle/state"
+  # Subtitle text is the nick when Ready; we assert the nick is somewhere in the
+  # drawer. Status dot color is unreadable without drawer_status_dot CD (§4).
+  if [ -n "$(bounds_of_text "$MOTD_NICK")" ]; then
+    ok "libera subtitle shows nick '$MOTD_NICK' (Ready)"
+  else
+    note "nick not shown; network may be Connecting/Registering (color-only dot, §4)"
+  fi
+  assert_no_crash
+
+  # 13. Scope to network.
+  step "Scope list to libera"
+  tap_text "libera"                      # TODO tag: drawer_network_row_<id> (§4)
+  assert_text "libera"                   # ScopeChip / title
+  assert_no_crash
+
+  # 14. Clear scope.
+  step "Clear network scope"
+  tap_desc "Clear network filter"
+  assert_text "motd"
+  assert_no_crash
+
+  # 15. Server messages buffer.
+  step "Open the SERVER buffer via drawer long-press"
+  tap_desc "Open navigation drawer"
+  long_press_text "libera"
+  if wait_for_text "Server messages" 5; then
+    tap_text "Server messages"
+    assert_text "Send a command…"        # SERVER composer placeholder (§1.5)
+  else
+    note "long-press menu did not surface 'Server messages'; skipping"
+  fi
+  assert_no_crash
+
+  # 16. Back to list.
+  step "Back to chat list"
+  adb_shell input keyevent 4
+  wait_for_text "motd" 8 || true
+  assert_text "motd"
+  assert_no_crash
+}
+
+# ==========================================================================
+# Phase C — join a channel & chat features
+# ==========================================================================
+phase_c() {
+  echo ""
+  echo "${_C_CYA}########## Phase C: join channel & chat ##########${_C_RST}"
+
+  # 17. New conversation sheet.
+  step "Open new-conversation sheet"
+  tap_desc "New conversation"
+  assert_text "Join channel"
+  assert_text "Browse channels…"
+  assert_no_crash
+
+  # 18. Join seed channel.
+  step "Join seed channel ${MOTD_TEST_CHANNEL}"
+  tap_text "Join channel"
+  # The join field placeholder differs by build; try common labels.
+  if [ -n "$(bounds_of_text "#channel")" ]; then
+    input_by_text_label "#channel" "$MOTD_TEST_CHANNEL"
+  elif [ -n "$(bounds_of_text "Channel")" ]; then
+    input_by_text_label "Channel" "$MOTD_TEST_CHANNEL"
+  else
+    note "join field label unknown; TODO tag for join field (§4 candidate)"
+  fi
+  tap_text "Join" || true
+  wait_for_text "$MOTD_TEST_CHANNEL" 15 || true
+  assert_text "$MOTD_TEST_CHANNEL"
+  assert_no_crash
+
+  # 19. Open channel.
+  step "Open ${MOTD_TEST_CHANNEL} chat"
+  tap_text "$MOTD_TEST_CHANNEL"          # TODO tag: chatlist_row_<bufferId> (§4)
+  assert_text "$MOTD_TEST_CHANNEL"
+  assert_text "Message"                  # composer placeholder
+  assert_no_crash
+
+  # 20. Send a message.
+  step "Send a message"
+  # TODO tag: chat_composer_field (§4). Fall back to placeholder text label.
+  input_by_text_label "Message" "hello from e2e"
+  redump
+  tap_desc "Send"
+  wait_for_text "hello from e2e" 10 || true
+  assert_text "hello from e2e"
+  assert_no_crash
+
+  # 21. Nick autocomplete (needs a second member; §5/§8).
+  step "Nick autocomplete"
+  if [ -n "$MOTD_SECOND_NICK" ]; then
+    input_by_text_label "Message" "${MOTD_SECOND_NICK:0:2}"
+    redump
+    # A dropdown row prefix-matching should appear; assert the second nick shows.
+    if [ -n "$(bounds_of_text "$MOTD_SECOND_NICK")" ]; then
+      ok "autocomplete lists '$MOTD_SECOND_NICK'"
+    else
+      note "no autocomplete row (channel may lack other members)"
+    fi
+    adb_shell input keyevent 4
+  else
+    note "MOTD_SECOND_NICK unset; skipping nick autocomplete (conditional, §5)"
+  fi
+  assert_no_crash
+
+  # 22. Command autocomplete.
+  step "Command autocomplete"
+  input_by_text_label "Message" "/"
+  redump
+  if [ -n "$(bounds_of_text "/join")" ] || [ -n "$(bounds_of_text "/me")" ]; then
+    ok "command dropdown present (/me, /join, …)"
+  else
+    note "command dropdown not detected"
+  fi
+  adb_shell input keyevent 4
+  assert_no_crash
+
+  # 23. /me action.
+  step "/me action"
+  input_by_text_label "Message" "/me waves"
+  redump
+  tap_desc "Send"
+  wait_for_text "waves" 8 || true
+  assert_text "waves"
+  assert_no_crash
+
+  # 24. Reaction add.
+  step "Add a reaction"
+  long_press_text "hello from e2e"       # TODO tag: chat_message_<msgid> (§4)
+  if wait_for_text "👍" 5; then
+    tap_text "👍"
+    ok "reaction quick-row present; tapped 👍"
+  else
+    note "reaction quick-row not detected"
+  fi
+  assert_no_crash
+
+  # 25. More reactions.
+  step "More reactions grid"
+  long_press_text "hello from e2e"
+  if wait_for_text "More reactions" 5 || [ -n "$(bounds_of_desc "More reactions")" ]; then
+    tap_desc "More reactions" || true
+    note "opened more-reactions grid (TODO tag: message_more_reactions, §4)"
+  else
+    note "more-reactions control not detected; dismissing"
+    adb_shell input keyevent 4
+  fi
+  assert_no_crash
+
+  # 26. Reply.
+  step "Reply bar"
+  long_press_text "hello from e2e"
+  if wait_for_text "Reply" 5; then
+    tap_text "Reply"
+    if [ -n "$(bounds_of_text "Replying to $MOTD_NICK")" ] || wait_for_text "Replying to" 4; then
+      ok "reply bar shown"
+    fi
+    tap_desc "Cancel reply" || true
+  else
+    note "Reply action not detected"
+  fi
+  assert_no_crash
+
+  # 27. Copy / Quote.
+  step "Copy action (no crash)"
+  long_press_text "hello from e2e"
+  if wait_for_text "Copy" 5; then
+    tap_text "Copy"                      # clipboard not asserted via UI (§2 step 27)
+    ok "Copy tapped"
+  else
+    note "Copy action not detected; dismissing"
+    adb_shell input keyevent 4
+  fi
+  assert_no_crash
+
+  # 28. Scroll-to-bottom FAB.
+  step "Scroll-to-bottom FAB"
+  # Swipe down (content up) to scroll history; then look for the FAB.
+  adb_shell input swipe 540 800 540 1600 200
+  redump
+  if [ -n "$(bounds_of_desc "Scroll to bottom")" ]; then
+    tap_desc "Scroll to bottom"
+    redump
+    assert_no_text "Scroll to bottom"    # gone once at bottom
+  else
+    note "scroll-to-bottom FAB not shown (few messages?)"
+  fi
+  assert_no_crash
+
+  # 29. Search from chat.
+  step "Search within the buffer"
+  tap_desc "Search"
+  assert_text "Search messages"
+  input_by_text_label "Search messages" "hello"
+  redump
+  if wait_for_text "hello" 8; then
+    ok "search returned a result"
+    tap_text "hello" || true             # jump back to chat (deep-jump pulse)
+  else
+    note "no search result (FTS may be async)"
+  fi
+  # Ensure we're back at a chat-ish screen.
+  adb_shell input keyevent 4 || true
+  assert_no_crash
+}
+
+# ==========================================================================
+# Phase D — channel info & moderation surface
+# ==========================================================================
+phase_d() {
+  echo ""
+  echo "${_C_CYA}########## Phase D: channel info ##########${_C_RST}"
+
+  # 30. Open channel info by tapping the title.
+  step "Open channel info"
+  # Reopen the channel to guarantee we're in the chat.
+  tap_text "$MOTD_TEST_CHANNEL" || true
+  redump
+  tap_text "$MOTD_TEST_CHANNEL"          # title area
+  if wait_for_text "Channel info" 6; then
+    ok "channel info open"
+  else
+    note "channel info title not detected"
+  fi
+  assert_no_crash
+
+  # 31. Topic edit dialog.
+  step "Topic edit dialog (cancel)"
+  if [ -n "$(bounds_of_desc "Edit topic")" ]; then
+    tap_desc "Edit topic"
+    wait_for_text "Edit topic" 5 || true
+    assert_text "Channel topic"
+    tap_text "Cancel"
+  else
+    note "Edit topic control not present"
+  fi
+  assert_no_crash
+
+  # 32. Mute toggle.
+  step "Mute toggle"
+  if [ -n "$(bounds_of_text "Mute")" ]; then
+    tap_text "Mute"
+    wait_for_text "Unmute" 5 || true
+    assert_text "Unmute"
+    tap_text "Unmute"                    # restore
+  else
+    note "Mute control not present"
+  fi
+  assert_no_crash
+
+  # 33. Pin toggle.
+  step "Pin toggle"
+  if [ -n "$(bounds_of_text "Pin")" ]; then
+    tap_text "Pin"
+    wait_for_text "Unpin" 5 || true
+    assert_text "Unpin"
+  else
+    note "Pin control not present"
+  fi
+  assert_no_crash
+
+  # 34. Member -> nick sheet.
+  step "Open a member nick sheet"
+  # We cannot reliably know a member nick without the seed; use second identity
+  # if provided, else best-effort.
+  if [ -n "$MOTD_SECOND_NICK" ] && [ -n "$(bounds_of_text "$MOTD_SECOND_NICK")" ]; then
+    tap_text "$MOTD_SECOND_NICK"         # TODO tag: channelinfo_member_<nick> (§4)
+    if wait_for_text "Message" 5; then
+      assert_text "Add to friends"
+      # 35. Add friend.
+      step "Add member to friends"
+      tap_text "Add to friends"
+      ok "added to friends"
+    fi
+  else
+    note "no known member nick (set MOTD_SECOND_NICK + seed); skipping nick sheet"
+  fi
+  assert_no_crash
+
+  # 36. Leave dialog (cancel).
+  step "Leave dialog (cancel)"
+  if [ -n "$(bounds_of_text "Leave")" ]; then
+    tap_text "Leave"
+    wait_for_text "Leave channel?" 5 || true
+    assert_text "Leave channel?"
+    tap_text "Cancel"
+  else
+    note "Leave control not present"
+  fi
+  assert_no_crash
+
+  # 37. Back to chat.
+  step "Back out of channel info"
+  adb_shell input keyevent 4
+  assert_no_crash
+}
+
+# ==========================================================================
+# Phase E — channel browser
+# ==========================================================================
+phase_e() {
+  echo ""
+  echo "${_C_CYA}########## Phase E: channel browser ##########${_C_RST}"
+
+  # 38. Open browser.
+  step "Open channel browser"
+  adb_shell input keyevent 4 || true     # ensure at chat list
+  wait_for_text "motd" 6 || true
+  tap_desc "New conversation"
+  if wait_for_text "Browse channels…" 5; then
+    tap_text "Browse channels…"
+    wait_for_text "Browse channels" 8 || true
+    assert_text "Search channels"
+  else
+    note "Browse channels… entry not found"
+  fi
+  assert_no_crash
+
+  # 39. Search channels.
+  step "Search channels"
+  if [ -n "$(bounds_of_text "Search channels")" ]; then
+    input_by_text_label "Search channels" "motd"
+    redump
+    if [ -n "$(bounds_of_text "No channels found")" ]; then
+      note "no channels found for mask"
+    else
+      note "channel list rendered (or loading)"
+    fi
+  fi
+  assert_no_crash
+
+  # 40. Join from browser (if a result exists).
+  step "Join from browser (best-effort)"
+  note "join-from-browser depends on live LIST results; skipping tap to avoid state churn"
+
+  # 41. Back.
+  step "Back from browser"
+  adb_shell input keyevent 4
+  assert_no_crash
+}
+
+# ==========================================================================
+# Phase F — settings sweep
+# ==========================================================================
+phase_f() {
+  echo ""
+  echo "${_C_CYA}########## Phase F: settings ##########${_C_RST}"
+
+  # 42. Open settings.
+  step "Open Settings"
+  wait_for_text "motd" 6 || true
+  tap_desc "Settings"
+  wait_for_text "Settings" 8 || true
+  assert_text "Settings"
+  assert_text "Appearance"
+  assert_no_crash
+
+  # 43. Theme AMOLED (color-only oracle -> screencap per §6).
+  step "Theme: AMOLED"
+  if [ -n "$(bounds_of_text "AMOLED (true black)")" ]; then
+    tap_text "AMOLED (true black)"
+    screencap_step "amoled_background"   # color-only oracle (§6)
+    ok "selected AMOLED (background asserted via screencap only)"
+  else
+    note "AMOLED radio not visible; may need scroll"
+  fi
+  assert_no_crash
+
+  # 44. Message style Compact.
+  step "Message style: Compact"
+  if [ -n "$(bounds_of_text "Compact")" ]; then
+    tap_text "Compact"
+    ok "selected Compact"
+  else
+    note "Compact radio not visible; may need scroll"
+  fi
+  assert_no_crash
+
+  # 45. Colored nicknames off/on.
+  step "Toggle Colored nicknames"
+  # TODO tag: settings_switch_nick_colors (§4) to read checked state directly.
+  if [ -n "$(bounds_of_text "Colored nicknames")" ]; then
+    tap_text "Colored nicknames"
+    tap_text "Colored nicknames"         # toggle back
+    ok "toggled Colored nicknames off/on"
+  else
+    note "Colored nicknames switch not visible"
+  fi
+  assert_no_crash
+
+  # 46. Palette.
+  step "Palette: Vivid"
+  if [ -n "$(bounds_of_text "Vivid palette")" ]; then
+    tap_text "Vivid palette"
+    ok "selected Vivid palette"
+  else
+    note "palette radios not visible"
+  fi
+  assert_no_crash
+
+  # 47. Nick color overrides.
+  step "Nick color overrides"
+  if [ -n "$(bounds_of_text "Nick color overrides")" ]; then
+    tap_text "Nick color overrides"
+    wait_for_text "Nick colors" 6 || true
+    assert_text "Nick colors"
+    input_by_text_label "Nickname" "foo"
+    redump
+    tap_text "Add" || true
+    if wait_for_text "Auto (no override)" 5; then
+      ok "hue picker opened for 'foo'"
+      adb_shell input keyevent 4         # dismiss dialog
+    fi
+    adb_shell input keyevent 4           # back to settings
+  else
+    note "Nick color overrides row not visible"
+  fi
+  assert_no_crash
+
+  # 48. Friends manage.
+  step "Friends manage screen"
+  if [ -n "$(bounds_of_text "Friends")" ]; then
+    tap_text "Friends"
+    wait_for_text "Friends" 6 || true
+    input_by_text_label "Nickname" "bar"
+    redump
+    tap_text "Add" || true
+    wait_for_text "bar" 5 || true
+    if [ -n "$(bounds_of_desc "Remove")" ]; then
+      tap_desc "Remove"
+      ok "added then removed friend 'bar'"
+    fi
+    adb_shell input keyevent 4
+  else
+    note "Friends row not visible"
+  fi
+  assert_no_crash
+
+  # 49-50. Fools manage + mode.
+  step "Fools manage + mode"
+  if [ -n "$(bounds_of_text "Fools")" ]; then
+    tap_text "Fools"
+    wait_for_text "Fools" 6 || true
+    adb_shell input keyevent 4
+  fi
+  if [ -n "$(bounds_of_text "Hide")" ]; then
+    tap_text "Hide"
+    tap_text "Collapse" || true          # restore
+    ok "toggled fools' messages mode"
+  else
+    note "fools mode radios not visible"
+  fi
+  assert_no_crash
+
+  # 51. Show join/part toggle.
+  step "Show join/part toggle"
+  # TODO tag: settings_switch_show_jpq (§4).
+  if [ -n "$(bounds_of_text "Show join/part messages")" ]; then
+    tap_text "Show join/part messages"
+    tap_text "Show join/part messages"   # restore
+    ok "toggled show join/part"
+  else
+    note "join/part switch not visible"
+  fi
+  assert_no_crash
+
+  # 52. Push availability (no distributor on CI -> specific disabled string).
+  step "Push delivery availability"
+  if [ -n "$(bounds_of_text "Push (UnifiedPush)")" ]; then
+    assert_text "Push (UnifiedPush)"
+    if [ -n "$(bounds_of_text "Install a UnifiedPush distributor like ntfy to receive push.")" ]; then
+      ok "push disabled with expected 'install distributor' hint"
+    else
+      note "push hint string differs (bouncer webpush state / distributor present)"
+    fi
+  else
+    note "push radio not visible; may need scroll"
+  fi
+  assert_no_crash
+
+  # 53. Battery optimization (OS intent -> no crash).
+  step "Battery optimization intent"
+  if [ -n "$(bounds_of_text "Battery optimization")" ]; then
+    tap_text "Battery optimization"
+    assert_no_crash                       # OS settings intent fired
+    adb_shell input keyevent 4            # return to app
+  else
+    note "Battery optimization row not visible"
+  fi
+  assert_no_crash
+
+  # 54-55. Networks list -> NetworkSettings.
+  step "Networks list -> NetworkSettings"
+  if [ -n "$(bounds_of_text "libera")" ]; then
+    tap_text "libera"
+    wait_for_text "Server messages" 6 || true
+    assert_text "Server messages"
+    assert_text "Connect automatically"
+    ok "network settings controls present"
+  else
+    note "libera row not visible in settings networks list"
+  fi
+  assert_no_crash
+
+  # 56. Bouncer networks (root).
+  step "Bouncer networks (root)"
+  if [ -n "$(bounds_of_text "Bouncer networks")" ]; then
+    tap_text "Bouncer networks"
+    wait_for_text "Bouncer networks" 6 || true
+    if [ -n "$(bounds_of_text "Add network to bouncer")" ]; then
+      tap_text "Add network to bouncer"
+      wait_for_text "Name" 5 || true
+      assert_text "Host"
+      tap_text "Cancel"
+    fi
+    adb_shell input keyevent 4            # back to network settings
+  else
+    note "Bouncer networks row not visible"
+  fi
+  adb_shell input keyevent 4              # back to settings
+  assert_no_crash
+
+  # 57. About.
+  step "About screen"
+  if [ -n "$(bounds_of_text "About")" ]; then
+    tap_text "About"
+    wait_for_text "GitHub" 6 || true
+    assert_text "License"
+    assert_text "GitHub"
+  else
+    note "About row not visible"
+  fi
+  # Back out to chat list.
+  adb_shell input keyevent 4
+  adb_shell input keyevent 4
+  wait_for_text "motd" 8 || true
+  assert_no_crash
+}
+
+# ==========================================================================
+# Phase G — render-mode verification
+# ==========================================================================
+phase_g() {
+  echo ""
+  echo "${_C_CYA}########## Phase G: render modes ##########${_C_RST}"
+
+  # 58. Compact render.
+  step "Compact render in chat"
+  tap_text "$MOTD_TEST_CHANNEL" || true
+  wait_for_text "hello from e2e" 8 || true
+  # Compact rows render single-line; bubbles absent. We assert the message is
+  # still visible (structural bubble-vs-line distinction needs a tag, §4).
+  assert_text "hello from e2e"
+  note "compact vs bubble structure needs chat_message_<msgid> tag to assert (§4)"
+  assert_no_crash
+
+  # 59. Restore Comfortable.
+  step "Restore Comfortable render"
+  adb_shell input keyevent 4             # back to list
+  tap_desc "Settings"
+  wait_for_text "Settings" 6 || true
+  if [ -n "$(bounds_of_text "Comfortable")" ]; then
+    tap_text "Comfortable"
+    ok "restored Comfortable message style"
+  else
+    note "Comfortable radio not visible"
+  fi
+  adb_shell input keyevent 4
+  wait_for_text "motd" 8 || true
+  assert_no_crash
+}
+
+# ==========================================================================
+# Phase H — image viewer (conditional on an image message existing)
+# ==========================================================================
+phase_h() {
+  echo ""
+  echo "${_C_CYA}########## Phase H: image viewer ##########${_C_RST}"
+  step "Image viewer (best-effort)"
+  # Requires a message with an inline image (seeded by fixtures/seed.sh). We
+  # cannot reliably locate an image node by text; skip gracefully unless the
+  # full-screen image CD is already reachable.
+  tap_text "$MOTD_TEST_CHANNEL" || true
+  redump
+  if [ -n "$(bounds_of_desc "Full-screen image")" ]; then
+    assert_desc_present "Full-screen image"
+    tap_desc "Back" || true
+  else
+    note "no inline image present (seed an image URL to exercise, §5); skipping"
+  fi
+  adb_shell input keyevent 4 || true
+  assert_no_crash
+}
+
+# ==========================================================================
+# Phase I — teardown
+# ==========================================================================
+phase_i() {
+  echo ""
+  echo "${_C_CYA}########## Phase I: teardown ##########${_C_RST}"
+
+  # 61. Delete a chat (swipe) — cancel to avoid destroying state mid-run.
+  step "Delete-chat swipe (cancel)"
+  wait_for_text "$MOTD_TEST_CHANNEL" 6 || true
+  local b
+  b="$(bounds_of_text "$MOTD_TEST_CHANNEL")"
+  if [ -n "$b" ]; then
+    # Swipe end-to-start (right->left) across the row centre to arm delete.
+    # Only the y (row centre) is needed; x endpoints are the screen edges.
+    local _cx cy
+    read -r _cx cy <<EOF
+$(_e2e_center "$b")
+EOF
+    adb_shell input swipe 980 "$cy" 120 "$cy" 250
+    redump
+    if [ -n "$(bounds_of_text "Delete chat?")" ]; then
+      assert_text "Delete chat?"
+      tap_text "Cancel"                  # do NOT delete; preserve for re-runs
+    else
+      note "swipe did not arm the delete dialog"
+    fi
+  else
+    note "seed channel row not present for swipe test"
+  fi
+  assert_no_crash
+
+  # 62. Final crash sweep.
+  step "Final crash sweep"
+  assert_no_crash
+
+  # 63. Reset (leave device clean).
+  step "Reset app state for next run"
+  adb_shell pm clear "$MOTD_PKG" >/dev/null
+  ok "pm clear done"
+}
+
+# ==========================================================================
+# Driver — phases toggled by env (default: all). E2E_PHASES="a c f" runs a subset.
+# ==========================================================================
+main() {
+  ensure_device
+  echo "${_C_CYA}MOTD E2E run — pkg=${MOTD_PKG} device=${SERIAL}${_C_RST}"
+  echo "${_C_CYA}bouncer=${MOTD_SOJU_HOST}:${MOTD_SOJU_PORT} nick=${MOTD_NICK} channel=${MOTD_TEST_CHANNEL}${_C_RST}"
+
+  local phases="${E2E_PHASES:-a b c d e f g h i}"
+  local p
+  for p in $phases; do
+    case "$p" in
+      a) phase_a ;;
+      b) phase_b ;;
+      c) phase_c ;;
+      d) phase_d ;;
+      e) phase_e ;;
+      f) phase_f ;;
+      g) phase_g ;;
+      h) phase_h ;;
+      i) phase_i ;;
+      *) note "unknown phase '$p' skipped" ;;
+    esac
+  done
+}
+
+main "$@"

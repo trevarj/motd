@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -376,7 +377,8 @@ private fun MemberRow(member: MemberEntity, isFriend: Boolean, onClick: () -> Un
         } else {
             null
         },
-        modifier = Modifier.clickable(onClick = onClick),
+        // Per-member handle so the harness selects a specific member row (plans/18 §4).
+        modifier = Modifier.testTag("channelinfo_member_${member.nick}").clickable(onClick = onClick),
     )
 }
 

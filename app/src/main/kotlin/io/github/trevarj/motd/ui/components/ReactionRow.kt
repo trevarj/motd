@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -57,6 +58,7 @@ private fun ReactionChipView(chip: ReactionChip, onClick: () -> Unit) {
     androidx.compose.foundation.layout.Row(
         // >=48dp touch target (plans/15 #24) while the visible chip stays compact.
         modifier = Modifier
+            .testTag("chat_reaction_chip_${chip.emoji}")
             .minimumInteractiveComponentSize()
             .wrapContentWidth()
             .background(bg, RoundedCornerShape(50))

@@ -15,6 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
@@ -43,6 +45,7 @@ class MainActivity : ComponentActivity() {
     private val requestNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* advisory */ }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         // Swap the launch/splash theme for the app theme before drawing Compose content.
         setTheme(R.style.Theme_Motd)
@@ -63,8 +66,12 @@ class MainActivity : ComponentActivity() {
             ) {
                 // Root Surface paints the themed background under every screen (incl. non-Scaffold
                 // ones like onboarding) so the window follows the color scheme instead of white.
+                // testTagsAsResourceId is enabled once here so every Compose testTag in the tree
+                // surfaces as a uiautomator resource-id for the e2e harness (plans/18 §4).
                 Surface(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .semantics { testTagsAsResourceId = true },
                     color = MaterialTheme.colorScheme.background,
                 ) {
                     MotdNavGraph()

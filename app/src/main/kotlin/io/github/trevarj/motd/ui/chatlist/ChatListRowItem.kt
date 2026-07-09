@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -57,6 +58,8 @@ fun ChatListRowItem(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            // Per-buffer handle so the harness selects a specific row (display names collide).
+            .testTag("chatlist_row_${row.bufferId}")
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 10.dp)
             .alpha(if (row.muted) 0.55f else 1f),
@@ -135,8 +138,12 @@ fun ChatListRowItem(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (row.mentionCount > 0) MentionBadge(count = row.mentionCount)
-                if (row.unreadCount > 0) UnreadBadge(count = row.unreadCount)
+                if (row.mentionCount > 0) {
+                    MentionBadge(count = row.mentionCount, modifier = Modifier.testTag("chatlist_row_mention_badge"))
+                }
+                if (row.unreadCount > 0) {
+                    UnreadBadge(count = row.unreadCount, modifier = Modifier.testTag("chatlist_row_unread_badge"))
+                }
             }
         }
     }
