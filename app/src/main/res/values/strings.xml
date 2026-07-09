@@ -19,6 +19,7 @@
     <string name="new_sheet_nick_hint">Nickname</string>
     <string name="new_sheet_join">Join</string>
     <string name="new_sheet_message">Message</string>
+    <string name="new_sheet_browse">Browse channels…</string>
 
     <!-- Onboarding (WP8) -->
     <string name="onboarding_welcome_title">Welcome to MOTD</string>
@@ -113,8 +114,6 @@
     <string name="channelinfo_leave">Leave</string>
     <string name="channelinfo_leave_confirm_title">Leave channel?</string>
     <string name="channelinfo_leave_confirm_message">You will stop receiving messages from this channel.</string>
-    <string name="channelinfo_member_message">Message</string>
-    <string name="channelinfo_member_mention">Mention</string>
     <string name="channelinfo_section_regular">Members</string>
     <string name="chat_jump_not_loaded">Message not loaded</string>
 
@@ -220,126 +219,124 @@
     <string name="chatlist_friends">Friends</string>
     <string name="chatlist_fools">Fools (%1$d)</string>
     <string name="channelinfo_fools_section">Fools (%1$d)</string>
-    <string name="channelinfo_add_friend">Add to friends</string>
-    <string name="channelinfo_remove_friend">Remove from friends</string>
-    <string name="channelinfo_add_fool">Add to fools</string>
-    <string name="channelinfo_remove_fool">Remove from fools</string>
     <plurals name="settings_nick_count">
         <item quantity="one">%d nick</item>
         <item quantity="other">%d nicks</item>
     </plurals>
 
     <!-- Round 5: app shell / multi-server UX (plans/16). Consumers land across WP-V1..WP-V4; every
-         entry with a still-absent consumer is tagged tools:ignore="UnusedResources" so lint
+         entry with a still-absent consumer is tagged so lint
          (warningsAsErrors) stays green mid-wave. WP-V5 strips the markers once the usages exist.
          The three *_title strings are consumed now by the WP-V0 screen stubs, so they carry no marker. -->
 
     <!-- Server drawer (WP-V1, §3) -->
-    <string name="drawer_open" tools:ignore="UnusedResources">Open navigation drawer</string>
-    <string name="drawer_all_chats" tools:ignore="UnusedResources">All chats</string>
-    <string name="drawer_add_network" tools:ignore="UnusedResources">Add network</string>
-    <string name="drawer_go_offline" tools:ignore="UnusedResources">Go offline</string>
-    <string name="drawer_go_online" tools:ignore="UnusedResources">Go online</string>
-    <string name="drawer_settings" tools:ignore="UnusedResources">Settings</string>
-    <string name="drawer_connect" tools:ignore="UnusedResources">Connect</string>
-    <string name="drawer_disconnect" tools:ignore="UnusedResources">Disconnect</string>
-    <string name="drawer_reconnect" tools:ignore="UnusedResources">Reconnect now</string>
-    <string name="drawer_server_messages" tools:ignore="UnusedResources">Server messages</string>
-    <string name="drawer_network_settings" tools:ignore="UnusedResources">Network settings</string>
-    <string name="drawer_state_connecting" tools:ignore="UnusedResources">Connecting…</string>
-    <string name="drawer_state_registering" tools:ignore="UnusedResources">Registering…</string>
-    <string name="drawer_state_disconnected" tools:ignore="UnusedResources">Disconnected</string>
+    <string name="drawer_open">Open navigation drawer</string>
+    <string name="drawer_all_chats">All chats</string>
+    <string name="drawer_add_network">Add network</string>
+    <string name="drawer_go_offline">Go offline</string>
+    <string name="drawer_go_online">Go online</string>
+    <string name="drawer_settings">Settings</string>
+    <string name="drawer_connect">Connect</string>
+    <string name="drawer_disconnect">Disconnect</string>
+    <string name="drawer_reconnect">Reconnect now</string>
+    <string name="drawer_server_messages">Server messages</string>
+    <string name="drawer_network_settings">Network settings</string>
+    <string name="drawer_state_connecting">Connecting…</string>
+    <string name="drawer_state_registering">Registering…</string>
+    <string name="drawer_state_disconnected">Disconnected</string>
 
     <!-- Chat-list scoping (WP-V1, §3.5) -->
-    <string name="chatlist_scoped_empty_title" tools:ignore="UnusedResources">No chats here yet</string>
-    <string name="chatlist_scoped_empty_message" tools:ignore="UnusedResources">This network has no conversations. Join a channel or start a message.</string>
-    <string name="chatlist_scope_clear" tools:ignore="UnusedResources">Clear network filter</string>
-    <string name="chatlist_browse_channels" tools:ignore="UnusedResources">Browse channels…</string>
+    <string name="chatlist_scoped_empty_title">No chats here yet</string>
+    <string name="chatlist_scoped_empty_message">This network has no conversations. Join a channel or start a message.</string>
+    <string name="chatlist_scope_clear">Clear network filter</string>
 
     <!-- Network settings status header + connect controls (WP-V2, §5.3) -->
-    <string name="network_settings_status_ready" tools:ignore="UnusedResources">Ready as %1$s</string>
-    <string name="network_settings_status_connecting" tools:ignore="UnusedResources">Connecting…</string>
-    <string name="network_settings_status_registering" tools:ignore="UnusedResources">Registering…</string>
-    <string name="network_settings_status_disconnected" tools:ignore="UnusedResources">Disconnected</string>
-    <string name="network_settings_status_failed" tools:ignore="UnusedResources">Failed — %1$s</string>
-    <string name="network_settings_status_connect" tools:ignore="UnusedResources">Connect</string>
-    <string name="network_settings_status_disconnect" tools:ignore="UnusedResources">Disconnect</string>
-    <string name="network_settings_status_reconnect" tools:ignore="UnusedResources">Reconnect</string>
-    <string name="network_settings_autoconnect" tools:ignore="UnusedResources">Connect automatically</string>
-    <string name="network_settings_autoconnect_desc" tools:ignore="UnusedResources">Reconnect to this network on startup.</string>
-    <string name="network_settings_bouncer_networks" tools:ignore="UnusedResources">Bouncer networks</string>
-    <string name="network_settings_bouncer_networks_desc" tools:ignore="UnusedResources">Manage networks bound to this soju account</string>
-    <string name="network_settings_managed_by" tools:ignore="UnusedResources">Managed by %1$s</string>
-    <string name="network_settings_managed_by_desc" tools:ignore="UnusedResources">Transport and login come from the soju connection</string>
-    <string name="network_settings_server_messages" tools:ignore="UnusedResources">Server messages</string>
-    <string name="network_settings_saved_reconnecting" tools:ignore="UnusedResources">Saved — reconnecting</string>
+    <string name="network_settings_status_ready">Ready as %1$s</string>
+    <string name="network_settings_status_connecting">Connecting…</string>
+    <string name="network_settings_status_registering">Registering…</string>
+    <string name="network_settings_status_disconnected">Disconnected</string>
+    <string name="network_settings_status_failed">Failed — %1$s</string>
+    <string name="network_settings_status_connect">Connect</string>
+    <string name="network_settings_status_disconnect">Disconnect</string>
+    <string name="network_settings_status_reconnect">Reconnect</string>
+    <string name="network_settings_autoconnect">Connect automatically</string>
+    <string name="network_settings_autoconnect_desc">Reconnect to this network on startup.</string>
+    <string name="network_settings_bouncer_networks">Bouncer networks</string>
+    <string name="network_settings_bouncer_networks_desc">Manage networks bound to this soju account</string>
+    <string name="settings_network_soju_suffix">%1$s · soju</string>
+    <string name="settings_network_via_suffix">%1$s · via %2$s</string>
+    <string name="network_settings_managed_by">Managed by %1$s</string>
+    <string name="network_settings_managed_by_desc">Transport and login come from the soju connection</string>
+    <string name="network_settings_server_messages">Server messages</string>
 
     <!-- Add network (WP-V2, §5.4) -->
     <string name="add_network_title">Add network</string>
-    <string name="add_network_kind_network" tools:ignore="UnusedResources">IRC network</string>
-    <string name="add_network_kind_soju" tools:ignore="UnusedResources">soju bouncer</string>
-    <string name="add_network_connect_save" tools:ignore="UnusedResources">Connect &amp; save</string>
-    <string name="add_network_testing" tools:ignore="UnusedResources">Testing connection…</string>
-    <string name="add_network_edit" tools:ignore="UnusedResources">Edit</string>
-    <string name="add_network_save_anyway" tools:ignore="UnusedResources">Save anyway</string>
-    <string name="add_network_retry" tools:ignore="UnusedResources">Retry</string>
+    <string name="add_network_kind_network">IRC network</string>
+    <string name="add_network_kind_soju">soju bouncer</string>
+    <string name="add_network_connect_save">Connect &amp; save</string>
+    <string name="add_network_testing">Testing connection…</string>
+    <string name="add_network_edit">Edit</string>
+    <string name="add_network_save_anyway">Save anyway</string>
+    <string name="add_network_retry">Retry</string>
+    <string name="add_network_failed">Couldn\'t connect — %1$s</string>
 
     <!-- soju bound-network manager (WP-V2, §5.5) -->
     <string name="bouncer_title">Bouncer networks</string>
-    <string name="bouncer_connect_to_manage" tools:ignore="UnusedResources">Connect to manage networks</string>
-    <string name="bouncer_connect" tools:ignore="UnusedResources">Connect</string>
-    <string name="bouncer_show_in_motd" tools:ignore="UnusedResources">Shown in MOTD</string>
-    <string name="bouncer_delete_from_bouncer" tools:ignore="UnusedResources">Delete from bouncer</string>
-    <string name="bouncer_delete_confirm_title" tools:ignore="UnusedResources">Delete network?</string>
-    <string name="bouncer_delete_confirm_message" tools:ignore="UnusedResources">This removes %1$s from the bouncer permanently.</string>
-    <string name="bouncer_add_to_bouncer" tools:ignore="UnusedResources">Add network to bouncer</string>
-    <string name="bouncer_field_name" tools:ignore="UnusedResources">Name</string>
-    <string name="bouncer_field_host" tools:ignore="UnusedResources">Host</string>
-    <string name="bouncer_field_port" tools:ignore="UnusedResources">Port</string>
-    <string name="bouncer_field_nick" tools:ignore="UnusedResources">Nickname</string>
-    <string name="bouncer_add" tools:ignore="UnusedResources">Add</string>
+    <string name="bouncer_connect_to_manage">Connect to manage networks</string>
+    <string name="bouncer_connect">Connect</string>
+    <string name="bouncer_show_in_motd">Shown in MOTD</string>
+    <string name="bouncer_delete_from_bouncer">Delete from bouncer</string>
+    <string name="bouncer_delete_confirm_title">Delete network?</string>
+    <string name="bouncer_delete_confirm_message">This removes %1$s from the bouncer permanently.</string>
+    <string name="bouncer_add_to_bouncer">Add network to bouncer</string>
+    <string name="bouncer_field_name">Name</string>
+    <string name="bouncer_field_host">Host</string>
+    <string name="bouncer_field_port">Port</string>
+    <string name="bouncer_field_nick">Nickname</string>
+    <string name="bouncer_add">Add</string>
 
     <!-- Channel browser (WP-V4, §5.7) -->
     <string name="channel_list_title">Browse channels</string>
-    <string name="channel_list_search_hint" tools:ignore="UnusedResources">Search channels</string>
-    <string name="channel_list_connect_to_browse" tools:ignore="UnusedResources">Connect to browse channels</string>
-    <string name="channel_list_connect" tools:ignore="UnusedResources">Connect</string>
-    <string name="channel_list_empty" tools:ignore="UnusedResources">No channels found</string>
-    <string name="channel_list_joining" tools:ignore="UnusedResources">Joining %1$s…</string>
-    <string name="channel_list_users" tools:ignore="UnusedResources">%1$d</string>
+    <string name="channel_list_search_hint">Search channels</string>
+    <string name="channel_list_gated">Search for a channel to browse this network.</string>
+    <string name="channel_list_connect_to_browse">Connect to browse channels</string>
+    <string name="channel_list_root_cant_browse">This soju account can\'t browse channels. Open one of its networks instead.</string>
+    <string name="channel_list_connect">Connect</string>
+    <string name="channel_list_empty">No channels found</string>
+    <string name="channel_list_joining">Joining %1$s…</string>
+    <string name="channel_list_users">%1$d</string>
 
     <!-- Nick action sheet + whois (WP-V3, §5.8) -->
-    <string name="nick_sheet_message" tools:ignore="UnusedResources">Message</string>
-    <string name="nick_sheet_mention" tools:ignore="UnusedResources">Mention</string>
-    <string name="nick_sheet_add_friend" tools:ignore="UnusedResources">Add to friends</string>
-    <string name="nick_sheet_remove_friend" tools:ignore="UnusedResources">Remove from friends</string>
-    <string name="nick_sheet_add_fool" tools:ignore="UnusedResources">Add to fools</string>
-    <string name="nick_sheet_remove_fool" tools:ignore="UnusedResources">Remove from fools</string>
-    <string name="nick_sheet_give_op" tools:ignore="UnusedResources">Give op</string>
-    <string name="nick_sheet_take_op" tools:ignore="UnusedResources">Take op</string>
-    <string name="nick_sheet_give_voice" tools:ignore="UnusedResources">Give voice</string>
-    <string name="nick_sheet_take_voice" tools:ignore="UnusedResources">Take voice</string>
-    <string name="nick_sheet_kick" tools:ignore="UnusedResources">Kick</string>
-    <string name="nick_sheet_ban" tools:ignore="UnusedResources">Ban</string>
-    <string name="nick_sheet_kick_title" tools:ignore="UnusedResources">Kick %1$s?</string>
-    <string name="nick_sheet_kick_reason_hint" tools:ignore="UnusedResources">Reason (optional)</string>
-    <string name="nick_sheet_ban_title" tools:ignore="UnusedResources">Ban %1$s?</string>
-    <string name="nick_sheet_details_in_server" tools:ignore="UnusedResources">Details in server messages</string>
-    <string name="whois_realname" tools:ignore="UnusedResources">Real name</string>
-    <string name="whois_userhost" tools:ignore="UnusedResources">%1$s@%2$s</string>
-    <string name="whois_account" tools:ignore="UnusedResources">Account: %1$s</string>
-    <string name="whois_server" tools:ignore="UnusedResources">Server: %1$s</string>
-    <string name="whois_channels" tools:ignore="UnusedResources">Channels: %1$s</string>
-    <string name="whois_idle" tools:ignore="UnusedResources">Idle: %1$s</string>
-    <string name="whois_away" tools:ignore="UnusedResources">Away: %1$s</string>
+    <string name="nick_sheet_message">Message</string>
+    <string name="nick_sheet_mention">Mention</string>
+    <string name="nick_sheet_add_friend">Add to friends</string>
+    <string name="nick_sheet_remove_friend">Remove from friends</string>
+    <string name="nick_sheet_add_fool">Add to fools</string>
+    <string name="nick_sheet_remove_fool">Remove from fools</string>
+    <string name="nick_sheet_give_op">Give op</string>
+    <string name="nick_sheet_take_op">Take op</string>
+    <string name="nick_sheet_give_voice">Give voice</string>
+    <string name="nick_sheet_take_voice">Take voice</string>
+    <string name="nick_sheet_kick">Kick</string>
+    <string name="nick_sheet_ban">Ban</string>
+    <string name="nick_sheet_kick_title">Kick %1$s?</string>
+    <string name="nick_sheet_kick_reason_hint">Reason (optional)</string>
+    <string name="nick_sheet_ban_title">Ban %1$s?</string>
+    <string name="nick_sheet_details_in_server">Details in server messages</string>
+    <string name="whois_userhost">%1$s@%2$s</string>
+    <string name="whois_account">Account: %1$s</string>
+    <string name="whois_server">Server: %1$s</string>
+    <string name="whois_channels">Channels: %1$s</string>
+    <string name="whois_idle">Idle: %1$s</string>
+    <string name="whois_away">Away: %1$s</string>
 
     <!-- Server buffer chat behavior (WP-V3, §5.6) -->
-    <string name="chat_server_composer_hint" tools:ignore="UnusedResources">Send a command…</string>
-    <string name="chat_server_invalid_command" tools:ignore="UnusedResources">Not a valid IRC command</string>
+    <string name="chat_server_composer_hint">Send a command…</string>
+    <string name="chat_server_invalid_command">Not a valid IRC command</string>
 
     <!-- Topic edit from ChannelInfo (WP-V3, §5.8) -->
-    <string name="channelinfo_topic_edit_title" tools:ignore="UnusedResources">Edit topic</string>
-    <string name="channelinfo_topic_edit_action" tools:ignore="UnusedResources">Edit topic</string>
-    <string name="channelinfo_topic_edit_hint" tools:ignore="UnusedResources">Channel topic</string>
-    <string name="channelinfo_topic_edit_save" tools:ignore="UnusedResources">Save</string>
+    <string name="channelinfo_topic_edit_title">Edit topic</string>
+    <string name="channelinfo_topic_edit_action">Edit topic</string>
+    <string name="channelinfo_topic_edit_hint">Channel topic</string>
+    <string name="channelinfo_topic_edit_save">Save</string>
 </resources>

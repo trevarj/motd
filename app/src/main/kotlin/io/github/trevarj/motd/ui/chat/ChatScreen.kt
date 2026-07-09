@@ -452,6 +452,12 @@ fun ChatContent(
                     enabled = composerEnabled,
                     reply = state.replyTo?.let { ComposerReply(it.sender, it.text) },
                     onCancelReply = { onSetReply(null) },
+                    // SERVER buffers send raw commands; hint that in the placeholder (plans/16 §5.6).
+                    placeholder = if (isServerBuffer) {
+                        stringResource(R.string.chat_server_composer_hint)
+                    } else {
+                        stringResource(R.string.chat_composer_placeholder)
+                    },
                     autocomplete = if (completions.isNotEmpty()) {
                         {
                             AutocompletePanel(

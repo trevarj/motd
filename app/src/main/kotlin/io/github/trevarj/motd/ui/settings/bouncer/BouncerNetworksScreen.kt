@@ -41,6 +41,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -150,6 +152,7 @@ private fun BouncerRow(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    val showInMotdLabel = stringResource(R.string.bouncer_show_in_motd)
 
     ListItem(
         headlineContent = { Text(row.name) },
@@ -167,6 +170,9 @@ private fun BouncerRow(
                 Switch(
                     checked = row.childNetworkId != null,
                     onCheckedChange = { onToggleImport(row) },
+                    modifier = Modifier.semantics {
+                        contentDescription = showInMotdLabel
+                    },
                 )
                 Box {
                     IconButton(onClick = { menuOpen = true }) {

@@ -232,13 +232,14 @@ fun SettingsContent(
  * "host:port" plus a role suffix for soju rows (plans/16 §5.2): " · soju" for a BOUNCER_ROOT,
  * " · via <root name>" for a BOUNCER_CHILD (root name resolved from [all]).
  */
+@Composable
 private fun networkSupporting(network: NetworkEntity, all: List<NetworkEntity>): String {
     val base = "${network.host}:${network.port}"
     return when (network.role) {
-        NetworkRole.BOUNCER_ROOT -> "$base · soju"
+        NetworkRole.BOUNCER_ROOT -> stringResource(R.string.settings_network_soju_suffix, base)
         NetworkRole.BOUNCER_CHILD -> {
             val rootName = all.firstOrNull { it.id == network.parentId }?.name
-            if (rootName != null) "$base · via $rootName" else base
+            if (rootName != null) stringResource(R.string.settings_network_via_suffix, base, rootName) else base
         }
         NetworkRole.DIRECT -> base
     }

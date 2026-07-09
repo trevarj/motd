@@ -52,6 +52,8 @@ fun Composer(
     modifier: Modifier = Modifier,
     reply: ComposerReply? = null,
     onCancelReply: () -> Unit = {},
+    // Placeholder text; SERVER buffers pass a "Send a command…" hint (plans/16 §5.6).
+    placeholder: String = stringResource(R.string.chat_composer_placeholder),
     autocomplete: (@Composable () -> Unit)? = null,
 ) {
     Surface(
@@ -74,7 +76,7 @@ fun Composer(
                     value = value,
                     onValueChange = onValueChange,
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text(stringResource(R.string.chat_composer_placeholder)) },
+                    placeholder = { Text(placeholder) },
                     maxLines = 6,
                     shape = RoundedCornerShape(24.dp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),

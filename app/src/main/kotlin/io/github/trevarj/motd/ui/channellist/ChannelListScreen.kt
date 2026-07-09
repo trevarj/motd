@@ -150,7 +150,7 @@ private fun ResultsBody(
         // No fetch yet: either gated on a search mask (no ELIST 'U') or waiting on the auto-fetch.
         !state.loaded && !state.loading -> {
             val msg = if (state.gated) {
-                stringResource(R.string.channel_list_search_hint)
+                stringResource(R.string.channel_list_gated)
             } else {
                 stringResource(R.string.channel_list_empty)
             }
@@ -205,7 +205,9 @@ private fun NotReadyState(isRoot: Boolean, onConnect: () -> Unit) {
     EmptyState(
         icon = Icons.Outlined.Forum,
         title = stringResource(R.string.channel_list_title),
-        message = stringResource(R.string.channel_list_connect_to_browse),
+        message = stringResource(
+            if (isRoot) R.string.channel_list_root_cant_browse else R.string.channel_list_connect_to_browse,
+        ),
         actionLabel = if (isRoot) null else stringResource(R.string.channel_list_connect),
         onAction = if (isRoot) null else onConnect,
     )

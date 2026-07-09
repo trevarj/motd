@@ -75,21 +75,20 @@ fun NickActionSheet(
             )
             HorizontalDivider()
 
-            // Message/Mention/friend/fool reuse the existing channelinfo labels (identical copy);
-            // the nick_sheet_* equivalents remain for callers that want the standalone set.
-            NickAction(Icons.AutoMirrored.Outlined.Message, stringResource(R.string.channelinfo_member_message), onMessage)
+            // Purpose-built nick-sheet labels shared by chat timeline and ChannelInfo.
+            NickAction(Icons.AutoMirrored.Outlined.Message, stringResource(R.string.nick_sheet_message), onMessage)
             if (showMention) {
-                NickAction(Icons.Outlined.AlternateEmail, stringResource(R.string.channelinfo_member_mention), onMention)
+                NickAction(Icons.Outlined.AlternateEmail, stringResource(R.string.nick_sheet_mention), onMention)
             }
             if (!isSelf) {
                 NickAction(
                     if (isFriend) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                    stringResource(if (isFriend) R.string.channelinfo_remove_friend else R.string.channelinfo_add_friend),
+                    stringResource(if (isFriend) R.string.nick_sheet_remove_friend else R.string.nick_sheet_add_friend),
                     onToggleFriend,
                 )
                 NickAction(
                     if (isFool) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
-                    stringResource(if (isFool) R.string.channelinfo_remove_fool else R.string.channelinfo_add_fool),
+                    stringResource(if (isFool) R.string.nick_sheet_remove_fool else R.string.nick_sheet_add_fool),
                     onToggleFool,
                 )
             }
@@ -168,6 +167,12 @@ private fun WhoisSummary(whois: WhoisInfo?) {
         }
         whois.channels.takeIf { it.isNotEmpty() }?.let {
             Text(stringResource(R.string.whois_channels, it.joinToString(" ")), style = MaterialTheme.typography.bodySmall)
+        }
+        whois.server?.takeIf { it.isNotBlank() }?.let {
+            Text(stringResource(R.string.whois_server, it), style = MaterialTheme.typography.bodySmall)
+        }
+        whois.idleSecs?.let {
+            Text(stringResource(R.string.whois_idle, "${it}s"), style = MaterialTheme.typography.bodySmall)
         }
         whois.awayMessage?.takeIf { it.isNotBlank() }?.let {
             Text(stringResource(R.string.whois_away, it), style = MaterialTheme.typography.bodySmall)

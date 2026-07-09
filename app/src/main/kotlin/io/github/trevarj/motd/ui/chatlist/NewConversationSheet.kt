@@ -146,7 +146,7 @@ private fun NewConversationSheetContent(
                 enabled = net != null && net.role != NetworkRole.BOUNCER_ROOT,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(stringResource(R.string.channel_list_title))
+                Text(stringResource(R.string.new_sheet_browse))
             }
         }
     }

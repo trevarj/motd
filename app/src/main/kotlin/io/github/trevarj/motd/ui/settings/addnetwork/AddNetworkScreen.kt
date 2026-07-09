@@ -197,7 +197,7 @@ private fun FailedSection(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(
-                text = stringResource(R.string.network_settings_status_failed, error.orEmpty()),
+                text = stringResource(R.string.add_network_failed, error.orEmpty()),
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 modifier = Modifier.padding(16.dp),
             )
