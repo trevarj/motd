@@ -273,8 +273,9 @@ _e2e_send_text() {
     ch="${text:$i:1}"
     case "$ch" in
       ' ')  out+='%s' ;;                       # adb input's space token
-      # Characters the adb `input text` parser / shell treat specially.
-      '('|')'|'<'|'>'|'|'|';'|'&'|'*'|\\|'~'|'"'|"'"|'`'|'$')
+      # Characters the adb `input text` parser / device shell treat specially. '#' starts a
+      # comment in the device shell (so an unescaped channel like "##motdtest" becomes empty).
+      '('|')'|'<'|'>'|'|'|';'|'&'|'*'|\\|'~'|'"'|"'"|'`'|'$'|'#'|'!'|'{'|'}')
             out+="\\$ch" ;;
       *)    out+="$ch" ;;
     esac
@@ -300,6 +301,11 @@ _e2e_input_by_fn() {
   adb_shell input tap $xy
   # Give the IME a beat to attach focus before typing.
   sleep 1
+  # Clear any pre-filled/default content (e.g. the Port field defaults to 6697) so typing
+  # REPLACES rather than appends. Move caret to end, then delete a generous run backward.
+  # 123=MOVE_END, 67=DEL; these fields are short (host/port/nick/user/pass).
+  adb_shell input keyevent 123
+  adb_shell input keyevent 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67
   _e2e_send_text "$text"
   # Close the soft keyboard so subsequent dumps see the settled layout.
   adb_shell input keyevent 4   # KEYCODE_BACK
@@ -370,7 +376,7 @@ assert_desc_present() {
   fi
 }
 
-# wait_for_text "<text>" <timeout_s> — poll a fresh dump every ~2s until the
+# wait_for_text "<text>" <timeout_s> — poll a fresh dump every ~1s until the
 # text appears or the timeout elapses. Returns success/failure without counting
 # a check (callers usually follow with assert_text); use for connect/registration.
 wait_for_text() {
@@ -379,8 +385,8 @@ wait_for_text() {
     if dump && [ -n "$(bounds_of_text "$t")" ]; then
       return 0
     fi
-    sleep 2
-    waited=$(( waited + 2 ))
+    sleep 1
+    waited=$(( waited + 1 ))
   done
   return 1
 }
@@ -400,10 +406,27 @@ wait_for_any_text() {
         fi
       done
     fi
-    sleep 2
-    waited=$(( waited + 2 ))
+    sleep 1
+    waited=$(( waited + 1 ))
   done
   return 1
+}
+
+# reset_to_chatlist — normalize the app to the chat-list screen so a phase can start from a known
+# anchor (the "New conversation" action). Closes any open sheet/dialog and presses BACK until the
+# list shows. Enables a rapid dev cycle: run the expensive phase 'a' once to set up device state
+# (install + onboard + connect), then re-run any later phase(s) alone via E2E_PHASES without
+# repeating onboarding. Returns non-zero if the chat list can't be reached (app not onboarded).
+reset_to_chatlist() {
+  local i
+  for i in 1 2 3 4 5 6 7 8; do
+    dump || true
+    [ -n "$(bounds_of_desc 'New conversation')" ] && return 0
+    adb_shell input keyevent 4   # BACK: dismiss a sheet/dialog or pop a screen
+    sleep 1
+  done
+  dump || true
+  [ -n "$(bounds_of_desc 'New conversation')" ]
 }
 
 # --- crash detection -------------------------------------------------------

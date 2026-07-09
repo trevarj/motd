@@ -28,7 +28,16 @@ fi
 # Package + APK.
 : "${MOTD_PKG:=io.github.trevarj.motd.debug}"
 : "${MOTD_APK:=}"                 # path to app-debug.apk; required for install
-MOTD_ACTIVITY="io.github.trevarj.motd/io.github.trevarj.motd.MainActivity"
+# Safety: this harness runs destructive pm clear / force-stop against MOTD_PKG. Refuse to touch
+# the release install (real account) — only ever the .debug variant.
+case "$MOTD_PKG" in
+  *.debug) ;;
+  *) echo "REFUSING: MOTD_PKG='$MOTD_PKG' is not the .debug variant; would touch the release app." >&2; exit 2 ;;
+esac
+# Component = <applicationId>/<activity-class>. The debug variant's applicationId carries the
+# .debug suffix (MOTD_PKG) but the Activity CLASS name is unsuffixed, so build it from MOTD_PKG
+# to guarantee we only ever drive the debug app — never the release install (real account).
+MOTD_ACTIVITY="${MOTD_PKG}/io.github.trevarj.motd.MainActivity"
 
 # Bouncer / account (see §0). No defaults for secrets.
 : "${MOTD_SOJU_HOST:=}"
@@ -96,9 +105,22 @@ phase_a() {
     note "MOTD_APK unset/absent; assuming app already installed"
   fi
   adb_shell pm clear "$MOTD_PKG" >/dev/null
+  adb_shell am force-stop "$MOTD_PKG" >/dev/null 2>&1 || true
   clear_crash
-  adb_shell am start -n "$MOTD_ACTIVITY" >/dev/null
-  wait_for_text "Welcome to motd" 20 || true
+  sleep 1
+  # -S forces a stop-then-start so a stale task can't be "brought to front" (the pm clear /
+  # am start race that left onboarding hidden). Fall back to a plain start if -S is unsupported.
+  adb_shell am start -S -n "$MOTD_ACTIVITY" >/dev/null 2>&1 || adb_shell am start -n "$MOTD_ACTIVITY" >/dev/null
+  # The runtime POST_NOTIFICATIONS dialog appears on top a few seconds into the cold start (a
+  # separate window) and hides onboarding from uiautomator. Poll for EITHER onboarding (done)
+  # or the dialog's exact "Allow" button (tap to dismiss), robust to launch/dialog timing.
+  _w=0
+  while [ "$_w" -lt 30 ]; do
+    dump || true
+    [ -n "$(bounds_of_text 'Welcome to motd')" ] && break
+    if [ -n "$(bounds_of_text 'Allow')" ]; then tap_text "Allow"; sleep 1; continue; fi
+    sleep 1; _w=$(( _w + 1 ))
+  done
   assert_text "Welcome to motd"          # redirected into onboarding (§1.1)
   assert_no_crash
 
@@ -145,9 +167,11 @@ phase_a() {
   # 7. Connect.
   step "Start connect test"
   tap_text "Next"
-  wait_for_text "Connecting" 10 || true
-  assert_text "Connecting"
-  assert_no_crash
+  # "Connecting" is transient and, for a self-signed bouncer, is immediately superseded by the
+  # TOFU cert dialog — treat it as a soft signal, not a hard assertion. No assert_no_crash here:
+  # the app logs an expected "certificate not trusted" until we accept the cert in step 8.
+  if wait_for_text "Connecting" 6; then ok "connect started (Connecting shown)"
+  else note "Connecting not caught (superseded by cert prompt); continuing"; fi
 
   # 8. Trust cert (TOFU). Every pm clear re-triggers this (§5, §7).
   step "Handle TOFU cert-trust prompt"
@@ -155,6 +179,7 @@ phase_a() {
     assert_text "SHA-256 fingerprint"
     tap_text "Trust"                     # buttons carry text (§4 note)
     note "trusted cert"
+    clear_crash                          # reset the expected pre-trust 'not trusted' baseline
   else
     note "cert dialog did not appear (already trusted or fast connect); continuing"
   fi
@@ -170,17 +195,25 @@ phase_a() {
   step "Import bouncer network 'libera'"
   wait_for_text "Bouncer networks" 20 || true
   assert_text "Bouncer networks"
+  # The list populates asynchronously as BOUNCER NETWORK notifications arrive after connect;
+  # poll for the libera row rather than asserting immediately (confirmed on the bouncer:
+  # BOUNCER NETWORK 2 name=libera state=connected).
+  wait_for_text "libera" 25 || true
   assert_text "libera"                   # TODO tag: onboarding_bouncer_row_<id> (§4)
-  # Enabling the libera switch is best-effort: the switch handle
-  # (onboarding_bouncer_switch_<id>, §4) does not exist yet, so we cannot read
-  # its checked state reliably. libera is selected by default on most builds.
-  note "libera switch defaults on; switch tag pending (§4)"
+  # Select libera (rows default to unselected) so it is imported as a child network and later
+  # phases have real buffers/channels to drive. The row is clickable and toggles its switch.
+  tap_text "libera"
+  sleep 1
+  note "selected libera for import"
   assert_no_crash
 
   # 10. Finish.
   step "Finish onboarding -> ChatList"
-  tap_text "Next" || true                # to FINISH page
-  tap_text "Finish"                      # TODO tag: onboarding_forward_button (§4)
+  # The forward button label varies (Next/Finish) and "Finish" also appears as the FINISH page
+  # heading, so drive it by its stable testTag rather than by text.
+  tap_tag onboarding_forward_button      # CONNECT -> FINISH
+  sleep 1
+  tap_tag onboarding_forward_button      # FINISH -> ChatList
   wait_for_text "motd" 15 || true
   assert_text "motd"                     # top bar on ChatList (§1.2)
   assert_no_text "Welcome to motd"
@@ -283,20 +316,22 @@ phase_c() {
   assert_text "Message"                  # composer placeholder
   assert_no_crash
 
-  # 20. Send a message.
+  # 20. Send a message. The composer uses sentence capitalization by design (bug #10, Telegram-
+  # style UX), so start the text with a capital letter — otherwise the IME uppercases the first
+  # char and the sent/echoed text ("Hello…") would not match a lowercase assertion.
   step "Send a message"
   # TODO tag: chat_composer_field (§4). Fall back to placeholder text label.
-  input_by_text_label "Message" "hello from e2e"
+  input_tag chat_composer_field "Hello from e2e"
   redump
   tap_desc "Send"
-  wait_for_text "hello from e2e" 10 || true
-  assert_text "hello from e2e"
+  wait_for_text "Hello from e2e" 10 || true
+  assert_text "Hello from e2e"
   assert_no_crash
 
   # 21. Nick autocomplete (needs a second member; §5/§8).
   step "Nick autocomplete"
   if [ -n "$MOTD_SECOND_NICK" ]; then
-    input_by_text_label "Message" "${MOTD_SECOND_NICK:0:2}"
+    input_tag chat_composer_field "${MOTD_SECOND_NICK:0:2}"
     redump
     # A dropdown row prefix-matching should appear; assert the second nick shows.
     if [ -n "$(bounds_of_text "$MOTD_SECOND_NICK")" ]; then
@@ -312,7 +347,7 @@ phase_c() {
 
   # 22. Command autocomplete.
   step "Command autocomplete"
-  input_by_text_label "Message" "/"
+  input_tag chat_composer_field "/"
   redump
   if [ -n "$(bounds_of_text "/join")" ] || [ -n "$(bounds_of_text "/me")" ]; then
     ok "command dropdown present (/me, /join, …)"
@@ -324,7 +359,7 @@ phase_c() {
 
   # 23. /me action.
   step "/me action"
-  input_by_text_label "Message" "/me waves"
+  input_tag chat_composer_field "/me waves"
   redump
   tap_desc "Send"
   wait_for_text "waves" 8 || true
@@ -333,7 +368,7 @@ phase_c() {
 
   # 24. Reaction add.
   step "Add a reaction"
-  long_press_text "hello from e2e"       # TODO tag: chat_message_<msgid> (§4)
+  long_press_text "Hello from e2e"       # TODO tag: chat_message_<msgid> (§4)
   if wait_for_text "👍" 5; then
     tap_text "👍"
     ok "reaction quick-row present; tapped 👍"
@@ -344,7 +379,7 @@ phase_c() {
 
   # 25. More reactions.
   step "More reactions grid"
-  long_press_text "hello from e2e"
+  long_press_text "Hello from e2e"
   if wait_for_text "More reactions" 5 || [ -n "$(bounds_of_desc "More reactions")" ]; then
     tap_desc "More reactions" || true
     note "opened more-reactions grid (TODO tag: message_more_reactions, §4)"
@@ -356,7 +391,7 @@ phase_c() {
 
   # 26. Reply.
   step "Reply bar"
-  long_press_text "hello from e2e"
+  long_press_text "Hello from e2e"
   if wait_for_text "Reply" 5; then
     tap_text "Reply"
     if [ -n "$(bounds_of_text "Replying to $MOTD_NICK")" ] || wait_for_text "Replying to" 4; then
@@ -370,7 +405,7 @@ phase_c() {
 
   # 27. Copy / Quote.
   step "Copy action (no crash)"
-  long_press_text "hello from e2e"
+  long_press_text "Hello from e2e"
   if wait_for_text "Copy" 5; then
     tap_text "Copy"                      # clipboard not asserted via UI (§2 step 27)
     ok "Copy tapped"
@@ -754,10 +789,10 @@ phase_g() {
   # 58. Compact render.
   step "Compact render in chat"
   tap_text "$MOTD_TEST_CHANNEL" || true
-  wait_for_text "hello from e2e" 8 || true
+  wait_for_text "Hello from e2e" 8 || true
   # Compact rows render single-line; bubbles absent. We assert the message is
   # still visible (structural bubble-vs-line distinction needs a tag, §4).
-  assert_text "hello from e2e"
+  assert_text "Hello from e2e"
   note "compact vs bubble structure needs chat_message_<msgid> tag to assert (§4)"
   assert_no_crash
 
@@ -849,9 +884,21 @@ main() {
   echo "${_C_CYA}MOTD E2E run — pkg=${MOTD_PKG} device=${SERIAL}${_C_RST}"
   echo "${_C_CYA}bouncer=${MOTD_SOJU_HOST}:${MOTD_SOJU_PORT} nick=${MOTD_NICK} channel=${MOTD_TEST_CHANNEL}${_C_RST}"
 
+  # Phases run in order. Phase 'a' owns the expensive setup (install + onboard + connect) and
+  # leaves durable device state (networks, joined channel). Every later phase begins from the
+  # chat-list anchor via reset_to_chatlist, so a subset run — e.g. E2E_PHASES="c" — picks up
+  # where a prior full run left off without repeating onboarding (rapid dev cycle).
   local phases="${E2E_PHASES:-a b c d e f g h i}"
   local p
   for p in $phases; do
+    if [ "$p" != "a" ]; then
+      if ! reset_to_chatlist; then
+        fail "phase '$p': app is not at the chat list (run E2E_PHASES=\"a\" first to set up state)"
+        continue
+      fi
+    fi
+    # Contain a hard early-abort (set -e) to the current phase via `|| fail`, so a glitch in one
+    # phase records a failure but still lets the remaining phases run (comprehensive coverage).
     case "$p" in
       a) phase_a ;;
       b) phase_b ;;
@@ -863,7 +910,7 @@ main() {
       h) phase_h ;;
       i) phase_i ;;
       *) note "unknown phase '$p' skipped" ;;
-    esac
+    esac || fail "phase '$p' aborted early (see output above)"
   done
 }
 
