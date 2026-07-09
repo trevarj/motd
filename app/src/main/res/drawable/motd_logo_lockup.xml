@@ -1,29 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Horizontal lockup: brand mark plus monospaced /motd wordmark. -->
+<!-- Horizontal lockup matching the selected outline chat/slash logo. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="200dp"
     android:height="67dp"
     android:viewportWidth="240"
     android:viewportHeight="80">
     <path
-        android:fillColor="#5B6EE1"
-        android:pathData="M24,14 L58,14 Q68,14 68,24 L68,47 Q68,57 58,57 L46,57 L35,68 L37,57 L24,57 Q14,57 14,47 L14,24 Q14,14 24,14 Z" />
-    <path
-        android:fillColor="#111318"
-        android:pathData="M27,27 L55,27 Q60,27 60,32 L60,45 Q60,50 55,50 L27,50 Q22,50 22,45 L22,32 Q22,27 27,27 Z" />
-    <path
-        android:strokeColor="#39D98A"
-        android:strokeWidth="3"
+        android:strokeColor="#168BFF"
+        android:strokeWidth="5.5"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="@android:color/transparent"
-        android:pathData="M31,36 L36,39 L31,43" />
+        android:pathData="M24,19 L58,19 Q71,19 71,40 Q71,61 58,61 L25,61 L14,68 L14,29 Q14,19 24,19 Z" />
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="3"
-        android:strokeLineCap="round"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M41,43 L51,43" />
+        android:fillColor="#111318"
+        android:pathData="M33,29 L39,29 L29,53 L23,53 Z" />
+    <path
+        android:fillColor="#39D98A"
+        android:pathData="M45,41 L52,41 Q54,41 54,43 L54,50 Q54,52 52,52 L45,52 Q43,52 43,50 L43,43 Q43,41 45,41 Z" />
     <path
         android:strokeColor="#111318"
         android:strokeWidth="6"

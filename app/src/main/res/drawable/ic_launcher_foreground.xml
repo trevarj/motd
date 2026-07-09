@@ -1,34 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive-icon foreground: text-free terminal/chat mark inside the 108dp safe zone. -->
+<!-- Adaptive-icon foreground: selected outline chat mark, slash, and terminal cursor. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M34,23 L74,23 Q86,23 86,35 L86,59 Q86,71 74,71 L57,71 L45,82 L47,71 L34,71 Q22,71 22,59 L22,35 Q22,23 34,23 Z" />
-    <path
-        android:fillColor="#111318"
-        android:pathData="M37,35 L71,35 Q77,35 77,41 L77,56 Q77,62 71,62 L37,62 Q31,62 31,56 L31,41 Q31,35 37,35 Z" />
-    <path
-        android:fillColor="#5B6EE1"
-        android:fillAlpha="0.18"
-        android:pathData="M37,35 L71,35 Q77,35 77,41 L77,43 L31,43 L31,41 Q31,35 37,35 Z" />
-    <path
-        android:strokeColor="#39D98A"
-        android:strokeWidth="4"
+        android:strokeColor="#168BFF"
+        android:strokeWidth="8.5"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="@android:color/transparent"
-        android:pathData="M41,47 L47,52 L41,57" />
+        android:pathData="M31.5,31 L66.5,31 Q90,31 90,54 Q90,77 66.5,77 L32.5,77 L19.5,85.5 L19.5,42.5 Q19.5,31 31.5,31 Z" />
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="4"
-        android:strokeLineCap="round"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M53,57 L65,57" />
+        android:fillColor="#F7F8FB"
+        android:pathData="M44,39.5 L51,39.5 L40,69 L33,69 Z" />
     <path
         android:fillColor="#39D98A"
-        android:pathData="M67,53 L72,53 L72,61 L67,61 Z" />
+        android:pathData="M57,55 L64,55 Q66,55 66,57 L66,64 Q66,66 64,66 L57,66 Q55,66 55,64 L55,57 Q55,55 57,55 Z" />
 </vector>

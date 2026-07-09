@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android themed-icon variant: single-color terminal/chat silhouette. -->
+<!-- Android themed-icon variant: single-color outline chat mark. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -7,6 +7,5 @@
     android:viewportHeight="108">
     <path
         android:fillColor="#FFFFFF"
-        android:fillType="evenOdd"
-        android:pathData="M34,23 L74,23 Q86,23 86,35 L86,59 Q86,71 74,71 L57,71 L45,82 L47,71 L34,71 Q22,71 22,59 L22,35 Q22,23 34,23 Z M37,35 Q31,35 31,41 L31,56 Q31,62 37,62 L71,62 Q77,62 77,56 L77,41 Q77,35 71,35 Z M41,46 L49,52 L41,58 L41,53 L45,52 L41,51 Z M53,55 L70,55 L70,59 L53,59 Z" />
+        android:pathData="M31.5,26.75 L66.5,26.75 Q73.1,26.75 78.8,28.85 Q84.55,30.95 88.85,35 Q93.15,39.05 95.2,43.95 Q97.25,48.85 97.25,54 Q97.25,59.15 95.2,64.05 Q93.15,68.95 88.85,73 Q84.55,77.05 78.8,79.15 Q73.1,81.25 66.5,81.25 L33.8,81.25 L17.15,92.2 Q15.2,93.45 13.2,92.4 Q11.25,91.35 11.25,89.1 L11.25,42.5 Q11.25,35.5 16.65,31.1 Q22.05,26.75 31.5,26.75 Z M31.5,35.25 Q19.75,35.25 19.75,42.5 L19.75,81.35 L31.2,73.8 Q32.25,73 33.6,73 L66.5,73 Q77.05,73 83,67.5 Q88.75,62.25 88.75,54 Q88.75,45.75 83,40.5 Q77.05,35.25 66.5,35.25 Z M44,39.5 L51,39.5 L40,69 L33,69 Z M57,55 L64,55 Q66,55 66,57 L66,64 Q66,66 64,66 L57,66 Q55,66 55,64 L55,57 Q55,55 57,55 Z" />
 </vector>

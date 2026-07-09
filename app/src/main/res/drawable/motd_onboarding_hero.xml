@@ -1,49 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Larger onboarding/store-style hero with restrained connection cues. -->
+<!-- Onboarding hero using the selected outline chat/slash logo. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="200dp"
     android:height="129dp"
     android:viewportWidth="280"
     android:viewportHeight="180">
     <path
-        android:strokeColor="#AAB3FF"
-        android:strokeWidth="2"
-        android:strokeAlpha="0.55"
-        android:strokeLineCap="round"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M58,119 C83,92 105,92 130,110 M150,70 C177,45 205,48 231,74 M82,58 C106,44 132,47 150,69" />
-    <path
-        android:fillColor="#39D98A"
-        android:fillAlpha="0.24"
-        android:pathData="M49,113 A8,8 0,1 0,65 113 A8,8 0,1 0,49 113" />
-    <path
-        android:fillColor="#39D98A"
-        android:fillAlpha="0.24"
-        android:pathData="M223,69 A8,8 0,1 0,239 69 A8,8 0,1 0,223 69" />
-    <path
-        android:fillColor="#5B6EE1"
-        android:pathData="M106,36 L174,36 Q193,36 193,55 L193,101 Q193,120 174,120 L149,120 L128,142 L132,120 L106,120 Q87,120 87,101 L87,55 Q87,36 106,36 Z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.2"
-        android:pathData="M110,40 L170,40 Q188,40 188,58 L188,65 Q150,55 94,74 L94,58 Q94,40 110,40 Z" />
-    <path
-        android:fillColor="#111318"
-        android:pathData="M112,61 L168,61 Q178,61 178,71 L178,96 Q178,106 168,106 L112,106 Q102,106 102,96 L102,71 Q102,61 112,61 Z" />
-    <path
-        android:strokeColor="#39D98A"
-        android:strokeWidth="6"
+        android:strokeColor="#168BFF"
+        android:strokeWidth="14"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="@android:color/transparent"
-        android:pathData="M119,79 L129,85 L119,92" />
+        android:pathData="M91,52 L170,52 Q217,52 217,91 Q217,130 170,130 L93,130 L61,151 L61,76 Q61,52 91,52 Z" />
     <path
-        android:strokeColor="#F6F7FB"
-        android:strokeWidth="6"
-        android:strokeLineCap="round"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M139,93 L159,93" />
+        android:fillColor="#111318"
+        android:pathData="M119,70 L135,70 L109,116 L93,116 Z" />
     <path
         android:fillColor="#39D98A"
-        android:pathData="M164,86 L172,86 L172,99 L164,99 Z" />
+        android:pathData="M149,88 L166,88 Q171,88 171,93 L171,110 Q171,115 166,115 L149,115 Q144,115 144,110 L144,93 Q144,88 149,88 Z" />
+    <path
+        android:strokeColor="#111318"
+        android:strokeWidth="8"
+        android:strokeLineCap="square"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M104,165 L119,139 M131,164 L131,145 Q131,140 136,140 Q141,140 141,145 L141,164 M141,145 Q141,140 146,140 Q151,140 151,145 L151,164 M167,140 L180,140 Q186,140 186,146 L186,158 Q186,164 180,164 L167,164 Q161,164 161,158 L161,146 Q161,140 167,140 M198,140 L216,140 M207,134 L207,158 Q207,164 213,164 L216,164 M228,134 L228,164 M228,145 Q232,140 239,140 Q247,140 247,148 L247,156 Q247,164 239,164 Q232,164 228,159" />
 </vector>
