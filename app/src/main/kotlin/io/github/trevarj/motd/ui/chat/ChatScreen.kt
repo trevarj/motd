@@ -115,6 +115,10 @@ fun ChatScreen(
     val readMarkerSnapshot by viewModel.readMarkerSnapshot.collectAsStateWithLifecycle()
     // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    // Round 5: nick sheet + raw-send snackbar (plans/16 §5.6/§5.8).
+    val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
+    val snackbarMessage by viewModel.snackbar.collectAsStateWithLifecycle()
+    val isServerBuffer = state.buffer?.type == BufferType.SERVER
 
     ChatContent(
         state = state,
@@ -127,11 +131,12 @@ fun ChatScreen(
         readMarkerSnapshot = readMarkerSnapshot,
         onMarkRead = viewModel::markRead,
         onBack = onBack,
-        onOpenChannelInfo = onOpenChannelInfo,
+        // SERVER buffers have no ChannelInfo (no members/topic); tapping the title is inert.
+        onOpenChannelInfo = if (isServerBuffer) ({}) else onOpenChannelInfo,
         onOpenSearch = onOpenSearch,
         onOpenImage = onOpenImage,
         nickNormalizer = viewModel.nickNormalizer(),
-        onSubmit = { raw -> viewModel.submit(raw, onOpenBuffer = onOpenBuffer) },
+        onSubmit = { raw -> viewModel.submit(raw, onOpenBuffer = onOpenBuffer, onOpenChannelList = onOpenChannelList) },
         onTyping = viewModel::sendTyping,
         onSetReply = viewModel::setReply,
         onReact = viewModel::react,
@@ -144,7 +149,37 @@ fun ChatScreen(
         onJumpFailedShown = viewModel::onJumpFailedShown,
         onJumpHandled = viewModel::onJumpHandled,
         onReresolveJump = viewModel::reresolveJumpOnce,
+        isServerBuffer = isServerBuffer,
+        onSenderClick = viewModel::openNickSheet,
+        rawSendSnackbar = snackbarMessage,
+        onSnackbarShown = viewModel::consumeSnackbar,
     )
+
+    // Nick sheet (plans/16 §5.8): actions render immediately; whois fills in when it lands.
+    nickSheet?.let { sheet ->
+        val norm = viewModel.nickNormalizer()
+        val myNick = (state.connState as? IrcClientState.Ready)?.nick
+        val isSelf = myNick != null && norm(sheet.nick) == norm(myNick)
+        val normSelf = io.github.trevarj.motd.data.prefs.normalizeNick(sheet.nick)
+        NickActionSheet(
+            nick = sheet.nick,
+            isSelf = isSelf,
+            isFriend = normSelf in settings.friends,
+            isFool = normSelf in settings.fools,
+            canModerate = viewModel.canModerate(),
+            whois = sheet.whois,
+            onDismiss = viewModel::dismissNickSheet,
+            onMessage = { viewModel.dismissNickSheet(); viewModel.submit("/query ${sheet.nick}", onOpenBuffer) },
+            onMention = { viewModel.dismissNickSheet() },
+            onToggleFriend = { viewModel.toggleFriend(sheet.nick) },
+            onToggleFool = { viewModel.toggleFool(sheet.nick) },
+            onOp = { grant -> viewModel.setMemberMode(sheet.nick, 'o', grant) },
+            onVoice = { grant -> viewModel.setMemberMode(sheet.nick, 'v', grant) },
+            onKick = { reason -> viewModel.dismissNickSheet(); viewModel.kick(sheet.nick, reason) },
+            onBan = { viewModel.dismissNickSheet(); viewModel.ban(sheet.nick) },
+            showMention = state.buffer?.type == BufferType.CHANNEL,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -177,6 +212,11 @@ fun ChatContent(
     onJumpFailedShown: () -> Unit = {},
     onJumpHandled: () -> Unit = {},
     onReresolveJump: () -> Unit = {},
+    // Round 5 (plans/16 §5.6/§5.8): SERVER-buffer raw-send + nick sheet plumbing.
+    isServerBuffer: Boolean = false,
+    onSenderClick: (String) -> Unit = {},
+    rawSendSnackbar: String? = null,
+    onSnackbarShown: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -206,6 +246,15 @@ fun ChatContent(
         if (jumpFailed) {
             snackbarHostState.showSnackbar(jumpNotLoaded)
             onJumpFailedShown()
+        }
+    }
+
+    // Raw-send parse failure on a SERVER buffer → transient snackbar (plans/16 §5.6).
+    val invalidCommand = stringResource(R.string.chat_server_invalid_command)
+    LaunchedEffect(rawSendSnackbar) {
+        if (rawSendSnackbar != null) {
+            snackbarHostState.showSnackbar(invalidCommand)
+            onSnackbarShown()
         }
     }
 
@@ -359,6 +408,7 @@ fun ChatContent(
                         foolsMode = foolsMode,
                         expandedFools = expandedFools,
                         onToggleFool = { id -> expandedFools = expandedFools + id },
+                        onSenderClick = onSenderClick,
                     )
 
                     // Empty buffer once the first refresh settles → placeholder (plans/15 #27).
@@ -428,6 +478,7 @@ fun ChatContent(
         }
         MessageActionSheet(
             sheetState = sheetState,
+            isServerBuffer = isServerBuffer,
             onDismiss = { sheetTarget = null },
             onReply = { hideThen { onSetReply(target) } },
             onReact = { emoji -> hideThen { target.msgid?.let { onReact(it, emoji) } } },

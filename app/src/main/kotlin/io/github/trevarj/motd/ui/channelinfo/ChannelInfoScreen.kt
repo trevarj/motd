@@ -14,24 +14,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Logout
-import androidx.compose.material.icons.automirrored.outlined.Message
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.AlternateEmail
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.PushPin
-import androidx.compose.material.icons.outlined.StarBorder
-import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,6 +52,7 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.prefs.normalizeNick
+import io.github.trevarj.motd.ui.chat.NickActionSheet
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -70,6 +66,7 @@ fun ChannelInfoScreen(
 ) {
     LaunchedEffect(bufferId) { viewModel.init(bufferId) }
     val state by viewModel.state.collectAsState()
+    val nickSheet by viewModel.nickSheet.collectAsState()
 
     ChannelInfoContent(
         state = state,
@@ -77,12 +74,31 @@ fun ChannelInfoScreen(
         onSetPinned = viewModel::setPinned,
         onSetMuted = viewModel::setMuted,
         onLeave = { viewModel.part(onBack) },
-        onMessageMember = { nick -> viewModel.messageMember(nick, onOpenBuffer) },
-        // Queue "$nick: " on the chat's composer draft, then pop back to the chat.
-        onMentionMember = { nick -> viewModel.mentionMember(nick, onDone = onBack) },
-        onToggleFriend = viewModel::toggleFriend,
-        onToggleFool = viewModel::toggleFool,
+        onMemberClick = viewModel::openNickSheet,
+        onSetTopic = viewModel::setTopic,
     )
+
+    // Nick sheet (plans/16 §5.8): shared with the chat timeline. Moderation shown only when op.
+    nickSheet?.let { sheet ->
+        val norm = io.github.trevarj.motd.data.prefs.normalizeNick(sheet.nick)
+        NickActionSheet(
+            nick = sheet.nick,
+            isSelf = false,
+            isFriend = norm in state.friends,
+            isFool = norm in state.fools,
+            canModerate = state.canModerate,
+            whois = sheet.whois,
+            onDismiss = viewModel::dismissNickSheet,
+            onMessage = { viewModel.dismissNickSheet(); viewModel.messageMember(sheet.nick, onOpenBuffer) },
+            onMention = { viewModel.dismissNickSheet(); viewModel.mentionMember(sheet.nick, onDone = onBack) },
+            onToggleFriend = { viewModel.toggleFriend(sheet.nick) },
+            onToggleFool = { viewModel.toggleFool(sheet.nick) },
+            onOp = { grant -> viewModel.setMemberMode(sheet.nick, 'o', grant) },
+            onVoice = { grant -> viewModel.setMemberMode(sheet.nick, 'v', grant) },
+            onKick = { reason -> viewModel.dismissNickSheet(); viewModel.kick(sheet.nick, reason) },
+            onBan = { viewModel.dismissNickSheet(); viewModel.ban(sheet.nick) },
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,13 +109,11 @@ fun ChannelInfoContent(
     onSetPinned: (Boolean) -> Unit,
     onSetMuted: (Boolean) -> Unit,
     onLeave: () -> Unit,
-    onMessageMember: (String) -> Unit,
-    onMentionMember: (String) -> Unit,
-    onToggleFriend: (String) -> Unit = {},
-    onToggleFool: (String) -> Unit = {},
+    onMemberClick: (String) -> Unit = {},
+    onSetTopic: (String) -> Unit = {},
 ) {
     var showLeaveConfirm by remember { mutableStateOf(false) }
-    var sheetMember by remember { mutableStateOf<String?>(null) }
+    var showTopicEdit by remember { mutableStateOf(false) }
     // Fools section is collapsed by default; state is local to the screen (plans/13 §3.6).
     var foolsExpanded by remember { mutableStateOf(false) }
     val buffer = state.buffer
@@ -118,7 +132,11 @@ fun ChannelInfoContent(
     ) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
             item(key = "header") {
-                ChannelHeader(buffer = buffer, memberCount = state.memberCount)
+                ChannelHeader(
+                    buffer = buffer,
+                    memberCount = state.memberCount,
+                    onEditTopic = { showTopicEdit = true },
+                )
             }
             item(key = "actions") {
                 ActionsRow(
@@ -142,7 +160,7 @@ fun ChannelInfoContent(
                     MemberRow(
                         member = member,
                         isFriend = normalizeNick(member.nick) in state.friends,
-                        onClick = { sheetMember = member.nick },
+                        onClick = { onMemberClick(member.nick) },
                     )
                 }
             }
@@ -157,7 +175,7 @@ fun ChannelInfoContent(
                 if (foolsExpanded) {
                     items(state.foolMembers, key = { "fool-${it.nick}" }) { member ->
                         Box(modifier = Modifier.alpha(0.55f)) {
-                            MemberRow(member = member, isFriend = false, onClick = { sheetMember = member.nick })
+                            MemberRow(member = member, isFriend = false, onClick = { onMemberClick(member.nick) })
                         }
                     }
                 }
@@ -183,46 +201,42 @@ fun ChannelInfoContent(
         )
     }
 
-    sheetMember?.let { nick ->
-        val norm = normalizeNick(nick)
-        val isFriend = norm in state.friends
-        val isFool = norm in state.fools
-        ModalBottomSheet(onDismissRequest = { sheetMember = null }) {
-            ListItem(
-                headlineContent = { Text(nick) },
-                leadingContent = { Avatar(name = nick, size = 36.dp) },
-            )
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.channelinfo_member_message)) },
-                leadingContent = { Icon(Icons.AutoMirrored.Outlined.Message, contentDescription = null) },
-                modifier = Modifier.clickable { onMessageMember(nick); sheetMember = null },
-            )
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.channelinfo_member_mention)) },
-                leadingContent = { Icon(Icons.Outlined.AlternateEmail, contentDescription = null) },
-                modifier = Modifier.clickable { onMentionMember(nick); sheetMember = null },
-            )
-            // Sheet stays open on toggle so the label/icon flips in place (plans/13 §3.6).
-            ListItem(
-                headlineContent = {
-                    Text(stringResource(if (isFriend) R.string.channelinfo_remove_friend else R.string.channelinfo_add_friend))
-                },
-                leadingContent = {
-                    Icon(if (isFriend) Icons.Filled.Star else Icons.Outlined.StarBorder, contentDescription = null)
-                },
-                modifier = Modifier.clickable { onToggleFriend(nick) },
-            )
-            ListItem(
-                headlineContent = {
-                    Text(stringResource(if (isFool) R.string.channelinfo_remove_fool else R.string.channelinfo_add_fool))
-                },
-                leadingContent = {
-                    Icon(if (isFool) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff, contentDescription = null)
-                },
-                modifier = Modifier.clickable { onToggleFool(nick) },
-            )
-        }
+    // Topic edit (plans/16 §5.8): a multiline dialog prefilled with the current topic. Always
+    // offered for CHANNEL buffers; a 482 (no privileges) lands in the server buffer.
+    if (showTopicEdit && buffer != null) {
+        TopicEditDialog(
+            initial = buffer.topic.orEmpty(),
+            onDismiss = { showTopicEdit = false },
+            onSave = { text -> showTopicEdit = false; onSetTopic(text) },
+        )
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TopicEditDialog(initial: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.channelinfo_topic_edit_title)) },
+        text = {
+            androidx.compose.material3.OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text(stringResource(R.string.channelinfo_topic_edit_hint)) },
+                minLines = 2,
+                maxLines = 6,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(text) }) {
+                Text(stringResource(R.string.channelinfo_topic_edit_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        },
+    )
 }
 
 @Composable
@@ -250,7 +264,7 @@ private fun FoolsSectionHeader(count: Int, expanded: Boolean, onToggle: () -> Un
 }
 
 @Composable
-private fun ChannelHeader(buffer: BufferEntity?, memberCount: Int) {
+private fun ChannelHeader(buffer: BufferEntity?, memberCount: Int, onEditTopic: () -> Unit = {}) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -263,13 +277,30 @@ private fun ChannelHeader(buffer: BufferEntity?, memberCount: Int) {
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(top = 12.dp),
         )
-        buffer?.topic?.takeIf { it.isNotBlank() }?.let { topic ->
-            Text(
-                text = topic,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        // Topic + edit affordance (CHANNEL buffers only). Shown even when the topic is blank so an
+        // op can set an initial topic (plans/16 §5.8).
+        if (buffer?.type == BufferType.CHANNEL) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(top = 8.dp),
-            )
+            ) {
+                val topic = buffer.topic?.takeIf { it.isNotBlank() }
+                if (topic != null) {
+                    Text(
+                        text = topic,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                }
+                IconButton(onClick = onEditTopic) {
+                    Icon(
+                        Icons.Outlined.Edit,
+                        contentDescription = stringResource(R.string.channelinfo_topic_edit_action),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
         }
         Text(
             text = pluralStringResource(R.plurals.channelinfo_members, memberCount, memberCount),
@@ -372,7 +403,6 @@ private fun ChannelInfoContentPreview() {
                 memberCount = 5,
             ),
             onBack = {}, onSetPinned = {}, onSetMuted = {}, onLeave = {},
-            onMessageMember = {}, onMentionMember = {},
         )
     }
 }

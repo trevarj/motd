@@ -32,6 +32,21 @@ sealed interface ChatCommand {
     /** `/topic text` — set the current channel's topic. */
     data class Topic(val topic: String) : ChatCommand
 
+    /** `/away [message]` — away with a message; `/back` or bare `/away` clears it (plans/16 §5.9). */
+    data class Away(val message: String?) : ChatCommand
+
+    /** `/whois nick` — open the nick sheet with WHOIS details (plans/16 §5.9). */
+    data class Whois(val nick: String) : ChatCommand
+
+    /** `/list` — open the channel browser for the current network (plans/16 §5.9). */
+    data object ChannelList : ChatCommand
+
+    /** `/kick nick [reason]` — kick from the current channel (plans/16 §5.9). */
+    data class Kick(val nick: String, val reason: String?) : ChatCommand
+
+    /** `/ban nick` — MODE +b nick!*@* on the current channel (plans/16 §5.9). */
+    data class Ban(val nick: String) : ChatCommand
+
     /** Unknown `/cmd args` — send as a raw line (slash stripped) via `IrcMessage.parse`. */
     data class RawLine(val line: String) : ChatCommand
 
@@ -40,7 +55,10 @@ sealed interface ChatCommand {
 }
 
 /** The slash-commands offered in the composer hint popup, in display order. */
-val COMMAND_HINTS: List<String> = listOf("/me", "/join", "/part", "/msg", "/query", "/nick", "/topic")
+val COMMAND_HINTS: List<String> = listOf(
+    "/me", "/join", "/part", "/msg", "/query", "/nick", "/topic",
+    "/away", "/whois", "/list", "/kick", "/ban",
+)
 
 /**
  * Parse [raw] composer input into a [ChatCommand]. See the type doc for the rules. This is the
@@ -84,7 +102,24 @@ fun parseCommand(raw: String): ChatCommand {
             if (nick.isEmpty()) ChatCommand.None else ChatCommand.Nick(nick)
         }
         "topic" -> if (rest.isEmpty()) ChatCommand.None else ChatCommand.Topic(rest)
-        // Unknown command: pass through raw, slash stripped (e.g. "whois nick").
+        // `/away [msg]` sets away with a message; bare `/away` (and `/back`) clears it.
+        "away" -> ChatCommand.Away(rest.ifEmpty { null })
+        "back" -> ChatCommand.Away(null)
+        "whois" -> {
+            val nick = rest.substringBefore(' ').trim()
+            if (nick.isEmpty()) ChatCommand.None else ChatCommand.Whois(nick)
+        }
+        "list" -> ChatCommand.ChannelList
+        "kick" -> {
+            val nick = rest.substringBefore(' ').trim()
+            val reason = rest.substringAfter(' ', "").trim().ifEmpty { null }
+            if (nick.isEmpty()) ChatCommand.None else ChatCommand.Kick(nick, reason)
+        }
+        "ban" -> {
+            val nick = rest.substringBefore(' ').trim()
+            if (nick.isEmpty()) ChatCommand.None else ChatCommand.Ban(nick)
+        }
+        // Unknown command: pass through raw, slash stripped (e.g. "names").
         else -> ChatCommand.RawLine(afterSlash)
     }
 }

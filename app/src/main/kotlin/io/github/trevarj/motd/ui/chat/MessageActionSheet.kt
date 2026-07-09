@@ -71,10 +71,13 @@ fun MessageActionSheet(
     onReact: (String) -> Unit,
     onCopy: () -> Unit,
     onQuote: () -> Unit,
+    // SERVER buffers have no msgids/targets: reply + reactions are inert and hidden (plans/16 §5.6).
+    isServerBuffer: Boolean = false,
 ) {
     var showGrid by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(modifier = Modifier.padding(bottom = 24.dp)) {
+            if (!isServerBuffer) {
             // Quick reactions + "more".
             Row(
                 modifier = Modifier
@@ -137,6 +140,7 @@ fun MessageActionSheet(
             }
 
             ActionItem(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_action_reply), onReply)
+            } // end !isServerBuffer (reactions + reply hidden for SERVER buffers)
             ActionItem(Icons.Filled.ContentCopy, stringResource(R.string.chat_action_copy), onCopy)
             ActionItem(Icons.Filled.FormatQuote, stringResource(R.string.chat_action_quote), onQuote)
         }

@@ -110,11 +110,11 @@ class EventProcessor @Inject constructor(
             is IrcEvent.RealnameChanged -> upsertUser(networkId, event.nick) { it.copy(realname = event.realname) }
             is IrcEvent.ReadMarker -> onReadMarker(networkId, event)
             is IrcEvent.BouncerNetworkState -> onBouncerNetworkState(networkId, event)
+            is IrcEvent.Disconnected -> onDisconnected(networkId, event)
+            is IrcEvent.ServerError -> onServerError(networkId, event)
+            is IrcEvent.Raw -> onRaw(networkId, event)
             is IrcEvent.Invited,
             is IrcEvent.CapsChanged,
-            is IrcEvent.Disconnected,
-            is IrcEvent.ServerError,
-            is IrcEvent.Raw,
             -> Unit // not persisted
         }
     }
@@ -124,6 +124,14 @@ class EventProcessor @Inject constructor(
     private suspend fun onChat(networkId: Long, e: IrcEvent.ChatMessage) {
         val st = stateFor(networkId)
         val isDm = !isChannel(e.target, st)
+        // Server-sourced NOTICEs (empty source, or a source that looks like a host) go to the
+        // SERVER buffer instead of spawning a junk QUERY buffer (plans/16 §5.6.1, Confirmed #5).
+        // Channel NOTICEs are unaffected; NickServ/ChanServ (no dot) keep their query buffers.
+        if (isDm && e.kind == IrcEvent.ChatKind.NOTICE && isServerSource(e.source.nick)) {
+            val serverBufferId = ensureServerBuffer(networkId, st)
+            insertSystem(serverBufferId, e.ctx, MessageKind.NOTICE, e.source.nick, e.text)
+            return
+        }
         // For a DM the buffer is keyed by the OTHER party's nick, not our own.
         val bufferName = if (isDm) {
             if (e.isSelf) e.target else e.source.nick
@@ -314,6 +322,51 @@ class EventProcessor @Inject constructor(
         }
     }
 
+    // -- server buffer (plans/16 §5.6) --------------------------------------
+
+    /** ServerError → SERVER buffer, kind ERROR. The event carries no ctx, so use the wall clock. */
+    private suspend fun onServerError(networkId: Long, e: IrcEvent.ServerError) {
+        val st = stateFor(networkId)
+        val bufferId = ensureServerBuffer(networkId, st)
+        val text = "${e.code} ${e.text}".trim()
+        insertSystem(bufferId, serverCtx(), MessageKind.ERROR, "", text)
+    }
+
+    /** Whitelisted informational numerics → SERVER buffer, kind SERVER_INFO (our nick dropped). */
+    private suspend fun onRaw(networkId: Long, e: IrcEvent.Raw) {
+        if (e.message.command !in SERVER_INFO_NUMERICS) return
+        val st = stateFor(networkId)
+        val bufferId = ensureServerBuffer(networkId, st)
+        // params[0] is our nick for these numerics; drop it and join the rest as the info line.
+        val text = e.message.params.drop(1).joinToString(" ").trim()
+        insertSystem(bufferId, serverCtx(), MessageKind.SERVER_INFO, "", text)
+    }
+
+    /** Disconnected marker → SERVER buffer for cheap in-history reconnect visibility. */
+    private suspend fun onDisconnected(networkId: Long, e: IrcEvent.Disconnected) {
+        val st = stateFor(networkId)
+        val bufferId = ensureServerBuffer(networkId, st)
+        val text = "disconnected" + (e.reason?.let { ": $it" } ?: "")
+        insertSystem(bufferId, serverCtx(), MessageKind.SERVER_INFO, "", text)
+    }
+
+    /** A ctx for server-buffer rows: no msgid/label, server time = now (the events carry none). */
+    private fun serverCtx(): MessageContext =
+        MessageContext(msgid = null, serverTime = System.currentTimeMillis(), account = null, batchId = null, label = null)
+
+    /** Find-or-create the per-network SERVER buffer (name "*"); mirrors ConnectionManager's. */
+    private suspend fun ensureServerBuffer(networkId: Long, st: NetworkState): Long {
+        bufferDao.byName(networkId, "*")?.let { return it.id }
+        val displayName = networkDao.byId(networkId)?.name ?: "Server"
+        val entity = BufferEntity(
+            networkId = networkId,
+            name = "*",
+            displayName = displayName,
+            type = BufferType.SERVER,
+        )
+        return bufferDao.insert(entity)
+    }
+
     // -- pending-send insert path (delegated by ConnectionManagerImpl.sendMessage) --
 
     /**
@@ -348,6 +401,13 @@ class EventProcessor @Inject constructor(
 
     private fun isChannel(target: String, st: NetworkState): Boolean =
         target.isNotEmpty() && target[0] in CHANTYPES
+
+    /**
+     * True when a NOTICE source looks like a server, not a user (Confirmed decision #5): an empty
+     * source, or one containing '.' (a hostname). RFC nicks cannot contain '.', so NickServ/ChanServ
+     * stay user queries while `*.libera.chat` routes to the SERVER buffer.
+     */
+    private fun isServerSource(nick: String): Boolean = nick.isEmpty() || '.' in nick
 
     private suspend fun ensureBuffer(networkId: Long, name: String, type: BufferType, st: NetworkState): Long =
         ensureBufferEntity(networkId, name, type, st).id
@@ -405,6 +465,9 @@ class EventProcessor @Inject constructor(
 
     private suspend fun maybeNotify(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, e: IrcEvent.ChatMessage) {
         if (e.isSelf) return
+        // Never raise a notification for a SERVER buffer: a MOTD line containing the user's nick
+        // must not fire a mention (plans/16 §5.6.5).
+        if (type == BufferType.SERVER) return
         if (type != BufferType.QUERY && !hasMention) return
         notifier.onIncoming(networkId, bufferId, type, hasMention, e)
     }
@@ -418,6 +481,21 @@ class EventProcessor @Inject constructor(
     private companion object {
         // Isupport CHANTYPES default; DM detection uses the first-char rule.
         const val CHANTYPES = "#&"
+
+        /**
+         * Informational numerics persisted to the SERVER buffer as SERVER_INFO (plans/16 §5.6.3):
+         * welcome (001..004), lusers (251..255, 265, 266), MOTD (375, 372, 376), away toggled
+         * (305, 306), RPL_AWAY (301), and the WHOIS set (311, 312, 317, 318, 319, 330, 338) as a
+         * fallback surface when labeled-response is missing. LIST numerics (321/322/323) are
+         * deliberately excluded so a browse never floods the buffer.
+         */
+        val SERVER_INFO_NUMERICS: Set<String> = setOf(
+            "001", "002", "003", "004",
+            "251", "252", "253", "254", "255", "265", "266",
+            "375", "372", "376",
+            "305", "306", "301",
+            "311", "312", "317", "318", "319", "330", "338",
+        )
     }
 }
 

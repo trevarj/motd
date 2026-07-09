@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.components
 
 import android.text.format.DateFormat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -88,6 +89,8 @@ fun MessageBubble(
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
+    // Tapping the sender name/avatar opens the nick sheet; null (self / non-first bubbles) = inert.
+    onSenderClick: (() -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     // A shared no-op onClick with a null indication removes the dead ripple on plain taps; long-press
@@ -157,7 +160,9 @@ fun MessageBubble(
         // Left avatar column for others, only on a group's first bubble.
         if (!isSelf) {
             if (showSender) {
-                Avatar(name = sender, size = spacing.bubbleAvatar, modifier = Modifier.padding(end = 8.dp, top = 2.dp))
+                val avatarMod = Modifier.padding(end = 8.dp, top = 2.dp)
+                    .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
+                Avatar(name = sender, size = spacing.bubbleAvatar, modifier = avatarMod)
             } else {
                 Box(Modifier.width(spacing.bubbleAvatarColumn))
             }
@@ -179,7 +184,10 @@ fun MessageBubble(
         ) {
             if (showSender && !isSelf) {
                 val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = if (onSenderClick != null) Modifier.clickable(onClick = onSenderClick) else Modifier,
+                ) {
                     Text(
                         text = sender,
                         color = nameColor,

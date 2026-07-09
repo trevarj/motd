@@ -6,9 +6,15 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.repo.BufferRepository
+import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
+import io.github.trevarj.motd.ui.chat.NickSheetState
+import io.github.trevarj.motd.ui.chat.WhoisInfo
+import io.github.trevarj.motd.ui.chat.parseWhois
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,6 +34,8 @@ data class ChannelInfoUiState(
     val foolMembers: List<MemberEntity> = emptyList(),
     val friends: Set<String> = emptySet(),
     val fools: Set<String> = emptySet(),
+    // Round 5 (plans/16 §5.8): true when the viewer holds op in this channel (moderation gate).
+    val canModerate: Boolean = false,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -62,6 +70,7 @@ class ChannelInfoViewModel @Inject constructor(
                 foolMembers = social.fools,
                 friends = settings.friends,
                 fools = settings.fools,
+                canModerate = viewerCanModerate(buffer, members, order),
             )
         }.stateIn(
             scope = viewModelScope,
@@ -113,5 +122,79 @@ class ChannelInfoViewModel @Inject constructor(
     /** Toggle [nick]'s fool membership (adding removes it from friends). */
     fun toggleFool(nick: String) = viewModelScope.launch {
         settingsRepository.setFool(nick, io.github.trevarj.motd.data.prefs.normalizeNick(nick) !in state.value.fools)
+    }
+
+    // --- nick sheet + whois (plans/16 §5.8) ---
+
+    private val _nickSheet = MutableStateFlow<NickSheetState?>(null)
+    val nickSheet: StateFlow<NickSheetState?> = _nickSheet
+
+    /** Open the nick sheet for [nick]; WHOIS via labeled-response when available (see ChatViewModel). */
+    fun openNickSheet(nick: String) {
+        _nickSheet.value = NickSheetState(nick = nick)
+        val networkId = state.value.buffer?.networkId ?: return
+        val client = connectionManager.clientFor(networkId) ?: return
+        val whoisMsg = IrcMessage(command = "WHOIS", params = listOf(nick))
+        if (client.hasCap("labeled-response")) {
+            viewModelScope.launch {
+                val lines = runCatching { client.sendLabeled(whoisMsg) }.getOrNull().orEmpty()
+                val info: WhoisInfo? = parseWhois(lines)
+                if (info != null && _nickSheet.value?.nick == nick) {
+                    _nickSheet.value = NickSheetState(nick = nick, whois = info)
+                }
+            }
+        } else {
+            viewModelScope.launch { client.send(whoisMsg) }
+        }
+    }
+
+    fun dismissNickSheet() { _nickSheet.value = null }
+
+    // --- moderation executors (plans/16 §5.8) ---
+
+    /** MODE <channel> +o/-o/+v/-v <nick>. */
+    fun setMemberMode(nick: String, mode: Char, grant: Boolean) = viewModelScope.launch {
+        val buffer = state.value.buffer ?: return@launch
+        val flag = (if (grant) "+" else "-") + mode
+        connectionManager.clientFor(buffer.networkId)
+            ?.send(IrcMessage(command = "MODE", params = listOf(buffer.name, flag, nick)))
+    }
+
+    /** KICK <channel> <nick> [:reason]. */
+    fun kick(nick: String, reason: String?) = viewModelScope.launch {
+        val buffer = state.value.buffer ?: return@launch
+        val params = if (reason.isNullOrBlank()) listOf(buffer.name, nick) else listOf(buffer.name, nick, reason)
+        connectionManager.clientFor(buffer.networkId)?.send(IrcMessage(command = "KICK", params = params))
+    }
+
+    /** MODE <channel> +b <banMask(nick)>. */
+    fun ban(nick: String) = viewModelScope.launch {
+        val buffer = state.value.buffer ?: return@launch
+        connectionManager.clientFor(buffer.networkId)
+            ?.send(IrcMessage(command = "MODE", params = listOf(buffer.name, "+b", banMask(nick))))
+    }
+
+    /**
+     * Set the channel topic (plans/16 §5.8). Always offered (op requirements vary per channel); a
+     * 482 error lands in the server buffer. The TopicChanged echo updates Room reactively.
+     */
+    fun setTopic(topic: String) = viewModelScope.launch {
+        val buffer = state.value.buffer ?: return@launch
+        connectionManager.clientFor(buffer.networkId)
+            ?.send(IrcMessage(command = "TOPIC", params = listOf(buffer.name, topic)))
+    }
+
+    /**
+     * True when the viewer's own member row holds op-or-above in this CHANNEL buffer (Confirmed #7).
+     * Self nick comes from the live client's Ready state; prefix order from ISUPPORT.
+     */
+    private fun viewerCanModerate(buffer: BufferEntity?, members: List<MemberEntity>, prefixOrder: String): Boolean {
+        if (buffer?.type != BufferType.CHANNEL) return false
+        val client = connectionManager.clientFor(buffer.networkId) ?: return false
+        val myNick = (connectionManager.connectionStates.value[buffer.networkId] as? IrcClientState.Ready)?.nick
+            ?: return false
+        val normalize: (String) -> String = { client.isupport.normalize(it) }
+        val me = members.firstOrNull { normalize(it.nick) == normalize(myNick) } ?: return false
+        return canModerate(me.prefixes, prefixOrder)
     }
 }

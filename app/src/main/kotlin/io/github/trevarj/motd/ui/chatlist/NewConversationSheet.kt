@@ -21,6 +21,7 @@ import androidx.compose.material3.SheetState
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -50,12 +51,17 @@ fun NewConversationSheet(
     onDismiss: () -> Unit,
     onJoinChannel: (networkId: Long, channel: String) -> Unit,
     onMessageUser: (networkId: Long, nick: String) -> Unit,
+    // Round 5 (plans/16 §3.5): seed the network from the active scope + browse entry.
+    preselectedNetworkId: Long? = null,
+    onBrowseChannels: (networkId: Long) -> Unit = {},
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         NewConversationSheetContent(
             networks = networks,
+            preselectedNetworkId = preselectedNetworkId,
             onJoinChannel = onJoinChannel,
             onMessageUser = onMessageUser,
+            onBrowseChannels = onBrowseChannels,
         )
     }
 }
@@ -65,9 +71,15 @@ private fun NewConversationSheetContent(
     networks: List<NetworkEntity>,
     onJoinChannel: (networkId: Long, channel: String) -> Unit,
     onMessageUser: (networkId: Long, nick: String) -> Unit,
+    preselectedNetworkId: Long? = null,
+    onBrowseChannels: (networkId: Long) -> Unit = {},
 ) {
     var tab by remember { mutableIntStateOf(0) }
-    var selectedNetwork by remember { mutableStateOf(networks.firstOrNull()) }
+    var selectedNetwork by remember {
+        mutableStateOf(
+            networks.firstOrNull { it.id == preselectedNetworkId } ?: networks.firstOrNull(),
+        )
+    }
     var input by remember { mutableStateOf("") }
 
     Column(
@@ -124,6 +136,18 @@ private fun NewConversationSheetContent(
             Text(
                 stringResource(if (tab == 0) R.string.new_sheet_join else R.string.new_sheet_message),
             )
+        }
+
+        // Browse: LIST is meaningless on the unbound soju root, so gate BOUNCER_ROOT out.
+        if (tab == 0) {
+            val net = selectedNetwork
+            TextButton(
+                onClick = { net?.let { onBrowseChannels(it.id) } },
+                enabled = net != null && net.role != NetworkRole.BOUNCER_ROOT,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.channel_list_title))
+            }
         }
     }
 }

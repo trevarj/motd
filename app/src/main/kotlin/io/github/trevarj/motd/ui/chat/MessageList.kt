@@ -96,6 +96,8 @@ fun MessageList(
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
     expandedFools: Set<Long> = emptySet(),
     onToggleFool: (Long) -> Unit = {},
+    // Tapping a non-self sender's name/avatar opens the nick sheet (plans/16 §5.8).
+    onSenderClick: (String) -> Unit = {},
 ) {
     LazyColumn(
         state = listState,
@@ -166,6 +168,7 @@ fun MessageList(
                 onDelete = onDelete,
                 loadPreview = loadPreview,
                 onOpenLink = onOpenLink,
+                onSenderClick = onSenderClick,
                 resolveReply = { msgid ->
                     // Resolve reply target within the loaded window only (plans/07).
                     (0 until items.itemCount)
@@ -269,6 +272,7 @@ private fun MessageRow(
     onDelete: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> LinkPreview?,
     onOpenLink: (String) -> Unit,
+    onSenderClick: (String) -> Unit,
     resolveReply: (String) -> ReplyPreviewData?,
 ) {
     // Read-marker divider sits below the first message newer than the marker (drawn after the
@@ -317,6 +321,8 @@ private fun MessageRow(
         onReact = { emoji -> msg.msgid?.let { onReact(it, emoji) } },
         onImageClick = onImageClick,
         onLinkPreviewClick = { linkUrl?.let(onOpenLink) },
+        // Only non-self senders open the nick sheet (self has no social/moderation actions).
+        onSenderClick = if (msg.isSelf) null else ({ onSenderClick(msg.sender) }),
     )
     if (msg.failed) {
         RetryRow(onRetry = { onRetry(msg) }, onDelete = { onDelete(msg) })

@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,8 +13,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Notifications
@@ -22,15 +25,19 @@ import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -67,7 +74,7 @@ fun ChatListScreen(
     onOpenSettings: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onOpenOnboarding: () -> Unit = {},
-    // Round 5 (plans/16): drawer/network-management pass-throughs. Bodies land in WP-V1.
+    // Round 5 (plans/16): drawer/network-management pass-throughs.
     onOpenNetworkSettings: (Long) -> Unit = {},
     onOpenAddNetwork: () -> Unit = {},
     onOpenChannelList: (Long) -> Unit = {},
@@ -91,6 +98,16 @@ fun ChatListScreen(
         onSetMuted = viewModel::setMuted,
         onJoinChannel = viewModel::joinChannel,
         onMessageUser = { networkId, nick -> viewModel.messageUser(networkId, nick, onOpenBuffer) },
+        // Round 5: drawer selection + connectivity + nav.
+        onSelectNetwork = viewModel::selectNetwork,
+        onConnect = viewModel::connect,
+        onDisconnect = viewModel::disconnect,
+        onGoOffline = viewModel::goOffline,
+        onGoOnline = viewModel::goOnline,
+        onServerMessages = { networkId -> viewModel.openServerBuffer(networkId, onOpenBuffer) },
+        onOpenNetworkSettings = onOpenNetworkSettings,
+        onOpenAddNetwork = onOpenAddNetwork,
+        onOpenChannelList = onOpenChannelList,
     )
 }
 
@@ -105,68 +122,148 @@ fun ChatListContent(
     onSetMuted: (Long, Boolean) -> Unit,
     onJoinChannel: (Long, String) -> Unit,
     onMessageUser: (Long, String) -> Unit,
+    // Round 5 (plans/16 §3): drawer + scoping. Defaulted so previews stay terse.
+    onSelectNetwork: (Long?) -> Unit = {},
+    onConnect: (Long) -> Unit = {},
+    onDisconnect: (Long) -> Unit = {},
+    onGoOffline: () -> Unit = {},
+    onGoOnline: () -> Unit = {},
+    onServerMessages: (Long) -> Unit = {},
+    onOpenNetworkSettings: (Long) -> Unit = {},
+    onOpenAddNetwork: () -> Unit = {},
+    onOpenChannelList: (Long) -> Unit = {},
 ) {
     var showSheet by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
     val scope = rememberCoroutineScope()
-    val multiNetwork = state.networks.size > 1
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    // The per-row network tag is redundant once the list is scoped to one network.
+    val showNetworkChip = state.networks.size > 1 && state.selectedNetworkId == null
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        stringResource(R.string.chatlist_title),
-                        fontWeight = FontWeight.Bold,
+    // Close the drawer with Back when it's open (before popping the back stack).
+    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ServerDrawerContent(
+                drawerRows = state.drawerRows,
+                selectedNetworkId = state.selectedNetworkId,
+                allUnread = state.allUnread,
+                allMentions = state.allMentions,
+                allOffline = state.allOffline,
+                onSelectNetwork = { id ->
+                    onSelectNetwork(id)
+                    scope.launch { drawerState.close() }
+                },
+                onConnect = onConnect,
+                onDisconnect = onDisconnect,
+                onServerMessages = { id ->
+                    onServerMessages(id)
+                    scope.launch { drawerState.close() }
+                },
+                onOpenNetworkSettings = { id ->
+                    onOpenNetworkSettings(id)
+                    scope.launch { drawerState.close() }
+                },
+                onAddNetwork = {
+                    onOpenAddNetwork()
+                    scope.launch { drawerState.close() }
+                },
+                onToggleOffline = { if (state.allOffline) onGoOnline() else onGoOffline() },
+                onOpenSettings = {
+                    onOpenSettings()
+                    scope.launch { drawerState.close() }
+                },
+            )
+        },
+    ) {
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            // Title shows the scoped network name, else the app name.
+                            text = state.selectedNetworkName ?: stringResource(R.string.chatlist_title),
+                            fontWeight = FontWeight.Bold,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(
+                                Icons.Filled.Menu,
+                                contentDescription = stringResource(R.string.drawer_open),
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = onOpenSearch) {
+                            Icon(
+                                Icons.Outlined.Search,
+                                contentDescription = stringResource(R.string.chatlist_search),
+                            )
+                        }
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(
+                                Icons.Outlined.Settings,
+                                contentDescription = stringResource(R.string.chatlist_settings),
+                            )
+                        }
+                    },
+                )
+            },
+            floatingActionButton = {
+                FloatingActionButton(onClick = { showSheet = true }) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = stringResource(R.string.chatlist_new_conversation),
                     )
-                },
-                actions = {
-                    IconButton(onClick = onOpenSearch) {
-                        Icon(
-                            Icons.Outlined.Search,
-                            contentDescription = stringResource(R.string.chatlist_search),
-                        )
-                    }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(
-                            Icons.Outlined.Settings,
-                            contentDescription = stringResource(R.string.chatlist_settings),
-                        )
-                    }
-                },
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showSheet = true }) {
-                Icon(
-                    Icons.Filled.Add,
-                    contentDescription = stringResource(R.string.chatlist_new_conversation),
+                }
+            },
+        ) { padding ->
+            Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+                ConnectionBanner(
+                    states = state.connection,
+                    networkName = { id -> state.networks.firstOrNull { it.id == id }?.name },
                 )
-            }
-        },
-    ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            ConnectionBanner(
-                states = state.connection,
-                networkName = { id -> state.networks.firstOrNull { it.id == id }?.name },
-            )
 
-            if (state.rows.isEmpty() && !state.loading && state.networks.isNotEmpty()) {
-                EmptyState(
-                    icon = Icons.Outlined.Forum,
-                    title = stringResource(R.string.chatlist_empty_title),
-                    message = stringResource(R.string.chatlist_empty_message),
-                )
-            } else {
-                ChatList(
-                    rows = state.rows,
-                    friends = state.friends,
-                    fools = state.fools,
-                    multiNetwork = multiNetwork,
-                    onOpenBuffer = onOpenBuffer,
-                    onSetPinned = onSetPinned,
-                    onSetMuted = onSetMuted,
-                )
+                // Active-scope chip: keeps the filter discoverable/escapable without the drawer.
+                if (state.selectedNetworkId != null) {
+                    ScopeChip(
+                        name = state.selectedNetworkName.orEmpty(),
+                        onClear = { onSelectNetwork(null) },
+                    )
+                }
+
+                if (state.rows.isEmpty() && !state.loading && state.networks.isNotEmpty()) {
+                    EmptyState(
+                        icon = Icons.Outlined.Forum,
+                        title = stringResource(
+                            if (state.selectedNetworkId != null) {
+                                R.string.chatlist_scoped_empty_title
+                            } else {
+                                R.string.chatlist_empty_title
+                            },
+                        ),
+                        message = stringResource(
+                            if (state.selectedNetworkId != null) {
+                                R.string.chatlist_scoped_empty_message
+                            } else {
+                                R.string.chatlist_empty_message
+                            },
+                        ),
+                    )
+                } else {
+                    ChatList(
+                        rows = state.rows,
+                        friends = state.friends,
+                        fools = state.fools,
+                        multiNetwork = showNetworkChip,
+                        onOpenBuffer = onOpenBuffer,
+                        onSetPinned = onSetPinned,
+                        onSetMuted = onSetMuted,
+                    )
+                }
             }
         }
     }
@@ -174,6 +271,7 @@ fun ChatListContent(
     if (showSheet) {
         NewConversationSheet(
             networks = state.networks,
+            preselectedNetworkId = state.selectedNetworkId,
             sheetState = sheetState,
             onDismiss = { showSheet = false },
             onJoinChannel = { networkId, channel ->
@@ -183,6 +281,28 @@ fun ChatListContent(
             onMessageUser = { networkId, nick ->
                 onMessageUser(networkId, nick)
                 scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
+            },
+            onBrowseChannels = { networkId ->
+                onOpenChannelList(networkId)
+                scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ScopeChip(name: String, onClear: () -> Unit) {
+    Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        FilterChip(
+            selected = true,
+            onClick = onClear,
+            label = { Text(name) },
+            trailingIcon = {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = stringResource(R.string.chatlist_scope_clear),
+                )
             },
         )
     }

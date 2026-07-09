@@ -187,6 +187,98 @@ class EventProcessorTest {
         assertTrue(children.isEmpty())
     }
 
+    // --- Round 5: server buffer routing (plans/16 §5.6) ---
+
+    private suspend fun serverBuffer() = db.bufferDao().byName(networkId, "*")
+
+    @Test
+    fun serverNotice_routesToServerBuffer_notQuery() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(), kind = IrcEvent.ChatKind.NOTICE,
+            source = Prefix("irc.libera.chat"), target = "me", text = "*** Looking up your hostname",
+            isSelf = false, replyToMsgid = null,
+        ))
+        val server = serverBuffer()
+        assertNotNull(server)
+        assertEquals(BufferType.SERVER, server!!.type)
+        assertEquals("libera", server.displayName)
+        assertEquals("*** Looking up your hostname", pagingList(server.id).single().text)
+        // No junk query buffer for the host source.
+        assertNull(db.bufferDao().byName(networkId, "irc.libera.chat"))
+    }
+
+    @Test
+    fun nickServNotice_stillCreatesQueryBuffer() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(), kind = IrcEvent.ChatKind.NOTICE,
+            source = Prefix("NickServ"), target = "me", text = "This nick is registered.",
+            isSelf = false, replyToMsgid = null,
+        ))
+        val query = db.bufferDao().byName(networkId, "nickserv")
+        assertNotNull(query)
+        assertEquals(BufferType.QUERY, query!!.type)
+        assertNull(serverBuffer())
+    }
+
+    @Test
+    fun serverError_insertsErrorRow() = runTest {
+        processor.process(networkId, IrcEvent.ServerError("482", listOf("me", "#chan"), "You're not a channel operator"))
+        val server = serverBuffer()!!
+        val row = pagingList(server.id).single()
+        assertEquals(MessageKind.ERROR, row.kind)
+        assertTrue(row.text.startsWith("482"))
+    }
+
+    @Test
+    fun whitelistedNumeric_insertsServerInfo_withNickDropped() = runTest {
+        // 375 RPL_MOTDSTART: params = [me, "- server Message of the Day -"].
+        processor.process(networkId, IrcEvent.Raw(
+            io.github.trevarj.motd.irc.proto.IrcMessage(command = "375", params = listOf("me", "- Message of the Day -")),
+        ))
+        val server = serverBuffer()!!
+        val row = pagingList(server.id).single()
+        assertEquals(MessageKind.SERVER_INFO, row.kind)
+        assertEquals("- Message of the Day -", row.text) // our nick dropped
+    }
+
+    @Test
+    fun nonWhitelistedRaw_isDropped() = runTest {
+        // 322 (RPL_LIST) is deliberately excluded so LIST never floods the server buffer.
+        processor.process(networkId, IrcEvent.Raw(
+            io.github.trevarj.motd.irc.proto.IrcMessage(command = "322", params = listOf("me", "#chan", "42", "topic")),
+        ))
+        assertNull(serverBuffer())
+    }
+
+    @Test
+    fun disconnected_insertsServerInfoMarker() = runTest {
+        processor.process(networkId, IrcEvent.Disconnected("connection reset"))
+        val server = serverBuffer()!!
+        val row = pagingList(server.id).single()
+        assertEquals(MessageKind.SERVER_INFO, row.kind)
+        assertEquals("disconnected: connection reset", row.text)
+    }
+
+    @Test
+    fun serverBufferMention_doesNotNotify() = runTest {
+        // A recording notifier; a MOTD line containing our nick must not fire.
+        var fired = false
+        val recProcessor = EventProcessor(db, TypingTrackerImpl(), object : MessageNotifier {
+            override fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage) {
+                fired = true
+            }
+        })
+        recProcessor.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+        recProcessor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(), kind = IrcEvent.ChatKind.NOTICE,
+            source = Prefix("irc.libera.chat"), target = "me", text = "welcome me to the server",
+            isSelf = false, replyToMsgid = null,
+        ))
+        assertFalse(fired)
+        // The line still landed in the server buffer.
+        assertNotNull(serverBuffer())
+    }
+
     @Test
     fun history_pushedThroughInOneBatch_isIdempotent() = runTest {
         val batch = IrcEvent.HistoryBatch("#chan", listOf(

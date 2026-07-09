@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CommandParserTest {
@@ -63,8 +64,8 @@ class CommandParserTest {
     }
 
     @Test fun unknown_command_becomes_raw_line_without_slash() {
-        assertEquals(ChatCommand.RawLine("whois alice"), parseCommand("/whois alice"))
         assertEquals(ChatCommand.RawLine("names"), parseCommand("/names"))
+        assertEquals(ChatCommand.RawLine("mode #c +m"), parseCommand("/mode #c +m"))
     }
 
     @Test fun command_case_is_insensitive() {
@@ -73,5 +74,46 @@ class CommandParserTest {
 
     @Test fun bare_slash_is_none() {
         assertEquals(ChatCommand.None, parseCommand("/"))
+    }
+
+    // --- Round 5 (plans/16 §5.9) ---
+
+    @Test fun away_with_and_without_message() {
+        assertEquals(ChatCommand.Away("brb lunch"), parseCommand("/away brb lunch"))
+        assertEquals(ChatCommand.Away(null), parseCommand("/away"))
+        assertEquals(ChatCommand.Away(null), parseCommand("/away   "))
+    }
+
+    @Test fun back_clears_away() {
+        assertEquals(ChatCommand.Away(null), parseCommand("/back"))
+    }
+
+    @Test fun whois_parses_nick() {
+        assertEquals(ChatCommand.Whois("alice"), parseCommand("/whois alice"))
+        assertEquals(ChatCommand.Whois("alice"), parseCommand("/whois alice extra"))
+        assertEquals(ChatCommand.None, parseCommand("/whois"))
+    }
+
+    @Test fun list_is_channel_list() {
+        assertEquals(ChatCommand.ChannelList, parseCommand("/list"))
+        // Trailing args are ignored — LIST opens the browser.
+        assertEquals(ChatCommand.ChannelList, parseCommand("/list #foo"))
+    }
+
+    @Test fun kick_reason_optional() {
+        assertEquals(ChatCommand.Kick("bob", null), parseCommand("/kick bob"))
+        assertEquals(ChatCommand.Kick("bob", "spamming"), parseCommand("/kick bob spamming"))
+        assertEquals(ChatCommand.None, parseCommand("/kick"))
+    }
+
+    @Test fun ban_parses_nick() {
+        assertEquals(ChatCommand.Ban("bob"), parseCommand("/ban bob"))
+        assertEquals(ChatCommand.None, parseCommand("/ban"))
+    }
+
+    @Test fun hint_list_includes_round5_commands() {
+        listOf("/away", "/whois", "/list", "/kick", "/ban").forEach {
+            assertTrue("$it should be a hint", it in COMMAND_HINTS)
+        }
     }
 }

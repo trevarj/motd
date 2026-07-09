@@ -8,6 +8,7 @@ import androidx.paging.cachedIn
 import androidx.paging.filter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.BufferEntity
+import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.repo.BufferRepository
@@ -203,12 +204,26 @@ class ChatViewModel @Inject constructor(
 
     suspend fun linkPreview(url: String): LinkPreview? = linkPreviewRepository.preview(url)
 
+    /** Transient one-shot messages surfaced as a snackbar by the screen (plans/16 §5.6). */
+    private val _snackbar = MutableStateFlow<String?>(null)
+    val snackbar: StateFlow<String?> = _snackbar.asStateFlow()
+
+    fun consumeSnackbar() { _snackbar.value = null }
+
     /**
-     * Parse [raw] and execute the resulting [ChatCommand]. `onOpenBuffer` navigates for /msg /query.
-     * Clears the reply and stops typing on a successful send.
+     * Parse [raw] and execute the resulting [ChatCommand]. `onOpenBuffer` navigates for /msg /query;
+     * `onOpenChannelList` navigates for /list. Clears the reply and stops typing on a normal send.
+     *
+     * A SERVER buffer is a raw-send surface (plans/16 §5.6): every submission is sent as a raw IRC
+     * line to the network (one leading `/` stripped) — [parseCommand] is bypassed, and a PRIVMSG to
+     * `"*"` is never sent.
      */
-    fun submit(raw: String, onOpenBuffer: (Long) -> Unit) = viewModelScope.launch {
+    fun submit(raw: String, onOpenBuffer: (Long) -> Unit, onOpenChannelList: (Long) -> Unit = {}) = viewModelScope.launch {
         val networkId = state.value.buffer?.networkId
+        if (state.value.buffer?.type == BufferType.SERVER) {
+            submitRawLine(networkId, raw)
+            return@launch
+        }
         when (val cmd = parseCommand(raw)) {
             is ChatCommand.None -> Unit
             is ChatCommand.Message -> {
@@ -234,10 +249,120 @@ class ChatViewModel @Inject constructor(
                 connectionManager.clientFor(nid)
                     ?.send(IrcMessage(command = "TOPIC", params = listOf(channel, cmd.topic)))
             }
+            // `/away [msg]` — confirmations (305/306) land in the SERVER buffer via §5.6.3.
+            is ChatCommand.Away -> networkId?.let { nid ->
+                connectionManager.clientFor(nid)
+                    ?.send(IrcMessage(command = "AWAY", params = listOfNotNull(cmd.message)))
+            }
+            is ChatCommand.Whois -> openNickSheet(cmd.nick)
+            is ChatCommand.ChannelList -> networkId?.let(onOpenChannelList)
+            // Moderation guarded to CHANNEL buffers; a no-op elsewhere.
+            is ChatCommand.Kick -> if (state.value.buffer?.type == BufferType.CHANNEL) kick(cmd.nick, cmd.reason)
+            is ChatCommand.Ban -> if (state.value.buffer?.type == BufferType.CHANNEL) ban(cmd.nick)
             is ChatCommand.RawLine -> networkId?.let { nid ->
                 connectionManager.clientFor(nid)?.send(IrcMessage.parse(cmd.line))
             }
         }
+    }
+
+    /** Raw-send for the SERVER buffer: strip one leading `/`, parse, send. Parse failure snackbars. */
+    private suspend fun submitRawLine(networkId: Long?, raw: String) {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return
+        val nid = networkId ?: return
+        val line = if (trimmed.startsWith("/")) trimmed.substring(1) else trimmed
+        val msg = runCatching { IrcMessage.parse(line) }.getOrNull()
+        if (msg == null || msg.command.isBlank()) {
+            _snackbar.value = "invalid" // sentinel; the screen maps to chat_server_invalid_command
+            return
+        }
+        connectionManager.clientFor(nid)?.send(msg)
+        replyTo.value = null
+    }
+
+    // --- nick sheet + whois (plans/16 §5.8) ---
+
+    private val _nickSheet = MutableStateFlow<NickSheetState?>(null)
+    val nickSheet: StateFlow<NickSheetState?> = _nickSheet.asStateFlow()
+
+    /**
+     * Open the nick sheet for [nick]. With `labeled-response` we WHOIS via a labeled request, parse
+     * the numerics, and fold the details in when they land (30s label timeout, guarded); otherwise
+     * a plain WHOIS is sent and the numerics surface in the server buffer (§5.6.3) while the sheet
+     * shows "Details in server messages". Actions render immediately regardless.
+     */
+    fun openNickSheet(nick: String) {
+        _nickSheet.value = NickSheetState(nick = nick)
+        val networkId = state.value.buffer?.networkId ?: return
+        val client = connectionManager.clientFor(networkId) ?: return
+        val whoisMsg = IrcMessage(command = "WHOIS", params = listOf(nick))
+        if (client.hasCap("labeled-response")) {
+            viewModelScope.launch {
+                val lines = runCatching { client.sendLabeled(whoisMsg) }.getOrNull().orEmpty()
+                val info = parseWhois(lines)
+                // Only fold in if the sheet is still open for this nick.
+                if (info != null && _nickSheet.value?.nick == nick) {
+                    _nickSheet.value = NickSheetState(nick = nick, whois = info)
+                }
+            }
+        } else {
+            viewModelScope.launch { client.send(whoisMsg) }
+        }
+    }
+
+    fun dismissNickSheet() { _nickSheet.value = null }
+
+    // --- moderation executors (plans/16 §5.8), CHANNEL buffers only ---
+
+    /** MODE <channel> +o/-o/+v/-v <nick>. */
+    fun setMemberMode(nick: String, mode: Char, grant: Boolean) = viewModelScope.launch {
+        val nid = state.value.buffer?.networkId ?: return@launch
+        val channel = state.value.buffer?.name ?: return@launch
+        val flag = (if (grant) "+" else "-") + mode
+        connectionManager.clientFor(nid)?.send(IrcMessage(command = "MODE", params = listOf(channel, flag, nick)))
+    }
+
+    /** KICK <channel> <nick> [:reason]. */
+    fun kick(nick: String, reason: String?) = viewModelScope.launch {
+        val nid = state.value.buffer?.networkId ?: return@launch
+        val channel = state.value.buffer?.name ?: return@launch
+        val params = if (reason.isNullOrBlank()) listOf(channel, nick) else listOf(channel, nick, reason)
+        connectionManager.clientFor(nid)?.send(IrcMessage(command = "KICK", params = params))
+    }
+
+    /** MODE <channel> +b <banMask(nick)>. */
+    fun ban(nick: String) = viewModelScope.launch {
+        val nid = state.value.buffer?.networkId ?: return@launch
+        val channel = state.value.buffer?.name ?: return@launch
+        connectionManager.clientFor(nid)
+            ?.send(IrcMessage(command = "MODE", params = listOf(channel, "+b", io.github.trevarj.motd.ui.channelinfo.banMask(nick))))
+    }
+
+    /** Toggle [nick]'s friend/fool membership (reuses SettingsRepository semantics). */
+    fun toggleFriend(nick: String) = viewModelScope.launch {
+        val settings = settingsRepository.settings.firstOrNull() ?: return@launch
+        settingsRepository.setFriend(nick, io.github.trevarj.motd.data.prefs.normalizeNick(nick) !in settings.friends)
+    }
+
+    fun toggleFool(nick: String) = viewModelScope.launch {
+        val settings = settingsRepository.settings.firstOrNull() ?: return@launch
+        settingsRepository.setFool(nick, io.github.trevarj.motd.data.prefs.normalizeNick(nick) !in settings.fools)
+    }
+
+    /**
+     * True when the viewer holds op in the current CHANNEL buffer (drives moderation visibility,
+     * Confirmed #7). Own prefixes come from the members list; prefix order from ISUPPORT.
+     */
+    fun canModerate(): Boolean {
+        val buffer = state.value.buffer ?: return false
+        if (buffer.type != BufferType.CHANNEL) return false
+        val myNick = (connState.value as? IrcClientState.Ready)?.nick ?: return false
+        val normalize = nickNormalizer()
+        val me = state.value.members.firstOrNull { normalize(it.nick) == normalize(myNick) } ?: return false
+        val order = buffer.networkId.let { connectionManager.clientFor(it) }
+            ?.let { io.github.trevarj.motd.ui.channelinfo.prefixOrderFrom(it.isupport.prefixModes) }
+            ?: io.github.trevarj.motd.ui.channelinfo.DEFAULT_PREFIX_ORDER
+        return io.github.trevarj.motd.ui.channelinfo.canModerate(me.prefixes, order)
     }
 
     // --- composer prefill (mention → draft, plans/11 §A) ---

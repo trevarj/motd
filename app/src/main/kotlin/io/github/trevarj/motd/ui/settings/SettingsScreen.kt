@@ -14,6 +14,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -72,6 +73,7 @@ fun SettingsScreen(
         onOpenFriends = onOpenFriends,
         onOpenFools = onOpenFools,
         onOpenNickColors = onOpenNickColors,
+        onOpenAddNetwork = onOpenAddNetwork,
         onThemeMode = viewModel::setThemeMode,
         onDynamicColor = viewModel::setDynamicColor,
         onDeliveryMode = viewModel::setDeliveryMode,
@@ -93,6 +95,7 @@ fun SettingsContent(
     onOpenFriends: () -> Unit,
     onOpenFools: () -> Unit,
     onOpenNickColors: () -> Unit,
+    onOpenAddNetwork: () -> Unit,
     onThemeMode: (ThemeMode) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onDeliveryMode: (DeliveryMode) -> Unit,
@@ -201,10 +204,16 @@ fun SettingsContent(
             state.networks.forEach { network ->
                 ListItem(
                     headlineContent = { Text(network.name) },
-                    supportingContent = { Text("${network.host}:${network.port}") },
+                    supportingContent = { Text(networkSupporting(network, state.networks)) },
                     modifier = Modifier.clickable { onOpenNetwork(network.id) },
                 )
             }
+            // Round 5 (plans/16 §5.2): add-network entry after the per-network rows.
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.add_network_title)) },
+                leadingContent = { Icon(Icons.Filled.Add, contentDescription = null) },
+                modifier = Modifier.clickable { onOpenAddNetwork() },
+            )
 
             HorizontalDivider()
 
@@ -216,6 +225,22 @@ fun SettingsContent(
                 modifier = Modifier.clickable { onOpenAbout() },
             )
         }
+    }
+}
+
+/**
+ * "host:port" plus a role suffix for soju rows (plans/16 §5.2): " · soju" for a BOUNCER_ROOT,
+ * " · via <root name>" for a BOUNCER_CHILD (root name resolved from [all]).
+ */
+private fun networkSupporting(network: NetworkEntity, all: List<NetworkEntity>): String {
+    val base = "${network.host}:${network.port}"
+    return when (network.role) {
+        NetworkRole.BOUNCER_ROOT -> "$base · soju"
+        NetworkRole.BOUNCER_CHILD -> {
+            val rootName = all.firstOrNull { it.id == network.parentId }?.name
+            if (rootName != null) "$base · via $rootName" else base
+        }
+        NetworkRole.DIRECT -> base
     }
 }
 
@@ -423,7 +448,7 @@ private fun SettingsContentPreview() {
                 pushAvailable = false,
             ),
             onBack = {}, onOpenNetwork = {}, onOpenAbout = {},
-            onOpenFriends = {}, onOpenFools = {}, onOpenNickColors = {},
+            onOpenFriends = {}, onOpenFools = {}, onOpenNickColors = {}, onOpenAddNetwork = {},
             onThemeMode = {}, onDynamicColor = {}, onDeliveryMode = {},
             onLayoutDensity = {}, onNickColorsEnabled = {}, onNickColorPalette = {},
             onShowJoinPartQuit = {}, onFoolsMode = {},
