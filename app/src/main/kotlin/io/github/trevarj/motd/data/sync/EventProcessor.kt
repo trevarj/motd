@@ -349,6 +349,11 @@ class EventProcessor @Inject constructor(
 
     private suspend fun onBouncerNetworkState(networkId: Long, e: IrcEvent.BouncerNetworkState) {
         val root = networkDao.byId(networkId) ?: return
+        // Only the bouncer ROOT connection materializes child networks. A bound child is scoped to
+        // a single upstream network, but its soju connection still receives BOUNCER NETWORK
+        // notifications; handling them here would spawn duplicate children parented to the child
+        // itself, which cannot resolve a valid root to bind through and fail SASL 904 (#40).
+        if (root.role != NetworkRole.BOUNCER_ROOT) return
         val existing = networkDao.childrenOf(root.id).firstOrNull { it.bouncerNetId == e.netId }
         // "*" attrs (empty map) signals deletion of the child network.
         if (e.attrs.isEmpty() && existing != null) {
