@@ -25,6 +25,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -37,6 +38,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.pluralStringResource
+import androidx.core.net.toUri
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -185,10 +187,16 @@ fun SettingsContent(
 
             // Delivery -----------------------------------------------------------------------
             SectionHeader(stringResource(R.string.settings_delivery))
+            val distributorUrl = stringResource(R.string.settings_delivery_push_distributor_url)
             DeliveryGroup(
                 current = state.settings.deliveryMode,
                 availability = state.pushAvailability,
                 onSelect = onDeliveryMode,
+                // No distributor installed: guide the user to install one (ntfy on F-Droid) via an
+                // ACTION_VIEW web intent. Registration self-heals once a distributor appears.
+                onInstallDistributor = {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, distributorUrl.toUri()))
+                },
             )
             ListItem(
                 headlineContent = { Text(stringResource(R.string.settings_battery)) },
@@ -348,6 +356,7 @@ private fun DeliveryGroup(
     current: DeliveryMode,
     availability: PushAvailability,
     onSelect: (DeliveryMode) -> Unit,
+    onInstallDistributor: () -> Unit,
 ) {
     Column(Modifier.selectableGroup()) {
         RadioRow(
@@ -372,6 +381,18 @@ private fun DeliveryGroup(
             enabled = availability.selectable,
             onClick = { onSelect(DeliveryMode.UNIFIED_PUSH) },
         )
+        // Install-a-distributor action, shown only when push is selectable but no distributor exists.
+        // Opens ntfy's F-Droid listing so the user can fix the missing-distributor gap in one tap.
+        if (availability.needsDistributor) {
+            TextButton(
+                onClick = onInstallDistributor,
+                modifier = Modifier
+                    .padding(start = 52.dp)
+                    .testTag("settings_install_distributor"),
+            ) {
+                Text(stringResource(R.string.settings_delivery_push_install_distributor))
+            }
+        }
     }
 }
 
