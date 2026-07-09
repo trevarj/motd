@@ -25,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -69,6 +70,7 @@ fun NetworkSettingsScreen(
     NetworkSettingsContent(
         state = state,
         onBack = onBack,
+        onDisplayNameChange = viewModel::editDisplayName,
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
         onSave = { viewModel.save(onBack) },
@@ -86,6 +88,7 @@ fun NetworkSettingsScreen(
 fun NetworkSettingsContent(
     state: NetworkSettingsUiState,
     onBack: () -> Unit,
+    onDisplayNameChange: (String) -> Unit = {},
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
     onSave: () -> Unit,
@@ -126,6 +129,15 @@ fun NetworkSettingsContent(
                 connState = state.connState,
                 onConnect = onConnect,
                 onDisconnect = onDisconnect,
+            )
+            // Editable display name (alias): rename a network so the drawer/list show a friendly
+            // label (e.g. "soju") instead of the raw host/IP. Persisted with the Save (check) FAB.
+            OutlinedTextField(
+                value = state.displayName,
+                onValueChange = onDisplayNameChange,
+                label = { Text(stringResource(R.string.network_settings_display_name)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("network_display_name"),
             )
             // autoConnect toggle — persisted immediately.
             AutoConnectRow(checked = state.autoConnect, onCheckedChange = onSetAutoConnect)

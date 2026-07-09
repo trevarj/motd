@@ -18,6 +18,8 @@ import javax.inject.Inject
 data class NetworkSettingsUiState(
     val loaded: Boolean = false,
     val entity: NetworkEntity? = null,
+    // User-facing display name (alias). Editable so a bouncer root need not show its raw host/IP.
+    val displayName: String = "",
     val server: ServerForm = ServerForm(),
     val auth: AuthForm = AuthForm(),
     // Round 5 (plans/16 §5.3): live status + autoConnect editing.
@@ -48,6 +50,7 @@ class NetworkSettingsViewModel @Inject constructor(
             _state.value = NetworkSettingsUiState(
                 loaded = true,
                 entity = n,
+                displayName = n?.name.orEmpty(),
                 server = n?.toServerForm() ?: ServerForm(),
                 auth = n?.toAuthForm() ?: AuthForm(),
                 autoConnect = n?.autoConnect ?: true,
@@ -66,6 +69,7 @@ class NetworkSettingsViewModel @Inject constructor(
 
     fun editServer(server: ServerForm) { _state.value = _state.value.copy(server = server) }
     fun editAuth(auth: AuthForm) { _state.value = _state.value.copy(auth = auth) }
+    fun editDisplayName(name: String) { _state.value = _state.value.copy(displayName = name) }
 
     fun connect() = viewModelScope.launch { connectionManager.connect(networkId) }
     fun disconnect() = viewModelScope.launch { connectionManager.disconnect(networkId) }
@@ -87,7 +91,8 @@ class NetworkSettingsViewModel @Inject constructor(
             auth = _state.value.auth,
             role = current.role,
             id = current.id,
-            name = current.name,
+            // A blank alias falls back to the existing name (never persist an empty display name).
+            name = _state.value.displayName.trim().ifBlank { current.name },
             parentId = current.parentId,
             bouncerNetId = current.bouncerNetId,
             // Persist the current autoConnect value alongside the form fields.

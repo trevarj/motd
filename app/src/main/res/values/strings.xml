@@ -89,6 +89,7 @@
     <string name="settings_github">GitHub</string>
     <string name="settings_github_url">https://github.com/trevarj/motd</string>
     <string name="network_settings_title">Network</string>
+    <string name="network_settings_display_name">Network name</string>
     <string name="network_settings_delete">Delete network</string>
     <string name="network_settings_delete_confirm_title">Delete network?</string>
     <string name="network_settings_delete_confirm_message">This removes the network and all of its buffers and history.</string>

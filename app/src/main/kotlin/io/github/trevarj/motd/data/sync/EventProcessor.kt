@@ -379,7 +379,9 @@ class EventProcessor @Inject constructor(
                 ),
             )
         } else {
-            networkDao.update(existing.copy(name = name, host = host, port = port, nick = nick))
+            // Preserve the row's current name on update: it may be a user-set alias, and the
+            // bouncer name is only authoritative when the child is first created above.
+            networkDao.update(existing.copy(host = host, port = port, nick = nick))
         }
     }
 
