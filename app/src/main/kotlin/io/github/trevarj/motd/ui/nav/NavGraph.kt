@@ -1,5 +1,9 @@
 package io.github.trevarj.motd.ui.nav
 
+import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -25,11 +29,24 @@ import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetworksScreen
  * App navigation graph. Routes come from [Routes.kt] (frozen). Each destination is wired to its
  * screen composable; WP7/WP8 fill in their own screen bodies behind these signatures.
  */
+// Material shared-axis X feel: forward pushes the new screen in from the right and the old one out
+// to the left; back reverses it. 300ms tween is the standard container-transform duration. These are
+// set at the NavHost level so every composable<Route> inherits them; the pop transitions are also
+// what the Android 13+ predictive-back scrim animates.
+private const val SLIDE_DURATION_MS = 300
+
 @Composable
 fun MotdNavGraph(
     navController: NavHostController = rememberNavController(),
 ) {
-    NavHost(navController = navController, startDestination = ChatListRoute) {
+    NavHost(
+        navController = navController,
+        startDestination = ChatListRoute,
+        enterTransition = { slideIntoContainer(SlideDirection.Start, tween(SLIDE_DURATION_MS)) },
+        exitTransition = { slideOutOfContainer(SlideDirection.Start, tween(SLIDE_DURATION_MS)) },
+        popEnterTransition = { slideIntoContainer(SlideDirection.End, tween(SLIDE_DURATION_MS)) },
+        popExitTransition = { slideOutOfContainer(SlideDirection.End, tween(SLIDE_DURATION_MS)) },
+    ) {
         composable<ChatListRoute> {
             ChatListScreen(
                 onOpenBuffer = { navController.navigate(ChatRoute(it)) },
@@ -109,7 +126,13 @@ fun MotdNavGraph(
                 onOpenBuffer = { navController.navigate(ChatRoute(it)) },
             )
         }
-        composable<ImageViewerRoute> { entry ->
+        composable<ImageViewerRoute>(
+            // Full-screen image reads better appearing/dismissing in place than sliding sideways.
+            enterTransition = { fadeIn(tween(SLIDE_DURATION_MS)) },
+            exitTransition = { fadeOut(tween(SLIDE_DURATION_MS)) },
+            popEnterTransition = { fadeIn(tween(SLIDE_DURATION_MS)) },
+            popExitTransition = { fadeOut(tween(SLIDE_DURATION_MS)) },
+        ) { entry ->
             val route = entry.toRoute<ImageViewerRoute>()
             ImageViewerScreen(url = route.url, onBack = { navController.popBackStack() })
         }
