@@ -235,7 +235,7 @@ private suspend fun saveImage(context: Context, url: String) {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, name)
                 put(MediaStore.Images.Media.MIME_TYPE, mimeFor(name))
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MOTD")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/motd")
             }
             val resolver = context.contentResolver
             val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)

@@ -2,7 +2,7 @@
   <img src="docs/assets/logo.png" alt="/motd" width="640">
 </p>
 
-# MOTD
+# motd
 
 A native Android IRCv3 client with a Telegram-style UI. Written in Kotlin with
 Jetpack Compose and Material 3.

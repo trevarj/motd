@@ -100,6 +100,34 @@ fun MessageBubble(
     val spacing = LocalSpacing.current
     val nickColors = LocalNickColors.current
 
+    // COMPACT density = classic single-line IRC rendering (`nick: text`). Delegate the whole row to
+    // the inline renderer; bubbles/avatars/alignment are the COMFORTABLE/COZY paradigm only.
+    if (spacing.compact) {
+        CompactMessageRow(
+            sender = sender,
+            text = text,
+            timeMs = timeMs,
+            isSelf = isSelf,
+            kind = kind,
+            nickColors = nickColors,
+            modifier = modifier,
+            senderIsFriend = senderIsFriend,
+            failed = failed,
+            pending = pending,
+            reply = reply,
+            imageUrl = imageUrl,
+            linkPreview = linkPreview,
+            linkPreviewLoading = linkPreviewLoading,
+            reactions = reactions,
+            onLongPress = onLongPress,
+            onReact = onReact,
+            onImageClick = onImageClick,
+            onLinkPreviewClick = onLinkPreviewClick,
+            onSenderClick = onSenderClick,
+        )
+        return
+    }
+
     // ACTION renders as centered-left italic text, no bubble (plans/07). Still carries reactions +
     // failed + timestamp decorations (plans/15 #16).
     if (kind == MessageKind.ACTION) {
@@ -240,11 +268,12 @@ fun MessageBubble(
             if (text.isNotBlank()) {
                 // Linkify http(s) URLs so the body is tappable even when the preview fails
                 // (plans/15 #11); LinkAnnotation.Url uses the platform URI open handler.
+                // Font size is constant across density modes (density selects render style, not
+                // size); always bodyLarge in the bubble renderer.
                 Text(
                     text = linkifiedBody(text, MaterialTheme.colorScheme.primary),
                     color = textColor,
-                    style = if (spacing.messageBodyLarge) MaterialTheme.typography.bodyLarge
-                    else MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyLarge,
                 )
             }
 
@@ -277,7 +306,7 @@ fun MessageBubble(
 
 /** Small clock glyph shown next to the timestamp while a message is still sending (plans/15 #21). */
 @Composable
-private fun PendingIcon() {
+internal fun PendingIcon() {
     Icon(
         Icons.Filled.Schedule,
         contentDescription = stringResource(R.string.chat_sending),
@@ -291,7 +320,7 @@ private fun PendingIcon() {
 
 /** Small error glyph shown next to the timestamp of a failed message. */
 @Composable
-private fun FailedIcon() {
+internal fun FailedIcon() {
     Icon(
         Icons.Filled.Error,
         contentDescription = stringResource(R.string.chat_failed),
@@ -307,7 +336,7 @@ private fun FailedIcon() {
  * Build an [AnnotatedString] where each http(s) URL in [text] is a tappable [LinkAnnotation.Url]
  * (plans/15 #11). URL boundaries come from [extractUrls], matched left-to-right in the raw text.
  */
-private fun linkifiedBody(text: String, linkColor: androidx.compose.ui.graphics.Color): AnnotatedString {
+internal fun linkifiedBody(text: String, linkColor: androidx.compose.ui.graphics.Color): AnnotatedString {
     val urls = extractUrls(text)
     if (urls.isEmpty()) return AnnotatedString(text)
     val linkStyle = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)
@@ -332,7 +361,7 @@ private fun linkifiedBody(text: String, linkColor: androidx.compose.ui.graphics.
  * not to fight the nick color or the bubble background.
  */
 @Composable
-private fun Modifier.friendNickTint(): Modifier = this
+internal fun Modifier.friendNickTint(): Modifier = this
     .clip(RoundedCornerShape(4.dp))
     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
     .padding(horizontal = 4.dp, vertical = 1.dp)
@@ -341,7 +370,7 @@ private fun Modifier.friendNickTint(): Modifier = this
 data class ReplyPreviewData(val sender: String, val text: String)
 
 @Composable
-private fun ReplyMiniBubble(reply: ReplyPreviewData, nickColors: NickColorScheme) {
+internal fun ReplyMiniBubble(reply: ReplyPreviewData, nickColors: NickColorScheme) {
     val accent = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
     Row(
         modifier = Modifier
@@ -378,7 +407,7 @@ private fun ReplyMiniBubble(reply: ReplyPreviewData, nickColors: NickColorScheme
  * device setting/locale changes, avoiding a per-row/per-recomposition allocation.
  */
 @Composable
-private fun formatTime(ms: Long): String {
+internal fun formatTime(ms: Long): String {
     val context = LocalContext.current
     val is24 = DateFormat.is24HourFormat(context)
     val formatter = remember(is24, java.util.Locale.getDefault()) {

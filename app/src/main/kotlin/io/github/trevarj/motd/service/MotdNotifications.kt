@@ -89,7 +89,7 @@ class MotdNotifications @Inject constructor(
         val text = if (reconnecting) "Reconnecting…" else "Connected to $connectedCount networks"
         return NotificationCompat.Builder(context, CHANNEL_STATUS)
             .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
-            .setContentTitle("MOTD")
+            .setContentTitle("motd")
             .setContentText(text)
             .setOngoing(true)
             .setSilent(true)

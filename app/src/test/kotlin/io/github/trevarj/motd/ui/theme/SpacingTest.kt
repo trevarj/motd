@@ -22,7 +22,9 @@ class SpacingTest {
         assertEquals(6.dp, s.chatListVPad)
         assertEquals(36.dp, s.chatListAvatar)
         assertEquals(32.dp, s.memberAvatar)
-        assertEquals(false, s.messageBodyLarge)
+        // COMPACT is the only mode that switches to the classic single-line IRC renderer.
+        assertEquals(true, s.compact)
+        assertEquals(1.dp, s.compactRowVPad)
     }
 
     @Test
@@ -39,7 +41,8 @@ class SpacingTest {
         assertEquals(10.dp, s.chatListVPad)
         assertEquals(44.dp, s.chatListAvatar)
         assertEquals(36.dp, s.memberAvatar)
-        assertEquals(true, s.messageBodyLarge)
+        // COMFORTABLE keeps the bubble renderer.
+        assertEquals(false, s.compact)
     }
 
     @Test
@@ -56,7 +59,15 @@ class SpacingTest {
         assertEquals(14.dp, s.chatListVPad)
         assertEquals(48.dp, s.chatListAvatar)
         assertEquals(40.dp, s.memberAvatar)
-        assertEquals(true, s.messageBodyLarge)
+        // COZY = roomier COMFORTABLE: still bubbles, not the IRC renderer.
+        assertEquals(false, s.compact)
+    }
+
+    @Test
+    fun compact_is_the_only_single_line_renderer() {
+        assertEquals(true, spacingFor(LayoutDensity.COMPACT).compact)
+        assertEquals(false, spacingFor(LayoutDensity.COMFORTABLE).compact)
+        assertEquals(false, spacingFor(LayoutDensity.COZY).compact)
     }
 
     @Test

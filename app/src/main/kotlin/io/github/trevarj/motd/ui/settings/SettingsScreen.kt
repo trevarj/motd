@@ -267,15 +267,18 @@ private fun ThemeModeGroup(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
 
 @Composable
 private fun DensityGroup(current: LayoutDensity, onSelect: (LayoutDensity) -> Unit) {
+    // Density selects the message *render style*, not the font size: Compact is classic single-line
+    // IRC, Comfortable/Cozy are chat bubbles (Cozy roomier). Subtitles spell that out.
     val options = listOf(
-        LayoutDensity.COMPACT to R.string.settings_density_compact,
-        LayoutDensity.COMFORTABLE to R.string.settings_density_comfortable,
-        LayoutDensity.COZY to R.string.settings_density_cozy,
+        Triple(LayoutDensity.COMPACT, R.string.settings_density_compact, R.string.settings_density_compact_desc),
+        Triple(LayoutDensity.COMFORTABLE, R.string.settings_density_comfortable, R.string.settings_density_comfortable_desc),
+        Triple(LayoutDensity.COZY, R.string.settings_density_cozy, R.string.settings_density_cozy_desc),
     )
     Column(Modifier.selectableGroup()) {
-        options.forEach { (density, labelRes) ->
+        options.forEach { (density, labelRes, descRes) ->
             RadioRow(
                 label = stringResource(labelRes),
+                subtitle = stringResource(descRes),
                 selected = current == density,
                 enabled = true,
                 onClick = { onSelect(density) },
