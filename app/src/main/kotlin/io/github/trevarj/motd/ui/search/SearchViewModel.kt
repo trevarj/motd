@@ -6,10 +6,13 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.repo.SearchRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -75,9 +78,13 @@ class SearchViewModel @Inject constructor(
         if (bufferId != null) scope.value = SearchScope.CURRENT
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     val state: StateFlow<SearchUiState> =
         combine(query, scope, hasBufferScope) { q, sc, hasScope -> Triple(q, sc, hasScope) }
+            .distinctUntilChanged()
+            // Debounce only the DB-hitting path so typing doesn't launch an FTS query per
+            // keystroke; a blank query short-circuits immediately so clearing results is instant.
+            .debounce { (q, _, _) -> if (parseSearchQuery(q).let { it.text.isBlank() && it.fromNick == null }) 0L else QUERY_DEBOUNCE_MS }
             .flatMapLatest { (q, sc, hasScope) ->
                 val parsed = parseSearchQuery(q)
                 if (parsed.text.isBlank() && parsed.fromNick == null) {
@@ -108,6 +115,11 @@ class SearchViewModel @Inject constructor(
     fun onQueryChange(q: String) { query.value = q }
 
     fun onScopeChange(s: SearchScope) { scope.value = s }
+
+    private companion object {
+        /** Wait for a typing pause before hitting the Room FTS query. */
+        const val QUERY_DEBOUNCE_MS = 250L
+    }
 }
 
 /** Group hits by buffer, preserving overall recency order (hits already time-ordered by DAO). */
