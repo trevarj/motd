@@ -74,7 +74,15 @@ fun MotdNavGraph(
             )
         }
         composable<OnboardingRoute> {
-            OnboardingScreen(onDone = { navController.popBackStack() })
+            // Finish lands on a fresh ChatList and clears onboarding (plus any duplicate
+            // onboarding entries) from the backstack; a bare popBackStack could fall back to
+            // the Welcome step instead of the chat list.
+            OnboardingScreen(onDone = {
+                navController.navigate(ChatListRoute) {
+                    popUpTo<ChatListRoute> { inclusive = true }
+                    launchSingleTop = true
+                }
+            })
         }
         composable<SettingsRoute> {
             SettingsScreen(
