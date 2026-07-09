@@ -87,6 +87,34 @@ class MessageDaoTest {
     }
 
     @Test
+    fun findSelfEchoCandidate_pendingRow_matchesEvenOutsideTimeWindow() = runTest {
+        val dao = db.messageDao()
+        // A pending self-send stamped with the DEVICE clock (5_000_000), far from the server echo
+        // time — the exact client/server clock-skew case that used to duplicate the message.
+        dao.insertAll(listOf(
+            message(bufferId, "skew msg", sender = "me", serverTime = 5_000_000L,
+                dedupKey = "pending:x", isSelf = true, pendingLabel = "x"),
+        ))
+        // Window around a server echo time of 1000; the pending row's stamp is nowhere near it.
+        val hit = dao.findSelfEchoCandidate(bufferId, "skew msg", 1000L - 30_000L, 1000L + 30_000L)
+        assertNotNull(hit)                 // still matched, because it is pending
+        assertEquals("x", hit!!.pendingLabel)
+    }
+
+    @Test
+    fun findSelfEchoCandidate_confirmedRow_outsideWindow_doesNotMatch() = runTest {
+        val dao = db.messageDao()
+        // A confirmed self row (no pendingLabel) far outside the window must NOT be matched, so an
+        // old identical self message is never collapsed into by a much later echo.
+        dao.insertAll(listOf(
+            message(bufferId, "old msg", sender = "me", serverTime = 5_000_000L,
+                dedupKey = "k", msgid = "m", isSelf = true),
+        ))
+        val hit = dao.findSelfEchoCandidate(bufferId, "old msg", 1000L - 30_000L, 1000L + 30_000L)
+        assertNull(hit)
+    }
+
+    @Test
     fun ftsRoundTrip_matchesTextAndSender_viaSanitizedQuery() = runTest {
         val dao = db.messageDao()
         dao.insertAll(

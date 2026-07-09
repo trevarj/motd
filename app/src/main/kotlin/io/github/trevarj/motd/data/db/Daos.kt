@@ -163,14 +163,17 @@ interface MessageDao {
     suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
 
     /**
-     * Newest local self row for [bufferId] matching [text] within [lo]..[hi] serverTime, to collapse
-     * an un-labeled echo into a pending/confirmed-local row (plans/03 echo heuristic). Un-confirmed
-     * (pendingLabel set) rows rank first. A suspend @Query runs off the main thread and is
-     * transaction-safe (both the live onChat path and the HistoryBatch withTransaction path).
+     * Newest local self row for [bufferId] matching [text], to collapse an un-labeled echo into a
+     * pending/confirmed-local row (plans/03 echo heuristic). A still-pending row (pendingLabel set)
+     * is a local send awaiting THIS echo, so it matches regardless of the [lo]..[hi] window — its
+     * serverTime is a device timestamp and cannot be compared to the server's echo time under clock
+     * skew (would otherwise duplicate the self-send). Confirmed rows must fall inside the window so
+     * an old identical self message isn't matched. Pending rows rank first. A suspend @Query runs
+     * off the main thread and is transaction-safe (live onChat + HistoryBatch withTransaction).
      */
     @Query(
         """SELECT * FROM messages WHERE bufferId = :bufferId AND isSelf = 1 AND text = :text
-          AND serverTime BETWEEN :lo AND :hi
+          AND (pendingLabel IS NOT NULL OR serverTime BETWEEN :lo AND :hi)
           ORDER BY (pendingLabel IS NOT NULL) DESC, serverTime DESC, id DESC LIMIT 1"""
     )
     suspend fun findSelfEchoCandidate(bufferId: Long, text: String, lo: Long, hi: Long): MessageEntity?

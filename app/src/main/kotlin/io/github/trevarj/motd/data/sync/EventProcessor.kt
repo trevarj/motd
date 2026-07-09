@@ -516,11 +516,12 @@ class EventProcessor @Inject constructor(
     }
 
     /**
-     * Echo-dedup heuristic (plans/03) for own messages arriving without a labeled correlation:
-     * the newest self row in [bufferId] with identical [text] whose serverTime is within
-     * [ECHO_MATCH_WINDOW_MS] of the incoming echo. Pending/failed rows are preferred (they are the
-     * strongest match); a confirmed-local row (from the no-labeled-response send path) also matches
-     * so its self-clock dedupKey collapses with the server echo. Returns null when nothing matches.
+     * Echo-dedup heuristic (plans/03) for own messages arriving without a labeled correlation: the
+     * newest self row in [bufferId] with identical [text] that is EITHER still pending (a local send
+     * awaiting its echo — collapses regardless of time, since its device-clock serverTime cannot be
+     * compared to the server's echo time under clock skew) OR a confirmed row whose serverTime is
+     * within [ECHO_MATCH_WINDOW_MS] of [echoTime] (bounded so an old identical self message is not
+     * matched). Pending/failed rows are preferred. Returns null when nothing matches.
      */
     private suspend fun findSelfEchoCandidate(bufferId: Long, text: String, echoTime: Long): MessageEntity? =
         // Delegates to a suspend @Query: Room runs it off the main thread (the events collector runs
