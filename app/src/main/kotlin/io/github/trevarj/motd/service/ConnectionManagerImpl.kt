@@ -241,7 +241,7 @@ class ConnectionManagerImpl @Inject constructor(
         return IrcClient(config, factory, scope)
     }
 
-    /** On Ready: persist any STS policy, then run reconnect catch-up (plans/04). */
+    /** On Ready: persist any STS policy, re-establish bouncer children, then run catch-up (plans/04). */
     private suspend fun onReady(row: NetworkEntity, client: IrcClient) {
         // Persist STS policy if the server advertised one.
         val stsValue = client.caps.firstOrNull { it == "sts" || it.startsWith("sts=") }?.substringAfter('=', "")
@@ -250,6 +250,18 @@ class ConnectionManagerImpl @Inject constructor(
         // socket just reached Ready after a reconnect / quick foreground connect).
         if (settings.settings.first().deliveryMode == DeliveryMode.UNIFIED_PUSH) {
             webPushRegistrar.get().reRegisterIfNeeded(row.id)
+        }
+        // A BOUNCER_ROOT reaching Ready means its transport is up again. Bound children tunnel
+        // through that transport (BOUNCER BIND) and cannot connect while the root is down, so a
+        // child whose actor died during the outage sits parked (Failed, completed job) and a plain
+        // reconcile won't rebuild it. Force-reconnect each wanted child via connect() — the same
+        // drop-and-rebuild path trustCert uses. This fires only on the root's transition INTO Ready
+        // (onReady is invoked once per Ready entry), so it can't storm/loop. Children the user
+        // explicitly disconnected (sticky userIntents=false) are excluded by childrenToReconnect.
+        if (row.role == NetworkRole.BOUNCER_ROOT) {
+            for (childId in childrenToReconnect(row.id, networksById.values.toList(), userIntents)) {
+                connect(childId)
+            }
         }
         catchUp(row.id, client)
     }
@@ -630,5 +642,28 @@ internal fun wantedNetworkIds(
     all.asSequence()
         .filter { userIntents[it.id] ?: it.autoConnect }
         .filter { it.role != NetworkRole.BOUNCER_CHILD || it.parentId != null }
+        .map { it.id }
+        .toSet()
+
+/**
+ * BOUNCER_CHILD ids to force-reconnect when their [rootId] transitions into Ready. A bound child
+ * tunnels through the root's transport (BOUNCER BIND) and cannot connect while the root is down;
+ * when the root comes back, a child whose actor died during the outage sits parked (Failed,
+ * completed job) and a plain reconcile won't rebuild it — so [ConnectionManagerImpl.onReady] calls
+ * `connect(childId)` for each id returned here, dropping the stale actor and rebuilding it.
+ *
+ * A child is reconnected when it is that root's own child (`parentId == rootId`) and is *wanted*:
+ * its sticky user intent (if present), else its `autoConnect` flag, is true. This respects an
+ * explicit user disconnect (sticky `userIntents=false`) so we never resurrect a child the user
+ * turned off. Same pure-function testing style as [wantedNetworkIds] / [networksSharingCertEndpoint].
+ */
+internal fun childrenToReconnect(
+    rootId: Long,
+    all: List<NetworkEntity>,
+    userIntents: Map<Long, Boolean>,
+): Set<Long> =
+    all.asSequence()
+        .filter { it.role == NetworkRole.BOUNCER_CHILD && it.parentId == rootId }
+        .filter { userIntents[it.id] ?: it.autoConnect }
         .map { it.id }
         .toSet()
