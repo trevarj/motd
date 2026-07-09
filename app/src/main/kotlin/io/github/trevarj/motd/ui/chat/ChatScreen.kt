@@ -69,7 +69,6 @@ import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
-import io.github.trevarj.motd.ui.components.TypingIndicatorRow
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.launch
@@ -510,8 +509,6 @@ fun ChatContent(
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     )
                 }
-
-                TypingIndicatorRow(nicks = state.typingNicks)
 
                 val completions = remember(composerText, memberNicks, recentSpeakers) {
                     autocompleteFor(composerText, memberNicks, recentSpeakers, nickNormalizer)
