@@ -55,4 +55,20 @@ class ChatModelsTest {
         assertEquals(2, chips[0].count)
         assertEquals(1, chips[1].count)
     }
+
+    // Auto-stick-to-bottom decision (autoscroll-to-newest bug). Pin the reverse list to the newest
+    // row only when the user was already at the bottom AND a new row actually arrived.
+    @Test fun `autoscroll when at bottom and count grew`() {
+        assertTrue(shouldAutoscrollToNewest(atBottom = true, oldCount = 10, newCount = 11))
+    }
+
+    @Test fun `no autoscroll when scrolled up even if count grew`() {
+        assertFalse(shouldAutoscrollToNewest(atBottom = false, oldCount = 10, newCount = 11))
+    }
+
+    @Test fun `no autoscroll when count did not grow`() {
+        // Same count (e.g. an echo-confirm msgid swap) or a shrink must not yank the viewport.
+        assertFalse(shouldAutoscrollToNewest(atBottom = true, oldCount = 10, newCount = 10))
+        assertFalse(shouldAutoscrollToNewest(atBottom = true, oldCount = 10, newCount = 9))
+    }
 }

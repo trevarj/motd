@@ -331,8 +331,31 @@ fun ChatContent(
     var sheetTarget by remember { mutableStateOf<MessageEntity?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
-    // At-bottom detection (reversed list: bottom == index 0).
-    val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+    // At-bottom detection (reversed list: bottom == index 0). A small scroll-offset tolerance keeps
+    // "at bottom" true while the newest row is only marginally scrolled, so autoscroll still pins.
+    val atBottom by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex == 0 &&
+                listState.firstVisibleItemScrollOffset <= AUTOSCROLL_BOTTOM_TOLERANCE_PX
+        }
+    }
+
+    // Auto-stick-to-bottom for incoming messages (autoscroll-to-newest bug). When a new row is
+    // prepended at index 0 the reverse-layout viewport does NOT follow it (stable keys anchor the
+    // existing rows), so an explicit scroll is needed. We snapshot whether the user was at the bottom
+    // *before* the count grew via [wasAtBottom]; a user scrolled up reading history is never yanked.
+    // Own-send scrolls unconditionally in the composer, so it doesn't route through this path.
+    var wasAtBottom by remember { mutableStateOf(true) }
+    var prevItemCount by remember { mutableStateOf(items.itemCount) }
+    LaunchedEffect(items.itemCount) {
+        val newCount = items.itemCount
+        if (shouldAutoscrollToNewest(wasAtBottom, prevItemCount, newCount)) {
+            listState.animateScrollToItem(0)
+        }
+        prevItemCount = newCount
+    }
+    // Track the at-bottom state on every settle so the next arrival reads the pre-add position.
+    LaunchedEffect(atBottom) { wasAtBottom = atBottom }
 
     val buffer = state.buffer
     // Mark read on new-message-while-at-bottom only (plans/07/15 #2): syncing while scrolled up

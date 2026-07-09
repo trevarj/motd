@@ -43,6 +43,13 @@ fun keepMessage(msg: MessageEntity, spec: MessageFilterSpec): Boolean =
 const val GROUP_WINDOW_MS: Long = 3 * 60 * 1000
 
 /**
+ * Scroll-offset slack (px) within which the reverse list still counts as "at bottom" for autoscroll.
+ * Small so a barely-nudged newest row keeps auto-following, but the user is not pinned once they
+ * deliberately scroll up. Compose scroll offsets are in raw pixels.
+ */
+const val AUTOSCROLL_BOTTOM_TOLERANCE_PX: Int = 64
+
+/**
  * Count how many of the below-the-fold [serverTimes] are newer than the frozen read [marker].
  * [serverTimes] are the reverse-list rows scrolled off toward the bottom (indices `0 until
  * firstVisibleIndex`, newest first). Returns the FAB unread badge value: 0 at the bottom, shrinking
@@ -50,6 +57,15 @@ const val GROUP_WINDOW_MS: Long = 3 * 60 * 1000
  */
 fun unreadBelowViewport(serverTimes: List<Long>, marker: Long): Int =
     serverTimes.count { it > marker }
+
+/**
+ * Decide whether an incoming message should pin the reverse list to the newest row (index 0). Only
+ * autoscroll when the user is already at/near the bottom ([atBottom]) AND the loaded row count
+ * actually grew ([newCount] > [oldCount]) — never yank a user who has scrolled up to read history.
+ * Own-send scrolls unconditionally at the call site and does not route through this helper.
+ */
+fun shouldAutoscrollToNewest(atBottom: Boolean, oldCount: Int, newCount: Int): Boolean =
+    atBottom && newCount > oldCount
 
 /**
  * Aggregate raw [ReactionEntity] rows into per-msgid chip lists: one chip per emoji with its count

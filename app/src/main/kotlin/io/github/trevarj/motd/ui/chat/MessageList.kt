@@ -7,7 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -158,7 +158,11 @@ fun MessageList(
                 label = "jumpHighlight",
             )
 
-            Box(modifier = Modifier.background(highlightColor)) {
+            // Column (not Box): MessageRow emits several vertical siblings — the collapse chip,
+            // bubble, retry row, and read-marker/day dividers. A Box would stack them on top of one
+            // another (dividers over message text; the fool-collapse chip trapped behind the bubble).
+            // A Column lays them out top-to-bottom so each affordance owns its own space and taps.
+            Column(modifier = Modifier.fillMaxWidth().background(highlightColor)) {
             MessageRow(
                 msg = msg,
                 older = older,
@@ -226,21 +230,24 @@ private fun SystemEventRun(
     val lines = run.map { it.text }
     val summary = if (run.size == 1) newest.text else summarizeSystemRun(run)
 
-    SystemEventPill(summary = summary, lines = lines, modifier = Modifier.testTag("chat_system_pill"))
-
     // Divider below the run when the run's newest crosses the marker and its older neighbor doesn't.
     val showNewDivider = readMarkerTime != null &&
         newest.serverTime > readMarkerTime &&
         (olderThanRun == null || olderThanRun.serverTime <= readMarkerTime)
     val showDay = olderThanRun == null || dayStart(oldest.serverTime) != dayStart(olderThanRun.serverTime)
 
-    if (showNewDivider) {
-        NewMessagesDivider(
-            label = stringResource(R.string.chat_new_messages),
-            modifier = Modifier.testTag("chat_read_marker_divider"),
-        )
+    // Column so the pill and any dividers stack vertically. A bare item slot stacks siblings on top
+    // of each other (its MeasurePolicy behaves like a Box), which would overlap the divider text.
+    Column(modifier = Modifier.fillMaxWidth()) {
+        SystemEventPill(summary = summary, lines = lines, modifier = Modifier.testTag("chat_system_pill"))
+        if (showNewDivider) {
+            NewMessagesDivider(
+                label = stringResource(R.string.chat_new_messages),
+                modifier = Modifier.testTag("chat_read_marker_divider"),
+            )
+        }
+        if (showDay) DaySeparator(timeMs = oldest.serverTime)
     }
-    if (showDay) DaySeparator(timeMs = oldest.serverTime)
 }
 
 /**
@@ -374,37 +381,41 @@ private fun FoolPlaceholderRow(
         (older == null || older.serverTime <= readMarkerTime)
     val showDay = older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            // Collapsed fool row is still a message container; keep it selectable/tappable.
-            .testTag(messageTag(msg))
-            .clickable { onExpand() }
-            .alpha(0.7f)
-            .padding(horizontal = 16.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Filled.VisibilityOff,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(14.dp),
-        )
-        Spacer(Modifier.size(6.dp))
-        Text(
-            text = stringResource(R.string.chat_fool_hidden, msg.sender),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    // Column so the placeholder row and any dividers stack vertically rather than overlapping (a bare
+    // item slot stacks its children like a Box).
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                // Collapsed fool row is still a message container; keep it selectable/tappable.
+                .testTag(messageTag(msg))
+                .clickable { onExpand() }
+                .alpha(0.7f)
+                .padding(horizontal = 16.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.VisibilityOff,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(
+                text = stringResource(R.string.chat_fool_hidden, msg.sender),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
-    if (showNewDivider) {
-        NewMessagesDivider(
-            label = stringResource(R.string.chat_new_messages),
-            modifier = Modifier.testTag("chat_read_marker_divider"),
-        )
+        if (showNewDivider) {
+            NewMessagesDivider(
+                label = stringResource(R.string.chat_new_messages),
+                modifier = Modifier.testTag("chat_read_marker_divider"),
+            )
+        }
+        if (showDay) DaySeparator(timeMs = msg.serverTime)
     }
-    if (showDay) DaySeparator(timeMs = msg.serverTime)
 }
 
 /**
