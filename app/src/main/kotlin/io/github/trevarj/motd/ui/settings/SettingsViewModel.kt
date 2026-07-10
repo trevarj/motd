@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
@@ -79,6 +80,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setShowJoinPartQuit(show: Boolean) = viewModelScope.launch {
         settingsRepository.setShowJoinPartQuit(show)
+    }
+
+    fun setChatWallpaper(wallpaper: ChatWallpaper) = viewModelScope.launch {
+        settingsRepository.setChatWallpaper(wallpaper)
     }
 
     fun setFoolsMode(mode: FoolsMode) = viewModelScope.launch {

@@ -127,6 +127,7 @@ fun ChatScreen(
         friends = settings.friends,
         fools = settings.fools,
         foolsMode = settings.foolsMode,
+        chatWallpaper = settings.chatWallpaper,
         reactionChips = { msgid -> chipsByMsgid[msgid].orEmpty() },
         readMarkerSnapshot = readMarkerSnapshot,
         onMarkRead = viewModel::markRead,
@@ -203,6 +204,7 @@ fun ChatContent(
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    chatWallpaper: io.github.trevarj.motd.data.prefs.ChatWallpaper = io.github.trevarj.motd.data.prefs.ChatWallpaper.NONE,
     readMarkerSnapshot: Long? = null,
     onMarkRead: (Long) -> Unit = {},
     onDelete: (MessageEntity) -> Unit = {},
@@ -449,6 +451,9 @@ fun ChatContent(
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.weight(1f)) {
+                    // Subtle IRC-themed wallpaper layered UNDER the message list only (never over the
+                    // composer). NONE renders the plain theme background; MessageList is untouched.
+                    ChatWallpaperBackground(chatWallpaper, modifier = Modifier.matchParentSize())
                     MessageList(
                         items = items,
                         listState = listState,

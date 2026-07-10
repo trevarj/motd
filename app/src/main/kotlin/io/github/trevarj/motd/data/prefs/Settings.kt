@@ -22,6 +22,10 @@ enum class FoolsMode { COLLAPSE, HIDE }
 /** Which visual style to use for nick avatars. */
 enum class AvatarStyle { MONOGRAM, INITIALS }
 
+/** Subtle IRC-themed chat background rendered behind the message list. NONE keeps the plain
+ *  theme background (opt-in; default for existing users). */
+enum class ChatWallpaper { NONE, CLASSIC, NETWORK, PIXEL }
+
 /** True for terminal color-scheme variants (dynamic color does not apply to these). */
 val ThemeMode.isTerminalTheme: Boolean
     get() = when (this) {
@@ -46,6 +50,8 @@ data class Settings(
     val showJoinPartQuit: Boolean = true,
     /** Avatar rendering style; defaults to the tonal monogram disc. */
     val avatarStyle: AvatarStyle = AvatarStyle.MONOGRAM,
+    /** Opt-in patterned chat background; NONE preserves the existing plain theme background. */
+    val chatWallpaper: ChatWallpaper = ChatWallpaper.NONE,
 )
 
 /** Canonical key for friends/fools/override lookups: trimmed + lowercased.
@@ -69,6 +75,7 @@ interface SettingsRepository {
     suspend fun setFoolsMode(m: FoolsMode)
     suspend fun setShowJoinPartQuit(show: Boolean)
     suspend fun setAvatarStyle(style: AvatarStyle)
+    suspend fun setChatWallpaper(w: ChatWallpaper)
 }
 
 /** Webpush endpoint + client keypair persistence (DataStore). Implemented by WP4 alongside

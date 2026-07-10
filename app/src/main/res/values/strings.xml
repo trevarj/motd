@@ -206,6 +206,15 @@
     <string name="settings_nick_color_overrides">Nick color overrides</string>
     <string name="settings_show_jpq">Show join/part messages</string>
     <string name="settings_show_jpq_desc">Show join, part, and quit events in channels.</string>
+    <string name="settings_wallpaper">Chat wallpaper</string>
+    <string name="settings_wallpaper_none">None</string>
+    <string name="settings_wallpaper_none_desc">Plain background.</string>
+    <string name="settings_wallpaper_classic">Classic</string>
+    <string name="settings_wallpaper_classic_desc">Chat bubbles, channels, and prompts.</string>
+    <string name="settings_wallpaper_network">Network</string>
+    <string name="settings_wallpaper_network_desc">Server nodes, bridges, and TLS locks.</string>
+    <string name="settings_wallpaper_pixel">Pixel</string>
+    <string name="settings_wallpaper_pixel_desc">Blocky terminal glyphs.</string>
     <string name="settings_people">People</string>
     <string name="settings_friends">Friends</string>
     <string name="settings_fools">Fools</string>
