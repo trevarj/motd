@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="190 42 330 100" role="img" aria-labelledby="title">
   <title id="title">/motd</title>
-  <path fill="none" stroke="#5266E8" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" d="m202 128 34-76M260 126V82c0-10 8-16 16-16 9 0 16 7 16 17v43m0-43c0-10 8-17 17-17s16 7 16 17v43M373 72c-16 0-25 11-25 27s9 27 25 27 25-11 25-27-9-27-25-27ZM424 52v58c0 11 6 16 16 16h6m-34-53h34M504 52v74m0-45c-6-6-13-9-21-9-15 0-23 11-23 27s8 27 23 27c8 0 15-3 21-10"/>
+  <!-- A deliberately sturdy monoline keeps the terminal-like lettering crisp in app chrome. -->
+  <path fill="none" stroke="#5266E8" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" d="m202 128 34-76M260 126V82c0-10 8-16 16-16 9 0 16 7 16 17v43m0-43c0-10 8-17 17-17s16 7 16 17v43M373 72c-16 0-25 11-25 27s9 27 25 27 25-11 25-27-9-27-25-27ZM424 52v58c0 11 6 16 16 16h6m-34-53h34M504 52v74m0-45c-6-6-13-9-21-9-15 0-23 11-23 27s8 27 23 27c8 0 15-3 21-10"/>
 </svg>
