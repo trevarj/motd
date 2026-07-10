@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,7 +37,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -87,11 +91,16 @@ fun ServerDrawerContent(
 ) {
     ModalDrawerSheet {
         Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-            Text(
-                text = stringResource(R.string.chatlist_title),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(16.dp),
+            // Brand header: the stacked motd lockup, tinted onSurface so it reads on every theme.
+            Image(
+                painter = painterResource(R.drawable.motd_logo_lockup),
+                contentDescription = stringResource(R.string.app_name),
+                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
+                contentScale = ContentScale.Fit,
+                alignment = Alignment.CenterStart,
+                modifier = Modifier
+                    .heightIn(min = 56.dp)
+                    .padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
             )
 
             // 1. Unified "All chats" entry (default view).

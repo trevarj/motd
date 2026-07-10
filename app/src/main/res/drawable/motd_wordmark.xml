@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The /motd wordmark: a single stroked path. Tinted by the caller so it reads on any theme. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="198dp"
+    android:height="60dp"
+    android:viewportWidth="330"
+    android:viewportHeight="100">
+    <!-- Source viewBox origin is (190,42); shift the path into a 0-origin viewport. -->
+    <group
+        android:translateX="-190"
+        android:translateY="-42">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="14"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M202,128 236,52M260,126V82C260,72 268,66 276,66C285,66 292,73 292,83V126M292,83C292,73 300,66 309,66S325,73 325,83V126M373,72C357,72 348,83 348,99S357,126 373,126 398,115 398,99 389,72 373,72ZM424,52V110C424,121 430,126 440,126H446M412,73H446M504,52V126M504,81C498,75 491,72 483,72 468,72 460,83 460,99S468,126 483,126C491,126 498,123 504,116" />
+    </group>
+</vector>

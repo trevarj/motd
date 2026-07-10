@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -58,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -191,11 +194,21 @@ fun ChatListContent(
             topBar = {
                 CenterAlignedTopAppBar(
                     title = {
-                        Text(
-                            // Title shows the scoped network name, else the app name.
-                            text = state.selectedNetworkName ?: stringResource(R.string.chatlist_title),
-                            fontWeight = FontWeight.Bold,
-                        )
+                        val scopedName = state.selectedNetworkName
+                        if (scopedName != null) {
+                            // Scoped: show the network name so the active filter is legible.
+                            Text(text = scopedName, fontWeight = FontWeight.Bold)
+                        } else {
+                            // Unscoped: brand the bar with the /motd wordmark. Tinted onSurface so
+                            // it reads on every theme (including terminal); never hardcode periwinkle.
+                            Icon(
+                                painter = painterResource(R.drawable.motd_wordmark),
+                                contentDescription = stringResource(R.string.app_name),
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                // 330:100 wordmark ratio; ~26dp tall reads well in the app bar.
+                                modifier = Modifier.height(26.dp).width(86.dp),
+                            )
+                        }
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
