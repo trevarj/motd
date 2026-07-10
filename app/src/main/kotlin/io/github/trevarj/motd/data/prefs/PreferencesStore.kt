@@ -109,7 +109,7 @@ class DataStoreSettingsRepository @Inject constructor(
                 ?: FoolsMode.COLLAPSE,
             showJoinPartQuit = prefs[PrefKeys.SHOW_JOIN_PART_QUIT]?.toBooleanStrictOrNull() ?: true,
             avatarStyle = prefs[PrefKeys.AVATAR_STYLE]?.let { runCatching { AvatarStyle.valueOf(it) }.getOrNull() }
-                ?: AvatarStyle.PIXEL_ART,
+                ?: AvatarStyle.MONOGRAM,
         )
     }
 

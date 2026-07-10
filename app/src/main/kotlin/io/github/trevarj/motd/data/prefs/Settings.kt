@@ -20,7 +20,7 @@ enum class NickColorPalette { DEFAULT, VIVID, PASTEL }
 enum class FoolsMode { COLLAPSE, HIDE }
 
 /** Which visual style to use for nick avatars. */
-enum class AvatarStyle { PIXEL_ART, INITIALS }
+enum class AvatarStyle { MONOGRAM, INITIALS }
 
 /** True for terminal color-scheme variants (dynamic color does not apply to these). */
 val ThemeMode.isTerminalTheme: Boolean
@@ -44,8 +44,8 @@ data class Settings(
     val fools: Set<String> = emptySet(),
     val foolsMode: FoolsMode = FoolsMode.COLLAPSE,
     val showJoinPartQuit: Boolean = true,
-    /** Avatar rendering style; defaults to pixel-art identicons. */
-    val avatarStyle: AvatarStyle = AvatarStyle.PIXEL_ART,
+    /** Avatar rendering style; defaults to the tonal monogram disc. */
+    val avatarStyle: AvatarStyle = AvatarStyle.MONOGRAM,
 )
 
 /** Canonical key for friends/fools/override lookups: trimmed + lowercased.

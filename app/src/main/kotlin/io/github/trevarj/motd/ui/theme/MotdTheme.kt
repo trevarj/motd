@@ -34,11 +34,11 @@ private val AmoledColors = DarkColors.copy(
 )
 
 /**
- * CompositionLocal carrying the active avatar rendering style. Defaults to PIXEL_ART so previews
- * and un-provided contexts use the new default without needing explicit provision.
+ * CompositionLocal carrying the active avatar rendering style. Defaults to MONOGRAM so previews
+ * and un-provided contexts use the default without needing explicit provision.
  */
 val LocalAvatarStyle: ProvidableCompositionLocal<AvatarStyle> =
-    staticCompositionLocalOf { AvatarStyle.PIXEL_ART }
+    staticCompositionLocalOf { AvatarStyle.MONOGRAM }
 
 /**
  * Return the fixed ColorScheme for terminal-palette ThemeModes, or null for the modes that use
@@ -67,7 +67,7 @@ fun MotdTheme(
     nickColorsEnabled: Boolean = true,
     nickColorPalette: NickColorPalette = NickColorPalette.DEFAULT,
     nickColorOverrides: Map<String, Int> = emptyMap(),
-    avatarStyle: AvatarStyle = AvatarStyle.PIXEL_ART,
+    avatarStyle: AvatarStyle = AvatarStyle.MONOGRAM,
     content: @Composable () -> Unit,
 ) {
     val dark = when (themeMode) {

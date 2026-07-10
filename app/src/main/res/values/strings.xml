@@ -387,7 +387,7 @@
 
     <!-- Avatar style picker -->
     <string name="settings_avatar_style">Avatar style</string>
-    <string name="settings_avatar_pixel_art">Pixel art</string>
+    <string name="settings_avatar_monogram">Monogram</string>
     <string name="settings_avatar_initials">Initials</string>
 
     <!-- Badge content-descriptions: carry the real (uncapped) count for the e2e harness (plans/18

@@ -325,7 +325,7 @@ private fun ThemeModeGroup(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
 @Composable
 private fun AvatarStyleGroup(current: AvatarStyle, onSelect: (AvatarStyle) -> Unit) {
     val options = listOf(
-        AvatarStyle.PIXEL_ART to R.string.settings_avatar_pixel_art,
+        AvatarStyle.MONOGRAM to R.string.settings_avatar_monogram,
         AvatarStyle.INITIALS to R.string.settings_avatar_initials,
     )
     Column(Modifier.selectableGroup()) {
