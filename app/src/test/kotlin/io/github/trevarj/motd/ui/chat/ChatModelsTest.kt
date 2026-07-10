@@ -62,6 +62,10 @@ class ChatModelsTest {
         assertTrue(shouldAutoscrollToNewest(atBottom = true, oldCount = 10, newCount = 11))
     }
 
+    @Test fun `initial paging page does not animate an already-bottom reverse list`() {
+        assertFalse(shouldAutoscrollToNewest(atBottom = true, oldCount = 0, newCount = 50))
+    }
+
     @Test fun `no autoscroll when scrolled up even if count grew`() {
         assertFalse(shouldAutoscrollToNewest(atBottom = false, oldCount = 10, newCount = 11))
     }

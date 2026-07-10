@@ -76,6 +76,23 @@ fun showsSender(current: MessageEntity, olderNeighbor: MessageEntity?): Boolean 
 }
 
 /**
+ * Resolves a reply target from the Paging window already loaded for this list.
+ *
+ * This deliberately runs only for a composed reply row. Building an index for every Paging row
+ * when the chat opens front-loads work that most rows do not need.
+ */
+internal fun resolveReplyFromLoadedItems(
+    targetMsgid: String,
+    itemCount: Int,
+    peek: (Int) -> MessageEntity?,
+): ReplyPreviewData? =
+    (0 until itemCount)
+        .asSequence()
+        .mapNotNull(peek)
+        .firstOrNull { it.msgid == targetMsgid }
+        ?.let { ReplyPreviewData(it.sender, it.text) }
+
+/**
  * Reverse-layout message list. Index 0 is the newest message (bottom). For each row we peek the
  * next (older) item to compute grouping, day separators, and the read-marker divider.
  */
@@ -111,18 +128,6 @@ fun MessageList(
     // Tapping a non-self sender's name/avatar opens the nick sheet (plans/16 §5.8).
     onSenderClick: (String) -> Unit = {},
 ) {
-    // Reply resolution index: build msgid -> preview once per loaded window instead of rescanning the
-    // whole window per reply row (was O(replies x window) with a fresh lambda each recomposition).
-    val replyIndex = remember(items.itemCount) {
-        val map = HashMap<String, ReplyPreviewData>(items.itemCount.coerceAtLeast(0))
-        for (i in 0 until items.itemCount) {
-            val m = items.peek(i) ?: continue
-            val mid = m.msgid ?: continue
-            map[mid] = ReplyPreviewData(m.sender, m.text)
-        }
-        map
-    }
-    val resolveReply = remember(replyIndex) { { msgid: String -> replyIndex[msgid] } }
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -199,7 +204,9 @@ fun MessageList(
                 loadPreview = loadPreview,
                 onOpenLink = onOpenLink,
                 onSenderClick = onSenderClick,
-                resolveReply = resolveReply,
+                resolveReply = { msgid ->
+                    resolveReplyFromLoadedItems(msgid, items.itemCount, items::peek)
+                },
             )
             }
         }

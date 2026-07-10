@@ -60,12 +60,14 @@ fun unreadBelowViewport(serverTimes: List<Long>, marker: Long): Int =
 
 /**
  * Decide whether an incoming message should pin the reverse list to the newest row (index 0). Only
- * autoscroll when the user is already at/near the bottom ([atBottom]) AND the loaded row count
- * actually grew ([newCount] > [oldCount]) — never yank a user who has scrolled up to read history.
+ * autoscroll when the user is already at/near the bottom ([atBottom]) AND an already-populated
+ * window grew ([newCount] > [oldCount]) — never yank a user who has scrolled up to read history.
+ * The first Paging page is deliberately excluded: a reverse list starts at index 0 already, and
+ * animating it to index 0 while the enter transition is running adds needless layout work.
  * Own-send scrolls unconditionally at the call site and does not route through this helper.
  */
 fun shouldAutoscrollToNewest(atBottom: Boolean, oldCount: Int, newCount: Int): Boolean =
-    atBottom && newCount > oldCount
+    atBottom && oldCount > 0 && newCount > oldCount
 
 /**
  * Aggregate raw [ReactionEntity] rows into per-msgid chip lists: one chip per emoji with its count

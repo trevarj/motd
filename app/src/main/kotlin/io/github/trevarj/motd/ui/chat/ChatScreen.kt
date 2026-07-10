@@ -254,16 +254,10 @@ fun ChatContent(
     // individually reversible). Cleared whenever expand-all is toggled off.
     var collapsedFools by remember { mutableStateOf(setOf<Long>()) }
 
-    // Initial anchor: on channel open with no deep-jump, park the reverse list at index 0 (newest)
-    // once the first page settles. reverseLayout already starts at 0, but an explicit scroll after
-    // the first non-empty refresh guards against a Paging prepend nudging the anchor before layout.
-    if (jumpTarget == null) {
-        LaunchedEffect(Unit) {
-            snapshotFlow { items.loadState.refresh to items.itemCount }
-                .first { (refresh, count) -> refresh is LoadState.NotLoading && count > 0 }
-            if (listState.firstVisibleItemIndex <= 1) listState.scrollToItem(0)
-        }
-    }
+    // A fresh reverse-layout list is already anchored at index 0 (the newest row).  Do not issue a
+    // second scroll when Paging's initial page arrives: even a non-animated scroll invalidates the
+    // just-measured viewport while the route enter transition is rendering, causing a visible
+    // main-thread hitch. Deep links retain their explicit anchor below.
 
     // Consume any mention prefill queued by ChannelInfo. Runs once per composition entry; the
     // store is already emptied by consume() and the text survives via rememberSaveable, so a

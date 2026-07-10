@@ -312,8 +312,9 @@ fun MessageBubble(
                 // (text, mention inputs) so it doesn't re-run every recomposition/scroll frame.
                 val linkColor = MaterialTheme.colorScheme.primary
                 val mentionColor = rememberMentionColor(knownNicks, nickColors)
-                val body = remember(text, linkColor, mentionColor) {
-                    linkifiedBody(text, linkColor, mentionColor)
+                val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
+                val body = remember(text, linkColor, mentionsActive, mentionColor) {
+                    linkifiedBody(text, linkColor, mentionsActive, mentionColor)
                 }
                 Text(
                     text = body,
@@ -487,12 +488,13 @@ private fun TwoLineMessageRow(
             if (text.isNotBlank()) {
                 val linkColor = MaterialTheme.colorScheme.primary
                 val mentionColor = rememberMentionColor(knownNicks, nickColors)
+                val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
                 // Memoized body build (linkify + mention coloring) so it doesn't re-run per frame.
-                val body = remember(text, kind, sender, linkColor, mentionColor) {
+                val body = remember(text, kind, sender, linkColor, mentionsActive, mentionColor) {
                     if (kind == MessageKind.ACTION) {
                         AnnotatedString("* $sender $text")
                     } else {
-                        linkifiedBody(text, linkColor, mentionColor)
+                        linkifiedBody(text, linkColor, mentionsActive, mentionColor)
                     }
                 }
                 Text(
@@ -600,10 +602,17 @@ internal fun FailedIcon() {
 internal fun linkifiedBody(
     text: String,
     linkColor: androidx.compose.ui.graphics.Color,
+    mentionsActive: Boolean = true,
     mentionColor: (String) -> androidx.compose.ui.graphics.Color? = { null },
 ): AnnotatedString {
+    // Most chat rows are plain text. Avoid the URL regex, nick token walk, and builder allocation
+    // when neither link annotations nor mention styling can affect the result.
+    if (!mentionsActive && !text.contains("http://") && !text.contains("https://")) {
+        return AnnotatedString(text)
+    }
     val urls = extractUrls(text)
     if (urls.isEmpty()) {
+        if (!mentionsActive) return AnnotatedString(text)
         return buildAnnotatedString { appendMentionColored(text, mentionColor) }
     }
     val linkStyle = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)
