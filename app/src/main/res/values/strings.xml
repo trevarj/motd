@@ -161,6 +161,8 @@
     <string name="chat_day_yesterday">Yesterday</string>
     <string name="chat_composer_placeholder">Message</string>
     <string name="chat_composer_send">Send</string>
+    <string name="chat_composer_emoji">Insert emoji</string>
+    <string name="chat_composer_emoji_close">Close emoji picker</string>
     <string name="chat_composer_replying_to">Replying to %1$s</string>
     <string name="chat_composer_cancel_reply">Cancel reply</string>
     <string name="chat_action_reply">Reply</string>
