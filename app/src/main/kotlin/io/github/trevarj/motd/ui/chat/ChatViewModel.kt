@@ -39,8 +39,12 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import io.github.trevarj.motd.ui.components.ReactionChip
+import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import java.time.Instant
 import javax.inject.Inject
+
+private const val MAX_REPLY_PREVIEW_CACHE = 128
+private const val MAX_REACTION_WINDOW_MSGIDS = 500
 
 /**
  * Single UI state for the chat screen (plans/07). `pagingFlow` is the cached message stream;
@@ -53,6 +57,8 @@ data class ChatState(
     val replyTo: MessageEntity? = null,
     val connState: IrcClientState = IrcClientState.Disconnected,
 )
+
+internal fun MessageEntity.toReplyPreviewData(): ReplyPreviewData = ReplyPreviewData(sender, text)
 
 /**
  * Wire text for resending a failed row. An ACTION is stored with its `/me ` prefix stripped, so
@@ -122,7 +128,7 @@ class ChatViewModel @Inject constructor(
 
     // --- reactions aggregation (plans/15 #5, #18) ---
 
-    /** Msgids currently visible in the paging window; the screen keeps this current. */
+    /** Msgids from the bounded loaded Paging window, supplied by the screen on page changes. */
     private val visibleMsgids = MutableStateFlow<List<String>>(emptyList())
 
     fun setVisibleMsgids(ids: List<String>) {
@@ -132,8 +138,9 @@ class ChatViewModel @Inject constructor(
     /**
      * Reaction chips keyed by msgid, aggregated in the VM so the value survives across message
      * arrivals (no blank frame from an emptyList re-seed) and picks up echo-confirm msgid swaps as
-     * soon as [visibleMsgids] changes. Buffer-scoped reactions avoid the SQLite IN(...) overflow
-     * (plans/15 #5); we filter to the visible window here.
+     * as reactions arrive. Buffer-scoped reactions avoid the SQLite IN(...) overflow; filtering
+     * the result to a bounded loaded window prevents historical reaction rows from being
+     * re-aggregated on the main thread when a populated chat opens.
      */
     val reactionChips: StateFlow<Map<String, List<ReactionChip>>> = combine(
         messageRepository.reactionsForBuffer(bufferId),
@@ -141,10 +148,24 @@ class ChatViewModel @Inject constructor(
         connState,
     ) { all, visible, conn ->
         val visibleSet = visible.toHashSet()
-        val relevant = all.filter { it.targetMsgid in visibleSet }
         val myNick = (conn as? IrcClientState.Ready)?.nick
-        aggregateReactions(relevant, myNick, nickNormalizer())
+        aggregateReactions(all.asSequence().filter { it.targetMsgid in visibleSet }.toList(), myNick, nickNormalizer())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    // Reply previews are requested only by composed rows. The bounded cache shares an in-flight
+    // Room lookup across recompositions and its WhileSubscribed policy cancels unused collection.
+    private val replyPreviewCache = object : LinkedHashMap<String, StateFlow<ReplyPreviewData?>>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, StateFlow<ReplyPreviewData?>>): Boolean =
+            size > MAX_REPLY_PREVIEW_CACHE
+    }
+
+    fun replyPreview(msgid: String): StateFlow<ReplyPreviewData?> = synchronized(replyPreviewCache) {
+        replyPreviewCache.getOrPut(msgid) {
+            kotlinx.coroutines.flow.flow {
+                emit(messageRepository.byMsgid(bufferId, msgid)?.toReplyPreviewData())
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        }
+    }
 
     // --- read marker snapshot (plans/15 #2) ---
 

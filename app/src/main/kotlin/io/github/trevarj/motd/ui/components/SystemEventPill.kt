@@ -35,11 +35,17 @@ data class SystemEvent(val text: String)
 @Composable
 fun SystemEventPill(
     summary: String,
-    lines: List<String>,
+    lineCount: Int,
+    loadLines: () -> List<String>,
+    /** Changes whenever the backing collapsed chunk changes; resets stale expanded line state. */
+    contentKey: Any,
     modifier: Modifier = Modifier,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val collapsible = lines.size > 1
+    var expanded by remember(contentKey) { mutableStateOf(false) }
+    // Materializing every line of a large JOIN/PART burst while scrolling is expensive. Keep the
+    // collapsed path to its bounded summary and build lines only if the user opens the pill.
+    var lines by remember(contentKey) { mutableStateOf<List<String>?>(null) }
+    val collapsible = lineCount > 1
     Row(
         modifier = modifier.fillMaxWidth().padding(vertical = LocalSpacing.current.systemPillVPad, horizontal = 12.dp),
         horizontalArrangement = Arrangement.Center,
@@ -51,13 +57,16 @@ fun SystemEventPill(
                     RoundedCornerShape(50),
                 )
                 .then(
-                    if (collapsible) Modifier.clickable { expanded = !expanded } else Modifier,
+                    if (collapsible) Modifier.clickable {
+                        if (!expanded) lines = loadLines()
+                        expanded = !expanded
+                    } else Modifier,
                 )
                 .padding(horizontal = 14.dp, vertical = 6.dp),
             horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
         ) {
             if (expanded && collapsible) {
-                lines.forEach { line ->
+                lines.orEmpty().forEach { line ->
                     Text(
                         text = line,
                         style = MaterialTheme.typography.labelSmall,
@@ -81,7 +90,10 @@ fun SystemEventPill(
 @Composable
 private fun SystemEventPillSinglePreview() {
     MotdTheme {
-        SystemEventPill(summary = "alice joined", lines = listOf("alice joined"))
+        SystemEventPill(
+            summary = "alice joined", lineCount = 1, loadLines = { listOf("alice joined") },
+            contentKey = "alice",
+        )
     }
 }
 
@@ -90,8 +102,9 @@ private fun SystemEventPillSinglePreview() {
 private fun SystemEventPillCollapsedPreview() {
     MotdTheme {
         SystemEventPill(
-            summary = "3 joined · 1 left",
-            lines = listOf("alice joined", "bob joined", "carol joined", "dave left"),
+            summary = "3 joined · 1 left", lineCount = 4,
+            loadLines = { listOf("alice joined", "bob joined", "carol joined", "dave left") },
+            contentKey = "preview",
         )
     }
 }

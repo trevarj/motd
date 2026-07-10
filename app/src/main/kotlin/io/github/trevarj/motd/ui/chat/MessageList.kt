@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -51,6 +52,8 @@ import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.components.SystemEventPill
 import io.github.trevarj.motd.ui.components.DaySeparator
 import io.github.trevarj.motd.ui.components.dayStart
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 /** System-event message kinds rendered as pills rather than bubbles. */
 private val SYSTEM_KINDS = setOf(
@@ -58,6 +61,12 @@ private val SYSTEM_KINDS = setOf(
     MessageKind.NICK, MessageKind.MODE, MessageKind.TOPIC, MessageKind.SERVER_INFO,
     MessageKind.ERROR,
 )
+
+/** Limit collapsed system-event work per composed row during high-velocity history traversal. */
+internal const val MAX_COLLAPSED_SYSTEM_EVENTS = 24
+
+/** Stable identity for remembered expanded pill state; changes when Paging extends a tail chunk. */
+internal data class SystemRunContentKey(val newestId: Long, val oldestId: Long, val count: Int)
 
 fun isSystemKind(kind: MessageKind): Boolean = kind in SYSTEM_KINDS
 
@@ -74,23 +83,6 @@ fun showsSender(current: MessageEntity, olderNeighbor: MessageEntity?): Boolean 
     if (isSystemKind(olderNeighbor.kind) != isSystemKind(current.kind)) return true
     return current.serverTime - olderNeighbor.serverTime > GROUP_WINDOW_MS
 }
-
-/**
- * Resolves a reply target from the Paging window already loaded for this list.
- *
- * This deliberately runs only for a composed reply row. Building an index for every Paging row
- * when the chat opens front-loads work that most rows do not need.
- */
-internal fun resolveReplyFromLoadedItems(
-    targetMsgid: String,
-    itemCount: Int,
-    peek: (Int) -> MessageEntity?,
-): ReplyPreviewData? =
-    (0 until itemCount)
-        .asSequence()
-        .mapNotNull(peek)
-        .firstOrNull { it.msgid == targetMsgid }
-        ?.let { ReplyPreviewData(it.sender, it.text) }
 
 /**
  * Reverse-layout message list. Index 0 is the newest message (bottom). For each row we peek the
@@ -111,6 +103,7 @@ fun MessageList(
     onOpenLink: (String) -> Unit,
     modifier: Modifier = Modifier,
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
+    replyPreview: (String) -> Flow<ReplyPreviewData?> = { flowOf(null) },
     onDelete: (MessageEntity) -> Unit = {},
     highlightMsgid: String? = null,
     // Normalized nicks known in the current buffer (member list). Drives @mention coloring in the
@@ -150,7 +143,7 @@ fun MessageList(
             // skip the rest. In a reversed list the newest of a contiguous system run is the item
             // whose just-newer neighbor is not a system event.
             if (isSystemKind(msg.kind)) {
-                if (newer != null && isSystemKind(newer.kind)) return@items // absorbed by a newer pill
+                if (!isSystemRunChunkHead(index, newer?.let { isSystemKind(it.kind) } == true)) return@items
                 SystemEventRun(items = items, index = index, newest = msg, readMarkerTime = readMarkerTime)
                 return@items
             }
@@ -204,9 +197,7 @@ fun MessageList(
                 loadPreview = loadPreview,
                 onOpenLink = onOpenLink,
                 onSenderClick = onSenderClick,
-                resolveReply = { msgid ->
-                    resolveReplyFromLoadedItems(msgid, items.itemCount, items::peek)
-                },
+                replyPreview = replyPreview,
             )
             }
         }
@@ -220,9 +211,9 @@ fun MessageList(
 }
 
 /**
- * Render a collapsed run of consecutive system events whose newest item is at [index]. Walks older
- * neighbors while they stay contiguous system events, summarizing counts by kind ("3 joined · 1
- * left"); the [SystemEventPill] expands to the per-event lines on tap (plans/15 #15). The
+ * Render one bounded chunk of a collapsed system-event run. Very long bursts are split into
+ * adjacent pills, so scrolling never scans or allocates the entire run. Lines remain lazy until
+ * expansion. The
  * read-marker/day separators are computed against the oldest item of the run and the neighbor just
  * older than the whole run, matching the reversed-list boundary rules used for bubbles.
  */
@@ -233,11 +224,12 @@ private fun SystemEventRun(
     newest: MessageEntity,
     readMarkerTime: Long?,
 ) {
-    // Gather the run: newest first (index), then older neighbors while still system events.
+    // Gather at most one chunk: newest first (index), then older neighbors while still system events.
     val run = ArrayList<MessageEntity>()
     run.add(newest)
     var i = index + 1
-    while (i < items.itemCount) {
+    val chunkLimit = systemRunChunkLimit(index)
+    while (i < items.itemCount && run.size < chunkLimit) {
         val m = items.peek(i) ?: break
         if (!isSystemKind(m.kind)) break
         run.add(m)
@@ -246,7 +238,6 @@ private fun SystemEventRun(
     val oldest = run.last()
     val olderThanRun = if (index + run.size < items.itemCount) items.peek(index + run.size) else null
 
-    val lines = run.map { it.text }
     val summary = if (run.size == 1) newest.text else summarizeSystemRun(run)
 
     // Divider below the run when the run's newest crosses the marker and its older neighbor doesn't.
@@ -258,7 +249,13 @@ private fun SystemEventRun(
     // Column so the pill and any dividers stack vertically. A bare item slot stacks siblings on top
     // of each other (its MeasurePolicy behaves like a Box), which would overlap the divider text.
     Column(modifier = Modifier.fillMaxWidth()) {
-        SystemEventPill(summary = summary, lines = lines, modifier = Modifier.testTag("chat_system_pill"))
+        SystemEventPill(
+            summary = summary,
+            lineCount = run.size,
+            loadLines = { run.map { it.text } },
+            contentKey = SystemRunContentKey(newest.id, oldest.id, run.size),
+            modifier = Modifier.testTag("chat_system_pill"),
+        )
         if (showNewDivider) {
             NewMessagesDivider(
                 label = stringResource(R.string.chat_new_messages),
@@ -268,6 +265,17 @@ private fun SystemEventRun(
         if (showDay) DaySeparator(timeMs = oldest.serverTime)
     }
 }
+
+/**
+ * A run begins at its newest row and at fixed absolute-index chunk boundaries. This is deliberately
+ * O(1): suppressed rows do no neighbor walk while flinging, and each event belongs to one head.
+ */
+internal fun isSystemRunChunkHead(index: Int, newerIsSystem: Boolean): Boolean =
+    !newerIsSystem || index % MAX_COLLAPSED_SYSTEM_EVENTS == 0
+
+/** Number of rows from [index] through the next absolute chunk boundary (at most 24). */
+internal fun systemRunChunkLimit(index: Int): Int =
+    MAX_COLLAPSED_SYSTEM_EVENTS - (index % MAX_COLLAPSED_SYSTEM_EVENTS)
 
 /**
  * Summarize a run of system events by kind: JOIN → "joined", PART/QUIT → "left", others by kind
@@ -312,7 +320,7 @@ private fun MessageRow(
     loadPreview: suspend (String) -> LinkPreview?,
     onOpenLink: (String) -> Unit,
     onSenderClick: (String) -> Unit,
-    resolveReply: (String) -> ReplyPreviewData?,
+    replyPreview: (String) -> Flow<ReplyPreviewData?>,
     // Non-null for an expanded fool row: renders a "hide" chip above the bubble that re-collapses it.
     onCollapseFool: (() -> Unit)? = null,
 ) {
@@ -325,7 +333,10 @@ private fun MessageRow(
     // Day separator when this message starts a new day relative to the older neighbor.
     val showDay = older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
 
-    val reply = msg.replyToMsgid?.let(resolveReply)
+    // A row asks Room for its reply target only while it is composed. This avoids timeline-wide
+    // loaded-window scans during fast traversal; collection is lifecycle-cancelled off-screen.
+    val replyFlow = remember(msg.replyToMsgid) { msg.replyToMsgid?.let(replyPreview) ?: flowOf(null) }
+    val reply by replyFlow.collectAsStateWithLifecycle(initialValue = null)
     // Parse URLs once per message text (was re-run on every recomposition, twice per row).
     val imageUrl = remember(msg.text) { firstImageUrl(msg.text) }
     val linkUrl = remember(msg.text) { firstLinkUrl(msg.text) }

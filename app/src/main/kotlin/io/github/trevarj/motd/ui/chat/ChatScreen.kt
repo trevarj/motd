@@ -76,6 +76,7 @@ import kotlinx.coroutines.launch
 /** Pause after the last keystroke before the nick-autocomplete panel becomes visible, so fast
  *  typing doesn't flash suggestions on every character. */
 private const val AUTOCOMPLETE_SHOW_DEBOUNCE_MS = 250L
+private const val MAX_REACTION_WINDOW_MSGIDS = 500
 
 /** Stateful entry: wires the ViewModel, lifecycle mark-read, and navigation. */
 @Composable
@@ -101,14 +102,13 @@ fun ChatScreen(
         onDispose { viewModel.onPause() }
     }
 
-    // Keep the VM's visible-msgid set current so its reaction aggregation subscribes to the right
-    // rows (picks up echo-confirm msgid swaps too, plans/15 #18).
+    // Keep a bounded loaded-window reaction key set. This changes only as Paging item count
+    // changes and avoids both layout observers and unbounded buffer-reaction aggregation.
     val visibleMsgids = remember(items.itemCount) {
-        (0 until items.itemCount).mapNotNull { items.peek(it)?.msgid }
+        (0 until minOf(items.itemCount, MAX_REACTION_WINDOW_MSGIDS)).mapNotNull { items.peek(it)?.msgid }
     }
     LaunchedEffect(visibleMsgids) { viewModel.setVisibleMsgids(visibleMsgids) }
 
-    // Aggregated chips retained in the VM (no blank frame on arrivals, plans/15 #18).
     val chipsByMsgid by viewModel.reactionChips.collectAsStateWithLifecycle()
 
     val jumpTarget by viewModel.jumpTarget.collectAsStateWithLifecycle()
@@ -137,6 +137,7 @@ fun ChatScreen(
         chatWallpaper = settings.chatWallpaper,
         showComposerEmoji = settings.showComposerEmoji,
         reactionChips = { msgid -> chipsByMsgid[msgid].orEmpty() },
+        replyPreview = viewModel::replyPreview,
         readMarkerSnapshot = readMarkerSnapshot,
         readMarkerLive = readMarkerTime,
         onMarkRead = viewModel::markRead,
@@ -218,6 +219,7 @@ fun ChatContent(
     onRetry: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> io.github.trevarj.motd.data.repo.LinkPreview?,
     reactionChips: (String) -> List<io.github.trevarj.motd.ui.components.ReactionChip> = { emptyList() },
+    replyPreview: (String) -> kotlinx.coroutines.flow.Flow<io.github.trevarj.motd.ui.components.ReplyPreviewData?> = { kotlinx.coroutines.flow.flowOf(null) },
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
@@ -576,6 +578,7 @@ fun ChatContent(
                         // Frozen read-marker so the "— New messages —" divider stays put (plans/15 #2).
                         readMarkerTime = readMarkerSnapshot,
                         reactionChips = reactionChips,
+                        replyPreview = replyPreview,
                         onLongPress = { sheetTarget = it },
                         onReact = onReact,
                         onImageClick = onOpenImage,
@@ -628,14 +631,10 @@ fun ChatContent(
                     // Gated on !autoScrolling so a sub-frame !atBottom blip during a programmatic
                     // scroll-to-newest (send / auto-follow) can't flash the FAB; a genuine user
                     // scroll-up leaves autoScrolling false, so it still appears promptly.
-                    val unreadIndex = remember(items.itemCount) {
-                        UnreadViewportIndex.from(
-                            List(items.itemCount) { index ->
-                                items.peek(index)?.let { UnreadViewportRow(index, it.serverTime, it.isSelf) }
-                                    ?: UnreadViewportRow(index, Long.MIN_VALUE, isSelf = true)
-                            },
-                        )
-                    }
+                    val unreadIndex = remember { UnreadViewportIndex() }
+                    // History growth appends older Paging rows. [UnreadViewportIndex] indexes only
+                    // that appended page; refreshes are detected by the index-zero identity.
+                    unreadIndex.update(items.itemCount, items::peek)
                     ScrollToBottomFab(
                         visible = initialPositionSettled && !atBottom && !autoScrolling,
                         unread = readMarkerLive?.let { unreadIndex.count(firstVisible, it) } ?: 0,

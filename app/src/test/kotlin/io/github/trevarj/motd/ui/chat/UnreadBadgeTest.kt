@@ -71,17 +71,51 @@ class UnreadBadgeTest {
     }
 
     @Test fun `viewport index excludes own rows while retaining strict marker boundary`() {
-        val index = UnreadViewportIndex.from(
-            listOf(
-                UnreadViewportRow(index = 0, serverTime = 140, isSelf = true),
-                UnreadViewportRow(index = 1, serverTime = 130, isSelf = false),
-                UnreadViewportRow(index = 2, serverTime = 120, isSelf = true),
-                UnreadViewportRow(index = 3, serverTime = 100, isSelf = false),
-            ),
+        val rows = listOf(
+            row(0, 140, true), row(1, 130, false), row(2, 120, true), row(3, 100, false),
         )
+        val index = UnreadViewportIndex().also { it.update(rows.size) { rows[it] } }
         assertEquals(1, index.count(firstVisibleIndex = 3, marker = 100))
         // Equality is read, and the newest self row never inflates the badge.
         assertEquals(0, index.count(firstVisibleIndex = 4, marker = 130))
         assertEquals(1, index.count(firstVisibleIndex = 2, marker = 100))
     }
+
+    @Test fun `append only growth reads only the appended page`() {
+        val rows = (0 until 100).map { row(it, (1_000 - it).toLong(), isSelf = it % 7 == 0) }
+        val reads = mutableListOf<Int>()
+        val index = UnreadViewportIndex()
+        index.update(50) { position -> reads += position; rows[position] }
+        reads.clear()
+        index.update(100) { position -> reads += position; rows[position] }
+        // One index-zero identity probe detects a refresh; the old prefix is otherwise untouched.
+        assertEquals(listOf(0) + (50 until 100).toList(), reads)
+        assertEquals(42, index.count(50, 900))
+    }
+
+    @Test fun `index zero replacement rebuilds the compact window`() {
+        val initial = listOf(row(0, 100, false), row(1, 90, false))
+        val refreshed = listOf(row(9, 120, false), row(1, 90, false))
+        val index = UnreadViewportIndex()
+        index.update(2) { initial[it] }
+        index.update(2) { refreshed[it] }
+        assertEquals(1, index.count(1, 100))
+    }
+
+    @Test fun `empty Paging emission clears without probing index zero then accepts a new window`() {
+        val index = UnreadViewportIndex()
+        index.update(1) { row(0, 120, false) }
+        index.update(0) { error("empty Paging emission must not call peek") }
+        assertEquals(0, index.count(1, 0))
+
+        index.update(2) { position -> row(position, 200L - position, false) }
+        assertEquals(1, index.count(1, 100))
+    }
+
+    private fun row(index: Int, time: Long, isSelf: Boolean) =
+        io.github.trevarj.motd.data.db.MessageEntity(
+            id = index.toLong(), bufferId = 1, msgid = "m$index", serverTime = time,
+            sender = "nick", kind = io.github.trevarj.motd.data.db.MessageKind.PRIVMSG,
+            text = "text", dedupKey = "m$index", isSelf = isSelf,
+        )
 }

@@ -8,31 +8,18 @@ import org.junit.Test
 
 class ReplyPreviewResolutionTest {
     @Test
-    fun resolves_target_only_from_the_loaded_window() {
-        val loaded = listOf(
-            message(id = 1, msgid = "newest", sender = "alice", text = "new"),
-            message(id = 2, msgid = "target", sender = "bob", text = "reply target"),
-            null,
-        )
-        val accessed = mutableListOf<Int>()
-
-        val reply = resolveReplyFromLoadedItems("target", loaded.size) { index ->
-            accessed += index
-            loaded[index]
-        }
+    fun `row-local repository result converts to preview without a Paging scan`() {
+        val reply = message(id = 2, msgid = "target", sender = "bob", text = "reply target")
+            .toReplyPreviewData()
 
         assertEquals("bob", reply?.sender)
         assertEquals("reply target", reply?.text)
-        assertEquals(listOf(0, 1), accessed)
     }
 
     @Test
-    fun does_not_resolve_an_unloaded_target() {
-        val loaded = listOf(message(id = 1, msgid = "loaded", sender = "alice", text = "visible"))
-
-        val reply = resolveReplyFromLoadedItems("not-loaded", loaded.size) { loaded[it] }
-
-        assertNull(reply)
+    fun `missing repository result remains an absent preview`() {
+        val reply: MessageEntity? = null
+        assertNull(reply?.toReplyPreviewData())
     }
 
     private fun message(id: Long, msgid: String, sender: String, text: String) = MessageEntity(

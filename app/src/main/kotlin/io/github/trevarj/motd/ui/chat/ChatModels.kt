@@ -74,10 +74,54 @@ data class UnreadViewportRow(val index: Int, val serverTime: Long, val isSelf: B
  * Allocation-free-at-scroll-time unread index. Both arrays are sorted by reverse-list index and
  * server time respectively, so the viewport and marker bounds can each be found in O(log n).
  */
-class UnreadViewportIndex private constructor(
-    private val rowIndices: IntArray,
-    private val serverTimes: LongArray,
-) {
+class UnreadViewportIndex {
+    private var rowIndices = IntArray(0)
+    private var serverTimes = LongArray(0)
+    private var size = 0
+    private var loadedCount = 0
+    private var firstRowId: Long? = null
+
+    /**
+     * Incorporate a Paging window without re-reading its already-indexed prefix. Paging appends
+     * older rows at the end during history traversal, so that hot path only visits the new page.
+     * A refresh, shrink, or replacement of index zero invalidates positional assumptions and
+     * rebuilds the compact non-self index.
+     */
+    fun update(itemCount: Int, peek: (Int) -> MessageEntity?) {
+        // Paging emits an empty snapshot while invalidating/refreshing. Never probe index zero for
+        // that transient state: requesting it can synchronously re-enter Paging on the UI thread.
+        if (itemCount == 0) {
+            clear()
+            return
+        }
+        val currentFirstId = peek(0)?.id
+        val rebuild = itemCount < loadedCount ||
+            (loadedCount > 0 && currentFirstId != firstRowId)
+        if (rebuild) clear()
+
+        if (itemCount > loadedCount) {
+            for (index in loadedCount until itemCount) {
+                val row = peek(index) ?: continue
+                if (!row.isSelf) {
+                    ensureCapacity(size + 1)
+                    rowIndices[size] = index
+                    serverTimes[size] = row.serverTime
+                    size++
+                }
+            }
+            loadedCount = itemCount
+        }
+        firstRowId = currentFirstId
+    }
+
+    private fun clear() {
+        rowIndices = IntArray(0)
+        serverTimes = LongArray(0)
+        size = 0
+        loadedCount = 0
+        firstRowId = null
+    }
+
     fun count(firstVisibleIndex: Int, marker: Long): Int {
         val inViewport = lowerBound(rowIndices, firstVisibleIndex)
         val newerThanMarker = upperBound(serverTimes, marker)
@@ -86,7 +130,7 @@ class UnreadViewportIndex private constructor(
 
     private fun lowerBound(values: IntArray, target: Int): Int {
         var low = 0
-        var high = values.size
+        var high = size
         while (low < high) {
             val middle = (low + high) ushr 1
             if (values[middle] < target) low = middle + 1 else high = middle
@@ -97,7 +141,7 @@ class UnreadViewportIndex private constructor(
     // Descending values: number strictly greater than target.
     private fun upperBound(values: LongArray, target: Long): Int {
         var low = 0
-        var high = values.size
+        var high = size
         while (low < high) {
             val middle = (low + high) ushr 1
             if (values[middle] > target) low = middle + 1 else high = middle
@@ -105,15 +149,13 @@ class UnreadViewportIndex private constructor(
         return low
     }
 
-    companion object {
-        fun from(rows: List<UnreadViewportRow>): UnreadViewportIndex {
-            val others = rows.filterNot { it.isSelf }
-            return UnreadViewportIndex(
-                rowIndices = IntArray(others.size) { others[it].index },
-                serverTimes = LongArray(others.size) { others[it].serverTime },
-            )
-        }
+    private fun ensureCapacity(required: Int) {
+        if (required <= rowIndices.size) return
+        val capacity = maxOf(required, rowIndices.size.coerceAtLeast(16) * 2)
+        rowIndices = rowIndices.copyOf(capacity)
+        serverTimes = serverTimes.copyOf(capacity)
     }
+
 }
 
 /**
