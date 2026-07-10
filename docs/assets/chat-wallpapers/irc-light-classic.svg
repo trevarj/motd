@@ -1,32 +1,44 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" role="img" aria-label="IRC classic light chat wallpaper pattern">
-  <rect width="1080" height="1080" fill="#fbfaf6"/>
-  <g fill="none" stroke="#9cacd1" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity=".64">
-    <path d="M98 105h64m-52-32-24 96m96-96-24 96"/>
-    <path d="M350 92h92a22 22 0 0 1 22 22v36a22 22 0 0 1-22 22h-52l-36 28v-28h-4a22 22 0 0 1-22-22v-36a22 22 0 0 1 22-22z"/>
-    <path d="M735 94h82a18 18 0 0 1 18 18v58a18 18 0 0 1-18 18h-82a18 18 0 0 1-18-18v-58a18 18 0 0 1 18-18zm18 29h42m-42 35h24"/>
-    <path d="M932 94l26 26-26 26m44 0h42"/>
-    <path d="M151 303a34 34 0 1 0 0 68h58a34 34 0 1 0 0-68h-58z"/>
-    <path d="M474 295v76m-38-38h76"/>
-    <path d="M714 296l60 36-60 36v-72z"/>
-    <path d="M892 291h96m-78 42h78m-96 42h96"/>
-    <path d="M84 534c30-42 62-42 96 0s66 42 96 0"/>
-    <path d="M407 517h80a20 20 0 0 1 20 20v48a20 20 0 0 1-20 20h-80a20 20 0 0 1-20-20v-48a20 20 0 0 1 20-20zm21 29h38m-38 30h62"/>
-    <path d="M676 514a46 46 0 1 0 0 92 46 46 0 0 0 0-92zm-44 46h88m-44-44c18 28 18 60 0 88m0-88c-18 28-18 60 0 88"/>
-    <path d="M920 522h38a34 34 0 0 1 0 68h-38a34 34 0 0 1 0-68zm38 0h38a34 34 0 0 1 0 68h-38"/>
-    <path d="M124 774h82a22 22 0 0 1 22 22v36a22 22 0 0 1-22 22h-43l-32 28v-28h-7a22 22 0 0 1-22-22v-36a22 22 0 0 1 22-22z"/>
-    <path d="M419 772h64m-52-32-24 96m96-96-24 96"/>
-    <path d="M712 766l44 44 82-82"/>
-    <path d="M926 782a44 44 0 1 0 88 0 44 44 0 0 0-88 0zm44-70v26m0 88v26m-70-70h26m88 0h26"/>
-    <path d="M258 964l26 26-26 26m44 0h42"/>
-    <path d="M562 942h92a22 22 0 0 1 22 22v36a22 22 0 0 1-22 22h-52l-36 28v-28h-4a22 22 0 0 1-22-22v-36a22 22 0 0 1 22-22z"/>
+  <rect width="1080" height="1080" fill="#f7f9fc"/>
+  <g fill="none" stroke="#8392b3" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity=".56">
+    <!-- Channel -->
+    <path d="M104 78 82 170m94-92-22 92M68 112h116M60 145h116"/>
+    <!-- Conversation -->
+    <path d="M350 82h92a22 22 0 0 1 22 22v46a22 22 0 0 1-22 22h-48l-38 30v-30h-6a22 22 0 0 1-22-22v-46a22 22 0 0 1 22-22z"/>
+    <!-- Server -->
+    <path d="M724 84h104a18 18 0 0 1 18 18v76a18 18 0 0 1-18 18H724a18 18 0 0 1-18-18v-76a18 18 0 0 1 18-18zm10 35h84m-84 38h84"/>
+    <!-- Prompt -->
+    <path d="m932 102 30 30-30 30m52 0h54"/>
+    <!-- Bouncer bridge -->
+    <path d="M72 334h54m0 0a34 34 0 0 1 68 0m0 0h54m-156 0a34 34 0 0 0 68 0m0 0a34 34 0 0 0 68 0"/>
+    <!-- Secure connection -->
+    <path d="M426 305h92v82h-92zm22 0v-24a24 24 0 0 1 48 0v24m-24 35v18"/>
+    <!-- Nick mention -->
+    <path d="M742 374a48 48 0 1 1 28-87v61c0 16 20 17 30 6 20-22 12-76-10-94-34-29-90-20-114 17-28 44-4 106 48 119 24 6 48 1 66-10m-48-60a22 22 0 1 0 0 44 22 22 0 0 0 0-44z"/>
+    <!-- Channel list -->
+    <path d="M918 292h96m-96 42h72m-72 42h96"/>
+    <!-- Network globe -->
+    <path d="M116 518a48 48 0 1 0 0 96 48 48 0 0 0 0-96zm-46 48h92m-46-46c18 28 18 64 0 92m0-92c-18 28-18 64 0 92"/>
+    <!-- MOTD document -->
+    <path d="M390 520h86l30 30v68H390zm86 0v30h30m-88 24h58m-58 24h42"/>
+    <!-- Linked networks -->
+    <path d="M672 546h42a30 30 0 0 1 0 60h-42a30 30 0 0 1 0-60zm42 0h42a30 30 0 0 1 0 60h-42m-20-30h40"/>
+    <!-- Presence -->
+    <path d="M918 532h104v76H918zM940 555h60m-60 30h36"/>
+    <!-- Reply -->
+    <path d="M82 802h132a22 22 0 0 1 22 22v42a22 22 0 0 1-22 22h-56l-38 30v-30H82a22 22 0 0 1-22-22v-42a22 22 0 0 1 22-22zm28 43h76"/>
+    <!-- Channel -->
+    <path d="M440 764 418 856m94-92-22 92m-86-58h116m-124 34h116"/>
+    <!-- Read marker -->
+    <path d="m684 819 34 34 72-72m-42 38 28 28 54-54"/>
+    <!-- TLS shield -->
+    <path d="M952 766c24 18 50 24 76 24v48c0 52-32 78-76 96-44-18-76-44-76-96v-48c26 0 52-6 76-24zm-28 82 20 20 40-44"/>
+    <!-- Prompt -->
+    <path d="m126 986 28 28-28 28m50 0h52"/>
+    <!-- Conversation -->
+    <path d="M458 946h106a22 22 0 0 1 22 22v42a22 22 0 0 1-22 22h-50l-38 30v-30h-18a22 22 0 0 1-22-22v-42a22 22 0 0 1 22-22zm24 43h58"/>
   </g>
-  <g fill="#5b6ee1" opacity=".68">
-    <circle cx="264" cy="132" r="8"/><circle cx="548" cy="132" r="7"/><circle cx="619" cy="292" r="7"/><circle cx="318" cy="488" r="6"/><circle cx="820" cy="485" r="7"/><circle cx="272" cy="794" r="8"/><circle cx="526" cy="913" r="6"/><circle cx="856" cy="940" r="8"/>
-  </g>
-  <g fill="#55cbb2" opacity=".72">
-    <circle cx="244" cy="315" r="9"/><circle cx="520" cy="402" r="7"/><circle cx="815" cy="210" r="8"/><circle cx="236" cy="612" r="6"/><circle cx="596" cy="656" r="8"/><circle cx="884" cy="832" r="7"/>
-  </g>
-  <g fill="#9cacd1" opacity=".55">
-    <circle cx="82" cy="238" r="5"/><circle cx="257" cy="238" r="5"/><circle cx="432" cy="238" r="5"/><circle cx="833" cy="660" r="5"/><circle cx="858" cy="660" r="5"/><circle cx="883" cy="660" r="5"/>
+  <g fill="none" stroke="#5b6ee1" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity=".68">
+    <path d="M472 340v18m242 218h40M944 868l40-44"/>
   </g>
 </svg>
