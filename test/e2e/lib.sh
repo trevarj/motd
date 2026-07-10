@@ -436,6 +436,22 @@ reset_to_chatlist() {
   [ -n "$(bounds_of_desc 'New conversation')" ]
 }
 
+# scroll_to_text "<text>" [tries] — in a reverse-layout chat list (newest at the bottom), scroll up
+# toward older messages until the exact text is on screen. Used before long-pressing an older
+# message that auto-scroll pushed off the top. Returns success if the text becomes visible.
+scroll_to_text() {
+  local t="$1" tries="${2:-6}" i
+  for i in $(seq 1 "$tries"); do
+    dump || true
+    [ -n "$(bounds_of_text "$t")" ] && return 0
+    # Swipe finger top->bottom to drag content down, revealing older messages above.
+    adb_shell input swipe 540 700 540 1650 300
+    sleep 1
+  done
+  dump || true
+  [ -n "$(bounds_of_text "$t")" ]
+}
+
 # --- crash detection -------------------------------------------------------
 
 # clear_crash — clear the logcat crash + main buffers to establish a baseline.

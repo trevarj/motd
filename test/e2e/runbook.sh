@@ -374,7 +374,7 @@ phase_c() {
 
   # 24. Reaction add.
   step "Add a reaction"
-  long_press_text "Hello from e2e"       # TODO tag: chat_message_<msgid> (§4)
+  scroll_to_text "Hello from e2e" || true; long_press_text "Hello from e2e"       # TODO tag: chat_message_<msgid> (§4)
   if wait_for_text "👍" 5; then
     tap_text "👍"
     ok "reaction quick-row present; tapped 👍"
@@ -385,7 +385,7 @@ phase_c() {
 
   # 25. More reactions.
   step "More reactions grid"
-  long_press_text "Hello from e2e"
+  scroll_to_text "Hello from e2e" || true; long_press_text "Hello from e2e"
   if wait_for_text "More reactions" 5 || [ -n "$(bounds_of_desc "More reactions")" ]; then
     tap_desc "More reactions" || true
     note "opened more-reactions grid (TODO tag: message_more_reactions, §4)"
@@ -397,7 +397,7 @@ phase_c() {
 
   # 26. Reply.
   step "Reply bar"
-  long_press_text "Hello from e2e"
+  scroll_to_text "Hello from e2e" || true; long_press_text "Hello from e2e"
   if wait_for_text "Reply" 5; then
     tap_text "Reply"
     if [ -n "$(bounds_of_text "Replying to $MOTD_NICK")" ] || wait_for_text "Replying to" 4; then
@@ -411,7 +411,7 @@ phase_c() {
 
   # 27. Copy / Quote.
   step "Copy action (no crash)"
-  long_press_text "Hello from e2e"
+  scroll_to_text "Hello from e2e" || true; long_press_text "Hello from e2e"
   if wait_for_text "Copy" 5; then
     tap_text "Copy"                      # clipboard not asserted via UI (§2 step 27)
     ok "Copy tapped"
@@ -552,13 +552,17 @@ phase_e() {
 
   # 38. Open browser.
   step "Open channel browser"
-  adb_shell input keyevent 4 || true     # ensure at chat list
+  # reset_to_chatlist (run before this phase) already put us on the chat list; a BACK here would
+  # pop it and exit the app, so just re-anchor instead of pressing BACK.
+  reset_to_chatlist >/dev/null 2>&1 || true
   wait_for_text "motd" 6 || true
   tap_desc "New conversation"
   if wait_for_text "Browse channels…" 5; then
     tap_text "Browse channels…"
     wait_for_text "Browse channels" 8 || true
-    assert_text "Search channels"
+    # The browser can legitimately show a "Connect to browse channels" empty state, so assert the
+    # screen title (always present) rather than the conditionally-shown search field.
+    assert_text "Browse channels"
   else
     note "Browse channels… entry not found"
   fi
@@ -795,10 +799,12 @@ phase_g() {
   # 58. Compact render.
   step "Compact render in chat"
   tap_text "$MOTD_TEST_CHANNEL" || true
-  wait_for_text "Hello from e2e" 8 || true
-  # Compact rows render single-line; bubbles absent. We assert the message is
-  # still visible (structural bubble-vs-line distinction needs a tag, §4).
-  assert_text "Hello from e2e"
+  # The chat opens scrolled to the newest message, so an older sent line may be off-screen —
+  # scroll it back into view before asserting it renders.
+  # Compact mode renders "nick: text" as ONE node, so match that combined form — a bare
+  # "Hello from e2e" only exists as its own node in the bubble layouts.
+  scroll_to_text "${MOTD_NICK}: Hello from e2e" 8 || true
+  assert_text "${MOTD_NICK}: Hello from e2e"
   note "compact vs bubble structure needs chat_message_<msgid> tag to assert (§4)"
   assert_no_crash
 

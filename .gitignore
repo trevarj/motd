@@ -24,6 +24,7 @@ keystore.properties
 
 # E2E harness local secrets + artifacts
 test/e2e/.env
+test/e2e/.env.live
 test/e2e/artifacts/
 
 # agent worktrees
