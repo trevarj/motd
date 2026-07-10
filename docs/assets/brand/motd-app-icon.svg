@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">motd app icon</title>
+  <rect width="512" height="512" fill="#5266E8"/>
+  <path fill="#fff" fill-rule="evenodd" transform="translate(82 84) scale(1.82)" d="M48 24h96c20 0 36 16 36 36v62c0 20-16 36-36 36H76l-38 24 10-30c-19-5-32-22-32-42V60c0-20 14-36 32-36Zm59.8 24.3c2.2-4.9 8-7.1 12.9-4.9s7.1 8 4.9 12.9l-37.4 78.4c-2.2 4.9-8 7.1-12.9 4.9s-7.1-8-4.9-12.9l37.4-78.4Z"/>
+</svg>

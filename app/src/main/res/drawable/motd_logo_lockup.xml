@@ -1,29 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Horizontal lockup: the /| command-prompt mark plus the /motd monospace wordmark.
-     Shown on the About screen (light surface), so glyphs use near-black #111318. -->
+<!-- Theme-tinted horizontal motd lockup. The symbol supplies the slash-command cue. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="200dp"
-    android:height="67dp"
-    android:viewportWidth="240"
-    android:viewportHeight="80">
-    <!-- /| mark -->
-    <path
-        android:strokeColor="#111318"
-        android:strokeWidth="7"
-        android:strokeLineCap="round"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M22,58 L44,22" />
-    <path
-        android:fillColor="#39D98A"
-        android:pathData="M50,20 L58,20 L58,36 L50,36 Z" />
-    <!-- /motd wordmark (monospace strokes) -->
-    <path
-        android:strokeColor="#111318"
-        android:strokeWidth="6"
-        android:strokeLineCap="square"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M89,58 L103,22 M115,56 L115,31 Q115,26 120,26 Q125,26 125,31 L125,56 M125,31 Q125,26 130,26 Q135,26 135,31 L135,56 M151,26 L164,26 Q170,26 170,32 L170,50 Q170,56 164,56 L151,56 Q145,56 145,50 L145,32 Q145,26 151,26 M181,26 L201,26 M191,20 L191,51 Q191,56 196,56 L201,56 M213,20 L213,56 M213,30 Q217,26 224,26 Q231,26 231,33 L231,49 Q231,56 224,56 Q217,56 213,52" />
-    <path
-        android:fillColor="#39D98A"
-        android:pathData="M234,51 L240,51 L240,58 L240,58 L234,58 Z" />
+    android:height="75dp"
+    android:viewportWidth="490"
+    android:viewportHeight="180">
+    <group
+        android:translateX="2"
+        android:translateY="1"
+        android:scaleX="0.92"
+        android:scaleY="0.92">
+        <path
+            android:fillColor="#FF000000"
+            android:fillType="evenOdd"
+            android:pathData="M48,24H144C164,24 180,40 180,60V122C180,142 164,158 144,158H76L38,182 48,152C29,147 16,130 16,110V60C16,40 30,24 48,24ZM107.8,48.3C110,43.4 115.8,41.2 120.7,43.4C125.6,45.6 127.8,51.4 125.6,56.3L88.2,134.7C86,139.6 80.2,141.8 75.3,139.6C70.4,137.4 68.2,131.6 70.4,126.7Z" />
+    </group>
+    <group android:translateX="-48">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="14"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M260,126V82C260,72 268,66 276,66C285,66 292,73 292,83V126M292,83C292,73 300,66 309,66S325,73 325,83V126M373,72C357,72 348,83 348,99S357,126 373,126 398,115 398,99 389,72 373,72ZM424,52V110C424,121 430,126 440,126H446M412,73H446M504,52V126M504,81C498,75 491,72 483,72 468,72 460,83 460,99S468,126 483,126C491,126 498,123 504,116" />
+    </group>
 </vector>

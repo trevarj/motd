@@ -1,18 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android splash artwork: the /| command-prompt mark centered for the platform SplashScreen
-     (which masks the icon to a circle, so no wordmark here). -->
+<!-- Static platform splash artwork. It matches the launcher foreground and stays comfortably
+     inside the platform's circular mask. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="200dp"
     android:height="200dp"
-    android:viewportWidth="288"
-    android:viewportHeight="288">
-    <path
-        android:strokeColor="#F7F8FB"
-        android:strokeWidth="24"
-        android:strokeLineCap="round"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M118,196 L164,104" />
-    <path
-        android:fillColor="#39D98A"
-        android:pathData="M176,96 L196,96 L196,140 L176,140 Z" />
+    android:viewportWidth="192"
+    android:viewportHeight="192">
+    <group
+        android:pivotX="96"
+        android:pivotY="96"
+        android:scaleX="0.66"
+        android:scaleY="0.66">
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M48,24H144C164,24 180,40 180,60V122C180,142 164,158 144,158H76L38,182 48,152C29,147 16,130 16,110V60C16,40 30,24 48,24ZM107.8,48.3C110,43.4 115.8,41.2 120.7,43.4C125.6,45.6 127.8,51.4 125.6,56.3L88.2,134.7C86,139.6 80.2,141.8 75.3,139.6C70.4,137.4 68.2,131.6 70.4,126.7Z" />
+    </group>
 </vector>

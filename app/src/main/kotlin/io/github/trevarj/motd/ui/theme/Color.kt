@@ -4,8 +4,8 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 
-// Brand seed. Static color schemes derive from this indigo when dynamic color is unavailable.
-val Indigo = Color(0xFF5B6EE1)
+// Brand seed. Static color schemes derive from this accessible indigo when dynamic color is unavailable.
+val Indigo = Color(0xFF5266E8)
 
 // Near-black surfaces for the AMOLED variant (dark scheme with true-black background/surface).
 val AmoledBackground = Color.Black

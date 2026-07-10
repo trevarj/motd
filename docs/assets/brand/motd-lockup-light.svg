@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 490 180" role="img" aria-labelledby="title">
+  <title id="title">motd</title>
+  <g fill="#5266E8" stroke="#5266E8" stroke-linecap="round" stroke-linejoin="round">
+    <path fill-rule="evenodd" stroke="none" transform="translate(2 1) scale(.92)" d="M48 24h96c20 0 36 16 36 36v62c0 20-16 36-36 36H76l-38 24 10-30c-19-5-32-22-32-42V60c0-20 14-36 32-36Zm59.8 24.3c2.2-4.9 8-7.1 12.9-4.9s7.1 8 4.9 12.9l-37.4 78.4c-2.2 4.9-8 7.1-12.9 4.9s-7.1-8-4.9-12.9l37.4-78.4Z"/>
+    <path fill="none" stroke-width="14" transform="translate(-48)" d="M260 126V82c0-10 8-16 16-16 9 0 16 7 16 17v43m0-43c0-10 8-17 17-17s16 7 16 17v43M373 72c-16 0-25 11-25 27s9 27 25 27 25-11 25-27-9-27-25-27ZM424 52v58c0 11 6 16 16 16h6m-34-53h34M504 52v74m0-45c-6-6-13-9-21-9-15 0-23 11-23 27s8 27 23 27c8 0 15-3 21-10"/>
+  </g>
+</svg>

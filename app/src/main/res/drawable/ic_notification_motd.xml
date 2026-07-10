@@ -1,14 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Notification-safe glyph: the /| command-prompt mark as a solid single-color shape. -->
+<!-- Notification-safe one-color form of the chat + slash mark. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
+    android:viewportWidth="192"
+    android:viewportHeight="192">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M11.6,4.4 L14,5.4 L9.4,19.6 L7,18.6 Z" />
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M15.5,4 L19,4 L19,10 L15.5,10 Z" />
+        android:fillType="evenOdd"
+        android:pathData="M48,24H144C164,24 180,40 180,60V122C180,142 164,158 144,158H76L38,182 48,152C29,147 16,130 16,110V60C16,40 30,24 48,24ZM107.8,48.3C110,43.4 115.8,41.2 120.7,43.4C125.6,45.6 127.8,51.4 125.6,56.3L88.2,134.7C86,139.6 80.2,141.8 75.3,139.6C70.4,137.4 68.2,131.6 70.4,126.7Z" />
 </vector>

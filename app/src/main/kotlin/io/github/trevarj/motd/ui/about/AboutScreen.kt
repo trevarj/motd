@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -57,7 +58,8 @@ fun AboutScreen(onBack: () -> Unit = {}) {
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             Image(
                 painter = painterResource(R.drawable.motd_logo_lockup),
-                contentDescription = stringResource(R.string.app_name),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(96.dp)
