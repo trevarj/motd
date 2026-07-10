@@ -24,9 +24,13 @@ internal object DbModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MotdDatabase =
-        // Non-destructive migrations only (plans/04): the release app holds real user history.
+        // Upgrades stay non-destructive (plans/04): the release app holds real user history.
         Room.databaseBuilder(context, MotdDatabase::class.java, "motd.db")
             .addMigrations(MIGRATION_1_2)
+            // Downgrades only happen in dev when switching between branches with different schema
+            // versions (e.g. the obfs branch's v3 vs main's v2); released builds only ever move the
+            // version up. Wipe-and-recreate on downgrade instead of crashing on a missing migration.
+            .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
             .build()
 
     @Provides fun provideNetworkDao(db: MotdDatabase): NetworkDao = db.networkDao()
