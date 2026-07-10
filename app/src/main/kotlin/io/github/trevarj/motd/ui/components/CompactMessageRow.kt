@@ -131,8 +131,7 @@ internal fun CompactMessageRow(
             )
             // Trailing timestamp keeps the IRC "right gutter" feel without a bubble.
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                if (failed) FailedIcon()
-                if (pending && !failed) PendingIcon()
+                MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                 Text(
                     text = formatTime(timeMs),
                     fontSize = 10.sp,

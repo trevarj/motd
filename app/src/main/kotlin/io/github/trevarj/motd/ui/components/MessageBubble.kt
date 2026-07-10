@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
@@ -151,8 +152,7 @@ fun MessageBubble(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (failed) FailedIcon()
-                if (pending && !failed) PendingIcon()
+                MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                 Text(
                     text = formatTime(timeMs),
                     fontSize = 10.sp,
@@ -288,8 +288,7 @@ fun MessageBubble(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (failed) FailedIcon()
-                if (pending && !failed) PendingIcon()
+                MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                 Text(
                     text = formatTime(timeMs),
                     fontSize = 10.sp,
@@ -302,6 +301,49 @@ fun MessageBubble(
             ReactionRow(reactions = reactions, onReact = onReact)
         }
     }
+}
+
+/**
+ * Delivery status of an own message, in priority order. IRC has no per-recipient read receipt
+ * (`draft/read-marker` is a personal, self-only marker), so [SENT] — the bouncer echoed it back —
+ * is as far as the ladder goes: there is no "read by them" state to render.
+ */
+internal enum class MsgStatus { NONE, PENDING, FAILED, SENT }
+
+/**
+ * Pure status decision shared by every render site. Incoming messages ([isSelf] false) are always
+ * [NONE]; they're never pending/failed and must not show a check.
+ */
+internal fun messageStatus(isSelf: Boolean, pending: Boolean, failed: Boolean): MsgStatus = when {
+    failed -> MsgStatus.FAILED
+    pending -> MsgStatus.PENDING
+    isSelf -> MsgStatus.SENT
+    else -> MsgStatus.NONE
+}
+
+/** Renders the single leading status glyph (clock / error / sent-check) for the timestamp row. */
+@Composable
+internal fun MessageStatusIcon(isSelf: Boolean, pending: Boolean, failed: Boolean) {
+    when (messageStatus(isSelf, pending, failed)) {
+        MsgStatus.FAILED -> FailedIcon()
+        MsgStatus.PENDING -> PendingIcon()
+        MsgStatus.SENT -> SentIcon()
+        MsgStatus.NONE -> {}
+    }
+}
+
+/** Small check glyph shown next to the timestamp once the bouncer has echoed an own message back. */
+@Composable
+internal fun SentIcon() {
+    Icon(
+        Icons.Filled.Done,
+        contentDescription = stringResource(R.string.chat_sent),
+        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        modifier = Modifier
+            .padding(end = 4.dp)
+            .heightIn(max = 12.dp)
+            .width(12.dp),
+    )
 }
 
 /** Small clock glyph shown next to the timestamp while a message is still sending (plans/15 #21). */
