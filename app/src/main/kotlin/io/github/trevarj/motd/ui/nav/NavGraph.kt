@@ -18,8 +18,12 @@ import io.github.trevarj.motd.ui.chatlist.ChatListScreen
 import io.github.trevarj.motd.ui.imageviewer.ImageViewerScreen
 import io.github.trevarj.motd.ui.onboarding.OnboardingScreen
 import io.github.trevarj.motd.ui.search.SearchScreen
+import io.github.trevarj.motd.ui.settings.AppearanceSettingsScreen
+import io.github.trevarj.motd.ui.settings.ChatSettingsScreen
+import io.github.trevarj.motd.ui.settings.DeliverySettingsScreen
 import io.github.trevarj.motd.ui.settings.ManageNicksScreen
 import io.github.trevarj.motd.ui.settings.NetworkSettingsScreen
+import io.github.trevarj.motd.ui.settings.NetworksSettingsScreen
 import io.github.trevarj.motd.ui.settings.NickListKind
 import io.github.trevarj.motd.ui.settings.SettingsScreen
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkScreen
@@ -85,14 +89,36 @@ fun MotdNavGraph(
             })
         }
         composable<SettingsRoute> {
+            // Top-level Settings: category rows opening the focused sub-screens below.
             SettingsScreen(
                 onBack = { navController.popBackStack() },
-                onOpenNetwork = { navController.navigate(NetworkSettingsRoute(it)) },
+                onOpenAppearance = { navController.navigate(AppearanceSettingsRoute) },
+                onOpenChat = { navController.navigate(ChatSettingsRoute) },
+                onOpenDelivery = { navController.navigate(DeliverySettingsRoute) },
+                onOpenNetworks = { navController.navigate(NetworksSettingsRoute) },
                 onOpenAbout = { navController.navigate(AboutRoute) },
+            )
+        }
+        composable<AppearanceSettingsRoute> {
+            AppearanceSettingsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenNickColors = { navController.navigate(NickColorsRoute) },
+            )
+        }
+        composable<ChatSettingsRoute> {
+            ChatSettingsScreen(
+                onBack = { navController.popBackStack() },
                 onOpenFriends = { navController.navigate(FriendsRoute) },
                 onOpenFools = { navController.navigate(FoolsRoute) },
-                onOpenNickColors = { navController.navigate(NickColorsRoute) },
-                // Round 5: add-network entry from Settings.
+            )
+        }
+        composable<DeliverySettingsRoute> {
+            DeliverySettingsScreen(onBack = { navController.popBackStack() })
+        }
+        composable<NetworksSettingsRoute> {
+            NetworksSettingsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenNetwork = { navController.navigate(NetworkSettingsRoute(it)) },
                 onOpenAddNetwork = { navController.navigate(AddNetworkRoute) },
             )
         }

@@ -1,8 +1,5 @@
 package io.github.trevarj.motd.ui.settings
 
-import android.content.Intent
-import android.os.PowerManager
-import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,13 +8,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -26,11 +20,8 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -39,92 +30,109 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.pluralStringResource
-import androidx.core.net.toUri
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
-import io.github.trevarj.motd.data.prefs.AvatarStyle
-import io.github.trevarj.motd.data.prefs.ChatWallpaper
-import io.github.trevarj.motd.data.prefs.FoolsMode
-import io.github.trevarj.motd.data.prefs.LayoutDensity
-import io.github.trevarj.motd.data.prefs.NickColorPalette
-import io.github.trevarj.motd.data.prefs.Settings
-import io.github.trevarj.motd.data.prefs.ThemeMode
-import io.github.trevarj.motd.data.prefs.isTerminalTheme
-import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.ui.about.appVersion
-import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
-import io.github.trevarj.motd.ui.theme.MotdTheme
 
-/** Stateful entry: wires the ViewModel and drives navigation. */
+/**
+ * Top-level Settings screen: a short list of category rows that each open a focused sub-screen. The
+ * long flat list was split into Appearance / Chat / Notifications & delivery / Networks / About for
+ * discoverability; every individual setting still lives under exactly one category and keeps its
+ * original wiring (see the per-category screens in this package).
+ */
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit = {},
-    onOpenNetwork: (Long) -> Unit = {},
+    onOpenAppearance: () -> Unit = {},
+    onOpenChat: () -> Unit = {},
+    onOpenDelivery: () -> Unit = {},
+    onOpenNetworks: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
-    onOpenFriends: () -> Unit = {},
-    onOpenFools: () -> Unit = {},
-    onOpenNickColors: () -> Unit = {},
-    // Round 5 (plans/16): add-network entry. Body lands in WP-V2.
-    onOpenAddNetwork: () -> Unit = {},
-    viewModel: SettingsViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.state.collectAsState()
     SettingsContent(
-        state = state,
         onBack = onBack,
-        onOpenNetwork = onOpenNetwork,
+        onOpenAppearance = onOpenAppearance,
+        onOpenChat = onOpenChat,
+        onOpenDelivery = onOpenDelivery,
+        onOpenNetworks = onOpenNetworks,
         onOpenAbout = onOpenAbout,
-        onOpenFriends = onOpenFriends,
-        onOpenFools = onOpenFools,
-        onOpenNickColors = onOpenNickColors,
-        onOpenAddNetwork = onOpenAddNetwork,
-        onThemeMode = viewModel::setThemeMode,
-        onDynamicColor = viewModel::setDynamicColor,
-        onDeliveryMode = viewModel::setDeliveryMode,
-        onLayoutDensity = viewModel::setLayoutDensity,
-        onNickColorsEnabled = viewModel::setNickColorsEnabled,
-        onNickColorPalette = viewModel::setNickColorPalette,
-        onShowJoinPartQuit = viewModel::setShowJoinPartQuit,
-        onFoolsMode = viewModel::setFoolsMode,
-        onAvatarStyle = viewModel::setAvatarStyle,
-        onChatWallpaper = viewModel::setChatWallpaper,
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsContent(
-    state: SettingsUiState,
     onBack: () -> Unit,
-    onOpenNetwork: (Long) -> Unit,
+    onOpenAppearance: () -> Unit,
+    onOpenChat: () -> Unit,
+    onOpenDelivery: () -> Unit,
+    onOpenNetworks: () -> Unit,
     onOpenAbout: () -> Unit,
-    onOpenFriends: () -> Unit,
-    onOpenFools: () -> Unit,
-    onOpenNickColors: () -> Unit,
-    onOpenAddNetwork: () -> Unit,
-    onThemeMode: (ThemeMode) -> Unit,
-    onDynamicColor: (Boolean) -> Unit,
-    onDeliveryMode: (DeliveryMode) -> Unit,
-    onLayoutDensity: (LayoutDensity) -> Unit,
-    onNickColorsEnabled: (Boolean) -> Unit,
-    onNickColorPalette: (NickColorPalette) -> Unit,
-    onShowJoinPartQuit: (Boolean) -> Unit,
-    onFoolsMode: (FoolsMode) -> Unit,
-    onAvatarStyle: (AvatarStyle) -> Unit = {},
-    onChatWallpaper: (ChatWallpaper) -> Unit = {},
 ) {
     val context = LocalContext.current
+    SettingsScaffold(title = stringResource(R.string.settings_title), onBack = onBack) {
+        CategoryRow(
+            title = stringResource(R.string.settings_appearance),
+            summary = stringResource(R.string.settings_appearance_summary),
+            onClick = onOpenAppearance,
+        )
+        CategoryRow(
+            title = stringResource(R.string.settings_chat),
+            summary = stringResource(R.string.settings_chat_summary),
+            onClick = onOpenChat,
+        )
+        CategoryRow(
+            title = stringResource(R.string.settings_delivery),
+            summary = stringResource(R.string.settings_delivery_summary),
+            onClick = onOpenDelivery,
+        )
+        CategoryRow(
+            title = stringResource(R.string.settings_networks),
+            summary = stringResource(R.string.settings_networks_summary),
+            onClick = onOpenNetworks,
+        )
+        CategoryRow(
+            title = stringResource(R.string.settings_about),
+            summary = appVersion(context),
+            onClick = onOpenAbout,
+        )
+    }
+}
+
+/** A tappable category row in the top-level Settings list. */
+@Composable
+private fun CategoryRow(title: String, summary: String, onClick: () -> Unit) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(summary) },
+        modifier = Modifier.clickable { onClick() },
+    )
+}
+
+// -- Shared building blocks (used by the category sub-screens in this package) --------------------
+
+/** Standard settings sub-screen scaffold: back-navigable top bar + vertically scrolling column. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SettingsScaffold(
+    title: String,
+    onBack: () -> Unit,
+    content: @Composable () -> Unit,
+) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.settings_title)) },
+                title = { Text(title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.onboarding_back))
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.onboarding_back),
+                        )
                     }
                 },
             )
@@ -133,133 +141,7 @@ fun SettingsContent(
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()),
         ) {
-            // Appearance ---------------------------------------------------------------------
-            SectionHeader(stringResource(R.string.settings_appearance))
-            ThemeModeGroup(current = state.settings.themeMode, onSelect = onThemeMode)
-            SwitchRow(
-                title = stringResource(R.string.settings_dynamic_color),
-                subtitle = stringResource(R.string.settings_dynamic_color_desc),
-                // Dynamic color only applies to the base modes; disable the toggle for terminal themes.
-                checked = state.settings.dynamicColor && !state.settings.themeMode.isTerminalTheme,
-                onCheckedChange = onDynamicColor,
-                switchTag = "settings_switch_dynamic_color",
-            )
-            SubLabel(stringResource(R.string.settings_density))
-            DensityGroup(current = state.settings.layoutDensity, onSelect = onLayoutDensity)
-            SubLabel(stringResource(R.string.settings_avatar_style))
-            AvatarStyleGroup(current = state.settings.avatarStyle, onSelect = onAvatarStyle)
-
-            HorizontalDivider()
-
-            // Chat -------------------------------------------------------------------------
-            SectionHeader(stringResource(R.string.settings_chat))
-            SwitchRow(
-                title = stringResource(R.string.settings_nick_colors),
-                subtitle = stringResource(R.string.settings_nick_colors_desc),
-                checked = state.settings.nickColorsEnabled,
-                onCheckedChange = onNickColorsEnabled,
-                switchTag = "settings_switch_nick_colors",
-            )
-            PaletteGroup(
-                current = state.settings.nickColorPalette,
-                enabled = state.settings.nickColorsEnabled,
-                onSelect = onNickColorPalette,
-            )
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_nick_color_overrides)) },
-                supportingContent = countText(state.settings.nickColorOverrides.size),
-                modifier = Modifier.clickable { onOpenNickColors() },
-            )
-            SwitchRow(
-                title = stringResource(R.string.settings_show_jpq),
-                subtitle = stringResource(R.string.settings_show_jpq_desc),
-                checked = state.settings.showJoinPartQuit,
-                onCheckedChange = onShowJoinPartQuit,
-                switchTag = "settings_switch_show_jpq",
-            )
-            SubLabel(stringResource(R.string.settings_wallpaper))
-            ChatWallpaperPicker(current = state.settings.chatWallpaper, onSelect = onChatWallpaper)
-
-            HorizontalDivider()
-
-            // People -----------------------------------------------------------------------
-            SectionHeader(stringResource(R.string.settings_people))
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_friends)) },
-                supportingContent = countText(state.settings.friends.size),
-                modifier = Modifier.clickable { onOpenFriends() },
-            )
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_fools)) },
-                supportingContent = countText(state.settings.fools.size),
-                modifier = Modifier.clickable { onOpenFools() },
-            )
-            SubLabel(stringResource(R.string.settings_fools_mode))
-            FoolsModeGroup(current = state.settings.foolsMode, onSelect = onFoolsMode)
-
-            HorizontalDivider()
-
-            // Delivery -----------------------------------------------------------------------
-            SectionHeader(stringResource(R.string.settings_delivery))
-            val distributorUrl = stringResource(R.string.settings_delivery_push_distributor_url)
-            DeliveryGroup(
-                current = state.settings.deliveryMode,
-                availability = state.pushAvailability,
-                onSelect = onDeliveryMode,
-                // No distributor installed: guide the user to install one (ntfy on F-Droid) via an
-                // ACTION_VIEW web intent. Registration self-heals once a distributor appears.
-                onInstallDistributor = {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, distributorUrl.toUri()))
-                },
-            )
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_battery)) },
-                supportingContent = { Text(stringResource(R.string.settings_battery_desc)) },
-                modifier = Modifier.clickable {
-                    // Directly request the Doze exemption for this app (keeps the persistent socket
-                    // alive in the background). If already exempt, open the OS list so the user can
-                    // review/revoke it.
-                    val pm = context.getSystemService(PowerManager::class.java)
-                    if (pm?.isIgnoringBatteryOptimizations(context.packageName) == true) {
-                        context.startActivity(
-                            Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
-                        )
-                    } else {
-                        context.startActivity(
-                            Intent(AndroidSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                                .setData("package:${context.packageName}".toUri()),
-                        )
-                    }
-                },
-            )
-
-            HorizontalDivider()
-
-            // Networks -----------------------------------------------------------------------
-            SectionHeader(stringResource(R.string.settings_networks))
-            state.networks.forEach { network ->
-                ListItem(
-                    headlineContent = { Text(network.name) },
-                    supportingContent = { Text(networkSupporting(network, state.networks)) },
-                    modifier = Modifier.clickable { onOpenNetwork(network.id) },
-                )
-            }
-            // Round 5 (plans/16 §5.2): add-network entry after the per-network rows.
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.add_network_title)) },
-                leadingContent = { Icon(Icons.Filled.Add, contentDescription = null) },
-                modifier = Modifier.clickable { onOpenAddNetwork() },
-            )
-
-            HorizontalDivider()
-
-            // About --------------------------------------------------------------------------
-            SectionHeader(stringResource(R.string.settings_about))
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.settings_about)) },
-                supportingContent = { Text(appVersion(context)) },
-                modifier = Modifier.clickable { onOpenAbout() },
-            )
+            content()
         }
     }
 }
@@ -269,7 +151,7 @@ fun SettingsContent(
  * " · via <root name>" for a BOUNCER_CHILD (root name resolved from [all]).
  */
 @Composable
-private fun networkSupporting(network: NetworkEntity, all: List<NetworkEntity>): String {
+internal fun networkSupporting(network: NetworkEntity, all: List<NetworkEntity>): String {
     val base = "${network.host}:${network.port}"
     return when (network.role) {
         NetworkRole.BOUNCER_ROOT -> stringResource(R.string.settings_network_soju_suffix, base)
@@ -281,139 +163,9 @@ private fun networkSupporting(network: NetworkEntity, all: List<NetworkEntity>):
     }
 }
 
-@Composable
-private fun ThemeModeGroup(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
-    // Base modes first, then terminal color schemes in a clearly labeled sub-block.
-    val baseOptions = listOf(
-        ThemeMode.SYSTEM to R.string.settings_theme_system,
-        ThemeMode.LIGHT to R.string.settings_theme_light,
-        ThemeMode.DARK to R.string.settings_theme_dark,
-        ThemeMode.AMOLED to R.string.settings_theme_amoled,
-    )
-    val terminalOptions = listOf(
-        ThemeMode.GRUVBOX_DARK to R.string.settings_theme_gruvbox_dark,
-        ThemeMode.GRUVBOX_LIGHT to R.string.settings_theme_gruvbox_light,
-        ThemeMode.SOLARIZED_DARK to R.string.settings_theme_solarized_dark,
-        ThemeMode.SOLARIZED_LIGHT to R.string.settings_theme_solarized_light,
-        ThemeMode.DRACULA to R.string.settings_theme_dracula,
-        ThemeMode.NORD to R.string.settings_theme_nord,
-        ThemeMode.CATPPUCCIN_LATTE to R.string.settings_theme_catppuccin_latte,
-        ThemeMode.CATPPUCCIN_MOCHA to R.string.settings_theme_catppuccin_mocha,
-        ThemeMode.TOKYO_NIGHT to R.string.settings_theme_tokyo_night,
-    )
-    Column(Modifier.selectableGroup()) {
-        baseOptions.forEach { (mode, labelRes) ->
-            RadioRow(
-                label = stringResource(labelRes),
-                selected = current == mode,
-                enabled = true,
-                onClick = { onSelect(mode) },
-            )
-        }
-        // Sub-label separating the terminal schemes from the base OS modes.
-        Text(
-            text = stringResource(R.string.settings_theme_terminal_schemes),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 52.dp, top = 6.dp, bottom = 2.dp),
-        )
-        terminalOptions.forEach { (mode, labelRes) ->
-            RadioRow(
-                label = stringResource(labelRes),
-                selected = current == mode,
-                enabled = true,
-                onClick = { onSelect(mode) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun AvatarStyleGroup(current: AvatarStyle, onSelect: (AvatarStyle) -> Unit) {
-    val options = listOf(
-        AvatarStyle.MONOGRAM to R.string.settings_avatar_monogram,
-        AvatarStyle.INITIALS to R.string.settings_avatar_initials,
-    )
-    Column(Modifier.selectableGroup()) {
-        options.forEach { (style, labelRes) ->
-            RadioRow(
-                label = stringResource(labelRes),
-                selected = current == style,
-                enabled = true,
-                onClick = { onSelect(style) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun DensityGroup(current: LayoutDensity, onSelect: (LayoutDensity) -> Unit) {
-    // Density selects the message *render style*, not the font size: Compact is classic single-line
-    // IRC, Comfortable/Cozy are chat bubbles (Cozy roomier). Subtitles spell that out.
-    val options = listOf(
-        Triple(LayoutDensity.COMPACT, R.string.settings_density_compact, R.string.settings_density_compact_desc),
-        Triple(LayoutDensity.COMFORTABLE, R.string.settings_density_comfortable, R.string.settings_density_comfortable_desc),
-        Triple(LayoutDensity.COZY, R.string.settings_density_cozy, R.string.settings_density_cozy_desc),
-    )
-    Column(Modifier.selectableGroup()) {
-        options.forEach { (density, labelRes, descRes) ->
-            RadioRow(
-                label = stringResource(labelRes),
-                subtitle = stringResource(descRes),
-                selected = current == density,
-                enabled = true,
-                onClick = { onSelect(density) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun PaletteGroup(
-    current: NickColorPalette,
-    enabled: Boolean,
-    onSelect: (NickColorPalette) -> Unit,
-) {
-    val options = listOf(
-        NickColorPalette.DEFAULT to R.string.settings_palette_default,
-        NickColorPalette.VIVID to R.string.settings_palette_vivid,
-        NickColorPalette.PASTEL to R.string.settings_palette_pastel,
-    )
-    Column(Modifier.selectableGroup()) {
-        options.forEach { (palette, labelRes) ->
-            RadioRow(
-                label = stringResource(labelRes),
-                selected = current == palette,
-                enabled = enabled,
-                onClick = { onSelect(palette) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun FoolsModeGroup(current: FoolsMode, onSelect: (FoolsMode) -> Unit) {
-    Column(Modifier.selectableGroup()) {
-        RadioRow(
-            label = stringResource(R.string.settings_fools_collapse),
-            subtitle = stringResource(R.string.settings_fools_collapse_desc),
-            selected = current == FoolsMode.COLLAPSE,
-            enabled = true,
-            onClick = { onSelect(FoolsMode.COLLAPSE) },
-        )
-        RadioRow(
-            label = stringResource(R.string.settings_fools_hide),
-            subtitle = stringResource(R.string.settings_fools_hide_desc),
-            selected = current == FoolsMode.HIDE,
-            enabled = true,
-            onClick = { onSelect(FoolsMode.HIDE) },
-        )
-    }
-}
-
 /** Supporting text showing the pluralized nick count, or null when the list is empty. */
 @Composable
-private fun countText(count: Int): (@Composable () -> Unit)? =
+internal fun countText(count: Int): (@Composable () -> Unit)? =
     if (count > 0) {
         { Text(pluralStringResource(R.plurals.settings_nick_count, count, count)) }
     } else {
@@ -421,52 +173,7 @@ private fun countText(count: Int): (@Composable () -> Unit)? =
     }
 
 @Composable
-private fun DeliveryGroup(
-    current: DeliveryMode,
-    availability: PushAvailability,
-    onSelect: (DeliveryMode) -> Unit,
-    onInstallDistributor: () -> Unit,
-) {
-    Column(Modifier.selectableGroup()) {
-        RadioRow(
-            label = stringResource(R.string.settings_delivery_socket),
-            subtitle = stringResource(R.string.settings_delivery_socket_desc),
-            selected = current == DeliveryMode.PERSISTENT_SOCKET,
-            enabled = true,
-            onClick = { onSelect(DeliveryMode.PERSISTENT_SOCKET) },
-        )
-        // Selectable once the bouncer advertises webpush; a missing distributor is surfaced as
-        // actionable guidance rather than a silently-disabled control (registration self-heals when
-        // a distributor is installed). Only the missing-webpush case disables the control.
-        val subtitle = when {
-            availability.needsDistributor -> stringResource(R.string.settings_delivery_push_needs_distributor)
-            availability.selectable -> stringResource(R.string.settings_delivery_push_desc)
-            else -> stringResource(R.string.settings_delivery_push_unavailable)
-        }
-        RadioRow(
-            label = stringResource(R.string.settings_delivery_push),
-            subtitle = subtitle,
-            selected = current == DeliveryMode.UNIFIED_PUSH,
-            enabled = availability.selectable,
-            onClick = { onSelect(DeliveryMode.UNIFIED_PUSH) },
-        )
-        // Install-a-distributor action, shown only when push is selectable but no distributor exists.
-        // Opens ntfy's F-Droid listing so the user can fix the missing-distributor gap in one tap.
-        if (availability.needsDistributor) {
-            TextButton(
-                onClick = onInstallDistributor,
-                modifier = Modifier
-                    .padding(start = 52.dp)
-                    .testTag("settings_install_distributor"),
-            ) {
-                Text(stringResource(R.string.settings_delivery_push_install_distributor))
-            }
-        }
-    }
-}
-
-@Composable
-private fun RadioRow(
+internal fun RadioRow(
     label: String,
     selected: Boolean,
     enabled: Boolean,
@@ -495,7 +202,7 @@ private fun RadioRow(
 }
 
 @Composable
-private fun SwitchRow(
+internal fun SwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,
@@ -520,7 +227,7 @@ private fun SwitchRow(
 }
 
 @Composable
-private fun SectionHeader(text: String) {
+internal fun SectionHeader(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelLarge,
@@ -532,7 +239,7 @@ private fun SectionHeader(text: String) {
 
 /** Dimmed sub-section label above an inline radio group (density, fools mode). */
 @Composable
-private fun SubLabel(text: String) {
+internal fun SubLabel(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelMedium,
@@ -544,30 +251,10 @@ private fun SubLabel(text: String) {
 @Preview
 @Composable
 private fun SettingsContentPreview() {
-    MotdTheme {
+    io.github.trevarj.motd.ui.theme.MotdTheme {
         SettingsContent(
-            state = SettingsUiState(
-                settings = Settings(
-                    themeMode = ThemeMode.DARK,
-                    dynamicColor = true,
-                    friends = setOf("alice"),
-                    fools = setOf("bob", "carol"),
-                    nickColorOverrides = mapOf("alice" to 210),
-                ),
-                networks = listOf(
-                    NetworkEntity(
-                        id = 1, name = "Libera", role = NetworkRole.DIRECT,
-                        host = "irc.libera.chat", port = 6697,
-                        nick = "me", username = "me", realname = "Me",
-                    ),
-                ),
-                pushAvailability = PushAvailability(),
-            ),
-            onBack = {}, onOpenNetwork = {}, onOpenAbout = {},
-            onOpenFriends = {}, onOpenFools = {}, onOpenNickColors = {}, onOpenAddNetwork = {},
-            onThemeMode = {}, onDynamicColor = {}, onDeliveryMode = {},
-            onLayoutDensity = {}, onNickColorsEnabled = {}, onNickColorPalette = {},
-            onShowJoinPartQuit = {}, onFoolsMode = {}, onAvatarStyle = {}, onChatWallpaper = {},
+            onBack = {}, onOpenAppearance = {}, onOpenChat = {},
+            onOpenDelivery = {}, onOpenNetworks = {}, onOpenAbout = {},
         )
     }
 }

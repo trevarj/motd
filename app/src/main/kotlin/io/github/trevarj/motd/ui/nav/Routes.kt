@@ -11,6 +11,11 @@ import kotlinx.serialization.Serializable
 @Serializable data object OnboardingRoute
 @Serializable data object AboutRoute
 @Serializable data object SettingsRoute
+// Settings category sub-screens (reached from the top-level Settings list).
+@Serializable data object AppearanceSettingsRoute
+@Serializable data object ChatSettingsRoute
+@Serializable data object DeliverySettingsRoute
+@Serializable data object NetworksSettingsRoute
 @Serializable data class NetworkSettingsRoute(val networkId: Long)
 @Serializable data class SearchRoute(val bufferId: Long? = null)
 @Serializable data class ChannelInfoRoute(val bufferId: Long)
