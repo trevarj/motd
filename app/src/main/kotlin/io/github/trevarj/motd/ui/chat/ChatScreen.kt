@@ -134,6 +134,7 @@ fun ChatScreen(
         fools = settings.fools,
         foolsMode = settings.foolsMode,
         chatWallpaper = settings.chatWallpaper,
+        showComposerEmoji = settings.showComposerEmoji,
         reactionChips = { msgid -> chipsByMsgid[msgid].orEmpty() },
         readMarkerSnapshot = readMarkerSnapshot,
         readMarkerLive = readMarkerTime,
@@ -212,6 +213,7 @@ fun ChatContent(
     fools: Set<String> = emptySet(),
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
     chatWallpaper: io.github.trevarj.motd.data.prefs.ChatWallpaper = io.github.trevarj.motd.data.prefs.ChatWallpaper.NONE,
+    showComposerEmoji: Boolean = true,
     readMarkerSnapshot: Long? = null,
     // Live buffer read marker (advances with markRead); drives the FAB unread badge count.
     readMarkerLive: Long? = null,
@@ -567,6 +569,7 @@ fun ChatContent(
                     } else {
                         stringResource(R.string.chat_composer_placeholder)
                     },
+                    showEmojiButton = showComposerEmoji,
                     autocomplete = if (showAutocomplete && completions.isNotEmpty()) {
                         {
                             AutocompletePanel(

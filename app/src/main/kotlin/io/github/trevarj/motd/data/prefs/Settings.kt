@@ -52,6 +52,8 @@ data class Settings(
     val avatarStyle: AvatarStyle = AvatarStyle.MONOGRAM,
     /** Opt-in patterned chat background; NONE preserves the existing plain theme background. */
     val chatWallpaper: ChatWallpaper = ChatWallpaper.NONE,
+    /** Show the emoji (Mood) button in the composer; users who never use it can hide it. */
+    val showComposerEmoji: Boolean = true,
 )
 
 /** Canonical key for friends/fools/override lookups: trimmed + lowercased.
@@ -76,6 +78,7 @@ interface SettingsRepository {
     suspend fun setShowJoinPartQuit(show: Boolean)
     suspend fun setAvatarStyle(style: AvatarStyle)
     suspend fun setChatWallpaper(w: ChatWallpaper)
+    suspend fun setShowComposerEmoji(show: Boolean)
 }
 
 /** Webpush endpoint + client keypair persistence (DataStore). Implemented by WP4 alongside

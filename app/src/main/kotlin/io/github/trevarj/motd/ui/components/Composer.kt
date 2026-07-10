@@ -70,6 +70,8 @@ fun Composer(
     onCancelReply: () -> Unit = {},
     // Placeholder text; SERVER buffers pass a "Send a command…" hint (plans/16 §5.6).
     placeholder: String = stringResource(R.string.chat_composer_placeholder),
+    // When false the emoji (Mood) button is hidden per the user's setting; picker stays collapsed.
+    showEmojiButton: Boolean = true,
     autocomplete: (@Composable () -> Unit)? = null,
 ) {
     // Inline emoji picker toggle; collapses on send so the panel never sticks around after a message.
@@ -87,22 +89,25 @@ fun Composer(
             }
 
             Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                // Trimmed vertical padding keeps the input area compact without cramping the field.
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                IconButton(
-                    onClick = { showEmojiPicker = !showEmojiPicker },
-                    modifier = Modifier.testTag("chat_composer_emoji").padding(end = 4.dp),
-                ) {
-                    Icon(
-                        Icons.Outlined.Mood,
-                        contentDescription = stringResource(
-                            if (showEmojiPicker) R.string.chat_composer_emoji_close
-                            else R.string.chat_composer_emoji,
-                        ),
-                        tint = if (showEmojiPicker) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                if (showEmojiButton) {
+                    IconButton(
+                        onClick = { showEmojiPicker = !showEmojiPicker },
+                        modifier = Modifier.testTag("chat_composer_emoji").padding(end = 4.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Mood,
+                            contentDescription = stringResource(
+                                if (showEmojiPicker) R.string.chat_composer_emoji_close
+                                else R.string.chat_composer_emoji,
+                            ),
+                            tint = if (showEmojiPicker) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 OutlinedTextField(
                     value = value,

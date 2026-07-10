@@ -93,4 +93,8 @@ class SettingsViewModel @Inject constructor(
     fun setAvatarStyle(style: AvatarStyle) = viewModelScope.launch {
         settingsRepository.setAvatarStyle(style)
     }
+
+    fun setShowComposerEmoji(show: Boolean) = viewModelScope.launch {
+        settingsRepository.setShowComposerEmoji(show)
+    }
 }

@@ -46,6 +46,7 @@ internal object PrefKeys {
     val SHOW_JOIN_PART_QUIT = stringPreferencesKey("show_join_part_quit")
     val AVATAR_STYLE = stringPreferencesKey("avatar_style")
     val CHAT_WALLPAPER = stringPreferencesKey("chat_wallpaper")
+    val SHOW_COMPOSER_EMOJI = stringPreferencesKey("show_composer_emoji")
 }
 
 // -- Round 4 nick-set / hue-override JSON codecs (top-level + internal so they are unit-testable
@@ -113,6 +114,7 @@ class DataStoreSettingsRepository @Inject constructor(
                 ?: AvatarStyle.MONOGRAM,
             chatWallpaper = prefs[PrefKeys.CHAT_WALLPAPER]?.let { runCatching { ChatWallpaper.valueOf(it) }.getOrNull() }
                 ?: ChatWallpaper.NONE,
+            showComposerEmoji = prefs[PrefKeys.SHOW_COMPOSER_EMOJI]?.toBooleanStrictOrNull() ?: true,
         )
     }
 
@@ -199,6 +201,10 @@ class DataStoreSettingsRepository @Inject constructor(
 
     override suspend fun setChatWallpaper(w: ChatWallpaper) {
         store.edit { it[PrefKeys.CHAT_WALLPAPER] = w.name }
+    }
+
+    override suspend fun setShowComposerEmoji(show: Boolean) {
+        store.edit { it[PrefKeys.SHOW_COMPOSER_EMOJI] = show.toString() }
     }
 
     // Empty set removes its key (mirrors setEndpointFor); non-empty writes the JSON array.

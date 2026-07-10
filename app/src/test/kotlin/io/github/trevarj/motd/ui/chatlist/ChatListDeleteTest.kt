@@ -99,6 +99,7 @@ class ChatListDeleteTest {
         override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
         override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
         override suspend fun setChatWallpaper(w: io.github.trevarj.motd.data.prefs.ChatWallpaper) = Unit
+        override suspend fun setShowComposerEmoji(show: Boolean) = Unit
     }
 
     private val dispatcher = StandardTestDispatcher()

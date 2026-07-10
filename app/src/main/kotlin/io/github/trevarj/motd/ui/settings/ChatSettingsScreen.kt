@@ -34,6 +34,7 @@ fun ChatSettingsScreen(
         onOpenFools = onOpenFools,
         onShowJoinPartQuit = viewModel::setShowJoinPartQuit,
         onFoolsMode = viewModel::setFoolsMode,
+        onShowComposerEmoji = viewModel::setShowComposerEmoji,
     )
 }
 
@@ -45,6 +46,7 @@ fun ChatSettingsContent(
     onOpenFools: () -> Unit,
     onShowJoinPartQuit: (Boolean) -> Unit,
     onFoolsMode: (FoolsMode) -> Unit,
+    onShowComposerEmoji: (Boolean) -> Unit,
 ) {
     SettingsScaffold(title = stringResource(R.string.settings_chat), onBack = onBack) {
         SwitchRow(
@@ -53,6 +55,13 @@ fun ChatSettingsContent(
             checked = settings.showJoinPartQuit,
             onCheckedChange = onShowJoinPartQuit,
             switchTag = "settings_switch_show_jpq",
+        )
+        SwitchRow(
+            title = stringResource(R.string.settings_composer_emoji),
+            subtitle = stringResource(R.string.settings_composer_emoji_desc),
+            checked = settings.showComposerEmoji,
+            onCheckedChange = onShowComposerEmoji,
+            switchTag = "settings_switch_composer_emoji",
         )
 
         HorizontalDivider()
@@ -100,7 +109,7 @@ private fun ChatSettingsPreview() {
         ChatSettingsContent(
             settings = Settings(friends = setOf("alice"), fools = setOf("bob", "carol")),
             onBack = {}, onOpenFriends = {}, onOpenFools = {},
-            onShowJoinPartQuit = {}, onFoolsMode = {},
+            onShowJoinPartQuit = {}, onFoolsMode = {}, onShowComposerEmoji = {},
         )
     }
 }
