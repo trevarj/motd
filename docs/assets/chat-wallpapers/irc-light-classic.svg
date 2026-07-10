@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" role="img" aria-label="IRC classic light chat wallpaper pattern">
+  <rect width="1080" height="1080" fill="#fbfaf6"/>
+  <g fill="none" stroke="#9cacd1" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity=".64">
+    <path d="M98 105h64m-52-32-24 96m96-96-24 96"/>
+    <path d="M350 92h92a22 22 0 0 1 22 22v36a22 22 0 0 1-22 22h-52l-36 28v-28h-4a22 22 0 0 1-22-22v-36a22 22 0 0 1 22-22z"/>
+    <path d="M735 94h82a18 18 0 0 1 18 18v58a18 18 0 0 1-18 18h-82a18 18 0 0 1-18-18v-58a18 18 0 0 1 18-18zm18 29h42m-42 35h24"/>
+    <path d="M932 94l26 26-26 26m44 0h42"/>
+    <path d="M151 303a34 34 0 1 0 0 68h58a34 34 0 1 0 0-68h-58z"/>
+    <path d="M474 295v76m-38-38h76"/>
+    <path d="M714 296l60 36-60 36v-72z"/>
+    <path d="M892 291h96m-78 42h78m-96 42h96"/>
+    <path d="M84 534c30-42 62-42 96 0s66 42 96 0"/>
+    <path d="M407 517h80a20 20 0 0 1 20 20v48a20 20 0 0 1-20 20h-80a20 20 0 0 1-20-20v-48a20 20 0 0 1 20-20zm21 29h38m-38 30h62"/>
+    <path d="M676 514a46 46 0 1 0 0 92 46 46 0 0 0 0-92zm-44 46h88m-44-44c18 28 18 60 0 88m0-88c-18 28-18 60 0 88"/>
+    <path d="M920 522h38a34 34 0 0 1 0 68h-38a34 34 0 0 1 0-68zm38 0h38a34 34 0 0 1 0 68h-38"/>
+    <path d="M124 774h82a22 22 0 0 1 22 22v36a22 22 0 0 1-22 22h-43l-32 28v-28h-7a22 22 0 0 1-22-22v-36a22 22 0 0 1 22-22z"/>
+    <path d="M419 772h64m-52-32-24 96m96-96-24 96"/>
+    <path d="M712 766l44 44 82-82"/>
+    <path d="M926 782a44 44 0 1 0 88 0 44 44 0 0 0-88 0zm44-70v26m0 88v26m-70-70h26m88 0h26"/>
+    <path d="M258 964l26 26-26 26m44 0h42"/>
+    <path d="M562 942h92a22 22 0 0 1 22 22v36a22 22 0 0 1-22 22h-52l-36 28v-28h-4a22 22 0 0 1-22-22v-36a22 22 0 0 1 22-22z"/>
+  </g>
+  <g fill="#5b6ee1" opacity=".68">
+    <circle cx="264" cy="132" r="8"/><circle cx="548" cy="132" r="7"/><circle cx="619" cy="292" r="7"/><circle cx="318" cy="488" r="6"/><circle cx="820" cy="485" r="7"/><circle cx="272" cy="794" r="8"/><circle cx="526" cy="913" r="6"/><circle cx="856" cy="940" r="8"/>
+  </g>
+  <g fill="#55cbb2" opacity=".72">
+    <circle cx="244" cy="315" r="9"/><circle cx="520" cy="402" r="7"/><circle cx="815" cy="210" r="8"/><circle cx="236" cy="612" r="6"/><circle cx="596" cy="656" r="8"/><circle cx="884" cy="832" r="7"/>
+  </g>
+  <g fill="#9cacd1" opacity=".55">
+    <circle cx="82" cy="238" r="5"/><circle cx="257" cy="238" r="5"/><circle cx="432" cy="238" r="5"/><circle cx="833" cy="660" r="5"/><circle cx="858" cy="660" r="5"/><circle cx="883" cy="660" r="5"/>
+  </g>
+</svg>
