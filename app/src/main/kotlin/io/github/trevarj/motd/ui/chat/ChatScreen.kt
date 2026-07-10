@@ -378,8 +378,9 @@ fun ChatContent(
     }
     val recentSpeakers = remember(items.itemCount) {
         // Exclude system-event senders and self so recency ranking reflects real conversation
-        // partners (plans/15 #30).
-        (0 until items.itemCount)
+        // partners (plans/15 #30). Only the newest rows matter for recency, so cap the scan (the list
+        // is reverse-laid-out, so index 0.. are the newest) to stay cheap on large loaded windows.
+        (0 until minOf(items.itemCount, 60))
             .mapNotNull { items.peek(it) }
             .filterNot { isSystemKind(it.kind) || it.isSelf }
             .map { it.sender }

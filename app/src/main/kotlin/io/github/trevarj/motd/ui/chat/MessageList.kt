@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -108,6 +109,18 @@ fun MessageList(
     // Tapping a non-self sender's name/avatar opens the nick sheet (plans/16 §5.8).
     onSenderClick: (String) -> Unit = {},
 ) {
+    // Reply resolution index: build msgid -> preview once per loaded window instead of rescanning the
+    // whole window per reply row (was O(replies x window) with a fresh lambda each recomposition).
+    val replyIndex = remember(items.itemCount) {
+        val map = HashMap<String, ReplyPreviewData>(items.itemCount.coerceAtLeast(0))
+        for (i in 0 until items.itemCount) {
+            val m = items.peek(i) ?: continue
+            val mid = m.msgid ?: continue
+            map[mid] = ReplyPreviewData(m.sender, m.text)
+        }
+        map
+    }
+    val resolveReply = remember(replyIndex) { { msgid: String -> replyIndex[msgid] } }
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -184,14 +197,7 @@ fun MessageList(
                 loadPreview = loadPreview,
                 onOpenLink = onOpenLink,
                 onSenderClick = onSenderClick,
-                resolveReply = { msgid ->
-                    // Resolve reply target within the loaded window only (plans/07).
-                    (0 until items.itemCount)
-                        .asSequence()
-                        .mapNotNull { items.peek(it) }
-                        .firstOrNull { it.msgid == msgid }
-                        ?.let { ReplyPreviewData(it.sender, it.text) }
-                },
+                resolveReply = resolveReply,
             )
             }
         }
@@ -311,8 +317,9 @@ private fun MessageRow(
     val showDay = older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
 
     val reply = msg.replyToMsgid?.let(resolveReply)
-    val imageUrl = firstImageUrl(msg.text)
-    val linkUrl = firstLinkUrl(msg.text)
+    // Parse URLs once per message text (was re-run on every recomposition, twice per row).
+    val imageUrl = remember(msg.text) { firstImageUrl(msg.text) }
+    val linkUrl = remember(msg.text) { firstLinkUrl(msg.text) }
 
     // Lazily fetch a link preview for the first non-image URL. produceState carries a completion
     // flag so a null result (fetch failed / not HTML) resolves to Done(null) and stops the

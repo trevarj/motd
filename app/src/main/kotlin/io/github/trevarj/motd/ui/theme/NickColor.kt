@@ -62,13 +62,18 @@ class NickColorScheme(
     val overrides: Map<String, Int>, // normalized nick -> hue
     val isDark: Boolean,
 ) {
+    // Memoize the per-nick color: it depends only on the (bounded) nick set for a given scheme.
+    // A new scheme instance is created whenever palette/overrides/theme change, discarding this
+    // cache, so it never goes stale. ConcurrentHashMap guards against any off-main composition.
+    private val cache = java.util.concurrent.ConcurrentHashMap<String, Color>()
+    private fun colored(nick: String): Color =
+        cache.getOrPut(nick) { resolveNickColor(nick, isDark, enabled = true, palette, overrides, Color.Unspecified) }
+
     /** Sender-name/reply-accent color; [fallback] when coloring is disabled. */
-    fun nick(nick: String, fallback: Color): Color =
-        resolveNickColor(nick, isDark, enabled, palette, overrides, fallback)
+    fun nick(nick: String, fallback: Color): Color = if (!enabled) fallback else colored(nick)
 
     /** Avatar background: override + palette always apply (never falls back to neutral). */
-    fun avatar(name: String): Color =
-        resolveNickColor(name, isDark, enabled = true, palette, overrides, fallback = Color.Unspecified)
+    fun avatar(name: String): Color = colored(name)
 }
 
 /** DEFAULT/DEFAULT/empty so previews and un-provided contexts render as today. */
