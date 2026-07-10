@@ -35,19 +35,18 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
  * scaled to the canvas width and repeated vertically to fill the height.
  *
  * Presets (matching the SVG pack):
- *  - CLASSIC (`irc-*-classic.svg`): stroked chat bubbles, hashtags, prompt chevrons, TLS checks,
- *    with blue + teal accent pips.
- *  - NETWORK (`irc-*-network.svg`): a faint dot grid, dashed topology links, stroked server/node
- *    glyphs, with blue + teal node accents.
- *  - PIXEL (`irc-*-pixel.svg`): filled pixel-block glyphs (blue + teal accent blocks) plus a
- *    stroked blocky-glyph group.
+ *  - CLASSIC (`irc-*-classic.svg`): stroked chat bubbles, hashtags, prompt chevrons, TLS shields,
+ *    with a single stroked blue accent group.
+ *  - NETWORK (`irc-*-network.svg`): faint topology link polylines behind stroked server/node
+ *    glyphs.
+ *  - PIXEL (`irc-*-pixel.svg`): filled pixel-block glyphs with blue + green accent blocks.
  *
  * THEME MAPPING (SVG hex is NOT baked): the base fill is the theme background (AMOLED keeps a true
  * black base); the main motif group is [MaterialTheme.colorScheme] `onSurfaceVariant`, the primary
- * accent is `primary`, and the secondary accent (classic/network teal, pixel green) is `tertiary`.
- * All at low alpha so bubbles/text stay readable; alphas run a touch higher on dark, chosen via
- * [isAppliedThemeDark] so forced DARK/AMOLED read dark even under a light OS. NONE keeps the plain
- * background. There is no animation.
+ * accent is `primary`, and the pixel green accent is `tertiary`. All at low alpha so bubbles/text
+ * stay readable; alphas run a touch higher on dark, chosen via [isAppliedThemeDark] so forced
+ * DARK/AMOLED read dark even under a light OS. NONE keeps the plain background. There is no
+ * animation.
  */
 @Composable
 fun ChatWallpaperBackground(
@@ -82,9 +81,9 @@ fun ChatWallpaperBackground(
             .drawBehind {
                 when (wallpaper) {
                     ChatWallpaper.NONE -> Unit
-                    ChatWallpaper.CLASSIC -> drawClassic(paths, ink, accent, accent2, mainAlpha, faintAlpha, accentAlpha)
-                    ChatWallpaper.NETWORK -> drawNetwork(paths, ink, accent, accent2, mainAlpha, faintAlpha, accentAlpha)
-                    ChatWallpaper.PIXEL -> drawPixel(paths, ink, accent, accent2, mainAlpha, accentAlpha)
+                    ChatWallpaper.CLASSIC -> drawClassic(paths, ink, accent, mainAlpha, accentAlpha)
+                    ChatWallpaper.NETWORK -> drawNetwork(paths, ink, mainAlpha, faintAlpha)
+                    ChatWallpaper.PIXEL -> drawPixel(ink, accent, accent2, mainAlpha, accentAlpha)
                 }
             },
     )
@@ -124,21 +123,24 @@ private fun parsePaths(vararg ds: String): Path {
     return out
 }
 
-/** Preset geometry parsed once (stroked-glyph groups); accents/rects are drawn from raw constants. */
+/**
+ * Preset geometry parsed once. [main] is the primary stroked-glyph group; [secondary] is the
+ * classic blue accent stroke / network topology links. Pixel rects are drawn from raw constants.
+ */
 private class WallpaperPaths(val main: Path, val secondary: Path? = null)
 
 private fun pathsFor(wallpaper: ChatWallpaper): WallpaperPaths = when (wallpaper) {
     ChatWallpaper.NONE -> WallpaperPaths(Path())
-    ChatWallpaper.CLASSIC -> WallpaperPaths(parsePaths(*CLASSIC_PATHS))
+    ChatWallpaper.CLASSIC -> WallpaperPaths(parsePaths(*CLASSIC_PATHS), parsePaths(*CLASSIC_ACCENT_PATHS))
     ChatWallpaper.NETWORK -> WallpaperPaths(parsePaths(*NETWORK_PATHS), parsePaths(*NETWORK_LINK_PATHS))
-    ChatWallpaper.PIXEL -> WallpaperPaths(parsePaths(*PIXEL_PATHS))
+    ChatWallpaper.PIXEL -> WallpaperPaths(Path())
 }
 
 // -- Stroke styles (mirror the SVG stroke-width / caps / joins at 1080-unit scale) ---------------
 
 private val roundStroke5 = Stroke(width = 5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+private val roundStroke6 = Stroke(width = 6f, cap = StrokeCap.Round, join = StrokeJoin.Round)
 private val roundStroke4 = Stroke(width = 4f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-private val squareStroke6 = Stroke(width = 6f, cap = StrokeCap.Square, join = StrokeJoin.Miter)
 
 // -- CLASSIC (irc-*-classic.svg) -----------------------------------------------------------------
 
@@ -146,16 +148,14 @@ private fun DrawScope.drawClassic(
     paths: WallpaperPaths,
     ink: Color,
     accent: Color,
-    accent2: Color,
     mainAlpha: Float,
-    faintAlpha: Float,
     accentAlpha: Float,
 ) = tiled {
     drawPath(paths.main, ink.copy(alpha = mainAlpha), style = roundStroke5)
-    drawDots(CLASSIC_ACCENT_BLUE, accent.copy(alpha = accentAlpha))
-    drawDots(CLASSIC_ACCENT_TEAL, accent2.copy(alpha = accentAlpha))
-    // The light SVG has a third, very faint ink dot cluster; reuse the ink at low alpha.
-    drawDots(CLASSIC_ACCENT_FAINT, ink.copy(alpha = faintAlpha))
+    // Blue accent stroke group (SVG stroke-width 6, round cap/join).
+    paths.secondary?.let {
+        drawPath(it, accent.copy(alpha = accentAlpha), style = roundStroke6)
+    }
 }
 
 // -- NETWORK (irc-*-network.svg) -----------------------------------------------------------------
@@ -163,40 +163,19 @@ private fun DrawScope.drawClassic(
 private fun DrawScope.drawNetwork(
     paths: WallpaperPaths,
     ink: Color,
-    accent: Color,
-    accent2: Color,
     mainAlpha: Float,
     faintAlpha: Float,
-    accentAlpha: Float,
 ) = tiled {
-    // Faint background dot grid (12 cols x 6 rows in the source).
-    val dotColor = ink.copy(alpha = faintAlpha * 0.8f)
-    for (y in NETWORK_GRID_Y) {
-        for (x in NETWORK_GRID_X) {
-            drawCircle(dotColor, radius = 3f, center = Offset(x, y))
-        }
-    }
-    // Dashed topology links behind the node glyphs.
+    // Faint topology links behind the node glyphs (SVG stroke-width 4, round cap).
     paths.secondary?.let {
-        drawPath(it, ink.copy(alpha = faintAlpha), style = networkLinkStroke())
+        drawPath(it, ink.copy(alpha = faintAlpha), style = roundStroke4)
     }
     drawPath(paths.main, ink.copy(alpha = mainAlpha), style = roundStroke5)
-    drawDots(NETWORK_ACCENT_BLUE, accent.copy(alpha = accentAlpha))
-    drawDots(NETWORK_ACCENT_TEAL, accent2.copy(alpha = accentAlpha))
 }
-
-/** Dashed stroke matching the source `stroke-dasharray="8 16"` links. */
-private fun networkLinkStroke(): Stroke = Stroke(
-    width = 4f,
-    cap = StrokeCap.Round,
-    join = StrokeJoin.Round,
-    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(8f, 16f)),
-)
 
 // -- PIXEL (irc-*-pixel.svg) ---------------------------------------------------------------------
 
 private fun DrawScope.drawPixel(
-    paths: WallpaperPaths,
     ink: Color,
     accent: Color,
     accent2: Color,
@@ -206,20 +185,9 @@ private fun DrawScope.drawPixel(
     drawRects(PIXEL_MAIN_RECTS, ink.copy(alpha = mainAlpha))
     drawRects(PIXEL_ACCENT_BLUE, accent.copy(alpha = accentAlpha))
     drawRects(PIXEL_ACCENT_GREEN, accent2.copy(alpha = accentAlpha))
-    // Blocky stroked glyph group (square caps, miter joins).
-    drawPath(paths.main, ink.copy(alpha = mainAlpha), style = squareStroke6)
 }
 
 // -- Primitive helpers ---------------------------------------------------------------------------
-
-/** Filled accent dots from a flat [cx, cy, r, cx, cy, r, ...] array. */
-private fun DrawScope.drawDots(dots: FloatArray, color: Color) {
-    var i = 0
-    while (i < dots.size) {
-        drawCircle(color, radius = dots[i + 2], center = Offset(dots[i], dots[i + 1]))
-        i += 3
-    }
-}
 
 /** Filled rects from a flat [x, y, w, h, ...] array. */
 private fun DrawScope.drawRects(rects: FloatArray, color: Color) {
@@ -238,110 +206,105 @@ private fun DrawScope.drawRects(rects: FloatArray, color: Color) {
 
 // CLASSIC: main stroked glyph group (bubbles, hashtags, chevrons, checks).
 private val CLASSIC_PATHS = arrayOf(
-    "M98 105h64m-52-32-24 96m96-96-24 96",
-    "M350 92h92a22 22 0 0 1 22 22v36a22 22 0 0 1-22 22h-52l-36 28v-28h-4a22 22 0 0 1-22-22v-36a22 22 0 0 1 22-22z",
-    "M735 94h82a18 18 0 0 1 18 18v58a18 18 0 0 1-18 18h-82a18 18 0 0 1-18-18v-58a18 18 0 0 1 18-18zm18 29h42m-42 35h24",
-    "M932 94l26 26-26 26m44 0h42",
-    "M151 303a34 34 0 1 0 0 68h58a34 34 0 1 0 0-68h-58z",
-    "M474 295v76m-38-38h76",
-    "M714 296l60 36-60 36v-72z",
-    "M892 291h96m-78 42h78m-96 42h96",
-    "M84 534c30-42 62-42 96 0s66 42 96 0",
-    "M407 517h80a20 20 0 0 1 20 20v48a20 20 0 0 1-20 20h-80a20 20 0 0 1-20-20v-48a20 20 0 0 1 20-20zm21 29h38m-38 30h62",
-    "M676 514a46 46 0 1 0 0 92 46 46 0 0 0 0-92zm-44 46h88m-44-44c18 28 18 60 0 88m0-88c-18 28-18 60 0 88",
-    "M920 522h38a34 34 0 0 1 0 68h-38a34 34 0 0 1 0-68zm38 0h38a34 34 0 0 1 0 68h-38",
-    "M124 774h82a22 22 0 0 1 22 22v36a22 22 0 0 1-22 22h-43l-32 28v-28h-7a22 22 0 0 1-22-22v-36a22 22 0 0 1 22-22z",
-    "M419 772h64m-52-32-24 96m96-96-24 96",
-    "M712 766l44 44 82-82",
-    "M926 782a44 44 0 1 0 88 0 44 44 0 0 0-88 0zm44-70v26m0 88v26m-70-70h26m88 0h26",
-    "M258 964l26 26-26 26m44 0h42",
-    "M562 942h92a22 22 0 0 1 22 22v36a22 22 0 0 1-22 22h-52l-36 28v-28h-4a22 22 0 0 1-22-22v-36a22 22 0 0 1 22-22z",
+    "M104 78 82 170m94-92-22 92M68 112h116M60 145h116",
+    "M350 82h92a22 22 0 0 1 22 22v46a22 22 0 0 1-22 22h-48l-38 30v-30h-6a22 22 0 0 1-22-22v-46a22 22 0 0 1 22-22z",
+    "M724 84h104a18 18 0 0 1 18 18v76a18 18 0 0 1-18 18H724a18 18 0 0 1-18-18v-76a18 18 0 0 1 18-18zm10 35h84m-84 38h84",
+    "m932 102 30 30-30 30m52 0h54",
+    "M72 334h54m0 0a34 34 0 0 1 68 0m0 0h54m-156 0a34 34 0 0 0 68 0m0 0a34 34 0 0 0 68 0",
+    "M426 305h92v82h-92zm22 0v-24a24 24 0 0 1 48 0v24m-24 35v18",
+    "M742 374a48 48 0 1 1 28-87v61c0 16 20 17 30 6 20-22 12-76-10-94-34-29-90-20-114 17-28 44-4 106 48 119 24 6 48 1 66-10m-48-60a22 22 0 1 0 0 44 22 22 0 0 0 0-44z",
+    "M918 292h96m-96 42h72m-72 42h96",
+    "M116 518a48 48 0 1 0 0 96 48 48 0 0 0 0-96zm-46 48h92m-46-46c18 28 18 64 0 92m0-92c-18 28-18 64 0 92",
+    "M390 520h86l30 30v68H390zm86 0v30h30m-88 24h58m-58 24h42",
+    "M672 546h42a30 30 0 0 1 0 60h-42a30 30 0 0 1 0-60zm42 0h42a30 30 0 0 1 0 60h-42m-20-30h40",
+    "M918 532h104v76H918zM940 555h60m-60 30h36",
+    "M82 802h132a22 22 0 0 1 22 22v42a22 22 0 0 1-22 22h-56l-38 30v-30H82a22 22 0 0 1-22-22v-42a22 22 0 0 1 22-22zm28 43h76",
+    "M440 764 418 856m94-92-22 92m-86-58h116m-124 34h116",
+    "m684 819 34 34 72-72m-42 38 28 28 54-54",
+    "M952 766c24 18 50 24 76 24v48c0 52-32 78-76 96-44-18-76-44-76-96v-48c26 0 52-6 76-24zm-28 82 20 20 40-44",
+    "m126 986 28 28-28 28m50 0h52",
+    "M458 946h106a22 22 0 0 1 22 22v42a22 22 0 0 1-22 22h-50l-38 30v-30h-18a22 22 0 0 1-22-22v-42a22 22 0 0 1 22-22zm24 43h58",
 )
 
-// CLASSIC accent groups: flat [cx, cy, r] triples.
-private val CLASSIC_ACCENT_BLUE = floatArrayOf(
-    264f, 132f, 8f, 548f, 132f, 7f, 619f, 292f, 7f, 318f, 488f, 6f,
-    820f, 485f, 7f, 272f, 794f, 8f, 526f, 913f, 6f, 856f, 940f, 8f,
-)
-private val CLASSIC_ACCENT_TEAL = floatArrayOf(
-    244f, 315f, 9f, 520f, 402f, 7f, 815f, 210f, 8f,
-    236f, 612f, 6f, 596f, 656f, 8f, 884f, 832f, 7f,
-)
-private val CLASSIC_ACCENT_FAINT = floatArrayOf(
-    82f, 238f, 5f, 257f, 238f, 5f, 432f, 238f, 5f,
-    833f, 660f, 5f, 858f, 660f, 5f, 883f, 660f, 5f,
+// CLASSIC accent group: a single stroked path (blue accent segments).
+private val CLASSIC_ACCENT_PATHS = arrayOf(
+    "M472 340v18m242 218h40M944 868l40-44",
 )
 
-// NETWORK: dashed link polylines.
+// NETWORK: topology link polylines (solid, connecting the node glyphs).
 private val NETWORK_LINK_PATHS = arrayOf(
-    "M124 144 286 244 460 168 664 286 872 182 1012 318",
-    "M80 590 246 464 438 618 640 492 806 662 1010 542",
-    "M134 930 312 780 510 900 700 766 926 894",
+    "M92 180 246 116 410 218 574 118 746 206 930 126",
+    "M160 492 318 398 488 506 650 410 828 510 994 414",
+    "M82 836 248 746 414 852 584 744 762 850 946 758",
 )
 
-// NETWORK: main stroked glyph group (server nodes, bubbles, chevrons).
+// NETWORK: main stroked glyph group (endpoints, hubs, servers, chevrons).
 private val NETWORK_PATHS = arrayOf(
-    "M222 172h70a18 18 0 0 1 18 18v38a18 18 0 0 1-18 18h-34l-28 24v-24h-8a18 18 0 0 1-18-18v-38a18 18 0 0 1 18-18z",
-    "M540 112h72m-58-34-26 104m110-104-26 104",
-    "M870 106h76a18 18 0 0 1 18 18v54a18 18 0 0 1-18 18h-76a18 18 0 0 1-18-18v-54a18 18 0 0 1 18-18zm16 27h44m-44 30h44",
-    "M143 412a38 38 0 1 0 0 76 38 38 0 0 0 0-76zm0 38h116m-58-58c24 36 24 80 0 116m0-116c-24 36-24 80 0 116",
-    "M414 400h52a20 20 0 0 1 20 20v46a20 20 0 0 1-20 20h-52a20 20 0 0 1-20-20v-46a20 20 0 0 1 20-20zm26-42v42",
-    "M696 394l25 25-25 25m42 0h42",
-    "M900 404h72m-58-34-26 104m110-104-26 104",
-    "M224 716h74a18 18 0 0 1 18 18v38a18 18 0 0 1-18 18h-74a18 18 0 0 1-18-18v-38a18 18 0 0 1 18-18z",
-    "M564 710h82a20 20 0 0 1 20 20v44a20 20 0 0 1-20 20h-82a20 20 0 0 1-20-20v-44a20 20 0 0 1 20-20z",
-    "M860 714h46a32 32 0 0 1 0 64h-46a32 32 0 0 1 0-64zm46 0h46a32 32 0 0 1 0 64h-46",
-)
-
-// NETWORK background dot grid coordinates.
-private val NETWORK_GRID_X = floatArrayOf(80f, 160f, 240f, 320f, 400f, 480f, 560f, 640f, 720f, 800f, 880f, 960f)
-private val NETWORK_GRID_Y = floatArrayOf(80f, 240f, 400f, 560f, 720f, 880f)
-
-// NETWORK accent node groups: flat [cx, cy, r] triples.
-private val NETWORK_ACCENT_BLUE = floatArrayOf(
-    124f, 144f, 10f, 460f, 168f, 10f, 872f, 182f, 10f,
-    438f, 618f, 10f, 806f, 662f, 10f, 700f, 766f, 10f,
-)
-private val NETWORK_ACCENT_TEAL = floatArrayOf(
-    286f, 244f, 9f, 664f, 286f, 9f, 246f, 464f, 9f,
-    640f, 492f, 9f, 312f, 780f, 9f, 926f, 894f, 9f,
+    "M56 145h72a18 18 0 0 1 18 18v42a18 18 0 0 1-18 18H92l-28 22v-22h-8a18 18 0 0 1-18-18v-42a18 18 0 0 1 18-18z",
+    "M256 76 238 154m78-78-18 78m-72-50h102m-108 28h102",
+    "M376 184h38a28 28 0 0 1 0 56h-38a28 28 0 0 1 0-56zm38 0h38a28 28 0 0 1 0 56h-38m-18-28h36",
+    "M536 166h76v70h-76zm18 0v-20a20 20 0 0 1 40 0v20m-20 29v16",
+    "M704 166h86v72h-86zm18 24h50m-50 24h50",
+    "M898 86h82a18 18 0 0 1 18 18v48a18 18 0 0 1-18 18h-82a18 18 0 0 1-18-18v-48a18 18 0 0 1 18-18zm20 31h42m-42 24h26",
+    "M118 442a46 46 0 1 0 0 92 46 46 0 0 0 0-92zm-44 46h88m-44-44c17 27 17 61 0 88m0-88c-17 27-17 61 0 88",
+    "m278 374 28 28-28 28m48 0h48",
+    "M446 464h84l26 26v58H446zm84 0v26h26m-86 27h54",
+    "M610 370h80v78h-80zM628 396h44m-44 27h26",
+    "M786 476h42a28 28 0 0 1 0 56h-42a28 28 0 0 1 0-56zm42 0h42a28 28 0 0 1 0 56h-42",
+    "M974 362 956 440m78-78-18 78m-72-50h102m-108 28h102",
+    "M46 796h82a18 18 0 0 1 18 18v40a18 18 0 0 1-18 18H92l-28 22v-22H46a18 18 0 0 1-18-18v-40a18 18 0 0 1 18-18z",
+    "M204 706h88v76h-88zm18 25h52m-52 26h52",
+    "M376 810h76v70h-76zm18 0v-20a20 20 0 0 1 40 0v20m-20 28v17",
+    "m544 714 30 30 62-62m-32 32 26 26 48-48",
+    "M718 812h38a28 28 0 0 1 0 56h-38a28 28 0 0 1 0-56zm38 0h38a28 28 0 0 1 0 56h-38m-18-28h36",
+    "M904 716h82a18 18 0 0 1 18 18v42a18 18 0 0 1-18 18h-82a18 18 0 0 1-18-18v-42a18 18 0 0 1 18-18zm20 30h42",
 )
 
 // PIXEL: main filled block group, flat [x, y, w, h] quads.
 private val PIXEL_MAIN_RECTS = floatArrayOf(
-    94f, 94f, 18f, 18f, 112f, 94f, 18f, 18f, 148f, 94f, 18f, 18f, 166f, 94f, 18f, 18f,
-    112f, 112f, 18f, 18f, 148f, 112f, 18f, 18f, 94f, 130f, 18f, 18f, 112f, 130f, 18f, 18f,
-    148f, 130f, 18f, 18f, 166f, 130f, 18f, 18f,
-    852f, 182f, 18f, 18f, 870f, 200f, 18f, 18f, 888f, 218f, 54f, 18f,
-    214f, 382f, 72f, 18f, 214f, 418f, 72f, 18f, 232f, 364f, 18f, 90f, 268f, 364f, 18f, 90f,
-    748f, 390f, 18f, 72f, 766f, 390f, 54f, 18f, 820f, 408f, 18f, 36f, 766f, 444f, 54f, 18f,
-    110f, 776f, 18f, 18f, 128f, 794f, 18f, 18f, 146f, 812f, 54f, 18f,
-    420f, 828f, 18f, 18f, 438f, 846f, 18f, 18f, 456f, 864f, 18f, 18f, 474f, 882f, 72f, 18f,
+    72f, 72f, 16f, 96f, 120f, 72f, 16f, 96f, 48f, 96f, 112f, 16f, 48f, 136f, 112f, 16f,
+    304f, 72f, 112f, 16f, 288f, 88f, 16f, 64f, 416f, 88f, 16f, 64f, 304f, 152f, 48f, 16f,
+    384f, 152f, 32f, 16f, 352f, 152f, 16f, 32f, 336f, 168f, 16f, 32f,
+    614f, 88f, 16f, 16f, 630f, 104f, 16f, 16f, 614f, 120f, 16f, 16f, 662f, 136f, 64f, 16f,
+    856f, 72f, 112f, 16f, 840f, 88f, 16f, 96f, 968f, 88f, 16f, 96f, 856f, 184f, 112f, 16f,
+    872f, 104f, 56f, 16f, 872f, 152f, 56f, 16f,
+    128f, 328f, 112f, 16f, 112f, 344f, 16f, 80f, 240f, 344f, 16f, 80f, 128f, 424f, 112f, 16f,
+    144f, 296f, 16f, 32f, 208f, 296f, 16f, 32f, 160f, 280f, 48f, 16f, 176f, 360f, 16f, 32f,
+    416f, 304f, 16f, 16f, 448f, 304f, 96f, 16f, 416f, 352f, 16f, 16f, 448f, 352f, 64f, 16f,
+    416f, 400f, 16f, 16f, 448f, 400f, 96f, 16f,
+    744f, 320f, 64f, 16f, 728f, 336f, 16f, 48f, 744f, 384f, 64f, 16f, 808f, 336f, 32f, 16f,
+    808f, 368f, 32f, 16f, 840f, 320f, 64f, 16f, 904f, 336f, 16f, 48f, 840f, 384f, 64f, 16f,
+    792f, 352f, 64f, 16f,
+    64f, 576f, 16f, 64f, 80f, 560f, 32f, 16f, 112f, 544f, 48f, 16f, 160f, 560f, 32f, 16f,
+    192f, 576f, 16f, 64f, 80f, 640f, 32f, 16f, 112f, 656f, 48f, 16f, 160f, 640f, 32f, 16f,
+    64f, 600f, 144f, 16f, 128f, 544f, 16f, 128f,
+    352f, 544f, 96f, 16f, 336f, 560f, 16f, 80f, 448f, 560f, 16f, 80f, 352f, 640f, 16f, 16f,
+    432f, 640f, 16f, 16f, 368f, 656f, 16f, 16f, 416f, 656f, 16f, 16f, 384f, 672f, 32f, 16f,
+    608f, 544f, 80f, 16f, 592f, 560f, 16f, 112f, 688f, 560f, 16f, 112f, 608f, 672f, 80f, 16f,
+    688f, 560f, 32f, 16f, 704f, 576f, 16f, 32f, 624f, 608f, 48f, 16f, 624f, 640f, 64f, 16f,
+    856f, 560f, 128f, 16f, 840f, 576f, 16f, 96f, 984f, 576f, 16f, 96f, 856f, 672f, 128f, 16f,
+    880f, 608f, 16f, 16f, 896f, 624f, 16f, 16f, 880f, 640f, 16f, 16f, 928f, 640f, 32f, 16f,
+    64f, 848f, 16f, 64f, 80f, 832f, 80f, 16f, 160f, 848f, 16f, 64f, 80f, 912f, 48f, 16f,
+    112f, 864f, 32f, 16f, 96f, 880f, 16f, 32f, 144f, 880f, 16f, 32f,
+    352f, 824f, 128f, 16f, 336f, 840f, 16f, 80f, 480f, 840f, 16f, 80f, 352f, 920f, 48f, 16f,
+    448f, 920f, 32f, 16f, 400f, 920f, 16f, 32f, 384f, 936f, 16f, 32f, 376f, 872f, 80f, 16f,
+    640f, 848f, 112f, 16f, 624f, 864f, 16f, 80f, 752f, 864f, 16f, 80f, 640f, 944f, 112f, 16f,
+    656f, 816f, 16f, 32f, 720f, 816f, 16f, 32f, 672f, 800f, 48f, 16f, 688f, 880f, 16f, 32f,
+    872f, 832f, 16f, 16f, 920f, 800f, 16f, 16f, 968f, 848f, 16f, 16f, 904f, 896f, 16f, 16f,
+    952f, 928f, 16f, 16f, 888f, 816f, 32f, 16f, 936f, 816f, 32f, 16f, 888f, 848f, 80f, 16f,
+    920f, 880f, 32f, 16f, 920f, 912f, 32f, 16f,
 )
 
 // PIXEL blue accent blocks.
 private val PIXEL_ACCENT_BLUE = floatArrayOf(
-    380f, 116f, 18f, 18f, 416f, 116f, 18f, 18f, 452f, 116f, 18f, 18f,
-    602f, 264f, 18f, 18f, 638f, 264f, 18f, 18f, 674f, 264f, 18f, 18f,
-    314f, 602f, 18f, 18f, 350f, 602f, 18f, 18f, 386f, 602f, 18f, 18f,
-    788f, 908f, 18f, 18f, 824f, 908f, 18f, 18f, 860f, 908f, 18f, 18f,
+    368f, 112f, 16f, 16f, 448f, 304f, 96f, 16f, 368f, 608f, 16f, 16f, 384f, 624f, 16f, 16f,
+    400f, 608f, 32f, 16f, 880f, 608f, 16f, 16f, 896f, 624f, 16f, 16f,
 )
 
 // PIXEL green accent blocks.
 private val PIXEL_ACCENT_GREEN = floatArrayOf(
-    616f, 116f, 18f, 18f, 634f, 134f, 18f, 18f, 652f, 152f, 18f, 18f,
-    102f, 556f, 18f, 18f, 120f, 556f, 18f, 18f, 138f, 556f, 18f, 18f,
-    904f, 614f, 18f, 18f, 922f, 632f, 18f, 18f, 940f, 650f, 18f, 18f,
-)
-
-// PIXEL stroked blocky-glyph group (square caps, miter joins).
-private val PIXEL_PATHS = arrayOf(
-    "M348 300h94v58h-58l-36 30v-30h-30v-28",
-    "M560 496h82v72h-82zM582 496v-26h38v26",
-    "M833 496h100v68h-100zM858 522h24m24 0h2m-50 18h50",
-    "M256 934h84m-70-42-28 126m126-126-28 126",
-    "M628 768h86m-70-42-28 126m126-126-28 126",
-    "M896 842c28-34 58-34 88 0s60 34 88 0",
+    944f, 104f, 16f, 16f, 176f, 360f, 16f, 16f, 808f, 352f, 32f, 16f,
+    688f, 880f, 16f, 16f, 920f, 800f, 16f, 16f, 952f, 928f, 16f, 16f,
 )
 
 // -- Previews (light + dark for each preset; review without installing) --------------------------
