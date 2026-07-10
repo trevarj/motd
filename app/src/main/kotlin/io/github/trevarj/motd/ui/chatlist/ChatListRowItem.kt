@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -23,10 +24,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.ui.components.Avatar
@@ -39,6 +42,8 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 /**
  * One chat-list row: avatar, display name (+ network chip when multi-network), last-message
  * one-liner, relative time, unread/mention badges. Muted rows render dimmed with a bell-off glyph.
+ * Pinned rows carry a small inline [Icons.Outlined.PushPin] beside the name (there is no separate
+ * "Pinned" section; the query orders pinned rows first within their section).
  *
  * Round 4 (plans/13 §3.5, Confirmed decision #4): a friend row gets a trailing [Icons.Filled.Star]
  * plus a subtle primary-tinted rounded background behind the display name (theme-aware, layered
@@ -99,6 +104,18 @@ fun ChatListRowItem(
                             .padding(start = 4.dp)
                             .size(14.dp),
                         tint = nickColor,
+                    )
+                }
+                if (row.pinned) {
+                    // Inline pin marker (replaces the former "Pinned" section); subtle, unread-neutral.
+                    Icon(
+                        imageVector = Icons.Outlined.PushPin,
+                        contentDescription = stringResource(R.string.chatlist_pinned),
+                        modifier = Modifier
+                            .testTag("chatlist_row_pin")
+                            .padding(start = 4.dp)
+                            .size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 if (row.muted) {

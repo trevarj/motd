@@ -68,7 +68,6 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
-import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.components.ConnectionBanner
 import io.github.trevarj.motd.ui.components.EmptyState
@@ -330,7 +329,9 @@ private fun ChatList(
     onSetMuted: (Long, Boolean) -> Unit,
     onDeleteBuffer: (ChatListRow) -> Unit,
 ) {
-    // Precedence: pinned > friend > fool > regular (plans/13 §3.5, Confirmed decision #6).
+    // Precedence: friend > fool > regular (plans/13 §3.5). Pinned rows are no longer a separate
+    // section; they sort first within their section (query orders pinned-first) and carry an inline
+    // pin icon on the row itself.
     val sections = sectionChatList(rows, friends, fools)
     // Fools section is collapsed by default; state is local to the screen (accepted, plans/13).
     var foolsExpanded by remember { mutableStateOf(false) }
@@ -339,15 +340,6 @@ private fun ChatList(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 88.dp),
     ) {
-        if (sections.pinned.isNotEmpty()) {
-            item(key = "pinned-header") {
-                SectionHeader(stringResource(R.string.chatlist_pinned))
-            }
-            items(sections.pinned, key = { "p-${it.bufferId}" }) { row ->
-                // A pinned friend keeps its star even while under Pinned.
-                RowWithMenu(row, isFriend(row, friends), multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
-            }
-        }
         if (sections.friends.isNotEmpty()) {
             item(key = "friends-header") {
                 SectionHeader(stringResource(R.string.chatlist_friends))
@@ -377,10 +369,6 @@ private fun ChatList(
         }
     }
 }
-
-/** A non-pinned QUERY row whose nick is a friend (used for the star on pinned friend rows). */
-private fun isFriend(row: ChatListRow, friends: Set<String>): Boolean =
-    row.type == BufferType.QUERY && normalizeNick(row.displayName) in friends
 
 @Composable
 private fun FoolsSectionHeader(count: Int, expanded: Boolean, onToggle: () -> Unit) {

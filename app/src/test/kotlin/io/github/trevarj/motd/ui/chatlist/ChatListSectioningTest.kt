@@ -30,7 +30,6 @@ class ChatListSectioningTest {
         assertEquals(listOf(1L), s.friends.map { it.bufferId })
         assertEquals(listOf(2L), s.fools.map { it.bufferId })
         assertEquals(listOf(3L), s.regular.map { it.bufferId })
-        assertEquals(emptyList<Long>(), s.pinned.map { it.bufferId })
     }
 
     @Test
@@ -46,16 +45,17 @@ class ChatListSectioningTest {
     }
 
     @Test
-    fun `pinned wins over friend and fool`() {
+    fun `pinned rows classify normally (no separate section), leading their section`() {
+        // Pinned no longer pulls rows aside; a pinned friend/fool stays in friends/fools, and the
+        // query's pinned-first order is preserved (input order is preserved within a section).
         val rows = listOf(
-            row(1, "alice", pinned = true),   // pinned friend
+            row(1, "alice", pinned = true),   // pinned friend, sorts first among friends
             row(2, "bob", pinned = true),     // pinned fool
             row(3, "carol"),                  // plain friend
         )
         val s = sectionChatList(rows, friends = setOf("alice", "carol"), fools = setOf("bob"))
-        assertEquals(listOf(1L, 2L), s.pinned.map { it.bufferId })
-        assertEquals(listOf(3L), s.friends.map { it.bufferId })
-        assertEquals(emptyList<Long>(), s.fools.map { it.bufferId })
+        assertEquals(listOf(1L, 3L), s.friends.map { it.bufferId })
+        assertEquals(listOf(2L), s.fools.map { it.bufferId })
     }
 
     @Test
@@ -76,6 +76,6 @@ class ChatListSectioningTest {
         val rows = listOf(row(1, "alice"), row(2, "#chan", type = BufferType.CHANNEL))
         val s = sectionChatList(rows, friends = emptySet(), fools = emptySet())
         assertEquals(listOf(1L, 2L), s.regular.map { it.bufferId })
-        assertEquals(emptyList<Long>(), s.friends + s.fools + s.pinned)
+        assertEquals(emptyList<Long>(), s.friends + s.fools)
     }
 }
