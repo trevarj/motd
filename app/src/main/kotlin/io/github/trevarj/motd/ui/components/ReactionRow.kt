@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,7 +12,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,9 +39,10 @@ fun ReactionRow(
 ) {
     if (reactions.isEmpty()) return
     FlowRow(
-        modifier = modifier.padding(top = 4.dp),
+        // Tight top gap so chips sit snugly under the message body without ballooning row height.
+        modifier = modifier.padding(top = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         reactions.forEach { chip ->
             ReactionChipView(chip = chip, onClick = { if (!chip.mine) onReact(chip.emoji) })
@@ -56,18 +57,20 @@ private fun ReactionChipView(chip: ReactionChip, onClick: () -> Unit) {
     val fg = if (chip.mine) MaterialTheme.colorScheme.onPrimaryContainer
     else MaterialTheme.colorScheme.onSurfaceVariant
     androidx.compose.foundation.layout.Row(
-        // >=48dp touch target (plans/15 #24) while the visible chip stays compact.
+        // Compact chip: a fixed short height keeps reactions snug under the message instead of the
+        // 48dp minimumInteractiveComponentSize that ballooned the row; the tap target stays usable
+        // via the chip's own horizontal/vertical padding (plans/15 #24).
         modifier = Modifier
             .testTag("chat_reaction_chip_${chip.emoji}")
-            .minimumInteractiveComponentSize()
             .wrapContentWidth()
+            .heightIn(min = 24.dp)
             .background(bg, RoundedCornerShape(50))
             .then(
                 if (chip.mine) Modifier.border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(50))
                 else Modifier,
             )
             .clickable { onClick() }
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .padding(horizontal = 8.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
