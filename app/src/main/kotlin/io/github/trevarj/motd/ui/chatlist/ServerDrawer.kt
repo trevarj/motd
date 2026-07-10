@@ -19,7 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudOff
-import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -29,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -103,22 +103,15 @@ fun ServerDrawerContent(
                     .padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
             )
 
-            // 1. Unified "All chats" entry (default view).
-            NavigationDrawerItem(
-                icon = { Icon(Icons.Outlined.Forum, contentDescription = null) },
-                label = { Text(stringResource(R.string.drawer_all_chats)) },
-                badge = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (allMentions > 0) MentionBadge(allMentions)
-                        if (allUnread > 0) UnreadBadge(allUnread)
-                    }
-                },
-                selected = selectedNetworkId == null,
-                onClick = { onSelectNetwork(null) },
-                modifier = Modifier.padding(horizontal = 12.dp),
+            // 1. Networks section header. The unscoped ("all chats") state is simply "no network
+            // selected" — reflected by the title-bar wordmark — so there is no standalone row for
+            // it. A subtle clear-filter action appears only while scoped.
+            NetworksHeader(
+                totalUnread = allUnread,
+                totalMentions = allMentions,
+                scoped = selectedNetworkId != null,
+                onClearFilter = { onSelectNetwork(null) },
             )
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             // 2. One entry per network (children indented under their soju root).
             for (row in drawerRows) {
@@ -168,6 +161,49 @@ fun ServerDrawerContent(
                 onClick = onOpenSettings,
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
+        }
+    }
+}
+
+/**
+ * "NETWORKS" section label with rolled-up unread/mention badges. While a network is scoped, a
+ * subtle "Show all chats" text button clears the filter (there is nothing to clear when unscoped,
+ * so it stays hidden — keeping the header uncluttered).
+ */
+@Composable
+private fun NetworksHeader(
+    totalUnread: Int,
+    totalMentions: Int,
+    scoped: Boolean,
+    onClearFilter: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 28.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.drawer_networks).uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        if (scoped) {
+            // Clear-scope affordance; only meaningful while filtered.
+            TextButton(
+                onClick = onClearFilter,
+                modifier = Modifier.testTag("drawer_clear_filter"),
+            ) {
+                Text(stringResource(R.string.drawer_clear_filter))
+            }
+        } else {
+            // Unscoped: surface the aggregate unread/mention rollup where "All chats" used to.
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (totalMentions > 0) MentionBadge(totalMentions)
+                if (totalUnread > 0) UnreadBadge(totalUnread)
+            }
         }
     }
 }

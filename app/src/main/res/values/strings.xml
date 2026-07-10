@@ -261,7 +261,8 @@
 
     <!-- Server drawer (WP-V1, §3) -->
     <string name="drawer_open">Open navigation drawer</string>
-    <string name="drawer_all_chats">All chats</string>
+    <string name="drawer_networks">Networks</string>
+    <string name="drawer_clear_filter">Show all chats</string>
     <string name="drawer_add_network">Add network</string>
     <string name="drawer_go_offline">Go offline</string>
     <string name="drawer_go_online">Go online</string>
