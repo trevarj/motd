@@ -56,6 +56,7 @@ import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.prefs.isTerminalTheme
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.ui.about.appVersion
+import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Stateful entry: wires the ViewModel and drives navigation. */
@@ -177,7 +178,7 @@ fun SettingsContent(
                 switchTag = "settings_switch_show_jpq",
             )
             SubLabel(stringResource(R.string.settings_wallpaper))
-            WallpaperGroup(current = state.settings.chatWallpaper, onSelect = onChatWallpaper)
+            ChatWallpaperPicker(current = state.settings.chatWallpaper, onSelect = onChatWallpaper)
 
             HorizontalDivider()
 
@@ -385,28 +386,6 @@ private fun PaletteGroup(
                 selected = current == palette,
                 enabled = enabled,
                 onClick = { onSelect(palette) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun WallpaperGroup(current: ChatWallpaper, onSelect: (ChatWallpaper) -> Unit) {
-    // Subtle IRC-themed chat backgrounds (opt-in). Subtitles hint at each preset's motifs.
-    val options = listOf(
-        Triple(ChatWallpaper.NONE, R.string.settings_wallpaper_none, R.string.settings_wallpaper_none_desc),
-        Triple(ChatWallpaper.CLASSIC, R.string.settings_wallpaper_classic, R.string.settings_wallpaper_classic_desc),
-        Triple(ChatWallpaper.NETWORK, R.string.settings_wallpaper_network, R.string.settings_wallpaper_network_desc),
-        Triple(ChatWallpaper.PIXEL, R.string.settings_wallpaper_pixel, R.string.settings_wallpaper_pixel_desc),
-    )
-    Column(Modifier.selectableGroup()) {
-        options.forEach { (wallpaper, labelRes, descRes) ->
-            RadioRow(
-                label = stringResource(labelRes),
-                subtitle = stringResource(descRes),
-                selected = current == wallpaper,
-                enabled = true,
-                onClick = { onSelect(wallpaper) },
             )
         }
     }
