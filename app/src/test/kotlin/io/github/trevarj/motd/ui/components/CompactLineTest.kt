@@ -47,4 +47,23 @@ class CompactLineTest {
             .map { it.url }
         assertTrue("expected an https link annotation", links.contains("https://example.com"))
     }
+
+    @Test
+    fun continuation_drops_nick_prefix() {
+        // showSender=false => a grouped continuation line renders body only, no `nick:` prefix.
+        val line = buildCompactLine(
+            "alice", "second line", MessageKind.PRIVMSG, nick, body, link, noTint,
+            showSender = false,
+        )
+        assertEquals("second line", line.text)
+    }
+
+    @Test
+    fun continuation_action_keeps_star_marker() {
+        val line = buildCompactLine(
+            "bob", "still waving", MessageKind.ACTION, nick, body, link, noTint,
+            showSender = false,
+        )
+        assertEquals("* still waving", line.text)
+    }
 }

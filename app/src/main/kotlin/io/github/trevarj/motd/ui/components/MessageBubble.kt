@@ -116,6 +116,7 @@ fun MessageBubble(
             kind = kind,
             nickColors = nickColors,
             modifier = modifier,
+            showSender = showSender,
             senderIsFriend = senderIsFriend,
             failed = failed,
             pending = pending,
@@ -144,6 +145,7 @@ fun MessageBubble(
             kind = kind,
             nickColors = nickColors,
             spacing = spacing,
+            showSender = showSender,
             modifier = modifier,
             senderIsFriend = senderIsFriend,
             failed = failed,
@@ -356,6 +358,7 @@ private fun TwoLineMessageRow(
     kind: MessageKind,
     nickColors: NickColorScheme,
     spacing: io.github.trevarj.motd.ui.theme.MotdSpacing,
+    showSender: Boolean,
     modifier: Modifier = Modifier,
     senderIsFriend: Boolean = false,
     failed: Boolean = false,
@@ -394,45 +397,57 @@ private fun TwoLineMessageRow(
             )
             .padding(horizontal = 12.dp, vertical = spacing.bubbleRowVPad),
     ) {
-        // Line 1: avatar + nick + (own) sent check + timestamp.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // Center the small avatar against the header line rather than top-pinning it.
-            val avatarMod = Modifier.padding(end = 6.dp)
-                .align(Alignment.CenterVertically)
-                .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
-            Avatar(name = sender, size = spacing.bubbleAvatar, modifier = avatarMod)
-            Text(
-                text = sender,
-                color = nameColor,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = (if (senderIsFriend) Modifier.friendNickTint() else Modifier)
-                    .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it },
-            )
-            if (senderIsFriend) {
-                Icon(
-                    Icons.Filled.Star,
-                    contentDescription = null,
-                    tint = nameColor,
-                    modifier = Modifier.padding(start = 4.dp).size(12.dp),
-                )
-            }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 6.dp),
-            ) {
-                MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
+        // Line 1 (header): avatar + nick + (own) sent check + timestamp — only on a group's first
+        // message. Continuations (showSender == false) omit the header and indent the body under it,
+        // so consecutive messages from a sender read as one grouped run (plans/07 grouping window).
+        if (showSender) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Center the small avatar against the header line rather than top-pinning it.
+                val avatarMod = Modifier.padding(end = 6.dp)
+                    .align(Alignment.CenterVertically)
+                    .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
+                Avatar(name = sender, size = spacing.bubbleAvatar, modifier = avatarMod)
                 Text(
-                    text = formatTime(timeMs),
-                    fontSize = 10.sp,
-                    color = if (failed) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    text = sender,
+                    color = nameColor,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = (if (senderIsFriend) Modifier.friendNickTint() else Modifier)
+                        .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it },
                 )
+                if (senderIsFriend) {
+                    Icon(
+                        Icons.Filled.Star,
+                        contentDescription = null,
+                        tint = nameColor,
+                        modifier = Modifier.padding(start = 4.dp).size(12.dp),
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 6.dp),
+                ) {
+                    MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
+                    Text(
+                        text = formatTime(timeMs),
+                        fontSize = 10.sp,
+                        color = if (failed) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    )
+                }
             }
         }
 
-        // Line 2: reply preview, body, inline image, link preview, reactions.
-        Column(modifier = Modifier.padding(top = spacing.bubbleInnerVPad)) {
+        // Line 2 (body): reply preview, body, inline image, link preview, reactions. Continuations
+        // reserve the avatar's horizontal space (avatar + its 6dp gap) so the body lines up under
+        // the group's body instead of jumping to the row's left edge.
+        val bodyIndent = if (showSender) 0.dp else spacing.bubbleAvatar + 6.dp
+        Column(
+            modifier = Modifier.padding(
+                start = bodyIndent,
+                top = if (showSender) spacing.bubbleInnerVPad else 0.dp,
+            ),
+        ) {
             reply?.let { ReplyMiniBubble(it, nickColors) }
 
             if (kind == MessageKind.NOTICE) {

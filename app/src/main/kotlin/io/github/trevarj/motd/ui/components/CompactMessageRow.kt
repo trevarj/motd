@@ -67,6 +67,8 @@ internal fun CompactMessageRow(
     kind: MessageKind,
     nickColors: NickColorScheme,
     modifier: Modifier = Modifier,
+    // Group continuation flag: false = omit the `nick:` prefix so the line reads as a continued run.
+    showSender: Boolean = true,
     senderIsFriend: Boolean = false,
     failed: Boolean = false,
     pending: Boolean = false,
@@ -96,8 +98,9 @@ internal fun CompactMessageRow(
 
     // The `nick: text` (or `* nick text`) content is a single flowing AnnotatedString so it wraps as
     // one paragraph like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
-    val line = remember(sender, text, kind, nameColor, bodyColor, linkColor, senderIsFriend) {
-        buildCompactLine(sender, text, kind, nameColor, bodyColor, linkColor, friendTint)
+    // Continuation lines (showSender == false) drop the `nick:` prefix so a run reads as one speaker.
+    val line = remember(sender, text, kind, nameColor, bodyColor, linkColor, senderIsFriend, showSender) {
+        buildCompactLine(sender, text, kind, nameColor, bodyColor, linkColor, friendTint, showSender)
     }
 
     Column(
@@ -170,7 +173,9 @@ internal fun CompactMessageRow(
 /**
  * Build the single-line `nick: text` content for COMPACT rendering. Prefix depends on kind:
  * ACTION → `* nick ` (no colon), NOTICE → `-nick- ` (subtle marker), else `nick: `. The nick span
- * is colored (+ optional friend background); URLs in the body are linkified. Pure/testable.
+ * is colored (+ optional friend background); URLs in the body are linkified. When [showSender] is
+ * false the row is a group continuation: the `nick:`/`-nick-` prefix is dropped so the run reads as
+ * one speaker (ACTION keeps its leading `* ` so an action line stays recognizable). Pure/testable.
  */
 internal fun buildCompactLine(
     sender: String,
@@ -180,27 +185,32 @@ internal fun buildCompactLine(
     bodyColor: Color,
     linkColor: Color,
     friendTint: Color,
+    showSender: Boolean = true,
 ): AnnotatedString = buildAnnotatedString {
     val nickStyle = SpanStyle(
         color = nameColor,
         fontWeight = FontWeight.SemiBold,
         background = friendTint,
     )
-    when (kind) {
-        MessageKind.ACTION -> {
-            withStyle(SpanStyle(color = bodyColor)) { append("* ") }
-            withStyle(nickStyle) { append(sender) }
-            append(" ")
+    if (showSender) {
+        when (kind) {
+            MessageKind.ACTION -> {
+                withStyle(SpanStyle(color = bodyColor)) { append("* ") }
+                withStyle(nickStyle) { append(sender) }
+                append(" ")
+            }
+            MessageKind.NOTICE -> {
+                // irssi-style notice marker: `-nick-`.
+                withStyle(nickStyle) { append("-$sender-") }
+                append(" ")
+            }
+            else -> {
+                withStyle(nickStyle) { append(sender) }
+                withStyle(SpanStyle(color = bodyColor)) { append(": ") }
+            }
         }
-        MessageKind.NOTICE -> {
-            // irssi-style notice marker: `-nick-`.
-            withStyle(nickStyle) { append("-$sender-") }
-            append(" ")
-        }
-        else -> {
-            withStyle(nickStyle) { append(sender) }
-            withStyle(SpanStyle(color = bodyColor)) { append(": ") }
-        }
+    } else if (kind == MessageKind.ACTION) {
+        withStyle(SpanStyle(color = bodyColor)) { append("* ") }
     }
     appendLinkified(text, bodyColor, linkColor)
 }
