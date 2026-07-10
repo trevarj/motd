@@ -156,6 +156,34 @@ class EventProcessorTest {
     }
 
     @Test
+    fun ownReactionEcho_reconcilesOntoOptimisticRow_withoutDuplicating() = runTest {
+        // Auto-create the buffer and seed the optimistic own-reaction row the way sendReact does
+        // (upsert keyed by bufferId+targetMsgid+sender) before the server echo arrives.
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "m1"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "hi",
+            isSelf = false, replyToMsgid = null,
+        ))
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        db.reactionDao().upsert(
+            io.github.trevarj.motd.data.db.ReactionEntity(
+                bufferId = buffer.id, targetMsgid = "m1", sender = "me", emoji = "👍", serverTime = 5,
+            ),
+        )
+        // Server echoes our own react back as a TAGMSG; onTag upserts by the same unique key, so the
+        // optimistic row is reconciled rather than duplicated.
+        processor.process(networkId, IrcEvent.TagMessage(
+            ctx = ctx(time = 9), source = Prefix("me"), target = "#chan",
+            typing = null, reactEmoji = "👍", reactTargetMsgid = "m1",
+        ))
+
+        val reactions = db.reactionDao().observeFor(buffer.id, listOf("m1")).first()
+        assertEquals(1, reactions.size)
+        assertEquals("me", reactions.single().sender)
+        assertEquals(9, reactions.single().serverTime)
+    }
+
+    @Test
     fun readMarker_advancesMaxOnly() = runTest {
         db.bufferDao().insert(
             io.github.trevarj.motd.data.db.BufferEntity(

@@ -42,6 +42,36 @@ class ReactionAndDeleteDaoTest {
     }
 
     @Test
+    fun optimisticOwnReaction_reconcilesWithServerEcho_withoutDuplicating() = runTest {
+        val dao = db.reactionDao()
+        // Optimistic own react (upserted locally on tap, before the TAGMSG round-trips).
+        dao.upsert(ReactionEntity(bufferId = bufferId, targetMsgid = "m1", sender = "me", emoji = "👍", serverTime = 1))
+        // Server echoes our own react back with a later server time; the UNIQUE(bufferId, targetMsgid,
+        // sender) + REPLACE conflict collapses it onto the optimistic row instead of adding a second.
+        dao.upsert(ReactionEntity(bufferId = bufferId, targetMsgid = "m1", sender = "me", emoji = "👍", serverTime = 2))
+
+        val rows = dao.observeForBuffer(bufferId).first()
+        assertEquals(1, rows.size)
+        assertEquals(2, rows.single().serverTime) // reconciled to the server-echoed row
+    }
+
+    @Test
+    fun observeMsgid_isNullWhilePending_thenEmitsMsgidOnceEchoLands() = runTest {
+        val dao = db.messageDao()
+        val id = dao.insertAll(
+            listOf(message(bufferId, "hi", serverTime = 1, dedupKey = "pending:l1", isSelf = true, pendingLabel = "l1")),
+        ).single()
+
+        assertNull(dao.observeMsgid(id).first())
+
+        // Echo promotes the msgid in place (as EventProcessor does on a labeled/heuristic echo).
+        val pending = dao.byPendingLabel(bufferId, "l1")!!
+        dao.update(pending.copy(msgid = "server-m1", pendingLabel = null, dedupKey = "server-m1"))
+
+        assertEquals("server-m1", dao.observeMsgid(id).first { it != null })
+    }
+
+    @Test
     fun deleteById_removesTheFailedRow() = runTest {
         val dao = db.messageDao()
         val id = dao.insertAll(

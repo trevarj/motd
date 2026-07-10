@@ -205,7 +205,9 @@ fun ChatContent(
     onSubmit: (String) -> Unit,
     onTyping: (Boolean) -> Unit,
     onSetReply: (MessageEntity?) -> Unit,
-    onReact: (String, String) -> Unit,
+    // React to a message. Takes the whole entity so a still-pending own message (msgid == null) can
+    // be queued rather than silently dropped; the VM defers the send until the msgid lands.
+    onReact: (MessageEntity, String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> io.github.trevarj.motd.data.repo.LinkPreview?,
     reactionChips: (String) -> List<io.github.trevarj.motd.ui.components.ReactionChip> = { emptyList() },
@@ -280,13 +282,15 @@ fun ChatContent(
         }
     }
 
-    // Raw-send parse failure on a SERVER buffer → transient snackbar (plans/16 §5.6).
+    // Transient snackbars off the VM's one-shot sentinel channel: raw-send parse failure on a SERVER
+    // buffer (plans/16 §5.6), or a queued reaction whose message never confirmed (plans/15 reactions).
     val invalidCommand = stringResource(R.string.chat_server_invalid_command)
+    val reactFailed = stringResource(R.string.chat_react_failed)
     LaunchedEffect(rawSendSnackbar) {
-        if (rawSendSnackbar != null) {
-            snackbarHostState.showSnackbar(invalidCommand)
-            onSnackbarShown()
-        }
+        val sentinel = rawSendSnackbar ?: return@LaunchedEffect
+        val text = if (sentinel == "react_failed") reactFailed else invalidCommand
+        snackbarHostState.showSnackbar(text)
+        onSnackbarShown()
     }
 
     // Deep-jump scroll: bounded APPEND loop (placeholders OFF, so tail loads never shift indices).
@@ -626,7 +630,9 @@ fun ChatContent(
             isServerBuffer = isServerBuffer,
             onDismiss = { sheetTarget = null },
             onReply = { hideThen { onSetReply(target) } },
-            onReact = { emoji -> hideThen { target.msgid?.let { onReact(it, emoji) } } },
+            // Pass the whole target: the VM queues the react when target.msgid is still null (own
+            // pending message) instead of silently dropping it.
+            onReact = { emoji -> hideThen { onReact(target, emoji) } },
             onCopy = {
                 hideThen {
                     scope.launch {

@@ -46,6 +46,12 @@ interface MessageRepository {
      *  in memory to avoid SQLite's bind-variable overflow on large windows (plans/15 #5, #18). */
     fun reactionsForBuffer(bufferId: Long): Flow<List<ReactionEntity>>
     suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
+    /**
+     * Suspend until the local row [id] carries a durable server msgid, or [timeoutMs] elapses.
+     * Returns the msgid, or null on timeout / missing row. Used to defer a reaction tapped on a
+     * still-pending own message until its echo lands (plans/15 reactions).
+     */
+    suspend fun awaitMsgid(id: Long, timeoutMs: Long): String?
     suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int
     /** Oldest non-self message time past [after], or null; anchors the unread divider/badge. */
     suspend fun firstUnreadOtherTime(bufferId: Long, after: Long): Long?

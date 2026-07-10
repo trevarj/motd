@@ -85,7 +85,9 @@ fun MessageList(
     listState: LazyListState,
     readMarkerTime: Long?,
     onLongPress: (MessageEntity) -> Unit,
-    onReact: (String, String) -> Unit,
+    // React to a message; the whole entity is passed so a still-pending own row (msgid == null) is
+    // queued by the VM instead of silently dropped (bug: react on a just-sent message did nothing).
+    onReact: (MessageEntity, String) -> Unit,
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> LinkPreview?,
@@ -296,7 +298,7 @@ private fun MessageRow(
     reactions: List<ReactionChip>,
     knownNicks: Set<String>,
     onLongPress: (MessageEntity) -> Unit,
-    onReact: (String, String) -> Unit,
+    onReact: (MessageEntity, String) -> Unit,
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     onDelete: (MessageEntity) -> Unit,
@@ -357,7 +359,9 @@ private fun MessageRow(
         reactions = reactions,
         knownNicks = knownNicks,
         onLongPress = { onLongPress(msg) },
-        onReact = { emoji -> msg.msgid?.let { onReact(it, emoji) } },
+        // Pass the entity, not just msgid: a chip re-tap on a confirmed message has a msgid, but the
+        // VM handles the pending case uniformly (queue) so we never silently drop a react.
+        onReact = { emoji -> onReact(msg, emoji) },
         onImageClick = onImageClick,
         onLinkPreviewClick = { linkUrl?.let(onOpenLink) },
         // Only non-self senders open the nick sheet (self has no social/moderation actions).

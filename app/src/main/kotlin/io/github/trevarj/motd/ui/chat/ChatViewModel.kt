@@ -192,7 +192,20 @@ class ChatViewModel @Inject constructor(
         connectionManager.sendTyping(bufferId, if (active) "active" else "done")
     }
 
-    fun react(msgid: String, emoji: String) = viewModelScope.launch {
+    /**
+     * React to [message] with [emoji]. A confirmed message sends immediately. An own message still
+     * pending its echo has `msgid == null`, so the tap MUST NOT be silently dropped (bug: reacting to
+     * a just-sent message "sometimes did nothing"): defer the send until the row's msgid lands, then
+     * fire the TAGMSG. The optimistic own-reaction chip is upserted inside sendReact, so it appears
+     * instantly and reconciles with the server echo without duplicating. On queue timeout (echo never
+     * arrived) surface a snackbar rather than failing silently.
+     */
+    fun react(message: MessageEntity, emoji: String) = viewModelScope.launch {
+        val msgid = message.msgid ?: messageRepository.awaitMsgid(message.id, REACT_QUEUE_TIMEOUT_MS)
+        if (msgid == null) {
+            _snackbar.value = "react_failed" // sentinel; screen maps to chat_react_failed
+            return@launch
+        }
         connectionManager.sendReact(bufferId, msgid, emoji)
     }
 
@@ -502,5 +515,9 @@ class ChatViewModel @Inject constructor(
     private companion object {
         // Survives config changes so a jump resolves exactly once per navigation.
         const val JUMP_CONSUMED_KEY = "jump_consumed"
+
+        // Max wait for a pending own message's msgid to land before a queued reaction gives up. Sits
+        // just past the 30s echo-failure flip so a message that will fail has already flipped by then.
+        const val REACT_QUEUE_TIMEOUT_MS = 32_000L
     }
 }

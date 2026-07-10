@@ -163,6 +163,15 @@ interface MessageDao {
     suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
 
     /**
+     * Observe a single local row's server msgid by primary key. Emits null while the row is still
+     * pending (own optimistic send not yet echoed) and the durable msgid once the echo promotes it
+     * in place. Drives the deferred-reaction queue: a react tapped on a still-pending own message
+     * waits on this flow until its msgid lands, then sends the TAGMSG (plans/15 reactions).
+     */
+    @Query("SELECT msgid FROM messages WHERE id = :id LIMIT 1")
+    fun observeMsgid(id: Long): Flow<String?>
+
+    /**
      * Newest local self row for [bufferId] matching [text], to collapse an un-labeled echo into a
      * pending/confirmed-local row (plans/03 echo heuristic). A still-pending row (pendingLabel set)
      * is a local send awaiting THIS echo, so it matches regardless of the [lo]..[hi] window — its

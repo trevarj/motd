@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
@@ -442,7 +443,21 @@ class ConnectionManagerImpl @Inject constructor(
 
     override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) {
         val buffer = bufferDao.observeById(bufferId) ?: return
-        clientFor(buffer.networkId)?.sendReact(buffer.name, msgid, emoji)
+        val client = clientFor(buffer.networkId) ?: return
+        // Optimistic own-reaction: upsert a local row keyed (bufferId, targetMsgid, sender) BEFORE the
+        // TAGMSG round-trips so the chip appears instantly regardless of whether soju/ergo echoes our
+        // own react back. The reactions table's UNIQUE(bufferId, targetMsgid, sender) with REPLACE
+        // means a returning echo collapses onto this exact row — no duplicate (plans/15 reactions).
+        db.reactionDao().upsert(
+            ReactionEntity(
+                bufferId = bufferId,
+                targetMsgid = msgid,
+                sender = buffer_meNick(client),
+                emoji = emoji,
+                serverTime = System.currentTimeMillis(),
+            ),
+        )
+        client.sendReact(buffer.name, msgid, emoji)
     }
 
     override suspend fun joinChannel(networkId: Long, channel: String) {

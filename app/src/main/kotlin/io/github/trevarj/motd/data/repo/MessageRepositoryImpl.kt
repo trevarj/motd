@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.db.ReactionDao
 import io.github.trevarj.motd.data.db.ReactionEntity
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
 
 // Paging 3 stream backed by the local pagingSource, with a RemoteMediator supplied per buffer
 // by the injected factory (WP1 no-op / WP5 CHATHISTORY-backed). PagingConfig is the frozen
@@ -43,6 +44,14 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity? =
         messageDao.byMsgid(bufferId, msgid)
+
+    // Wait for the echo to promote a pending own row's msgid in place. observeMsgid emits the
+    // current value immediately (null while pending) and again when the row updates, so first
+    // non-null wins; withTimeoutOrNull bounds the wait so a lost echo can't hang the react forever.
+    override suspend fun awaitMsgid(id: Long, timeoutMs: Long): String? =
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            messageDao.observeMsgid(id).firstOrNull { it != null }
+        }
 
     override suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int =
         messageDao.countNewerThan(bufferId, serverTime, id)
