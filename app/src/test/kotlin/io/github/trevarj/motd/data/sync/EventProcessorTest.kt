@@ -364,6 +364,35 @@ class EventProcessorTest {
     }
 
     @Test
+    fun ownMessage_bareEchoThenLaterHistoryWithMsgid_collapsesByMsgid() = runTest {
+        // The remaining double-send: a self message confirmed by a BARE echo (no msgid) keeps a
+        // msgid-less local row. A reconnect CHATHISTORY replay later delivers the SAME message with
+        // a real msgid, OUTSIDE the 30s echo window. Before the fix that replay fell through to a
+        // fresh INSERT (no msgid on the row, window missed) and the message showed twice.
+        val bufferId = selfBuffer("#chan")
+        // 1. optimistic pending send.
+        processor.insertPending(bufferId, "lblz", "me", "double me", null, MessageKind.PRIVMSG)
+        // 2. bare echo (echo-message on, but this echo carries no draft/msgid) confirms in place.
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = null, time = System.currentTimeMillis(), label = "lblz"),
+            kind = IrcEvent.ChatKind.PRIVMSG, source = Prefix("me"), target = "#chan",
+            text = "double me", isSelf = true, replyToMsgid = null,
+        ))
+        assertEquals(1, pagingList(bufferId).count { it.text == "double me" })
+        // 3. much-later CHATHISTORY replay carries the real msgid, well outside the echo window.
+        processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(
+            IrcEvent.ChatMessage(
+                ctx = ctx(msgid = "hist-msgid", time = 10_000_000L, label = null),
+                kind = IrcEvent.ChatKind.PRIVMSG, source = Prefix("me"), target = "#chan",
+                text = "double me", isSelf = true, replyToMsgid = null,
+            ),
+        )))
+        val rows = pagingList(bufferId).filter { it.text == "double me" }
+        assertEquals(1, rows.size)
+        assertEquals("hist-msgid", rows.single().msgid)
+    }
+
+    @Test
     fun ownMessage_distinctSelfSendsSameText_notMerged_outsideWindow() = runTest {
         val bufferId = selfBuffer("#chan")
         // Two genuinely separate self-sends of the same text far apart in time must stay separate.

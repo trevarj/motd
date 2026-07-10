@@ -219,6 +219,30 @@ class EventProcessor @Inject constructor(
                 }
                 return
             }
+            // (c) Last-resort msgid promotion (goguma keys everything on draft/msgid). A self message
+            // that arrives WITH a real msgid but missed the time-window heuristic above is very likely
+            // the durable identity for a row we confirmed earlier from a BARE echo (no msgid) — that
+            // row kept a local sha1/pending dedupKey and still has msgid = null. A reconnect
+            // CHATHISTORY replay of that message lands here minutes/hours later, well outside the echo
+            // window, so without this it would insert a SECOND row (the remaining double-send). Collapse
+            // it onto the newest msgid-less self row of identical text, promoting the durable msgid so a
+            // further replay short-circuits via byMsgid / the UNIQUE(bufferId, msgid) index. A genuinely
+            // distinct second self-send is unaffected: its own echo already stamped it with its own
+            // msgid, so it is never returned as a msgid-less candidate.
+            if (incomingMsgid != null) {
+                val orphan = messageDao.findSelfMsgidlessCandidate(bufferId, e.text)
+                if (orphan != null) {
+                    messageDao.update(
+                        orphan.copy(
+                            msgid = incomingMsgid,
+                            dedupKey = incomingMsgid,
+                            pendingLabel = null,
+                            failed = false,
+                        ),
+                    )
+                    return
+                }
+            }
         }
 
         val inserted = messageDao.insertAll(listOf(row)).single()

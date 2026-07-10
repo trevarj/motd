@@ -44,6 +44,48 @@ class MessageDaoTest {
     }
 
     @Test
+    fun msgidUniqueness_sameMsgidDifferentDedupKey_yieldsOneRow() = runTest {
+        // The gap the old UNIQUE(bufferId, dedupKey) index alone missed: a self row confirmed by a
+        // BARE echo keeps a LOCAL dedupKey (sha1/pending) while its msgid stays null; a CHATHISTORY
+        // replay then arrives with the real msgid AS its dedupKey — a different dedupKey, so the old
+        // index would NOT reject it. The new UNIQUE(bufferId, msgid) index rejects it by msgid.
+        val dao = db.messageDao()
+        val first = message(bufferId, "hi", serverTime = 1000, dedupKey = "srv-9", msgid = "srv-9", isSelf = true)
+        // A second row: same msgid, DIFFERENT dedupKey and time (a distinct local key).
+        val second = message(bufferId, "hi", serverTime = 2000, dedupKey = "local-sha1", msgid = "srv-9", isSelf = true)
+
+        assertEquals(true, dao.insertAll(listOf(first)).single() > 0)
+        assertEquals(-1L, dao.insertAll(listOf(second)).single()) // IGNORE on the msgid index
+        assertEquals(1000L, dao.newestTime(bufferId)) // only the first row survives
+    }
+
+    @Test
+    fun msgidUniqueness_nullMsgidsCoexist() = runTest {
+        // NULLs are distinct in a UNIQUE index: many still-pending / msgid-less self rows must coexist.
+        val dao = db.messageDao()
+        dao.insertAll(listOf(
+            message(bufferId, "a", serverTime = 1, dedupKey = "pending:l1", msgid = null, isSelf = true, pendingLabel = "l1"),
+            message(bufferId, "b", serverTime = 2, dedupKey = "pending:l2", msgid = null, isSelf = true, pendingLabel = "l2"),
+        ))
+        assertEquals(2, dao.pagingList(bufferId).size)
+    }
+
+    @Test
+    fun findSelfMsgidlessCandidate_matchesMsgidlessSelfRow_ignoresMsgidBearing() = runTest {
+        val dao = db.messageDao()
+        dao.insertAll(listOf(
+            // A msgid-bearing self row of the same text must NOT be returned (already has identity).
+            message(bufferId, "dup", serverTime = 1000, dedupKey = "m1", msgid = "m1", isSelf = true),
+            // The msgid-less self row awaiting its durable identity: the one to reconcile onto.
+            message(bufferId, "dup", serverTime = 2000, dedupKey = "pending:l", msgid = null, isSelf = true, pendingLabel = "l"),
+        ))
+        val hit = dao.findSelfMsgidlessCandidate(bufferId, "dup")
+        assertNotNull(hit)
+        assertNull(hit!!.msgid)
+        assertEquals("l", hit.pendingLabel)
+    }
+
+    @Test
     fun echoFlow_pendingInsertThenUpdateInPlace_thenHistoryOverlapIgnored_oneRow() = runTest {
         val dao = db.messageDao()
         val label = "lbl-1"

@@ -58,6 +58,12 @@ data class BufferEntity(
 @Entity(
     tableName = "messages",
     indices = [Index(value = ["bufferId", "dedupKey"], unique = true),
+        // msgid is the durable server identity. Once a row carries a msgid, no second row in the
+        // same buffer may share it: any later echo OR CHATHISTORY replay bearing that msgid collapses
+        // via INSERT IGNORE instead of duplicating (goguma keys dedup on draft/msgid the same way).
+        // SQLite treats NULLs as distinct in a UNIQUE index, so the many still-pending / msgid-less
+        // self rows coexist freely; only confirmed duplicates are rejected.
+        Index(value = ["bufferId", "msgid"], unique = true),
         Index(value = ["bufferId", "serverTime", "id"])],
     foreignKeys = [ForeignKey(
         entity = BufferEntity::class, parentColumns = ["id"],

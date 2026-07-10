@@ -178,6 +178,22 @@ interface MessageDao {
     )
     suspend fun findSelfEchoCandidate(bufferId: Long, text: String, lo: Long, hi: Long): MessageEntity?
 
+    /**
+     * Newest self row in [bufferId] matching [text] that still lacks a durable server msgid, used to
+     * reconcile a msgid-BEARING self arrival (a CHATHISTORY replay, or a delayed echo) onto the local
+     * row it belongs to when the plain time-window heuristic missed it. A msgid-less self row is one
+     * whose confirming echo never carried a draft/msgid, so it is definitively still awaiting its
+     * durable identity; matching by (isSelf, text) regardless of time is therefore safe — a genuinely
+     * distinct second self-send would already carry its OWN msgid (its own echo confirmed it) and so
+     * would not be returned here. This is the last-resort collapse before a fresh insert (goguma-style
+     * msgid promotion). Suspend @Query → runs off the main thread and is transaction-safe.
+     */
+    @Query(
+        """SELECT * FROM messages WHERE bufferId = :bufferId AND isSelf = 1 AND text = :text
+          AND msgid IS NULL ORDER BY serverTime DESC, id DESC LIMIT 1"""
+    )
+    suspend fun findSelfMsgidlessCandidate(bufferId: Long, text: String): MessageEntity?
+
     // Delete a single row by primary key. Used to drop a failed local-echo row on retry/delete so
     // the resend does not leave a permanent duplicate "failed" bubble (plans/15 #10).
     @Query("DELETE FROM messages WHERE id = :id")
