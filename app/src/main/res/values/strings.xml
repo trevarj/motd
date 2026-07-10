@@ -203,7 +203,7 @@
     <string name="settings_density">Message style</string>
     <string name="settings_density_compact">Compact</string>
     <string name="settings_density_comfortable">Comfortable</string>
-    <string name="settings_density_cozy">Cozy</string>
+    <string name="settings_density_two_line">Two-line</string>
     <string name="settings_chat">Chat</string>
     <string name="settings_nick_colors">Colored nicknames</string>
     <string name="settings_nick_colors_desc">Color sender names in chats.</string>
@@ -382,7 +382,7 @@
          at end to avoid a same-file clobber with the parallel rebrand agent. -->
     <string name="settings_density_compact_desc">Classic IRC: single-line, no bubbles.</string>
     <string name="settings_density_comfortable_desc">Modern chat bubbles with avatars.</string>
-    <string name="settings_density_cozy_desc">Chat bubbles with extra spacing.</string>
+    <string name="settings_density_two_line_desc">Compact rows: avatar, nick, and time above the message.</string>
 
     <!-- Chat-list row long-press menu (previously inline literals; moved to resources so they are
          localizable and stable for the e2e harness, plans/18 §4). -->

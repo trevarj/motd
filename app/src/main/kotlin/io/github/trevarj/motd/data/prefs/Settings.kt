@@ -15,7 +15,7 @@ enum class ThemeMode {
 }
 
 // Round 4 (plans/13): user-customizable UI settings.
-enum class LayoutDensity { COMPACT, COMFORTABLE, COZY }
+enum class LayoutDensity { COMPACT, COMFORTABLE, TWO_LINE }
 enum class NickColorPalette { DEFAULT, VIVID, PASTEL }
 enum class FoolsMode { COLLAPSE, HIDE }
 

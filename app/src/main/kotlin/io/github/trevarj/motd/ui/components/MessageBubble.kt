@@ -102,7 +102,7 @@ fun MessageBubble(
     val nickColors = LocalNickColors.current
 
     // COMPACT density = classic single-line IRC rendering (`nick: text`). Delegate the whole row to
-    // the inline renderer; bubbles/avatars/alignment are the COMFORTABLE/COZY paradigm only.
+    // the inline renderer; bubbles/avatars/alignment are the COMFORTABLE/TWO_LINE paradigm only.
     if (spacing.compact) {
         CompactMessageRow(
             sender = sender,
@@ -111,6 +111,35 @@ fun MessageBubble(
             isSelf = isSelf,
             kind = kind,
             nickColors = nickColors,
+            modifier = modifier,
+            senderIsFriend = senderIsFriend,
+            failed = failed,
+            pending = pending,
+            reply = reply,
+            imageUrl = imageUrl,
+            linkPreview = linkPreview,
+            linkPreviewLoading = linkPreviewLoading,
+            reactions = reactions,
+            onLongPress = onLongPress,
+            onReact = onReact,
+            onImageClick = onImageClick,
+            onLinkPreviewClick = onLinkPreviewClick,
+            onSenderClick = onSenderClick,
+        )
+        return
+    }
+
+    // TWO_LINE density = a compact header line (avatar + nick + own-sent check + time) over the body
+    // line. Not a bubble; delegates to the dedicated two-line renderer.
+    if (spacing.twoLine) {
+        TwoLineMessageRow(
+            sender = sender,
+            text = text,
+            timeMs = timeMs,
+            isSelf = isSelf,
+            kind = kind,
+            nickColors = nickColors,
+            spacing = spacing,
             modifier = modifier,
             senderIsFriend = senderIsFriend,
             failed = failed,
@@ -296,6 +325,149 @@ fun MessageBubble(
                     else textColor.copy(alpha = 0.6f),
                     modifier = Modifier.align(Alignment.CenterVertically),
                 )
+            }
+
+            ReactionRow(reactions = reactions, onReact = onReact)
+        }
+    }
+}
+
+/**
+ * TWO_LINE density renderer (plans/13): a compact two-line message row.
+ *  - Line 1: a small avatar, the nick-colored name (friend tint/star preserved), the own-message
+ *    sent check ([MessageStatusIcon], own messages only), and the timestamp.
+ *  - Line 2: the message body (linkified), plus the reply preview, inline image, link preview, and
+ *    the now-compact reactions.
+ *
+ * ACTION renders as `* nick text` italic (like the bubble/IRC renderers); NOTICE gets its label.
+ * Uniformly left-aligned — no own-message right alignment or bubble background.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TwoLineMessageRow(
+    sender: String,
+    text: String,
+    timeMs: Long,
+    isSelf: Boolean,
+    kind: MessageKind,
+    nickColors: NickColorScheme,
+    spacing: io.github.trevarj.motd.ui.theme.MotdSpacing,
+    modifier: Modifier = Modifier,
+    senderIsFriend: Boolean = false,
+    failed: Boolean = false,
+    pending: Boolean = false,
+    reply: ReplyPreviewData? = null,
+    imageUrl: String? = null,
+    linkPreview: LinkPreview? = null,
+    linkPreviewLoading: Boolean = false,
+    reactions: List<ReactionChip> = emptyList(),
+    onLongPress: () -> Unit = {},
+    onReact: (String) -> Unit = {},
+    onImageClick: (String) -> Unit = {},
+    onLinkPreviewClick: () -> Unit = {},
+    onSenderClick: (() -> Unit)? = null,
+) {
+    val actionsLabel = stringResource(R.string.chat_bubble_actions)
+    val interaction = remember { MutableInteractionSource() }
+    val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
+    val bodyColor = MaterialTheme.colorScheme.onSurface
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = {},
+                onLongClick = onLongPress,
+                onLongClickLabel = actionsLabel,
+            )
+            .padding(horizontal = 12.dp, vertical = spacing.bubbleRowVPad),
+    ) {
+        // Line 1: avatar + nick + (own) sent check + timestamp.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val avatarMod = Modifier.padding(end = 6.dp)
+                .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
+            Avatar(name = sender, size = spacing.bubbleAvatar, modifier = avatarMod)
+            Text(
+                text = sender,
+                color = nameColor,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = (if (senderIsFriend) Modifier.friendNickTint() else Modifier)
+                    .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it },
+            )
+            if (senderIsFriend) {
+                Icon(
+                    Icons.Filled.Star,
+                    contentDescription = null,
+                    tint = nameColor,
+                    modifier = Modifier.padding(start = 4.dp).size(12.dp),
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 6.dp),
+            ) {
+                MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
+                Text(
+                    text = formatTime(timeMs),
+                    fontSize = 10.sp,
+                    color = if (failed) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+            }
+        }
+
+        // Line 2: reply preview, body, inline image, link preview, reactions.
+        Column(modifier = Modifier.padding(top = spacing.bubbleInnerVPad)) {
+            reply?.let { ReplyMiniBubble(it, nickColors) }
+
+            if (kind == MessageKind.NOTICE) {
+                Text(
+                    text = stringResource(R.string.chat_notice_label),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+
+            imageUrl?.let { url ->
+                AsyncImage(
+                    model = url,
+                    contentDescription = null,
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier
+                        .padding(vertical = 2.dp)
+                        .widthIn(max = 280.dp)
+                        .heightIn(max = 240.dp)
+                        .aspectRatio(4f / 3f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
+                )
+            }
+
+            if (text.isNotBlank()) {
+                Text(
+                    text = if (kind == MessageKind.ACTION) {
+                        AnnotatedString("* $sender $text")
+                    } else {
+                        linkifiedBody(text, MaterialTheme.colorScheme.primary)
+                    },
+                    color = if (kind == MessageKind.ACTION) MaterialTheme.colorScheme.onSurfaceVariant else bodyColor,
+                    fontStyle = if (kind == MessageKind.ACTION) FontStyle.Italic else FontStyle.Normal,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+
+            if (linkPreview != null || linkPreviewLoading) {
+                Box(Modifier.padding(top = 4.dp)) {
+                    LinkPreviewCard(
+                        preview = linkPreview,
+                        loading = linkPreviewLoading,
+                        onClick = onLinkPreviewClick,
+                    )
+                }
             }
 
             ReactionRow(reactions = reactions, onReact = onReact)
@@ -511,6 +683,25 @@ private fun MessageBubbleFailedPreview() {
             sender = "me", text = "this one failed", timeMs = System.currentTimeMillis(),
             isSelf = true, kind = MessageKind.PRIVMSG, showSender = false, failed = true,
         )
+    }
+}
+
+@Preview
+@Composable
+private fun MessageBubbleTwoLinePreview() {
+    // TWO_LINE theme so MessageBubble routes into TwoLineMessageRow.
+    MotdTheme(layoutDensity = io.github.trevarj.motd.data.prefs.LayoutDensity.TWO_LINE) {
+        Column {
+            MessageBubble(
+                sender = "alice", text = "hey, welcome to the channel!",
+                timeMs = 0L, isSelf = false, kind = MessageKind.PRIVMSG, showSender = true,
+                reactions = listOf(ReactionChip("👍", 2, mine = false)),
+            )
+            MessageBubble(
+                sender = "me", text = "my two-line reply", timeMs = 0L,
+                isSelf = true, kind = MessageKind.PRIVMSG, showSender = false,
+            )
+        }
     }
 }
 

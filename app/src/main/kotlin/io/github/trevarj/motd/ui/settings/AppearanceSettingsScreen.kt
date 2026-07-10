@@ -171,11 +171,12 @@ private fun AvatarStyleGroup(current: AvatarStyle, onSelect: (AvatarStyle) -> Un
 @Composable
 private fun DensityGroup(current: LayoutDensity, onSelect: (LayoutDensity) -> Unit) {
     // Density selects the message *render style*, not the font size: Compact is classic single-line
-    // IRC, Comfortable/Cozy are chat bubbles (Cozy roomier). Subtitles spell that out.
+    // IRC, Comfortable is chat bubbles, Two-line is a compact avatar+nick+time header over the body.
+    // Subtitles spell that out.
     val options = listOf(
         Triple(LayoutDensity.COMPACT, R.string.settings_density_compact, R.string.settings_density_compact_desc),
         Triple(LayoutDensity.COMFORTABLE, R.string.settings_density_comfortable, R.string.settings_density_comfortable_desc),
-        Triple(LayoutDensity.COZY, R.string.settings_density_cozy, R.string.settings_density_cozy_desc),
+        Triple(LayoutDensity.TWO_LINE, R.string.settings_density_two_line, R.string.settings_density_two_line_desc),
     )
     Column(Modifier.selectableGroup()) {
         options.forEach { (density, labelRes, descRes) ->

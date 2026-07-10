@@ -13,14 +13,17 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
  * COMFORTABLE reproduces the current hardcoded literals exactly (pixel-identical to today).
  *
  * The density setting selects the *render style*, not the font size: COMPACT renders each message as
- * a classic single-line IRC row (`nick: text`), COMFORTABLE/COZY render Telegram-style bubbles.
- * Message body text size is constant across all modes (always `bodyLarge`); only spacing/paddings
- * and the render paradigm change. [compact] routes [io.github.trevarj.motd.ui.components.MessageBubble]
- * between the inline row and the bubble; [compactRowVPad] is the inline row's vertical padding.
+ * a classic single-line IRC row (`nick: text`), COMFORTABLE renders Telegram-style bubbles, and
+ * TWO_LINE renders a compact two-line row (avatar+nick+time header over the body). Message body text
+ * size is constant across all modes (always `bodyLarge`); only spacing/paddings and the render
+ * paradigm change. [compact] routes [io.github.trevarj.motd.ui.components.MessageBubble] into the
+ * inline IRC row; [twoLine] routes it into the two-line row; otherwise the bubble renders.
+ * [compactRowVPad] is the inline row's vertical padding.
  */
 @Immutable
 data class MotdSpacing(
-    val compact: Boolean, // true -> classic single-line IRC row; false -> chat bubbles
+    val compact: Boolean, // true -> classic single-line IRC row; false -> chat bubbles / two-line
+    val twoLine: Boolean, // true -> compact two-line row (avatar+nick+time header over the body)
     val compactRowVPad: Dp, // COMPACT inline row vertical padding (tight IRC rows)
     val bubbleRowVPad: Dp, // MessageBubble outer Row vertical padding
     val bubbleInnerVPad: Dp, // bubble Column inner vertical padding
@@ -39,6 +42,7 @@ data class MotdSpacing(
 fun spacingFor(density: LayoutDensity): MotdSpacing = when (density) {
     LayoutDensity.COMPACT -> MotdSpacing(
         compact = true,
+        twoLine = false,
         compactRowVPad = 1.dp,
         bubbleRowVPad = 0.dp,
         bubbleInnerVPad = 4.dp,
@@ -54,6 +58,7 @@ fun spacingFor(density: LayoutDensity): MotdSpacing = when (density) {
     )
     LayoutDensity.COMFORTABLE -> MotdSpacing(
         compact = false,
+        twoLine = false,
         compactRowVPad = 1.dp,
         bubbleRowVPad = 1.dp,
         bubbleInnerVPad = 6.dp,
@@ -67,21 +72,25 @@ fun spacingFor(density: LayoutDensity): MotdSpacing = when (density) {
         chatListAvatar = 44.dp,
         memberAvatar = 36.dp,
     )
-    // COZY = a roomier COMFORTABLE: same bubble paradigm, more breathing room.
-    LayoutDensity.COZY -> MotdSpacing(
+    // TWO_LINE = a compact two-line row: small avatar + nick + time header over the body. Not a
+    // bubble and not the single-line IRC row; [twoLine] routes MessageBubble to that renderer.
+    LayoutDensity.TWO_LINE -> MotdSpacing(
         compact = false,
+        twoLine = true,
         compactRowVPad = 2.dp,
+        // Tight outer padding for the two-line row; the inner header/body spacing lives in the renderer.
         bubbleRowVPad = 2.dp,
-        bubbleInnerVPad = 8.dp,
+        bubbleInnerVPad = 4.dp,
         bubbleInnerHPad = 12.dp,
-        bubbleCorner = 20.dp,
-        bubbleAvatar = 36.dp,
-        bubbleAvatarColumn = 44.dp,
-        actionVPad = 4.dp,
-        systemPillVPad = 6.dp,
-        chatListVPad = 14.dp,
-        chatListAvatar = 48.dp,
-        memberAvatar = 40.dp,
+        bubbleCorner = 18.dp,
+        // Small header avatar (line 1) — smaller than the bubble avatar to keep the row compact.
+        bubbleAvatar = 20.dp,
+        bubbleAvatarColumn = 28.dp,
+        actionVPad = 3.dp,
+        systemPillVPad = 4.dp,
+        chatListVPad = 10.dp,
+        chatListAvatar = 44.dp,
+        memberAvatar = 36.dp,
     )
 }
 
