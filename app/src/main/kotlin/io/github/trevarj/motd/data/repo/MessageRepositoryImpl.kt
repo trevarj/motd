@@ -47,5 +47,8 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int =
         messageDao.countNewerThan(bufferId, serverTime, id)
 
+    override suspend fun firstUnreadOtherTime(bufferId: Long, after: Long): Long? =
+        messageDao.firstUnreadOtherTime(bufferId, after)
+
     override suspend fun deleteMessage(id: Long) = messageDao.deleteById(id)
 }

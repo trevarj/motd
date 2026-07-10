@@ -627,8 +627,9 @@ private fun unreadBelowViewport(
     firstVisibleIndex: Int,
 ): Int {
     if (marker == null || firstVisibleIndex <= 0) return 0
+    // Skip our own sent rows: they are never "unread" to us, so they must not inflate the badge.
     val times = (0 until firstVisibleIndex.coerceAtMost(items.itemCount))
-        .mapNotNull { items.peek(it)?.serverTime }
+        .mapNotNull { items.peek(it)?.takeUnless { m -> m.isSelf }?.serverTime }
     return unreadBelowViewport(times, marker)
 }
 

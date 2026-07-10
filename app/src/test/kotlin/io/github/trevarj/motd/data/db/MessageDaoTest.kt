@@ -138,6 +138,35 @@ class MessageDaoTest {
         assertEquals(1, bySender.size)
         assertEquals("lazy dog sleeps", bySender.single().message.text)
     }
+
+    @Test
+    fun firstUnreadOtherTime_anchorsOnOther_notOwnMessages() = runTest {
+        val dao = db.messageDao()
+        dao.insertAll(
+            listOf(
+                message(bufferId, "already read", serverTime = 900, dedupKey = "d0", msgid = "d0"),
+                // Own message past the marker must be ignored (you have read what you sent).
+                message(bufferId, "my line", serverTime = 1500, dedupKey = "d1", msgid = "d1", isSelf = true),
+                // First real incoming message past the marker: the anchor.
+                message(bufferId, "someone else", serverTime = 2000, dedupKey = "d2", msgid = "d2"),
+                message(bufferId, "my reply", serverTime = 2500, dedupKey = "d3", msgid = "d3", isSelf = true),
+            )
+        )
+        assertEquals(2000L, dao.firstUnreadOtherTime(bufferId, after = 1000L))
+    }
+
+    @Test
+    fun firstUnreadOtherTime_onlyOwnMessagesPastMarker_returnsNull() = runTest {
+        val dao = db.messageDao()
+        dao.insertAll(
+            listOf(
+                message(bufferId, "my line", serverTime = 1500, dedupKey = "d1", msgid = "d1", isSelf = true),
+                message(bufferId, "my other line", serverTime = 2000, dedupKey = "d2", msgid = "d2", isSelf = true),
+            )
+        )
+        // The reported bug: with only your own messages past the marker, there is no unread anchor.
+        assertNull(dao.firstUnreadOtherTime(bufferId, after = 1000L))
+    }
 }
 
 // Test-only helper to drain the PagingSource into a list without Paging machinery.

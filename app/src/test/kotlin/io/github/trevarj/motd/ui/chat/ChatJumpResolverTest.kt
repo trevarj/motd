@@ -33,6 +33,10 @@ private class FakeMessageRepository(rows: List<MessageEntity> = emptyList()) : M
             it.bufferId == bufferId &&
                 (it.serverTime > serverTime || (it.serverTime == serverTime && it.id > id))
         }
+
+    override suspend fun firstUnreadOtherTime(bufferId: Long, after: Long): Long? =
+        store.filter { it.bufferId == bufferId && !it.isSelf && it.serverTime > after }
+            .minOfOrNull { it.serverTime }
 }
 
 private fun msg(id: Long, bufferId: Long, serverTime: Long, msgid: String?): MessageEntity =

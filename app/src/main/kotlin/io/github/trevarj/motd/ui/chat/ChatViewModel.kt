@@ -420,8 +420,17 @@ class ChatViewModel @Inject constructor(
         }
         // Freeze the read-marker once, on the first buffer emission, so the unread divider/badge
         // stay put instead of collapsing as markRead advances the live marker (plans/15 #2).
+        // Anchor it to the first message from SOMEONE ELSE past the marker (minus 1, so the existing
+        // "> marker" divider/badge comparisons land on that message): your own sent messages must
+        // never trip the "new messages" divider or the scroll-down badge, since you have read what
+        // you just sent. Null (no real marker, or nothing unread from others) hides both.
         viewModelScope.launch {
-            _readMarkerSnapshot.value = bufferRepository.observeBuffer(bufferId).firstOrNull()?.readMarkerTime
+            val realMarker = bufferRepository.observeBuffer(bufferId).firstOrNull()?.readMarkerTime
+            _readMarkerSnapshot.value = if (realMarker == null) {
+                null
+            } else {
+                messageRepository.firstUnreadOtherTime(bufferId, realMarker)?.let { it - 1 }
+            }
         }
     }
 

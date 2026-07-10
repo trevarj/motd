@@ -190,6 +190,14 @@ interface MessageDao {
     )
     suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int
 
+    /**
+     * Server time of the OLDEST message from someone else (isSelf = 0) newer than [after], or null
+     * if none. Anchors the "new messages" divider + unread badge to real incoming messages: your own
+     * sent messages must never trip the unread UI, since you have obviously read what you just sent.
+     */
+    @Query("SELECT MIN(serverTime) FROM messages WHERE bufferId = :bufferId AND isSelf = 0 AND serverTime > :after")
+    suspend fun firstUnreadOtherTime(bufferId: Long, after: Long): Long?
+
     // FTS4 external-content search over (text, sender). :query is already sanitized (each token
     // quoted + prefixed with *) by SearchRepository. Chat kinds only; optional buffer scope.
     @Query(

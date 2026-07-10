@@ -47,6 +47,8 @@ interface MessageRepository {
     fun reactionsForBuffer(bufferId: Long): Flow<List<ReactionEntity>>
     suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
     suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int
+    /** Oldest non-self message time past [after], or null; anchors the unread divider/badge. */
+    suspend fun firstUnreadOtherTime(bufferId: Long, after: Long): Long?
     /** Delete a locally-stored row by id (failed-echo cleanup on retry/delete, plans/15 #10). */
     suspend fun deleteMessage(id: Long)
 }
