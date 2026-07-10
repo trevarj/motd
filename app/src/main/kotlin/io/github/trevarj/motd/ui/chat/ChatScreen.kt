@@ -73,6 +73,10 @@ import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.launch
 
+/** Pause after the last keystroke before the nick-autocomplete panel becomes visible, so fast
+ *  typing doesn't flash suggestions on every character. */
+private const val AUTOCOMPLETE_SHOW_DEBOUNCE_MS = 250L
+
 /** Stateful entry: wires the ViewModel, lifecycle mark-read, and navigation. */
 @Composable
 fun ChatScreen(
@@ -524,6 +528,18 @@ fun ChatContent(
                 val completions = remember(composerText, memberNicks, recentSpeakers) {
                     autocompleteFor(composerText, memberNicks, recentSpeakers, nickNormalizer)
                 }
+                // Debounce the SHOW so fast typing doesn't flash the suggestion panel on every
+                // keystroke: only reveal completions after a brief pause. Hiding stays immediate
+                // (an empty result clears the panel at once) so the panel never lingers stale.
+                var showAutocomplete by remember { mutableStateOf(false) }
+                LaunchedEffect(completions) {
+                    if (completions.isEmpty()) {
+                        showAutocomplete = false
+                    } else {
+                        kotlinx.coroutines.delay(AUTOCOMPLETE_SHOW_DEBOUNCE_MS)
+                        showAutocomplete = true
+                    }
+                }
                 Composer(
                     value = composerText,
                     onValueChange = {
@@ -551,7 +567,7 @@ fun ChatContent(
                     } else {
                         stringResource(R.string.chat_composer_placeholder)
                     },
-                    autocomplete = if (completions.isNotEmpty()) {
+                    autocomplete = if (showAutocomplete && completions.isNotEmpty()) {
                         {
                             AutocompletePanel(
                                 candidates = completions.map { it.display },
