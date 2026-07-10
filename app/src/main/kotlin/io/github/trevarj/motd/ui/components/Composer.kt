@@ -89,14 +89,15 @@ fun Composer(
             }
 
             Row(
-                // Trimmed vertical padding keeps the input area compact without cramping the field.
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                verticalAlignment = Alignment.Bottom,
+                // Symmetric vertical padding keeps the row compact but not cramped; CenterVertically
+                // ensures icons and the text field share a common centerline.
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (showEmojiButton) {
                     IconButton(
                         onClick = { showEmojiPicker = !showEmojiPicker },
-                        modifier = Modifier.testTag("chat_composer_emoji").padding(end = 4.dp),
+                        modifier = Modifier.testTag("chat_composer_emoji"),
                     ) {
                         Icon(
                             Icons.Outlined.Mood,
@@ -131,7 +132,6 @@ fun Composer(
                         onSend()
                     },
                     enabled = canSend,
-                    modifier = Modifier.padding(start = 4.dp),
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
