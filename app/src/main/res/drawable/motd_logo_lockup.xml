@@ -1,23 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Horizontal lockup matching the selected outline chat/slash logo. -->
+<!-- Horizontal lockup: the /| command-prompt mark plus the /motd monospace wordmark.
+     Shown on the About screen (light surface), so glyphs use near-black #111318. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="200dp"
     android:height="67dp"
     android:viewportWidth="240"
     android:viewportHeight="80">
+    <!-- /| mark -->
     <path
-        android:strokeColor="#168BFF"
-        android:strokeWidth="5.5"
+        android:strokeColor="#111318"
+        android:strokeWidth="7"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"
         android:fillColor="@android:color/transparent"
-        android:pathData="M24,19 L58,19 Q71,19 71,40 Q71,61 58,61 L25,61 L14,68 L14,29 Q14,19 24,19 Z" />
-    <path
-        android:fillColor="#111318"
-        android:pathData="M33,29 L39,29 L29,53 L23,53 Z" />
+        android:pathData="M22,58 L44,22" />
     <path
         android:fillColor="#39D98A"
-        android:pathData="M45,41 L52,41 Q54,41 54,43 L54,50 Q54,52 52,52 L45,52 Q43,52 43,50 L43,43 Q43,41 45,41 Z" />
+        android:pathData="M50,20 L58,20 L58,36 L50,36 Z" />
+    <!-- /motd wordmark (monospace strokes) -->
     <path
         android:strokeColor="#111318"
         android:strokeWidth="6"
@@ -26,5 +25,5 @@
         android:pathData="M89,58 L103,22 M115,56 L115,31 Q115,26 120,26 Q125,26 125,31 L125,56 M125,31 Q125,26 130,26 Q135,26 135,31 L135,56 M151,26 L164,26 Q170,26 170,32 L170,50 Q170,56 164,56 L151,56 Q145,56 145,50 L145,32 Q145,26 151,26 M181,26 L201,26 M191,20 L191,51 Q191,56 196,56 L201,56 M213,20 L213,56 M213,30 Q217,26 224,26 Q231,26 231,33 L231,49 Q231,56 224,56 Q217,56 213,52" />
     <path
         android:fillColor="#39D98A"
-        android:pathData="M234,51 L240,51 L240,58 L234,58 Z" />
+        android:pathData="M234,51 L240,51 L240,58 L240,58 L234,58 Z" />
 </vector>

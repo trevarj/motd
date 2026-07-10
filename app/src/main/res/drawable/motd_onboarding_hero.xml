@@ -1,23 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Onboarding hero using the selected outline chat/slash logo. -->
+<!-- Onboarding hero: large /| command-prompt mark with the /motd wordmark below.
+     Shown on the light Material surface, so glyphs use near-black #111318. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="200dp"
     android:height="129dp"
     android:viewportWidth="280"
     android:viewportHeight="180">
+    <!-- /| mark -->
     <path
-        android:strokeColor="#168BFF"
-        android:strokeWidth="14"
+        android:strokeColor="#111318"
+        android:strokeWidth="16"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"
         android:fillColor="@android:color/transparent"
-        android:pathData="M91,52 L170,52 Q217,52 217,91 Q217,130 170,130 L93,130 L61,151 L61,76 Q61,52 91,52 Z" />
-    <path
-        android:fillColor="#111318"
-        android:pathData="M119,70 L135,70 L109,116 L93,116 Z" />
+        android:pathData="M118,112 L150,48" />
     <path
         android:fillColor="#39D98A"
-        android:pathData="M149,88 L166,88 Q171,88 171,93 L171,110 Q171,115 166,115 L149,115 Q144,115 144,110 L144,93 Q144,88 149,88 Z" />
+        android:pathData="M158,44 L176,44 L176,80 L158,80 Z" />
+    <!-- /motd wordmark (monospace strokes) -->
     <path
         android:strokeColor="#111318"
         android:strokeWidth="8"

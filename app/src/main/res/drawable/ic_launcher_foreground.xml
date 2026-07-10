@@ -1,21 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive-icon foreground: selected outline chat mark, slash, and terminal cursor. -->
+<!-- Adaptive-icon foreground: the /| command-prompt mark (slash + terminal cursor block).
+     Kept inside the center safe zone so it survives Android's circular/rounded mask. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:strokeColor="#168BFF"
-        android:strokeWidth="8.5"
+        android:strokeColor="#F7F8FB"
+        android:strokeWidth="11"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"
         android:fillColor="@android:color/transparent"
-        android:pathData="M31.5,31 L66.5,31 Q90,31 90,54 Q90,77 66.5,77 L32.5,77 L19.5,85.5 L19.5,42.5 Q19.5,31 31.5,31 Z" />
-    <path
-        android:fillColor="#F7F8FB"
-        android:pathData="M44,39.5 L51,39.5 L40,69 L33,69 Z" />
+        android:pathData="M40,76 L62,32" />
     <path
         android:fillColor="#39D98A"
-        android:pathData="M57,55 L64,55 Q66,55 66,57 L66,64 Q66,66 64,66 L57,66 Q55,66 55,64 L55,57 Q55,55 57,55 Z" />
+        android:pathData="M68,30 L78,30 L78,50 L68,50 Z" />
 </vector>
