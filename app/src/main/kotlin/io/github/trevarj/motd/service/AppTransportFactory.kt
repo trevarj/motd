@@ -2,6 +2,7 @@ package io.github.trevarj.motd.service
 
 import android.content.Context
 import android.security.KeyChain
+import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.irc.transport.IrcTransport
@@ -11,6 +12,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import java.net.InetSocketAddress
+import java.net.Proxy
 import java.net.Socket
 import java.security.Principal
 import java.security.PrivateKey
@@ -87,8 +90,19 @@ class AppTransportFactory(
     /** Called from the handshake when an untrusted/changed leaf cert is hit; lets the connection
      *  layer publish a TOFU prompt even though IrcClient flattens the failure into a state string. */
     private val onCertUntrusted: (CertUntrustedException) -> Unit = {},
+    /**
+     * Optional SOCKS5 proxy to tunnel through (plans/19 §3.4, plans/20 Phase 1). Built per-network
+     * by [ConnectionManagerImpl] from the row's obfsMode/proxyHost/proxyPort and captured here (like
+     * [clientCertAlias]) so it need not thread through IrcClient. STS/pinning/hostname logic is
+     * untouched: it still keys on the REAL host:port, which the proxy resolves and reaches remotely.
+     */
+    private val proxy: Proxy? = null,
 ) : TransportFactory {
-    override fun create(host: String, port: Int, tls: Boolean, wsUrl: String?): IrcTransport {
+    override fun create(host: String, port: Int, tls: Boolean, wsUrl: String?, proxy: Proxy?): IrcTransport {
+        // The per-network proxy captured at construction is the source of truth; the create() param
+        // (unused by IrcClient, present for the fun-interface) takes precedence if a caller supplies one.
+        val effProxy = proxy ?: this.proxy
+
         // Opt-in IRC-over-WebSocket transport (plans/19 §3.3). When a wsUrl is configured the
         // physical connection is a WebSocket to that URL instead of a raw TCP/TLS socket; TLS,
         // pinning, and hostname verification still key on the wsUrl's REAL host/port.
@@ -98,13 +112,14 @@ class AppTransportFactory(
         val policy = runBlocking { stsStore.policyFor(host) }
         val effTls = tls || policy != null
         val effPort = policy?.port ?: port
-        if (!effTls) return OkioLineTransport(host, effPort, tls = false)
+        if (!effTls) return OkioLineTransport(host, effPort, tls = false, proxy = effProxy)
 
         val pinned = runBlocking { certStore.pinnedFor(host, effPort) }
         val trustManager = PinningTrustManager(host, effPort, pinned, onCertUntrusted)
         val sslContext = buildTlsContext(clientCertAlias, trustManager)
-        // Pinned leaf → skip hostname verification (bare-IP certs); unpinned → enforce it.
-        return OkioLineTransport(host, effPort, tls = true, sslContext = sslContext, verifyHostname = pinned == null)
+        // Pinned leaf → skip hostname verification (bare-IP certs); unpinned → enforce it. The proxy
+        // (if any) tunnels the connection; TLS/SNI/pin still key on the real host:port through it.
+        return OkioLineTransport(host, effPort, tls = true, sslContext = sslContext, verifyHostname = pinned == null, proxy = effProxy)
     }
 
     /**
@@ -152,6 +167,41 @@ class AppTransportFactory(
             arrayOf(km)
         }
         return SSLContext.getInstance("TLS").apply { init(keyManagers, arrayOf(trustManager), null) }
+    }
+}
+
+/** Orbot's default local SOCKS5 endpoint, used by the TOR obfs shortcut (plans/19 §3.4). */
+const val ORBOT_SOCKS_HOST = "127.0.0.1"
+const val ORBOT_SOCKS_PORT = 9050
+
+/**
+ * Build the [Proxy] a network row's obfuscation config implies (plans/19 §3.4, plans/20 Phase 1),
+ * or null for a direct connection. Pure so [ConnectionManagerImpl] can resolve it and the unit test
+ * can assert the exact [Proxy] built.
+ *
+ * - `null`/`NONE` → null (direct).
+ * - `SOCKS5`/`EMBEDDED_REALITY` → SOCKS5 at the given [proxyHost]:[proxyPort]. EMBEDDED_REALITY maps
+ *   to a plain SOCKS5 for Phase 1 (a locally-run sing-box client); the Phase 2 in-app core just
+ *   supplies a loopback host/port through the same field.
+ * - `TOR` → SOCKS5 pinned at Orbot's 127.0.0.1:9050 (host/port ignored).
+ *
+ * The destination is left UNRESOLVED (`createUnresolved`) so DNS is performed remotely by the proxy
+ * (leak-free, `.onion`-capable) — the same rule [OkioLineTransport] applies when dialing.
+ */
+fun proxyForNetwork(obfsMode: ObfsMode?, proxyHost: String?, proxyPort: Int?): Proxy? = when (obfsMode) {
+    null, ObfsMode.NONE -> null
+    ObfsMode.TOR -> Proxy(
+        Proxy.Type.SOCKS,
+        InetSocketAddress.createUnresolved(ORBOT_SOCKS_HOST, ORBOT_SOCKS_PORT),
+    )
+    ObfsMode.SOCKS5, ObfsMode.EMBEDDED_REALITY -> {
+        val host = proxyHost?.trim()?.ifBlank { null }
+        // No usable host/port → treat as direct (defensive; the UI keeps host/port populated).
+        if (host == null || proxyPort == null || proxyPort !in 1..65535) {
+            null
+        } else {
+            Proxy(Proxy.Type.SOCKS, InetSocketAddress.createUnresolved(host, proxyPort))
+        }
     }
 }
 

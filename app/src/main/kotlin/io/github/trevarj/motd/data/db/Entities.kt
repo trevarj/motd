@@ -7,6 +7,15 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 enum class NetworkRole { DIRECT, BOUNCER_ROOT, BOUNCER_CHILD }
+
+/**
+ * Per-network obfuscation transport (plans/19 §3.4, plans/20 Phase 1). `NONE` is the default
+ * direct connection. `SOCKS5` dials through a user-supplied SOCKS5 proxy (host/port). `TOR` is a
+ * `SOCKS5` shortcut pinned at Orbot's `127.0.0.1:9050`. `EMBEDDED_REALITY` is the Phase 2 in-app
+ * sing-box VLESS+REALITY core; for Phase 1 it maps to a plain SOCKS5 proxy (a locally-run
+ * sing-box client on `proxyHost:proxyPort`), so the transport wiring is identical.
+ */
+enum class ObfsMode { NONE, SOCKS5, TOR, EMBEDDED_REALITY }
 enum class BufferType { CHANNEL, QUERY, SERVER }
 enum class MessageKind { PRIVMSG, NOTICE, ACTION, JOIN, PART, QUIT, KICK, NICK, MODE, TOPIC, ERROR, SERVER_INFO }
 
@@ -27,8 +36,17 @@ data class NetworkEntity(
     // Opt-in IRC-over-WebSocket endpoint (plans/19 §3.3). When set (e.g. wss://bnc.example.com:443/)
     // the connection tunnels over a WebSocket to blend with HTTPS; null uses the TCP/TLS transport.
     val wsUrl: String? = null,
+    // Opt-in obfuscation transport (plans/19 §3.4, plans/20 Phase 1). null/NONE = direct. SOCKS5/TOR
+    // dial the connection through a SOCKS5 proxy at proxyHost:proxyPort with remote DNS; TOR pins
+    // Orbot's 127.0.0.1:9050. EMBEDDED_REALITY (Phase 2 in-app core) maps to a SOCKS5 proxy for now.
+    val obfsMode: ObfsMode? = null,
+    val proxyHost: String? = null,
+    val proxyPort: Int? = null,
+    /** Pasted VLESS+REALITY link. It contains credentials and must not be logged. */
+    val obfsLink: String? = null,
 ) {
-    // redact saslPassword from logs
+    // Redact secrets (saslPassword) from logs; proxyHost/port are non-sensitive so keep them out
+    // too for brevity — the endpoint host:port is enough to identify the row.
     override fun toString() = "NetworkEntity(id=$id, name=$name, role=$role, host=$host:$port)"
 }
 

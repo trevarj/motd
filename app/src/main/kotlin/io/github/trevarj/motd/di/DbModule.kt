@@ -12,6 +12,8 @@ import io.github.trevarj.motd.data.db.MemberDao
 import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.MIGRATION_1_2
 import io.github.trevarj.motd.data.db.MIGRATION_2_3
+import io.github.trevarj.motd.data.db.MIGRATION_3_4
+import io.github.trevarj.motd.data.db.MIGRATION_4_5
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.ReactionDao
@@ -27,7 +29,7 @@ internal object DbModule {
     fun provideDatabase(@ApplicationContext context: Context): MotdDatabase =
         // Upgrades stay non-destructive (plans/04): the release app holds real user history.
         Room.databaseBuilder(context, MotdDatabase::class.java, "motd.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             // Downgrades only happen in dev when switching between branches with different schema
             // versions (e.g. the obfs branch's v3 vs main's v2); released builds only ever move the
             // version up. Wipe-and-recreate on downgrade instead of crashing on a missing migration.

@@ -98,6 +98,19 @@
     <string name="network_settings_display_name">Network name</string>
     <string name="network_settings_ws_url">WebSocket URL (wss://)</string>
     <string name="network_settings_ws_url_desc">Optional. Tunnels IRC over a WebSocket (e.g. wss://bnc.example.com:443/) to look like ordinary HTTPS and bypass networks that block IRC. Requires a WebSocket listener on your soju server. Leave blank for a normal TCP/TLS connection.</string>
+    <!-- Connection / Obfuscation (plans/20 Phase 1): opt-in SOCKS5 / Tor proxy. -->
+    <string name="network_settings_obfs_section">Connection / Obfuscation</string>
+    <string name="network_settings_obfs_section_desc">Route this network through a proxy to bypass censorship. Opt-in and may add latency. The strongest options (Tor .onion bouncer, VLESS+REALITY) require setup on your own soju server.</string>
+    <string name="network_settings_obfs_mode_none">Direct (no proxy)</string>
+    <string name="network_settings_obfs_mode_socks5">SOCKS5 proxy</string>
+    <string name="network_settings_obfs_mode_tor">Tor (Orbot)</string>
+    <string name="network_settings_obfs_mode_reality">VLESS + REALITY (sing-box)</string>
+    <string name="network_settings_obfs_proxy_host">Proxy host</string>
+    <string name="network_settings_obfs_proxy_port">Proxy port</string>
+    <string name="network_settings_obfs_tor_shortcut">Route via Tor (Orbot)</string>
+    <string name="network_settings_obfs_tor_desc">Sets a SOCKS5 proxy at 127.0.0.1:9050. Requires Orbot running on this device.</string>
+    <string name="network_settings_obfs_reality_desc">Point at a locally-run sing-box client\'s SOCKS5 inbound (e.g. 127.0.0.1:1080). The in-app REALITY core is planned; for now run sing-box alongside.</string>
+    <string name="network_settings_obfs_dns_note">DNS is resolved remotely through the proxy (no leak; .onion works).</string>
     <string name="network_settings_delete">Delete network</string>
     <string name="network_settings_delete_confirm_title">Delete network?</string>
     <string name="network_settings_delete_confirm_message">This removes the network and all of its buffers and history.</string>

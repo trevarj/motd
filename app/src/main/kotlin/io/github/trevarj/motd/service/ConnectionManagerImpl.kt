@@ -255,14 +255,19 @@ class ConnectionManagerImpl @Inject constructor(
             null
         }
         val config = buildChildConfig(row, root)
+        // Obfuscation/proxy follows the transport endpoint too: a bound child tunnels through the
+        // bouncer root's socket, so it inherits the root's proxy (plans/20 Phase 1).
+        val endpoint = root ?: row
+        val proxy = proxyForNetwork(endpoint.obfsMode, endpoint.proxyHost, endpoint.proxyPort)
         val factory = AppTransportFactory(
             appContext = appContext,
             stsStore = stsStore,
             certStore = certStore,
             // TLS/cert trust follows the transport endpoint: the bouncer's for a bound child.
-            clientCertAlias = (root ?: row).clientCertAlias,
+            clientCertAlias = endpoint.clientCertAlias,
             // Stash the failure keyed by network so the actor can park on it; unwrap defensively.
             onCertUntrusted = { ex -> certFailures[row.id] = ex },
+            proxy = proxy,
         )
         return IrcClient(config, factory, scope)
     }
@@ -655,12 +660,13 @@ internal fun buildChildConfig(row: NetworkEntity, root: NetworkEntity?): IrcClie
 
 /**
  * Connection-affecting fingerprint for one network row. Any change here restarts the actor
- * (rebuilds the socket): endpoint, identity, SASL, bouncer bind, client-cert alias, and the opt-in
- * WSS URL (plans/19 §3.3), so toggling/editing the WebSocket transport reconnects. Extracted for
- * unit tests.
+ * (rebuilds the socket): endpoint, identity, SASL, bouncer bind, client-cert alias, the opt-in WSS
+ * URL (plans/19 §3.3), and the obfuscation/proxy config (plans/20 Phase 1), so toggling/editing the
+ * WebSocket transport or the proxy reconnects. Extracted for unit tests.
  */
 internal fun networkFingerprint(row: NetworkEntity): String =
-    "${row.host}:${row.port}:${row.tls}:${row.nick}:${row.saslMechanism}:${row.bouncerNetId}:${row.clientCertAlias}:${row.wsUrl}"
+    "${row.host}:${row.port}:${row.tls}:${row.nick}:${row.saslMechanism}:${row.bouncerNetId}:" +
+        "${row.clientCertAlias}:${row.wsUrl}:${row.obfsMode}:${row.proxyHost}:${row.proxyPort}"
 
 /**
  * Network ids parked on the given `host:port` cert endpoint (plans/12, #48). When a TOFU cert is

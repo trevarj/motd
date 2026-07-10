@@ -22,4 +22,11 @@ internal class Converters {
 
     @TypeConverter
     fun stringToMessageKind(v: String): MessageKind = MessageKind.valueOf(v)
+
+    // Nullable: the obfsMode column is null on legacy/direct rows (plans/20 Phase 1).
+    @TypeConverter
+    fun obfsModeToString(v: ObfsMode?): String? = v?.name
+
+    @TypeConverter
+    fun stringToObfsMode(v: String?): ObfsMode? = v?.let { ObfsMode.valueOf(it) }
 }

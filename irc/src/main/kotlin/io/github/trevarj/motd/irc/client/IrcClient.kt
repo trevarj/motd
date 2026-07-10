@@ -135,7 +135,8 @@ class IrcClient(
     }
 
     private suspend fun run() {
-        val t = factory.create(config.host, config.port, config.tls, config.wsUrl)
+        // proxy is null here; the app's per-network AppTransportFactory captures its own proxy.
+        val t = factory.create(config.host, config.port, config.tls, config.wsUrl, null)
         transport = t
         try {
             t.connect()

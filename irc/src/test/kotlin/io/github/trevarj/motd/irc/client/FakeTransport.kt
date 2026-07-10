@@ -43,5 +43,5 @@ class FakeTransport : IrcTransport {
         inbound.close()
     }
 
-    fun factory(): TransportFactory = TransportFactory { _, _, _, _ -> this }
+    fun factory(): TransportFactory = TransportFactory { _, _, _, _, _ -> this }
 }

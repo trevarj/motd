@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
@@ -383,6 +384,11 @@ fun buildNetworkEntity(
     bouncerNetId: String? = null,
     // Opt-in IRC-over-WebSocket endpoint (plans/19 §3.3); null keeps the TCP/TLS transport.
     wsUrl: String? = null,
+    // Opt-in obfuscation/proxy (plans/20 Phase 1). NONE persists null (direct); SOCKS5/TOR/REALITY
+    // persist the mode + proxy host/port.
+    obfsMode: ObfsMode = ObfsMode.NONE,
+    proxyHost: String? = null,
+    proxyPort: Int? = null,
 ): NetworkEntity {
     val isSoju = role == NetworkRole.BOUNCER_ROOT || role == NetworkRole.BOUNCER_CHILD
     // Trim leading/trailing whitespace: paste artefacts break host resolution and NICK/USER.
@@ -414,6 +420,10 @@ fun buildNetworkEntity(
         saslPassword = auth.saslPassword.ifBlank { null },
         clientCertAlias = if (isSoju) null else auth.certAlias,
         wsUrl = wsUrl?.trim()?.ifBlank { null },
+        // NONE stores null so a direct row stays clean; other modes store the mode + trimmed proxy.
+        obfsMode = if (obfsMode == ObfsMode.NONE) null else obfsMode,
+        proxyHost = if (obfsMode == ObfsMode.NONE) null else proxyHost?.trim()?.ifBlank { null },
+        proxyPort = if (obfsMode == ObfsMode.NONE) null else proxyPort,
     )
 }
 

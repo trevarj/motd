@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 3,
+    version = 5,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -61,5 +61,43 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
         db.execSQL(
             "CREATE UNIQUE INDEX IF NOT EXISTS index_messages_bufferId_msgid ON messages(bufferId, msgid)",
         )
+    }
+}
+
+/**
+ * v3 -> v4: add the nullable SOCKS5/Tor transport settings on `networks`. Existing rows remain
+ * direct connections until the user explicitly enables an obfuscation mode.
+ */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.addNetworkColumnsIfMissing(
+            "obfsMode" to "TEXT",
+            "proxyHost" to "TEXT",
+            "proxyPort" to "INTEGER",
+        )
+    }
+}
+
+/**
+ * v4 -> v5: add the nullable VLESS+REALITY share link. The embedded core owns its loopback SOCKS
+ * endpoint, so this deliberately remains separate from the user-editable proxy host and port.
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // An unreleased development build used schema version 3 for this column. MIGRATION_3_4
+        // leaves it intact when upgrading that database, so this must be safe in both paths.
+        db.addNetworkColumnsIfMissing("obfsLink" to "TEXT")
+    }
+}
+
+private fun SupportSQLiteDatabase.addNetworkColumnsIfMissing(vararg columns: Pair<String, String>) {
+    val existing = buildSet {
+        query("PRAGMA table_info(`networks`)").use { cursor ->
+            val nameColumn = cursor.getColumnIndexOrThrow("name")
+            while (cursor.moveToNext()) add(cursor.getString(nameColumn))
+        }
+    }
+    columns.forEach { (name, type) ->
+        if (name !in existing) execSQL("ALTER TABLE networks ADD COLUMN $name $type")
     }
 }

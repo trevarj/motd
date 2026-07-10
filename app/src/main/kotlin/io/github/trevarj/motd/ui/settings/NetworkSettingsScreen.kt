@@ -11,11 +11,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -26,6 +30,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -44,11 +49,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
@@ -72,6 +80,10 @@ fun NetworkSettingsScreen(
         onBack = onBack,
         onDisplayNameChange = viewModel::editDisplayName,
         onWsUrlChange = viewModel::editWsUrl,
+        onObfsModeChange = viewModel::editObfsMode,
+        onProxyHostChange = viewModel::editProxyHost,
+        onProxyPortChange = viewModel::editProxyPort,
+        onUseTor = viewModel::useTorShortcut,
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
         onSave = { viewModel.save(onBack) },
@@ -91,6 +103,10 @@ fun NetworkSettingsContent(
     onBack: () -> Unit,
     onDisplayNameChange: (String) -> Unit = {},
     onWsUrlChange: (String) -> Unit = {},
+    onObfsModeChange: (ObfsMode) -> Unit = {},
+    onProxyHostChange: (String) -> Unit = {},
+    onProxyPortChange: (String) -> Unit = {},
+    onUseTor: () -> Unit = {},
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
     onSave: () -> Unit,
@@ -159,6 +175,17 @@ fun NetworkSettingsContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // Collapsible obfuscation section (plans/20 Phase 1), off by default. A bound child
+                // inherits the root's transport, so only endpoint-owning rows show it.
+                ObfuscationSection(
+                    mode = state.obfsMode,
+                    proxyHost = state.proxyHost,
+                    proxyPort = state.proxyPort,
+                    onModeChange = onObfsModeChange,
+                    onProxyHostChange = onProxyHostChange,
+                    onProxyPortChange = onProxyPortChange,
+                    onUseTor = onUseTor,
+                )
             }
             // autoConnect toggle — persisted immediately.
             AutoConnectRow(checked = state.autoConnect, onCheckedChange = onSetAutoConnect)
@@ -291,6 +318,124 @@ private fun AutoConnectRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit)
             )
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/**
+ * Collapsible "Connection / Obfuscation" section (plans/20 Phase 1). Off by default: a header row
+ * with an expand toggle reveals the mode selector; SOCKS5/REALITY reveal host/port; a "Route via
+ * Tor (Orbot)" shortcut pins 127.0.0.1:9050. Stateless — the ViewModel owns the values.
+ */
+@Composable
+private fun ObfuscationSection(
+    mode: ObfsMode,
+    proxyHost: String,
+    proxyPort: String,
+    onModeChange: (ObfsMode) -> Unit,
+    onProxyHostChange: (String) -> Unit,
+    onProxyPortChange: (String) -> Unit,
+    onUseTor: () -> Unit,
+) {
+    // Auto-expand when a non-default mode is already configured so an edited network shows its proxy.
+    var expanded by remember { mutableStateOf(mode != ObfsMode.NONE) }
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .testTag("network_obfs_header"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.network_settings_obfs_section),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = null,
+            )
+        }
+        if (!expanded) return@Column
+
+        Text(
+            stringResource(R.string.network_settings_obfs_section_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
+        Column(Modifier.selectableGroup()) {
+            ObfsOption(ObfsMode.NONE, mode, stringResource(R.string.network_settings_obfs_mode_none), onModeChange)
+            ObfsOption(ObfsMode.SOCKS5, mode, stringResource(R.string.network_settings_obfs_mode_socks5), onModeChange)
+            ObfsOption(ObfsMode.TOR, mode, stringResource(R.string.network_settings_obfs_mode_tor), onModeChange)
+            ObfsOption(ObfsMode.EMBEDDED_REALITY, mode, stringResource(R.string.network_settings_obfs_mode_reality), onModeChange)
+        }
+        // TOR pins Orbot's endpoint and hides the host/port; SOCKS5/REALITY reveal editable fields.
+        when (mode) {
+            ObfsMode.TOR -> Text(
+                stringResource(R.string.network_settings_obfs_tor_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ObfsMode.SOCKS5, ObfsMode.EMBEDDED_REALITY -> Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (mode == ObfsMode.EMBEDDED_REALITY) {
+                    Text(
+                        stringResource(R.string.network_settings_obfs_reality_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                OutlinedTextField(
+                    value = proxyHost,
+                    onValueChange = onProxyHostChange,
+                    label = { Text(stringResource(R.string.network_settings_obfs_proxy_host)) },
+                    placeholder = { Text("127.0.0.1") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Uri,
+                        autoCorrectEnabled = false,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth().testTag("network_obfs_host"),
+                )
+                OutlinedTextField(
+                    value = proxyPort,
+                    onValueChange = onProxyPortChange,
+                    label = { Text(stringResource(R.string.network_settings_obfs_proxy_port)) },
+                    placeholder = { Text("1080") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                    modifier = Modifier.fillMaxWidth().testTag("network_obfs_port"),
+                )
+                TextButton(onClick = onUseTor) {
+                    Text(stringResource(R.string.network_settings_obfs_tor_shortcut))
+                }
+                Text(
+                    stringResource(R.string.network_settings_obfs_dns_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            ObfsMode.NONE -> Unit
+        }
+    }
+}
+
+@Composable
+private fun ObfsOption(
+    mode: ObfsMode,
+    selected: ObfsMode,
+    label: String,
+    onSelect: (ObfsMode) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = mode == selected, onClick = { onSelect(mode) })
+        Text(label, modifier = Modifier.padding(start = 8.dp))
     }
 }
 
