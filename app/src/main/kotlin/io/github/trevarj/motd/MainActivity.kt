@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
                 nickColorsEnabled = settings.nickColorsEnabled,
                 nickColorPalette = settings.nickColorPalette,
                 nickColorOverrides = settings.nickColorOverrides,
+                avatarStyle = settings.avatarStyle,
             ) {
                 // Root Surface paints the themed background under every screen (incl. non-Scaffold
                 // ones like onboarding) so the window follows the color scheme instead of white.

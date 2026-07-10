@@ -46,11 +46,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.ThemeMode
+import io.github.trevarj.motd.data.prefs.isTerminalTheme
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.ui.about.appVersion
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -86,6 +88,7 @@ fun SettingsScreen(
         onNickColorPalette = viewModel::setNickColorPalette,
         onShowJoinPartQuit = viewModel::setShowJoinPartQuit,
         onFoolsMode = viewModel::setFoolsMode,
+        onAvatarStyle = viewModel::setAvatarStyle,
     )
 }
 
@@ -108,6 +111,7 @@ fun SettingsContent(
     onNickColorPalette: (NickColorPalette) -> Unit,
     onShowJoinPartQuit: (Boolean) -> Unit,
     onFoolsMode: (FoolsMode) -> Unit,
+    onAvatarStyle: (AvatarStyle) -> Unit = {},
 ) {
     val context = LocalContext.current
     Scaffold(
@@ -131,12 +135,15 @@ fun SettingsContent(
             SwitchRow(
                 title = stringResource(R.string.settings_dynamic_color),
                 subtitle = stringResource(R.string.settings_dynamic_color_desc),
-                checked = state.settings.dynamicColor,
+                // Dynamic color only applies to the base modes; disable the toggle for terminal themes.
+                checked = state.settings.dynamicColor && !state.settings.themeMode.isTerminalTheme,
                 onCheckedChange = onDynamicColor,
                 switchTag = "settings_switch_dynamic_color",
             )
             SubLabel(stringResource(R.string.settings_density))
             DensityGroup(current = state.settings.layoutDensity, onSelect = onLayoutDensity)
+            SubLabel(stringResource(R.string.settings_avatar_style))
+            AvatarStyleGroup(current = state.settings.avatarStyle, onSelect = onAvatarStyle)
 
             HorizontalDivider()
 
@@ -270,19 +277,64 @@ private fun networkSupporting(network: NetworkEntity, all: List<NetworkEntity>):
 
 @Composable
 private fun ThemeModeGroup(current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
-    val options = listOf(
+    // Base modes first, then terminal color schemes in a clearly labeled sub-block.
+    val baseOptions = listOf(
         ThemeMode.SYSTEM to R.string.settings_theme_system,
         ThemeMode.LIGHT to R.string.settings_theme_light,
         ThemeMode.DARK to R.string.settings_theme_dark,
         ThemeMode.AMOLED to R.string.settings_theme_amoled,
     )
+    val terminalOptions = listOf(
+        ThemeMode.GRUVBOX_DARK to R.string.settings_theme_gruvbox_dark,
+        ThemeMode.GRUVBOX_LIGHT to R.string.settings_theme_gruvbox_light,
+        ThemeMode.SOLARIZED_DARK to R.string.settings_theme_solarized_dark,
+        ThemeMode.SOLARIZED_LIGHT to R.string.settings_theme_solarized_light,
+        ThemeMode.DRACULA to R.string.settings_theme_dracula,
+        ThemeMode.NORD to R.string.settings_theme_nord,
+        ThemeMode.CATPPUCCIN_LATTE to R.string.settings_theme_catppuccin_latte,
+        ThemeMode.CATPPUCCIN_MOCHA to R.string.settings_theme_catppuccin_mocha,
+        ThemeMode.TOKYO_NIGHT to R.string.settings_theme_tokyo_night,
+    )
     Column(Modifier.selectableGroup()) {
-        options.forEach { (mode, labelRes) ->
+        baseOptions.forEach { (mode, labelRes) ->
             RadioRow(
                 label = stringResource(labelRes),
                 selected = current == mode,
                 enabled = true,
                 onClick = { onSelect(mode) },
+            )
+        }
+        // Sub-label separating the terminal schemes from the base OS modes.
+        Text(
+            text = stringResource(R.string.settings_theme_terminal_schemes),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 52.dp, top = 6.dp, bottom = 2.dp),
+        )
+        terminalOptions.forEach { (mode, labelRes) ->
+            RadioRow(
+                label = stringResource(labelRes),
+                selected = current == mode,
+                enabled = true,
+                onClick = { onSelect(mode) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AvatarStyleGroup(current: AvatarStyle, onSelect: (AvatarStyle) -> Unit) {
+    val options = listOf(
+        AvatarStyle.PIXEL_ART to R.string.settings_avatar_pixel_art,
+        AvatarStyle.INITIALS to R.string.settings_avatar_initials,
+    )
+    Column(Modifier.selectableGroup()) {
+        options.forEach { (style, labelRes) ->
+            RadioRow(
+                label = stringResource(labelRes),
+                selected = current == style,
+                enabled = true,
+                onClick = { onSelect(style) },
             )
         }
     }
@@ -509,7 +561,7 @@ private fun SettingsContentPreview() {
             onOpenFriends = {}, onOpenFools = {}, onOpenNickColors = {}, onOpenAddNetwork = {},
             onThemeMode = {}, onDynamicColor = {}, onDeliveryMode = {},
             onLayoutDensity = {}, onNickColorsEnabled = {}, onNickColorPalette = {},
-            onShowJoinPartQuit = {}, onFoolsMode = {},
+            onShowJoinPartQuit = {}, onFoolsMode = {}, onAvatarStyle = {},
         )
     }
 }

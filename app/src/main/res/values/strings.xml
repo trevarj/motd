@@ -373,6 +373,23 @@
     <string name="chatlist_mute">Mute</string>
     <string name="chatlist_unmute">Unmute</string>
 
+    <!-- Terminal color schemes (theme picker) -->
+    <string name="settings_theme_terminal_schemes">Terminal color schemes</string>
+    <string name="settings_theme_gruvbox_dark">Gruvbox Dark</string>
+    <string name="settings_theme_gruvbox_light">Gruvbox Light</string>
+    <string name="settings_theme_solarized_dark">Solarized Dark</string>
+    <string name="settings_theme_solarized_light">Solarized Light</string>
+    <string name="settings_theme_dracula">Dracula</string>
+    <string name="settings_theme_nord">Nord</string>
+    <string name="settings_theme_catppuccin_latte">Catppuccin Latte</string>
+    <string name="settings_theme_catppuccin_mocha">Catppuccin Mocha</string>
+    <string name="settings_theme_tokyo_night">Tokyo Night</string>
+
+    <!-- Avatar style picker -->
+    <string name="settings_avatar_style">Avatar style</string>
+    <string name="settings_avatar_pixel_art">Pixel art</string>
+    <string name="settings_avatar_initials">Initials</string>
+
     <!-- Badge content-descriptions: carry the real (uncapped) count for the e2e harness (plans/18
          §4). The visible badge text caps at "99+" / "@". -->
     <plurals name="badge_unread">

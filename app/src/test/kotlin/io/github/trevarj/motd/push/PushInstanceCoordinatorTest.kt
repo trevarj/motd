@@ -3,6 +3,7 @@ package io.github.trevarj.motd.push
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
@@ -65,6 +66,7 @@ class PushInstanceCoordinatorTest {
         override suspend fun setFool(nick: String, isFool: Boolean) = Unit
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
         override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
+        override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
     }
 
     private class FakeNetworkDao(nets: List<NetworkEntity>) : NetworkDao {

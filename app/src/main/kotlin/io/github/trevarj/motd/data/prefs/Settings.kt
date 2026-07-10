@@ -3,12 +3,31 @@ package io.github.trevarj.motd.data.prefs
 import io.github.trevarj.motd.service.DeliveryMode
 import kotlinx.coroutines.flow.Flow
 
-enum class ThemeMode { SYSTEM, LIGHT, DARK, AMOLED }
+enum class ThemeMode {
+    SYSTEM, LIGHT, DARK, AMOLED,
+    // Terminal color schemes (light + dark where the scheme has both).
+    GRUVBOX_DARK, GRUVBOX_LIGHT,
+    SOLARIZED_DARK, SOLARIZED_LIGHT,
+    DRACULA,
+    NORD,
+    CATPPUCCIN_LATTE, CATPPUCCIN_MOCHA,
+    TOKYO_NIGHT,
+}
 
 // Round 4 (plans/13): user-customizable UI settings.
 enum class LayoutDensity { COMPACT, COMFORTABLE, COZY }
 enum class NickColorPalette { DEFAULT, VIVID, PASTEL }
 enum class FoolsMode { COLLAPSE, HIDE }
+
+/** Which visual style to use for nick avatars. */
+enum class AvatarStyle { PIXEL_ART, INITIALS }
+
+/** True for terminal color-scheme variants (dynamic color does not apply to these). */
+val ThemeMode.isTerminalTheme: Boolean
+    get() = when (this) {
+        ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK, ThemeMode.AMOLED -> false
+        else -> true
+    }
 
 data class Settings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
@@ -25,6 +44,8 @@ data class Settings(
     val fools: Set<String> = emptySet(),
     val foolsMode: FoolsMode = FoolsMode.COLLAPSE,
     val showJoinPartQuit: Boolean = true,
+    /** Avatar rendering style; defaults to pixel-art identicons. */
+    val avatarStyle: AvatarStyle = AvatarStyle.PIXEL_ART,
 )
 
 /** Canonical key for friends/fools/override lookups: trimmed + lowercased.
@@ -47,6 +68,7 @@ interface SettingsRepository {
     suspend fun setFool(nick: String, isFool: Boolean)
     suspend fun setFoolsMode(m: FoolsMode)
     suspend fun setShowJoinPartQuit(show: Boolean)
+    suspend fun setAvatarStyle(style: AvatarStyle)
 }
 
 /** Webpush endpoint + client keypair persistence (DataStore). Implemented by WP4 alongside

@@ -44,6 +44,7 @@ internal object PrefKeys {
     val FOOL_NICKS = stringPreferencesKey("fool_nicks")
     val FOOLS_MODE = stringPreferencesKey("fools_mode")
     val SHOW_JOIN_PART_QUIT = stringPreferencesKey("show_join_part_quit")
+    val AVATAR_STYLE = stringPreferencesKey("avatar_style")
 }
 
 // -- Round 4 nick-set / hue-override JSON codecs (top-level + internal so they are unit-testable
@@ -107,6 +108,8 @@ class DataStoreSettingsRepository @Inject constructor(
             foolsMode = prefs[PrefKeys.FOOLS_MODE]?.let { runCatching { FoolsMode.valueOf(it) }.getOrNull() }
                 ?: FoolsMode.COLLAPSE,
             showJoinPartQuit = prefs[PrefKeys.SHOW_JOIN_PART_QUIT]?.toBooleanStrictOrNull() ?: true,
+            avatarStyle = prefs[PrefKeys.AVATAR_STYLE]?.let { runCatching { AvatarStyle.valueOf(it) }.getOrNull() }
+                ?: AvatarStyle.PIXEL_ART,
         )
     }
 
@@ -185,6 +188,10 @@ class DataStoreSettingsRepository @Inject constructor(
 
     override suspend fun setShowJoinPartQuit(show: Boolean) {
         store.edit { it[PrefKeys.SHOW_JOIN_PART_QUIT] = show.toString() }
+    }
+
+    override suspend fun setAvatarStyle(style: AvatarStyle) {
+        store.edit { it[PrefKeys.AVATAR_STYLE] = style.name }
     }
 
     // Empty set removes its key (mirrors setEndpointFor); non-empty writes the JSON array.

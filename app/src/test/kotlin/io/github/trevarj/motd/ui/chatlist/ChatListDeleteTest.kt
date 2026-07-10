@@ -6,6 +6,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
@@ -96,6 +97,7 @@ class ChatListDeleteTest {
         override suspend fun setFool(nick: String, isFool: Boolean) = Unit
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
         override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
+        override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
     }
 
     private val dispatcher = StandardTestDispatcher()

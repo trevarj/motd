@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
@@ -82,5 +83,9 @@ class SettingsViewModel @Inject constructor(
 
     fun setFoolsMode(mode: FoolsMode) = viewModelScope.launch {
         settingsRepository.setFoolsMode(mode)
+    }
+
+    fun setAvatarStyle(style: AvatarStyle) = viewModelScope.launch {
+        settingsRepository.setAvatarStyle(style)
     }
 }

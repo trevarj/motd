@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
+import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
@@ -70,6 +71,7 @@ class ManageNicksViewModelTest {
 
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
         override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
+        override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
     }
 
     private val dispatcher = StandardTestDispatcher()
