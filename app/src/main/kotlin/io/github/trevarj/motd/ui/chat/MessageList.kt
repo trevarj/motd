@@ -93,6 +93,9 @@ fun MessageList(
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
     onDelete: (MessageEntity) -> Unit = {},
     highlightMsgid: String? = null,
+    // Normalized nicks known in the current buffer (member list). Drives @mention coloring in the
+    // message bodies (plans/17); passed straight through to each MessageBubble.
+    knownNicks: Set<String> = emptySet(),
     // Behavioral settings threaded from viewModel.settings (plans/13 §2.3/§2.4). Style-only
     // concerns (density, nick color) flow through CompositionLocals instead.
     friends: Set<String> = emptySet(),
@@ -172,6 +175,7 @@ fun MessageList(
                 onCollapseFool = if (isFool) ({ onToggleFool(msg.id) }) else null,
                 senderIsFriend = !msg.isSelf && normalizeNick(msg.sender) in friends,
                 reactions = msg.msgid?.let(reactionChips).orEmpty(),
+                knownNicks = knownNicks,
                 onLongPress = onLongPress,
                 onReact = onReact,
                 onImageClick = onImageClick,
@@ -284,6 +288,7 @@ private fun MessageRow(
     readMarkerTime: Long?,
     senderIsFriend: Boolean,
     reactions: List<ReactionChip>,
+    knownNicks: Set<String>,
     onLongPress: (MessageEntity) -> Unit,
     onReact: (String, String) -> Unit,
     onImageClick: (String) -> Unit,
@@ -343,6 +348,7 @@ private fun MessageRow(
         linkPreview = preview,
         linkPreviewLoading = previewLoading,
         reactions = reactions,
+        knownNicks = knownNicks,
         onLongPress = { onLongPress(msg) },
         onReact = { emoji -> msg.msgid?.let { onReact(it, emoji) } },
         onImageClick = onImageClick,

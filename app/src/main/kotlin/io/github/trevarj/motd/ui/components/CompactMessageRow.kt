@@ -77,6 +77,8 @@ internal fun CompactMessageRow(
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
+    // Normalized nicks known in the current buffer; @mentions of these are colored (plans/17).
+    knownNicks: Set<String> = emptySet(),
     onLongPress: () -> Unit = {},
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
@@ -99,8 +101,10 @@ internal fun CompactMessageRow(
     // The `nick: text` (or `* nick text`) content is a single flowing AnnotatedString so it wraps as
     // one paragraph like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
     // Continuation lines (showSender == false) drop the `nick:` prefix so a run reads as one speaker.
-    val line = remember(sender, text, kind, nameColor, bodyColor, linkColor, senderIsFriend, showSender) {
-        buildCompactLine(sender, text, kind, nameColor, bodyColor, linkColor, friendTint, showSender)
+    // Known-nick @mentions in the body are colored via the memoized resolver.
+    val mentionColor = rememberMentionColor(knownNicks, nickColors)
+    val line = remember(sender, text, kind, nameColor, bodyColor, linkColor, senderIsFriend, showSender, mentionColor) {
+        buildCompactLine(sender, text, kind, nameColor, bodyColor, linkColor, friendTint, showSender, mentionColor)
     }
 
     Column(
@@ -173,9 +177,10 @@ internal fun CompactMessageRow(
 /**
  * Build the single-line `nick: text` content for COMPACT rendering. Prefix depends on kind:
  * ACTION → `* nick ` (no colon), NOTICE → `-nick- ` (subtle marker), else `nick: `. The nick span
- * is colored (+ optional friend background); URLs in the body are linkified. When [showSender] is
- * false the row is a group continuation: the `nick:`/`-nick-` prefix is dropped so the run reads as
- * one speaker (ACTION keeps its leading `* ` so an action line stays recognizable). Pure/testable.
+ * is colored (+ optional friend background); URLs in the body are linkified and known-nick
+ * @mentions ([mentionColor]) are colored. When [showSender] is false the row is a group
+ * continuation: the `nick:`/`* nick`/`-nick-` prefix is dropped so the run reads as one speaker
+ * (the body alone is rendered). Pure/testable.
  */
 internal fun buildCompactLine(
     sender: String,
@@ -186,12 +191,15 @@ internal fun buildCompactLine(
     linkColor: Color,
     friendTint: Color,
     showSender: Boolean = true,
+    mentionColor: (String) -> Color? = { null },
 ): AnnotatedString = buildAnnotatedString {
     val nickStyle = SpanStyle(
         color = nameColor,
         fontWeight = FontWeight.SemiBold,
         background = friendTint,
     )
+    // Continuation lines omit the sender prefix entirely; ACTION keeps the leading `* ` marker so an
+    // action line stays recognizable even mid-run.
     if (showSender) {
         when (kind) {
             MessageKind.ACTION -> {
@@ -212,18 +220,23 @@ internal fun buildCompactLine(
     } else if (kind == MessageKind.ACTION) {
         withStyle(SpanStyle(color = bodyColor)) { append("* ") }
     }
-    appendLinkified(text, bodyColor, linkColor)
+    appendLinkified(text, bodyColor, linkColor, mentionColor)
 }
 
-/** Append [text] with http(s) URLs turned into tappable links, rest in [bodyColor]. */
+/**
+ * Append [text] with http(s) URLs turned into tappable links and known-nick @mentions colored via
+ * [mentionColor]; the remaining plain body is in [bodyColor]. Mention coloring runs on the non-URL
+ * spans so a nick that is part of a URL stays a link.
+ */
 private fun androidx.compose.ui.text.AnnotatedString.Builder.appendLinkified(
     text: String,
     bodyColor: Color,
     linkColor: Color,
+    mentionColor: (String) -> Color? = { null },
 ) {
     val urls = extractUrls(text)
     if (urls.isEmpty()) {
-        withStyle(SpanStyle(color = bodyColor)) { append(text) }
+        withStyle(SpanStyle(color = bodyColor)) { appendMentionColored(text, mentionColor) }
         return
     }
     val linkStyle = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)
@@ -231,11 +244,13 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendLinkified(
     for (url in urls) {
         val at = text.indexOf(url, cursor)
         if (at < 0) continue
-        withStyle(SpanStyle(color = bodyColor)) { append(text.substring(cursor, at)) }
+        withStyle(SpanStyle(color = bodyColor)) { appendMentionColored(text.substring(cursor, at), mentionColor) }
         withLink(LinkAnnotation.Url(url)) { withStyle(linkStyle) { append(url) } }
         cursor = at + url.length
     }
-    if (cursor < text.length) withStyle(SpanStyle(color = bodyColor)) { append(text.substring(cursor)) }
+    if (cursor < text.length) {
+        withStyle(SpanStyle(color = bodyColor)) { appendMentionColored(text.substring(cursor), mentionColor) }
+    }
 }
 
 @Preview

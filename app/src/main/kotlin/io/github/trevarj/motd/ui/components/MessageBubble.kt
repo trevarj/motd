@@ -90,6 +90,9 @@ fun MessageBubble(
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
+    // Normalized nicks known in the current buffer; @mentions of these in the body are colored with
+    // the nick's own color (plans/17). Empty = no mention coloring.
+    knownNicks: Set<String> = emptySet(),
     onLongPress: () -> Unit = {},
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
@@ -116,7 +119,6 @@ fun MessageBubble(
             kind = kind,
             nickColors = nickColors,
             modifier = modifier,
-            showSender = showSender,
             senderIsFriend = senderIsFriend,
             failed = failed,
             pending = pending,
@@ -125,6 +127,8 @@ fun MessageBubble(
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
             reactions = reactions,
+            knownNicks = knownNicks,
+            showSender = showSender,
             onLongPress = onLongPress,
             onReact = onReact,
             onImageClick = onImageClick,
@@ -145,7 +149,6 @@ fun MessageBubble(
             kind = kind,
             nickColors = nickColors,
             spacing = spacing,
-            showSender = showSender,
             modifier = modifier,
             senderIsFriend = senderIsFriend,
             failed = failed,
@@ -155,6 +158,8 @@ fun MessageBubble(
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
             reactions = reactions,
+            knownNicks = knownNicks,
+            showSender = showSender,
             onLongPress = onLongPress,
             onReact = onReact,
             onImageClick = onImageClick,
@@ -302,11 +307,16 @@ fun MessageBubble(
 
             if (text.isNotBlank()) {
                 // Linkify http(s) URLs so the body is tappable even when the preview fails
-                // (plans/15 #11); LinkAnnotation.Url uses the platform URI open handler.
-                // Font size is constant across density modes (density selects render style, not
-                // size); always bodyLarge in the bubble renderer.
+                // (plans/15 #11); LinkAnnotation.Url uses the platform URI open handler. Known-nick
+                // @mentions are colored with the nick's own color. Body build is memoized per
+                // (text, mention inputs) so it doesn't re-run every recomposition/scroll frame.
+                val linkColor = MaterialTheme.colorScheme.primary
+                val mentionColor = rememberMentionColor(knownNicks, nickColors)
+                val body = remember(text, linkColor, mentionColor) {
+                    linkifiedBody(text, linkColor, mentionColor)
+                }
                 Text(
-                    text = linkifiedBody(text, MaterialTheme.colorScheme.primary),
+                    text = body,
                     color = textColor,
                     style = MaterialTheme.typography.bodyLarge,
                 )
@@ -368,6 +378,7 @@ private fun TwoLineMessageRow(
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
+    knownNicks: Set<String> = emptySet(),
     onLongPress: () -> Unit = {},
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
@@ -398,8 +409,7 @@ private fun TwoLineMessageRow(
             .padding(horizontal = 12.dp, vertical = spacing.bubbleRowVPad),
     ) {
         // Line 1 (header): avatar + nick + (own) sent check + timestamp — only on a group's first
-        // message. Continuations (showSender == false) omit the header and indent the body under it,
-        // so consecutive messages from a sender read as one grouped run (plans/07 grouping window).
+        // message. Continuations (showSender == false) omit the header and indent the body under it.
         if (showSender) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Center the small avatar against the header line rather than top-pinning it.
@@ -439,8 +449,8 @@ private fun TwoLineMessageRow(
         }
 
         // Line 2 (body): reply preview, body, inline image, link preview, reactions. Continuations
-        // reserve the avatar's horizontal space (avatar + its 6dp gap) so the body lines up under
-        // the group's body instead of jumping to the row's left edge.
+        // reserve the avatar's horizontal space (avatar + its 6dp gap) so text lines up under the
+        // group's body; the header build already indents by the same amount via the avatar column.
         val bodyIndent = if (showSender) 0.dp else spacing.bubbleAvatar + 6.dp
         Column(
             modifier = Modifier.padding(
@@ -475,12 +485,18 @@ private fun TwoLineMessageRow(
             }
 
             if (text.isNotBlank()) {
-                Text(
-                    text = if (kind == MessageKind.ACTION) {
+                val linkColor = MaterialTheme.colorScheme.primary
+                val mentionColor = rememberMentionColor(knownNicks, nickColors)
+                // Memoized body build (linkify + mention coloring) so it doesn't re-run per frame.
+                val body = remember(text, kind, sender, linkColor, mentionColor) {
+                    if (kind == MessageKind.ACTION) {
                         AnnotatedString("* $sender $text")
                     } else {
-                        linkifiedBody(text, MaterialTheme.colorScheme.primary)
-                    },
+                        linkifiedBody(text, linkColor, mentionColor)
+                    }
+                }
+                Text(
+                    text = body,
                     color = if (kind == MessageKind.ACTION) MaterialTheme.colorScheme.onSurfaceVariant else bodyColor,
                     fontStyle = if (kind == MessageKind.ACTION) FontStyle.Italic else FontStyle.Normal,
                     style = MaterialTheme.typography.bodyLarge,
@@ -575,24 +591,109 @@ internal fun FailedIcon() {
 
 /**
  * Build an [AnnotatedString] where each http(s) URL in [text] is a tappable [LinkAnnotation.Url]
- * (plans/15 #11). URL boundaries come from [extractUrls], matched left-to-right in the raw text.
+ * (plans/15 #11) and each @mention of a known nick is colored with that nick's own color. URL
+ * boundaries come from [extractUrls], matched left-to-right in the raw text; the runs between URLs
+ * get mention coloring via [appendMentionColored]. [mentionColor] returns the nick's color for a
+ * known token (matched case-insensitively via [normalizeNick]) or null for a plain word; when null
+ * for everything (no known nicks) the body is a single unstyled run.
  */
-internal fun linkifiedBody(text: String, linkColor: androidx.compose.ui.graphics.Color): AnnotatedString {
+internal fun linkifiedBody(
+    text: String,
+    linkColor: androidx.compose.ui.graphics.Color,
+    mentionColor: (String) -> androidx.compose.ui.graphics.Color? = { null },
+): AnnotatedString {
     val urls = extractUrls(text)
-    if (urls.isEmpty()) return AnnotatedString(text)
+    if (urls.isEmpty()) {
+        return buildAnnotatedString { appendMentionColored(text, mentionColor) }
+    }
     val linkStyle = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)
     return buildAnnotatedString {
         var cursor = 0
         for (url in urls) {
             val at = text.indexOf(url, cursor)
             if (at < 0) continue
-            append(text.substring(cursor, at))
+            appendMentionColored(text.substring(cursor, at), mentionColor)
             withLink(LinkAnnotation.Url(url)) {
                 withStyle(linkStyle) { append(url) }
             }
             cursor = at + url.length
         }
-        if (cursor < text.length) append(text.substring(cursor))
+        if (cursor < text.length) appendMentionColored(text.substring(cursor), mentionColor)
+    }
+}
+
+/**
+ * A stable `nick -> Color?` resolver for @mention coloring: returns the nick's own color when
+ * [knownNicks] (normalized) contains the token, else null. Memoized on ([knownNicks], [nickColors])
+ * so the same lambda instance is reused across recompositions, keeping the body [remember] cache
+ * warm during scroll. Returns a null-op resolver when there are no known nicks.
+ */
+@Composable
+internal fun rememberMentionColor(
+    knownNicks: Set<String>,
+    nickColors: NickColorScheme,
+): (String) -> androidx.compose.ui.graphics.Color? {
+    return remember(knownNicks, nickColors) {
+        if (knownNicks.isEmpty() || !nickColors.enabled) {
+            { null }
+        } else {
+            { token ->
+                // Mentions always resolve to the nick's own color; Unspecified fallback is never
+                // hit because membership is checked first.
+                if (io.github.trevarj.motd.data.prefs.normalizeNick(token) in knownNicks) {
+                    nickColors.nick(token, androidx.compose.ui.graphics.Color.Unspecified)
+                } else {
+                    null
+                }
+            }
+        }
+    }
+}
+
+// Chars that can be part of an IRC nick token. Mentions are matched on runs of these, so trailing
+// punctuation (`:`, `,`, `!`) and a leading `@` fall outside the token and don't break the match.
+private fun isNickChar(c: Char): Boolean =
+    c.isLetterOrDigit() || c == '_' || c == '-' || c == '[' || c == ']' ||
+        c == '{' || c == '}' || c == '\\' || c == '|' || c == '^' || c == '`'
+
+/**
+ * Append [text] to the builder, coloring any word-boundary token that resolves to a known-nick
+ * color via [mentionColor] (bare `nick`, `nick:`/`nick,` prefix forms, and `@nick`). A leading `@`
+ * is consumed as part of the token so `@bob` highlights `bob`. Non-nick runs are appended verbatim.
+ * Pure over the builder; no Android runtime needed.
+ */
+internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendMentionColored(
+    text: String,
+    mentionColor: (String) -> androidx.compose.ui.graphics.Color?,
+) {
+    var i = 0
+    val n = text.length
+    while (i < n) {
+        val c = text[i]
+        // A token starts at a nick char, or an `@` immediately followed by a nick char.
+        val atMention = c == '@' && i + 1 < n && isNickChar(text[i + 1])
+        if (isNickChar(c) || atMention) {
+            val start = i
+            if (atMention) i++ // skip the leading '@' when scanning the nick body
+            val nickStart = i
+            while (i < n && isNickChar(text[i])) i++
+            val nick = text.substring(nickStart, i)
+            val color = mentionColor(nick)
+            if (color != null) {
+                // Color the whole token including a leading '@' so the mention reads as one unit.
+                withStyle(SpanStyle(color = color, fontWeight = FontWeight.Medium)) {
+                    append(text.substring(start, i))
+                }
+            } else {
+                append(text.substring(start, i))
+            }
+        } else {
+            // Non-nick run (whitespace/punctuation): append up to the next potential token start.
+            val start = i
+            while (i < n && !isNickChar(text[i]) && text[i] != '@') i++
+            if (i == start) i++ // lone '@' not starting a mention
+            append(text.substring(start, i))
+        }
     }
 }
 

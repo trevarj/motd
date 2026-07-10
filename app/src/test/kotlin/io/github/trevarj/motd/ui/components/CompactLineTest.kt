@@ -66,4 +66,35 @@ class CompactLineTest {
         )
         assertEquals("* still waving", line.text)
     }
+
+    @Test
+    fun known_nick_mention_gets_nick_color() {
+        val mention = Color(0xFFAABBCC)
+        // "bob" is a known nick; "hi bob:" should color the bob token with the mention color.
+        val line = buildCompactLine(
+            "alice", "hi bob: welcome", MessageKind.PRIVMSG, nick, body, link, noTint,
+            mentionColor = { token -> if (token.lowercase() == "bob") mention else null },
+        )
+        assertEquals("alice: hi bob: welcome", line.text)
+        val start = line.text.indexOf("bob")
+        val spanAtBob = line.spanStyles.firstOrNull {
+            it.start <= start && it.end >= start + 3 && it.item.color == mention
+        }
+        assertTrue("expected the bob mention colored with the nick color", spanAtBob != null)
+    }
+
+    @Test
+    fun at_mention_form_is_colored() {
+        val mention = Color(0xFFAABBCC)
+        val line = buildCompactLine(
+            "alice", "ping @carol now", MessageKind.PRIVMSG, nick, body, link, noTint,
+            mentionColor = { token -> if (token.lowercase() == "carol") mention else null },
+        )
+        // The '@' is folded into the colored token so the mention reads as one unit.
+        val at = line.text.indexOf("@carol")
+        val span = line.spanStyles.firstOrNull {
+            it.start == at && it.end == at + "@carol".length && it.item.color == mention
+        }
+        assertTrue("expected @carol colored as a single mention token", span != null)
+    }
 }

@@ -385,6 +385,12 @@ fun ChatContent(
             .map { it.sender }
     }
     val memberNicks = state.members.map { it.nick }
+    // Normalized member nicks for @mention coloring in message bodies (plans/17). Normalized with
+    // the same normalizeNick the row renderers use so token lookups match; memoized on the member
+    // list so the set isn't rebuilt every recomposition.
+    val knownNicks = remember(memberNicks) {
+        memberNicks.map { io.github.trevarj.motd.data.prefs.normalizeNick(it) }.toSet()
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -480,6 +486,7 @@ fun ChatContent(
                         // Link-preview tap opens the URL in the system browser.
                         onOpenLink = { ctx.startActivity(Intent(Intent.ACTION_VIEW, it.toUri())) },
                         highlightMsgid = highlightMsgid,
+                        knownNicks = knownNicks,
                         friends = friends,
                         fools = fools,
                         foolsMode = foolsMode,
