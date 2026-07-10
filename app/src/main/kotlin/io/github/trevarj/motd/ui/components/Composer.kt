@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Mood
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.R
@@ -76,12 +78,19 @@ fun Composer(
 ) {
     // Inline emoji picker toggle; collapses on send so the panel never sticks around after a message.
     var showEmojiPicker by remember { mutableStateOf(false) }
+    // Distinct input-area surface: surfaceContainer + slight tonal elevation set the whole area
+    // (reply bar, autocomplete, emoji panel, and the field row) apart from the chat background, and a
+    // hairline top divider gives a crisp separation edge. All theme-adaptive via colorScheme.
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 2.dp,
     ) {
         Column {
+            HorizontalDivider(
+                thickness = Dp.Hairline,
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
             autocomplete?.invoke()
 
             AnimatedVisibility(visible = reply != null) {
