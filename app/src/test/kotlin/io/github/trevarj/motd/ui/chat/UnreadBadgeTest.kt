@@ -36,4 +36,14 @@ class UnreadBadgeTest {
     @Test fun `marker equal to a row time excludes that row (strictly newer)`() {
         assertEquals(1, unreadBelowViewport(listOf(110L, 100L), marker = 100L))
     }
+
+    @Test fun `advancing the live marker past below-fold rows clears the badge`() {
+        // Two unread rows below the fold against the entry marker (100).
+        val below = listOf(130L, 120L)
+        assertEquals(2, unreadBelowViewport(below, marker = 100L))
+        // markRead at the bottom advances the LIVE marker to the newest row; scrolling back up now
+        // counts zero (the badge clears without leaving the buffer). The frozen snapshot would have
+        // kept counting 2 here — that was the bug.
+        assertEquals(0, unreadBelowViewport(below, marker = 130L))
+    }
 }

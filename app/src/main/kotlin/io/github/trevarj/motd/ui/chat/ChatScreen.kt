@@ -111,8 +111,10 @@ fun ChatScreen(
 
     val jumpTarget by viewModel.jumpTarget.collectAsStateWithLifecycle()
     val jumpFailed by viewModel.jumpFailed.collectAsStateWithLifecycle()
-    // Read marker frozen on entry so the divider/badge don't flash away (plans/15 #2).
+    // Read marker frozen on entry so the "— New messages —" divider doesn't flash away (plans/15 #2).
     val readMarkerSnapshot by viewModel.readMarkerSnapshot.collectAsStateWithLifecycle()
+    // Live read marker drives the FAB unread badge so it clears as messages are read (not on exit).
+    val readMarkerTime by viewModel.readMarkerTime.collectAsStateWithLifecycle()
     // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     // Round 5: nick sheet + raw-send snackbar (plans/16 §5.6/§5.8).
@@ -130,6 +132,7 @@ fun ChatScreen(
         chatWallpaper = settings.chatWallpaper,
         reactionChips = { msgid -> chipsByMsgid[msgid].orEmpty() },
         readMarkerSnapshot = readMarkerSnapshot,
+        readMarkerLive = readMarkerTime,
         onMarkRead = viewModel::markRead,
         onBack = onBack,
         // SERVER buffers have no ChannelInfo (no members/topic); tapping the title is inert.
@@ -206,6 +209,8 @@ fun ChatContent(
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
     chatWallpaper: io.github.trevarj.motd.data.prefs.ChatWallpaper = io.github.trevarj.motd.data.prefs.ChatWallpaper.NONE,
     readMarkerSnapshot: Long? = null,
+    // Live buffer read marker (advances with markRead); drives the FAB unread badge count.
+    readMarkerLive: Long? = null,
     onMarkRead: (Long) -> Unit = {},
     onDelete: (MessageEntity) -> Unit = {},
     consumePrefill: () -> String? = { null },
@@ -499,17 +504,18 @@ fun ChatContent(
                         )
                     }
 
-                    // Scroll-to-bottom FAB with unread count (against the frozen marker, plans/15 #2).
-                    // Viewport-aware: only messages below the fold (newer than the topmost visible
-                    // row) and past the read marker count, so the badge shrinks as the user scrolls
-                    // down and clears at the bottom — it isn't a monotonic "arrived since entry"
-                    // tally. firstVisibleItemIndex is read reactively so scrolls recompute it.
+                    // Scroll-to-bottom FAB with unread count. Viewport-aware: only messages below the
+                    // fold (newer than the topmost visible row) and past the LIVE read marker count,
+                    // so the badge shrinks as the user scrolls down and clears at the bottom once
+                    // markRead advances the live marker — instead of counting already-read messages
+                    // against the frozen snapshot until buffer re-entry. firstVisibleItemIndex is
+                    // read reactively so scrolls recompute it.
                     val firstVisible by remember {
                         derivedStateOf { listState.firstVisibleItemIndex }
                     }
                     ScrollToBottomFab(
                         visible = !atBottom,
-                        unread = unreadBelowViewport(items, readMarkerSnapshot, firstVisible),
+                        unread = unreadBelowViewport(items, readMarkerLive, firstVisible),
                         onClick = { scope.launch { listState.animateScrollToItem(0) } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     )

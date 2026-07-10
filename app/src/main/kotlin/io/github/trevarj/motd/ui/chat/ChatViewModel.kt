@@ -148,10 +148,19 @@ class ChatViewModel @Inject constructor(
 
     // --- read marker snapshot (plans/15 #2) ---
 
-    // Frozen on buffer entry so the "— New messages —" divider and the FAB unread badge keep a
-    // stable boundary instead of flashing/vanishing as markRead advances the live marker.
+    // Frozen on buffer entry so the "— New messages —" divider keeps a stable boundary instead of
+    // flashing/vanishing as markRead advances the live marker. Used ONLY for the divider now.
     private val _readMarkerSnapshot = MutableStateFlow<Long?>(null)
     val readMarkerSnapshot: StateFlow<Long?> = _readMarkerSnapshot.asStateFlow()
+
+    // Live read marker for the scroll-to-bottom FAB badge: unlike the frozen snapshot, this tracks
+    // the buffer's real read marker, so once markRead advances it (at bottom) the badge count drops
+    // to 0 and stays 0 when scrolling back up — instead of counting already-read messages until
+    // re-entry (bug: badge doesn't clear until leaving the chat).
+    val readMarkerTime: StateFlow<Long?> = bufferRepository.observeBuffer(bufferId)
+        .map { it?.readMarkerTime }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // --- lifecycle: foreground tracker + mark-read (plans/07) ---
 
