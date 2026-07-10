@@ -10,13 +10,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.tooling.preview.Preview
@@ -25,24 +27,32 @@ import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.ui.components.isAppliedThemeDark
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlin.random.Random
 
 /**
  * Subtle, IRC-themed chat wallpaper drawn behind the message list (WhatsApp/Telegram style). The
  * artwork is a faithful, procedural reproduction of the source SVGs in
  * `docs/assets/chat-wallpapers/`: the exact `<path d="...">` geometry (parsed with Compose's
  * [PathParser], no new dependency) and `<rect>`/`<circle>` motif placements are baked into the
- * constants below and drawn on a [androidx.compose.foundation.Canvas]. The 1080-unit source tile is
- * scaled to the canvas width and repeated vertically to fill the height.
+ * constants below.
+ *
+ * Rendering: rather than tile the whole 1080-unit sheet edge to edge (which reads as large and
+ * grid-aligned), each motif is treated as an INDIVIDUAL small "stamp". Stamps are scattered
+ * patchwork-style across the canvas at pseudo-random positions, each randomly rotated and slightly
+ * scale-jittered, with generous whitespace so the pattern stays dainty and readable. The scatter is
+ * DETERMINISTIC: a seeded PRNG (keyed by the preset) produces a fixed placement list once via
+ * [remember], in normalized (0..1) coordinates, so it never re-randomizes on recomposition/scroll
+ * and never depends on `Math.random`/time. The same renderer backs the [ChatWallpaperPicker]
+ * swatches, so previews always match the live background.
  *
  * Presets (matching the SVG pack):
  *  - CLASSIC (`irc-*-classic.svg`): stroked chat bubbles, hashtags, prompt chevrons, TLS shields,
- *    with a single stroked blue accent group.
- *  - NETWORK (`irc-*-network.svg`): faint topology link polylines behind stroked server/node
- *    glyphs.
+ *    plus a stroked blue accent glyph.
+ *  - NETWORK (`irc-*-network.svg`): stroked server/node glyphs.
  *  - PIXEL (`irc-*-pixel.svg`): filled pixel-block glyphs with blue + green accent blocks.
  *
  * THEME MAPPING (SVG hex is NOT baked): the base fill is the theme background (AMOLED keeps a true
- * black base); the main motif group is [MaterialTheme.colorScheme] `onSurfaceVariant`, the primary
+ * black base); the main motif ink is [MaterialTheme.colorScheme] `onSurfaceVariant`, the primary
  * accent is `primary`, and the pixel green accent is `tertiary`. All at low alpha so bubbles/text
  * stay readable; alphas run a touch higher on dark, chosen via [isAppliedThemeDark] so forced
  * DARK/AMOLED read dark even under a light OS. NONE keeps the plain background. There is no
@@ -67,140 +77,229 @@ fun ChatWallpaperBackground(
     val accent2 = MaterialTheme.colorScheme.tertiary
     // Low alphas keep the pattern behind message bubbles; a touch stronger on dark to stay visible.
     val mainAlpha = if (dark) 0.09f else 0.07f
-    val faintAlpha = if (dark) 0.06f else 0.045f
-    val accentAlpha = if (dark) 0.10f else 0.08f
+    val accentAlpha = if (dark) 0.11f else 0.09f
 
-    // Parsing the path strings into Compose Paths is pure work; cache per preset so we don't reparse
-    // on every recomposition/frame.
-    val paths = remember(wallpaper) { pathsFor(wallpaper) }
+    // Parsing/centering the motif geometry is pure work; cache the stamp pool per preset so we don't
+    // reparse on every recomposition/frame.
+    val stamps = remember(wallpaper) { stampsFor(wallpaper) }
+    // The scatter placement is computed once (seeded by the preset) so it is stable across
+    // recomposition/scroll and independent of the exact canvas size.
+    val placements = remember(wallpaper) { scatter(wallpaper, stamps.size) }
 
     Box(
         modifier
             .fillMaxSize()
             .background(base)
             .drawBehind {
-                when (wallpaper) {
-                    ChatWallpaper.NONE -> Unit
-                    ChatWallpaper.CLASSIC -> drawClassic(paths, ink, accent, mainAlpha, accentAlpha)
-                    ChatWallpaper.NETWORK -> drawNetwork(paths, ink, mainAlpha, faintAlpha)
-                    ChatWallpaper.PIXEL -> drawPixel(ink, accent, accent2, mainAlpha, accentAlpha)
-                }
+                drawStamps(stamps, placements, ink, accent, accent2, mainAlpha, accentAlpha)
             },
     )
 }
 
-// -- Tiling --------------------------------------------------------------------------------------
+// -- Stamp model ---------------------------------------------------------------------------------
 
-/** Source SVG viewBox is 1080-wide/tall. */
-private const val TILE = 1080f
+/** Which theme role paints a stamp. */
+private enum class Ink { MAIN, ACCENT, ACCENT2 }
 
 /**
- * Scales the 1080-unit source tile to the canvas width and repeats it vertically to fill the height,
- * invoking [drawTile] once per row inside a scaled/translated draw context. One extra row bleeds off
- * the bottom so partial tiles at the edge stay covered.
+ * One scatterable motif, already recentered so its bounding box is centered on the origin — that
+ * keeps rotation about the center trivial. [size] is the larger bounds dimension in source units,
+ * used to normalize every stamp to a common on-screen footprint. Filled stamps (pixel blocks) use
+ * [Fill]; stroked stamps carry their SVG stroke width via [strokeWidth].
  */
-private fun DrawScope.tiled(drawTile: DrawScope.() -> Unit) {
-    val s = size.width / TILE
-    val tilePx = TILE * s
-    val rows = (size.height / tilePx).toInt() + 1
-    for (r in 0..rows) {
-        translate(top = r * tilePx) {
-            // Scale the 1080-unit tile to canvas width about the top-left origin.
-            scale(s, s, pivot = Offset.Zero) { drawTile() }
-        }
-    }
+private class Stamp(
+    val path: Path,
+    val size: Float,
+    val ink: Ink,
+    val strokeWidth: Float, // 0 => filled
+)
+
+/** One placed stamp in normalized canvas coordinates (0..1), with a baked rotation + scale jitter. */
+private class Placement(
+    val stampIndex: Int,
+    val nx: Float,
+    val ny: Float,
+    val rotationDeg: Float,
+    val scaleJitter: Float,
+)
+
+// -- Stamp pools (parsed once per preset) --------------------------------------------------------
+
+/** Parses one SVG `d` string into a [Path], recentered on the origin; null if it has no extent. */
+private fun stampFromPath(d: String, ink: Ink, strokeWidth: Float): Stamp? {
+    val path = PathParser().parsePathString(d).toPath()
+    val b = path.getBounds()
+    if (b.width <= 0f && b.height <= 0f) return null
+    // Recenter so rotation pivots about the glyph's middle.
+    path.translate(Offset(-b.center.x, -b.center.y))
+    return Stamp(path, maxOf(b.width, b.height), ink, strokeWidth)
 }
 
-// -- Path parsing --------------------------------------------------------------------------------
+/** Builds a filled [Stamp] from a group of [x, y, w, h] rects, recentered on the origin. */
+private fun stampFromRects(rects: List<Float>, ink: Ink): Stamp? {
+    if (rects.isEmpty()) return null
+    var minX = Float.MAX_VALUE
+    var minY = Float.MAX_VALUE
+    var maxX = -Float.MAX_VALUE
+    var maxY = -Float.MAX_VALUE
+    var i = 0
+    while (i < rects.size) {
+        val x = rects[i]
+        val y = rects[i + 1]
+        minX = minOf(minX, x); minY = minOf(minY, y)
+        maxX = maxOf(maxX, x + rects[i + 2]); maxY = maxOf(maxY, y + rects[i + 3])
+        i += 4
+    }
+    val cx = (minX + maxX) / 2f
+    val cy = (minY + maxY) / 2f
+    val path = Path()
+    i = 0
+    while (i < rects.size) {
+        path.addRect(Rect(rects[i] - cx, rects[i + 1] - cy, rects[i] + rects[i + 2] - cx, rects[i + 1] + rects[i + 3] - cy))
+        i += 4
+    }
+    return Stamp(path, maxOf(maxX - minX, maxY - minY), ink, strokeWidth = 0f)
+}
 
-/** Parses one or more SVG `d` strings into a single Compose [Path]. */
-private fun parsePaths(vararg ds: String): Path {
-    val out = Path()
-    for (d in ds) {
-        // Each `d` gets its own parser so subpaths never bleed across glyphs.
-        out.addPath(PathParser().parsePathString(d).toPath())
+/**
+ * Groups a flat [x, y, w, h] rect array into per-glyph clusters by bucketing each rect's center into
+ * a fixed 270-unit grid cell (the source lays glyphs on a ~4x6 grid), yielding one filled stamp per
+ * occupied cell. Deterministic and needs no hand-maintained glyph boundaries.
+ */
+private fun rectGlyphStamps(rects: FloatArray, ink: Ink): List<Stamp> {
+    val cells = LinkedHashMap<Long, MutableList<Float>>()
+    var i = 0
+    while (i < rects.size) {
+        val cx = rects[i] + rects[i + 2] / 2f
+        val cy = rects[i + 1] + rects[i + 3] / 2f
+        val col = (cx / PIXEL_CELL).toInt()
+        val rowc = (cy / PIXEL_CELL).toInt()
+        val key = col.toLong() shl 32 or (rowc.toLong() and 0xffffffffL)
+        val bucket = cells.getOrPut(key) { ArrayList() }
+        bucket.add(rects[i]); bucket.add(rects[i + 1]); bucket.add(rects[i + 2]); bucket.add(rects[i + 3])
+        i += 4
+    }
+    return cells.values.mapNotNull { stampFromRects(it, ink) }
+}
+
+private fun stampsFor(wallpaper: ChatWallpaper): List<Stamp> = when (wallpaper) {
+    ChatWallpaper.NONE -> emptyList()
+    ChatWallpaper.CLASSIC ->
+        CLASSIC_PATHS.mapNotNull { stampFromPath(it, Ink.MAIN, STROKE_MAIN) } +
+            CLASSIC_ACCENT_PATHS.mapNotNull { stampFromPath(it, Ink.ACCENT, STROKE_ACCENT) }
+    ChatWallpaper.NETWORK ->
+        NETWORK_PATHS.mapNotNull { stampFromPath(it, Ink.MAIN, STROKE_MAIN) }
+    ChatWallpaper.PIXEL ->
+        rectGlyphStamps(PIXEL_MAIN_RECTS, Ink.MAIN) +
+            rectGlyphStamps(PIXEL_ACCENT_BLUE, Ink.ACCENT) +
+            rectGlyphStamps(PIXEL_ACCENT_GREEN, Ink.ACCENT2)
+}
+
+// -- Scatter (deterministic, seeded per preset) --------------------------------------------------
+
+/** Target on-screen footprint of a stamp's larger dimension, as a fraction of the canvas width. */
+private const val STAMP_FRACTION = 0.11f
+
+/** Scatter grid columns; rows scale 2x for the portrait aspect. Kept low so the pattern is sparse. */
+private const val SCATTER_DENSITY = 8
+
+/**
+ * Builds a stable, seeded scatter of stamps in normalized (0..1) coordinates. A jittered grid keeps
+ * the placement patchwork (never a rigid lattice) while guaranteeing even coverage; each cell places
+ * one stamp with a random glyph, any-angle rotation, and a small scale jitter. Keyed off the preset
+ * ordinal so each preset has its own fixed layout and the picker swatch matches the live background.
+ */
+private fun scatter(wallpaper: ChatWallpaper, stampCount: Int): List<Placement> {
+    if (stampCount == 0) return emptyList()
+    // A tall aspect (portrait chat) needs more rows than columns; approximate with a 1:2 grid.
+    val cols = SCATTER_DENSITY
+    val rows = SCATTER_DENSITY * 2
+    val rnd = Random(seedFor(wallpaper))
+    val out = ArrayList<Placement>(cols * rows)
+    for (r in 0 until rows) {
+        for (c in 0 until cols) {
+            // Jitter within the cell so the grid reads as hand-scattered, not aligned.
+            val nx = (c + 0.5f + (rnd.nextFloat() - 0.5f) * 0.9f) / cols
+            val ny = (r + 0.5f + (rnd.nextFloat() - 0.5f) * 0.9f) / rows
+            out.add(
+                Placement(
+                    stampIndex = rnd.nextInt(stampCount),
+                    nx = nx,
+                    ny = ny,
+                    rotationDeg = rnd.nextFloat() * 360f,
+                    scaleJitter = 0.8f + rnd.nextFloat() * 0.5f, // 0.8x..1.3x
+                ),
+            )
+        }
     }
     return out
 }
 
-/**
- * Preset geometry parsed once. [main] is the primary stroked-glyph group; [secondary] is the
- * classic blue accent stroke / network topology links. Pixel rects are drawn from raw constants.
- */
-private class WallpaperPaths(val main: Path, val secondary: Path? = null)
+/** Stable seed per preset (avoids depending on hashCode / enum identity across runs). */
+private fun seedFor(wallpaper: ChatWallpaper): Long = 0x9E3779B97F4A7C15uL.toLong() * (wallpaper.ordinal + 1)
 
-private fun pathsFor(wallpaper: ChatWallpaper): WallpaperPaths = when (wallpaper) {
-    ChatWallpaper.NONE -> WallpaperPaths(Path())
-    ChatWallpaper.CLASSIC -> WallpaperPaths(parsePaths(*CLASSIC_PATHS), parsePaths(*CLASSIC_ACCENT_PATHS))
-    ChatWallpaper.NETWORK -> WallpaperPaths(parsePaths(*NETWORK_PATHS), parsePaths(*NETWORK_LINK_PATHS))
-    ChatWallpaper.PIXEL -> WallpaperPaths(Path())
-}
+// -- Drawing -------------------------------------------------------------------------------------
 
-// -- Stroke styles (mirror the SVG stroke-width / caps / joins at 1080-unit scale) ---------------
-
-private val roundStroke5 = Stroke(width = 5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-private val roundStroke6 = Stroke(width = 6f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-private val roundStroke4 = Stroke(width = 4f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-
-// -- CLASSIC (irc-*-classic.svg) -----------------------------------------------------------------
-
-private fun DrawScope.drawClassic(
-    paths: WallpaperPaths,
-    ink: Color,
-    accent: Color,
-    mainAlpha: Float,
-    accentAlpha: Float,
-) = tiled {
-    drawPath(paths.main, ink.copy(alpha = mainAlpha), style = roundStroke5)
-    // Blue accent stroke group (SVG stroke-width 6, round cap/join).
-    paths.secondary?.let {
-        drawPath(it, accent.copy(alpha = accentAlpha), style = roundStroke6)
-    }
-}
-
-// -- NETWORK (irc-*-network.svg) -----------------------------------------------------------------
-
-private fun DrawScope.drawNetwork(
-    paths: WallpaperPaths,
-    ink: Color,
-    mainAlpha: Float,
-    faintAlpha: Float,
-) = tiled {
-    // Faint topology links behind the node glyphs (SVG stroke-width 4, round cap).
-    paths.secondary?.let {
-        drawPath(it, ink.copy(alpha = faintAlpha), style = roundStroke4)
-    }
-    drawPath(paths.main, ink.copy(alpha = mainAlpha), style = roundStroke5)
-}
-
-// -- PIXEL (irc-*-pixel.svg) ---------------------------------------------------------------------
-
-private fun DrawScope.drawPixel(
+private fun DrawScope.drawStamps(
+    stamps: List<Stamp>,
+    placements: List<Placement>,
     ink: Color,
     accent: Color,
     accent2: Color,
     mainAlpha: Float,
     accentAlpha: Float,
-) = tiled {
-    drawRects(PIXEL_MAIN_RECTS, ink.copy(alpha = mainAlpha))
-    drawRects(PIXEL_ACCENT_BLUE, accent.copy(alpha = accentAlpha))
-    drawRects(PIXEL_ACCENT_GREEN, accent2.copy(alpha = accentAlpha))
-}
-
-// -- Primitive helpers ---------------------------------------------------------------------------
-
-/** Filled rects from a flat [x, y, w, h, ...] array. */
-private fun DrawScope.drawRects(rects: FloatArray, color: Color) {
-    var i = 0
-    while (i < rects.size) {
-        drawRect(
-            color,
-            topLeft = Offset(rects[i], rects[i + 1]),
-            size = androidx.compose.ui.geometry.Size(rects[i + 2], rects[i + 3]),
-        )
-        i += 4
+) {
+    if (stamps.isEmpty()) return
+    // Common footprint: the stamp's larger source dimension maps to STAMP_FRACTION of canvas width.
+    val target = size.width * STAMP_FRACTION
+    for (p in placements) {
+        val stamp = stamps[p.stampIndex]
+        val s = (target / stamp.size) * p.scaleJitter
+        val cx = p.nx * size.width
+        val cy = p.ny * size.height
+        val color = when (stamp.ink) {
+            Ink.MAIN -> ink.copy(alpha = mainAlpha)
+            Ink.ACCENT -> accent.copy(alpha = accentAlpha)
+            Ink.ACCENT2 -> accent2.copy(alpha = accentAlpha)
+        }
+        rotate(p.rotationDeg, pivot = Offset(cx, cy)) {
+            translate(cx, cy) {
+                // Scale the centered stamp down about the origin (== the placement point).
+                val style = if (stamp.strokeWidth > 0f) {
+                    Stroke(
+                        width = stamp.strokeWidth * s,
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round,
+                    )
+                } else {
+                    Fill
+                }
+                withScaledPath(stamp.path, s) { scaled -> drawPath(scaled, color, style = style) }
+            }
+        }
     }
 }
+
+/**
+ * Draws [path] scaled by [s] about the origin. Compose's [DrawScope.scale] would also scale stroke
+ * width, so instead we bake the scale into a copy of the path and stroke it at an explicit width.
+ */
+private inline fun withScaledPath(path: Path, s: Float, block: (Path) -> Unit) {
+    val scaled = Path()
+    scaled.addPath(path)
+    scaled.transform(scaleMatrix(s))
+    block(scaled)
+}
+
+private fun scaleMatrix(s: Float) = androidx.compose.ui.graphics.Matrix().apply { scale(s, s) }
+
+// -- Stroke widths (mirror the SVG stroke-width at 1080-unit scale) ------------------------------
+
+private const val STROKE_MAIN = 5f
+private const val STROKE_ACCENT = 6f
+
+/** Source SVG viewBox is 1080-wide/tall; pixel glyphs sit on a ~270-unit grid. */
+private const val PIXEL_CELL = 270f
 
 // -- Baked geometry (verbatim from docs/assets/chat-wallpapers/*.svg, 1080 viewBox) --------------
 
@@ -226,16 +325,9 @@ private val CLASSIC_PATHS = arrayOf(
     "M458 946h106a22 22 0 0 1 22 22v42a22 22 0 0 1-22 22h-50l-38 30v-30h-18a22 22 0 0 1-22-22v-42a22 22 0 0 1 22-22zm24 43h58",
 )
 
-// CLASSIC accent group: a single stroked path (blue accent segments).
+// CLASSIC accent group: stroked blue accent segments.
 private val CLASSIC_ACCENT_PATHS = arrayOf(
     "M472 340v18m242 218h40M944 868l40-44",
-)
-
-// NETWORK: topology link polylines (solid, connecting the node glyphs).
-private val NETWORK_LINK_PATHS = arrayOf(
-    "M92 180 246 116 410 218 574 118 746 206 930 126",
-    "M160 492 318 398 488 506 650 410 828 510 994 414",
-    "M82 836 248 746 414 852 584 744 762 850 946 758",
 )
 
 // NETWORK: main stroked glyph group (endpoints, hubs, servers, chevrons).
