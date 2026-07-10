@@ -59,6 +59,10 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
 import java.text.DateFormat as JavaDateFormat
 
+/** Alpha for the per-nick row background wash in TWO_LINE density: matches the COMPACT band so runs
+ *  of a nick's messages are trackable, faint enough to stay readable in light and dark themes. */
+private const val TWO_LINE_ROW_TINT_ALPHA = 0.10f
+
 /**
  * One chat bubble. Handles the four rendered kinds (PRIVMSG bubble, NOTICE labelled bubble, ACTION
  * italic no-bubble, plus reply/image/reactions decorations). System-event kinds are rendered by
@@ -371,10 +375,16 @@ private fun TwoLineMessageRow(
     val interaction = remember { MutableInteractionSource() }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val bodyColor = MaterialTheme.colorScheme.onSurface
+    // Per-nick row wash (same treatment as COMPACT): a faint tint of the sender's own nick color
+    // behind the whole row so runs of a nick's messages are trackable by speaker.
+    val rowTint = nameColor.copy(alpha = TWO_LINE_ROW_TINT_ALPHA)
 
     Column(
         modifier = modifier
             .fillMaxWidth()
+            // Tint fills the full row width (behind the horizontal padding) so the speaker band is
+            // unbroken edge to edge, matching COMPACT.
+            .background(rowTint)
             .combinedClickable(
                 interactionSource = interaction,
                 indication = null,
@@ -386,7 +396,9 @@ private fun TwoLineMessageRow(
     ) {
         // Line 1: avatar + nick + (own) sent check + timestamp.
         Row(verticalAlignment = Alignment.CenterVertically) {
+            // Center the small avatar against the header line rather than top-pinning it.
             val avatarMod = Modifier.padding(end = 6.dp)
+                .align(Alignment.CenterVertically)
                 .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
             Avatar(name = sender, size = spacing.bubbleAvatar, modifier = avatarMod)
             Text(
