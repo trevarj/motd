@@ -26,6 +26,17 @@ import kotlinx.serialization.Serializable
 @Serializable data object FoolsRoute
 @Serializable data object NickColorsRoute
 
+/**
+ * Notification-tap deep-link target consumed by [MotdNavGraph]: open [bufferId] and jump to the
+ * message (via the existing ChatRoute jump path). [jumpToMsgid] may be null and [jumpToTime] 0 when
+ * the notification carried no msgid; the buffer still opens.
+ */
+data class NotificationTarget(
+    val bufferId: Long,
+    val jumpToMsgid: String?,
+    val jumpToTime: Long,
+)
+
 // Round 5 (plans/16): app shell / network management.
 @Serializable data object AddNetworkRoute
 @Serializable data class BouncerNetworksRoute(val rootNetworkId: Long)

@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -42,7 +43,23 @@ private const val SLIDE_DURATION_MS = 300
 @Composable
 fun MotdNavGraph(
     navController: NavHostController = rememberNavController(),
+    // Notification-tap deep-link: open the buffer and jump to the message. Null when absent.
+    notificationTarget: NotificationTarget? = null,
+    onNotificationTargetHandled: () -> Unit = {},
 ) {
+    // Route a notification tap to ChatRoute so the existing jump path (local resolve → CHATHISTORY
+    // AROUND fallback) scrolls to and highlights the message. Runs for both cold start (target
+    // seeded before first composition) and warm start (target updated by onNewIntent). Clearing the
+    // target after navigating lets a subsequent identical tap re-trigger (null → value transition).
+    LaunchedEffect(notificationTarget) {
+        val target = notificationTarget ?: return@LaunchedEffect
+        navController.navigate(
+            ChatRoute(target.bufferId, target.jumpToMsgid, target.jumpToTime),
+        ) {
+            launchSingleTop = true
+        }
+        onNotificationTargetHandled()
+    }
     NavHost(
         navController = navController,
         startDestination = ChatListRoute,

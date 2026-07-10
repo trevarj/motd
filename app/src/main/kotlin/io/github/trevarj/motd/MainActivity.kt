@@ -14,6 +14,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -27,9 +29,11 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.service.ConnectionManagerImpl
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.IrcForegroundService
+import io.github.trevarj.motd.service.MotdNotifications
 import io.github.trevarj.motd.ui.components.CertPromptViewModel
 import io.github.trevarj.motd.ui.components.CertTrustDialog
 import io.github.trevarj.motd.ui.nav.MotdNavGraph
+import io.github.trevarj.motd.ui.nav.NotificationTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import javax.inject.Inject
 import kotlinx.coroutines.flow.first
@@ -45,6 +49,10 @@ class MainActivity : ComponentActivity() {
     private val requestNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* advisory */ }
 
+    // Latest notification-tap deep-link target. Seeded from the launch intent (cold start) and
+    // updated by onNewIntent (warm start); the nav graph consumes it and clears it after routing.
+    private var notificationTarget by mutableStateOf<NotificationTarget?>(null)
+
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         // Swap the launch/splash theme for the app theme before drawing Compose content.
@@ -53,6 +61,8 @@ class MainActivity : ComponentActivity() {
 
         requestPostNotificationsIfNeeded()
         maybeStartForegroundService()
+        // Cold start: the launcher created the activity with the notification's content intent.
+        notificationTarget = parseNotificationTarget(intent)
 
         setContent {
             val settings by settingsRepository.settings.collectAsState(initial = Settings())
@@ -75,13 +85,39 @@ class MainActivity : ComponentActivity() {
                         .semantics { testTagsAsResourceId = true },
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    MotdNavGraph()
+                    MotdNavGraph(
+                        notificationTarget = notificationTarget,
+                        onNotificationTargetHandled = { notificationTarget = null },
+                    )
                     // Global TOFU cert-trust dialog host: shows above the whole nav graph so it works
                     // for onboarding connect-tests, chat-list reconnects, etc. (plans/12).
                     CertTrustDialogHost()
                 }
             }
         }
+    }
+
+    /** Warm start: the running activity is re-delivered the tapped notification's content intent. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        parseNotificationTarget(intent)?.let { notificationTarget = it }
+    }
+
+    /**
+     * Extract the deep-jump target from a notification content intent, or null when the intent
+     * isn't one (e.g. a plain launcher launch). The msgid is optional — a null/missing msgid still
+     * opens the buffer and the AROUND fallback handles a not-yet-cached target.
+     */
+    private fun parseNotificationTarget(intent: Intent?): NotificationTarget? {
+        if (intent?.action != MotdNotifications.ACTION_OPEN_BUFFER) return null
+        val bufferId = intent.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1L)
+        if (bufferId < 0) return null
+        return NotificationTarget(
+            bufferId = bufferId,
+            jumpToMsgid = intent.getStringExtra(MotdNotifications.EXTRA_JUMP_MSGID),
+            jumpToTime = intent.getLongExtra(MotdNotifications.EXTRA_JUMP_TIME, 0L),
+        )
     }
 
     /** Ask for POST_NOTIFICATIONS at first launch on API 33+ (needed for message/status notifs). */

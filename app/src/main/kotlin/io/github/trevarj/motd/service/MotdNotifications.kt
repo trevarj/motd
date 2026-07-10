@@ -11,6 +11,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.MainActivity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.prefs.Settings
@@ -153,10 +154,27 @@ class MotdNotifications @Inject constructor(
             android.R.drawable.ic_menu_view, "Mark read", markReadIntent,
         ).build()
 
+        // Tapping the notification opens the buffer AND jumps to this message. MainActivity reads
+        // these extras and routes to ChatRoute(bufferId, jumpToMsgid, jumpToTime), reusing the
+        // existing deep-jump path (local resolve → CHATHISTORY AROUND fallback). A distinct request
+        // code per buffer keeps concurrent buffers' content intents separate; FLAG_UPDATE_CURRENT
+        // refreshes the target msgid/time on each new message. Works cold (launcher intent) or warm.
+        val contentIntent = PendingIntent.getActivity(
+            context, bufferId.toInt(),
+            Intent(context, MainActivity::class.java)
+                .setAction(ACTION_OPEN_BUFFER)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(EXTRA_BUFFER_ID, bufferId)
+                .putExtra(EXTRA_JUMP_MSGID, message.ctx.msgid)
+                .putExtra(EXTRA_JUMP_TIME, message.ctx.serverTime),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
         val notification = NotificationCompat.Builder(context, channel)
             .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
             .setStyle(style)
             .setAutoCancel(true)
+            .setContentIntent(contentIntent)
             .addAction(replyAction)
             .addAction(markReadAction)
             .build()
@@ -176,5 +194,11 @@ class MotdNotifications @Inject constructor(
         const val CHANNEL_STATUS = "status"
         const val CHANNEL_MESSAGES = "messages"
         const val CHANNEL_MENTIONS = "mentions"
+
+        // Deep-link extras carried by a message notification's content intent (tap → open + jump).
+        const val ACTION_OPEN_BUFFER = "io.github.trevarj.motd.OPEN_BUFFER"
+        const val EXTRA_BUFFER_ID = "notif_buffer_id"
+        const val EXTRA_JUMP_MSGID = "notif_jump_msgid"
+        const val EXTRA_JUMP_TIME = "notif_jump_time"
     }
 }
