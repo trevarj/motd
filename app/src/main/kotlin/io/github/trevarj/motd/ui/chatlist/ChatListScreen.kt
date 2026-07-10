@@ -205,8 +205,9 @@ fun ChatListContent(
                                 painter = painterResource(R.drawable.motd_wordmark),
                                 contentDescription = stringResource(R.string.app_name),
                                 tint = MaterialTheme.colorScheme.onSurface,
-                                // 330:100 wordmark ratio; ~26dp tall reads well in the app bar.
-                                modifier = Modifier.height(26.dp).width(86.dp),
+                                // Keep the thin stroked lettering crisp without crowding the app bar.
+                                // 330:100 source ratio, rendered at an exact 3.25:1 ratio.
+                                modifier = Modifier.height(24.dp).width(78.dp),
                             )
                         }
                     },

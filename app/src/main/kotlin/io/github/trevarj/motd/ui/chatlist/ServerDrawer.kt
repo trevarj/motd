@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -91,7 +93,8 @@ fun ServerDrawerContent(
 ) {
     ModalDrawerSheet {
         Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-            // Brand header: the stacked motd lockup, tinted onSurface so it reads on every theme.
+            // Compact brand header: the lockup is deliberately smaller than a navigation row so
+            // the network list, rather than the branding, owns the drawer's visual hierarchy.
             Image(
                 painter = painterResource(R.drawable.motd_logo_lockup),
                 contentDescription = stringResource(R.string.app_name),
@@ -99,8 +102,11 @@ fun ServerDrawerContent(
                 contentScale = ContentScale.Fit,
                 alignment = Alignment.CenterStart,
                 modifier = Modifier
-                    .heightIn(min = 56.dp)
-                    .padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
+                    // 490:180 source ratio. Specifying both dimensions avoids the drawable's
+                    // oversized 200x75dp intrinsic size expanding this header.
+                    .padding(start = 16.dp, top = 12.dp, bottom = 8.dp)
+                    .width(128.dp)
+                    .height(47.dp),
             )
 
             // 1. Networks section header. The unscoped ("all chats") state is simply "no network
