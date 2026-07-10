@@ -352,6 +352,21 @@ fun ChatContent(
         }
     }
 
+    // Suppresses the scroll-to-bottom FAB while a programmatic scroll-to-newest is in flight. When a
+    // new row inserts at index 0 the reverse list momentarily reads !atBottom for a sub-frame before
+    // the animate-to-0 settles; without this gate the FAB flashes on every send / auto-follow. A real
+    // user scroll-up doesn't set this, so the FAB still appears promptly when reading history.
+    var autoScrolling by remember { mutableStateOf(false) }
+    // Animate the reverse list to the newest row (index 0) with the FAB gated off for the duration.
+    suspend fun scrollToNewest() {
+        autoScrolling = true
+        try {
+            listState.animateScrollToItem(0)
+        } finally {
+            autoScrolling = false
+        }
+    }
+
     // Auto-stick-to-bottom for incoming messages (autoscroll-to-newest bug). When a new row is
     // prepended at index 0 the reverse-layout viewport does NOT follow it (stable keys anchor the
     // existing rows), so an explicit scroll is needed. We snapshot whether the user was at the bottom
@@ -362,7 +377,7 @@ fun ChatContent(
     LaunchedEffect(items.itemCount) {
         val newCount = items.itemCount
         if (shouldAutoscrollToNewest(wasAtBottom, prevItemCount, newCount)) {
-            listState.animateScrollToItem(0)
+            scrollToNewest()
         }
         prevItemCount = newCount
     }
@@ -527,10 +542,13 @@ fun ChatContent(
                     val firstVisible by remember {
                         derivedStateOf { listState.firstVisibleItemIndex }
                     }
+                    // Gated on !autoScrolling so a sub-frame !atBottom blip during a programmatic
+                    // scroll-to-newest (send / auto-follow) can't flash the FAB; a genuine user
+                    // scroll-up leaves autoScrolling false, so it still appears promptly.
                     ScrollToBottomFab(
-                        visible = !atBottom,
+                        visible = !atBottom && !autoScrolling,
                         unread = unreadBelowViewport(items, readMarkerLive, firstVisible),
-                        onClick = { scope.launch { listState.animateScrollToItem(0) } },
+                        onClick = { scope.launch { scrollToNewest() } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     )
                 }
@@ -565,7 +583,8 @@ fun ChatContent(
                             composerText = TextFieldValue("")
                             // Sending should always reveal the just-sent message: snap the reverse
                             // list back to the newest row (index 0) even if the user had scrolled up.
-                            scope.launch { listState.animateScrollToItem(0) }
+                            // Routes through scrollToNewest so the FAB stays gated off for the scroll.
+                            scope.launch { scrollToNewest() }
                         }
                     },
                     enabled = composerEnabled,
