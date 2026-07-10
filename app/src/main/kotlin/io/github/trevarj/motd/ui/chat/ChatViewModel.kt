@@ -425,6 +425,23 @@ class ChatViewModel @Inject constructor(
     /** Resolved jump target (index + optional highlight msgid); null when nothing to jump to. */
     val jumpTarget: StateFlow<ChatJumpResolver.Result.Target?> = _jumpTarget.asStateFlow()
 
+    // Normal channel entry is also a one-shot position operation. Unlike a search deep-link it
+    // has no highlight, but it must settle before read state can advance.
+    private val _initialTarget = MutableStateFlow<ChatJumpResolver.Result.Target?>(null)
+    val initialTarget: StateFlow<ChatJumpResolver.Result.Target?> = _initialTarget.asStateFlow()
+
+    private val _entryPositionSettled = MutableStateFlow(
+        savedStateHandle.get<Boolean>(ENTRY_POSITION_SETTLED_KEY) == true,
+    )
+    /** True only after a resolved entry/deep-link position has settled and may advance read state. */
+    val entryPositionSettled: StateFlow<Boolean> = _entryPositionSettled.asStateFlow()
+
+    private val _entryPositionUnresolved = MutableStateFlow(
+        savedStateHandle.get<Boolean>(ENTRY_POSITION_UNRESOLVED_KEY) == true,
+    )
+    /** Durable explicit failure state: entry remains read-gated until the user navigates away. */
+    val entryPositionUnresolved: StateFlow<Boolean> = _entryPositionUnresolved.asStateFlow()
+
     // Nullable-event StateFlow instead of a replay-less SharedFlow so a NotFound resolved in init
     // (before the screen subscribes) is not dropped; the UI clears it via [onJumpFailedShown]
     // (plans/15 #13).
@@ -436,7 +453,17 @@ class ChatViewModel @Inject constructor(
     private var reresolveUsed = false
 
     init {
-        if (jumpTime > 0 && savedStateHandle.get<Boolean>(JUMP_CONSUMED_KEY) != true) {
+        val hasDeepJump = jumpTime > 0
+        // `jump_consumed` only prevents duplicate work after a completed jump. If Android kills
+        // the process while the first resolve/scroll is in flight, the restored handle has it set
+        // but neither terminal entry-position state; re-publish the target/failure for the new UI.
+        if (needsDeepJumpResolution(
+                hasDeepJump = hasDeepJump,
+                jumpConsumed = savedStateHandle.get<Boolean>(JUMP_CONSUMED_KEY) == true,
+                entryPositionSettled = _entryPositionSettled.value,
+                entryPositionUnresolved = _entryPositionUnresolved.value,
+            )
+        ) {
             savedStateHandle[JUMP_CONSUMED_KEY] = true
             resolveJump()
         }
@@ -452,6 +479,21 @@ class ChatViewModel @Inject constructor(
                 null
             } else {
                 messageRepository.firstUnreadOtherTime(bufferId, realMarker)?.let { it - 1 }
+            }
+            // A deep-link owns positioning. A normal open lands on the oldest unread incoming
+            // message when there is one; otherwise it explicitly settles at the newest row.
+            if (!hasDeepJump && !_entryPositionSettled.value) {
+                val targetTime = realMarker?.let {
+                    messageRepository.firstUnreadOtherTime(bufferId, it)
+                }
+                _initialTarget.value = if (targetTime == null) {
+                    ChatJumpResolver.Result.Target(index = 0, highlightMsgid = null)
+                } else {
+                    when (val result = resolver.resolve(bufferId, null, targetTime, null)) {
+                        is ChatJumpResolver.Result.Target -> result
+                        ChatJumpResolver.Result.NotFound -> ChatJumpResolver.Result.Target(0, null)
+                    }
+                }
             }
         }
     }
@@ -481,6 +523,34 @@ class ChatViewModel @Inject constructor(
     /** Screen calls this after it has scrolled to (or given up on) the current target. */
     fun onJumpHandled() {
         _jumpTarget.value = null
+        markEntryPositionSettled()
+    }
+
+    /** The screen completed its one-shot normal-entry positioning. */
+    fun onInitialPositionHandled() {
+        _initialTarget.value = null
+        markEntryPositionSettled()
+    }
+
+    /** A target could not be loaded safely; retain the read gate rather than marking it read. */
+    fun onInitialPositionUnresolved() {
+        _initialTarget.value = null
+        markEntryPositionUnresolved()
+    }
+
+    fun onJumpUnresolved() {
+        _jumpTarget.value = null
+        markEntryPositionUnresolved()
+    }
+
+    private fun markEntryPositionSettled() {
+        savedStateHandle[ENTRY_POSITION_SETTLED_KEY] = true
+        _entryPositionSettled.value = true
+    }
+
+    private fun markEntryPositionUnresolved() {
+        savedStateHandle[ENTRY_POSITION_UNRESOLVED_KEY] = true
+        _entryPositionUnresolved.value = true
     }
 
     /** Screen calls this after showing the not-loaded snackbar so it does not re-fire. */
@@ -515,9 +585,19 @@ class ChatViewModel @Inject constructor(
     private companion object {
         // Survives config changes so a jump resolves exactly once per navigation.
         const val JUMP_CONSUMED_KEY = "jump_consumed"
+        const val ENTRY_POSITION_SETTLED_KEY = "entry_position_settled"
+        const val ENTRY_POSITION_UNRESOLVED_KEY = "entry_position_unresolved"
 
         // Max wait for a pending own message's msgid to land before a queued reaction gives up. Sits
         // just past the 30s echo-failure flip so a message that will fail has already flipped by then.
         const val REACT_QUEUE_TIMEOUT_MS = 32_000L
     }
 }
+
+/** Whether a deep link still needs its target/failure published after SavedState restoration. */
+internal fun needsDeepJumpResolution(
+    hasDeepJump: Boolean,
+    jumpConsumed: Boolean,
+    entryPositionSettled: Boolean,
+    entryPositionUnresolved: Boolean,
+): Boolean = hasDeepJump && (!jumpConsumed || (!entryPositionSettled && !entryPositionUnresolved))

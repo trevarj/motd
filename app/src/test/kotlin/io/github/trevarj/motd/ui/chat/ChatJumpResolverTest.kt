@@ -1,6 +1,8 @@
 package io.github.trevarj.motd.ui.chat
 
 import androidx.paging.PagingData
+import androidx.paging.LoadState
+import androidx.lifecycle.SavedStateHandle
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
@@ -49,6 +51,62 @@ private fun msg(id: Long, bufferId: Long, serverTime: Long, msgid: String?): Mes
     )
 
 class ChatJumpResolverTest {
+
+    @Test fun `only durable unresolved entry state presents the not-loaded snackbar`() {
+        assertTrue(shouldPresentUnresolvedEntrySnackbar(entryPositionUnresolved = true))
+        assertTrue(!shouldPresentUnresolvedEntrySnackbar(entryPositionUnresolved = false))
+    }
+
+    @Test fun `restored in-flight deep jump resolves again`() {
+        val restored = SavedStateHandle(mapOf("jump_consumed" to true))
+
+        assertTrue(
+            needsDeepJumpResolution(
+                hasDeepJump = true,
+                jumpConsumed = restored.get<Boolean>("jump_consumed") == true,
+                entryPositionSettled = restored.get<Boolean>("entry_position_settled") == true,
+                entryPositionUnresolved = restored.get<Boolean>("entry_position_unresolved") == true,
+            ),
+        )
+    }
+
+    @Test fun `restored terminal deep jump is not resolved again`() {
+        val restored = SavedStateHandle(
+            mapOf("jump_consumed" to true, "entry_position_unresolved" to true),
+        )
+
+        assertTrue(
+            !needsDeepJumpResolution(
+                hasDeepJump = true,
+                jumpConsumed = restored.get<Boolean>("jump_consumed") == true,
+                entryPositionSettled = restored.get<Boolean>("entry_position_settled") == true,
+                entryPositionUnresolved = restored.get<Boolean>("entry_position_unresolved") == true,
+            ),
+        )
+    }
+
+    @Test fun `empty refresh waits for a loading append then accepts its target rows`() {
+        assertEquals(InitialPagingPage.Pending, initialPagingPage(itemCount = 0, append = LoadState.Loading))
+        assertEquals(InitialPagingPage.RowsAvailable, initialPagingPage(itemCount = 1, append = LoadState.Loading))
+    }
+
+    @Test fun `terminal empty append leaves a deep or unread target unresolved`() {
+        assertEquals(
+            InitialPagingPage.TerminalEmpty,
+            initialPagingPage(itemCount = 0, append = LoadState.NotLoading(endOfPaginationReached = true)),
+        )
+        assertEquals(
+            InitialPagingPage.TerminalEmpty,
+            initialPagingPage(itemCount = 0, append = LoadState.Error(IllegalStateException("no rows"))),
+        )
+    }
+
+    @Test fun `deep jump cannot settle when its resolved index has a different msgid`() {
+        // The screen must re-resolve this case and leave the mark-read gate closed until a later
+        // target matches; a subsequent NotFound then takes the durable unresolved path.
+        assertTrue(!deepJumpTargetMatches(expectedMsgid = "wanted", actualMsgid = "shifted"))
+        assertTrue(deepJumpTargetMatches(expectedMsgid = "wanted", actualMsgid = "wanted"))
+    }
 
     @Test fun local_hit_returns_index_and_highlight() = runTest {
         val repo = FakeMessageRepository(
@@ -103,5 +161,37 @@ class ChatJumpResolverTest {
         r as ChatJumpResolver.Result.Target
         assertEquals(1, r.index) // one row (t=300) is strictly newer than t=200
         assertEquals(null, r.highlightMsgid)
+    }
+
+    @Test fun `unread time target lands at its reverse-list boundary`() = runTest {
+        val resolver = ChatJumpResolver(
+            FakeMessageRepository(
+                listOf(
+                    msg(1, 7, serverTime = 100, msgid = "m-a"),
+                    msg(2, 7, serverTime = 200, msgid = "m-b"),
+                    msg(3, 7, serverTime = 300, msgid = "m-c"),
+                ),
+            ),
+        ) { _, _, _ -> false }
+
+        val result = resolver.resolve(bufferId = 7, msgid = null, timeMs = 200, bufferName = null)
+        assertTrue(result is ChatJumpResolver.Result.Target)
+        assertEquals(1, (result as ChatJumpResolver.Result.Target).index)
+    }
+
+    @Test fun `time target lands at the newest row of a tied timestamp`() = runTest {
+        val resolver = ChatJumpResolver(
+            FakeMessageRepository(
+                listOf(
+                    msg(1, 7, serverTime = 100, msgid = "m-a"),
+                    msg(2, 7, serverTime = 200, msgid = "m-b"),
+                    msg(3, 7, serverTime = 200, msgid = "m-c"),
+                    msg(4, 7, serverTime = 300, msgid = "m-d"),
+                ),
+            ),
+        ) { _, _, _ -> false }
+
+        val result = resolver.resolve(bufferId = 7, msgid = null, timeMs = 200, bufferName = null)
+        assertEquals(1, (result as ChatJumpResolver.Result.Target).index)
     }
 }

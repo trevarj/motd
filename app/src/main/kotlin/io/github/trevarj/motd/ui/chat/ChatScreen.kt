@@ -94,12 +94,10 @@ fun ChatScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val items = viewModel.messages.collectAsLazyPagingItems()
 
-    // Foreground-buffer tracker on resume/pause (notification suppression, plans/05). On resume we
-    // also mark read up to the newest loaded message (plans/07: mark-read on resume).
+    // Foreground-buffer tracker on resume/pause (notification suppression, plans/05). Read state
+    // is deliberately deferred until the one-shot entry position has settled below.
     DisposableEffect(Unit) {
         viewModel.onResume()
-        val newestOnResume = if (items.itemCount > 0) items.peek(0)?.serverTime ?: 0L else 0L
-        viewModel.markRead(newestOnResume)
         onDispose { viewModel.onPause() }
     }
 
@@ -114,6 +112,9 @@ fun ChatScreen(
     val chipsByMsgid by viewModel.reactionChips.collectAsStateWithLifecycle()
 
     val jumpTarget by viewModel.jumpTarget.collectAsStateWithLifecycle()
+    val initialTarget by viewModel.initialTarget.collectAsStateWithLifecycle()
+    val entryPositionSettled by viewModel.entryPositionSettled.collectAsStateWithLifecycle()
+    val entryPositionUnresolved by viewModel.entryPositionUnresolved.collectAsStateWithLifecycle()
     val jumpFailed by viewModel.jumpFailed.collectAsStateWithLifecycle()
     // Read marker frozen on entry so the "— New messages —" divider doesn't flash away (plans/15 #2).
     val readMarkerSnapshot by viewModel.readMarkerSnapshot.collectAsStateWithLifecycle()
@@ -154,9 +155,15 @@ fun ChatScreen(
         loadPreview = viewModel::linkPreview,
         consumePrefill = viewModel::consumePrefill,
         jumpTarget = jumpTarget,
+        initialTarget = initialTarget,
+        entryPositionInitiallySettled = entryPositionSettled,
+        entryPositionUnresolved = entryPositionUnresolved,
         jumpFailed = jumpFailed,
         onJumpFailedShown = viewModel::onJumpFailedShown,
         onJumpHandled = viewModel::onJumpHandled,
+        onInitialPositionHandled = viewModel::onInitialPositionHandled,
+        onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
+        onJumpUnresolved = viewModel::onJumpUnresolved,
         onReresolveJump = viewModel::reresolveJumpOnce,
         isServerBuffer = isServerBuffer,
         onSenderClick = viewModel::openNickSheet,
@@ -223,9 +230,15 @@ fun ChatContent(
     onDelete: (MessageEntity) -> Unit = {},
     consumePrefill: () -> String? = { null },
     jumpTarget: ChatJumpResolver.Result.Target? = null,
+    initialTarget: ChatJumpResolver.Result.Target? = null,
+    entryPositionInitiallySettled: Boolean = false,
+    entryPositionUnresolved: Boolean = false,
     jumpFailed: Boolean = false,
     onJumpFailedShown: () -> Unit = {},
     onJumpHandled: () -> Unit = {},
+    onInitialPositionHandled: () -> Unit = {},
+    onInitialPositionUnresolved: () -> Unit = {},
+    onJumpUnresolved: () -> Unit = {},
     onReresolveJump: () -> Unit = {},
     // Round 5 (plans/16 §5.6/§5.8): SERVER-buffer raw-send + nick sheet plumbing.
     isServerBuffer: Boolean = false,
@@ -254,10 +267,14 @@ fun ChatContent(
     // individually reversible). Cleared whenever expand-all is toggled off.
     var collapsedFools by remember { mutableStateOf(setOf<Long>()) }
 
-    // A fresh reverse-layout list is already anchored at index 0 (the newest row).  Do not issue a
-    // second scroll when Paging's initial page arrives: even a non-animated scroll invalidates the
-    // just-measured viewport while the route enter transition is rendering, causing a visible
-    // main-thread hitch. Deep links retain their explicit anchor below.
+    // Entry position is resolved once after refresh. Until then do not expose a transient FAB or
+    // advance read state from a default index-0 layout.
+    var initialPositionSettled by remember(entryPositionInitiallySettled) {
+        mutableStateOf(entryPositionInitiallySettled)
+    }
+    // The first Paging emission after entry settlement reflects data loaded for the target, not a
+    // live arrival. Consume it without auto-follow so an unread target remains on screen.
+    var suppressNextAutoFollow by remember { mutableStateOf(!entryPositionInitiallySettled) }
 
     // Consume any mention prefill queued by ChannelInfo. Runs once per composition entry; the
     // store is already emptied by consume() and the text survives via rememberSaveable, so a
@@ -271,8 +288,16 @@ fun ChatContent(
     val jumpNotLoaded = stringResource(R.string.chat_jump_not_loaded)
     LaunchedEffect(jumpFailed) {
         if (jumpFailed) {
-            snackbarHostState.showSnackbar(jumpNotLoaded)
             onJumpFailedShown()
+            onJumpUnresolved()
+        }
+    }
+
+    // This survives configuration recreation, unlike the one-shot jump failure StateFlow. The
+    // target is deliberately not acknowledged, so make the remaining read gate understandable.
+    LaunchedEffect(entryPositionUnresolved) {
+        if (shouldPresentUnresolvedEntrySnackbar(entryPositionUnresolved)) {
+            snackbarHostState.showSnackbar(jumpNotLoaded)
         }
     }
 
@@ -292,8 +317,15 @@ fun ChatContent(
         val j = jumpTarget ?: return@LaunchedEffect
         // Guard #1: the jump resolves in VM init, often before the first paging emission. Touching
         // items[itemCount-1] with itemCount == 0 throws IndexOutOfBounds; wait for the first page.
-        snapshotFlow { items.loadState.refresh to items.itemCount }
-            .first { (refresh, count) -> refresh is LoadState.NotLoading && count > 0 }
+        snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
+            .first { (refresh, append, count) ->
+                refresh is LoadState.NotLoading &&
+                    initialPagingPage(count, append) != InitialPagingPage.Pending
+            }
+        if (initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty) {
+            onJumpUnresolved()
+            return@LaunchedEffect
+        }
 
         var rounds = 0
         while (items.itemCount <= j.index &&
@@ -315,17 +347,63 @@ fun ChatContent(
         }
         if (items.itemCount > j.index) {
             listState.scrollToItem(j.index)
-            highlightMsgid = j.highlightMsgid
             // A live message may have shifted indices between resolve and scroll; re-resolve once.
-            if (j.highlightMsgid != null && items.peek(j.index)?.msgid != j.highlightMsgid) {
+            if (!deepJumpTargetMatches(j.highlightMsgid, items.peek(j.index)?.msgid)) {
                 onReresolveJump()
             } else {
+                highlightMsgid = j.highlightMsgid
+                initialPositionSettled = true
+                suppressNextAutoFollow = true
                 onJumpHandled()
             }
         } else {
             // Ran past the cap / end of pagination without reaching the target.
-            snackbarHostState.showSnackbar(jumpNotLoaded)
-            onJumpHandled()
+            onJumpUnresolved()
+        }
+    }
+
+    // Normal entry shares the deep-link paging mechanics but has no highlight. It is separate so
+    // a deep link always wins and so a completed normal entry cannot be replayed on recomposition.
+    LaunchedEffect(initialTarget) {
+        val target = initialTarget ?: return@LaunchedEffect
+        snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
+            .first { (refresh, append, count) ->
+                refresh is LoadState.NotLoading &&
+                    initialPagingPage(count, append) != InitialPagingPage.Pending
+            }
+
+        var rounds = 0
+        while (items.itemCount <= target.index &&
+            target.index > 0 &&
+            rounds++ < 64 &&
+            items.itemCount > 0 &&
+            !items.loadState.append.endOfPaginationReached
+        ) {
+            val before = items.itemCount
+            items[items.itemCount - 1]
+            snapshotFlow { items.loadState.append to items.itemCount }
+                .first { (append, count) ->
+                    (append is LoadState.NotLoading && count > before) ||
+                        append.endOfPaginationReached || append is LoadState.Error
+                }
+        }
+        if (items.itemCount > target.index) {
+            // A default newest target is already at index 0; never invalidate it with a redundant
+            // scroll. Older targets get exactly one non-animated, post-refresh settle.
+            if (target.index > 0) listState.scrollToItem(target.index)
+            initialPositionSettled = true
+            suppressNextAutoFollow = true
+            onInitialPositionHandled()
+        } else if (target.index == 0 &&
+            initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty
+        ) {
+            // A newest-row target may settle on an empty buffer only after its append is terminal.
+            initialPositionSettled = true
+            suppressNextAutoFollow = true
+            onInitialPositionHandled()
+        } else {
+            // An APPEND cap/error must not turn an unread target into a read acknowledgement.
+            onInitialPositionUnresolved()
         }
     }
 
@@ -372,8 +450,15 @@ fun ChatContent(
     // Own-send scrolls unconditionally in the composer, so it doesn't route through this path.
     var wasAtBottom by remember { mutableStateOf(true) }
     var prevItemCount by remember { mutableStateOf(items.itemCount) }
-    LaunchedEffect(items.itemCount) {
+    LaunchedEffect(items.itemCount, initialPositionSettled) {
+        if (!initialPositionSettled) return@LaunchedEffect
         val newCount = items.itemCount
+        if (suppressNextAutoFollow) {
+            prevItemCount = newCount
+            wasAtBottom = atBottom
+            suppressNextAutoFollow = false
+            return@LaunchedEffect
+        }
         if (shouldAutoscrollToNewest(wasAtBottom, prevItemCount, newCount)) {
             scrollToNewest()
         }
@@ -386,8 +471,8 @@ fun ChatContent(
     // Mark read on new-message-while-at-bottom only (plans/07/15 #2): syncing while scrolled up
     // reading history would clear unread on other clients and destroy the local unread UX.
     val newestTime = if (items.itemCount > 0) items.peek(0)?.serverTime ?: 0L else 0L
-    LaunchedEffect(newestTime, atBottom) {
-        if (atBottom && newestTime > 0) onMarkRead(newestTime)
+    LaunchedEffect(newestTime, atBottom, initialPositionSettled) {
+        if (initialPositionSettled && atBottom && newestTime > 0) onMarkRead(newestTime)
     }
     val recentSpeakers = remember(items.itemCount) {
         // Exclude system-event senders and self so recency ranking reflects real conversation
@@ -543,9 +628,17 @@ fun ChatContent(
                     // Gated on !autoScrolling so a sub-frame !atBottom blip during a programmatic
                     // scroll-to-newest (send / auto-follow) can't flash the FAB; a genuine user
                     // scroll-up leaves autoScrolling false, so it still appears promptly.
+                    val unreadIndex = remember(items.itemCount) {
+                        UnreadViewportIndex.from(
+                            List(items.itemCount) { index ->
+                                items.peek(index)?.let { UnreadViewportRow(index, it.serverTime, it.isSelf) }
+                                    ?: UnreadViewportRow(index, Long.MIN_VALUE, isSelf = true)
+                            },
+                        )
+                    }
                     ScrollToBottomFab(
-                        visible = !atBottom && !autoScrolling,
-                        unread = unreadBelowViewport(items, readMarkerLive, firstVisible),
+                        visible = initialPositionSettled && !atBottom && !autoScrolling,
+                        unread = readMarkerLive?.let { unreadIndex.count(firstVisible, it) } ?: 0,
                         onClick = { scope.launch { scrollToNewest() } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     )
@@ -657,6 +750,23 @@ fun appendPrefill(value: TextFieldValue, prefill: String): TextFieldValue {
  * Header subtitle: typing summary if anyone is typing, else a localized member count for channels.
  * Uses the [Context] typing overload and a plural for the count (plans/15 #25).
  */
+/** The durable unresolved-entry state is the sole source of the not-loaded snackbar. */
+internal fun shouldPresentUnresolvedEntrySnackbar(entryPositionUnresolved: Boolean): Boolean =
+    entryPositionUnresolved
+
+/**
+ * A completed REFRESH may still be followed by a Room/RemoteMediator APPEND. Do not decide entry
+ * positioning from a transient empty window; only rows or a terminal empty append are conclusive.
+ */
+internal fun initialPagingPage(itemCount: Int, append: LoadState): InitialPagingPage = when {
+    itemCount > 0 -> InitialPagingPage.RowsAvailable
+    append is LoadState.Error -> InitialPagingPage.TerminalEmpty
+    append is LoadState.NotLoading && append.endOfPaginationReached -> InitialPagingPage.TerminalEmpty
+    else -> InitialPagingPage.Pending
+}
+
+internal enum class InitialPagingPage { Pending, RowsAvailable, TerminalEmpty }
+
 private fun chatSubtitle(state: ChatState, context: android.content.Context): String? {
     if (state.typingNicks.isNotEmpty()) {
         return typingText(context, state.typingNicks)
@@ -678,18 +788,6 @@ private fun chatSubtitle(state: ChatState, context: android.content.Context): St
  * message — never a monotonic "arrived since entry" tally. Delegates to the pure
  * [unreadBelowViewport] helper for unit testing.
  */
-private fun unreadBelowViewport(
-    items: LazyPagingItems<MessageEntity>,
-    marker: Long?,
-    firstVisibleIndex: Int,
-): Int {
-    if (marker == null || firstVisibleIndex <= 0) return 0
-    // Skip our own sent rows: they are never "unread" to us, so they must not inflate the badge.
-    val times = (0 until firstVisibleIndex.coerceAtMost(items.itemCount))
-        .mapNotNull { items.peek(it)?.takeUnless { m -> m.isSelf }?.serverTime }
-    return unreadBelowViewport(times, marker)
-}
-
 @Composable
 private fun ScrollToBottomFab(
     visible: Boolean,

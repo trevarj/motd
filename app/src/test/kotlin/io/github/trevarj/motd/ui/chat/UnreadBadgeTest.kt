@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.chat
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.AbstractList
 
 /**
  * Pure counting behind the scroll-to-bottom FAB badge (bug #7). [unreadBelowViewport] receives the
@@ -45,5 +46,42 @@ class UnreadBadgeTest {
         // counts zero (the badge clears without leaving the buffer). The frozen snapshot would have
         // kept counting 2 here — that was the bug.
         assertEquals(0, unreadBelowViewport(below, marker = 130L))
+    }
+
+    @Test fun `binary search honors equality and both bounds`() {
+        val descending = listOf(500L, 400L, 300L, 200L, 100L)
+        assertEquals(0, unreadBelowViewport(descending, marker = 500L))
+        assertEquals(2, unreadBelowViewport(descending, marker = 300L))
+        assertEquals(5, unreadBelowViewport(descending, marker = 99L))
+    }
+
+    @Test fun `large window probes logarithmically`() {
+        val size = 4_096
+        val values = object : AbstractList<Long>() {
+            var reads = 0
+            override val size: Int get() = size
+            override fun get(index: Int): Long {
+                reads++
+                return (size - index).toLong()
+            }
+        }
+        assertEquals(2_048, unreadBelowViewport(values, marker = 2_048L))
+        // A linear implementation needs thousands of reads. Binary search needs at most log2(n)+1.
+        assertEquals(true, values.reads <= 13)
+    }
+
+    @Test fun `viewport index excludes own rows while retaining strict marker boundary`() {
+        val index = UnreadViewportIndex.from(
+            listOf(
+                UnreadViewportRow(index = 0, serverTime = 140, isSelf = true),
+                UnreadViewportRow(index = 1, serverTime = 130, isSelf = false),
+                UnreadViewportRow(index = 2, serverTime = 120, isSelf = true),
+                UnreadViewportRow(index = 3, serverTime = 100, isSelf = false),
+            ),
+        )
+        assertEquals(1, index.count(firstVisibleIndex = 3, marker = 100))
+        // Equality is read, and the newest self row never inflates the badge.
+        assertEquals(0, index.count(firstVisibleIndex = 4, marker = 130))
+        assertEquals(1, index.count(firstVisibleIndex = 2, marker = 100))
     }
 }

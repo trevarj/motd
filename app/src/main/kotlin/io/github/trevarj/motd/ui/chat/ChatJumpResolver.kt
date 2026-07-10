@@ -59,3 +59,10 @@ class ChatJumpResolver(
         return Result.NotFound
     }
 }
+
+/**
+ * A deep jump may settle (and therefore open the mark-read gate) only after the row at its
+ * resolved index is still the exact msgid requested. A time-only jump has no identity to check.
+ */
+internal fun deepJumpTargetMatches(expectedMsgid: String?, actualMsgid: String?): Boolean =
+    expectedMsgid == null || expectedMsgid == actualMsgid

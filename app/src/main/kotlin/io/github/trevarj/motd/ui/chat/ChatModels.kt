@@ -55,8 +55,66 @@ const val AUTOSCROLL_BOTTOM_TOLERANCE_PX: Int = 64
  * firstVisibleIndex`, newest first). Returns the FAB unread badge value: 0 at the bottom, shrinking
  * as the user scrolls down — viewport/read aware rather than a monotonic arrival tally (bug #7).
  */
-fun unreadBelowViewport(serverTimes: List<Long>, marker: Long): Int =
-    serverTimes.count { it > marker }
+fun unreadBelowViewport(serverTimes: List<Long>, marker: Long): Int {
+    // The reverse list is newest-first. Find the first row that is not strictly newer than the
+    // marker instead of walking (and, at the Compose call-site, copying) every below-fold row.
+    var low = 0
+    var high = serverTimes.size
+    while (low < high) {
+        val middle = (low + high) ushr 1
+        if (serverTimes[middle] > marker) low = middle + 1 else high = middle
+    }
+    return low
+}
+
+/** A non-self timeline row captured once per Paging window, not once per scroll frame. */
+data class UnreadViewportRow(val index: Int, val serverTime: Long, val isSelf: Boolean)
+
+/**
+ * Allocation-free-at-scroll-time unread index. Both arrays are sorted by reverse-list index and
+ * server time respectively, so the viewport and marker bounds can each be found in O(log n).
+ */
+class UnreadViewportIndex private constructor(
+    private val rowIndices: IntArray,
+    private val serverTimes: LongArray,
+) {
+    fun count(firstVisibleIndex: Int, marker: Long): Int {
+        val inViewport = lowerBound(rowIndices, firstVisibleIndex)
+        val newerThanMarker = upperBound(serverTimes, marker)
+        return minOf(inViewport, newerThanMarker)
+    }
+
+    private fun lowerBound(values: IntArray, target: Int): Int {
+        var low = 0
+        var high = values.size
+        while (low < high) {
+            val middle = (low + high) ushr 1
+            if (values[middle] < target) low = middle + 1 else high = middle
+        }
+        return low
+    }
+
+    // Descending values: number strictly greater than target.
+    private fun upperBound(values: LongArray, target: Long): Int {
+        var low = 0
+        var high = values.size
+        while (low < high) {
+            val middle = (low + high) ushr 1
+            if (values[middle] > target) low = middle + 1 else high = middle
+        }
+        return low
+    }
+
+    companion object {
+        fun from(rows: List<UnreadViewportRow>): UnreadViewportIndex {
+            val others = rows.filterNot { it.isSelf }
+            return UnreadViewportIndex(
+                rowIndices = IntArray(others.size) { others[it].index },
+                serverTimes = LongArray(others.size) { others[it].serverTime },
+            )
+        }
+    }
+}
 
 /**
  * Decide whether an incoming message should pin the reverse list to the newest row (index 0). Only
