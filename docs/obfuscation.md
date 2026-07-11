@@ -1,227 +1,134 @@
-# Obfuscation: reaching soju through censorship
+# Obfuscation
 
-motd can dial your bouncer through a **SOCKS5 proxy** with remote DNS, off by
-default and per-network. That one seam is the substrate every stronger transport
-terminates in (plans/19 §5, plans/20). The strongest option shipped-adjacent is
-**VLESS + REALITY** carried by a sing-box server next to soju: it borrows a real
-third-party site's TLS handshake, so on the wire it is indistinguishable from
-ordinary HTTPS to that site and survives active DPI probing.
+motd can reach an IRC server or soju bouncer through one of these per-network
+options:
 
-Phase 1 (this release) is the client-side SOCKS5 substrate plus a local REALITY
-test harness. The in-app REALITY core (embedded sing-box `libbox`) is Phase 2;
-until then, run a small **sing-box/Xray client** next to the app that exposes a
-local SOCKS5, and point the per-network Obfuscation field at it. No companion app
-is *eventually* needed — Phase 2 folds the client into the APK.
+- **Off** — direct connection.
+- **SOCKS5** — use an existing SOCKS5 proxy; DNS is resolved through the proxy.
+- **Tor (Orbot)** — use Orbot's local SOCKS5 proxy, normally with a `.onion`
+  bouncer address.
+- **VLESS + REALITY** — the Phase 2 arm64 build runs an embedded sing-box client
+  and exposes a local SOCKS proxy automatically. You supply one VLESS URI; no
+  companion Android proxy app is needed.
 
-## a. VPS: the sing-box REALITY server (next to soju)
+VLESS + REALITY is useful where ordinary IRC/TLS is blocked or conspicuous. It
+is not a guarantee of anonymity, and operating it may have legal or policy
+implications where you live.
 
-soju stays unchanged on loopback (`listen ircs://:6697`). Put a sing-box VLESS +
-REALITY inbound in front of it. This is one static Go binary + one JSON config +
-one systemd unit — soju-grade.
+## VLESS + REALITY on a VPS
 
-### 1. Keys and identifiers (one time)
+You need a VPS with a public TCP port (use `443` for the best chance of
+surviving ISP filtering), an IRC server or
+[soju](https://soju.im/) bouncer, and an [Xray](https://github.com/XTLS/Xray-core)
+REALITY server. The app embeds sing-box as its client; use Xray on the server
+because this pairing is the tested compatible path. Allow the chosen TCP port in
+both your host and provider firewall. Keep soju private where possible.
+For Docker, use Xray's [official container image](https://github.com/XTLS/Xray-core/)
+and join it to the same Docker network as soju.
+
+Generate the server credentials once:
 
 ```sh
-sing-box generate reality-keypair   # -> PrivateKey (server) + PublicKey (client)
-sing-box generate uuid              # -> the VLESS user UUID
-sing-box generate rand 8 --hex      # -> a short-id (hex, even length, <= 16 chars)
+sing-box generate reality-keypair
+sing-box generate uuid
+sing-box generate rand 8 --hex
 ```
 
-### 2. Pick a handshake domain
+Save the private key on the VPS. The public key, UUID, and short ID go in the
+client URI. Choose a real TLS 1.3 hostname that is permitted and reliably
+reachable in your jurisdiction; do not use a site your ISP or local policy
+blocks. The `dest`, `serverNames`, and URI `sni` must all match. See the
+[Xray documentation](https://xtls.github.io/en/) for the full option set.
 
-REALITY impersonates a **real, reachable TLS 1.3 site** the server relays probes
-to. It must:
-
-- serve TLS 1.3 and complete a handshake the client's uTLS Chrome fingerprint
-  accepts, and
-- be reachable from the VPS on `:443`.
-
-`www.microsoft.com` is a poor choice in practice (it did not complete the REALITY
-steal from our test host). **`www.cloudflare.com`** is a reliable default;
-`www.apple.com`, `addons.mozilla.org`, `gateway.icloud.com` also work. Prefer a
-site unrelated to you that is unlikely to be blocked.
-
-### 3. `/etc/sing-box/config.json`
+Create `/etc/xray/config.json` (use `443`; keep a second listener on another
+port only as an optional fallback):
 
 ```json
 {
-  "log": { "level": "warn" },
+  "log": { "loglevel": "warning" },
   "inbounds": [
     {
-      "type": "vless",
-      "tag": "vless-in",
+      "tag": "motd-vless",
       "listen": "0.0.0.0",
-      "listen_port": 443,
-      "users": [ { "uuid": "<UUID>" } ],
-      "tls": {
-        "enabled": true,
-        "server_name": "www.cloudflare.com",
-        "reality": {
-          "enabled": true,
-          "handshake": { "server": "www.cloudflare.com", "server_port": 443 },
-          "private_key": "<PrivateKey>",
-          "short_id": [ "<short-id>" ]
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{ "id": "<UUID>" }],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "dest": "<HANDSHAKE_HOST>:443",
+          "serverNames": ["<HANDSHAKE_HOST>"],
+          "privateKey": "<PRIVATE_KEY>",
+          "shortIds": ["<SHORT_ID>"]
         }
       }
     }
   ],
   "outbounds": [
-    { "type": "direct", "tag": "direct" }
-  ]
+    { "tag": "direct", "protocol": "freedom" },
+    { "tag": "block", "protocol": "blackhole" }
+  ],
+  "routing": {
+    "rules": [
+      { "type": "field", "domain": ["full:soju"], "port": "6697", "outboundTag": "direct" },
+      { "type": "field", "network": "tcp,udp", "outboundTag": "block" }
+    ]
+  }
 }
 ```
 
-The decrypted stream is routed to whatever destination the **client** asked for.
-With the client pattern below the client dials `127.0.0.1:6697`, and the server's
-`direct` outbound reaches soju on loopback — no static forward needed. If you want
-the server to force the destination (so the client cannot pick arbitrary hosts),
-add a route rule pinning the outbound to `127.0.0.1:6697`.
-
-Validate before starting: `sing-box check -c /etc/sing-box/config.json`.
-
-### 4. systemd unit `/etc/systemd/system/sing-box.service`
-
-```ini
-[Unit]
-Description=sing-box (VLESS+REALITY in front of soju)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/sing-box run -c /etc/sing-box/config.json
-Restart=on-failure
-RestartSec=3
-LimitNOFILE=65535
-# Hardening
-DynamicUser=yes
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-NoNewPrivileges=yes
-
-[Install]
-WantedBy=multi-user.target
-```
+The route rules above restrict the service to the bouncer named `soju`; change
+that name only to match your Docker/network layout. Validate and start Xray
+using your distribution's service or Docker setup:
 
 ```sh
-systemctl daemon-reload
-systemctl enable --now sing-box
+xray run -test -c /etc/xray/config.json
+systemctl enable --now xray
 ```
 
-### 5. The client share link
+Your client URI is:
 
-```
-vless://<UUID>@<vps-host>:443?encryption=none&security=reality&sni=www.cloudflare.com&fp=chrome&pbk=<PublicKey>&sid=<short-id>&type=tcp#my-bouncer
-```
-
-## b. Client setup (until the embedded core lands)
-
-Phase 1 has no embedded REALITY core, so run a **local sing-box/Xray client** on
-the device (or the machine the device reaches) that exposes a plain SOCKS5 inbound
-and speaks VLESS+REALITY out to your VPS. Then, in motd:
-
-1. Open the network's settings → **Connection / Obfuscation** (collapsed, off by
-   default).
-2. Mode **SOCKS5**, Host `127.0.0.1`, Port `1080` (or wherever the client's SOCKS
-   inbound listens).
-3. Leave the soju endpoint (host/port/TLS) as-is: the app resolves and reaches it
-   **remotely through the proxy** (DNS is not leaked locally; `.onion` works).
-
-Notes:
-
-- **Route via Tor (Orbot)** is a shortcut that pins SOCKS5 at `127.0.0.1:9050`;
-  install Orbot and, ideally, expose soju as a `.onion` hidden service.
-- The strongest options (a `.onion` bouncer, or VLESS+REALITY) require setup on
-  **your own** soju/VPS — this is opt-in and may add latency.
-- Client uTLS caveat: sing-box's own REALITY *client* currently cannot
-  authenticate against a sing-box REALITY *server*
-  ([SagerNet/sing-box#4023](https://github.com/SagerNet/sing-box/issues/4023),
-  closed "not planned"). Use an **Xray** client (v2rayNG on Android, or the `xray`
-  binary) against the sing-box server. The app never sees this — it only dials the
-  SOCKS5 the client exposes.
-
-An example Xray client (SOCKS5 on `127.0.0.1:1080` → VLESS+REALITY out):
-
-```json
-{
-  "inbounds": [ { "listen": "127.0.0.1", "port": 1080, "protocol": "socks",
-                  "settings": { "udp": false } } ],
-  "outbounds": [ { "protocol": "vless",
-    "settings": { "vnext": [ { "address": "<vps-host>", "port": 443,
-      "users": [ { "id": "<UUID>", "encryption": "none" } ] } ] },
-    "streamSettings": { "network": "tcp", "security": "reality",
-      "realitySettings": { "serverName": "www.cloudflare.com", "fingerprint": "chrome",
-        "publicKey": "<PublicKey>", "shortId": "<short-id>" } } } ]
-}
+```text
+vless://<UUID>@<VPS_HOST>:443?encryption=none&security=reality&sni=<HANDSHAKE_HOST>&fp=chrome&pbk=<PUBLIC_KEY>&sid=<SHORT_ID>&type=tcp#motd
 ```
 
-## c. Local test flow (`test/e2e/local-stack.sh`)
+Treat this URI like a password: it grants access to your VPS proxy. Use a unique
+UUID per device and remove it from the server config when a device is lost.
 
-The native ergo + soju stack has a REALITY layer for proving the substrate
-end-to-end before touching a VPS.
+## Configure motd
 
-```sh
-./test/e2e/local-stack.sh up            # ergo + soju (as usual)
-./test/e2e/local-stack.sh obfs-up       # sing-box REALITY server :8443 + Xray SOCKS5 client :1080
-./test/e2e/local-stack.sh obfs-validate # socket-level proof: IRC/TLS to soju THROUGH reality
-./test/e2e/local-stack.sh obfs-down     # stop the reality layer
-```
+1. Add or edit the bouncer network. These **Host**, **Port**, and TLS fields
+   name the bouncer destination *after* the VLESS tunnel, not the public VLESS
+   server. The VLESS URI below contains the public server address.
 
-`obfs-up` generates a fresh keypair/short-id/uuid, writes both configs under
-`/tmp/motd-stack/obfs/`, runs the **sing-box server** (REALITY inbound on `:8443`,
-handshake `www.cloudflare.com`) and the **Xray client** (SOCKS5 inbound on
-`127.0.0.1:1080`, VLESS+REALITY outbound to the server), does `adb reverse
-tcp:1080`, and prints the `vless://` share link. It refuses to start if `:8443` or
-`:1080` is already held.
+   With separate Docker containers on a shared network, use the bouncer's Docker
+   DNS name (for example, host `soju`, port `6697`, TLS enabled). Do **not** use
+   `127.0.0.1`: in that layout it points back to the proxy container. Loopback is
+   correct only when the proxy and bouncer share a network namespace.
+2. Open **Settings → Networks → _your network_ → Connection / Obfuscation**.
+3. Choose **VLESS + REALITY (sing-box)**, paste the URI, and save.
+4. Reconnect. On first use of a self-signed or loopback certificate, verify the
+   fingerprint and accept motd's certificate-trust prompt. motd pins that leaf
+   certificate for later connections.
 
-`obfs-validate` opens a SOCKS5 CONNECT to `127.0.0.1:6697` (soju) **through** the
-proxy, completes soju's TLS 1.3 handshake, and reads soju's `CAP LS` banner —
-proving the server + client REALITY configs carry IRC end-to-end.
+If your bouncer is elsewhere, keep its normal hostname and port instead, and
+adjust the Xray route restriction accordingly.
 
-### Cross-core embedded-client gate
+## SOCKS5 and Tor
 
-The normal `obfs-*` path proves Xray can act as the client for the documented
-sing-box server. It does **not** prove that libbox/sing-box can act as the
-client. Run this separate compatibility gate before relying on an embedded
-libbox client:
+For an existing proxy, choose **SOCKS5** and enter its host and port. For Tor,
+install [Orbot](https://orbot.app/), start it, then choose **Tor (Orbot)**. A
+Tor hidden-service address for soju avoids exposing the bouncer's public IP.
 
-```sh
-./test/e2e/local-stack.sh up
-./test/e2e/local-stack.sh obfs-xray-up
-./test/e2e/local-stack.sh obfs-xray-validate
-./test/e2e/local-stack.sh obfs-xray-negative
-./test/e2e/local-stack.sh obfs-xray-down
-./test/e2e/local-stack.sh down
-```
+## Troubleshooting
 
-It uses separate ports by default (`Xray` REALITY server `127.0.0.1:8444`,
-sing-box SOCKS client `127.0.0.1:1081`) and writes artifacts to
-`/tmp/motd-stack/obfs-xray/`. The validator must report both TLS and an IRC
-`CAP LS` response. `obfs-xray-up` is deliberately a proof gate only: it does
-not change the app and must not be treated as evidence that sing-box can
-authenticate to the existing sing-box server. Override its ports with
-`MOTD_XRAY_REALITY_PORT` and `MOTD_SINGBOX_SOCKS_PORT`.
-
-`obfs-xray-negative` starts a second temporary sing-box SOCKS client with one
-character of the REALITY public key changed. Its SOCKS `CONNECT` must fail;
-otherwise the proof gate fails. Override its separate temporary port with
-`MOTD_SINGBOX_BAD_SOCKS_PORT`.
-
-Overrides: `MOTD_SOCKS_PORT`, `MOTD_REALITY_PORT`, `MOTD_HANDSHAKE_DOMAIN` (e.g.
-if `1080` is taken locally, `MOTD_SOCKS_PORT=11080 ./test/e2e/local-stack.sh
-obfs-up`).
-
-### Drive the app against it (manual)
-
-The socket-level `obfs-validate` is the authoritative proof. To also exercise the
-app UI against the tunnel:
-
-1. `./test/e2e/local-stack.sh up && ./test/e2e/local-stack.sh obfs-up`
-   (if `1080` is free; else set `MOTD_SOCKS_PORT` and use that port below).
-2. `nix develop -c ./gradlew :app:installDebug`.
-3. Onboard the soju bouncer as usual (Host `127.0.0.1`, Port `6697`, TLS on,
-   Username/Password `motd`/`motdtest`; Trust the self-signed cert).
-4. Open the network's settings → **Connection / Obfuscation** → **SOCKS5**,
-   Host `127.0.0.1`, Port `1080` → Save (check FAB). Editing the proxy restarts
-   the connection (it is part of the connection fingerprint).
-5. The network reconnects; open `##motdtest` and confirm seeded history — the
-   traffic is now flowing through VLESS+REALITY to soju.
+- Confirm the VPS firewall allows the selected TCP port and that Xray validates
+  its configuration.
+- Ensure the REALITY server name is reachable from the VPS and supports TLS 1.3.
+- A changed bouncer certificate requires reviewing the new certificate prompt.
+- The embedded option currently requires the `phase2Arm64` APK and an arm64-v8a
+  Android device. Use SOCKS5 or Tor on other builds/devices.

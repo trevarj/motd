@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.obfs
 
+import io.github.trevarj.motd.service.toSingBoxConfigJson
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -24,6 +25,13 @@ class VlessLinkTest {
         assertEquals("edge.example", outbound["server"]!!.jsonPrimitive.content)
         assertEquals("www.cloudflare.com", outbound["tls"]!!.jsonObject["server_name"]!!.jsonPrimitive.content)
         assertEquals("public-key", outbound["tls"]!!.jsonObject["reality"]!!.jsonObject["public_key"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `sing-box config routes SOCKS traffic through the REALITY outbound`() {
+        val config = Json.parseToJsonElement(VlessLink.parse(valid).getOrThrow().toSingBoxConfigJson()).jsonObject
+
+        assertEquals("motd-reality", config["route"]!!.jsonObject["final"]!!.jsonPrimitive.content)
     }
 
     @Test

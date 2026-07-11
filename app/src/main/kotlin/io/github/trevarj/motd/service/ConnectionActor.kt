@@ -28,11 +28,17 @@ interface ManagedConnection {
 }
 
 /** Adapter wrapping a real [IrcClient]. */
-class IrcClientConnection(val client: IrcClient) : ManagedConnection {
+class IrcClientConnection(
+    val client: IrcClient,
+    private val onStop: () -> Unit = {},
+) : ManagedConnection {
     override val state: StateFlow<IrcClientState> get() = client.state
     override val events: SharedFlow<IrcEvent> get() = client.events
     override fun start() = client.start()
-    override fun stop() = client.stop()
+    override fun stop() {
+        client.stop()
+        onStop()
+    }
 }
 
 /**

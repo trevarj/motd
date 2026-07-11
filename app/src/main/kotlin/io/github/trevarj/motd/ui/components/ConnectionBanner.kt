@@ -91,10 +91,11 @@ private fun bannerStatus(
         }
     }
 
-    // Any connecting/registering/disconnected network -> progress banner.
+    // Only active in-flight states get a progress banner. A plain Disconnected row is quiescent
+    // (for example an old imported network or a manually disconnected account); showing it as
+    // "Connecting…" makes a healthy bouncer child look stuck.
     val pending = states.entries.firstOrNull { (_, s) ->
-        s is IrcClientState.Connecting || s is IrcClientState.Registering ||
-            s is IrcClientState.Disconnected
+        s is IrcClientState.Connecting || s is IrcClientState.Registering
     } ?: return null
 
     val name = networkName(pending.key)

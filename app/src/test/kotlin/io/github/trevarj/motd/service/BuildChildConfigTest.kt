@@ -12,8 +12,8 @@ import org.junit.Test
 /**
  * Unit tests for [buildChildConfig] (#40). A soju BOUNCER_CHILD is a *bound connection to the
  * bouncer*, not a direct socket to the upstream network: it must connect on the bouncer's
- * host/port/tls and authenticate with the root account's SASL credentials (bare user, never a
- * `user/network` form), then select the upstream via `BOUNCER BIND <bouncerNetId>`.
+ * host/port/tls and authenticate with the root account's SASL credentials using soju's
+ * `account/network` authcid form.
  */
 class BuildChildConfigTest {
 
@@ -64,15 +64,14 @@ class BuildChildConfigTest {
     fun `child authenticates with the root account SASL creds`() {
         val cfg = buildChildConfig(child(), root())
         assertEquals(SaslMechanism.PLAIN, cfg.sasl)
-        // Bare account user — NOT "motd/libera": network selection is via BOUNCER BIND.
-        assertEquals("motd", cfg.saslUser)
+        assertEquals("motd/libera", cfg.saslUser)
         assertEquals("s3cret", cfg.saslPassword)
     }
 
     @Test
-    fun `child binds the upstream network via bouncerNetId`() {
+    fun `child selects upstream network via SASL authcid not BOUNCER BIND`() {
         val cfg = buildChildConfig(child(), root())
-        assertEquals("7", cfg.bouncerNetId)
+        assertNull(cfg.bouncerNetId)
     }
 
     @Test
@@ -95,8 +94,7 @@ class BuildChildConfigTest {
         // Defensive: reconcile excludes orphan children, but buildChildConfig must not crash.
         val cfg = buildChildConfig(child(), root = null)
         assertEquals("irc.libera.chat", cfg.host)
-        // Still emits a BIND so a later-resolved bouncer would select the right network.
-        assertEquals("7", cfg.bouncerNetId)
+        assertNull(cfg.bouncerNetId)
     }
 
     // -- WSS transport threading (plans/19 §3.3) ------------------------------

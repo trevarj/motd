@@ -113,6 +113,9 @@ android {
         // The Doze battery-exemption request is a justified core use: an always-on IRC/bouncer
         // connection is the app's primary function. Distributed outside the Play Store.
         disable += "BatteryLife"
+        // Phase 2 deliberately ships the pinned arm64-only libbox artifact; ChromeOS x86_64
+        // translation support is outside this flavor's contract.
+        disable += "ChromeOsAbiSupport"
     }
 }
 

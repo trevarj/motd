@@ -74,6 +74,9 @@ port and authenticate with your bouncer account. motd then negotiates bouncer
 capabilities and, with `soju.im/bouncer-networks`, manages your upstream
 networks from a single connection.
 
+For SOCKS5, Tor, or VLESS + REALITY configuration, see the
+[obfuscation guide](docs/obfuscation.md).
+
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md).

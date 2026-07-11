@@ -5,6 +5,8 @@ import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.Build
+import android.system.OsConstants
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.obfs.VlessLink
 import io.nekohasekai.libbox.CommandServer
@@ -27,6 +29,9 @@ import java.net.NetworkInterface as JavaNetworkInterface
 /** Loopback endpoint returned by the embedded obfuscation core. */
 data class LocalSocksEndpoint(val host: String = "127.0.0.1", val port: Int)
 
+/** A running embedded SOCKS core lease owned by one physical IRC connection attempt. */
+data class LocalSocksLease(val endpoint: LocalSocksEndpoint, val release: () -> Unit)
+
 /**
  * Small, generated-code-free boundary around libbox. The eventual libbox adapter is responsible
  * for starting its SOCKS inbound and returning the port it actually bound; the connection layer
@@ -38,18 +43,21 @@ interface LocalSocksEngine {
 }
 
 /**
- * Owns the one embedded-core instance shared by all EMBEDDED_REALITY networks. It is synchronized
- * because Room reconciliation can build a root and its bouncer children concurrently.
+ * Owns embedded-core instances for EMBEDDED_REALITY connections. A single VLESS link maps to one
+ * libbox command server with a reference-counted SOCKS inbound; running multiple command servers in
+ * the same app process can stall concurrent root/child bouncer registrations mid-stream.
  */
 @Singleton
 class LocalSocksProvider private constructor(private val engineFactory: () -> LocalSocksEngine) {
     @Inject constructor(@ApplicationContext context: Context) : this({ LibboxLocalSocksEngine(context) })
 
-    private data class ActiveCore(val engine: LocalSocksEngine, val endpoint: LocalSocksEndpoint)
+    private data class ActiveCore(
+        val engine: LocalSocksEngine,
+        val endpoint: LocalSocksEndpoint,
+        var refs: Int,
+    )
 
-    // A bouncer root may be configured independently of another root. Never replace a live core
-    // for A when B connects: each distinct link owns its own loopback listener until stopAll.
-    private val activeCores = LinkedHashMap<VlessLink, ActiveCore>()
+    private val activeCores = LinkedHashMap<String, ActiveCore>()
 
     companion object {
         /** Test seam: production construction is Hilt-only. */
@@ -59,14 +67,49 @@ class LocalSocksProvider private constructor(private val engineFactory: () -> Lo
 
     @Synchronized
     fun start(link: VlessLink): Result<LocalSocksEndpoint> {
-        activeCores[link]?.let { return Result.success(it.endpoint) }
+        return acquire(link).map { it.endpoint }
+    }
+
+    @Synchronized
+    fun acquire(link: VlessLink, ownerKey: String? = null): Result<LocalSocksLease> {
+        val configJson = link.toSingBoxConfigJson()
+        val coreKey = if (ownerKey.isNullOrBlank()) configJson else "$configJson\nowner=$ownerKey"
+        activeCores[coreKey]?.let { core ->
+            core.refs++
+            var released = false
+            return Result.success(LocalSocksLease(core.endpoint) {
+                synchronized(this) {
+                    if (!released) {
+                        released = true
+                        release(coreKey)
+                    }
+                }
+            })
+        }
         val engine = engineFactory()
-        return engine.start(link.toSingBoxConfigJson()).mapCatching { port ->
+        return engine.start(configJson).mapCatching { port ->
             require(port in 1..65535) { "Embedded SOCKS provider returned invalid port" }
-            LocalSocksEndpoint(port = port).also {
-                activeCores[link] = ActiveCore(engine, it)
+            val endpoint = LocalSocksEndpoint(port = port)
+            activeCores[coreKey] = ActiveCore(engine, endpoint, refs = 1)
+            var released = false
+            LocalSocksLease(endpoint) {
+                synchronized(this) {
+                    if (!released) {
+                        released = true
+                        release(coreKey)
+                    }
+                }
             }
         }.onFailure { engine.stop() }
+    }
+
+    @Synchronized
+    private fun release(configJson: String) {
+        val core = activeCores[configJson] ?: return
+        core.refs--
+        if (core.refs <= 0) {
+            activeCores.remove(configJson)?.engine?.stop()
+        }
     }
 
     @Synchronized
@@ -204,9 +247,15 @@ private class AndroidPlatform(context: Context) : PlatformInterface {
     ): io.nekohasekai.libbox.ConnectionOwner = io.nekohasekai.libbox.ConnectionOwner()
     override fun getInterfaces(): io.nekohasekai.libbox.NetworkInterfaceIterator {
         val interfaces = runCatching {
-            JavaNetworkInterface.getNetworkInterfaces().toList()
-                .filter { network -> network.isUp }
-                .map(::toLibboxInterface)
+            val javaInterfaces = JavaNetworkInterface.getNetworkInterfaces().toList()
+                .associateBy { it.name }
+            connectivity.allNetworks.mapNotNull { network ->
+                val properties = connectivity.getLinkProperties(network) ?: return@mapNotNull null
+                val name = properties.interfaceName ?: return@mapNotNull null
+                val javaInterface = javaInterfaces[name] ?: return@mapNotNull null
+                val capabilities = connectivity.getNetworkCapabilities(network)
+                toLibboxInterface(javaInterface, properties, capabilities)
+            }.distinctBy { it.name }
         }.getOrElse { emptyList() }
         return if (interfaces.isEmpty()) EmptyNetworkInterfaces else NetworkInterfaces(interfaces.iterator())
     }
@@ -237,7 +286,10 @@ private class AndroidPlatform(context: Context) : PlatformInterface {
     }
     override fun systemCertificates(): io.nekohasekai.libbox.StringIterator = EmptyStrings
     override fun underNetworkExtension() = false
-    override fun usePlatformAutoDetectInterfaceControl() = false
+    // Match sing-box-for-Android's platform bridge. Let Android own socket/interface selection;
+    // binding the VLESS socket through the Java interface inventory can leave later writes on a
+    // stale route after the bouncer child capability transition.
+    override fun usePlatformAutoDetectInterfaceControl() = true
     override fun useProcFS() = false
 
     private fun reportDefaultInterface() {
@@ -248,29 +300,49 @@ private class AndroidPlatform(context: Context) : PlatformInterface {
         val index = runCatching { JavaNetworkInterface.getByName(name)?.index ?: -1 }.getOrDefault(-1)
         val capabilities = network?.let(connectivity::getNetworkCapabilities)
         val expensive = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
-        val constrained = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_CONGESTED) == false
+        val constrained = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_CONGESTED) == false
+        } else {
+            false
+        }
         listener.updateDefaultInterface(name, index, expensive, constrained)
     }
 
-    private fun toLibboxInterface(network: JavaNetworkInterface): io.nekohasekai.libbox.NetworkInterface =
+    private fun toLibboxInterface(
+        network: JavaNetworkInterface,
+        properties: LinkProperties,
+        capabilities: NetworkCapabilities?,
+    ): io.nekohasekai.libbox.NetworkInterface =
         io.nekohasekai.libbox.NetworkInterface().apply {
             index = network.index
             mtu = runCatching { network.mtu }.getOrDefault(0)
             name = network.name
-            // libbox maps these with netip.MustParsePrefix. Supplying a bare host address
-            // panics from its network-monitor callback after the service has started.
             addresses = Strings(network.interfaceAddresses.map { address -> address.toLibboxPrefix() })
-            flags = 0
-            type = network.name.interfaceType()
-            setDNSServer(EmptyStrings)
-            metered = false
+            flags = interfaceFlags(network, capabilities)
+            type = capabilities.interfaceType()
+            setDNSServer(Strings(properties.dnsServers.mapNotNull { it.hostAddress }))
+            metered = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
         }
 
-    private fun String.interfaceType(): Int = when {
-        startsWith("wlan") || startsWith("wifi") -> Libbox.InterfaceTypeWIFI
-        startsWith("rmnet") || startsWith("ccmni") -> Libbox.InterfaceTypeCellular
-        startsWith("eth") -> Libbox.InterfaceTypeEthernet
+    private fun NetworkCapabilities?.interfaceType(): Int = when {
+        this?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> Libbox.InterfaceTypeWIFI
+        this?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> Libbox.InterfaceTypeCellular
+        this?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> Libbox.InterfaceTypeEthernet
         else -> Libbox.InterfaceTypeOther
+    }
+
+    private fun interfaceFlags(
+        network: JavaNetworkInterface,
+        capabilities: NetworkCapabilities?,
+    ): Int {
+        var flags = 0
+        if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true) {
+            flags = flags or OsConstants.IFF_UP or OsConstants.IFF_RUNNING
+        }
+        if (network.isLoopback) flags = flags or OsConstants.IFF_LOOPBACK
+        if (network.isPointToPoint) flags = flags or OsConstants.IFF_POINTOPOINT
+        if (network.supportsMulticast()) flags = flags or OsConstants.IFF_MULTICAST
+        return flags
     }
 
     private fun InterfaceAddress.toLibboxPrefix(): String {
@@ -301,6 +373,11 @@ internal fun VlessLink.toSingBoxConfigJson(): String = Json.encodeToString(
         })
         put("outbounds", buildJsonArray {
             add(Json.parseToJsonElement(toSingBoxOutboundJson()))
+        })
+        // sing-box otherwise selects its implicit direct outbound for unmatched SOCKS traffic.
+        // Every connection received by this private inbound must traverse the VLESS tunnel.
+        put("route", buildJsonObject {
+            put("final", "motd-reality")
         })
     },
 )

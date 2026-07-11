@@ -197,7 +197,7 @@ class ConnectionManagerImpl @Inject constructor(
     private fun reconcile(all: List<NetworkEntity>) {
         // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
         networksById = all.associateBy { it.id }
-        val wantedIds = wantedNetworkIds(all, userIntents)
+        val wantedIds = wantedNetworkIds(all, userIntents, _states.value)
         // Remove actors whose network is no longer wanted (deleted, autoConnect off, user-disconnected).
         for (id in actors.keys.toList()) {
             if (id !in wantedIds) {
@@ -235,13 +235,8 @@ class ConnectionManagerImpl @Inject constructor(
         val actor = ConnectionActor(
             networkId = row.id,
             scope = scope,
-            connectionFactory = { IrcClientConnection(buildClient(row)) },
+            connectionFactory = { buildConnection(row) },
             onState = { id, state ->
-                // Surface failures to logcat for on-device diagnosis (#43): the UI only shows a
-                // terse "Failed", so log the network id + reason + fatality under a stable tag.
-                if (state is IrcClientState.Failed) {
-                    android.util.Log.w(CONN_LOG_TAG, "network $id Failed: ${state.reason} (fatal=${state.fatal})")
-                }
                 if (state is IrcClientState.Failed && state.fatal && isConfigurationFailure(state.reason)) {
                     terminalConfigFingerprints[id] = fp
                 }
@@ -262,7 +257,7 @@ class ConnectionManagerImpl @Inject constructor(
         if (row.role == NetworkRole.BOUNCER_CHILD) row.parentId?.let { networksById[it] } else null,
     )
 
-    private fun buildClient(row: NetworkEntity): IrcClient {
+    private fun buildConnection(row: NetworkEntity): IrcClientConnection {
         // A BOUNCER_CHILD is a *bound connection to the bouncer*, not a direct socket to the
         // upstream network. Its own host/port/tls/SASL may carry the upstream server's details
         // (soju's BOUNCER NETWORK attrs report the upstream host), so connecting on them would
@@ -281,7 +276,7 @@ class ConnectionManagerImpl @Inject constructor(
         // Resolve EMBEDDED_REALITY before inspecting legacy proxyHost/proxyPort. Those columns are
         // deliberately null for a VLESS-configured row; validating them first would park a valid
         // embedded configuration as "SOCKS5 proxy host is required".
-        val proxyResolution = resolveTransportProxy(endpoint, localSocksProvider)
+        val proxyResolution = resolveTransportProxy(endpoint, localSocksProvider, ownerKey = row.id.toString())
         val factory = AppTransportFactory(
             appContext = appContext,
             stsStore = stsStore,
@@ -293,7 +288,7 @@ class ConnectionManagerImpl @Inject constructor(
             proxy = proxyResolution.proxy,
             proxyConfigurationError = proxyResolution.error,
         )
-        return IrcClient(config, factory, scope)
+        return IrcClientConnection(IrcClient(config, factory, scope), proxyResolution.release)
     }
 
     /** On Ready: persist any STS policy, re-establish bouncer children, then run catch-up (plans/04). */
@@ -306,15 +301,20 @@ class ConnectionManagerImpl @Inject constructor(
         if (settings.settings.first().deliveryMode == DeliveryMode.UNIFIED_PUSH) {
             webPushRegistrar.get().reRegisterIfNeeded(row.id)
         }
-        // A BOUNCER_ROOT reaching Ready means its transport is up again. Bound children tunnel
-        // through that transport (BOUNCER BIND) and cannot connect while the root is down, so a
-        // child whose actor died during the outage sits parked (Failed, completed job) and a plain
-        // reconcile won't rebuild it. Force-reconnect each wanted child via connect() — the same
-        // drop-and-rebuild path trustCert uses. This fires only on the root's transition INTO Ready
-        // (onReady is invoked once per Ready entry), so it can't storm/loop. Children the user
-        // explicitly disconnected (sticky userIntents=false) are excluded by childrenToReconnect.
+        // A BOUNCER_ROOT reaching Ready means bound children can establish BOUNCER BIND again.
+        // Only revive a wanted child that is absent, dead, or terminally disconnected/failed.
+        // A child that is still Connecting/Registering owns its own transition to Ready; rebuilding
+        // it here races registration. Rebuilding a healthy Ready child causes needless bouncer
+        // churn and can interrupt the foreground channel.
         if (row.role == NetworkRole.BOUNCER_ROOT) {
-            for (childId in childrenToReconnect(row.id, networksById.values.toList(), userIntents)) {
+            val actorAlive = actors.mapValues { (_, actor) -> actor.isAlive }
+            for (childId in childrenNeedingReconnect(
+                rootId = row.id,
+                all = networksById.values.toList(),
+                userIntents = userIntents,
+                actorAlive = actorAlive,
+                states = _states.value,
+            )) {
                 connect(childId)
             }
         }
@@ -632,7 +632,6 @@ class ConnectionManagerImpl @Inject constructor(
 
     companion object {
         // Stable logcat tag for connection failures (#43).
-        const val CONN_LOG_TAG = "MotdConn"
         const val CHATHISTORY_CAP = "draft/chathistory"
         const val WEBPUSH_CAP = "soju.im/webpush"
         const val ECHO_TIMEOUT_MS = 30_000L
@@ -655,14 +654,22 @@ class ConnectionManagerImpl @Inject constructor(
 /**
  * Build the [IrcClientConfig] for one network row (plans/05 §soju bouncer-networks). For a
  * BOUNCER_CHILD the physical socket is the *bouncer's*, not the upstream network's: the transport
- * endpoint (host/port/tls) and the account SASL credentials are taken from the resolved [root]
- * row, and the upstream network is selected with `BOUNCER BIND <bouncerNetId>` during
- * registration. Falls back to the child's own fields when the root cannot be resolved (orphan
- * rows are excluded from the wanted set upstream, so this is defensive only). Extracted for tests.
+ * endpoint (host/port/tls) and the account SASL credentials are taken from the resolved [root].
+ * soju's pre-welcome BOUNCER BIND path mutates capabilities in a way that can stall on Android's
+ * embedded transport, so children select their upstream with the stable account/network SASL authcid
+ * form that soju also supports for bouncer networks.
+ * Falls back to the child's own fields when the root cannot be resolved (orphan rows are excluded
+ * from the wanted set upstream, so this is defensive only). Extracted for tests.
  */
 internal fun buildChildConfig(row: NetworkEntity, root: NetworkEntity?): IrcClientConfig {
     // The endpoint + account identity a bound child inherits from its bouncer root.
     val endpoint = if (row.role == NetworkRole.BOUNCER_CHILD) (root ?: row) else row
+    val childNetworkSelector = row.name.takeIf { row.role == NetworkRole.BOUNCER_CHILD && root != null }
+    val saslUser = if (childNetworkSelector != null && !endpoint.saslUser.isNullOrBlank()) {
+        "${endpoint.saslUser}/$childNetworkSelector"
+    } else {
+        endpoint.saslUser
+    }
     return IrcClientConfig(
         host = endpoint.host,
         port = endpoint.port,
@@ -671,12 +678,10 @@ internal fun buildChildConfig(row: NetworkEntity, root: NetworkEntity?): IrcClie
         nick = row.nick,
         username = row.username,
         realname = row.realname,
-        // SASL authenticates the bouncer *account* (bare user), never a per-network user/network
-        // form — network selection is done by BOUNCER BIND below, not by the SASL authcid.
         sasl = runCatching { SaslMechanism.valueOf(endpoint.saslMechanism) }.getOrDefault(SaslMechanism.NONE),
-        saslUser = endpoint.saslUser,
+        saslUser = saslUser,
         saslPassword = endpoint.saslPassword,
-        bouncerNetId = if (row.role == NetworkRole.BOUNCER_CHILD) row.bouncerNetId else null,
+        bouncerNetId = null,
         // WSS transport follows the physical endpoint: the bouncer's wsUrl for a bound child.
         wsUrl = endpoint.wsUrl,
     )
@@ -688,11 +693,16 @@ internal fun buildChildConfig(row: NetworkEntity, root: NetworkEntity?): IrcClie
  * endpoint. Keep that path separate from the legacy SOCKS validation so it can never fall through
  * to direct TCP or be rejected for its intentionally-null legacy columns.
  */
-internal data class TransportProxyResolution(val proxy: java.net.Proxy?, val error: String?)
+internal data class TransportProxyResolution(
+    val proxy: java.net.Proxy?,
+    val error: String?,
+    val release: () -> Unit = {},
+)
 
 internal fun resolveTransportProxy(
     endpoint: NetworkEntity,
     localSocksProvider: LocalSocksProvider,
+    ownerKey: String? = null,
 ): TransportProxyResolution {
     if (endpoint.obfsMode == ObfsMode.EMBEDDED_REALITY) {
         val link = VlessLink.parse(endpoint.obfsLink.orEmpty()).getOrElse { error ->
@@ -701,7 +711,10 @@ internal fun resolveTransportProxy(
                 error = "Embedded REALITY configuration: ${error.message ?: "invalid VLESS link"}",
             )
         }
-        val localEndpoint = localSocksProvider.start(link).getOrElse { error ->
+        // Keep each physical IRC actor on its own libbox service. Sharing one SOCKS inbound across
+        // the root and a bouncer child makes the native core serialize their TLS streams at the
+        // capability transition; both sessions appear Ready but post-registration writes vanish.
+        val lease = localSocksProvider.acquire(link, ownerKey = ownerKey ?: endpoint.id.toString()).getOrElse { error ->
             return TransportProxyResolution(
                 proxy = null,
                 error = "Embedded REALITY configuration: ${error.message ?: "provider unavailable"}",
@@ -709,12 +722,13 @@ internal fun resolveTransportProxy(
         }
         // start() validates its returned port. Retain this guard so a future provider change
         // cannot turn a bad local endpoint into a direct connection.
-        val proxy = proxyForNetwork(ObfsMode.SOCKS5, localEndpoint.host, localEndpoint.port)
+        val proxy = proxyForNetwork(ObfsMode.SOCKS5, lease.endpoint.host, lease.endpoint.port)
             ?: return TransportProxyResolution(
                 proxy = null,
                 error = "Embedded REALITY configuration: invalid local SOCKS endpoint",
+                release = lease.release,
             )
-        return TransportProxyResolution(proxy = proxy, error = null)
+        return TransportProxyResolution(proxy = proxy, error = null, release = lease.release)
     }
 
     val error = proxyConfigurationErrorForNetwork(
@@ -810,32 +824,44 @@ internal fun shouldRebuildActor(
 internal fun wantedNetworkIds(
     all: List<NetworkEntity>,
     userIntents: Map<Long, Boolean>,
+    states: Map<Long, IrcClientState> = emptyMap(),
 ): Set<Long> =
     all.asSequence()
         .filter { userIntents[it.id] ?: it.autoConnect }
         .filter { it.role != NetworkRole.BOUNCER_CHILD || it.parentId != null }
+        .filter {
+            it.role != NetworkRole.BOUNCER_CHILD ||
+                states[it.parentId] is IrcClientState.Ready
+        }
         .map { it.id }
         .toSet()
 
 /**
- * BOUNCER_CHILD ids to force-reconnect when their [rootId] transitions into Ready. A bound child
- * tunnels through the root's transport (BOUNCER BIND) and cannot connect while the root is down;
- * when the root comes back, a child whose actor died during the outage sits parked (Failed,
- * completed job) and a plain reconcile won't rebuild it — so [ConnectionManagerImpl.onReady] calls
- * `connect(childId)` for each id returned here, dropping the stale actor and rebuilding it.
+ * BOUNCER_CHILD ids to revive when their [rootId] transitions into Ready. A bound child tunnels
+ * through the root's transport (BOUNCER BIND), so an absent, dead, or terminally
+ * disconnected/failed child may need a fresh actor once its root is available. A child that is
+ * Connecting, Registering, or Ready is deliberately excluded: its live loop owns that transition,
+ * and forcing a rebuild would race registration or disconnect a healthy session.
  *
  * A child is reconnected when it is that root's own child (`parentId == rootId`) and is *wanted*:
  * its sticky user intent (if present), else its `autoConnect` flag, is true. This respects an
  * explicit user disconnect (sticky `userIntents=false`) so we never resurrect a child the user
  * turned off. Same pure-function testing style as [wantedNetworkIds] / [networksSharingCertEndpoint].
  */
-internal fun childrenToReconnect(
+internal fun childrenNeedingReconnect(
     rootId: Long,
     all: List<NetworkEntity>,
     userIntents: Map<Long, Boolean>,
+    actorAlive: Map<Long, Boolean>,
+    states: Map<Long, IrcClientState>,
 ): Set<Long> =
     all.asSequence()
         .filter { it.role == NetworkRole.BOUNCER_CHILD && it.parentId == rootId }
         .filter { userIntents[it.id] ?: it.autoConnect }
+        .filter { child ->
+            actorAlive[child.id] != true ||
+                states[child.id] is IrcClientState.Failed ||
+                states[child.id] == IrcClientState.Disconnected
+        }
         .map { it.id }
         .toSet()

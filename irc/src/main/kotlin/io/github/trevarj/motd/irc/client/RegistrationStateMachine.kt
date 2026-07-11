@@ -36,6 +36,7 @@ internal class RegistrationStateMachine(
     private val acked = LinkedHashSet<String>()
     private var requestedBatches = 0
     private var ackedBatches = 0
+    private val postWelcomeCapReqs = ArrayList<String>()
 
     private val isupport = Isupport()
     private var sasl: SaslAuthenticator? = null
@@ -55,6 +56,7 @@ internal class RegistrationStateMachine(
             "432", "433", "436" -> onNickError(msg)
             "001" -> onWelcome(msg)
             "005" -> { onIsupport(msg); emptyList() }
+            "FAIL" -> fail(msg.params.drop(1).joinToString(" ").ifBlank { "registration failed" }, fatal = true)
             "376", "422" -> emptyList() // end of MOTD; 001 already completed us
             "PING" -> listOf(Action.Send("PONG ${msg.params.firstOrNull().orEmpty()}"))
             "ERROR" -> fail("server ERROR: ${msg.params.lastOrNull().orEmpty()}", fatal = false)
@@ -69,6 +71,7 @@ internal class RegistrationStateMachine(
             "LS" -> onCapLs(msg)
             "ACK" -> onCapAck(msg)
             "NAK" -> onCapNak(msg)
+            "DEL", "NEW" -> onCapChangedBeforeWelcome()
             else -> emptyList()
         }
     }
@@ -82,7 +85,22 @@ internal class RegistrationStateMachine(
 
         // Full LS received: compute request set and send REQs.
         phase = Phase.CAP_REQ
-        val req = CapNegotiator.requestSet(advertised.keys, config.extraCaps)
+        val desired = CapNegotiator.requestSet(advertised.keys, config.extraCaps)
+        val req = if (isBouncerChildRegistration()) {
+            // soju mutates the capability set when a downstream selects a bouncer network.
+            // Requesting the full feature set before network selection can leave Android's embedded
+            // transport stuck before welcome. Use the minimum caps needed to authenticate/select,
+            // then request ordinary feature caps after 001.
+            val preBind = setOf("sasl", "soju.im/bouncer-networks")
+                .filter { it in desired || it in advertised.keys }
+                .filter { it != "soju.im/bouncer-networks" || config.bouncerNetId != null }
+                .toSet()
+            postWelcomeCapReqs.clear()
+            postWelcomeCapReqs.addAll(desired - preBind - "cap-notify")
+            preBind
+        } else {
+            desired
+        }
         if (req.isEmpty()) return advanceAfterCaps()
         val batches = CapNegotiator.batches(req)
         requestedBatches = batches.size
@@ -158,6 +176,33 @@ internal class RegistrationStateMachine(
         // 001 <nick> :Welcome — server's canonical nick wins.
         nick = msg.params.firstOrNull() ?: nick
         phase = Phase.DONE
+        val actions = mutableListOf<Action>(
+            Action.SetNick(nick),
+            Action.Complete(nick, acked.toSet(), isupport),
+        )
+        for (batch in CapNegotiator.batches(postWelcomeCapReqs.toSet())) {
+            actions.add(Action.Send("CAP REQ :$batch"))
+        }
+        return actions
+    }
+
+    /**
+     * soju emits CAP DEL/NEW immediately after a bouncer-network child is selected. On Android's
+     * embedded libbox path the final welcome burst can stall after this mutation even though soju
+     * has completed registration server-side. For bouncer children only, the mutation after CAP END
+     * is sufficient proof that SASL and network selection succeeded; mark the child Ready so the
+     * app can use the live socket. Ordinary IRC connections still require 001.
+     */
+    private fun onCapChangedBeforeWelcome(): List<Action> {
+        if (phase != Phase.WELCOME || !isBouncerChildRegistration()) return emptyList()
+        phase = Phase.DONE
+        // Do not send the deferred feature CAP REQs here.  At this point the server is still
+        // finishing registration and Android's embedded stream can expose the capability mutation
+        // before it exposes the final 001 burst.  Injecting another CAP REQ into that half-open
+        // transition races the server and leaves the child socket writable-looking but unable to
+        // relay subsequent PRIVMSGs.  The normal 001 path below still requests the features when
+        // the complete welcome is visible; the fallback intentionally keeps only the minimum
+        // authenticated stream alive.
         return listOf(
             Action.SetNick(nick),
             Action.Complete(nick, acked.toSet(), isupport),
@@ -195,4 +240,7 @@ internal class RegistrationStateMachine(
 
     private fun hasAcked(name: String): Boolean =
         acked.any { it == name || it.startsWith("$name=") }
+
+    private fun isBouncerChildRegistration(): Boolean =
+        config.bouncerNetId != null || config.saslUser?.contains('/') == true
 }

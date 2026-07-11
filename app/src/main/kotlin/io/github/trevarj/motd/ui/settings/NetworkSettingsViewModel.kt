@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.obfs.VlessLink
@@ -36,10 +37,41 @@ data class NetworkSettingsUiState(
     val connState: IrcClientState = IrcClientState.Disconnected,
     val autoConnect: Boolean = true,
     val parentName: String? = null,   // root name for a BOUNCER_CHILD's "Managed by" row
+    /** A bouncer transport/login change can invalidate all locally imported child mirrors. */
+    val pendingBouncerIdentityChange: BouncerIdentityChange? = null,
 ) {
-    val canSave: Boolean get() = server.isValid && auth.isValid &&
-        (obfsMode != ObfsMode.EMBEDDED_REALITY || VlessLink.parse(obfsLink).isSuccess)
+    val vlessLinkError: String?
+        get() = if (obfsMode == ObfsMode.EMBEDDED_REALITY) vlessLinkValidationError(obfsLink) else null
+    val canSave: Boolean get() = server.isValid && auth.isValid && vlessLinkError == null
 }
+
+/** User-safe validation copy for the VLESS field; never echoes a potentially sensitive URI. */
+internal fun vlessLinkValidationError(link: String): String? {
+    return VlessLink.parse(link).exceptionOrNull()?.message
+}
+
+/** Details displayed before changing the endpoint/credentials a bouncer's child mirrors inherit. */
+data class BouncerIdentityChange(val localMirrorCount: Int)
+
+/**
+ * Whether two bouncer-root rows address the same inherited child transport/login identity.
+ *
+ * This deliberately excludes display and IRC identity fields (nick/user/realname), the SASL
+ * password, and proxy/VLESS configuration: those edits do not make existing local mirrors refer
+ * to a different bouncer account. Host comparison follows DNS semantics and treats incidental
+ * whitespace in optional text fields as non-semantic.
+ */
+internal fun bouncerIdentityChanged(before: NetworkEntity, after: NetworkEntity): Boolean =
+    normalizeBouncerHost(before.host) != normalizeBouncerHost(after.host) ||
+        before.port != after.port ||
+        before.tls != after.tls ||
+        before.wsUrl.normalizedOptional() != after.wsUrl.normalizedOptional() ||
+        before.saslMechanism != after.saslMechanism ||
+        before.saslUser.normalizedOptional() != after.saslUser.normalizedOptional() ||
+        before.clientCertAlias.normalizedOptional() != after.clientCertAlias.normalizedOptional()
+
+private fun normalizeBouncerHost(host: String): String = host.trim().trimEnd('.').lowercase()
+private fun String?.normalizedOptional(): String? = this?.trim()?.ifBlank { null }
 
 @HiltViewModel
 class NetworkSettingsViewModel @Inject constructor(
@@ -51,6 +83,7 @@ class NetworkSettingsViewModel @Inject constructor(
     val state: StateFlow<NetworkSettingsUiState> = _state.asStateFlow()
 
     private var networkId: Long = 0
+    private var pendingBouncerUpdate: NetworkEntity? = null
 
     fun init(networkId: Long) {
         if (_state.value.loaded) return
@@ -119,7 +152,61 @@ class NetworkSettingsViewModel @Inject constructor(
 
     fun save(onDone: () -> Unit) = viewModelScope.launch {
         val current = _state.value.entity ?: return@launch
-        val updated = buildNetworkEntity(
+        val updated = updatedNetwork(current)
+        val children = if (current.role == NetworkRole.BOUNCER_ROOT && bouncerIdentityChanged(current, updated)) {
+            networkRepository.childrenOf(current.id)
+        } else {
+            emptyList()
+        }
+        if (children.isNotEmpty()) {
+            pendingBouncerUpdate = updated
+            _state.value = _state.value.copy(
+                pendingBouncerIdentityChange = BouncerIdentityChange(children.size),
+            )
+        } else {
+            networkRepository.updateNetwork(updated)
+            onDone()
+        }
+    }
+
+    /** Keep child mirrors only when the user explicitly accepts their inherited identity change. */
+    fun keepLocalMirrors(onDone: () -> Unit) = resolveBouncerIdentityChange(
+        removeLocalMirrors = false,
+        onDone = onDone,
+    )
+
+    /** Remove only local child mirrors/history; this never deletes bouncer-side networks. */
+    fun removeLocalMirrors(onDone: () -> Unit) = resolveBouncerIdentityChange(
+        removeLocalMirrors = true,
+        onDone = onDone,
+    )
+
+    fun cancelBouncerIdentityChange() {
+        pendingBouncerUpdate = null
+        _state.value = _state.value.copy(pendingBouncerIdentityChange = null)
+    }
+
+    private fun resolveBouncerIdentityChange(removeLocalMirrors: Boolean, onDone: () -> Unit) =
+        viewModelScope.launch {
+            val updated = pendingBouncerUpdate ?: return@launch
+            // Write the root first. Deleting a local child cascades only through its local Room
+            // rows; it does not issue a bouncer-side network deletion command.
+            networkRepository.updateNetwork(updated)
+            if (removeLocalMirrors) {
+                networkRepository.childrenOf(updated.id).forEach { child ->
+                    networkRepository.deleteNetwork(child.id)
+                }
+            }
+            pendingBouncerUpdate = null
+            _state.value = _state.value.copy(
+                entity = updated,
+                pendingBouncerIdentityChange = null,
+            )
+            onDone()
+        }
+
+    private fun updatedNetwork(current: NetworkEntity): NetworkEntity =
+        buildNetworkEntity(
             server = _state.value.server,
             auth = _state.value.auth,
             role = current.role,
@@ -137,9 +224,6 @@ class NetworkSettingsViewModel @Inject constructor(
             obfsLink = _state.value.obfsLink,
             // Persist the current autoConnect value alongside the form fields.
         ).copy(autoConnect = _state.value.autoConnect)
-        networkRepository.updateNetwork(updated)
-        onDone()
-    }
 
     fun delete(onDone: () -> Unit) = viewModelScope.launch {
         _state.value.entity?.let { networkRepository.deleteNetwork(it.id) }

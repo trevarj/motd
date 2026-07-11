@@ -215,6 +215,28 @@ class EventProcessorTest {
         assertTrue(children.isEmpty())
     }
 
+    @Test
+    fun bouncerNetworkState_partialUpdate_preservesExistingConnectionFields() = runTest {
+        val rootId = db.networkDao().insert(
+            NetworkEntity(
+                name = "soju", role = NetworkRole.BOUNCER_ROOT,
+                host = "bnc.example", port = 6697, nick = "rootNick", username = "me", realname = "Me",
+            ),
+        )
+        processor.process(rootId, IrcEvent.BouncerNetworkState("42", mapOf(
+            "name" to "OFTC", "host" to "irc.oftc.net", "port" to "6698", "nickname" to "childNick",
+        )))
+
+        // Soju's later NETWORK notifications may omit unchanged attrs. They must not replace the
+        // child endpoint/nick with root defaults, which would churn the child's fingerprint.
+        processor.process(rootId, IrcEvent.BouncerNetworkState("42", mapOf("name" to "OFTC")))
+
+        val child = db.networkDao().childrenOf(rootId).single()
+        assertEquals("irc.oftc.net", child.host)
+        assertEquals(6698, child.port)
+        assertEquals("childNick", child.nick)
+    }
+
     // --- Round 5: server buffer routing (plans/16 §5.6) ---
 
     private suspend fun serverBuffer() = db.bufferDao().byName(networkId, "*")

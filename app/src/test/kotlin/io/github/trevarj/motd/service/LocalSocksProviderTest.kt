@@ -16,15 +16,31 @@ class LocalSocksProviderTest {
     ).getOrThrow()
 
     @Test
-    fun `starts once and reuses the endpoint for the same link`() {
-        val engine = FakeEngine(Result.success(11999))
-        val provider = LocalSocksProvider.forTest { engine }
+    fun `shares one endpoint for leases of the same link`() {
+        val first = FakeEngine(Result.success(11999))
+        val provider = LocalSocksProvider.forTest { first }
 
         assertEquals(11999, provider.start(link).getOrThrow().port)
         assertEquals(11999, provider.start(link).getOrThrow().port)
-        assertEquals(1, engine.starts)
-        assertTrue(engine.lastJson!!.contains("\"listen\":\"127.0.0.1\""))
-        assertTrue(engine.lastJson!!.contains("\"fingerprint\":\"firefox\""))
+        assertEquals(1, first.starts)
+        assertTrue(first.lastJson!!.contains("\"listen\":\"127.0.0.1\""))
+        assertTrue(first.lastJson!!.contains("\"fingerprint\":\"firefox\""))
+    }
+
+    @Test
+    fun `lease release stops shared core only after last release`() {
+        val first = FakeEngine(Result.success(11999))
+        val provider = LocalSocksProvider.forTest { first }
+
+        val firstLease = provider.acquire(link).getOrThrow()
+        val secondLease = provider.acquire(link).getOrThrow()
+
+        firstLease.release()
+        firstLease.release()
+        assertEquals(0, first.stops)
+
+        secondLease.release()
+        assertEquals(1, first.stops)
     }
 
     @Test
@@ -34,14 +50,18 @@ class LocalSocksProviderTest {
     }
 
     @Test
-    fun `stop clears cached endpoint`() {
-        val engine = FakeEngine(Result.success(11999))
-        val provider = LocalSocksProvider.forTest { engine }
+    fun `stop clears all active endpoints`() {
+        val first = FakeEngine(Result.success(11999))
+        val second = FakeEngine(Result.success(12000))
+        val engines = ArrayDeque(listOf(first, second))
+        val provider = LocalSocksProvider.forTest { engines.removeFirst() }
+
         provider.start(link).getOrThrow()
+        provider.start(link).getOrThrow()
+
         provider.stop()
-        provider.start(link).getOrThrow()
-        assertEquals(2, engine.starts)
-        assertEquals(1, engine.stops)
+        assertEquals(1, first.stops)
+        assertEquals(0, second.stops)
     }
 
     @Test

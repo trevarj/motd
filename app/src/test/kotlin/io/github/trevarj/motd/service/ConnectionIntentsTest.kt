@@ -2,6 +2,7 @@ package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.irc.event.IrcClientState
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -62,8 +63,25 @@ class ConnectionIntentsTest {
     fun `orphan BOUNCER_CHILD is excluded even when wanted`() {
         val orphan = net(1, autoConnect = true, role = NetworkRole.BOUNCER_CHILD, parentId = null)
         val bound = net(2, autoConnect = true, role = NetworkRole.BOUNCER_CHILD, parentId = 9L)
-        assertEquals(setOf(2L), wantedNetworkIds(listOf(orphan, bound), emptyMap()))
+        val states = mapOf(9L to IrcClientState.Ready("motd", emptySet(), emptyMap()))
+        assertEquals(setOf(2L), wantedNetworkIds(listOf(orphan, bound), emptyMap(), states))
         // An explicit force-connect still cannot resurrect an orphan child.
-        assertEquals(setOf(2L), wantedNetworkIds(listOf(orphan, bound), mapOf(1L to true)))
+        assertEquals(setOf(2L), wantedNetworkIds(listOf(orphan, bound), mapOf(1L to true), states))
+    }
+
+    @Test
+    fun `bouncer child waits until parent root is ready`() {
+        val root = net(1, autoConnect = true, role = NetworkRole.BOUNCER_ROOT)
+        val child = net(2, autoConnect = true, role = NetworkRole.BOUNCER_CHILD, parentId = 1L)
+
+        assertEquals(setOf(1L), wantedNetworkIds(listOf(root, child), emptyMap()))
+        assertEquals(
+            setOf(1L, 2L),
+            wantedNetworkIds(
+                listOf(root, child),
+                emptyMap(),
+                states = mapOf(1L to IrcClientState.Ready("motd", emptySet(), emptyMap())),
+            ),
+        )
     }
 }

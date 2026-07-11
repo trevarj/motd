@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -88,6 +89,9 @@ fun NetworkSettingsScreen(
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
         onSave = { viewModel.save(onBack) },
+        onCancelBouncerIdentityChange = viewModel::cancelBouncerIdentityChange,
+        onKeepLocalMirrors = { viewModel.keepLocalMirrors(onBack) },
+        onRemoveLocalMirrors = { viewModel.removeLocalMirrors(onBack) },
         onDelete = { viewModel.delete(onBack) },
         onConnect = viewModel::connect,
         onDisconnect = viewModel::disconnect,
@@ -112,6 +116,9 @@ fun NetworkSettingsContent(
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
     onSave: () -> Unit,
+    onCancelBouncerIdentityChange: () -> Unit = {},
+    onKeepLocalMirrors: () -> Unit = {},
+    onRemoveLocalMirrors: () -> Unit = {},
     onDelete: () -> Unit,
     onConnect: () -> Unit = {},
     onDisconnect: () -> Unit = {},
@@ -243,6 +250,37 @@ fun NetworkSettingsContent(
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) {
                     Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
+    state.pendingBouncerIdentityChange?.let { change ->
+        AlertDialog(
+            onDismissRequest = onCancelBouncerIdentityChange,
+            title = { Text("Update bouncer connection?") },
+            text = {
+                Text(
+                    "This changes the connection or login inherited by " +
+                        "${change.localMirrorCount} local bouncer " +
+                        (if (change.localMirrorCount == 1) "mirror." else "mirrors.") +
+                        " You can keep them, or remove their local buffers and history. " +
+                        "Removing mirrors does not change anything on the bouncer.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = onRemoveLocalMirrors) {
+                    Text("Remove local mirrors")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = onCancelBouncerIdentityChange) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                    TextButton(onClick = onKeepLocalMirrors) {
+                        Text("Keep local mirrors")
+                    }
                 }
             },
         )
@@ -420,6 +458,13 @@ private fun ObfuscationSection(
             }
             ObfsMode.EMBEDDED_REALITY -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
+                    "The VLESS URI's host and port are the public tunnel ingress on your VPS. " +
+                        "The Server host and port fields below remain the bouncer destination " +
+                        "inside that tunnel (for example Docker soju:6697), not the VPS IP.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
                     stringResource(R.string.network_settings_obfs_reality_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -430,7 +475,15 @@ private fun ObfuscationSection(
                     label = { Text(stringResource(R.string.network_settings_obfs_reality_link)) },
                     placeholder = { Text("vless://uuid@host:443?type=tcp&security=reality&…") },
                     singleLine = false,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+                    isError = vlessLinkValidationError(obfsLink) != null,
+                    supportingText = {
+                        vlessLinkValidationError(obfsLink)?.let { Text(it) }
+                    },
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Uri,
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                    ),
                     modifier = Modifier.fillMaxWidth().testTag("network_obfs_link"),
                 )
             }

@@ -2,17 +2,16 @@ package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.irc.event.IrcClientState
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
  * Unit tests for the "reconnect bouncer children when the root reconnects" behavior. When a
- * BOUNCER_ROOT transitions into Ready, [ConnectionManagerImpl.onReady] iterates
- * [childrenToReconnect] and force-reconnects each returned child via `connect(id)` — the same
- * drop-and-rebuild path used for trust reconnects. A child's actor dies while the root is down
- * (the bound transport is gone) and a plain reconcile won't rebuild the parked Failed actor, so an
- * explicit connect() is required. Pure-function testing style matching [ConnectionIntentsTest] /
- * [TrustReconnectTest].
+ * BOUNCER_ROOT transitions into Ready, [ConnectionManagerImpl.onReady] only rebuilds wanted
+ * children which are absent, dead, or terminally disconnected/failed. A child's actor can die
+ * while the root is down, while rebuilding a live Connecting/Registering/Ready actor races or
+ * interrupts its bouncer connection.
  */
 class ChildReconnectTest {
 
@@ -35,23 +34,45 @@ class ChildReconnectTest {
     )
 
     @Test
-    fun `wanted children of the root are reconnected`() {
+    fun `healthy Ready child is not restarted`() {
         val root = net(1, role = NetworkRole.BOUNCER_ROOT)
         val childA = net(2, role = NetworkRole.BOUNCER_CHILD, parentId = 1L)
         val childB = net(3, role = NetworkRole.BOUNCER_CHILD, parentId = 1L)
         assertEquals(
-            setOf(2L, 3L),
-            childrenToReconnect(1L, listOf(root, childA, childB), emptyMap()),
+            emptySet<Long>(),
+            childrenNeedingReconnect(
+                1L, listOf(root, childA, childB), emptyMap(),
+                actorAlive = mapOf(2L to true, 3L to true),
+                states = mapOf(2L to ready(), 3L to ready()),
+            ),
         )
     }
 
     @Test
-    fun `children of a different root are excluded`() {
+    fun `live child still connecting or registering is not restarted`() {
+        val connecting = net(2, role = NetworkRole.BOUNCER_CHILD, parentId = 1L)
+        val registering = net(3, role = NetworkRole.BOUNCER_CHILD, parentId = 1L)
+        assertEquals(
+            emptySet<Long>(),
+            childrenNeedingReconnect(
+                1L, listOf(connecting, registering), emptyMap(),
+                actorAlive = mapOf(2L to true, 3L to true),
+                states = mapOf(2L to IrcClientState.Connecting, 3L to IrcClientState.Registering),
+            ),
+        )
+    }
+
+    @Test
+    fun `stale child is restarted but healthy sibling is preserved`() {
         val ownChild = net(2, role = NetworkRole.BOUNCER_CHILD, parentId = 1L)
-        val otherChild = net(3, role = NetworkRole.BOUNCER_CHILD, parentId = 9L)
+        val healthyChild = net(3, role = NetworkRole.BOUNCER_CHILD, parentId = 1L)
         assertEquals(
             setOf(2L),
-            childrenToReconnect(1L, listOf(ownChild, otherChild), emptyMap()),
+            childrenNeedingReconnect(
+                1L, listOf(ownChild, healthyChild), emptyMap(),
+                actorAlive = mapOf(2L to false, 3L to true),
+                states = mapOf(2L to IrcClientState.Failed("root was down", fatal = false), 3L to ready()),
+            ),
         )
     }
 
@@ -62,7 +83,7 @@ class ChildReconnectTest {
         // User explicitly disconnected child 2: intent false overrides autoConnect=true.
         assertEquals(
             setOf(3L),
-            childrenToReconnect(1L, listOf(childA, childB), mapOf(2L to false)),
+            childrenNeedingReconnect(1L, listOf(childA, childB), mapOf(2L to false), emptyMap(), emptyMap()),
         )
     }
 
@@ -73,7 +94,7 @@ class ChildReconnectTest {
         // autoConnect=false and no intent -> skipped; force-connect intent true -> reconnected.
         assertEquals(
             setOf(3L),
-            childrenToReconnect(1L, listOf(autoOff, forced), mapOf(3L to true)),
+            childrenNeedingReconnect(1L, listOf(autoOff, forced), mapOf(3L to true), emptyMap(), emptyMap()),
         )
     }
 
@@ -85,7 +106,9 @@ class ChildReconnectTest {
         val directWithParent = net(5, role = NetworkRole.DIRECT, parentId = 1L)
         assertEquals(
             emptySet<Long>(),
-            childrenToReconnect(1L, listOf(root, direct, directWithParent), emptyMap()),
+            childrenNeedingReconnect(1L, listOf(root, direct, directWithParent), emptyMap(), emptyMap(), emptyMap()),
         )
     }
+
+    private fun ready() = IrcClientState.Ready("motd", emptySet(), emptyMap())
 }

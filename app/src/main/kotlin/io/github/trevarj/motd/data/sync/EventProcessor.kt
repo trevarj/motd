@@ -404,8 +404,15 @@ class EventProcessor @Inject constructor(
             )
         } else {
             // Preserve the row's current name on update: it may be a user-set alias, and the
-            // bouncer name is only authoritative when the child is first created above.
-            networkDao.update(existing.copy(host = host, port = port, nick = nick))
+            // bouncer name is only authoritative when the child is first created above. Soju may
+            // send a partial NETWORK notification; absent attrs mean "unchanged", not "use the
+            // root defaults". Replacing child host/port/nick with root values changes its
+            // connection fingerprint and restarts an otherwise healthy bound actor.
+            networkDao.update(existing.copy(
+                host = e.attrs["host"] ?: existing.host,
+                port = e.attrs["port"]?.toIntOrNull() ?: existing.port,
+                nick = e.attrs["nickname"] ?: existing.nick,
+            ))
         }
     }
 
