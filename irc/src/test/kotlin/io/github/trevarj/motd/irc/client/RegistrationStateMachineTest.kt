@@ -30,6 +30,7 @@ class RegistrationStateMachineTest {
         val afterFirstBindCapChange = machine.onMessage(cap("DEL", "draft/message-redaction"))
         assertTrue(afterFirstBindCapChange.any { it is RegistrationStateMachine.Action.Complete })
         assertTrue(afterFirstBindCapChange.sentLines().isEmpty())
+        assertTrue(afterFirstBindCapChange.deferredLines().single().contains("draft/chathistory"))
     }
 
     @Test
@@ -79,6 +80,7 @@ class RegistrationStateMachineTest {
         val afterCapChange = machine.onMessage(cap("DEL", "extended-monitor"))
         assertTrue(afterCapChange.any { it is RegistrationStateMachine.Action.Complete })
         assertTrue(afterCapChange.sentLines().isEmpty())
+        assertTrue(afterCapChange.deferredLines().single().contains("server-time"))
     }
 
     private fun cap(subcommand: String, caps: String) =
@@ -87,6 +89,6 @@ class RegistrationStateMachineTest {
     private fun List<RegistrationStateMachine.Action>.sentLines(): List<String> =
         filterIsInstance<RegistrationStateMachine.Action.Send>().map { it.line }
 
-    private fun List<RegistrationStateMachine.Action>.anySendStartingWith(prefix: String): Boolean =
-        sentLines().any { it.startsWith(prefix) }
+    private fun List<RegistrationStateMachine.Action>.deferredLines(): List<String> =
+        filterIsInstance<RegistrationStateMachine.Action.SendDeferred>().map { it.line }
 }

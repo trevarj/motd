@@ -18,6 +18,7 @@ internal class RegistrationStateMachine(
         data class Send(val line: String) : Action
         /** Our nick changed (initial, or after a 433 retry) — client must update self-nick. */
         data class SetNick(val nick: String) : Action
+        data class SendDeferred(val line: String, val delayMs: Long) : Action
         /** Registration succeeded. */
         data class Complete(val nick: String, val caps: Set<String>, val isupport: Isupport) : Action
         /** Registration failed terminally. */
@@ -196,17 +197,14 @@ internal class RegistrationStateMachine(
     private fun onCapChangedBeforeWelcome(): List<Action> {
         if (phase != Phase.WELCOME || !isBouncerChildRegistration()) return emptyList()
         phase = Phase.DONE
-        // Do not send the deferred feature CAP REQs here.  At this point the server is still
-        // finishing registration and Android's embedded stream can expose the capability mutation
-        // before it exposes the final 001 burst.  Injecting another CAP REQ into that half-open
-        // transition races the server and leaves the child socket writable-looking but unable to
-        // relay subsequent PRIVMSGs.  The normal 001 path below still requests the features when
-        // the complete welcome is visible; the fallback intentionally keeps only the minimum
-        // authenticated stream alive.
-        return listOf(
+        val actions = mutableListOf<Action>(
             Action.SetNick(nick),
             Action.Complete(nick, acked.toSet(), isupport),
         )
+        for (batch in CapNegotiator.batches(postWelcomeCapReqs.toSet())) {
+            actions.add(Action.SendDeferred("CAP REQ :$batch", FALLBACK_FEATURE_CAP_DELAY_MS))
+        }
+        return actions
     }
 
     private fun onIsupport(msg: IrcMessage) {
@@ -243,4 +241,8 @@ internal class RegistrationStateMachine(
 
     private fun isBouncerChildRegistration(): Boolean =
         config.bouncerNetId != null || config.saslUser?.contains('/') == true
+
+    companion object {
+        const val FALLBACK_FEATURE_CAP_DELAY_MS = 1_000L
+    }
 }

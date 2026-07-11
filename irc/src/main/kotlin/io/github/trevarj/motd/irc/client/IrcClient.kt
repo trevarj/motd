@@ -210,6 +210,10 @@ class IrcClient(
     private suspend fun applyRegAction(a: RegistrationStateMachine.Action, t: IrcTransport) {
         when (a) {
             is RegistrationStateMachine.Action.Send -> runCatching { t.send(a.line) }
+            is RegistrationStateMachine.Action.SendDeferred -> scope.launch {
+                delay(a.delayMs)
+                if (transport === t) runCatching { t.send(a.line) }
+            }
             is RegistrationStateMachine.Action.SetNick -> selfNick.set(a.nick)
             is RegistrationStateMachine.Action.Complete -> {
                 selfNick.set(a.nick)
@@ -291,12 +295,21 @@ class IrcClient(
             }
             "DEL" -> {
                 ackedCaps.set(ackedCaps.get().filterNot { it.substringBefore('=') in caps }.toSet())
+                updateReadyCaps(ackedCaps.get())
                 _events.emit(IrcEvent.CapsChanged(emptySet(), caps))
             }
             "ACK" -> {
                 ackedCaps.set(ackedCaps.get() + caps)
+                updateReadyCaps(ackedCaps.get())
                 _events.emit(IrcEvent.CapsChanged(caps, emptySet()))
             }
+        }
+    }
+
+    private fun updateReadyCaps(caps: Set<String>) {
+        val current = _state.value
+        if (current is IrcClientState.Ready) {
+            _state.value = current.copy(caps = caps)
         }
     }
 
