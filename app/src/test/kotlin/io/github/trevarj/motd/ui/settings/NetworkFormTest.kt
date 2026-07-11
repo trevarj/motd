@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.settings
 
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
@@ -11,6 +12,24 @@ import org.junit.Test
 
 /** Field-matrix coverage for [buildNetworkEntity] across the connection variants. */
 class NetworkFormTest {
+
+    @Test
+    fun `embedded REALITY persists only the VLESS link and never a proxy endpoint`() {
+        val entity = buildNetworkEntity(
+            server = ServerForm(host = "bnc.example.org", nick = "me"),
+            auth = AuthForm(),
+            role = NetworkRole.DIRECT,
+            obfsMode = ObfsMode.EMBEDDED_REALITY,
+            proxyHost = "127.0.0.1",
+            proxyPort = 1080,
+            obfsLink = "  vless://uuid@example:443?type=tcp  ",
+        )
+
+        assertEquals(ObfsMode.EMBEDDED_REALITY, entity.obfsMode)
+        assertEquals("vless://uuid@example:443?type=tcp", entity.obfsLink)
+        assertNull(entity.proxyHost)
+        assertNull(entity.proxyPort)
+    }
 
     @Test
     fun `soju root uses the collected nick, not the SASL username`() {

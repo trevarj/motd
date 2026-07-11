@@ -177,6 +177,35 @@ tcp:1080`, and prints the `vless://` share link. It refuses to start if `:8443` 
 proxy, completes soju's TLS 1.3 handshake, and reads soju's `CAP LS` banner —
 proving the server + client REALITY configs carry IRC end-to-end.
 
+### Cross-core embedded-client gate
+
+The normal `obfs-*` path proves Xray can act as the client for the documented
+sing-box server. It does **not** prove that libbox/sing-box can act as the
+client. Run this separate compatibility gate before relying on an embedded
+libbox client:
+
+```sh
+./test/e2e/local-stack.sh up
+./test/e2e/local-stack.sh obfs-xray-up
+./test/e2e/local-stack.sh obfs-xray-validate
+./test/e2e/local-stack.sh obfs-xray-negative
+./test/e2e/local-stack.sh obfs-xray-down
+./test/e2e/local-stack.sh down
+```
+
+It uses separate ports by default (`Xray` REALITY server `127.0.0.1:8444`,
+sing-box SOCKS client `127.0.0.1:1081`) and writes artifacts to
+`/tmp/motd-stack/obfs-xray/`. The validator must report both TLS and an IRC
+`CAP LS` response. `obfs-xray-up` is deliberately a proof gate only: it does
+not change the app and must not be treated as evidence that sing-box can
+authenticate to the existing sing-box server. Override its ports with
+`MOTD_XRAY_REALITY_PORT` and `MOTD_SINGBOX_SOCKS_PORT`.
+
+`obfs-xray-negative` starts a second temporary sing-box SOCKS client with one
+character of the REALITY public key changed. Its SOCKS `CONNECT` must fail;
+otherwise the proof gate fails. Override its separate temporary port with
+`MOTD_SINGBOX_BAD_SOCKS_PORT`.
+
 Overrides: `MOTD_SOCKS_PORT`, `MOTD_REALITY_PORT`, `MOTD_HANDSHAKE_DOMAIN` (e.g.
 if `1080` is taken locally, `MOTD_SOCKS_PORT=11080 ./test/e2e/local-stack.sh
 obfs-up`).

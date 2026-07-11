@@ -31,6 +31,13 @@ interface IrcTransport {
     suspend fun close()
 }
 
+/**
+ * A persisted transport setting is invalid or asks for a combination this build cannot route.
+ * Unlike a transient IO failure, retrying cannot fix it; [IrcClient] exposes it as a fatal failed
+ * state so the connection actor parks until the user changes the setting.
+ */
+class TransportConfigurationException(message: String) : IllegalStateException(message)
+
 fun interface TransportFactory {
     /**
      * Build a transport for [host]:[port]. When [wsUrl] is non-null (plans/19 §3.3) the factory may

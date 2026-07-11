@@ -1,0 +1,29 @@
+# Third-party notices
+
+## Current distribution
+
+This source tree vendors the pinned arm64-v8a libbox AAR used by the embedded
+transport:
+
+- Artifact: `app/libs/libbox.aar`
+- sing-box version: `v1.13.12`
+- Delivery variant: explicit `phase2Arm64` product flavor
+- ABI: `arm64-v8a` only; unsupported ABI variants are not built
+- SHA-256: `ef8b4a00eb2e2de7b9a593db18f5190431d1cd311066bde76792bfb1a262a88f`
+- Build manifest: `app/libs/libbox-v1.13.12.manifest`
+
+## Planned embedded transport: sing-box / libbox
+
+The planned embedded VLESS + REALITY transport uses libbox from
+[SagerNet/sing-box](https://github.com/SagerNet/sing-box). The pinned upstream
+source is sing-box **v1.13.12**, commit
+[`1086ab2563320e0da0c23b3a491d8dfa0939dff4`](https://github.com/SagerNet/sing-box/commit/1086ab2563320e0da0c23b3a491d8dfa0939dff4),
+with its Android submodule at
+[`772879ce9cd37c29e377d4d44d0efee12662948d`](https://github.com/SagerNet/sing-box-for-android/commit/772879ce9cd37c29e377d4d44d0efee12662948d).
+
+sing-box is GPL-3.0-or-later. The exact corresponding-source inputs and a
+rebuild procedure are documented in
+[third_party/sing-box/README.md](third_party/sing-box/README.md), with pins in
+[third_party/sing-box/source.lock](third_party/sing-box/source.lock). Any
+release that conveys this AAR must also make the complete source snapshot used
+for that release available under GPL-3.0-or-later.

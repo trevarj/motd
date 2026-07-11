@@ -6,6 +6,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.onboarding.AuthForm
@@ -28,6 +29,7 @@ data class NetworkSettingsUiState(
     val obfsMode: ObfsMode = ObfsMode.NONE,
     val proxyHost: String = "",
     val proxyPort: String = "",
+    val obfsLink: String = "",
     val server: ServerForm = ServerForm(),
     val auth: AuthForm = AuthForm(),
     // Round 5 (plans/16 §5.3): live status + autoConnect editing.
@@ -35,7 +37,8 @@ data class NetworkSettingsUiState(
     val autoConnect: Boolean = true,
     val parentName: String? = null,   // root name for a BOUNCER_CHILD's "Managed by" row
 ) {
-    val canSave: Boolean get() = server.isValid && auth.isValid
+    val canSave: Boolean get() = server.isValid && auth.isValid &&
+        (obfsMode != ObfsMode.EMBEDDED_REALITY || VlessLink.parse(obfsLink).isSuccess)
 }
 
 @HiltViewModel
@@ -63,6 +66,7 @@ class NetworkSettingsViewModel @Inject constructor(
                 obfsMode = n?.obfsMode ?: ObfsMode.NONE,
                 proxyHost = n?.proxyHost.orEmpty(),
                 proxyPort = n?.proxyPort?.toString().orEmpty(),
+                obfsLink = n?.obfsLink.orEmpty(),
                 server = n?.toServerForm() ?: ServerForm(),
                 auth = n?.toAuthForm() ?: AuthForm(),
                 autoConnect = n?.autoConnect ?: true,
@@ -89,6 +93,7 @@ class NetworkSettingsViewModel @Inject constructor(
     fun editProxyPort(port: String) {
         _state.value = _state.value.copy(proxyPort = port.filter(Char::isDigit))
     }
+    fun editObfsLink(link: String) { _state.value = _state.value.copy(obfsLink = link) }
 
     /** "Route via Tor (Orbot)" shortcut: pin SOCKS5 at 127.0.0.1:9050 (plans/19 §3.4). */
     fun useTorShortcut() {
@@ -129,6 +134,7 @@ class NetworkSettingsViewModel @Inject constructor(
             obfsMode = _state.value.obfsMode,
             proxyHost = _state.value.proxyHost,
             proxyPort = _state.value.proxyPort.toIntOrNull(),
+            obfsLink = _state.value.obfsLink,
             // Persist the current autoConnect value alongside the form fields.
         ).copy(autoConnect = _state.value.autoConnect)
         networkRepository.updateNetwork(updated)

@@ -83,6 +83,7 @@ fun NetworkSettingsScreen(
         onObfsModeChange = viewModel::editObfsMode,
         onProxyHostChange = viewModel::editProxyHost,
         onProxyPortChange = viewModel::editProxyPort,
+        onObfsLinkChange = viewModel::editObfsLink,
         onUseTor = viewModel::useTorShortcut,
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
@@ -106,6 +107,7 @@ fun NetworkSettingsContent(
     onObfsModeChange: (ObfsMode) -> Unit = {},
     onProxyHostChange: (String) -> Unit = {},
     onProxyPortChange: (String) -> Unit = {},
+    onObfsLinkChange: (String) -> Unit = {},
     onUseTor: () -> Unit = {},
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
@@ -181,9 +183,11 @@ fun NetworkSettingsContent(
                     mode = state.obfsMode,
                     proxyHost = state.proxyHost,
                     proxyPort = state.proxyPort,
+                    obfsLink = state.obfsLink,
                     onModeChange = onObfsModeChange,
                     onProxyHostChange = onProxyHostChange,
                     onProxyPortChange = onProxyPortChange,
+                    onObfsLinkChange = onObfsLinkChange,
                     onUseTor = onUseTor,
                 )
             }
@@ -323,17 +327,20 @@ private fun AutoConnectRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit)
 
 /**
  * Collapsible "Connection / Obfuscation" section (plans/20 Phase 1). Off by default: a header row
- * with an expand toggle reveals the mode selector; SOCKS5/REALITY reveal host/port; a "Route via
- * Tor (Orbot)" shortcut pins 127.0.0.1:9050. Stateless — the ViewModel owns the values.
+ * with an expand toggle reveals the mode selector; SOCKS5 reveals host/port and embedded REALITY
+ * accepts only a share link. A "Route via Tor (Orbot)" shortcut pins 127.0.0.1:9050. Stateless —
+ * the ViewModel owns the values.
  */
 @Composable
 private fun ObfuscationSection(
     mode: ObfsMode,
     proxyHost: String,
     proxyPort: String,
+    obfsLink: String,
     onModeChange: (ObfsMode) -> Unit,
     onProxyHostChange: (String) -> Unit,
     onProxyPortChange: (String) -> Unit,
+    onObfsLinkChange: (String) -> Unit,
     onUseTor: () -> Unit,
 ) {
     // Auto-expand when a non-default mode is already configured so an edited network shows its proxy.
@@ -370,23 +377,16 @@ private fun ObfuscationSection(
             ObfsOption(ObfsMode.TOR, mode, stringResource(R.string.network_settings_obfs_mode_tor), onModeChange)
             ObfsOption(ObfsMode.EMBEDDED_REALITY, mode, stringResource(R.string.network_settings_obfs_mode_reality), onModeChange)
         }
-        // TOR pins Orbot's endpoint and hides the host/port; SOCKS5/REALITY reveal editable fields.
+        // TOR pins Orbot's endpoint; embedded REALITY is fully configured by its share link.
         when (mode) {
             ObfsMode.TOR -> Text(
                 stringResource(R.string.network_settings_obfs_tor_desc),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            ObfsMode.SOCKS5, ObfsMode.EMBEDDED_REALITY -> Column(
+            ObfsMode.SOCKS5 -> Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (mode == ObfsMode.EMBEDDED_REALITY) {
-                    Text(
-                        stringResource(R.string.network_settings_obfs_reality_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 OutlinedTextField(
                     value = proxyHost,
                     onValueChange = onProxyHostChange,
@@ -416,6 +416,22 @@ private fun ObfuscationSection(
                     stringResource(R.string.network_settings_obfs_dns_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            ObfsMode.EMBEDDED_REALITY -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(R.string.network_settings_obfs_reality_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = obfsLink,
+                    onValueChange = onObfsLinkChange,
+                    label = { Text(stringResource(R.string.network_settings_obfs_reality_link)) },
+                    placeholder = { Text("vless://uuid@host:443?type=tcp&security=reality&…") },
+                    singleLine = false,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+                    modifier = Modifier.fillMaxWidth().testTag("network_obfs_link"),
                 )
             }
             ObfsMode.NONE -> Unit

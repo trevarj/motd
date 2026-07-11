@@ -51,11 +51,42 @@ class ProxyForNetworkTest {
     }
 
     @Test
-    fun `SOCKS5 with a missing or invalid endpoint falls back to direct`() {
+    fun `SOCKS5 with a missing or invalid endpoint is a configuration failure`() {
         assertNull(proxyForNetwork(ObfsMode.SOCKS5, null, 1080))
         assertNull(proxyForNetwork(ObfsMode.SOCKS5, "  ", 1080))
         assertNull(proxyForNetwork(ObfsMode.SOCKS5, "127.0.0.1", null))
         assertNull(proxyForNetwork(ObfsMode.SOCKS5, "127.0.0.1", 0))
         assertNull(proxyForNetwork(ObfsMode.SOCKS5, "127.0.0.1", 70000))
+
+        assertEquals("SOCKS5 proxy host is required", proxyConfigurationErrorForNetwork(ObfsMode.SOCKS5, null, 1080))
+        assertEquals("SOCKS5 proxy host is required", proxyConfigurationErrorForNetwork(ObfsMode.EMBEDDED_REALITY, " ", 1080))
+        assertEquals("SOCKS5 proxy port must be between 1 and 65535", proxyConfigurationErrorForNetwork(ObfsMode.SOCKS5, "127.0.0.1", 0))
+        assertEquals("SOCKS5 proxy port must be between 1 and 65535", proxyConfigurationErrorForNetwork(ObfsMode.SOCKS5, "127.0.0.1", null))
+    }
+
+    @Test
+    fun `configured proxy and WebSocket are rejected rather than bypassing the proxy`() {
+        val proxy = proxyForNetwork(ObfsMode.SOCKS5, "127.0.0.1", 1080)!!
+        val torProxy = proxyForNetwork(ObfsMode.TOR, null, null)!!
+
+        assertEquals(
+            "WebSocket transport cannot be used with a SOCKS5 or Tor proxy",
+            transportConfigurationError("wss://bnc.example.test/", proxy, null),
+        )
+        assertEquals(
+            "WebSocket transport cannot be used with a SOCKS5 or Tor proxy",
+            transportConfigurationError("wss://bnc.example.test/", torProxy, null),
+        )
+        // The malformed proxy error wins even though it has no Proxy instance to pass to WSS.
+        assertEquals(
+            "SOCKS5 proxy host is required",
+            transportConfigurationError(
+                "wss://bnc.example.test/",
+                null,
+                proxyConfigurationErrorForNetwork(ObfsMode.SOCKS5, null, 1080),
+            ),
+        )
+        assertNull(transportConfigurationError(null, proxy, null))
+        assertNull(transportConfigurationError("wss://bnc.example.test/", null, null))
     }
 }

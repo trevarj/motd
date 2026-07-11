@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.irc.transport.IrcTransport
 import io.github.trevarj.motd.irc.transport.OkioLineTransport
+import io.github.trevarj.motd.irc.transport.TransportConfigurationException
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
@@ -97,11 +98,22 @@ class AppTransportFactory(
      * untouched: it still keys on the REAL host:port, which the proxy resolves and reaches remotely.
      */
     private val proxy: Proxy? = null,
+    /**
+     * A persisted proxy mode was enabled but could not be converted to a usable SOCKS endpoint.
+     * This is kept separate from [proxy] so a malformed setting cannot silently become a direct
+     * connection. The failure is returned from [IrcTransport.connect], where [IrcClient] already
+     * maps connection errors onto its visible failed state.
+     */
+    private val proxyConfigurationError: String? = null,
 ) : TransportFactory {
     override fun create(host: String, port: Int, tls: Boolean, wsUrl: String?, proxy: Proxy?): IrcTransport {
         // The per-network proxy captured at construction is the source of truth; the create() param
         // (unused by IrcClient, present for the fun-interface) takes precedence if a caller supplies one.
         val effProxy = proxy ?: this.proxy
+
+        transportConfigurationError(wsUrl, effProxy, proxyConfigurationError)?.let {
+            return ConfigurationFailureTransport(it)
+        }
 
         // Opt-in IRC-over-WebSocket transport (plans/19 §3.3). When a wsUrl is configured the
         // physical connection is a WebSocket to that URL instead of a raw TCP/TLS socket; TLS,
@@ -203,6 +215,50 @@ fun proxyForNetwork(obfsMode: ObfsMode?, proxyHost: String?, proxyPort: Int?): P
             Proxy(Proxy.Type.SOCKS, InetSocketAddress.createUnresolved(host, proxyPort))
         }
     }
+}
+
+/**
+ * Validate an enabled persisted proxy mode before a connection is built. This must be checked
+ * alongside [proxyForNetwork]: null is a legitimate direct setting only for `NONE`, never for an
+ * invalid enabled proxy. Keeping the error as data lets [AppTransportFactory] surface it through
+ * the normal `IrcClientState.Failed` path instead of throwing while the connection actor is built.
+ */
+internal fun proxyConfigurationErrorForNetwork(
+    obfsMode: ObfsMode?,
+    proxyHost: String?,
+    proxyPort: Int?,
+): String? = when (obfsMode) {
+    null, ObfsMode.NONE, ObfsMode.TOR -> null
+    ObfsMode.SOCKS5, ObfsMode.EMBEDDED_REALITY -> when {
+        proxyHost.isNullOrBlank() -> "SOCKS5 proxy host is required"
+        proxyPort == null || proxyPort !in 1..65535 -> "SOCKS5 proxy port must be between 1 and 65535"
+        else -> null
+    }
+}
+
+/**
+ * WSS is currently implemented by OkHttp without proxy plumbing. Selecting both transports used
+ * to discard [proxy] and dial WSS directly, which is a censorship-bypass and DNS-leak hazard.
+ */
+internal fun transportConfigurationError(
+    wsUrl: String?,
+    proxy: Proxy?,
+    proxyConfigurationError: String?,
+): String? = proxyConfigurationError ?: if (!wsUrl.isNullOrBlank() && proxy != null) {
+    "WebSocket transport cannot be used with a SOCKS5 or Tor proxy"
+} else {
+    null
+}
+
+/** A deferred configuration error: [connect] throws inside IrcClient's existing failure boundary. */
+private class ConfigurationFailureTransport(private val reason: String) : IrcTransport {
+    override suspend fun connect(): Nothing = throw TransportConfigurationException(reason)
+
+    override val incoming = kotlinx.coroutines.flow.emptyFlow<String>()
+
+    override suspend fun send(line: String): Nothing = throw TransportConfigurationException(reason)
+
+    override suspend fun close() = Unit
 }
 
 /**

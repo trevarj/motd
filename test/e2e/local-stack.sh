@@ -17,6 +17,10 @@
 #   ./test/e2e/local-stack.sh obfs-up   # VLESS+REALITY layer: sing-box server + Xray SOCKS client
 #   ./test/e2e/local-stack.sh obfs-down # stop the reality layer + drop its adb reverse
 #   ./test/e2e/local-stack.sh obfs-validate  # socket-level proof: IRC/TLS to soju THROUGH reality
+#   ./test/e2e/local-stack.sh obfs-xray-up       # compatibility proof: Xray server + sing-box SOCKS client
+#   ./test/e2e/local-stack.sh obfs-xray-down     # stop the compatibility proof layer
+#   ./test/e2e/local-stack.sh obfs-xray-validate # socket-level proof through that layer
+#   ./test/e2e/local-stack.sh obfs-xray-negative # reject a deliberately wrong REALITY public key
 #
 # All credentials below are ephemeral LOCAL test creds, NOT secrets.
 set -euo pipefail
@@ -49,6 +53,12 @@ REALITY_PORT="${MOTD_REALITY_PORT:-8443}"
 SOCKS_PORT="${MOTD_SOCKS_PORT:-1080}"
 HANDSHAKE_DOMAIN="${MOTD_HANDSHAKE_DOMAIN:-www.cloudflare.com}"
 OBFS_DIR="$RUN/obfs"
+# A deliberately separate cross-core compatibility path. Keep its defaults distinct
+# from obfs-* so the two proofs can be compared without port collisions.
+XRAY_REALITY_PORT="${MOTD_XRAY_REALITY_PORT:-8444}"
+SINGBOX_SOCKS_PORT="${MOTD_SINGBOX_SOCKS_PORT:-1081}"
+SINGBOX_BAD_SOCKS_PORT="${MOTD_SINGBOX_BAD_SOCKS_PORT:-1082}"
+XRAY_OBFS_DIR="$RUN/obfs-xray"
 
 log() { printf '\033[36m[local-stack]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[31m[local-stack] FATAL:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -432,6 +442,177 @@ print("PASS: IRC/TLS reached soju END-TO-END through VLESS+REALITY")
 PY
 }
 
+# ---- Cross-core REALITY compatibility proof -----------------------------------------------
+#
+# This is intentionally the inverse of obfs-*: Xray terminates the REALITY inbound and
+# sing-box is the VLESS+REALITY SOCKS client. It is the gate for an embedded libbox
+# client: do not infer client compatibility from the existing sing-box-server/Xray-client
+# test. Both hops remain on loopback; only the final direct outbound reaches local soju.
+#
+#   validator -> sing-box SOCKS -> VLESS+REALITY -> Xray -> 127.0.0.1:6697 (soju)
+
+xray_obfs_stop_pids() {
+  for p in xray singbox; do
+    local f="$XRAY_OBFS_DIR/$p.pid"
+    if [ -f "$f" ]; then kill "$(cat "$f")" 2>/dev/null || true; rm -f "$f"; fi
+  done
+  local negative="$XRAY_OBFS_DIR/singbox-negative.pid"
+  if [ -f "$negative" ]; then kill "$(cat "$negative")" 2>/dev/null || true; rm -f "$negative"; fi
+}
+
+xray_obfs_up() {
+  xray_obfs_stop_pids
+  for pp in "$XRAY_REALITY_PORT" "$SINGBOX_SOCKS_PORT"; do
+    if nc -z 127.0.0.1 "$pp" 2>/dev/null; then
+      die "port $pp already in use. Inspect: ss -ltnp | grep :$pp — kill it, run '$0 obfs-xray-down', or set MOTD_XRAY_REALITY_PORT/MOTD_SINGBOX_SOCKS_PORT"
+    fi
+  done
+  [ -S "$ADMIN_SOCK" ] || die "base stack is not up — run '$0 up' before '$0 obfs-xray-up'"
+  mkdir -p "$XRAY_OBFS_DIR"
+
+  log "reality compatibility: generate x25519 keypair + short-id + uuid"
+  local kp priv pub uuid sid
+  kp="$(sing-box generate reality-keypair)"
+  priv="$(printf '%s\n' "$kp" | awk '/PrivateKey/{print $2}')"
+  pub="$(printf '%s\n' "$kp" | awk '/PublicKey/{print $2}')"
+  uuid="$(sing-box generate uuid)"
+  sid="$(sing-box generate rand 8 --hex)"
+  printf 'UUID=%s\nPRIV=%s\nPUB=%s\nSID=%s\n' "$uuid" "$priv" "$pub" "$sid" >"$XRAY_OBFS_DIR/reality.env"
+
+  log "xray: REALITY server on 127.0.0.1:$XRAY_REALITY_PORT (handshake $HANDSHAKE_DOMAIN) -> soju :$SOJU_PORT"
+  cat >"$XRAY_OBFS_DIR/xray-server.json" <<EOF
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [ { "tag": "vless-in", "listen": "127.0.0.1", "port": $XRAY_REALITY_PORT,
+    "protocol": "vless", "settings": { "clients": [ { "id": "$uuid" } ], "decryption": "none" },
+    "streamSettings": { "network": "tcp", "security": "reality",
+      "realitySettings": { "show": false, "dest": "$HANDSHAKE_DOMAIN:443", "xver": 0,
+        "serverNames": [ "$HANDSHAKE_DOMAIN" ], "privateKey": "$priv", "shortIds": [ "$sid" ] } } } ],
+  "outbounds": [ { "tag": "direct", "protocol": "freedom" } ]
+}
+EOF
+
+  log "sing-box: REALITY client with a SOCKS5 inbound on 127.0.0.1:$SINGBOX_SOCKS_PORT"
+  cat >"$XRAY_OBFS_DIR/singbox-client.json" <<EOF
+{
+  "log": { "level": "info" },
+  "inbounds": [ { "type": "socks", "tag": "socks-in", "listen": "127.0.0.1", "listen_port": $SINGBOX_SOCKS_PORT } ],
+  "outbounds": [ { "type": "vless", "tag": "vless-out", "server": "127.0.0.1", "server_port": $XRAY_REALITY_PORT,
+    "uuid": "$uuid", "tls": { "enabled": true, "server_name": "$HANDSHAKE_DOMAIN",
+      "utls": { "enabled": true, "fingerprint": "chrome" },
+      "reality": { "enabled": true, "public_key": "$pub", "short_id": "$sid" } } } ],
+  "route": { "final": "vless-out" }
+}
+EOF
+
+  xray run -test -c "$XRAY_OBFS_DIR/xray-server.json" >/dev/null 2>&1 || die "Xray REALITY server config invalid"
+  sing-box check -c "$XRAY_OBFS_DIR/singbox-client.json" || die "sing-box REALITY client config invalid"
+
+  setsid xray run -c "$XRAY_OBFS_DIR/xray-server.json" >"$XRAY_OBFS_DIR/xray.log" 2>&1 &
+  echo $! >"$XRAY_OBFS_DIR/xray.pid"
+  setsid sing-box run -c "$XRAY_OBFS_DIR/singbox-client.json" >"$XRAY_OBFS_DIR/singbox.log" 2>&1 &
+  echo $! >"$XRAY_OBFS_DIR/singbox.pid"
+  wait_port 127.0.0.1 "$XRAY_REALITY_PORT" "Xray REALITY server"
+  wait_port 127.0.0.1 "$SINGBOX_SOCKS_PORT" "sing-box REALITY client"
+  log "adb reverse tcp:$SINGBOX_SOCKS_PORT (device loopback -> host sing-box SOCKS)"
+  adb reverse "tcp:$SINGBOX_SOCKS_PORT" "tcp:$SINGBOX_SOCKS_PORT" || log "adb reverse failed (no device?) — set it up manually"
+  log "cross-core layer up; prove it with '$0 obfs-xray-validate'"
+}
+
+xray_obfs_down() {
+  log "stopping Xray-server/sing-box-client compatibility layer"
+  xray_obfs_stop_pids
+  adb reverse --remove "tcp:$SINGBOX_SOCKS_PORT" 2>/dev/null || true
+  log "obfs-xray-down (configs kept at $XRAY_OBFS_DIR)"
+}
+
+xray_obfs_validate() {
+  [ -f "$XRAY_OBFS_DIR/reality.env" ] || die "compatibility layer not up — run '$0 obfs-xray-up' first"
+  nc -z 127.0.0.1 "$SINGBOX_SOCKS_PORT" 2>/dev/null || die "sing-box SOCKS proxy not listening on 127.0.0.1:$SINGBOX_SOCKS_PORT (run '$0 obfs-xray-up')"
+  log "validating IRC/TLS through sing-box-client -> Xray-server REALITY tunnel…"
+  SOCKS_PORT="$SINGBOX_SOCKS_PORT" SOJU_PORT="$SOJU_PORT" python3 - <<'PY'
+import os, socket, ssl, struct, sys
+
+s = socket.create_connection(("127.0.0.1", int(os.environ["SOCKS_PORT"])), timeout=10)
+s.sendall(b"\x05\x01\x00")
+if s.recv(2) != b"\x05\x00": sys.exit("FAIL: SOCKS5 method negotiation rejected")
+host, port = b"127.0.0.1", int(os.environ["SOJU_PORT"])
+s.sendall(b"\x05\x01\x00\x03" + bytes([len(host)]) + host + struct.pack(">H", port))
+rep = s.recv(4)
+if len(rep) != 4 or rep[1] != 0: sys.exit(f"FAIL: SOCKS5 CONNECT failed ({rep!r})")
+atyp = rep[3]
+if atyp == 1: s.recv(6)       # IPv4 address + port
+elif atyp == 4: s.recv(18)    # IPv6 address + port
+elif atyp == 3:
+    length = s.recv(1)
+    if not length: sys.exit("FAIL: truncated SOCKS5 domain reply")
+    s.recv(length[0] + 2)
+else: sys.exit(f"FAIL: unknown SOCKS5 reply address type {atyp}")
+print(f"  SOCKS5 CONNECT to soju :{port} ok (through sing-box -> Xray REALITY)")
+tls = ssl._create_unverified_context().wrap_socket(s, server_hostname="127.0.0.1")
+print(f"  TLS handshake to soju ok (cipher {tls.cipher()[0]})")
+tls.sendall(b"CAP LS 302\r\n")
+tls.settimeout(8); data = tls.recv(4096); tls.close()
+banner = data.decode(errors="replace").splitlines()[0] if data else ""
+if "CAP" not in banner: sys.exit(f"FAIL: no IRC CAP response through the tunnel (got {banner!r})")
+print(f"  IRC banner: {banner[:120]}")
+print("PASS: IRC/TLS reached soju through sing-box client + Xray REALITY server")
+PY
+}
+
+# A positive cross-core tunnel is insufficient if a client accepts any REALITY key. Run a second,
+# isolated sing-box SOCKS client with one character of the server public key changed and assert that
+# SOCKS CONNECT is rejected. The normal proof layer remains running throughout.
+xray_obfs_negative() {
+  [ -f "$XRAY_OBFS_DIR/reality.env" ] || die "compatibility layer not up — run '$0 obfs-xray-up' first"
+  if nc -z 127.0.0.1 "$SINGBOX_BAD_SOCKS_PORT" 2>/dev/null; then
+    die "port $SINGBOX_BAD_SOCKS_PORT already in use; run '$0 obfs-xray-down' or set MOTD_SINGBOX_BAD_SOCKS_PORT"
+  fi
+  # shellcheck disable=SC1090
+  . "$XRAY_OBFS_DIR/reality.env"
+  local bad_pub
+  bad_pub="A${PUB:1}"
+  [ "$bad_pub" = "$PUB" ] && bad_pub="B${PUB:1}"
+  cat >"$XRAY_OBFS_DIR/singbox-invalid-key.json" <<EOF
+{
+  "log": { "level": "info" },
+  "inbounds": [ { "type": "socks", "tag": "socks-in", "listen": "127.0.0.1", "listen_port": $SINGBOX_BAD_SOCKS_PORT } ],
+  "outbounds": [ { "type": "vless", "tag": "vless-out", "server": "127.0.0.1", "server_port": $XRAY_REALITY_PORT,
+    "uuid": "$UUID", "tls": { "enabled": true, "server_name": "$HANDSHAKE_DOMAIN",
+      "utls": { "enabled": true, "fingerprint": "chrome" },
+      "reality": { "enabled": true, "public_key": "$bad_pub", "short_id": "$SID" } } } ],
+  "route": { "final": "vless-out" }
+}
+EOF
+  sing-box check -c "$XRAY_OBFS_DIR/singbox-invalid-key.json" || die "invalid-key sing-box config unexpectedly invalid"
+  setsid sing-box run -c "$XRAY_OBFS_DIR/singbox-invalid-key.json" >"$XRAY_OBFS_DIR/singbox-invalid-key.log" 2>&1 &
+  echo $! >"$XRAY_OBFS_DIR/singbox-negative.pid"
+  wait_port 127.0.0.1 "$SINGBOX_BAD_SOCKS_PORT" "invalid-key sing-box client"
+  log "asserting the wrong REALITY public key cannot CONNECT to soju"
+  SOCKS_PORT="$SINGBOX_BAD_SOCKS_PORT" SOJU_PORT="$SOJU_PORT" python3 - <<'PY'
+import os, socket, struct, sys
+
+s = socket.create_connection(("127.0.0.1", int(os.environ["SOCKS_PORT"])), timeout=10)
+s.sendall(b"\x05\x01\x00")
+if s.recv(2) != b"\x05\x00":
+    sys.exit("FAIL: invalid-key client did not provide SOCKS5")
+host, port = b"127.0.0.1", int(os.environ["SOJU_PORT"])
+s.sendall(b"\x05\x01\x00\x03" + bytes([len(host)]) + host + struct.pack(">H", port))
+try:
+    reply = s.recv(4)
+except socket.timeout:
+    reply = b""
+finally:
+    s.close()
+if len(reply) == 4 and reply[1] == 0:
+    sys.exit("FAIL: wrong REALITY public key unexpectedly established a SOCKS tunnel")
+print("PASS: wrong REALITY public key was rejected")
+PY
+  local negative="$XRAY_OBFS_DIR/singbox-negative.pid"
+  kill "$(cat "$negative")" 2>/dev/null || true
+  rm -f "$negative"
+}
+
 case "$CMD" in
   up) up ;;
   down) down ;;
@@ -440,5 +621,9 @@ case "$CMD" in
   obfs-up) obfs_up ;;
   obfs-down) obfs_down ;;
   obfs-validate) obfs_validate ;;
-  *) die "unknown command '$CMD' (want up|down|seed|status|obfs-up|obfs-down|obfs-validate)" ;;
+  obfs-xray-up) xray_obfs_up ;;
+  obfs-xray-down) xray_obfs_down ;;
+  obfs-xray-validate) xray_obfs_validate ;;
+  obfs-xray-negative) xray_obfs_negative ;;
+  *) die "unknown command '$CMD' (want up|down|seed|status|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-negative)" ;;
 esac

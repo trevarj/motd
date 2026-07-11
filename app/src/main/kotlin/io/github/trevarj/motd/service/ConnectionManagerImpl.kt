@@ -14,6 +14,8 @@ import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.db.ObfsMode
+import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -49,6 +51,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val pushPrefs: PushPrefs,
     private val certStore: CertTrustStore,
     private val baseTransportFactory: TransportFactory,
+    private val localSocksProvider: LocalSocksProvider,
     // Lazy to break the WebPushRegistrar <-> ConnectionManager ctor cycle.
     private val webPushRegistrar: dagger.Lazy<WebPushRegistrar>,
 ) : ConnectionManager {
@@ -61,6 +64,9 @@ class ConnectionManagerImpl @Inject constructor(
     private val actors = HashMap<Long, ConnectionActor>()
     // Fingerprint of the config each actor was built from, so config changes trigger a restart.
     private val fingerprints = HashMap<Long, String>()
+    // Fatal configuration failures are intentionally parked. Reconcile/foreground events must not
+    // recreate them until the effective network configuration changes.
+    private val terminalConfigFingerprints = HashMap<Long, String>()
 
     // Latest full network set, kept so buildClient can resolve a BOUNCER_CHILD's root row (its
     // bouncer endpoint + account SASL) without a suspend DB read. Updated on every reconcile.
@@ -128,6 +134,7 @@ class ConnectionManagerImpl @Inject constructor(
         if (!allArmed) return
         for (actor in actors.values) actor.stop()
         actors.clear(); fingerprints.clear()
+        terminalConfigFingerprints.clear()
         _states.value = emptyMap()
         // Hoist the Intent to a local so lint doesn't read it as an implicit SAM instance.
         val stopIntent = android.content.Intent(appContext, IrcForegroundService::class.java)
@@ -140,6 +147,8 @@ class ConnectionManagerImpl @Inject constructor(
         unregisterConnectivityCallback()
         for (actor in actors.values) actor.stop()
         actors.clear(); fingerprints.clear()
+        terminalConfigFingerprints.clear()
+        localSocksProvider.stop()
         // Service teardown resets sticky user intent (in-memory only).
         userIntents.clear()
         _states.value = emptyMap()
@@ -158,6 +167,8 @@ class ConnectionManagerImpl @Inject constructor(
         userIntents[networkId] = true
         // Force-rebuild: a parked fatal-Failed actor sits in `actors` with a completed job and an
         // unchanged fingerprint, so plain ensureActor would no-op. Drop it first to actually reconnect.
+        val currentFp = fingerprint(row)
+        if (terminalConfigFingerprints[networkId] == currentFp) return
         actors.remove(networkId)?.stop()
         fingerprints.remove(networkId)
         ensureActor(row)
@@ -192,6 +203,7 @@ class ConnectionManagerImpl @Inject constructor(
             if (id !in wantedIds) {
                 actors.remove(id)?.stop()
                 fingerprints.remove(id)
+                terminalConfigFingerprints.remove(id)
                 _states.value = _states.value - id
             }
         }
@@ -201,6 +213,8 @@ class ConnectionManagerImpl @Inject constructor(
     private fun ensureActor(row: NetworkEntity) {
         val fp = fingerprint(row)
         val existing = actors[row.id]
+        if (terminalConfigFingerprints[row.id] == fp) return
+        terminalConfigFingerprints.remove(row.id)
         // A live actor whose fingerprint is unchanged is left alone (healthy / connecting /
         // actively retrying / parked awaiting cert trust). Only rebuild on a config change OR when
         // the existing actor is stale — its reconnect loop finished (fatal Failed / cert park with a
@@ -228,6 +242,9 @@ class ConnectionManagerImpl @Inject constructor(
                 if (state is IrcClientState.Failed) {
                     android.util.Log.w(CONN_LOG_TAG, "network $id Failed: ${state.reason} (fatal=${state.fatal})")
                 }
+                if (state is IrcClientState.Failed && state.fatal && isConfigurationFailure(state.reason)) {
+                    terminalConfigFingerprints[id] = fp
+                }
                 _states.value = _states.value + (id to state)
             },
             onEvent = { id, event -> eventProcessor.process(id, event) },
@@ -240,7 +257,10 @@ class ConnectionManagerImpl @Inject constructor(
         actor.start()
     }
 
-    private fun fingerprint(row: NetworkEntity): String = networkFingerprint(row)
+    private fun fingerprint(row: NetworkEntity): String = networkFingerprint(
+        row,
+        if (row.role == NetworkRole.BOUNCER_CHILD) row.parentId?.let { networksById[it] } else null,
+    )
 
     private fun buildClient(row: NetworkEntity): IrcClient {
         // A BOUNCER_CHILD is a *bound connection to the bouncer*, not a direct socket to the
@@ -258,7 +278,10 @@ class ConnectionManagerImpl @Inject constructor(
         // Obfuscation/proxy follows the transport endpoint too: a bound child tunnels through the
         // bouncer root's socket, so it inherits the root's proxy (plans/20 Phase 1).
         val endpoint = root ?: row
-        val proxy = proxyForNetwork(endpoint.obfsMode, endpoint.proxyHost, endpoint.proxyPort)
+        // Resolve EMBEDDED_REALITY before inspecting legacy proxyHost/proxyPort. Those columns are
+        // deliberately null for a VLESS-configured row; validating them first would park a valid
+        // embedded configuration as "SOCKS5 proxy host is required".
+        val proxyResolution = resolveTransportProxy(endpoint, localSocksProvider)
         val factory = AppTransportFactory(
             appContext = appContext,
             stsStore = stsStore,
@@ -267,7 +290,8 @@ class ConnectionManagerImpl @Inject constructor(
             clientCertAlias = endpoint.clientCertAlias,
             // Stash the failure keyed by network so the actor can park on it; unwrap defensively.
             onCertUntrusted = { ex -> certFailures[row.id] = ex },
-            proxy = proxy,
+            proxy = proxyResolution.proxy,
+            proxyConfigurationError = proxyResolution.error,
         )
         return IrcClient(config, factory, scope)
     }
@@ -659,14 +683,74 @@ internal fun buildChildConfig(row: NetworkEntity, root: NetworkEntity?): IrcClie
 }
 
 /**
- * Connection-affecting fingerprint for one network row. Any change here restarts the actor
- * (rebuilds the socket): endpoint, identity, SASL, bouncer bind, client-cert alias, the opt-in WSS
- * URL (plans/19 §3.3), and the obfuscation/proxy config (plans/20 Phase 1), so toggling/editing the
- * WebSocket transport or the proxy reconnects. Extracted for unit tests.
+ * Resolve the proxy for the physical connection endpoint. EMBEDDED_REALITY intentionally has no
+ * persisted SOCKS host/port: the VLESS link starts libbox and supplies a per-link loopback
+ * endpoint. Keep that path separate from the legacy SOCKS validation so it can never fall through
+ * to direct TCP or be rejected for its intentionally-null legacy columns.
  */
-internal fun networkFingerprint(row: NetworkEntity): String =
-    "${row.host}:${row.port}:${row.tls}:${row.nick}:${row.saslMechanism}:${row.bouncerNetId}:" +
-        "${row.clientCertAlias}:${row.wsUrl}:${row.obfsMode}:${row.proxyHost}:${row.proxyPort}"
+internal data class TransportProxyResolution(val proxy: java.net.Proxy?, val error: String?)
+
+internal fun resolveTransportProxy(
+    endpoint: NetworkEntity,
+    localSocksProvider: LocalSocksProvider,
+): TransportProxyResolution {
+    if (endpoint.obfsMode == ObfsMode.EMBEDDED_REALITY) {
+        val link = VlessLink.parse(endpoint.obfsLink.orEmpty()).getOrElse { error ->
+            return TransportProxyResolution(
+                proxy = null,
+                error = "Embedded REALITY configuration: ${error.message ?: "invalid VLESS link"}",
+            )
+        }
+        val localEndpoint = localSocksProvider.start(link).getOrElse { error ->
+            return TransportProxyResolution(
+                proxy = null,
+                error = "Embedded REALITY configuration: ${error.message ?: "provider unavailable"}",
+            )
+        }
+        // start() validates its returned port. Retain this guard so a future provider change
+        // cannot turn a bad local endpoint into a direct connection.
+        val proxy = proxyForNetwork(ObfsMode.SOCKS5, localEndpoint.host, localEndpoint.port)
+            ?: return TransportProxyResolution(
+                proxy = null,
+                error = "Embedded REALITY configuration: invalid local SOCKS endpoint",
+            )
+        return TransportProxyResolution(proxy = proxy, error = null)
+    }
+
+    val error = proxyConfigurationErrorForNetwork(
+        endpoint.obfsMode,
+        endpoint.proxyHost,
+        endpoint.proxyPort,
+    )
+    return TransportProxyResolution(
+        proxy = if (error == null) {
+            proxyForNetwork(endpoint.obfsMode, endpoint.proxyHost, endpoint.proxyPort)
+        } else {
+            null
+        },
+        error = error,
+    )
+}
+
+/**
+ * Connection-affecting fingerprint for one network row. A bound child inherits its physical
+ * endpoint, bouncer SASL, client certificate, WSS URL, and proxy from [root], so those effective
+ * fields must participate too. Otherwise a root proxy/WSS edit leaves existing child actors on the
+ * old (possibly direct) socket. Extracted for unit tests.
+ */
+internal fun networkFingerprint(row: NetworkEntity, root: NetworkEntity? = null): String {
+    val endpoint = if (row.role == NetworkRole.BOUNCER_CHILD) root ?: row else row
+    return "${endpoint.host}:${endpoint.port}:${endpoint.tls}:${row.nick}:${row.username}:${row.realname}:" +
+        "${endpoint.saslMechanism}:${endpoint.saslUser}:${endpoint.saslPassword}:${row.bouncerNetId}:" +
+        "${endpoint.clientCertAlias}:${endpoint.wsUrl}:${endpoint.obfsMode}:${endpoint.proxyHost}:${endpoint.proxyPort}:${endpoint.obfsLink}"
+}
+
+/** Configuration failures cannot become healthy through reconnect/backoff; only an effective
+ * fingerprint change can release their actor park. [IrcClient] prefixes thrown transport errors. */
+internal fun isConfigurationFailure(reason: String): Boolean =
+    reason.startsWith("connect failed: SOCKS5 proxy ") ||
+        reason.startsWith("connect failed: WebSocket transport cannot ") ||
+        reason.startsWith("connect failed: Embedded REALITY configuration")
 
 /**
  * Network ids parked on the given `host:port` cert endpoint (plans/12, #48). When a TOFU cert is

@@ -2,6 +2,7 @@ package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -134,5 +135,30 @@ class BuildChildConfigTest {
         assertNotEquals(fp1, fp2)
         // Same wsUrl -> stable fingerprint (no spurious restart).
         assertEquals(fp2, networkFingerprint(base.copy(wsUrl = "wss://bnc.example.org:443/")))
+    }
+
+    @Test
+    fun `child fingerprint follows every inherited root transport field`() {
+        val child = child()
+        val root = root()
+        val baseline = networkFingerprint(child, root)
+
+        val rootTransportChanges = listOf(
+            root.copy(host = "new-bouncer.example.org"),
+            root.copy(port = 443),
+            root.copy(tls = false),
+            root.copy(saslMechanism = SaslMechanism.EXTERNAL.name),
+            root.copy(saslUser = "other-account"),
+            root.copy(saslPassword = "changed-secret"),
+            root.copy(clientCertAlias = "client-cert"),
+            root.copy(wsUrl = "wss://bnc.example.org:443/"),
+            root.copy(obfsMode = ObfsMode.SOCKS5, proxyHost = "127.0.0.1", proxyPort = 1080),
+            root.copy(obfsMode = ObfsMode.TOR),
+        )
+
+        rootTransportChanges.forEach { changedRoot ->
+            assertNotEquals(baseline, networkFingerprint(child, changedRoot))
+        }
+        assertEquals(baseline, networkFingerprint(child, root))
     }
 }

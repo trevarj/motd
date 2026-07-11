@@ -389,6 +389,7 @@ fun buildNetworkEntity(
     obfsMode: ObfsMode = ObfsMode.NONE,
     proxyHost: String? = null,
     proxyPort: Int? = null,
+    obfsLink: String? = null,
 ): NetworkEntity {
     val isSoju = role == NetworkRole.BOUNCER_ROOT || role == NetworkRole.BOUNCER_CHILD
     // Trim leading/trailing whitespace: paste artefacts break host resolution and NICK/USER.
@@ -422,8 +423,9 @@ fun buildNetworkEntity(
         wsUrl = wsUrl?.trim()?.ifBlank { null },
         // NONE stores null so a direct row stays clean; other modes store the mode + trimmed proxy.
         obfsMode = if (obfsMode == ObfsMode.NONE) null else obfsMode,
-        proxyHost = if (obfsMode == ObfsMode.NONE) null else proxyHost?.trim()?.ifBlank { null },
-        proxyPort = if (obfsMode == ObfsMode.NONE) null else proxyPort,
+        proxyHost = if (obfsMode == ObfsMode.SOCKS5) proxyHost?.trim()?.ifBlank { null } else null,
+        proxyPort = if (obfsMode == ObfsMode.SOCKS5) proxyPort else null,
+        obfsLink = if (obfsMode == ObfsMode.EMBEDDED_REALITY) obfsLink?.trim()?.ifBlank { null } else null,
     )
 }
 

@@ -44,13 +44,20 @@ commands under `nix develop`.
 ```sh
 nix develop -c ./gradlew :irc:test               # protocol tests (pure JVM)
 nix develop -c ./gradlew :app:testDebugUnitTest  # app unit tests (Robolectric)
-nix develop -c ./gradlew :app:assembleDebug      # debug APK
+nix develop -c ./gradlew :app:assemblePhase2Arm64Debug # Phase 2 arm64 debug APK
 nix develop -c ./gradlew build                   # tests + lint + APKs
 ```
 
-The debug APK lands in `app/build/outputs/apk/debug/app-debug.apk`. Install it
-with `adb install`. The debug build carries the `.debug` application-id suffix,
-so it can coexist with a release install.
+The Phase 2 debug APK lands under
+`app/build/outputs/apk/phase2Arm64/debug/`. Install it with `adb install`. The
+debug build carries the `.debug` application-id suffix, so it can coexist with
+a release install.
+
+The embedded VLESS + REALITY transport is an explicit `phase2Arm64` build
+flavor. Its bundled libbox is currently arm64-v8a-only, so these APKs must not
+be installed on 32-bit ARM or x86 devices. This is visible in the generated
+version name (`-phase2-arm64`) and enforced by the Gradle variant; other ABI
+support remains a future explicitly-built artifact, not an implicit exclusion.
 
 ## Connecting
 
@@ -70,6 +77,13 @@ networks from a single connection.
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## License
+
+Copyright 2026 Trevor Arjeski. motd is licensed under the GNU General Public
+License, version 3 or (at your option) any later version; see
+[LICENSE](LICENSE). Third-party licensing and the planned libbox source
+provenance are recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Community
 

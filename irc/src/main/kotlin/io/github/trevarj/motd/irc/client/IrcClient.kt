@@ -11,6 +11,7 @@ import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.IrcParseException
 import io.github.trevarj.motd.irc.proto.Isupport
 import io.github.trevarj.motd.irc.transport.IrcTransport
+import io.github.trevarj.motd.irc.transport.TransportConfigurationException
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -143,7 +144,12 @@ class IrcClient(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            _state.value = IrcClientState.Failed("connect failed: ${e.message}", fatal = false)
+            // Invalid persisted transport config cannot recover through backoff. Keep ordinary
+            // socket/TLS failures retryable, but park until the user changes this setting.
+            _state.value = IrcClientState.Failed(
+                "connect failed: ${e.message}",
+                fatal = e is TransportConfigurationException,
+            )
             emitDisconnected(e.message)
             return
         }

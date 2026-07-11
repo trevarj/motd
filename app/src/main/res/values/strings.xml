@@ -109,7 +109,8 @@
     <string name="network_settings_obfs_proxy_port">Proxy port</string>
     <string name="network_settings_obfs_tor_shortcut">Route via Tor (Orbot)</string>
     <string name="network_settings_obfs_tor_desc">Sets a SOCKS5 proxy at 127.0.0.1:9050. Requires Orbot running on this device.</string>
-    <string name="network_settings_obfs_reality_desc">Point at a locally-run sing-box client\'s SOCKS5 inbound (e.g. 127.0.0.1:1080). The in-app REALITY core is planned; for now run sing-box alongside.</string>
+    <string name="network_settings_obfs_reality_desc">Paste the VLESS + REALITY share link for this network. MOTD starts its embedded tunnel and keeps the loopback proxy private.</string>
+    <string name="network_settings_obfs_reality_link">VLESS + REALITY link</string>
     <string name="network_settings_obfs_dns_note">DNS is resolved remotely through the proxy (no leak; .onion works).</string>
     <string name="network_settings_delete">Delete network</string>
     <string name="network_settings_delete_confirm_title">Delete network?</string>

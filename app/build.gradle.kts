@@ -1,3 +1,12 @@
+import java.security.MessageDigest
+import java.util.Properties
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.TaskAction
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,6 +14,40 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+}
+
+abstract class VerifyLibboxArtifact : DefaultTask() {
+    @get:InputFile abstract val aar: RegularFileProperty
+    @get:InputFile abstract val manifest: RegularFileProperty
+    @get:Input abstract val expectedVersion: Property<String>
+    @get:Input abstract val expectedSha256: Property<String>
+
+    @TaskAction
+    fun verify() {
+        val values = Properties().also { manifest.get().asFile.inputStream().use(it::load) }
+        check(values.getProperty("sing-box-version") == expectedVersion.get()) {
+            "libbox manifest version must be ${expectedVersion.get()}"
+        }
+        check(values.getProperty("abis") == "arm64-v8a") {
+            "libbox manifest must declare only arm64-v8a"
+        }
+        check(values.getProperty("libbox-aar-sha256") == expectedSha256.get()) {
+            "libbox manifest SHA-256 does not match the pinned value"
+        }
+        val digest = MessageDigest.getInstance("SHA-256")
+        aar.get().asFile.inputStream().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        val actualSha256 = digest.digest().joinToString("") { "%02x".format(it) }
+        check(actualSha256 == expectedSha256.get()) {
+            "libbox AAR SHA-256 does not match the pinned value"
+        }
+    }
 }
 
 android {
@@ -45,6 +88,16 @@ android {
             if (keystorePath != null) signingConfig = signingConfigs.getByName("release")
         }
     }
+    // The embedded libbox artifact is currently arm64-v8a-only. Keep that constraint explicit in
+    // the Phase 2 variant rather than narrowing every MOTD build without a visible policy.
+    flavorDimensions += "embeddedTransport"
+    productFlavors {
+        create("phase2Arm64") {
+            dimension = "embeddedTransport"
+            ndk { abiFilters += "arm64-v8a" }
+            versionNameSuffix = "-phase2-arm64"
+        }
+    }
     buildFeatures { compose = true }
     testOptions { unitTests { isIncludeAndroidResources = true } }  // Robolectric
 
@@ -63,10 +116,24 @@ android {
     }
 }
 
+val verifyLibboxArtifact by tasks.registering(VerifyLibboxArtifact::class) {
+    group = "verification"
+    description = "Verifies the tracked libbox AAR against its pinned SHA-256 manifest."
+    aar.set(layout.projectDirectory.file("libs/libbox.aar"))
+    manifest.set(layout.projectDirectory.file("libs/libbox-v1.13.12.manifest"))
+    expectedVersion.set("v1.13.12")
+    expectedSha256.set("ef8b4a00eb2e2de7b9a593db18f5190431d1cd311066bde76792bfb1a262a88f")
+}
+
+tasks.matching { it.name == "check" || it.name.startsWith("assemble") }.configureEach {
+    dependsOn(verifyLibboxArtifact)
+}
+
 kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation(project(":irc"))
+    implementation(files("libs/libbox.aar"))
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
