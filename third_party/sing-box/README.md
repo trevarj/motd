@@ -14,8 +14,8 @@ the exact upstream sources remain at the pinned public revisions below.
   at `772879ce9cd37c29e377d4d44d0efee12662948d`
 - Android submodule source archive SHA-256:
   `bf6c420460899347d3080220288bfe7279962e30a4ffef482e1c61924300c171`
-- Vendored artifact: `app/libs/libbox.aar`, **arm64-v8a-only**, used only by
-  the explicit `phase2Arm64` product flavor
+- Vendored artifact: `app/libs/libbox.aar`, **arm64-v8a-only**, used by the
+  main Android application build
 - Artifact SHA-256: `ef8b4a00eb2e2de7b9a593db18f5190431d1cd311066bde76792bfb1a262a88f`
 - Artifact build manifest: `app/libs/libbox-v1.13.12.manifest`
 
@@ -58,8 +58,8 @@ it to `app/libs/libbox.aar` plus its SHA-256 manifest at
 this repository and their values above must match before release. Gradle's
 `verifyLibboxArtifact` task verifies the tracked AAR against both the manifest
 and the pinned expected SHA-256; every `assemble*` and `check` task depends on
-it. The `phase2Arm64` variant is the only variant permitted to package this
-arm64-v8a-only artifact.
+it. The Android application build is arm64-only while this is the only packaged
+libbox artifact.
 
 ## License and notices
 

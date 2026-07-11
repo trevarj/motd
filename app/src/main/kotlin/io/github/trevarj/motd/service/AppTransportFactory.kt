@@ -193,7 +193,7 @@ const val ORBOT_SOCKS_PORT = 9050
  *
  * - `null`/`NONE` → null (direct).
  * - `SOCKS5`/`EMBEDDED_REALITY` → SOCKS5 at the given [proxyHost]:[proxyPort]. EMBEDDED_REALITY maps
- *   to a plain SOCKS5 for Phase 1 (a locally-run sing-box client); the Phase 2 in-app core just
+ *   to a plain SOCKS5 for a locally-run sing-box client; the in-app core just
  *   supplies a loopback host/port through the same field.
  * - `TOR` → SOCKS5 pinned at Orbot's 127.0.0.1:9050 (host/port ignored).
  *

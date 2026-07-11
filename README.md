@@ -44,20 +44,18 @@ commands under `nix develop`.
 ```sh
 nix develop -c ./gradlew :irc:test               # protocol tests (pure JVM)
 nix develop -c ./gradlew :app:testDebugUnitTest  # app unit tests (Robolectric)
-nix develop -c ./gradlew :app:assemblePhase2Arm64Debug # Phase 2 arm64 debug APK
+nix develop -c ./gradlew :app:assembleDebug      # arm64 debug APK
 nix develop -c ./gradlew build                   # tests + lint + APKs
 ```
 
-The Phase 2 debug APK lands under
-`app/build/outputs/apk/phase2Arm64/debug/`. Install it with `adb install`. The
-debug build carries the `.debug` application-id suffix, so it can coexist with
-a release install.
+The debug APK lands under `app/build/outputs/apk/debug/`. Install it with `adb
+install`. The debug build carries the `.debug` application-id suffix, so it can
+coexist with a release install.
 
-The embedded VLESS + REALITY transport is an explicit `phase2Arm64` build
-flavor. Its bundled libbox is currently arm64-v8a-only, so these APKs must not
-be installed on 32-bit ARM or x86 devices. This is visible in the generated
-version name (`-phase2-arm64`) and enforced by the Gradle variant; other ABI
-support remains a future explicitly-built artifact, not an implicit exclusion.
+The embedded VLESS + REALITY transport uses bundled libbox, which is currently
+arm64-v8a-only. APKs built from this source tree must not be installed on 32-bit
+ARM or x86 devices. Other ABI support needs a separately pinned and verified
+libbox artifact.
 
 ## Connecting
 

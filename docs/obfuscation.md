@@ -7,7 +7,7 @@ options:
 - **SOCKS5** — use an existing SOCKS5 proxy; DNS is resolved through the proxy.
 - **Tor (Orbot)** — use Orbot's local SOCKS5 proxy, normally with a `.onion`
   bouncer address.
-- **VLESS + REALITY** — the Phase 2 arm64 build runs an embedded sing-box client
+- **VLESS + REALITY** — the arm64 build runs an embedded sing-box client
   and exposes a local SOCKS proxy automatically. You supply one VLESS URI; no
   companion Android proxy app is needed.
 
@@ -130,5 +130,5 @@ Tor hidden-service address for soju avoids exposing the bouncer's public IP.
   its configuration.
 - Ensure the REALITY server name is reachable from the VPS and supports TLS 1.3.
 - A changed bouncer certificate requires reviewing the new certificate prompt.
-- The embedded option currently requires the `phase2Arm64` APK and an arm64-v8a
-  Android device. Use SOCKS5 or Tor on other builds/devices.
+- The embedded option currently requires an arm64-v8a Android device. Use
+  SOCKS5 or Tor on other device ABIs.

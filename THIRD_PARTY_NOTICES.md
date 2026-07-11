@@ -7,14 +7,14 @@ transport:
 
 - Artifact: `app/libs/libbox.aar`
 - sing-box version: `v1.13.12`
-- Delivery variant: explicit `phase2Arm64` product flavor
+- Delivery: main Android application APK
 - ABI: `arm64-v8a` only; unsupported ABI variants are not built
 - SHA-256: `ef8b4a00eb2e2de7b9a593db18f5190431d1cd311066bde76792bfb1a262a88f`
 - Build manifest: `app/libs/libbox-v1.13.12.manifest`
 
-## Planned embedded transport: sing-box / libbox
+## Embedded transport: sing-box / libbox
 
-The planned embedded VLESS + REALITY transport uses libbox from
+The embedded VLESS + REALITY transport uses libbox from
 [SagerNet/sing-box](https://github.com/SagerNet/sing-box). The pinned upstream
 source is sing-box **v1.13.12**, commit
 [`1086ab2563320e0da0c23b3a491d8dfa0939dff4`](https://github.com/SagerNet/sing-box/commit/1086ab2563320e0da0c23b3a491d8dfa0939dff4),

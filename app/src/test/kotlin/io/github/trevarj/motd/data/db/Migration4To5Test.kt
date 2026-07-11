@@ -13,7 +13,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/** The Phase 2 migration persists the VLESS+REALITY link without changing Phase 1 proxy values. */
+/** The embedded REALITY migration persists the VLESS+REALITY link without changing proxy values. */
 @RunWith(RobolectricTestRunner::class)
 class Migration4To5Test {
     private var helper: SupportSQLiteOpenHelper? = null

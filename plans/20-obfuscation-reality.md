@@ -70,7 +70,7 @@ SOCKS5 / Tor `.onion`) and is the terminus every embedded transport plugs into.
   change restarts the actor like any connection-affecting field.
 - **DB — `NetworkEntity` (`data/db/Entities.kt`) + migration 2→3
   (`MotdDatabase.kt`)**: nullable columns `obfsMode` (`NONE` | `SOCKS5` | `TOR` |
-  `EMBEDDED_REALITY`), `proxyHost`, `proxyPort`, and (Phase 2) `obfsLink` (the
+  `EMBEDDED_REALITY`), `proxyHost`, `proxyPort`, and `obfsLink` (the
   pasted `vless://…`). Follow the existing `wsUrl` migration pattern
   (`ALTER TABLE networks ADD COLUMN …`). Redact any secret in `toString()`.
 - **Settings UI — `NetworkSettingsScreen.kt` / `NetworkForm.kt`**: a collapsible
@@ -80,7 +80,7 @@ SOCKS5 / Tor `.onion`) and is the terminus every embedded transport plugs into.
 - **Tests**: a fake SOCKS5 server asserting the destination arrives **unresolved**
   (remote-DNS / leak-free), and `AppTransportFactory` builds the right `Proxy`.
 
-## Phase 2 — Embedded sing-box core + REALITY
+## Embedded sing-box core + REALITY
 
 - **Dependency**: vendor `libbox` (sing-box gomobile `.aar`, the core
   `sing-box-for-android` ships). Not on Maven Central → build via `gomobile bind`
@@ -94,8 +94,8 @@ SOCKS5 / Tor `.onion`) and is the terminus every embedded transport plugs into.
   `ConnectionManagerImpl.startAll/stopAll` (survives doze; add bootstrap latency
   to the watchdog/backoff per `plans/19` §8). Bind in `di/IrcModule.kt`.
 - **`AppTransportFactory`**: when `obfsMode == EMBEDDED_REALITY`, consult
-  `LocalSocksProvider` for the live loopback port and build the SOCKS `Proxy` from
-  Phase 1. Nothing else changes.
+  `LocalSocksProvider` for the live loopback port and build the SOCKS `Proxy`.
+  Nothing else changes.
 - **vless:// parsing (new `obfs/VlessLink.kt`)**: parse
   `vless://<uuid>@host:443?security=reality&sni=<domain>&pbk=<pubkey>&sid=<shortId>&flow=xtls-rprx-vision`
   into the sing-box outbound JSON (uuid, server/port, `tls.reality` with
@@ -139,11 +139,11 @@ SOCKS5 / Tor `.onion`) and is the terminus every embedded transport plugs into.
 
 - Phase 1 (SOCKS5 substrate): low, client-only, testable against any SOCKS5
   (`ssh -D`, the local sing-box, Orbot). Independently shippable.
-- Phase 2 (embed core + REALITY): high (AAR vendoring, lifecycle, size, vless
+- Embedded core + REALITY: high (AAR vendoring, lifecycle, size, vless
   parsing).
 - Phase 3 (server + docs): low, mostly config; can be done first to have a live
   endpoint for Phase 1/2 testing.
 
-Recommended order: **Phase 3 server up (gives a real endpoint) → Phase 1 substrate
-(validate against it via any SOCKS, e.g. a plain sing-box socks outbound) → Phase 2
-embed the core.** Everything after Phase 1 reuses its SOCKS5 plumbing.
+Recommended order: bring up the server endpoint, validate the SOCKS substrate
+against it, then embed the core. Everything after the SOCKS substrate reuses its
+plumbing.

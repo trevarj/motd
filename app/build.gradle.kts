@@ -61,6 +61,7 @@ android {
         // CI derives these from the git tag / run number (see plans/08).
         versionName = System.getenv("MOTD_VERSION_NAME") ?: "0.0.0-dev"
         versionCode = System.getenv("MOTD_VERSION_CODE")?.toIntOrNull() ?: 1
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     // Signing only when CI secrets are present; local/debug builds never fail on this.
@@ -88,16 +89,8 @@ android {
             if (keystorePath != null) signingConfig = signingConfigs.getByName("release")
         }
     }
-    // The embedded libbox artifact is currently arm64-v8a-only. Keep that constraint explicit in
-    // the Phase 2 variant rather than narrowing every MOTD build without a visible policy.
-    flavorDimensions += "embeddedTransport"
-    productFlavors {
-        create("phase2Arm64") {
-            dimension = "embeddedTransport"
-            ndk { abiFilters += "arm64-v8a" }
-            versionNameSuffix = "-phase2-arm64"
-        }
-    }
+    // The embedded libbox artifact is currently arm64-v8a-only, so every APK built from this
+    // source set is intentionally arm64-only until another libbox ABI is pinned and verified.
     buildFeatures { compose = true }
     testOptions { unitTests { isIncludeAndroidResources = true } }  // Robolectric
 
@@ -113,8 +106,8 @@ android {
         // The Doze battery-exemption request is a justified core use: an always-on IRC/bouncer
         // connection is the app's primary function. Distributed outside the Play Store.
         disable += "BatteryLife"
-        // Phase 2 deliberately ships the pinned arm64-only libbox artifact; ChromeOS x86_64
-        // translation support is outside this flavor's contract.
+        // The pinned libbox artifact is arm64-only; ChromeOS x86_64 translation support is outside
+        // the current APK contract.
         disable += "ChromeOsAbiSupport"
     }
 }

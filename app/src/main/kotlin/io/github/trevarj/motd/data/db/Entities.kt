@@ -11,7 +11,7 @@ enum class NetworkRole { DIRECT, BOUNCER_ROOT, BOUNCER_CHILD }
 /**
  * Per-network obfuscation transport (plans/19 §3.4, plans/20 Phase 1). `NONE` is the default
  * direct connection. `SOCKS5` dials through a user-supplied SOCKS5 proxy (host/port). `TOR` is a
- * `SOCKS5` shortcut pinned at Orbot's `127.0.0.1:9050`. `EMBEDDED_REALITY` is the Phase 2 in-app
+ * `SOCKS5` shortcut pinned at Orbot's `127.0.0.1:9050`. `EMBEDDED_REALITY` is the in-app
  * sing-box VLESS+REALITY core configured by a pasted share link; the core exposes its own private
  * loopback SOCKS5 endpoint to the transport.
  */

@@ -96,7 +96,7 @@ class LocalSocksProviderTest {
             username = "motd",
             realname = "MOTD",
             obfsMode = ObfsMode.EMBEDDED_REALITY,
-            // Phase 2 intentionally clears legacy SOCKS settings when persisting a VLESS link.
+            // Embedded REALITY intentionally clears legacy SOCKS settings when persisting a VLESS link.
             proxyHost = null,
             proxyPort = null,
             obfsLink = validLink,
