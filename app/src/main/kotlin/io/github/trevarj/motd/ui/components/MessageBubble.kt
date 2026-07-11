@@ -4,7 +4,6 @@ import android.text.format.DateFormat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,6 +81,7 @@ fun MessageBubble(
     kind: MessageKind,
     showSender: Boolean,
     modifier: Modifier = Modifier,
+    formattedTime: String? = null,
     senderIsFriend: Boolean = false,
     failed: Boolean = false,
     pending: Boolean = false,
@@ -101,9 +101,12 @@ fun MessageBubble(
     onSenderClick: (() -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
+    // Production timelines pass a string from one list-scoped formatter. The fallback keeps
+    // previews/direct callers source-compatible without making every real row query system time
+    // settings and construct its own formatter.
+    val displayedTime = formattedTime ?: formatTime(timeMs)
     // A shared no-op onClick with a null indication removes the dead ripple on plain taps; long-press
     // is the only action entry, labeled for TalkBack (plans/15 #31).
-    val interaction = remember { MutableInteractionSource() }
     // Density tokens + nick-color scheme flow through CompositionLocals; no signature churn.
     val spacing = LocalSpacing.current
     val nickColors = LocalNickColors.current
@@ -114,7 +117,7 @@ fun MessageBubble(
         CompactMessageRow(
             sender = sender,
             text = text,
-            timeMs = timeMs,
+            formattedTime = displayedTime,
             isSelf = isSelf,
             kind = kind,
             nickColors = nickColors,
@@ -144,7 +147,7 @@ fun MessageBubble(
         TwoLineMessageRow(
             sender = sender,
             text = text,
-            timeMs = timeMs,
+            formattedTime = displayedTime,
             isSelf = isSelf,
             kind = kind,
             nickColors = nickColors,
@@ -176,7 +179,8 @@ fun MessageBubble(
             modifier = modifier
                 .fillMaxWidth()
                 .combinedClickable(
-                    interactionSource = interaction,
+                    // No ripple is drawn, so a MutableInteractionSource would only allocate per row.
+                    interactionSource = null,
                     indication = null,
                     onClick = {},
                     onLongClick = onLongPress,
@@ -194,7 +198,7 @@ fun MessageBubble(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                 Text(
-                    text = formatTime(timeMs),
+                    text = displayedTime,
                     fontSize = 10.sp,
                     color = if (failed) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
@@ -242,7 +246,7 @@ fun MessageBubble(
                 .clip(shape)
                 .background(bubbleColor)
                 .combinedClickable(
-                    interactionSource = interaction,
+                    interactionSource = null,
                     indication = null,
                     onClick = {},
                     onLongClick = onLongPress,
@@ -336,7 +340,7 @@ fun MessageBubble(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                 Text(
-                    text = formatTime(timeMs),
+                    text = displayedTime,
                     fontSize = 10.sp,
                     color = if (failed) MaterialTheme.colorScheme.error
                     else textColor.copy(alpha = 0.6f),
@@ -364,7 +368,7 @@ fun MessageBubble(
 private fun TwoLineMessageRow(
     sender: String,
     text: String,
-    timeMs: Long,
+    formattedTime: String,
     isSelf: Boolean,
     kind: MessageKind,
     nickColors: NickColorScheme,
@@ -387,7 +391,6 @@ private fun TwoLineMessageRow(
     onSenderClick: (() -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
-    val interaction = remember { MutableInteractionSource() }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val bodyColor = MaterialTheme.colorScheme.onSurface
     // Per-nick row wash (same treatment as COMPACT): a faint tint of the sender's own nick color
@@ -401,7 +404,7 @@ private fun TwoLineMessageRow(
             // unbroken edge to edge, matching COMPACT.
             .background(rowTint)
             .combinedClickable(
-                interactionSource = interaction,
+                interactionSource = null,
                 indication = null,
                 onClick = {},
                 onLongClick = onLongPress,
@@ -440,7 +443,7 @@ private fun TwoLineMessageRow(
                 ) {
                     MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                     Text(
-                        text = formatTime(timeMs),
+                        text = formattedTime,
                         fontSize = 10.sp,
                         color = if (failed) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
@@ -759,14 +762,27 @@ internal fun ReplyMiniBubble(reply: ReplyPreviewData, nickColors: NickColorSchem
  */
 @Composable
 internal fun formatTime(ms: Long): String {
+    return rememberMessageTimeFormatter()(ms)
+}
+
+/**
+ * One formatter per message-list composition. Android's 12/24-hour lookup can cross framework
+ * settings, and DateFormat is stateful; sharing it on the UI thread avoids repeating both costs for
+ * every row first composed in a fling.
+ */
+@Composable
+internal fun rememberMessageTimeFormatter(): (Long) -> String {
     val context = LocalContext.current
-    val is24 = DateFormat.is24HourFormat(context)
-    val formatter = remember(is24, java.util.Locale.getDefault()) {
+    val locale = java.util.Locale.getDefault()
+    val is24 = remember(context, locale) { DateFormat.is24HourFormat(context) }
+    val formatter = remember(is24, locale) {
         // getTimeFormat honors the 12/24h system setting; not thread-safe but only used on the UI thread.
         DateFormat.getTimeFormat(context) as? JavaDateFormat
             ?: JavaDateFormat.getTimeInstance(JavaDateFormat.SHORT)
     }
-    return formatter.format(java.util.Date(ms))
+    return remember(formatter) {
+        { ms: Long -> formatter.format(java.util.Date(ms)) }
+    }
 }
 
 @Preview

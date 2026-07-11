@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResult
+import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.ConnectionManager
 import java.time.Instant
 import javax.inject.Inject
@@ -98,7 +99,12 @@ class ChatHistoryRemoteMediator(
         val result = history.chathistory(
             ChatHistoryRequest(ChatHistoryRequest.Subcommand.BEFORE, target, bound1 = bound, limit = pageSize),
         )
-        for (ev in result.events) processor.process(networkId, ev)
+        // Apply the page as one IRC history batch. EventProcessor wraps HistoryBatch in a single
+        // Room transaction, so Paging sees one invalidation instead of up to 50 row-by-row refreshes
+        // while the user is entering or flinging through a channel.
+        if (result.events.isNotEmpty()) {
+            processor.process(networkId, IrcEvent.HistoryBatch(target, result.events))
+        }
         val buffer = bufferDao.observeById(bufferId)
         if (result.events.isEmpty()) {
             buffer?.let { bufferDao.update(it.copy(historyComplete = true)) }
@@ -112,7 +118,9 @@ class ChatHistoryRemoteMediator(
     /** Pull the most recent page for [target] and persist it through the sole IRC→Room writer. */
     private suspend fun fetchLatest(networkId: Long, target: String) {
         val result = history.chathistory(ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = pageSize))
-        for (ev in result.events) processor.process(networkId, ev)
+        if (result.events.isNotEmpty()) {
+            processor.process(networkId, IrcEvent.HistoryBatch(target, result.events))
+        }
     }
 
     companion object {

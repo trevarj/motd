@@ -1,10 +1,5 @@
 package io.github.trevarj.motd.ui.components
 
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -19,7 +14,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -102,14 +96,10 @@ private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit, modifi
 
 @Composable
 private fun LinkPreviewSkeleton(modifier: Modifier) {
-    val transition = rememberInfiniteTransition(label = "shimmer")
-    val alpha by transition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 0.7f,
-        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
-        label = "shimmerAlpha",
-    )
-    val block = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.4f)
+    // A per-card infinite transition continuously invalidated the chat while previews were in
+    // flight. A static skeleton communicates the same loading state without consuming scroll-frame
+    // work; the card is replaced as soon as the preview resolves.
+    val block = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.18f)
     Row(
         modifier = modifier
             .fillMaxWidth()

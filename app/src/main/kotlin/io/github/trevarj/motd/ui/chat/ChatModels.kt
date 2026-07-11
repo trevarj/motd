@@ -80,6 +80,7 @@ class UnreadViewportIndex {
     private var size = 0
     private var loadedCount = 0
     private var firstRowId: Long? = null
+    private var stoppedAtMarker: Long? = null
 
     /**
      * Incorporate a Paging window without re-reading its already-indexed prefix. Paging appends
@@ -87,7 +88,12 @@ class UnreadViewportIndex {
      * A refresh, shrink, or replacement of index zero invalidates positional assumptions and
      * rebuilds the compact non-self index.
      */
-    fun update(itemCount: Int, peek: (Int) -> MessageEntity?) {
+    fun update(
+        itemCount: Int,
+        maxNonSelf: Int = Int.MAX_VALUE,
+        stopAtOrBefore: Long? = null,
+        peek: (Int) -> MessageEntity?,
+    ) {
         // Paging emits an empty snapshot while invalidating/refreshing. Never probe index zero for
         // that transient state: requesting it can synchronously re-enter Paging on the UI thread.
         if (itemCount == 0) {
@@ -99,17 +105,32 @@ class UnreadViewportIndex {
             (loadedCount > 0 && currentFirstId != firstRowId)
         if (rebuild) clear()
 
-        if (itemCount > loadedCount) {
-            for (index in loadedCount until itemCount) {
-                val row = peek(index) ?: continue
+        // The FAB renders 99+ at 100, so its caller can cap [maxNonSelf] and avoid rebuilding a
+        // multi-thousand-row Paging window when a live message is prepended at index zero. A read
+        // marker is an even stronger terminal boundary because server times are descending.
+        val markerAlreadyCovered = stopAtOrBefore != null &&
+            stoppedAtMarker?.let { stopAtOrBefore >= it } == true
+        if (!markerAlreadyCovered && size < maxNonSelf && itemCount > loadedCount) {
+            var index = loadedCount
+            while (index < itemCount && size < maxNonSelf) {
+                val row = peek(index)
+                loadedCount = index + 1
+                if (row == null) {
+                    index++
+                    continue
+                }
+                if (stopAtOrBefore != null && row.serverTime <= stopAtOrBefore) {
+                    stoppedAtMarker = stopAtOrBefore
+                    break
+                }
                 if (!row.isSelf) {
                     ensureCapacity(size + 1)
                     rowIndices[size] = index
                     serverTimes[size] = row.serverTime
                     size++
                 }
+                index++
             }
-            loadedCount = itemCount
         }
         firstRowId = currentFirstId
     }
@@ -120,6 +141,7 @@ class UnreadViewportIndex {
         size = 0
         loadedCount = 0
         firstRowId = null
+        stoppedAtMarker = null
     }
 
     fun count(firstVisibleIndex: Int, marker: Long): Int {

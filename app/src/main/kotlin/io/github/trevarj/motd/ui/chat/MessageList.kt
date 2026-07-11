@@ -1,6 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
-import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,9 +24,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,15 +57,13 @@ import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.components.SystemEventPill
 import io.github.trevarj.motd.ui.components.DaySeparator
 import io.github.trevarj.motd.ui.components.dayStart
+import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
-
-/** System-event message kinds rendered as pills rather than bubbles. */
-private val SYSTEM_KINDS = setOf(
-    MessageKind.JOIN, MessageKind.PART, MessageKind.QUIT, MessageKind.KICK,
-    MessageKind.NICK, MessageKind.MODE, MessageKind.TOPIC, MessageKind.SERVER_INFO,
-    MessageKind.ERROR,
-)
+import kotlinx.coroutines.withContext
 
 /** Limit collapsed system-event work per composed row during high-velocity history traversal. */
 internal const val MAX_COLLAPSED_SYSTEM_EVENTS = 24
@@ -68,7 +71,40 @@ internal const val MAX_COLLAPSED_SYSTEM_EVENTS = 24
 /** Stable identity for remembered expanded pill state; changes when Paging extends a tail chunk. */
 internal data class SystemRunContentKey(val newestId: Long, val oldestId: Long, val count: Int)
 
-fun isSystemKind(kind: MessageKind): Boolean = kind in SYSTEM_KINDS
+/** Reuse lazy compositions only across rows with the same structural layout. */
+internal enum class MessageContentType {
+    SYSTEM,
+    ACTION,
+    ACTION_FAILED,
+    SELF,
+    SELF_FAILED,
+    OTHER,
+    OTHER_FAILED,
+}
+
+fun isSystemKind(kind: MessageKind): Boolean = when (kind) {
+    MessageKind.JOIN,
+    MessageKind.PART,
+    MessageKind.QUIT,
+    MessageKind.KICK,
+    MessageKind.NICK,
+    MessageKind.MODE,
+    MessageKind.TOPIC,
+    MessageKind.SERVER_INFO,
+    MessageKind.ERROR,
+    -> true
+    else -> false
+}
+
+internal fun messageContentType(message: MessageEntity): MessageContentType = when {
+    isSystemKind(message.kind) -> MessageContentType.SYSTEM
+    message.kind == MessageKind.ACTION && message.failed -> MessageContentType.ACTION_FAILED
+    message.kind == MessageKind.ACTION -> MessageContentType.ACTION
+    message.isSelf && message.failed -> MessageContentType.SELF_FAILED
+    message.isSelf -> MessageContentType.SELF
+    message.failed -> MessageContentType.OTHER_FAILED
+    else -> MessageContentType.OTHER
+}
 
 /** Stable per-message testTag id: server msgid when present, else the local entity id (pending). */
 private fun messageTag(msg: MessageEntity): String = "chat_message_${msg.msgid ?: msg.id}"
@@ -122,6 +158,9 @@ fun MessageList(
     // Tapping a non-self sender's name/avatar opens the nick sheet (plans/16 §5.8).
     onSenderClick: (String) -> Unit = {},
 ) {
+    val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
+    val richContentEnabled = previewsEnabled && !scrolling
+    val formatMessageTime = rememberMessageTimeFormatter()
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -134,7 +173,10 @@ fun MessageList(
         items(
             count = items.itemCount,
             key = items.itemKey { it.id },
-            contentType = items.itemContentType { if (isSystemKind(it.kind)) "system" else "msg" },
+            // Own bubbles, other bubbles, ACTION rows, and retry rows have different composition
+            // shapes. Keeping separate pools avoids structural churn at exactly the boundaries that
+            // previously produced hitches when a fling crossed own messages.
+            contentType = items.itemContentType(::messageContentType),
         ) { index ->
             val msg = items[index] ?: return@items
             val older = if (index + 1 < items.itemCount) items.peek(index + 1) else null
@@ -165,15 +207,18 @@ fun MessageList(
 
             // Deep-jump pulse: fade a highlight tint in then back out on the target row (~1.6s).
             val highlighted = highlightMsgid != null && msg.msgid == highlightMsgid
-            val highlightColor by animateColorAsState(
-                targetValue = if (highlighted) {
-                    androidx.compose.material3.MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                } else {
-                    Color.Transparent
-                },
-                animationSpec = tween(durationMillis = 800),
-                label = "jumpHighlight",
-            )
+            // Deep jumps are rare. Do not install an animation state object in every ordinary row;
+            // only the single target needs one while the highlight is active.
+            val highlightColor = if (highlighted) {
+                val pulse = remember(msg.id, highlightMsgid) { Animatable(0f) }
+                LaunchedEffect(msg.id, highlightMsgid) {
+                    pulse.animateTo(1f, tween(durationMillis = 800))
+                    pulse.animateTo(0f, tween(durationMillis = 800))
+                }
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.14f * pulse.value)
+            } else {
+                Color.Transparent
+            }
 
             // Column (not Box): MessageRow emits several vertical siblings — the collapse chip,
             // bubble, retry row, and read-marker/day dividers. A Box would stack them on top of one
@@ -183,6 +228,7 @@ fun MessageList(
             MessageRow(
                 msg = msg,
                 older = older,
+                formatTime = formatMessageTime,
                 readMarkerTime = readMarkerTime,
                 // An expanded fool row shows a small tap-to-re-collapse chip above its bubble so the
                 // toggle is bidirectional without stealing the bubble's long-press/link taps (#9).
@@ -197,6 +243,7 @@ fun MessageList(
                 onDelete = onDelete,
                 loadPreview = loadPreview,
                 previewsEnabled = previewsEnabled,
+                richContentEnabled = richContentEnabled,
                 onOpenLink = onOpenLink,
                 onSenderClick = onSenderClick,
                 replyPreview = replyPreview,
@@ -246,7 +293,9 @@ private fun SystemEventRun(
     val showNewDivider = readMarkerTime != null &&
         newest.serverTime > readMarkerTime &&
         (olderThanRun == null || olderThanRun.serverTime <= readMarkerTime)
-    val showDay = olderThanRun == null || dayStart(oldest.serverTime) != dayStart(olderThanRun.serverTime)
+    val showDay = remember(oldest.serverTime, olderThanRun?.serverTime) {
+        olderThanRun == null || dayStart(oldest.serverTime) != dayStart(olderThanRun.serverTime)
+    }
 
     // Column so the pill and any dividers stack vertically. A bare item slot stacks siblings on top
     // of each other (its MeasurePolicy behaves like a Box), which would overlap the divider text.
@@ -300,8 +349,9 @@ private fun summarizeSystemRun(run: List<MessageEntity>): String {
     return counts.entries.joinToString(" · ") { (label, n) -> "$n $label" }
 }
 
-/** Completion-tracked link-preview state so a failed/null fetch stops the shimmer (plans/15 #3). */
+/** Completion-tracked link-preview state so a failed/null fetch stops the loading skeleton. */
 private sealed interface PreviewState {
+    data object Idle : PreviewState
     data object Loading : PreviewState
     data class Done(val preview: LinkPreview?) : PreviewState
 }
@@ -310,6 +360,7 @@ private sealed interface PreviewState {
 private fun MessageRow(
     msg: MessageEntity,
     older: MessageEntity?,
+    formatTime: (Long) -> String,
     readMarkerTime: Long?,
     senderIsFriend: Boolean,
     reactions: List<ReactionChip>,
@@ -321,6 +372,7 @@ private fun MessageRow(
     onDelete: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> LinkPreview?,
     previewsEnabled: Boolean,
+    richContentEnabled: Boolean,
     onOpenLink: (String) -> Unit,
     onSenderClick: (String) -> Unit,
     replyPreview: (String) -> Flow<ReplyPreviewData?>,
@@ -334,29 +386,59 @@ private fun MessageRow(
         (older == null || older.serverTime <= readMarkerTime)
 
     // Day separator when this message starts a new day relative to the older neighbor.
-    val showDay = older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
+    val showDay = remember(msg.serverTime, older?.serverTime) {
+        older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
+    }
 
     // A row asks Room for its reply target only while it is composed. This avoids timeline-wide
     // loaded-window scans during fast traversal; collection is lifecycle-cancelled off-screen.
-    val replyFlow = remember(msg.replyToMsgid) { msg.replyToMsgid?.let(replyPreview) ?: flowOf(null) }
-    val reply by replyFlow.collectAsStateWithLifecycle(initialValue = null)
-    // Parse URLs once per message text (was re-run on every recomposition, twice per row).
-    val imageUrl = remember(msg.text) { firstImageUrl(msg.text) }
-    val linkUrl = remember(msg.text) { firstLinkUrl(msg.text) }
+    val reply: ReplyPreviewData? = if (msg.replyToMsgid != null) {
+        val replyFlow = remember(msg.replyToMsgid) { replyPreview(msg.replyToMsgid) }
+        val resolved by replyFlow.collectAsStateWithLifecycle(initialValue = null)
+        resolved
+    } else {
+        null
+    }
 
-    // Lazily fetch a link preview for the first non-image URL. produceState carries a completion
-    // flag so a null result (fetch failed / not HTML) resolves to Done(null) and stops the
-    // skeleton shimmer instead of shimmering forever (plans/15 #3).
-    val previewState by produceState<PreviewState>(PreviewState.Done(null), linkUrl, previewsEnabled) {
-        value = if (linkUrl == null || !previewsEnabled) {
-            PreviewState.Done(null)
-        } else {
-            value = PreviewState.Loading
-            PreviewState.Done(runCatching { loadPreview(linkUrl) }.getOrNull())
+    // URL discovery is unnecessary for the overwhelming majority of IRC lines. For the rows that
+    // can contain a URL, wait until the fling settles and do the single regex pass on Default.
+    val mayContainUrl = remember(msg.text) {
+        msg.text.contains("http://") || msg.text.contains("https://")
+    }
+    var richUrls by remember(msg.id, msg.text) {
+        mutableStateOf<MessageUrls?>(if (mayContainUrl) null else MessageUrls.Empty)
+    }
+    val latestRichContentEnabled by rememberUpdatedState(richContentEnabled)
+    LaunchedEffect(msg.id, msg.text, mayContainUrl) {
+        if (!mayContainUrl || richUrls != null) return@LaunchedEffect
+        snapshotFlow { latestRichContentEnabled }.first { it }
+        richUrls = withContext(Dispatchers.Default) { messageUrls(msg.text) }
+    }
+    val imageUrl = richUrls?.imageUrl
+    val linkUrl = richUrls?.linkUrl
+
+    // Lazily fetch a link preview for the first non-image URL once the timeline is idle. The
+    // completion state retains a null result (fetch failed / not HTML), so it does not retry or
+    // leave a loading skeleton behind (plans/15 #3).
+    var previewState by remember(msg.id, linkUrl) { mutableStateOf<PreviewState>(PreviewState.Idle) }
+    val latestPreviewsEnabled by rememberUpdatedState(previewsEnabled && richContentEnabled)
+    LaunchedEffect(msg.id, linkUrl) {
+        val url = linkUrl ?: return@LaunchedEffect
+        snapshotFlow { latestPreviewsEnabled }.first { it }
+        if (previewState !is PreviewState.Idle) return@LaunchedEffect
+        previewState = PreviewState.Loading
+        val preview = try {
+            loadPreview(url)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
         }
+        previewState = PreviewState.Done(preview)
     }
     val preview = (previewState as? PreviewState.Done)?.preview
-    val previewLoading = previewsEnabled && linkUrl != null && previewState is PreviewState.Loading
+    val previewLoading = linkUrl != null && previewState is PreviewState.Loading
+    val formattedTime = remember(msg.serverTime, formatTime) { formatTime(msg.serverTime) }
 
     onCollapseFool?.let { FoolCollapseChip(sender = msg.sender, onCollapse = it) }
 
@@ -367,6 +449,7 @@ private fun MessageRow(
         sender = msg.sender,
         text = msg.text,
         timeMs = msg.serverTime,
+        formattedTime = formattedTime,
         isSelf = msg.isSelf,
         kind = msg.kind,
         showSender = showsSender(msg, older),
@@ -418,7 +501,9 @@ private fun FoolPlaceholderRow(
     val showNewDivider = readMarkerTime != null &&
         msg.serverTime > readMarkerTime &&
         (older == null || older.serverTime <= readMarkerTime)
-    val showDay = older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
+    val showDay = remember(msg.serverTime, older?.serverTime) {
+        older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
+    }
 
     // Column so the placeholder row and any dividers stack vertically rather than overlapping (a bare
     // item slot stacks its children like a Box).

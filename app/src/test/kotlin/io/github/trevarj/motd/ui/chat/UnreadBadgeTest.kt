@@ -112,6 +112,30 @@ class UnreadBadgeTest {
         assertEquals(1, index.count(1, 100))
     }
 
+    @Test fun `badge cap avoids indexing the entire loaded history`() {
+        val rows = (0 until 2_000).map { row(it, (10_000 - it).toLong(), false) }
+        var reads = 0
+        val index = UnreadViewportIndex()
+        index.update(rows.size, maxNonSelf = 100) { position -> reads++; rows[position] }
+
+        assertEquals(100, index.count(firstVisibleIndex = rows.size, marker = 0))
+        assertEquals(true, reads <= 101) // index-zero refresh probe + the capped prefix
+    }
+
+    @Test fun `read marker stops indexing once rows are already read`() {
+        val rows = (0 until 2_000).map { row(it, (10_000 - it).toLong(), false) }
+        var reads = 0
+        val index = UnreadViewportIndex()
+        index.update(
+            itemCount = rows.size,
+            maxNonSelf = 100,
+            stopAtOrBefore = 9_990,
+        ) { position -> reads++; rows[position] }
+
+        assertEquals(10, index.count(firstVisibleIndex = rows.size, marker = 9_990))
+        assertEquals(true, reads <= 12)
+    }
+
     private fun row(index: Int, time: Long, isSelf: Boolean) =
         io.github.trevarj.motd.data.db.MessageEntity(
             id = index.toLong(), bufferId = 1, msgid = "m$index", serverTime = time,

@@ -2,7 +2,6 @@ package io.github.trevarj.motd.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -62,7 +61,7 @@ private const val COMPACT_ROW_TINT_ALPHA = 0.10f
 internal fun CompactMessageRow(
     sender: String,
     text: String,
-    timeMs: Long,
+    formattedTime: String,
     isSelf: Boolean,
     kind: MessageKind,
     nickColors: NickColorScheme,
@@ -86,7 +85,6 @@ internal fun CompactMessageRow(
     onSenderClick: (() -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
-    val interaction = remember { MutableInteractionSource() }
     val spacing = LocalSpacing.current
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     // Self text stays on the default body color; others too (IRC is uniform). The nick carries color.
@@ -114,7 +112,8 @@ internal fun CompactMessageRow(
             // unbroken edge to edge.
             .background(rowTint)
             .combinedClickable(
-                interactionSource = interaction,
+                // Null lazily avoids an interaction object because this row has no indication.
+                interactionSource = null,
                 indication = null,
                 onClick = {},
                 onLongClick = onLongPress,
@@ -140,7 +139,7 @@ internal fun CompactMessageRow(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                 Text(
-                    text = formatTime(timeMs),
+                    text = formattedTime,
                     fontSize = 10.sp,
                     color = if (failed) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),

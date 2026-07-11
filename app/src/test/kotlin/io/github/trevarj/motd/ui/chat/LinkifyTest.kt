@@ -24,4 +24,15 @@ class LinkifyTest {
         assertEquals(listOf("https://example.com/a[b]"), extractUrls("https://example.com/a[b]"))
         assertEquals(listOf("https://example.com/a"), extractUrls("[https://example.com/a]"))
     }
+
+    @Test fun resolves_image_and_preview_link_in_one_result() {
+        assertEquals(
+            MessageUrls(
+                imageUrl = "https://example.com/photo.webp",
+                linkUrl = "https://example.com/article",
+            ),
+            messageUrls("read https://example.com/article then https://example.com/photo.webp"),
+        )
+        assertEquals(MessageUrls.Empty, messageUrls("ordinary IRC line"))
+    }
 }

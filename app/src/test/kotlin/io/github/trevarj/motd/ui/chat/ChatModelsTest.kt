@@ -2,6 +2,8 @@ package io.github.trevarj.motd.ui.chat
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -12,6 +14,19 @@ class ChatModelsTest {
 
     private fun react(msgid: String, sender: String, emoji: String) =
         ReactionEntity(bufferId = 1L, targetMsgid = msgid, sender = sender, emoji = emoji, serverTime = 0L)
+
+    private fun message(kind: MessageKind = MessageKind.PRIVMSG, self: Boolean = false, failed: Boolean = false) =
+        MessageEntity(
+            id = 1L,
+            bufferId = 1L,
+            serverTime = 1L,
+            sender = "nick",
+            kind = kind,
+            text = "text",
+            isSelf = self,
+            failed = failed,
+            dedupKey = "1",
+        )
 
     @Test fun `mine matches own nick case-insensitively`() {
         val chips = aggregateReactions(listOf(react("m1", "Alice", "👍")), myNick = "alice")
@@ -106,5 +121,13 @@ class ChatModelsTest {
         assertFalse(composerNeedsMemberNicks(TextFieldValue("a", TextRange(1))))
         assertTrue(composerNeedsMemberNicks(TextFieldValue("al", TextRange(2))))
         assertTrue(composerNeedsMemberNicks(TextFieldValue("@a", TextRange(2))))
+    }
+
+    @Test fun `lazy row content types separate structurally different messages`() {
+        assertEquals(MessageContentType.OTHER, messageContentType(message()))
+        assertEquals(MessageContentType.SELF, messageContentType(message(self = true)))
+        assertEquals(MessageContentType.SELF_FAILED, messageContentType(message(self = true, failed = true)))
+        assertEquals(MessageContentType.ACTION, messageContentType(message(kind = MessageKind.ACTION)))
+        assertEquals(MessageContentType.SYSTEM, messageContentType(message(kind = MessageKind.JOIN)))
     }
 }

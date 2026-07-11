@@ -6,6 +6,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -20,7 +21,15 @@ class LinkPreviewRepositoryImpl @Inject constructor() : LinkPreviewRepository {
 
     override suspend fun preview(url: String): LinkPreview? {
         cache.get(url)?.let { return it.value }
-        val result = runCatching { fetch(url) }.getOrNull()
+        val result = try {
+            fetch(url)
+        } catch (cancelled: CancellationException) {
+            // A row leaving composition is normal cancellation, not a negative preview result.
+            // Propagate it so a later visible row may retry instead of poisoning the LRU with null.
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
         cache.put(url, Holder(result))
         return result
     }

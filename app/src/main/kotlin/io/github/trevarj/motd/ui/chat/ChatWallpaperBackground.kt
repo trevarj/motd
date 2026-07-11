@@ -1,32 +1,44 @@
 package io.github.trevarj.motd.ui.chat
 
-import androidx.compose.foundation.background
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.Paint
+import android.util.LruCache
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Fill
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.asAndroidPath
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.withRotation
+import androidx.core.graphics.withScale
+import androidx.core.graphics.withTranslation
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.ui.components.isAppliedThemeDark
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
 /**
@@ -86,12 +98,59 @@ fun ChatWallpaperBackground(
     // recomposition/scroll and independent of the exact canvas size.
     val placements = remember(wallpaper) { scatter(wallpaper, stamps.size) }
 
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+    val baseArgb = base.toArgb()
+    val mainArgb = ink.copy(alpha = mainAlpha).toArgb()
+    val accentArgb = accent.copy(alpha = accentAlpha).toArgb()
+    val accent2Argb = accent2.copy(alpha = accentAlpha).toArgb()
+    val rasterKey = remember(wallpaper, canvasSize, baseArgb, mainArgb, accentArgb, accent2Argb) {
+        canvasSize.takeIf { it.width > 0 && it.height > 0 }?.let { size ->
+            WallpaperRasterKey(
+                wallpaper = wallpaper,
+                width = rasterDimension(size.width),
+                height = rasterDimension(size.height),
+                baseArgb = baseArgb,
+                mainArgb = mainArgb,
+                accentArgb = accentArgb,
+                accent2Argb = accent2Argb,
+            )
+        }
+    }
+    // The old drawBehind path transformed and allocated 128 vector Paths on every invalidated
+    // scroll frame. Render the static wallpaper once on a worker thread, retain it across channel
+    // opens, and issue one bitmap draw per frame. Until it is ready the themed base color paints,
+    // keeping first composition free of wallpaper work.
+    val raster by produceState<ImageBitmap?>(
+        initialValue = null,
+        rasterKey,
+    ) {
+        val key = rasterKey ?: return@produceState
+        // produceState retains its State object when a key changes. Reset it to the raster for the
+        // new key so a rotation or theme change can never keep drawing the previous bitmap.
+        value = WallpaperRasterCache.get(key)
+        if (value == null) {
+            value = withContext(Dispatchers.Default) {
+                WallpaperRasterCache.get(key) ?: renderWallpaperRaster(key, stamps, placements)
+                    .also { WallpaperRasterCache.put(key, it) }
+            }
+        }
+    }
+
     Box(
         modifier
             .fillMaxSize()
-            .background(base)
+            .onSizeChanged { if (canvasSize != it) canvasSize = it }
             .drawBehind {
-                drawStamps(stamps, placements, ink, accent, accent2, mainAlpha, accentAlpha)
+                val image = raster
+                if (image == null) {
+                    drawRect(base)
+                } else {
+                    drawImage(
+                        image = image,
+                        dstSize = IntSize(size.width.toInt(), size.height.toInt()),
+                        filterQuality = FilterQuality.Medium,
+                    )
+                }
             },
     )
 }
@@ -238,60 +297,69 @@ private fun scatter(wallpaper: ChatWallpaper, stampCount: Int): List<Placement> 
 /** Stable seed per preset (avoids depending on hashCode / enum identity across runs). */
 private fun seedFor(wallpaper: ChatWallpaper): Long = 0x9E3779B97F4A7C15uL.toLong() * (wallpaper.ordinal + 1)
 
-// -- Drawing -------------------------------------------------------------------------------------
+// -- Raster drawing ------------------------------------------------------------------------------
 
-private fun DrawScope.drawStamps(
+private const val WALLPAPER_RASTER_SCALE = 0.5f
+private const val WALLPAPER_RASTER_CACHE_KB = 12 * 1024
+
+private data class WallpaperRasterKey(
+    val wallpaper: ChatWallpaper,
+    val width: Int,
+    val height: Int,
+    val baseArgb: Int,
+    val mainArgb: Int,
+    val accentArgb: Int,
+    val accent2Argb: Int,
+)
+
+private object WallpaperRasterCache : LruCache<WallpaperRasterKey, ImageBitmap>(WALLPAPER_RASTER_CACHE_KB) {
+    override fun sizeOf(key: WallpaperRasterKey, value: ImageBitmap): Int =
+        (value.width * value.height * 4) / 1024
+}
+
+private fun rasterDimension(fullSize: Int): Int =
+    (fullSize * WALLPAPER_RASTER_SCALE).toInt().coerceAtLeast(1)
+
+/** CPU-rasterize the static motif layer off the main thread; callers draw the result as one image. */
+private fun renderWallpaperRaster(
+    key: WallpaperRasterKey,
     stamps: List<Stamp>,
     placements: List<Placement>,
-    ink: Color,
-    accent: Color,
-    accent2: Color,
-    mainAlpha: Float,
-    accentAlpha: Float,
-) {
-    if (stamps.isEmpty()) return
-    // Common footprint: the stamp's larger source dimension maps to STAMP_FRACTION of canvas width.
-    val target = size.width * STAMP_FRACTION
-    for (p in placements) {
-        val stamp = stamps[p.stampIndex]
-        val s = (target / stamp.size) * p.scaleJitter
-        val cx = p.nx * size.width
-        val cy = p.ny * size.height
-        val color = when (stamp.ink) {
-            Ink.MAIN -> ink.copy(alpha = mainAlpha)
-            Ink.ACCENT -> accent.copy(alpha = accentAlpha)
-            Ink.ACCENT2 -> accent2.copy(alpha = accentAlpha)
+): ImageBitmap {
+    val bitmap = createBitmap(key.width, key.height)
+    val canvas = AndroidCanvas(bitmap)
+    canvas.drawColor(key.baseArgb)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    val target = key.width * STAMP_FRACTION
+    for (placement in placements) {
+        val stamp = stamps[placement.stampIndex]
+        val scale = (target / stamp.size) * placement.scaleJitter
+        paint.color = when (stamp.ink) {
+            Ink.MAIN -> key.mainArgb
+            Ink.ACCENT -> key.accentArgb
+            Ink.ACCENT2 -> key.accent2Argb
         }
-        rotate(p.rotationDeg, pivot = Offset(cx, cy)) {
-            translate(cx, cy) {
-                // Scale the centered stamp down about the origin (== the placement point).
-                val style = if (stamp.strokeWidth > 0f) {
-                    Stroke(
-                        width = stamp.strokeWidth * s,
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round,
-                    )
-                } else {
-                    Fill
+        if (stamp.strokeWidth > 0f) {
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = stamp.strokeWidth
+        } else {
+            paint.style = Paint.Style.FILL
+        }
+        val cx = placement.nx * key.width
+        val cy = placement.ny * key.height
+        canvas.withRotation(placement.rotationDeg, cx, cy) {
+            withTranslation(cx, cy) {
+                withScale(scale, scale) {
+                    drawPath(stamp.path.asAndroidPath(), paint)
                 }
-                withScaledPath(stamp.path, s) { scaled -> drawPath(scaled, color, style = style) }
             }
         }
     }
+    return bitmap.asImageBitmap()
 }
-
-/**
- * Draws [path] scaled by [s] about the origin. Compose's [DrawScope.scale] would also scale stroke
- * width, so instead we bake the scale into a copy of the path and stroke it at an explicit width.
- */
-private inline fun withScaledPath(path: Path, s: Float, block: (Path) -> Unit) {
-    val scaled = Path()
-    scaled.addPath(path)
-    scaled.transform(scaleMatrix(s))
-    block(scaled)
-}
-
-private fun scaleMatrix(s: Float) = androidx.compose.ui.graphics.Matrix().apply { scale(s, s) }
 
 // -- Stroke widths (mirror the SVG stroke-width at 1080-unit scale) ------------------------------
 

@@ -81,7 +81,7 @@ import kotlinx.coroutines.launch
 private const val AUTOCOMPLETE_SHOW_DEBOUNCE_MS = 250L
 private const val REACTION_PREFETCH_ROWS = 12
 private const val MAX_VISIBLE_REACTION_MSGIDS = 80
-private const val DEFER_MEMBER_LOAD_MS = 1_000L
+private const val MAX_UNREAD_BADGE_COUNT = 100
 
 /** Stateful entry: wires the ViewModel, lifecycle mark-read, and navigation. */
 @Composable
@@ -110,6 +110,15 @@ fun ChatScreen(
     }
 
     val chipsByMsgid by viewModel.reactionChips.collectAsStateWithLifecycle()
+    val reactionChipsForMessage = remember(chipsByMsgid) {
+        { msgid: String -> chipsByMsgid[msgid].orEmpty() }
+    }
+    // The VM resolves the live ISUPPORT normalizer. Memoize the returned lambda so unrelated
+    // header/composer state changes do not invalidate every lazy-list row through a new function
+    // identity.
+    val nickNormalizer = remember(state.buffer?.networkId, state.connState) {
+        viewModel.nickNormalizer()
+    }
 
     val jumpTarget by viewModel.jumpTarget.collectAsStateWithLifecycle()
     val initialTarget by viewModel.initialTarget.collectAsStateWithLifecycle()
@@ -136,7 +145,7 @@ fun ChatScreen(
         foolsMode = settings.foolsMode,
         chatWallpaper = settings.chatWallpaper,
         showComposerEmoji = settings.showComposerEmoji,
-        reactionChips = { msgid -> chipsByMsgid[msgid].orEmpty() },
+        reactionChips = reactionChipsForMessage,
         replyPreview = viewModel::replyPreview,
         memberNicks = memberNicks,
         knownNicks = knownNicks,
@@ -148,7 +157,7 @@ fun ChatScreen(
         onOpenChannelInfo = if (isServerBuffer) ({}) else onOpenChannelInfo,
         onOpenSearch = onOpenSearch,
         onOpenImage = onOpenImage,
-        nickNormalizer = viewModel.nickNormalizer(),
+        nickNormalizer = nickNormalizer,
         onSubmit = { raw -> viewModel.submit(raw, onOpenBuffer = onOpenBuffer, onOpenChannelList = onOpenChannelList) },
         onTyping = viewModel::sendTyping,
         onSetReply = viewModel::setReply,
@@ -442,45 +451,51 @@ fun ChatContent(
         }
     }
 
-    LaunchedEffect(initialPositionSettled, items.itemCount) {
-        if (!initialPositionSettled) return@LaunchedEffect
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-            .collect { (index, offset) ->
-                val row = items.peek(index) ?: return@collect
-                onScrollPositionChanged(
-                    ChatScrollPosition(
-                        index = index,
-                        offset = offset,
-                        msgid = row.msgid,
-                        serverTime = row.serverTime,
-                        rowId = row.id,
-                    ),
-                )
-            }
+    fun saveCurrentScrollPosition() {
+        if (!initialPositionSettled) return
+        val index = listState.firstVisibleItemIndex
+        val row = items.peek(index) ?: return
+        onScrollPositionChanged(
+            ChatScrollPosition(
+                index = index,
+                offset = listState.firstVisibleItemScrollOffset,
+                msgid = row.msgid,
+                serverTime = row.serverTime,
+                rowId = row.id,
+            ),
+        )
     }
 
-    LaunchedEffect(initialPositionSettled) {
+    // The previous collector allocated and wrote to the position cache for nearly every pixel of a
+    // fling. We only need the final anchor: persist when scrolling settles, plus once on disposal so
+    // a back gesture during an active fling still retains the current location.
+    LaunchedEffect(initialPositionSettled, listState) {
         if (!initialPositionSettled) return@LaunchedEffect
-        withFrameNanos { }
-        kotlinx.coroutines.delay(DEFER_MEMBER_LOAD_MS)
-        Trace.beginSection("MOTD chat deferred members")
-        try {
-            onNeedMembers()
-        } finally {
-            Trace.endSection()
-        }
+        snapshotFlow { listState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { scrolling -> if (!scrolling) saveCurrentScrollPosition() }
+    }
+    DisposableEffect(initialPositionSettled, listState) {
+        onDispose { saveCurrentScrollPosition() }
     }
 
     LaunchedEffect(initialPositionSettled, listState) {
         snapshotFlow {
-            if (!initialPositionSettled || items.itemCount == 0) {
-                emptyList()
+            // While scrolling, deliberately stop observing itemCount/index. snapshotFlow then
+            // unregisters those hot reads until the idle edge, preventing a DB query restart for
+            // every row crossed by a fling while keeping the last reaction map on screen.
+            if (!initialPositionSettled || listState.isScrollInProgress) {
+                null
             } else {
-                visibleReactionMsgids(items, listState)
+                items.itemCount to listState.firstVisibleItemIndex
             }
         }
             .distinctUntilChanged()
-            .collect(onVisibleMsgidsChanged)
+            .collect { idleWindow ->
+                if (idleWindow != null) {
+                    onVisibleMsgidsChanged(visibleReactionMsgids(items, listState))
+                }
+            }
     }
 
     // Long-press action sheet target.
@@ -678,25 +693,13 @@ fun ChatContent(
                         )
                     }
 
-                    // Scroll-to-bottom FAB with unread count. Viewport-aware: only messages below the
-                    // fold (newer than the topmost visible row) and past the LIVE read marker count,
-                    // so the badge shrinks as the user scrolls down and clears at the bottom once
-                    // markRead advances the live marker — instead of counting already-read messages
-                    // against the frozen snapshot until buffer re-entry. firstVisibleItemIndex is
-                    // read reactively so scrolls recompute it.
-                    val firstVisible by remember {
-                        derivedStateOf { listState.firstVisibleItemIndex }
-                    }
-                    // Gated on !autoScrolling so a sub-frame !atBottom blip during a programmatic
-                    // scroll-to-newest (send / auto-follow) can't flash the FAB; a genuine user
-                    // scroll-up leaves autoScrolling false, so it still appears promptly.
-                    val unreadIndex = remember { UnreadViewportIndex() }
-                    // History growth appends older Paging rows. [UnreadViewportIndex] indexes only
-                    // that appended page; refreshes are detected by the index-zero identity.
-                    unreadIndex.update(items.itemCount, items::peek)
-                    ScrollToBottomFab(
+                    // Keep the hot firstVisibleItemIndex read inside the FAB subtree. Reading it in
+                    // ChatContent made every row boundary re-run the entire Scaffold/list/composer.
+                    ViewportScrollToBottomFab(
+                        items = items,
+                        listState = listState,
+                        readMarker = readMarkerLive,
                         visible = initialPositionSettled && !atBottom && !autoScrolling,
-                        unread = readMarkerLive?.let { unreadIndex.count(firstVisible, it) } ?: 0,
                         onClick = { scope.launch { scrollToNewest() } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     )
@@ -895,7 +898,11 @@ private fun ScrollToBottomFab(
 ) {
     AnimatedVisibility(visible = visible, enter = scaleIn(), exit = scaleOut(), modifier = modifier) {
         BadgedBox(
-            badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else "$unread") } },
+            badge = {
+                if (unread > 0) {
+                    Badge { Text(if (unread >= MAX_UNREAD_BADGE_COUNT) "99+" else "$unread") }
+                }
+            },
         ) {
             FloatingActionButton(onClick = onClick) {
                 Icon(
@@ -905,6 +912,43 @@ private fun ScrollToBottomFab(
             }
         }
     }
+}
+
+/**
+ * Viewport-aware FAB wrapper. This is intentionally its own restart scope: the first visible index
+ * changes repeatedly during a fling, while the expensive chat scaffold and lazy-list declaration do
+ * not. Only this small badge subtree recomposes at message boundaries.
+ */
+@Composable
+private fun ViewportScrollToBottomFab(
+    items: LazyPagingItems<MessageEntity>,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    readMarker: Long?,
+    visible: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val firstVisible by remember(listState) {
+        derivedStateOf { listState.firstVisibleItemIndex }
+    }
+    val unreadIndex = remember { UnreadViewportIndex() }
+    val unread = readMarker?.let { marker ->
+        // History growth appends older Paging rows. The compact index reads only the unread prefix
+        // (and never more than the displayed 99+ cap); index-zero identity detects refreshes.
+        unreadIndex.update(
+            itemCount = items.itemCount,
+            peek = items::peek,
+            maxNonSelf = MAX_UNREAD_BADGE_COUNT,
+            stopAtOrBefore = marker,
+        )
+        unreadIndex.count(firstVisible, marker)
+    } ?: 0
+    ScrollToBottomFab(
+        visible = visible,
+        unread = unread,
+        onClick = onClick,
+        modifier = modifier,
+    )
 }
 
 @Preview

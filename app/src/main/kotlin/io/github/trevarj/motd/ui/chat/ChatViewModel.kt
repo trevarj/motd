@@ -147,8 +147,9 @@ class ChatViewModel @Inject constructor(
 
     /**
      * Member rosters can be large on public IRC channels. Do not collect them as part of the first
-     * chat-state emission; the screen calls this after entry settles (or when autocomplete needs
-     * nicks) so the first paint is driven by the message page, not a full NAMES list.
+     * chat-state emission. The screen requests them only when autocomplete or nick moderation needs
+     * the roster, so opening a busy channel never rebuilds every visible message merely to show a
+     * member count.
      */
     fun ensureMembersObserved() {
         if (membersJob != null) return
@@ -381,6 +382,9 @@ class ChatViewModel @Inject constructor(
      * shows "Details in server messages". Actions render immediately regardless.
      */
     fun openNickSheet(nick: String) {
+        // Moderation visibility depends on our prefixes in the channel roster. Load it on this
+        // explicit interaction, not on every channel entry.
+        ensureMembersObserved()
         _nickSheet.value = NickSheetState(nick = nick)
         val networkId = state.value.buffer?.networkId ?: return
         val client = connectionManager.clientFor(networkId) ?: return
