@@ -100,6 +100,7 @@ fun MessageList(
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> LinkPreview?,
+    previewsEnabled: Boolean,
     onOpenLink: (String) -> Unit,
     modifier: Modifier = Modifier,
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
@@ -195,6 +196,7 @@ fun MessageList(
                 onRetry = onRetry,
                 onDelete = onDelete,
                 loadPreview = loadPreview,
+                previewsEnabled = previewsEnabled,
                 onOpenLink = onOpenLink,
                 onSenderClick = onSenderClick,
                 replyPreview = replyPreview,
@@ -318,6 +320,7 @@ private fun MessageRow(
     onRetry: (MessageEntity) -> Unit,
     onDelete: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> LinkPreview?,
+    previewsEnabled: Boolean,
     onOpenLink: (String) -> Unit,
     onSenderClick: (String) -> Unit,
     replyPreview: (String) -> Flow<ReplyPreviewData?>,
@@ -344,15 +347,16 @@ private fun MessageRow(
     // Lazily fetch a link preview for the first non-image URL. produceState carries a completion
     // flag so a null result (fetch failed / not HTML) resolves to Done(null) and stops the
     // skeleton shimmer instead of shimmering forever (plans/15 #3).
-    val previewState by produceState<PreviewState>(PreviewState.Loading, linkUrl) {
-        value = if (linkUrl == null) {
+    val previewState by produceState<PreviewState>(PreviewState.Done(null), linkUrl, previewsEnabled) {
+        value = if (linkUrl == null || !previewsEnabled) {
             PreviewState.Done(null)
         } else {
+            value = PreviewState.Loading
             PreviewState.Done(runCatching { loadPreview(linkUrl) }.getOrNull())
         }
     }
     val preview = (previewState as? PreviewState.Done)?.preview
-    val previewLoading = linkUrl != null && previewState is PreviewState.Loading
+    val previewLoading = previewsEnabled && linkUrl != null && previewState is PreviewState.Loading
 
     onCollapseFool?.let { FoolCollapseChip(sender = msg.sender, onCollapse = it) }
 

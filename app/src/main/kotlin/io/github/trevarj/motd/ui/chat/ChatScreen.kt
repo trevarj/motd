@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.chat
 
 import android.content.ClipData
 import android.content.Intent
+import android.os.Trace
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
@@ -43,6 +44,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.Clipboard
@@ -60,7 +62,6 @@ import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.R
-import kotlinx.coroutines.flow.first
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.FoolsMode
@@ -71,12 +72,16 @@ import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Pause after the last keystroke before the nick-autocomplete panel becomes visible, so fast
  *  typing doesn't flash suggestions on every character. */
 private const val AUTOCOMPLETE_SHOW_DEBOUNCE_MS = 250L
-private const val MAX_REACTION_WINDOW_MSGIDS = 500
+private const val REACTION_PREFETCH_ROWS = 12
+private const val MAX_VISIBLE_REACTION_MSGIDS = 80
+private const val DEFER_MEMBER_LOAD_MS = 1_000L
 
 /** Stateful entry: wires the ViewModel, lifecycle mark-read, and navigation. */
 @Composable
@@ -94,6 +99,8 @@ fun ChatScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val items = viewModel.messages.collectAsLazyPagingItems()
+    val memberNicks by viewModel.memberNicks.collectAsStateWithLifecycle()
+    val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
 
     // Foreground-buffer tracker on resume/pause (notification suppression, plans/05). Read state
     // is deliberately deferred until the one-shot entry position has settled below.
@@ -101,13 +108,6 @@ fun ChatScreen(
         viewModel.onResume()
         onDispose { viewModel.onPause() }
     }
-
-    // Keep a bounded loaded-window reaction key set. This changes only as Paging item count
-    // changes and avoids both layout observers and unbounded buffer-reaction aggregation.
-    val visibleMsgids = remember(items.itemCount) {
-        (0 until minOf(items.itemCount, MAX_REACTION_WINDOW_MSGIDS)).mapNotNull { items.peek(it)?.msgid }
-    }
-    LaunchedEffect(visibleMsgids) { viewModel.setVisibleMsgids(visibleMsgids) }
 
     val chipsByMsgid by viewModel.reactionChips.collectAsStateWithLifecycle()
 
@@ -138,6 +138,8 @@ fun ChatScreen(
         showComposerEmoji = settings.showComposerEmoji,
         reactionChips = { msgid -> chipsByMsgid[msgid].orEmpty() },
         replyPreview = viewModel::replyPreview,
+        memberNicks = memberNicks,
+        knownNicks = knownNicks,
         readMarkerSnapshot = readMarkerSnapshot,
         readMarkerLive = readMarkerTime,
         onMarkRead = viewModel::markRead,
@@ -165,6 +167,8 @@ fun ChatScreen(
         onInitialPositionHandled = viewModel::onInitialPositionHandled,
         onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
         onScrollPositionChanged = viewModel::saveScrollPosition,
+        onVisibleMsgidsChanged = viewModel::setVisibleMsgids,
+        onNeedMembers = viewModel::ensureMembersObserved,
         onJumpUnresolved = viewModel::onJumpUnresolved,
         onReresolveJump = viewModel::reresolveJumpOnce,
         isServerBuffer = isServerBuffer,
@@ -221,6 +225,8 @@ fun ChatContent(
     loadPreview: suspend (String) -> io.github.trevarj.motd.data.repo.LinkPreview?,
     reactionChips: (String) -> List<io.github.trevarj.motd.ui.components.ReactionChip> = { emptyList() },
     replyPreview: (String) -> kotlinx.coroutines.flow.Flow<io.github.trevarj.motd.ui.components.ReplyPreviewData?> = { kotlinx.coroutines.flow.flowOf(null) },
+    memberNicks: List<String> = emptyList(),
+    knownNicks: Set<String> = emptySet(),
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
@@ -242,6 +248,8 @@ fun ChatContent(
     onInitialPositionHandled: () -> Unit = {},
     onInitialPositionUnresolved: () -> Unit = {},
     onScrollPositionChanged: (ChatScrollPosition) -> Unit = {},
+    onVisibleMsgidsChanged: (List<String>) -> Unit = {},
+    onNeedMembers: () -> Unit = {},
     onJumpUnresolved: () -> Unit = {},
     onReresolveJump: () -> Unit = {},
     // Round 5 (plans/16 §5.6/§5.8): SERVER-buffer raw-send + nick sheet plumbing.
@@ -270,6 +278,17 @@ fun ChatContent(
     // Rows the user explicitly re-collapsed while expand-all is on (so a global expand is still
     // individually reversible). Cleared whenever expand-all is toggled off.
     var collapsedFools by remember { mutableStateOf(setOf<Long>()) }
+
+    LaunchedEffect(Unit) {
+        withFrameNanos {
+            Trace.beginSection("MOTD chat first frame")
+            try {
+                // Instant-like marker for Perfetto/gfx correlation without spanning suspension.
+            } finally {
+                Trace.endSection()
+            }
+        }
+    }
 
     // Entry position is resolved once after refresh. Until then do not expose a transient FAB or
     // advance read state from a default index-0 layout.
@@ -440,6 +459,30 @@ fun ChatContent(
             }
     }
 
+    LaunchedEffect(initialPositionSettled) {
+        if (!initialPositionSettled) return@LaunchedEffect
+        withFrameNanos { }
+        kotlinx.coroutines.delay(DEFER_MEMBER_LOAD_MS)
+        Trace.beginSection("MOTD chat deferred members")
+        try {
+            onNeedMembers()
+        } finally {
+            Trace.endSection()
+        }
+    }
+
+    LaunchedEffect(initialPositionSettled, listState) {
+        snapshotFlow {
+            if (!initialPositionSettled || items.itemCount == 0) {
+                emptyList()
+            } else {
+                visibleReactionMsgids(items, listState)
+            }
+        }
+            .distinctUntilChanged()
+            .collect(onVisibleMsgidsChanged)
+    }
+
     // Long-press action sheet target.
     var sheetTarget by remember { mutableStateOf<MessageEntity?>(null) }
     val sheetState = rememberModalBottomSheetState()
@@ -508,14 +551,6 @@ fun ChatContent(
             .filterNot { isSystemKind(it.kind) || it.isSelf }
             .map { it.sender }
     }
-    val memberNicks = state.members.map { it.nick }
-    // Normalized member nicks for @mention coloring in message bodies (plans/17). Normalized with
-    // the same normalizeNick the row renderers use so token lookups match; memoized on the member
-    // list so the set isn't rebuilt every recomposition.
-    val knownNicks = remember(memberNicks) {
-        memberNicks.map { io.github.trevarj.motd.data.prefs.normalizeNick(it) }.toSet()
-    }
-
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -608,6 +643,7 @@ fun ChatContent(
                         onRetry = onRetry,
                         onDelete = onDelete,
                         loadPreview = loadPreview,
+                        previewsEnabled = initialPositionSettled,
                         // Link-preview tap opens the URL in the system browser.
                         onOpenLink = { ctx.startActivity(Intent(Intent.ACTION_VIEW, it.toUri())) },
                         highlightMsgid = highlightMsgid,
@@ -668,6 +704,12 @@ fun ChatContent(
 
                 val completions = remember(composerText, memberNicks, recentSpeakers) {
                     autocompleteFor(composerText, memberNicks, recentSpeakers, nickNormalizer)
+                }
+                val needsMemberCompletion = remember(composerText) {
+                    composerNeedsMemberNicks(composerText)
+                }
+                LaunchedEffect(needsMemberCompletion) {
+                    if (needsMemberCompletion) onNeedMembers()
                 }
                 // Debounce the SHOW so fast typing doesn't flash the suggestion panel on every
                 // keystroke: only reveal completions after a brief pause. Hiding stays immediate
@@ -789,13 +831,47 @@ internal fun initialPagingPage(itemCount: Int, append: LoadState): InitialPaging
 
 internal enum class InitialPagingPage { Pending, RowsAvailable, TerminalEmpty }
 
+internal fun visibleReactionMsgids(
+    items: LazyPagingItems<MessageEntity>,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+): List<String> {
+    val visible = listState.layoutInfo.visibleItemsInfo
+        .map { it.index }
+        .filter { it >= 0 && it < items.itemCount }
+    val start: Int
+    val endExclusive: Int
+    if (visible.isEmpty()) {
+        start = 0
+        endExclusive = minOf(items.itemCount, REACTION_PREFETCH_ROWS * 2)
+    } else {
+        start = (visible.minOrNull() ?: 0).minus(REACTION_PREFETCH_ROWS).coerceAtLeast(0)
+        endExclusive = ((visible.maxOrNull() ?: 0) + REACTION_PREFETCH_ROWS + 1)
+            .coerceAtMost(items.itemCount)
+    }
+    if (start >= endExclusive) return emptyList()
+    return (start until endExclusive)
+        .asSequence()
+        .mapNotNull { items.peek(it)?.msgid }
+        .distinct()
+        .take(MAX_VISIBLE_REACTION_MSGIDS)
+        .toList()
+}
+
+internal fun composerNeedsMemberNicks(value: TextFieldValue): Boolean {
+    val text = value.text
+    if (text.startsWith("/") && !text.startsWith("//") && !text.contains(' ')) return false
+    val token = nickTokenAt(text, value.selection.end) ?: return false
+    val atPrefixed = token.start < text.length && text[token.start] == '@'
+    return token.text.length >= 2 || atPrefixed
+}
+
 private fun chatSubtitle(state: ChatState, context: android.content.Context): String? {
     if (state.typingNicks.isNotEmpty()) {
         return typingText(context, state.typingNicks)
     }
     val buffer = state.buffer ?: return null
-    return if (buffer.type == BufferType.CHANNEL && state.members.isNotEmpty()) {
-        val n = state.members.size
+    return if (buffer.type == BufferType.CHANNEL && state.memberCount != null) {
+        val n = state.memberCount
         context.resources.getQuantityString(R.plurals.chat_member_count, n, n)
     } else {
         null

@@ -5,7 +5,6 @@ import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
-import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -65,11 +64,7 @@ fun ChatContentPreviewBody() {
                 id = 1, networkId = 1, name = "#kotlin", displayName = "#kotlin",
                 type = BufferType.CHANNEL, readMarkerTime = now - 100_000,
             ),
-            members = listOf(
-                MemberEntity(1, "alice", "@"),
-                MemberEntity(1, "bob", ""),
-                MemberEntity(1, "carol", "+"),
-            ),
+            memberCount = 3,
             typingNicks = listOf("alice"),
             replyTo = null,
             connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
@@ -79,6 +74,7 @@ fun ChatContentPreviewBody() {
         onBack = {}, onOpenChannelInfo = {}, onOpenSearch = {}, onOpenImage = {},
         nickNormalizer = { it.lowercase() },
         onSubmit = {}, onTyping = {}, onSetReply = {}, onReact = { _, _ -> }, onRetry = {},
+        memberNicks = listOf("alice", "bob", "carol"),
         loadPreview = { null },
     )
 }

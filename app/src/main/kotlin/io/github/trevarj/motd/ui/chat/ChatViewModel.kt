@@ -15,6 +15,7 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
+import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -34,10 +35,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import java.time.Instant
@@ -52,7 +59,7 @@ private const val MAX_REACTION_WINDOW_MSGIDS = 500
  */
 data class ChatState(
     val buffer: BufferEntity? = null,
-    val members: List<MemberEntity> = emptyList(),
+    val memberCount: Int? = null,
     val typingNicks: List<String> = emptyList(),
     val replyTo: MessageEntity? = null,
     val connState: IrcClientState = IrcClientState.Disconnected,
@@ -104,28 +111,62 @@ class ChatViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Settings())
 
     private val replyTo = MutableStateFlow<MessageEntity?>(null)
+    private val _members = MutableStateFlow<List<MemberEntity>>(emptyList())
+    private val _memberNicks = MutableStateFlow<List<String>>(emptyList())
+    val memberNicks: StateFlow<List<String>> = _memberNicks.asStateFlow()
+    private val _knownNicks = MutableStateFlow<Set<String>>(emptySet())
+    val knownNicks: StateFlow<Set<String>> = _knownNicks.asStateFlow()
+    private val _memberCount = MutableStateFlow<Int?>(null)
+    private var membersJob: Job? = null
 
-    private val connState: StateFlow<IrcClientState> = bufferRepository.observeBuffer(bufferId)
+    private val buffer: StateFlow<BufferEntity?> = bufferRepository.observeBuffer(bufferId)
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val connState: StateFlow<IrcClientState> = buffer
         .combine(connectionManager.connectionStates) { buffer, states ->
             buffer?.let { states[it.networkId] } ?: IrcClientState.Disconnected
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), IrcClientState.Disconnected)
 
     val state: StateFlow<ChatState> = combine(
-        bufferRepository.observeBuffer(bufferId),
-        bufferRepository.observeMembers(bufferId),
+        buffer,
+        _memberCount,
         typingTracker.typingNicks(bufferId),
         replyTo,
         connState,
-    ) { buffer, members, typing, reply, conn ->
+    ) { buffer, memberCount, typing, reply, conn ->
         ChatState(
             buffer = buffer,
-            members = members,
+            memberCount = memberCount,
             typingNicks = typing,
             replyTo = reply,
             connState = conn,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatState())
+
+    /**
+     * Member rosters can be large on public IRC channels. Do not collect them as part of the first
+     * chat-state emission; the screen calls this after entry settles (or when autocomplete needs
+     * nicks) so the first paint is driven by the message page, not a full NAMES list.
+     */
+    fun ensureMembersObserved() {
+        if (membersJob != null) return
+        membersJob = viewModelScope.launch {
+            bufferRepository.observeMembers(bufferId)
+                .distinctUntilChanged()
+                .collect { members ->
+                    val (nicks, known) = withContext(Dispatchers.Default) {
+                        val nicks = members.map { it.nick }
+                        nicks to nicks.map(::normalizeNick).toSet()
+                    }
+                    _members.value = members
+                    _memberNicks.value = nicks
+                    _knownNicks.value = known
+                    _memberCount.value = members.size
+                }
+        }
+    }
 
     // --- reactions aggregation (plans/15 #5, #18) ---
 
@@ -143,14 +184,18 @@ class ChatViewModel @Inject constructor(
      * the result to a bounded loaded window prevents historical reaction rows from being
      * re-aggregated on the main thread when a populated chat opens.
      */
+    @OptIn(ExperimentalCoroutinesApi::class)
     val reactionChips: StateFlow<Map<String, List<ReactionChip>>> = combine(
-        messageRepository.reactionsForBuffer(bufferId),
-        visibleMsgids,
+        visibleMsgids
+            .map { it.take(MAX_REACTION_WINDOW_MSGIDS) }
+            .distinctUntilChanged()
+            .flatMapLatest { ids ->
+                if (ids.isEmpty()) flowOf(emptyList()) else messageRepository.reactions(bufferId, ids)
+            },
         connState,
-    ) { all, visible, conn ->
-        val visibleSet = visible.toHashSet()
+    ) { visibleReactions, conn ->
         val myNick = (conn as? IrcClientState.Ready)?.nick
-        aggregateReactions(all.asSequence().filter { it.targetMsgid in visibleSet }.toList(), myNick, nickNormalizer())
+        aggregateReactions(visibleReactions, myNick, nickNormalizer())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     // Reply previews are requested only by composed rows. The bounded cache shares an in-flight
@@ -179,7 +224,7 @@ class ChatViewModel @Inject constructor(
     // the buffer's real read marker, so once markRead advances it (at bottom) the badge count drops
     // to 0 and stays 0 when scrolling back up — instead of counting already-read messages until
     // re-entry (bug: badge doesn't clear until leaving the chat).
-    val readMarkerTime: StateFlow<Long?> = bufferRepository.observeBuffer(bufferId)
+    val readMarkerTime: StateFlow<Long?> = buffer
         .map { it?.readMarkerTime }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -402,7 +447,7 @@ class ChatViewModel @Inject constructor(
         if (buffer.type != BufferType.CHANNEL) return false
         val myNick = (connState.value as? IrcClientState.Ready)?.nick ?: return false
         val normalize = nickNormalizer()
-        val me = state.value.members.firstOrNull { normalize(it.nick) == normalize(myNick) } ?: return false
+        val me = _members.value.firstOrNull { normalize(it.nick) == normalize(myNick) } ?: return false
         val order = buffer.networkId.let { connectionManager.clientFor(it) }
             ?.let { io.github.trevarj.motd.ui.channelinfo.prefixOrderFrom(it.isupport.prefixModes) }
             ?: io.github.trevarj.motd.ui.channelinfo.DEFAULT_PREFIX_ORDER

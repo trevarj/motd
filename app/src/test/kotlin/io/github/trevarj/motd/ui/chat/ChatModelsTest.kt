@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.data.db.ReactionEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -93,5 +95,16 @@ class ChatModelsTest {
                 atBottom = true,
             ),
         )
+    }
+
+    @Test fun `composer does not need member nicks for blank text or command hints`() {
+        assertFalse(composerNeedsMemberNicks(TextFieldValue("")))
+        assertFalse(composerNeedsMemberNicks(TextFieldValue("/jo", TextRange(3))))
+    }
+
+    @Test fun `composer needs member nicks only for qualifying nick tokens`() {
+        assertFalse(composerNeedsMemberNicks(TextFieldValue("a", TextRange(1))))
+        assertTrue(composerNeedsMemberNicks(TextFieldValue("al", TextRange(2))))
+        assertTrue(composerNeedsMemberNicks(TextFieldValue("@a", TextRange(2))))
     }
 }
