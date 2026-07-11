@@ -4,6 +4,8 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcClientState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -83,5 +85,13 @@ class ConnectionIntentsTest {
                 states = mapOf(1L to IrcClientState.Ready("motd", emptySet(), emptyMap())),
             ),
         )
+    }
+
+    @Test
+    fun `late history and read-marker caps trigger catch-up`() {
+        assertTrue(capShouldTriggerCatchUp("draft/chathistory"))
+        assertTrue(capShouldTriggerCatchUp("draft/read-marker"))
+        assertFalse(capShouldTriggerCatchUp("message-tags"))
+        assertFalse(capShouldTriggerCatchUp("echo-message"))
     }
 }

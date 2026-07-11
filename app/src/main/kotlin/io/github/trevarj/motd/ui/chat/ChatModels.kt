@@ -169,6 +169,27 @@ class UnreadViewportIndex {
 fun shouldAutoscrollToNewest(atBottom: Boolean, oldCount: Int, newCount: Int): Boolean =
     atBottom && oldCount > 0 && newCount > oldCount
 
+data class ChatInitialPosition(
+    val index: Int,
+    val offset: Int = 0,
+    val fromSavedPosition: Boolean = false,
+)
+
+data class ChatScrollPosition(
+    val index: Int,
+    val offset: Int,
+    val msgid: String?,
+    val serverTime: Long,
+    val rowId: Long,
+)
+
+/**
+ * Normal entry scroll: saved viewports and older unread targets need explicit positioning; a fresh
+ * newest target only scrolls if the list state was retained off-bottom.
+ */
+fun shouldScrollToInitialTarget(target: ChatInitialPosition, atBottom: Boolean): Boolean =
+    target.fromSavedPosition || target.index > 0 || !atBottom
+
 /**
  * Aggregate raw [ReactionEntity] rows into per-msgid chip lists: one chip per emoji with its count
  * and whether [myNick] is among the reactors. Ordered by first appearance for stability.

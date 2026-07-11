@@ -242,7 +242,7 @@ class ConnectionManagerImpl @Inject constructor(
                 }
                 _states.value = _states.value + (id to state)
             },
-            onEvent = { id, event -> eventProcessor.process(id, event) },
+            onEvent = { id, event -> handleConnectionEvent(id, event) },
             onReady = { conn -> onReady(row, (conn as IrcClientConnection).client) },
             pendingCertFailure = { certFailures.remove(row.id) },
             onCertUntrusted = { id, ex -> publishCertPrompt(id, ex) },
@@ -250,6 +250,13 @@ class ConnectionManagerImpl @Inject constructor(
         actors[row.id] = actor
         fingerprints[row.id] = fp
         actor.start()
+    }
+
+    private suspend fun handleConnectionEvent(networkId: Long, event: IrcEvent) {
+        eventProcessor.process(networkId, event)
+        if (event is IrcEvent.CapsChanged && event.added.any(::capShouldTriggerCatchUp)) {
+            clientFor(networkId)?.let { catchUp(networkId, it) }
+        }
     }
 
     private fun fingerprint(row: NetworkEntity): String = networkFingerprint(
@@ -633,6 +640,7 @@ class ConnectionManagerImpl @Inject constructor(
     companion object {
         // Stable logcat tag for connection failures (#43).
         const val CHATHISTORY_CAP = "draft/chathistory"
+        const val READ_MARKER_CAP = "draft/read-marker"
         const val WEBPUSH_CAP = "soju.im/webpush"
         const val ECHO_TIMEOUT_MS = 30_000L
         const val MAX_BYTES = 400
@@ -644,6 +652,9 @@ class ConnectionManagerImpl @Inject constructor(
             deliveryPersistent && hasNetworks
     }
 }
+
+internal fun capShouldTriggerCatchUp(cap: String): Boolean =
+    cap == ConnectionManagerImpl.CHATHISTORY_CAP || cap == ConnectionManagerImpl.READ_MARKER_CAP
 
 /**
  * Pure wanted-set computation for [ConnectionManagerImpl.reconcile] (plans/16 §4), extracted for

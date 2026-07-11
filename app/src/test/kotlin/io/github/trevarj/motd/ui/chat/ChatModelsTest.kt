@@ -75,4 +75,23 @@ class ChatModelsTest {
         assertFalse(shouldAutoscrollToNewest(atBottom = true, oldCount = 10, newCount = 10))
         assertFalse(shouldAutoscrollToNewest(atBottom = true, oldCount = 10, newCount = 9))
     }
+
+    @Test fun `normal entry scrolls newest only when retained state is off bottom`() {
+        assertFalse(shouldScrollToInitialTarget(ChatInitialPosition(index = 0), atBottom = true))
+        assertTrue(shouldScrollToInitialTarget(ChatInitialPosition(index = 0), atBottom = false))
+    }
+
+    @Test fun `normal entry always scrolls to older unread target`() {
+        assertTrue(shouldScrollToInitialTarget(ChatInitialPosition(index = 7), atBottom = true))
+        assertTrue(shouldScrollToInitialTarget(ChatInitialPosition(index = 7), atBottom = false))
+    }
+
+    @Test fun `saved scroll position always restores`() {
+        assertTrue(
+            shouldScrollToInitialTarget(
+                ChatInitialPosition(index = 0, offset = 20, fromSavedPosition = true),
+                atBottom = true,
+            ),
+        )
+    }
 }

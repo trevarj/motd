@@ -78,6 +78,7 @@ class ChatViewModel @Inject constructor(
     private val foregroundBufferTracker: ForegroundBufferTracker,
     private val linkPreviewRepository: LinkPreviewRepository,
     private val draftStore: ComposerDraftStore,
+    private val scrollPositionStore: ChatScrollPositionStore,
     private val eventSink: IrcEventSink,
     private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
@@ -448,8 +449,8 @@ class ChatViewModel @Inject constructor(
 
     // Normal channel entry is also a one-shot position operation. Unlike a search deep-link it
     // has no highlight, but it must settle before read state can advance.
-    private val _initialTarget = MutableStateFlow<ChatJumpResolver.Result.Target?>(null)
-    val initialTarget: StateFlow<ChatJumpResolver.Result.Target?> = _initialTarget.asStateFlow()
+    private val _initialTarget = MutableStateFlow<ChatInitialPosition?>(null)
+    val initialTarget: StateFlow<ChatInitialPosition?> = _initialTarget.asStateFlow()
 
     private val _entryPositionSettled = MutableStateFlow(
         savedStateHandle.get<Boolean>(ENTRY_POSITION_SETTLED_KEY) == true,
@@ -501,21 +502,33 @@ class ChatViewModel @Inject constructor(
             } else {
                 messageRepository.firstUnreadOtherTime(bufferId, realMarker)?.let { it - 1 }
             }
-            // A deep-link owns positioning. A normal open lands on the oldest unread incoming
-            // message when there is one; otherwise it explicitly settles at the newest row.
+            // A deep-link owns positioning. A normal open first restores this buffer's last
+            // in-memory viewport, then falls back to oldest unread incoming, then newest.
             if (!hasDeepJump && !_entryPositionSettled.value) {
-                val targetTime = realMarker?.let {
-                    messageRepository.firstUnreadOtherTime(bufferId, it)
-                }
-                _initialTarget.value = if (targetTime == null) {
-                    ChatJumpResolver.Result.Target(index = 0, highlightMsgid = null)
-                } else {
-                    when (val result = resolver.resolve(bufferId, null, targetTime, null)) {
-                        is ChatJumpResolver.Result.Target -> result
-                        ChatJumpResolver.Result.NotFound -> ChatJumpResolver.Result.Target(0, null)
-                    }
-                }
+                _initialTarget.value = restoredScrollPosition()
+                    ?: unreadEntryPosition(realMarker)
+                    ?: ChatInitialPosition(index = 0)
             }
+        }
+    }
+
+    private suspend fun restoredScrollPosition(): ChatInitialPosition? {
+        val saved = scrollPositionStore.get(bufferId) ?: return null
+        val index = saved.msgid?.let { msgid ->
+            messageRepository.byMsgid(bufferId, msgid)?.let { row ->
+                messageRepository.countNewerThan(bufferId, row.serverTime, row.id)
+            }
+        } ?: messageRepository.countNewerThan(bufferId, saved.serverTime, saved.rowId)
+        return ChatInitialPosition(index = index, offset = saved.offset, fromSavedPosition = true)
+    }
+
+    private suspend fun unreadEntryPosition(realMarker: Long?): ChatInitialPosition? {
+        val targetTime = realMarker?.let {
+            messageRepository.firstUnreadOtherTime(bufferId, it)
+        } ?: return null
+        return when (val result = resolver.resolve(bufferId, null, targetTime, null)) {
+            is ChatJumpResolver.Result.Target -> ChatInitialPosition(index = result.index)
+            ChatJumpResolver.Result.NotFound -> null
         }
     }
 
@@ -551,6 +564,10 @@ class ChatViewModel @Inject constructor(
     fun onInitialPositionHandled() {
         _initialTarget.value = null
         markEntryPositionSettled()
+    }
+
+    fun saveScrollPosition(position: ChatScrollPosition) {
+        scrollPositionStore.put(bufferId, position)
     }
 
     /** A target could not be loaded safely; retain the read gate rather than marking it read. */

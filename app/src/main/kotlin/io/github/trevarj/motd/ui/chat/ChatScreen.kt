@@ -164,6 +164,7 @@ fun ChatScreen(
         onJumpHandled = viewModel::onJumpHandled,
         onInitialPositionHandled = viewModel::onInitialPositionHandled,
         onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
+        onScrollPositionChanged = viewModel::saveScrollPosition,
         onJumpUnresolved = viewModel::onJumpUnresolved,
         onReresolveJump = viewModel::reresolveJumpOnce,
         isServerBuffer = isServerBuffer,
@@ -232,7 +233,7 @@ fun ChatContent(
     onDelete: (MessageEntity) -> Unit = {},
     consumePrefill: () -> String? = { null },
     jumpTarget: ChatJumpResolver.Result.Target? = null,
-    initialTarget: ChatJumpResolver.Result.Target? = null,
+    initialTarget: ChatInitialPosition? = null,
     entryPositionInitiallySettled: Boolean = false,
     entryPositionUnresolved: Boolean = false,
     jumpFailed: Boolean = false,
@@ -240,6 +241,7 @@ fun ChatContent(
     onJumpHandled: () -> Unit = {},
     onInitialPositionHandled: () -> Unit = {},
     onInitialPositionUnresolved: () -> Unit = {},
+    onScrollPositionChanged: (ChatScrollPosition) -> Unit = {},
     onJumpUnresolved: () -> Unit = {},
     onReresolveJump: () -> Unit = {},
     // Round 5 (plans/16 §5.6/§5.8): SERVER-buffer raw-send + nick sheet plumbing.
@@ -390,9 +392,13 @@ fun ChatContent(
                 }
         }
         if (items.itemCount > target.index) {
-            // A default newest target is already at index 0; never invalidate it with a redundant
-            // scroll. Older targets get exactly one non-animated, post-refresh settle.
-            if (target.index > 0) listState.scrollToItem(target.index)
+            // A fresh reverse list is already at index 0. If this destination retained a previous
+            // off-bottom list state, explicitly restore newest; older unread targets also position.
+            val currentlyAtBottom = listState.firstVisibleItemIndex == 0 &&
+                listState.firstVisibleItemScrollOffset <= AUTOSCROLL_BOTTOM_TOLERANCE_PX
+            if (shouldScrollToInitialTarget(target, currentlyAtBottom)) {
+                listState.scrollToItem(target.index, target.offset)
+            }
             initialPositionSettled = true
             suppressNextAutoFollow = true
             onInitialPositionHandled()
@@ -415,6 +421,23 @@ fun ChatContent(
             kotlinx.coroutines.delay(1_600)
             highlightMsgid = null
         }
+    }
+
+    LaunchedEffect(initialPositionSettled, items.itemCount) {
+        if (!initialPositionSettled) return@LaunchedEffect
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                val row = items.peek(index) ?: return@collect
+                onScrollPositionChanged(
+                    ChatScrollPosition(
+                        index = index,
+                        offset = offset,
+                        msgid = row.msgid,
+                        serverTime = row.serverTime,
+                        rowId = row.id,
+                    ),
+                )
+            }
     }
 
     // Long-press action sheet target.
