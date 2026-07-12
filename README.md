@@ -112,3 +112,9 @@ repository secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`,
 
 To dry-run locally, run `nix develop -c ./gradlew :app:assembleRelease` with the
 signing env set (or the debug signing config).
+
+## LLM disclaimer
+
+This project has been developed with assistance from large language models.
+LLM-generated contributions are reviewed, tested, and maintained by the project
+maintainer, who remains responsible for the published code and releases.
