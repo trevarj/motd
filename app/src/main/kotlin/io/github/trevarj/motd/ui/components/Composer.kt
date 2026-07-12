@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Mood
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -74,6 +75,7 @@ fun Composer(
     placeholder: String = stringResource(R.string.chat_composer_placeholder),
     // When false the emoji (Mood) button is hidden per the user's setting; picker stays collapsed.
     showEmojiButton: Boolean = true,
+    onAttachment: (() -> Unit)? = null,
     autocomplete: (@Composable () -> Unit)? = null,
 ) {
     // Inline emoji picker toggle; collapses on send so the panel never sticks around after a message.
@@ -103,6 +105,11 @@ fun Composer(
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                onAttachment?.let { action ->
+                    IconButton(onClick = action, modifier = Modifier.testTag("chat_composer_attachment")) {
+                        Icon(Icons.Outlined.AttachFile, contentDescription = "Add attachment")
+                    }
+                }
                 if (showEmojiButton) {
                     IconButton(
                         onClick = { showEmojiPicker = !showEmojiPicker },

@@ -279,6 +279,9 @@ fun ChatContent(
     var composerText by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
+    var attachmentSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var uploadCurrentDraftDirectly by rememberSaveable { mutableStateOf(false) }
+    var longDraftPrompt by rememberSaveable { mutableStateOf(false) }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
     // Global fool expand/collapse toggle (plans/13 §2.4): when true every collapsed fool row in the
     // buffer renders expanded; per-row toggles still override individually via [expandedFools] and
@@ -737,8 +740,12 @@ fun ChatContent(
                     onSend = {
                         val text = composerText.text
                         if (text.isNotBlank()) {
-                            onSubmit(text)
-                            composerText = TextFieldValue("")
+                            if (isLongDraft(text)) {
+                                longDraftPrompt = true
+                            } else {
+                                onSubmit(text)
+                                composerText = TextFieldValue("")
+                            }
                             // Sending should always reveal the just-sent message: snap the reverse
                             // list back to the newest row (index 0) even if the user had scrolled up.
                             // Routes through scrollToNewest so the FAB stays gated off for the scroll.
@@ -755,6 +762,7 @@ fun ChatContent(
                         stringResource(R.string.chat_composer_placeholder)
                     },
                     showEmojiButton = showComposerEmoji,
+                    onAttachment = { uploadCurrentDraftDirectly = false; attachmentSheetOpen = true },
                     autocomplete = if (showAutocomplete && completions.isNotEmpty()) {
                         {
                             AutocompletePanel(
@@ -769,6 +777,35 @@ fun ChatContent(
                 )
             }
         }
+    }
+
+    AttachmentSheets(
+        open = attachmentSheetOpen,
+        currentDraft = composerText.text,
+        startWithCurrentDraft = uploadCurrentDraftDirectly,
+        onDismiss = { attachmentSheetOpen = false; uploadCurrentDraftDirectly = false },
+        onInsertUrl = { composerText = io.github.trevarj.motd.ui.components.insertAtCursor(composerText, it) },
+        onReplaceDraft = { composerText = TextFieldValue(it, androidx.compose.ui.text.TextRange(it.length)) },
+    )
+    if (longDraftPrompt) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { longDraftPrompt = false },
+            title = { Text("Long draft") },
+            text = { Text("Upload the draft as a paste, or send it as ordinary IRC messages?") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = {
+                longDraftPrompt = false
+                uploadCurrentDraftDirectly = true
+                attachmentSheetOpen = true
+            }) { Text("Upload as paste") } },
+            dismissButton = { Row {
+                androidx.compose.material3.TextButton(onClick = {
+                    longDraftPrompt = false
+                    onSubmit(composerText.text)
+                    composerText = TextFieldValue("")
+                }) { Text("Send as messages") }
+                androidx.compose.material3.TextButton(onClick = { longDraftPrompt = false }) { Text("Cancel") }
+            } },
+        )
     }
 
     sheetTarget?.let { target ->

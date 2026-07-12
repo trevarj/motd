@@ -39,6 +39,10 @@ import io.github.trevarj.motd.service.MotdNotifications
 import io.github.trevarj.motd.service.PushNotifierImpl
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.ui.settings.PushAvailabilityProvider
+import io.github.trevarj.motd.attachment.AttachmentPrefs
+import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
+import io.github.trevarj.motd.attachment.AttachmentUploader
+import io.github.trevarj.motd.attachment.AttachmentUploaderImpl
 import javax.inject.Singleton
 
 /**
@@ -78,6 +82,12 @@ internal abstract class AppModule {
     /** TOFU cert-pin store (plans/12); same DataStore-backed impl. */
     @Binds @Singleton
     abstract fun certTrustStore(impl: DataStoreSettingsRepository): CertTrustStore
+
+    @Binds @Singleton
+    abstract fun attachmentPrefs(impl: AttachmentPrefsImpl): AttachmentPrefs
+
+    @Binds @Singleton
+    abstract fun attachmentUploader(impl: AttachmentUploaderImpl): AttachmentUploader
 
     // -- data/sync (WP5) --
     @Binds @Singleton

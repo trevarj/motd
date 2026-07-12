@@ -79,6 +79,8 @@ fun ChatSettingsContent(
         )
         SubLabel(stringResource(R.string.settings_fools_mode))
         FoolsModeGroup(current = settings.foolsMode, onSelect = onFoolsMode)
+        HorizontalDivider()
+        AttachmentSettingsSection()
     }
 }
 
