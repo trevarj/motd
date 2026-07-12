@@ -467,7 +467,10 @@ fun ChatContent(
     fun saveCurrentScrollPosition() {
         if (!initialPositionSettled) return
         val index = listState.firstVisibleItemIndex
-        val row = items.peek(index) ?: return
+        // Paging can replace the outgoing buffer's snapshot with the incoming empty QUERY snapshot
+        // between itemCount/index reads and onDispose. Treat that transition as no anchor to save;
+        // never index the stale snapshot (the previous direct peek crashed DM navigation).
+        val row = pagingSnapshotItemOrNull(index, items.itemCount) { items.peek(it) } ?: return
         onScrollPositionChanged(
             ChatScrollPosition(
                 index = index,
@@ -846,6 +849,20 @@ fun ChatContent(
                 hideThen { composerText = appendPrefill(composerText, "> ${target.text}\n") }
             },
         )
+    }
+}
+
+/** Safely read a Paging snapshot that may be replaced between its count read and item lookup. */
+internal inline fun <T> pagingSnapshotItemOrNull(
+    index: Int,
+    itemCount: Int,
+    lookup: (Int) -> T?,
+): T? {
+    if (index !in 0 until itemCount) return null
+    return try {
+        lookup(index)
+    } catch (_: IndexOutOfBoundsException) {
+        null
     }
 }
 
