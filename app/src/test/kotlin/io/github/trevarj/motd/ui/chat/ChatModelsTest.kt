@@ -93,6 +93,46 @@ class ChatModelsTest {
         assertFalse(shouldAutoscrollToNewest(atBottom = true, oldCount = 10, newCount = 9))
     }
 
+    @Test fun `burst arrivals keep following across programmatic scroll motion`() {
+        val tracker = AutoFollowTracker(initialItemCount = 10)
+
+        assertTrue(tracker.onItemCountChanged(11))
+        tracker.onScrollStateChanged(scrolling = true, programmatic = true, atBottom = false)
+
+        // A second insert while the first pin is active must request another pin rather than
+        // interpreting the programmatic scroll as the user leaving the bottom.
+        assertTrue(tracker.onItemCountChanged(12))
+        assertTrue(tracker.following)
+    }
+
+    @Test fun `user scroll disables following until settling at bottom`() {
+        val tracker = AutoFollowTracker(initialItemCount = 10)
+
+        tracker.onScrollStateChanged(scrolling = true, programmatic = false, atBottom = true)
+        assertFalse(tracker.onItemCountChanged(11))
+        assertFalse(tracker.following)
+
+        tracker.onScrollStateChanged(scrolling = false, programmatic = false, atBottom = true)
+        assertTrue(tracker.onItemCountChanged(12))
+    }
+
+    @Test fun `initial paging reset is not treated as a live arrival`() {
+        val tracker = AutoFollowTracker(initialItemCount = 0)
+
+        tracker.reset(itemCount = 50, atBottom = true)
+        assertFalse(tracker.onItemCountChanged(50))
+        assertTrue(tracker.onItemCountChanged(51))
+    }
+
+    @Test fun `explicit newest request restores following`() {
+        val tracker = AutoFollowTracker(initialItemCount = 10)
+        tracker.onScrollStateChanged(scrolling = true, programmatic = false, atBottom = false)
+
+        tracker.requestFollow()
+
+        assertTrue(tracker.onItemCountChanged(11))
+    }
+
     @Test fun `normal entry scrolls newest only when retained state is off bottom`() {
         assertFalse(shouldScrollToInitialTarget(ChatInitialPosition(index = 0), atBottom = true))
         assertTrue(shouldScrollToInitialTarget(ChatInitialPosition(index = 0), atBottom = false))

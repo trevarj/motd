@@ -38,6 +38,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -278,6 +279,7 @@ fun ChatContent(
     onSnackbarShown: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
+    val autoFollow = remember { AutoFollowTracker(items.itemCount) }
     val scope = rememberCoroutineScope()
     // Expanded fool rows (plans/13 §2.4): keyed by MessageEntity.id, expand-only for the session.
     // Ephemeral by design (lost on config change; accepted per plans/13 Risks #6).
@@ -530,53 +532,48 @@ fun ChatContent(
         }
     }
 
-    // Suppresses the scroll-to-bottom FAB while a programmatic scroll-to-newest is in flight. When a
-    // new row inserts at index 0 the reverse list momentarily reads !atBottom for a sub-frame before
-    // the animate-to-0 settles; without this gate the FAB flashes on every send / auto-follow. A real
-    // user scroll-up doesn't set this, so the FAB still appears promptly when reading history.
-    var autoScrolling by remember { mutableStateOf(false) }
-    // Animate the reverse list to the newest row (index 0) with the FAB gated off for the duration.
-    suspend fun scrollToNewest() {
-        autoScrolling = true
+    // Count nested programmatic scrolls rather than using a Boolean: an incoming pin may supersede
+    // an explicit animation, and the cancelled animation must not briefly masquerade as a user drag.
+    var programmaticScrolls by remember { mutableIntStateOf(0) }
+    val autoScrolling = programmaticScrolls > 0
+    suspend fun scrollToNewest(animate: Boolean) {
+        autoFollow.requestFollow()
+        programmaticScrolls++
         try {
-            listState.animateScrollToItem(0)
+            if (animate) listState.animateScrollToItem(0) else listState.scrollToItem(0)
         } finally {
-            autoScrolling = false
+            programmaticScrolls--
         }
     }
 
-    // Auto-stick-to-bottom for incoming messages. When a new row is
-    // prepended at index 0 the reverse-layout viewport does NOT follow it (stable keys anchor the
-    // existing rows), so an explicit scroll is needed. We snapshot whether the user was at the bottom
-    // *before* the count grew via [wasAtBottom]; a user scrolled up reading history is never yanked.
-    // Own-send scrolls unconditionally in the composer, so it doesn't route through this path.
-    var wasAtBottom by remember { mutableStateOf(true) }
-    // Record user intent only on real/programmatic scroll-state edges. A Paging prepend can move
-    // the anchored viewport off index 0 without starting a scroll; observing [atBottom] directly
-    // therefore mistook an incoming row's layout shift for the user scrolling up and disabled
-    // auto-follow before the item-count effect ran.
+    // Record only actual scroll-state/programmatic edges. An index/offset change caused by a Paging
+    // prepend does not emit here, so it cannot be mistaken for the user leaving the bottom.
     LaunchedEffect(listState, initialPositionSettled) {
         if (!initialPositionSettled) return@LaunchedEffect
-        snapshotFlow { listState.isScrollInProgress }
+        snapshotFlow { listState.isScrollInProgress to (programmaticScrolls > 0) }
             .distinctUntilChanged()
-            .collect { scrolling ->
-                wasAtBottom = if (scrolling) false else atBottom
+            .collect { (scrolling, programmatic) ->
+                autoFollow.onScrollStateChanged(scrolling, programmatic, atBottom)
             }
     }
-    var prevItemCount by remember { mutableStateOf(items.itemCount) }
-    LaunchedEffect(items.itemCount, initialPositionSettled) {
+
+    // Keep one collector alive for the whole settled entry. Keying a LaunchedEffect directly on
+    // itemCount cancelled an in-flight animateScrollToItem when the next message arrived; because
+    // that animation also set isScrollInProgress, the replacement effect believed the user had
+    // scrolled away and permanently stopped following a burst. Live arrivals snap to index zero;
+    // animation is reserved for explicit send/FAB actions.
+    LaunchedEffect(items, initialPositionSettled) {
         if (!initialPositionSettled) return@LaunchedEffect
-        val newCount = items.itemCount
-        if (suppressNextAutoFollow) {
-            prevItemCount = newCount
-            wasAtBottom = atBottom
-            suppressNextAutoFollow = false
-            return@LaunchedEffect
-        }
-        if (shouldAutoscrollToNewest(wasAtBottom, prevItemCount, newCount)) {
-            scrollToNewest()
-        }
-        prevItemCount = newCount
+        snapshotFlow { items.itemCount }
+            .distinctUntilChanged()
+            .collect { newCount ->
+                if (suppressNextAutoFollow) {
+                    autoFollow.reset(newCount, atBottom)
+                    suppressNextAutoFollow = false
+                } else if (autoFollow.onItemCountChanged(newCount)) {
+                    scrollToNewest(animate = false)
+                }
+            }
     }
     val buffer = state.buffer
     // Mark read on new-message-while-at-bottom only (plans/07/15 #2): syncing while scrolled up
@@ -728,7 +725,7 @@ fun ChatContent(
                         listState = listState,
                         readMarker = readMarkerLive,
                         visible = initialPositionSettled && !atBottom && !autoScrolling,
-                        onClick = { scope.launch { scrollToNewest() } },
+                        onClick = { scope.launch { scrollToNewest(animate = true) } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     )
                 }
@@ -771,10 +768,10 @@ fun ChatContent(
                                 onSubmit(text)
                                 composerText = TextFieldValue("")
                             }
-                            // Sending should always reveal the just-sent message: snap the reverse
+                            // Sending should always reveal the just-sent message: return the reverse
                             // list back to the newest row (index 0) even if the user had scrolled up.
                             // Routes through scrollToNewest so the FAB stays gated off for the scroll.
-                            scope.launch { scrollToNewest() }
+                            scope.launch { scrollToNewest(animate = true) }
                         }
                     },
                     enabled = composerEnabled,

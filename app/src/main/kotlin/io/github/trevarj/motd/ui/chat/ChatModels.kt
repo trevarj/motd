@@ -191,6 +191,46 @@ class UnreadViewportIndex {
 fun shouldAutoscrollToNewest(atBottom: Boolean, oldCount: Int, newCount: Int): Boolean =
     atBottom && oldCount > 0 && newCount > oldCount
 
+/**
+ * Tracks the user's decision to follow live arrivals independently from the reverse list's
+ * transient physical position. Paging inserts and programmatic scrolls can both move index zero
+ * without representing user intent, so deriving this state directly from the current bottom
+ * position is racy.
+ */
+internal class AutoFollowTracker(initialItemCount: Int) {
+    var following: Boolean = true
+        private set
+
+    private var itemCount: Int = initialItemCount
+
+    /** Consume the first post-entry Paging snapshot without treating it as a live arrival. */
+    fun reset(itemCount: Int, atBottom: Boolean) {
+        this.itemCount = itemCount
+        following = atBottom
+    }
+
+    /** Explicit send/FAB actions opt back into following the newest row. */
+    fun requestFollow() {
+        following = true
+    }
+
+    /**
+     * Update follow intent only for real user scrolling. Programmatic motion and Paging anchor
+     * shifts must not disable it. A user scroll that settles back at the bottom opts in again.
+     */
+    fun onScrollStateChanged(scrolling: Boolean, programmatic: Boolean, atBottom: Boolean) {
+        if (programmatic) return
+        following = if (scrolling) false else atBottom
+    }
+
+    /** Record a new presented count and return whether the viewport should pin to index zero. */
+    fun onItemCountChanged(newItemCount: Int): Boolean {
+        val shouldFollow = shouldAutoscrollToNewest(following, itemCount, newItemCount)
+        itemCount = newItemCount
+        return shouldFollow
+    }
+}
+
 data class ChatInitialPosition(
     val index: Int,
     val offset: Int = 0,
