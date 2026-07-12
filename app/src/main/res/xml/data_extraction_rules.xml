@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ policy. Keep the explicit exclusions even though allowBackup=false: some OEM
+     device-transfer implementations interpret migration independently from cloud backup. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="database" path="." />
+        <exclude domain="file" path="datastore/" />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_file" path="datastore/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="database" path="." />
+        <exclude domain="file" path="datastore/" />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_file" path="datastore/" />
+    </device-transfer>
+</data-extraction-rules>
