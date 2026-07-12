@@ -283,6 +283,7 @@ internal fun RadioRow(
     enabled: Boolean,
     onClick: () -> Unit,
     subtitle: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -292,7 +293,7 @@ internal fun RadioRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, onClick = null, enabled = enabled)
-        Column(modifier = Modifier.padding(start = 12.dp)) {
+        Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
             Text(
                 label,
                 color = if (enabled) MaterialTheme.colorScheme.onSurface
@@ -302,6 +303,7 @@ internal fun RadioRow(
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        trailing?.invoke()
     }
 }
 

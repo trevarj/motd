@@ -18,6 +18,7 @@ import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -88,7 +89,9 @@ class ChatViewModel @Inject constructor(
     private val scrollPositionStore: ChatScrollPositionStore,
     private val eventSink: IrcEventSink,
     private val settingsRepository: SettingsRepository,
+    appearancePrefs: AppearancePrefs,
 ) : ViewModel() {
+    val appearance = appearancePrefs.config
 
     private val route: ChatRoute = savedStateHandle.toRoute<ChatRoute>()
     val bufferId: Long = route.bufferId

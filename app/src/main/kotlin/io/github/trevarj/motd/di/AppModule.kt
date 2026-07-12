@@ -8,6 +8,8 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.github.trevarj.motd.data.prefs.CertTrustStore
+import io.github.trevarj.motd.data.prefs.AppearancePrefs
+import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.PushProviderPrefs
@@ -72,6 +74,9 @@ internal abstract class AppModule {
     // -- data/prefs (WP4): DataStoreSettingsRepository implements both seams --
     @Binds @Singleton
     abstract fun settingsRepository(impl: DataStoreSettingsRepository): SettingsRepository
+
+    @Binds @Singleton
+    abstract fun appearancePrefs(impl: AppearancePrefsImpl): AppearancePrefs
 
     @Binds @Singleton
     abstract fun pushPrefs(impl: DataStoreSettingsRepository): PushPrefs

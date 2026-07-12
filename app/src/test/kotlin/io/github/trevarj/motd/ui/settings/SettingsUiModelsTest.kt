@@ -3,7 +3,7 @@ package io.github.trevarj.motd.ui.settings
 import io.github.trevarj.motd.attachment.EndpointPreset
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
-import io.github.trevarj.motd.data.prefs.ThemeMode
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
@@ -15,18 +15,10 @@ import org.junit.Test
 class SettingsUiModelsTest {
     @Test
     fun `theme groups are complete and alphabetically arranged by display label`() {
-        assertEquals(
-            listOf(ThemeMode.CATPPUCCIN_LATTE, ThemeMode.GRUVBOX_LIGHT, ThemeMode.LIGHT, ThemeMode.SOLARIZED_LIGHT),
-            LIGHT_THEME_MODES,
-        )
-        assertEquals(
-            listOf(
-                ThemeMode.AMOLED, ThemeMode.CATPPUCCIN_MOCHA, ThemeMode.DARK, ThemeMode.DRACULA,
-                ThemeMode.GRUVBOX_DARK, ThemeMode.NORD, ThemeMode.SOLARIZED_DARK, ThemeMode.TOKYO_NIGHT,
-            ),
-            DARK_THEME_MODES,
-        )
-        assertEquals(ThemeMode.entries.toSet(), (listOf(ThemeMode.SYSTEM) + LIGHT_THEME_MODES + DARK_THEME_MODES).toSet())
+        assertEquals(ColorThemePreset.entries.size - 1, LIGHT_THEME_PRESETS.size + DARK_THEME_PRESETS.size)
+        assertEquals(ColorThemePreset.entries.toSet(), (listOf(ColorThemePreset.SYSTEM) + LIGHT_THEME_PRESETS + DARK_THEME_PRESETS).toSet())
+        assertEquals(LIGHT_THEME_PRESETS.map(::themePresetLabelText).sorted(), LIGHT_THEME_PRESETS.map(::themePresetLabelText))
+        assertEquals(DARK_THEME_PRESETS.map(::themePresetLabelText).sorted(), DARK_THEME_PRESETS.map(::themePresetLabelText))
     }
 
     @Test

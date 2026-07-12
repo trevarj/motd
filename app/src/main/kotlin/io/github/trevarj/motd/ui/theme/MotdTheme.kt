@@ -16,7 +16,8 @@ import androidx.compose.ui.platform.LocalContext
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
-import io.github.trevarj.motd.data.prefs.ThemeMode
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.isDark
 
 // Static schemes seeded from the indigo brand color; used when dynamic color is off or pre-API-31.
 private val LightColors = lightColorScheme(primary = Indigo)
@@ -44,23 +45,39 @@ val LocalAvatarStyle: ProvidableCompositionLocal<AvatarStyle> =
  * Return the fixed ColorScheme for terminal-palette ThemeModes, or null for the modes that use
  * dynamic color / the brand-seed default. "Dark" here means the scheme uses dark backgrounds.
  */
-private fun fixedTerminalScheme(themeMode: ThemeMode): ColorScheme? = when (themeMode) {
-    ThemeMode.GRUVBOX_DARK -> GruvboxDarkScheme
-    ThemeMode.GRUVBOX_LIGHT -> GruvboxLightScheme
-    ThemeMode.SOLARIZED_DARK -> SolarizedDarkScheme
-    ThemeMode.SOLARIZED_LIGHT -> SolarizedLightScheme
-    ThemeMode.DRACULA -> DraculaScheme
-    ThemeMode.NORD -> NordScheme
-    ThemeMode.CATPPUCCIN_LATTE -> CatppuccinLatteScheme
-    ThemeMode.CATPPUCCIN_MOCHA -> CatppuccinMochaScheme
-    ThemeMode.TOKYO_NIGHT -> TokyoNightScheme
+internal fun fixedThemeScheme(theme: ColorThemePreset): ColorScheme? = when (theme) {
+    ColorThemePreset.AYU_DARK -> AyuDarkScheme
+    ColorThemePreset.AYU_LIGHT -> AyuLightScheme
+    ColorThemePreset.AYU_MIRAGE -> AyuMirageScheme
+    ColorThemePreset.CATPPUCCIN_LATTE -> CatppuccinLatteScheme
+    ColorThemePreset.CATPPUCCIN_MOCHA -> CatppuccinMochaScheme
+    ColorThemePreset.DRACULA -> DraculaScheme
+    ColorThemePreset.EVERFOREST_DARK -> EverforestDarkScheme
+    ColorThemePreset.EVERFOREST_LIGHT -> EverforestLightScheme
+    ColorThemePreset.GRUVBOX_DARK -> GruvboxDarkScheme
+    ColorThemePreset.GRUVBOX_LIGHT -> GruvboxLightScheme
+    ColorThemePreset.KANAGAWA_DRAGON -> KanagawaDragonScheme
+    ColorThemePreset.KANAGAWA_LOTUS -> KanagawaLotusScheme
+    ColorThemePreset.KANAGAWA_WAVE -> KanagawaWaveScheme
+    ColorThemePreset.MODUS_OPERANDI -> ModusOperandiScheme
+    ColorThemePreset.MODUS_VIVENDI -> ModusVivendiScheme
+    ColorThemePreset.MONOKAI -> MonokaiScheme
+    ColorThemePreset.NORD -> NordScheme
+    ColorThemePreset.ONE_DARK -> OneDarkScheme
+    ColorThemePreset.ROSE_PINE -> RosePineScheme
+    ColorThemePreset.ROSE_PINE_DAWN -> RosePineDawnScheme
+    ColorThemePreset.ROSE_PINE_MOON -> RosePineMoonScheme
+    ColorThemePreset.SOLARIZED_DARK -> SolarizedDarkScheme
+    ColorThemePreset.SOLARIZED_LIGHT -> SolarizedLightScheme
+    ColorThemePreset.TOKYO_NIGHT -> TokyoNightScheme
+    ColorThemePreset.ZENBURN -> ZenburnScheme
     // Base modes resolve through the normal dark/dynamic path.
     else -> null
 }
 
 @Composable
 fun MotdTheme(
-    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    themePreset: ColorThemePreset = ColorThemePreset.SYSTEM,
     dynamicColor: Boolean = true,
     // Round 4 (plans/13); all defaulted so existing call sites (incl. previews) stay unchanged.
     layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
@@ -70,19 +87,13 @@ fun MotdTheme(
     avatarStyle: AvatarStyle = AvatarStyle.MONOGRAM,
     content: @Composable () -> Unit,
 ) {
-    val dark = when (themeMode) {
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-        ThemeMode.LIGHT, ThemeMode.GRUVBOX_LIGHT, ThemeMode.SOLARIZED_LIGHT,
-        ThemeMode.CATPPUCCIN_LATTE -> false
-        // All other named dark/terminal schemes are dark.
-        else -> true
-    }
-    val colorScheme = fixedTerminalScheme(themeMode) ?: when {
+    val dark = if (themePreset == ColorThemePreset.SYSTEM) isSystemInDarkTheme() else themePreset.isDark
+    val colorScheme = fixedThemeScheme(themePreset) ?: when {
         // Material You dynamic color, API 31+. AMOLED still forces true-black surfaces below.
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val ctx = LocalContext.current
             val scheme = if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-            if (themeMode == ThemeMode.AMOLED) {
+            if (themePreset == ColorThemePreset.AMOLED) {
                 scheme.copy(
                     background = AmoledBackground,
                     surface = AmoledSurface,
@@ -96,7 +107,7 @@ fun MotdTheme(
                 scheme
             }
         }
-        themeMode == ThemeMode.AMOLED -> AmoledColors
+        themePreset == ColorThemePreset.AMOLED -> AmoledColors
         dark -> DarkColors
         else -> LightColors
     }

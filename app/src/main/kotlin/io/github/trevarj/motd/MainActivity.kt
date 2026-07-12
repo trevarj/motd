@@ -26,6 +26,8 @@ import dagger.hilt.android.AndroidEntryPoint
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
+import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.service.ConnectionManagerImpl
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.IrcForegroundService
@@ -43,6 +45,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var settingsRepository: SettingsRepository
+    @Inject lateinit var appearancePrefs: AppearancePrefs
     @Inject lateinit var db: MotdDatabase
 
     // POST_NOTIFICATIONS runtime permission (API 33+); result is advisory, no action needed.
@@ -66,8 +69,9 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val settings by settingsRepository.settings.collectAsState(initial = Settings())
+            val appearance by appearancePrefs.config.collectAsState(initial = AppearanceConfig())
             MotdTheme(
-                themeMode = settings.themeMode,
+                themePreset = appearance.theme,
                 dynamicColor = settings.dynamicColor,
                 layoutDensity = settings.layoutDensity,
                 nickColorsEnabled = settings.nickColorsEnabled,

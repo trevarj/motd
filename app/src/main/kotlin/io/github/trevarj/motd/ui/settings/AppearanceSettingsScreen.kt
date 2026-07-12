@@ -2,10 +2,15 @@ package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -13,6 +18,8 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -31,13 +38,17 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
-import io.github.trevarj.motd.data.prefs.ThemeMode
-import io.github.trevarj.motd.data.prefs.isTerminalTheme
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.isFixedPalette
+import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.ColorLens
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.foundation.shape.CircleShape
+import io.github.trevarj.motd.ui.theme.fixedThemeScheme
 
 /** Appearance category: theme, dynamic color, layout density, avatar style, nick colors, wallpaper. */
 @Composable
@@ -49,30 +60,32 @@ fun AppearanceSettingsScreen(
     val state by viewModel.state.collectAsState()
     AppearanceSettingsContent(
         settings = state.settings,
+        appearance = state.appearance,
         onBack = onBack,
         onOpenNickColors = onOpenNickColors,
-        onThemeMode = viewModel::setThemeMode,
+        onThemePreset = viewModel::setThemePreset,
         onDynamicColor = viewModel::setDynamicColor,
         onLayoutDensity = viewModel::setLayoutDensity,
         onAvatarStyle = viewModel::setAvatarStyle,
         onNickColorsEnabled = viewModel::setNickColorsEnabled,
         onNickColorPalette = viewModel::setNickColorPalette,
-        onChatWallpaper = viewModel::setChatWallpaper,
+        onWallpaper = viewModel::setWallpaper,
     )
 }
 
 @Composable
 fun AppearanceSettingsContent(
     settings: Settings,
+    appearance: io.github.trevarj.motd.data.prefs.AppearanceConfig,
     onBack: () -> Unit,
     onOpenNickColors: () -> Unit,
-    onThemeMode: (ThemeMode) -> Unit,
+    onThemePreset: (ColorThemePreset) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onLayoutDensity: (LayoutDensity) -> Unit,
     onAvatarStyle: (AvatarStyle) -> Unit,
     onNickColorsEnabled: (Boolean) -> Unit,
     onNickColorPalette: (NickColorPalette) -> Unit,
-    onChatWallpaper: (io.github.trevarj.motd.data.prefs.ChatWallpaper) -> Unit,
+    onWallpaper: (io.github.trevarj.motd.data.prefs.WallpaperSelection) -> Unit,
 ) {
     var showThemeSheet by remember { mutableStateOf(false) }
     SettingsScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
@@ -80,7 +93,7 @@ fun AppearanceSettingsContent(
             SettingsNavigationRow(
                 icon = Icons.Outlined.Palette,
                 title = stringResource(R.string.settings_theme),
-                value = themeModeLabel(settings.themeMode),
+                value = themePresetLabel(appearance.theme),
                 onClick = { showThemeSheet = true },
                 modifier = Modifier.testTag("settings_theme_picker"),
             )
@@ -88,13 +101,13 @@ fun AppearanceSettingsContent(
             SwitchRow(
                 title = stringResource(R.string.settings_dynamic_color),
                 subtitle = stringResource(
-                    if (settings.themeMode.isTerminalTheme) R.string.settings_dynamic_color_unavailable
+                    if (appearance.theme.isFixedPalette) R.string.settings_dynamic_color_unavailable
                     else R.string.settings_dynamic_color_desc,
                 ),
-                checked = settings.dynamicColor && !settings.themeMode.isTerminalTheme,
+                checked = settings.dynamicColor && !appearance.theme.isFixedPalette,
                 onCheckedChange = onDynamicColor,
                 switchTag = "settings_switch_dynamic_color",
-                enabled = !settings.themeMode.isTerminalTheme,
+                enabled = !appearance.theme.isFixedPalette,
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
@@ -124,13 +137,13 @@ fun AppearanceSettingsContent(
             AvatarStyleGroup(current = settings.avatarStyle, onSelect = onAvatarStyle)
         }
         SettingsGroup(title = stringResource(R.string.settings_wallpaper)) {
-            ChatWallpaperPicker(current = settings.chatWallpaper, onSelect = onChatWallpaper)
+            ChatWallpaperPicker(current = appearance.wallpaper, onApply = onWallpaper)
         }
     }
     if (showThemeSheet) {
         ThemePickerSheet(
-            current = settings.themeMode,
-            onSelect = { mode -> onThemeMode(mode); showThemeSheet = false },
+            current = appearance.theme,
+            onSelect = { mode -> onThemePreset(mode); showThemeSheet = false },
             onDismiss = { showThemeSheet = false },
         )
     }
@@ -138,49 +151,137 @@ fun AppearanceSettingsContent(
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun ThemePickerSheet(current: ThemeMode, onSelect: (ThemeMode) -> Unit, onDismiss: () -> Unit) {
+private fun ThemePickerSheet(current: ColorThemePreset, onSelect: (ColorThemePreset) -> Unit, onDismiss: () -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val normalized = query.trim().lowercase()
+    fun filtered(items: List<ColorThemePreset>) = items.filter {
+        themePresetLabelText(it).lowercase().contains(normalized)
+    }
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_theme_sheet")) {
-        Column(Modifier.selectableGroup().heightIn(max = 680.dp).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-            Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
-            ThemeSheetSection(stringResource(R.string.settings_theme_system_group), listOf(ThemeMode.SYSTEM), current, onSelect)
-            ThemeSheetSection(stringResource(R.string.settings_theme_light_group), LIGHT_THEME_MODES, current, onSelect)
-            ThemeSheetSection(stringResource(R.string.settings_theme_dark_group), DARK_THEME_MODES, current, onSelect)
+        LazyColumn(Modifier.selectableGroup().heightIn(max = 680.dp).padding(bottom = 24.dp)) {
+            item {
+                Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                    placeholder = { Text(stringResource(R.string.settings_theme_search)) },
+                    modifier = Modifier.padding(horizontal = 16.dp).testTag("settings_theme_search"),
+                )
+            }
+            val groups = listOf(
+                R.string.settings_theme_system_group to filtered(listOf(ColorThemePreset.SYSTEM)),
+                R.string.settings_theme_light_group to filtered(LIGHT_THEME_PRESETS),
+                R.string.settings_theme_dark_group to filtered(DARK_THEME_PRESETS),
+            )
+            groups.forEach { (title, modes) ->
+                if (modes.isNotEmpty()) {
+                    item { SubLabel(stringResource(title)) }
+                    items(modes.size) { index ->
+                        val mode = modes[index]
+                        ThemeRadioRow(mode, current == mode, onSelect)
+                    }
+                }
+            }
+            if (groups.all { it.second.isEmpty() }) {
+                item { Text(stringResource(R.string.settings_theme_no_results), modifier = Modifier.padding(24.dp)) }
+            }
         }
     }
 }
 
 @Composable
-private fun ThemeSheetSection(title: String, modes: List<ThemeMode>, current: ThemeMode, onSelect: (ThemeMode) -> Unit) {
-    SubLabel(title)
-    modes.forEach { mode -> RadioRow(themeModeLabel(mode), current == mode, true, { onSelect(mode) }) }
+private fun ThemeRadioRow(mode: ColorThemePreset, selected: Boolean, onSelect: (ColorThemePreset) -> Unit) {
+    val scheme = fixedThemeScheme(mode)
+    RadioRow(
+        label = themePresetLabel(mode),
+        selected = selected,
+        enabled = true,
+        onClick = { onSelect(mode) },
+        trailing = scheme?.let {
+            {
+                Row {
+                    listOf(it.primary, it.secondary, it.tertiary).forEach { color ->
+                        Box(Modifier.size(14.dp).background(color, CircleShape))
+                        Spacer(Modifier.width(3.dp))
+                    }
+                }
+            }
+        },
+    )
 }
 
 @Composable
-private fun themeModeLabel(mode: ThemeMode): String = stringResource(
-    when (mode) {
-        ThemeMode.SYSTEM -> R.string.settings_theme_system
-        ThemeMode.LIGHT -> R.string.settings_theme_light
-        ThemeMode.DARK -> R.string.settings_theme_dark
-        ThemeMode.AMOLED -> R.string.settings_theme_amoled
-        ThemeMode.GRUVBOX_DARK -> R.string.settings_theme_gruvbox_dark
-        ThemeMode.GRUVBOX_LIGHT -> R.string.settings_theme_gruvbox_light
-        ThemeMode.SOLARIZED_DARK -> R.string.settings_theme_solarized_dark
-        ThemeMode.SOLARIZED_LIGHT -> R.string.settings_theme_solarized_light
-        ThemeMode.DRACULA -> R.string.settings_theme_dracula
-        ThemeMode.NORD -> R.string.settings_theme_nord
-        ThemeMode.CATPPUCCIN_LATTE -> R.string.settings_theme_catppuccin_latte
-        ThemeMode.CATPPUCCIN_MOCHA -> R.string.settings_theme_catppuccin_mocha
-        ThemeMode.TOKYO_NIGHT -> R.string.settings_theme_tokyo_night
-    },
-)
+private fun themePresetLabel(mode: ColorThemePreset): String = stringResource(themePresetLabelRes(mode))
 
-internal val LIGHT_THEME_MODES = listOf(
-    ThemeMode.CATPPUCCIN_LATTE, ThemeMode.GRUVBOX_LIGHT, ThemeMode.LIGHT, ThemeMode.SOLARIZED_LIGHT,
-)
-internal val DARK_THEME_MODES = listOf(
-    ThemeMode.AMOLED, ThemeMode.CATPPUCCIN_MOCHA, ThemeMode.DARK, ThemeMode.DRACULA,
-    ThemeMode.GRUVBOX_DARK, ThemeMode.NORD, ThemeMode.SOLARIZED_DARK, ThemeMode.TOKYO_NIGHT,
-)
+internal fun themePresetLabelText(mode: ColorThemePreset): String = when (mode) {
+    ColorThemePreset.SYSTEM -> "System default"
+    ColorThemePreset.LIGHT -> "Light"
+    ColorThemePreset.DARK -> "Dark"
+    ColorThemePreset.AMOLED -> "AMOLED (true black)"
+    ColorThemePreset.AYU_DARK -> "Ayu Dark"
+    ColorThemePreset.AYU_LIGHT -> "Ayu Light"
+    ColorThemePreset.AYU_MIRAGE -> "Ayu Mirage"
+    ColorThemePreset.CATPPUCCIN_LATTE -> "Catppuccin Latte"
+    ColorThemePreset.CATPPUCCIN_MOCHA -> "Catppuccin Mocha"
+    ColorThemePreset.DRACULA -> "Dracula"
+    ColorThemePreset.EVERFOREST_DARK -> "Everforest Dark"
+    ColorThemePreset.EVERFOREST_LIGHT -> "Everforest Light"
+    ColorThemePreset.GRUVBOX_DARK -> "Gruvbox Dark"
+    ColorThemePreset.GRUVBOX_LIGHT -> "Gruvbox Light"
+    ColorThemePreset.KANAGAWA_DRAGON -> "Kanagawa Dragon"
+    ColorThemePreset.KANAGAWA_LOTUS -> "Kanagawa Lotus"
+    ColorThemePreset.KANAGAWA_WAVE -> "Kanagawa Wave"
+    ColorThemePreset.MODUS_OPERANDI -> "Modus Operandi"
+    ColorThemePreset.MODUS_VIVENDI -> "Modus Vivendi"
+    ColorThemePreset.MONOKAI -> "Monokai"
+    ColorThemePreset.NORD -> "Nord"
+    ColorThemePreset.ONE_DARK -> "One Dark"
+    ColorThemePreset.ROSE_PINE -> "Rosé Pine"
+    ColorThemePreset.ROSE_PINE_DAWN -> "Rosé Pine Dawn"
+    ColorThemePreset.ROSE_PINE_MOON -> "Rosé Pine Moon"
+    ColorThemePreset.SOLARIZED_DARK -> "Solarized Dark"
+    ColorThemePreset.SOLARIZED_LIGHT -> "Solarized Light"
+    ColorThemePreset.TOKYO_NIGHT -> "Tokyo Night"
+    ColorThemePreset.ZENBURN -> "Zenburn"
+}
+
+private fun themePresetLabelRes(mode: ColorThemePreset): Int = when (mode) {
+    ColorThemePreset.SYSTEM -> R.string.settings_theme_system
+    ColorThemePreset.LIGHT -> R.string.settings_theme_light
+    ColorThemePreset.DARK -> R.string.settings_theme_dark
+    ColorThemePreset.AMOLED -> R.string.settings_theme_amoled
+    ColorThemePreset.AYU_DARK -> R.string.settings_theme_ayu_dark
+    ColorThemePreset.AYU_LIGHT -> R.string.settings_theme_ayu_light
+    ColorThemePreset.AYU_MIRAGE -> R.string.settings_theme_ayu_mirage
+    ColorThemePreset.CATPPUCCIN_LATTE -> R.string.settings_theme_catppuccin_latte
+    ColorThemePreset.CATPPUCCIN_MOCHA -> R.string.settings_theme_catppuccin_mocha
+    ColorThemePreset.DRACULA -> R.string.settings_theme_dracula
+    ColorThemePreset.EVERFOREST_DARK -> R.string.settings_theme_everforest_dark
+    ColorThemePreset.EVERFOREST_LIGHT -> R.string.settings_theme_everforest_light
+    ColorThemePreset.GRUVBOX_DARK -> R.string.settings_theme_gruvbox_dark
+    ColorThemePreset.GRUVBOX_LIGHT -> R.string.settings_theme_gruvbox_light
+    ColorThemePreset.KANAGAWA_DRAGON -> R.string.settings_theme_kanagawa_dragon
+    ColorThemePreset.KANAGAWA_LOTUS -> R.string.settings_theme_kanagawa_lotus
+    ColorThemePreset.KANAGAWA_WAVE -> R.string.settings_theme_kanagawa_wave
+    ColorThemePreset.MODUS_OPERANDI -> R.string.settings_theme_modus_operandi
+    ColorThemePreset.MODUS_VIVENDI -> R.string.settings_theme_modus_vivendi
+    ColorThemePreset.MONOKAI -> R.string.settings_theme_monokai
+    ColorThemePreset.NORD -> R.string.settings_theme_nord
+    ColorThemePreset.ONE_DARK -> R.string.settings_theme_one_dark
+    ColorThemePreset.ROSE_PINE -> R.string.settings_theme_rose_pine
+    ColorThemePreset.ROSE_PINE_DAWN -> R.string.settings_theme_rose_pine_dawn
+    ColorThemePreset.ROSE_PINE_MOON -> R.string.settings_theme_rose_pine_moon
+    ColorThemePreset.SOLARIZED_DARK -> R.string.settings_theme_solarized_dark
+    ColorThemePreset.SOLARIZED_LIGHT -> R.string.settings_theme_solarized_light
+    ColorThemePreset.TOKYO_NIGHT -> R.string.settings_theme_tokyo_night
+    ColorThemePreset.ZENBURN -> R.string.settings_theme_zenburn
+}
+
+internal val LIGHT_THEME_PRESETS = ColorThemePreset.entries.filter { !it.isDark && it != ColorThemePreset.SYSTEM }
+    .sortedBy(::themePresetLabelText)
+internal val DARK_THEME_PRESETS = ColorThemePreset.entries.filter { it.isDark }.sortedBy(::themePresetLabelText)
 
 @Composable
 private fun AvatarStyleGroup(current: AvatarStyle, onSelect: (AvatarStyle) -> Unit) {
@@ -251,10 +352,11 @@ private fun PaletteGroup(
 private fun AppearanceSettingsPreview() {
     MotdTheme {
         AppearanceSettingsContent(
-            settings = Settings(themeMode = ThemeMode.DARK, dynamicColor = true),
-            onBack = {}, onOpenNickColors = {}, onThemeMode = {}, onDynamicColor = {},
+            settings = Settings(dynamicColor = true),
+            appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(theme = ColorThemePreset.DARK),
+            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onDynamicColor = {},
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
-            onNickColorPalette = {}, onChatWallpaper = {},
+            onNickColorPalette = {}, onWallpaper = {},
         )
     }
 }

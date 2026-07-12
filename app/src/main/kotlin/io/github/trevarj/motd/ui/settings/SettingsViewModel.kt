@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.prefs.AvatarStyle
-import io.github.trevarj.motd.data.prefs.ChatWallpaper
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
+import io.github.trevarj.motd.data.prefs.AppearancePrefs
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
@@ -13,7 +15,7 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.PushProvider
 import io.github.trevarj.motd.data.prefs.PushProviderPrefs
-import io.github.trevarj.motd.data.prefs.ThemeMode
+import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.service.DeliveryMode
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,6 +30,7 @@ data class SettingsUiState(
     val networks: List<NetworkEntity> = emptyList(),
     val pushAvailability: PushAvailability = PushAvailability(),
     val pushProvider: PushProvider = PushProvider.UNIFIED_PUSH,
+    val appearance: AppearanceConfig = AppearanceConfig(),
 )
 
 @HiltViewModel
@@ -36,6 +39,7 @@ class SettingsViewModel @Inject constructor(
     private val networkRepository: NetworkRepository,
     private val pushAvailability: PushAvailabilityProvider,
     private val pushProviderPrefs: PushProviderPrefs,
+    private val appearancePrefs: AppearancePrefs,
 ) : ViewModel() {
 
     val state: StateFlow<SettingsUiState> =
@@ -46,12 +50,14 @@ class SettingsViewModel @Inject constructor(
             // toggle enables live once the soju bouncer advertises webpush.
             pushAvailability.availability(),
             pushProviderPrefs.provider,
-        ) { settings, networks, availability, provider ->
+            appearancePrefs.config,
+        ) { settings, networks, availability, provider, appearance ->
             SettingsUiState(
                 settings = settings,
                 networks = networks,
                 pushAvailability = availability,
                 pushProvider = provider,
+                appearance = appearance,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -59,8 +65,8 @@ class SettingsViewModel @Inject constructor(
             initialValue = SettingsUiState(),
         )
 
-    fun setThemeMode(mode: ThemeMode) = viewModelScope.launch {
-        settingsRepository.setThemeMode(mode)
+    fun setThemePreset(theme: ColorThemePreset) = viewModelScope.launch {
+        appearancePrefs.setTheme(theme)
     }
 
     fun setDynamicColor(enabled: Boolean) = viewModelScope.launch {
@@ -93,8 +99,8 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.setShowJoinPartQuit(show)
     }
 
-    fun setChatWallpaper(wallpaper: ChatWallpaper) = viewModelScope.launch {
-        settingsRepository.setChatWallpaper(wallpaper)
+    fun setWallpaper(selection: WallpaperSelection) = viewModelScope.launch {
+        appearancePrefs.setWallpaper(selection)
     }
 
     fun setFoolsMode(mode: FoolsMode) = viewModelScope.launch {

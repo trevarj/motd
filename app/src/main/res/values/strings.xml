@@ -337,13 +337,6 @@
     <string name="settings_composer_emoji_desc">Show the emoji button in the message composer.</string>
     <string name="settings_wallpaper">Chat wallpaper</string>
     <string name="settings_wallpaper_none">None</string>
-    <string name="settings_wallpaper_none_desc">Plain background.</string>
-    <string name="settings_wallpaper_classic">Classic</string>
-    <string name="settings_wallpaper_classic_desc">Chat bubbles, channels, and prompts.</string>
-    <string name="settings_wallpaper_network">Network</string>
-    <string name="settings_wallpaper_network_desc">Server nodes, bridges, and TLS locks.</string>
-    <string name="settings_wallpaper_pixel">Pixel</string>
-    <string name="settings_wallpaper_pixel_desc">Blocky terminal glyphs.</string>
     <string name="settings_people">People</string>
     <string name="settings_friends">Friends</string>
     <string name="settings_fools">Fools</string>
@@ -525,6 +518,42 @@
     <string name="settings_theme_catppuccin_latte">Catppuccin Latte</string>
     <string name="settings_theme_catppuccin_mocha">Catppuccin Mocha</string>
     <string name="settings_theme_tokyo_night">Tokyo Night</string>
+    <string name="settings_theme_ayu_dark">Ayu Dark</string>
+    <string name="settings_theme_ayu_light">Ayu Light</string>
+    <string name="settings_theme_ayu_mirage">Ayu Mirage</string>
+    <string name="settings_theme_everforest_dark">Everforest Dark</string>
+    <string name="settings_theme_everforest_light">Everforest Light</string>
+    <string name="settings_theme_kanagawa_dragon">Kanagawa Dragon</string>
+    <string name="settings_theme_kanagawa_lotus">Kanagawa Lotus</string>
+    <string name="settings_theme_kanagawa_wave">Kanagawa Wave</string>
+    <string name="settings_theme_modus_operandi">Modus Operandi</string>
+    <string name="settings_theme_modus_vivendi">Modus Vivendi</string>
+    <string name="settings_theme_monokai">Monokai</string>
+    <string name="settings_theme_one_dark">One Dark</string>
+    <string name="settings_theme_rose_pine">Rosé Pine</string>
+    <string name="settings_theme_rose_pine_dawn">Rosé Pine Dawn</string>
+    <string name="settings_theme_rose_pine_moon">Rosé Pine Moon</string>
+    <string name="settings_theme_zenburn">Zenburn</string>
+    <string name="settings_theme_search">Search themes</string>
+    <string name="settings_theme_no_results">No matching themes</string>
+
+    <string name="settings_wallpaper_chatter">Chatter</string>
+    <string name="settings_wallpaper_chatter_desc">Bubbles, replies, typing, and reactions.</string>
+    <string name="settings_wallpaper_channels">Channels</string>
+    <string name="settings_wallpaper_channels_desc">Channels, mentions, and member activity.</string>
+    <string name="settings_wallpaper_terminal">Terminal</string>
+    <string name="settings_wallpaper_terminal_desc">Prompts, cursors, and terminal panes.</string>
+    <string name="settings_wallpaper_relay">Relay</string>
+    <string name="settings_wallpaper_relay_desc">Servers, bridges, and secure links.</string>
+    <string name="settings_wallpaper_signals">Signals</string>
+    <string name="settings_wallpaper_signals_desc">Pings, presence, and connection arcs.</string>
+    <string name="settings_wallpaper_pixels">Pixels</string>
+    <string name="settings_wallpaper_pixels_desc">IRC motifs on a crisp pixel grid.</string>
+    <string name="settings_wallpaper_intensity">Pattern intensity</string>
+    <string name="settings_wallpaper_preview_incoming">The background stays quiet.</string>
+    <string name="settings_wallpaper_preview_outgoing">And still feels like IRC.</string>
+    <string name="settings_wallpaper_apply">Apply wallpaper</string>
+    <string name="settings_wallpaper_cancel">Cancel</string>
 
     <!-- Avatar style picker -->
     <string name="settings_avatar_style">Avatar style</string>

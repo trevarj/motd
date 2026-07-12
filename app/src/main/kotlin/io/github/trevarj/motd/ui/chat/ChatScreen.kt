@@ -132,6 +132,9 @@ fun ChatScreen(
     val readMarkerTime by viewModel.readMarkerTime.collectAsStateWithLifecycle()
     // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val appearance by viewModel.appearance.collectAsStateWithLifecycle(
+        initialValue = io.github.trevarj.motd.data.prefs.AppearanceConfig(),
+    )
     // Round 5: nick sheet + raw-send snackbar (plans/16 §5.6/§5.8).
     val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
     val snackbarMessage by viewModel.snackbar.collectAsStateWithLifecycle()
@@ -144,7 +147,7 @@ fun ChatScreen(
         friends = settings.friends,
         fools = settings.fools,
         foolsMode = settings.foolsMode,
-        chatWallpaper = settings.chatWallpaper,
+        chatWallpaper = appearance.wallpaper,
         showComposerEmoji = settings.showComposerEmoji,
         reactionChips = reactionChipsForMessage,
         replyPreview = viewModel::replyPreview,
@@ -244,7 +247,7 @@ fun ChatContent(
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
-    chatWallpaper: io.github.trevarj.motd.data.prefs.ChatWallpaper = io.github.trevarj.motd.data.prefs.ChatWallpaper.NONE,
+    chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection = io.github.trevarj.motd.data.prefs.WallpaperSelection(),
     showComposerEmoji: Boolean = true,
     readMarkerSnapshot: Long? = null,
     // Live buffer read marker (advances with markRead); drives the FAB unread badge count.
