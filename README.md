@@ -50,6 +50,7 @@ nix develop -c ./gradlew build                   # tests + lint + APKs
 
 Firebase Cloud Messaging is available in the separate Google flavor; see
 [Firebase push setup](docs/firebase-push.md).
+For Google-free push, see [ntfy and UnifiedPush setup](docs/ntfy-push.md).
 
 The debug APK lands under `app/build/outputs/apk/foss/debug/`. Install it with `adb
 install`. The debug build carries the `.debug` application-id suffix, so it can
