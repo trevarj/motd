@@ -85,12 +85,19 @@ fun AboutScreen(onBack: () -> Unit = {}) {
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
             )
+            Text(
+                text = stringResource(R.string.about_legal_notice),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
+            )
 
             HorizontalDivider(modifier = Modifier.padding(top = 16.dp))
 
             ListItem(
                 headlineContent = { Text(stringResource(R.string.about_license)) },
-                supportingContent = { Text(stringResource(R.string.about_license_mit)) },
+                supportingContent = { Text(stringResource(R.string.about_license_gpl)) },
                 modifier = Modifier.clickable {
                     context.startActivity(Intent(Intent.ACTION_VIEW, licenseUrl.toUri()))
                 },

@@ -76,14 +76,29 @@ without prior consent.
 2. Use `build-libbox.sh` with the pinned Go/gomobile and NDK inputs described
    above. The script verifies the AAR ABI and writes the checked artifact hash
    into `app/libs/libbox-v1.13.12.manifest`.
-3. For every APK/AAB that conveys libbox, publish the complete source snapshot
-   used for that build: the sing-box checkout, checked-out Android submodule,
-   this build script and `source.lock`, `go.mod`/`go.sum`, and all modified or
-   vendored dependency source. Publish it under GPL-3.0-or-later with clear
-   access directions beside the object-code release.
-4. Record that source snapshot URL and SHA-256 in `THIRD_PARTY_NOTICES.md` for
-   the release, and keep the AAR filename, ABI, and SHA-256 aligned with the
-   checked-in manifest.
+3. Run `./third_party/sing-box/package-source.sh <tag> <output-dir>`. It clones
+   and verifies both pinned revisions, emits their exact `git archive` streams,
+   and packages them with this build script, `source.lock`, `go.mod`/`go.sum`,
+   vendored source, the Nix build inputs, license, and artifact manifest. The
+   outer archive is deterministic (`tar` metadata normalized; `gzip -n`).
+4. The release workflow runs `prepare-release-assets.sh`, attaches the complete
+   source archive beside the APK, and renders a release-specific copy of
+   `THIRD_PARTY_NOTICES.md` containing the actual asset URL and SHA-256. It also
+   attaches `LICENSE` and `SHA256SUMS`. Keep all four artifacts available for as
+   long as the APK is offered.
+
+The packaged inner source archives can be rebuilt without cloning upstream:
+
+```sh
+LIBBOX_SOURCE_ARCHIVE=/path/to/sing-box-v1.13.12.tar \
+LIBBOX_ANDROID_SOURCE_ARCHIVE=/path/to/sing-box-for-android-772879ce....tar \
+LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28-linux.zip \
+  nix develop .#libbox -c ./third_party/sing-box/build-libbox.sh
+```
+
+In archive mode the build script verifies both pinned archive hashes, then recreates deterministic
+local Git metadata tagged with the pinned sing-box version. Upstream's libbox builder reads that tag
+to embed the same release version string; the archive hashes remain the source-provenance authority.
 
 These records ensure recipients can obtain the exact source needed to rebuild
 the distributed libbox artifact under GPL-3.0-or-later.

@@ -7,9 +7,15 @@ permissions:
   contents: write
 
 jobs:
+  hermetic-e2e:
+    uses: ./.github/workflows/e2e.yml
+    with:
+      phases: 'a b c'
+
   release:
+    needs: hermetic-e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -17,7 +23,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Decode keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/keystore.jks"
-      - name: Build signed release APK
+      - name: Full build, tests, lint, and signed release APK
         env:
           MOTD_KEYSTORE_PATH: ${{ runner.temp }}/keystore.jks
           MOTD_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -25,10 +31,23 @@ jobs:
           MOTD_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           MOTD_VERSION_NAME: ${{ github.ref_name }}
           MOTD_VERSION_CODE: ${{ github.run_number }}
-        run: ./gradlew :app:assembleRelease --stacktrace
-      - name: Rename artifact
-        run: cp app/build/outputs/apk/release/app-release.apk motd-${{ github.ref_name }}.apk
+        run: ./gradlew build :app:lintDebug --stacktrace --no-daemon
+      - name: Prepare licensed release assets
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          ./third_party/sing-box/prepare-release-assets.sh \
+            "${{ github.ref_name }}" \
+            app/build/outputs/apk/release/app-release.apk \
+            release-assets
       - uses: softprops/action-gh-release@v2
         with:
-          files: motd-${{ github.ref_name }}.apk
+          body_path: release-assets/release-compliance.md
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/motd-${{ github.ref_name }}.apk
+            release-assets/motd-libbox-source-${{ github.ref_name }}.tar.gz
+            release-assets/LICENSE
+            release-assets/SHA256SUMS
+            release-assets/motd-${{ github.ref_name }}-THIRD_PARTY_NOTICES.md
           generate_release_notes: true

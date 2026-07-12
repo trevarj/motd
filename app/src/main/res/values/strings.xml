@@ -161,8 +161,9 @@
     <!-- About (WP-R3) -->
     <string name="about_title">About</string>
     <string name="about_license">License</string>
-    <string name="about_license_mit">MIT</string>
-    <string name="about_blurb">An IRCv3 client for Android — see plans/ for the design docs.</string>
+    <string name="about_license_gpl">GNU GPL v3 or later</string>
+    <string name="about_blurb">A modern IRCv3 client for Android, built for direct networks and soju bouncers.</string>
+    <string name="about_legal_notice">Free software with no warranty. You may share and modify it under the GNU GPL v3 or later.</string>
 
     <!-- Chat components (WP7 review, plans/15 #25) -->
     <string name="chat_typing_one">%1$s is typing…</string>

@@ -20,7 +20,7 @@ android_platform="${LIBBOX_ANDROID_PLATFORM:-android/arm64}"
 # shellcheck disable=SC1090
 source "$lock_file"
 
-for required in git go java make sha256sum unzip; do
+for required in git go java make sha256sum tar unzip; do
   command -v "$required" >/dev/null || {
     echo "missing $required; run nix develop .#libbox -c $0" >&2
     exit 1
@@ -188,36 +188,81 @@ fi
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/motd-libbox.XXXXXX")"
 trap 'rm -rf "$work_dir"' EXIT
 source_dir="$work_dir/sing-box"
+source_archive="${LIBBOX_SOURCE_ARCHIVE:-}"
+android_source_archive="${LIBBOX_ANDROID_SOURCE_ARCHIVE:-}"
 
-git clone --no-checkout "$SING_BOX_REPOSITORY" "$source_dir"
-git -C "$source_dir" checkout --detach "$SING_BOX_COMMIT"
-[[ "$(git -C "$source_dir" rev-parse HEAD)" == "$SING_BOX_COMMIT" ]] || {
-  echo "sing-box commit verification failed" >&2
-  exit 1
-}
-[[ "$(git -C "$source_dir" describe --exact-match --tags HEAD)" == "$SING_BOX_VERSION" ]] || {
-  echo "sing-box tag verification failed" >&2
-  exit 1
-}
-[[ "$(git -C "$source_dir" archive --format=tar HEAD | sha256sum | cut -d ' ' -f1)" == "$SING_BOX_GIT_ARCHIVE_SHA256" ]] || {
-  echo "sing-box source archive verification failed" >&2
-  exit 1
-}
+if [[ -n "$source_archive" || -n "$android_source_archive" ]]; then
+  [[ -n "$source_archive" && -n "$android_source_archive" ]] || {
+    echo "set both LIBBOX_SOURCE_ARCHIVE and LIBBOX_ANDROID_SOURCE_ARCHIVE" >&2
+    exit 1
+  }
+  [[ -f "$source_archive" && -f "$android_source_archive" ]] || {
+    echo "one or more libbox source archives do not exist" >&2
+    exit 1
+  }
+  [[ "$(sha256sum "$source_archive" | cut -d ' ' -f1)" == "$SING_BOX_GIT_ARCHIVE_SHA256" ]] || {
+    echo "sing-box source archive verification failed" >&2
+    exit 1
+  }
+  [[ "$(sha256sum "$android_source_archive" | cut -d ' ' -f1)" == "$ANDROID_SUBMODULE_GIT_ARCHIVE_SHA256" ]] || {
+    echo "Android submodule source archive verification failed" >&2
+    exit 1
+  }
 
-git -C "$source_dir" submodule update --init --recursive "$ANDROID_SUBMODULE_PATH"
-android_dir="$source_dir/$ANDROID_SUBMODULE_PATH"
-[[ "$(git -C "$android_dir" rev-parse HEAD)" == "$ANDROID_SUBMODULE_COMMIT" ]] || {
-  echo "Android submodule verification failed" >&2
-  exit 1
-}
-[[ "$(git -C "$android_dir" archive --format=tar HEAD | sha256sum | cut -d ' ' -f1)" == "$ANDROID_SUBMODULE_GIT_ARCHIVE_SHA256" ]] || {
-  echo "Android submodule source archive verification failed" >&2
+  mkdir -p "$source_dir"
+  tar -xf "$source_archive" -C "$source_dir"
+  android_dir="$source_dir/$ANDROID_SUBMODULE_PATH"
+  mkdir -p "$android_dir"
+  tar -xf "$android_source_archive" -C "$android_dir"
+
+  # Upstream's libbox builder derives the embedded version from `git describe`. A plain source
+  # archive intentionally contains no .git directory, so recreate deterministic local metadata
+  # and tag the verified tree. The commit identity is not provenance (the archive hashes above
+  # are); it only restores the v1.13.12 version string used by the original pinned build.
+  git -C "$source_dir" init --quiet
+  git -C "$source_dir" config user.name "MOTD source rebuild"
+  git -C "$source_dir" config user.email "source-rebuild@invalid"
+  git -C "$source_dir" add --all
+  GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
+    git -C "$source_dir" commit --quiet --message "$SING_BOX_VERSION source archive"
+  git -C "$source_dir" tag "$SING_BOX_VERSION"
+else
+  git clone --no-checkout "$SING_BOX_REPOSITORY" "$source_dir"
+  git -C "$source_dir" checkout --detach "$SING_BOX_COMMIT"
+  [[ "$(git -C "$source_dir" rev-parse HEAD)" == "$SING_BOX_COMMIT" ]] || {
+    echo "sing-box commit verification failed" >&2
+    exit 1
+  }
+  [[ "$(git -C "$source_dir" describe --exact-match --tags HEAD)" == "$SING_BOX_VERSION" ]] || {
+    echo "sing-box tag verification failed" >&2
+    exit 1
+  }
+  [[ "$(git -C "$source_dir" archive --format=tar HEAD | sha256sum | cut -d ' ' -f1)" == "$SING_BOX_GIT_ARCHIVE_SHA256" ]] || {
+    echo "sing-box source archive verification failed" >&2
+    exit 1
+  }
+
+  git -C "$source_dir" submodule update --init --recursive "$ANDROID_SUBMODULE_PATH"
+  android_dir="$source_dir/$ANDROID_SUBMODULE_PATH"
+  [[ "$(git -C "$android_dir" rev-parse HEAD)" == "$ANDROID_SUBMODULE_COMMIT" ]] || {
+    echo "Android submodule verification failed" >&2
+    exit 1
+  }
+  [[ "$(git -C "$android_dir" archive --format=tar HEAD | sha256sum | cut -d ' ' -f1)" == "$ANDROID_SUBMODULE_GIT_ARCHIVE_SHA256" ]] || {
+    echo "Android submodule source archive verification failed" >&2
+    exit 1
+  }
+fi
+
+[[ -f "$source_dir/go.mod" && -f "$source_dir/go.sum" ]] || {
+  echo "verified sing-box source is missing go.mod or go.sum" >&2
   exit 1
 }
 
 go install "github.com/sagernet/gomobile/cmd/gomobile@$GOMOBILE_VERSION"
 go install "github.com/sagernet/gomobile/cmd/gobind@$GOMOBILE_VERSION"
-export PATH="$PATH:$(go env GOPATH)/bin"
+gopath_bin="$(go env GOPATH)/bin"
+export PATH="$PATH:$gopath_bin"
 for required in gomobile gobind; do
   command -v "$required" >/dev/null || {
     echo "gomobile installation failed: missing $required" >&2

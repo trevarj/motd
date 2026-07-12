@@ -83,8 +83,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Copyright 2026 Trevor Arjeski. motd is licensed under the GNU General Public
 License, version 3 or (at your option) any later version; see
-[LICENSE](LICENSE). Third-party licensing and the planned libbox source
-provenance are recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[LICENSE](LICENSE). Third-party licensing and libbox source provenance are
+recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Community
 
@@ -93,7 +93,8 @@ Questions, bug reports, and feedback: join `#motd` on
 
 ## Releasing
 
-Releases are cut by pushing a `v*` tag; `release.yml` builds and uploads a
+Releases are cut by pushing a `v*` tag. The tag workflow first passes the
+hermetic E2E gate and the full Gradle build (tests and lint), then builds the
 signed APK. `versionName` comes from the tag and `versionCode` from the CI run
 number.
 
@@ -102,12 +103,12 @@ git tag -s v0.1.0 -m "v0.1.0"
 git push origin v0.1.0
 ```
 
-CI decodes the keystore from `KEYSTORE_BASE64`, runs `:app:assembleRelease` with
-the signing env (`MOTD_KEYSTORE_PATH`, `MOTD_KEYSTORE_PASSWORD`,
-`MOTD_KEY_ALIAS`, `MOTD_KEY_PASSWORD`), renames the artifact to
-`motd-<tag>.apk`, and attaches it to a GitHub release. Required repository
-secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`
-(see [`plans/08-ci-release.md`](plans/08-ci-release.md)).
+CI decodes the keystore from `KEYSTORE_BASE64`, runs the full build with the
+signing env (`MOTD_KEYSTORE_PATH`, `MOTD_KEYSTORE_PASSWORD`, `MOTD_KEY_ALIAS`,
+`MOTD_KEY_PASSWORD`), and attaches the APK, GPL license, deterministic complete
+libbox source, `SHA256SUMS`, and release-specific third-party notice. Required
+repository secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`,
+`KEY_PASSWORD` (see [`plans/08-ci-release.md`](plans/08-ci-release.md)).
 
 To dry-run locally, run `nix develop -c ./gradlew :app:assembleRelease` with the
 signing env set (or the debug signing config).

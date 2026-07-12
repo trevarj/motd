@@ -27,3 +27,8 @@ rebuild procedure are documented in
 [third_party/sing-box/source.lock](third_party/sing-box/source.lock). Any
 release that conveys this AAR must also make the complete source snapshot used
 for that release available under GPL-3.0-or-later.
+
+Every GitHub release attaches a deterministic `motd-libbox-source-<tag>.tar.gz`
+asset, `SHA256SUMS`, the project `LICENSE`, and a rendered release-specific copy
+of this notice. The rendered notice records the archive's actual release URL
+and SHA-256; use that copy as the provenance record for a particular APK.
