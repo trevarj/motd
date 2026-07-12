@@ -97,6 +97,7 @@ fun ChatScreen(
     onOpenChannelList: (Long) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
 ) {
+    var mentionRequest by remember { mutableStateOf<Pair<Long, String>?>(null) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val items = viewModel.messages.collectAsLazyPagingItems()
     val memberNicks by viewModel.memberNicks.collectAsStateWithLifecycle()
@@ -166,6 +167,7 @@ fun ChatScreen(
         onDelete = viewModel::deleteFailed,
         loadPreview = viewModel::linkPreview,
         consumePrefill = viewModel::consumePrefill,
+        mentionPrefill = mentionRequest,
         jumpTarget = jumpTarget,
         initialTarget = initialTarget,
         entryPositionInitiallySettled = entryPositionSettled,
@@ -201,7 +203,10 @@ fun ChatScreen(
             whois = sheet.whois,
             onDismiss = viewModel::dismissNickSheet,
             onMessage = { viewModel.dismissNickSheet(); viewModel.submit("/query ${sheet.nick}", onOpenBuffer) },
-            onMention = { viewModel.dismissNickSheet() },
+            onMention = {
+                mentionRequest = System.nanoTime() to "${sheet.nick}: "
+                viewModel.dismissNickSheet()
+            },
             onToggleFriend = { viewModel.toggleFriend(sheet.nick) },
             onToggleFool = { viewModel.toggleFool(sheet.nick) },
             onOp = { grant -> viewModel.setMemberMode(sheet.nick, 'o', grant) },
@@ -247,6 +252,8 @@ fun ChatContent(
     onMarkRead: (Long) -> Unit = {},
     onDelete: (MessageEntity) -> Unit = {},
     consumePrefill: () -> String? = { null },
+    // Immediate nick-sheet mention request. The nonce permits mentioning the same nick repeatedly.
+    mentionPrefill: Pair<Long, String>? = null,
     jumpTarget: ChatJumpResolver.Result.Target? = null,
     initialTarget: ChatInitialPosition? = null,
     entryPositionInitiallySettled: Boolean = false,
@@ -316,6 +323,9 @@ fun ChatContent(
     // config change cannot double-prefill.
     LaunchedEffect(Unit) {
         consumePrefill()?.let { composerText = appendPrefill(composerText, it) }
+    }
+    LaunchedEffect(mentionPrefill) {
+        mentionPrefill?.second?.let { composerText = appendPrefill(composerText, it) }
     }
 
     // Cap-miss / not-loaded → transient snackbar. jumpFailed is a latch StateFlow (replay-safe), so
