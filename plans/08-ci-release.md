@@ -66,7 +66,8 @@ jobs:
 Tagged releases first call `.github/workflows/smoke.yml`. That focused gate starts
 the hermetic Docker soju/ergo stack and runs the Kotlin onboarding/connectivity
 suite on a Gradle Managed Device. Only after it passes does `release.yml` build,
-sign, and publish the APK and licensed libbox source/compliance assets.
+sign, and publish the APK, licensed libbox source, IBM Plex OFL, and compliance
+assets.
 
 The exhaustive A-I device journey in `.github/workflows/e2e.yml` runs nightly or
 by manual dispatch. It is diagnostic coverage and intentionally does not gate a

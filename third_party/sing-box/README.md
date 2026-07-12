@@ -84,8 +84,9 @@ without prior consent.
 4. The release workflow runs `prepare-release-assets.sh`, attaches the complete
    source archive beside the APK, and renders a release-specific copy of
    `THIRD_PARTY_NOTICES.md` containing the actual asset URL and SHA-256. It also
-   attaches `LICENSE` and `SHA256SUMS`. Keep all four artifacts available for as
-   long as the APK is offered.
+   attaches the project and IBM Plex licenses plus `SHA256SUMS`. Keep the APK,
+   source archive, notice, licenses, and checksum manifest available together
+   for as long as the APK is offered.
 
 The packaged inner source archives can be rebuilt without cloning upstream:
 

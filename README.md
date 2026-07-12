@@ -105,8 +105,9 @@ git push origin v0.1.0
 
 CI decodes the keystore from `KEYSTORE_BASE64`, runs the full build with the
 signing env (`MOTD_KEYSTORE_PATH`, `MOTD_KEYSTORE_PASSWORD`, `MOTD_KEY_ALIAS`,
-`MOTD_KEY_PASSWORD`), and attaches the APK, GPL license, deterministic complete
-libbox source, `SHA256SUMS`, and release-specific third-party notice. Required
+`MOTD_KEY_PASSWORD`), and attaches the APK, GPL and IBM Plex licenses,
+deterministic complete libbox source, `SHA256SUMS`, and release-specific
+third-party notice. Required
 repository secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`,
 `KEY_PASSWORD` (see [`plans/08-ci-release.md`](plans/08-ci-release.md)).
 

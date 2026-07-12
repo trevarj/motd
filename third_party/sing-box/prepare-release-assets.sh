@@ -24,6 +24,8 @@ source_name="motd-libbox-source-${release_tag}.tar.gz"
 notice_name="motd-${release_tag}-THIRD_PARTY_NOTICES.md"
 install -m 0644 "$apk_path" "$output_dir/$apk_name"
 install -m 0644 "$root_dir/LICENSE" "$output_dir/LICENSE"
+install -m 0644 "$root_dir/docs/assets/brand/IBM-PLEX-LICENSE.txt" \
+  "$output_dir/IBM-PLEX-LICENSE.txt"
 
 source_sha256="$(sha256sum "$output_dir/$source_name" | cut -d ' ' -f1)"
 source_url="https://github.com/${repository}/releases/download/${release_tag}/${source_name}"
@@ -45,14 +47,16 @@ EOF
 
 (
   cd "$output_dir"
-  sha256sum "$apk_name" "$source_name" LICENSE "$notice_name" > SHA256SUMS
+  sha256sum "$apk_name" "$source_name" LICENSE IBM-PLEX-LICENSE.txt "$notice_name" > SHA256SUMS
 )
 
 cat > "$output_dir/release-compliance.md" <<EOF
 ## Source and license
 
-MOTD is GPL-3.0-or-later and includes libbox from sing-box. The complete corresponding source
-for the bundled libbox is available as [${source_name}](${source_url})
+MOTD is GPL-3.0-or-later, includes libbox from sing-box, and uses outlined lettering derived
+from IBM Plex Mono under the SIL Open Font License 1.1. The complete corresponding source for
+the bundled libbox is available as [${source_name}](${source_url})
 (SHA-256: \`${source_sha256}\`). See the attached [release-specific third-party notice](https://github.com/${repository}/releases/download/${release_tag}/${notice_name})
-and \`SHA256SUMS\` for provenance and verification details.
+and \`SHA256SUMS\` for provenance and verification details. The IBM Plex license is attached as
+\`IBM-PLEX-LICENSE.txt\`.
 EOF

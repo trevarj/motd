@@ -32,3 +32,11 @@ Every GitHub release attaches a deterministic `motd-libbox-source-<tag>.tar.gz`
 asset, `SHA256SUMS`, the project `LICENSE`, and a rendered release-specific copy
 of this notice. The rendered notice records the archive's actual release URL
 and SHA-256; use that copy as the provenance record for a particular APK.
+
+## Brand lettering: IBM Plex Mono
+
+The outlined lettering in the motd wordmark and lockups is derived from IBM
+Plex Mono Bold Italic, copyright © 2017 IBM Corp. IBM Plex is licensed under
+the SIL Open Font License 1.1. The exact source pin and license are recorded in
+[`docs/assets/brand/`](docs/assets/brand/README.md). The font binary is not
+distributed; the SVG and Android assets contain converted glyph outlines.
