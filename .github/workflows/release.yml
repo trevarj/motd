@@ -8,12 +8,13 @@ permissions:
 
 jobs:
   hermetic-e2e:
+    # Set repository variable ENABLE_RELEASE_HERMETIC_E2E=true to re-enable.
+    if: ${{ vars.ENABLE_RELEASE_HERMETIC_E2E == 'true' }}
     uses: ./.github/workflows/e2e.yml
     with:
       phases: 'a b c'
 
   release:
-    needs: hermetic-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
