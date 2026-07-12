@@ -2,7 +2,7 @@ package io.github.trevarj.motd.ui.chat
 
 import android.net.Uri
 import io.github.trevarj.motd.attachment.AttachmentSource
-import io.github.trevarj.motd.attachment.EndpointPreset
+import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -15,7 +15,7 @@ import org.robolectric.RobolectricTestRunner
 class AttachmentUiModelsTest {
     @Test fun textOffersTermbinAndCompatibleDestinations() {
         val options = uploadDestinations(AttachmentSource.Text("hello"), PasteBackendConfig())
-        assertEquals(listOf("Termbin", "CrafterBin", "0x0.st"), options.map { it.label })
+        assertEquals(AttachmentBackend.entries.map { it.label }, options.map { it.label })
     }
 
     @Test fun filesNeverOfferTermbin() {
@@ -26,10 +26,23 @@ class AttachmentUiModelsTest {
     @Test fun configuredCustomEndpointIsAvailable() {
         val options = uploadDestinations(
             AttachmentSource.Text("hello"),
-            PasteBackendConfig(endpoint = "https://paste.example"),
+            PasteBackendConfig(
+                backend = AttachmentBackend.CUSTOM_0X0,
+                endpoint = "https://paste.example",
+                customEndpoint = "https://paste.example",
+            ),
         )
-        assertTrue(options.any { it.label == "Custom" && it.config.endpoint == "https://paste.example" })
-        assertTrue(options.any { it.config.endpoint == EndpointPreset.CRAFTERBIN.endpoint })
+        assertTrue(options.any {
+            it.config.backend == AttachmentBackend.CUSTOM_0X0 &&
+                it.config.endpoint == "https://paste.example"
+        })
+        assertTrue(options.any { it.config.backend == AttachmentBackend.CRAFTERBIN })
+    }
+
+    @Test fun backendRetentionReflectsServicePolicy() {
+        assertEquals("3 hours", backendRetention(PasteBackendConfig(backend = AttachmentBackend.UGUU)))
+        assertEquals("24 hours", backendRetention(PasteBackendConfig(backend = AttachmentBackend.LITTERBOX)))
+        assertEquals("rolling 180 days", backendRetention(PasteBackendConfig(backend = AttachmentBackend.CNET)))
     }
 
     @Test fun byteFormattingUsesReadableUnits() {

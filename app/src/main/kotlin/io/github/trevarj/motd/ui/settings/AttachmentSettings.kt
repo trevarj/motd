@@ -25,10 +25,11 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.DEFAULT_PUBLIC_LIMIT_BYTES
-import io.github.trevarj.motd.attachment.EndpointPreset
+import io.github.trevarj.motd.attachment.AttachmentBackend
+import io.github.trevarj.motd.attachment.LITTERBOX_EXPIRIES
 import io.github.trevarj.motd.attachment.MAX_CUSTOM_LIMIT_BYTES
 import io.github.trevarj.motd.attachment.PasteBackendConfig
-import io.github.trevarj.motd.attachment.PasteProtocol
+import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.attachment.validateEndpoint
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
@@ -45,82 +46,56 @@ class AttachmentSettingsViewModel @Inject constructor(private val prefs: Attachm
 fun UploadsSettingsContent(viewModel: AttachmentSettingsViewModel = hiltViewModel()) {
     val config by viewModel.config.collectAsStateWithLifecycle()
     var customEndpoint by rememberSaveable { mutableStateOf("") }
-    var selectedPreset by rememberSaveable { mutableStateOf(endpointPreset(config.endpoint)) }
-    LaunchedEffect(config.endpoint) {
-        val persistedPreset = endpointPreset(config.endpoint)
-        selectedPreset = persistedPreset
-        if (persistedPreset == EndpointPreset.CUSTOM) customEndpoint = config.endpoint
+    LaunchedEffect(config.customEndpoint) {
+        customEndpoint = config.customEndpoint
     }
 
     SettingsGroup(title = stringResource(io.github.trevarj.motd.R.string.settings_upload_destination)) {
         Column(Modifier.selectableGroup()) {
-            RadioRow(
-                label = stringResource(io.github.trevarj.motd.R.string.settings_upload_0x0),
-                subtitle = stringResource(io.github.trevarj.motd.R.string.settings_upload_0x0_desc),
-                selected = config.protocol == PasteProtocol.MULTIPART_0X0,
-                enabled = true,
-                onClick = { viewModel.update { it.copy(protocol = PasteProtocol.MULTIPART_0X0) } },
-            )
-            RadioRow(
-                label = stringResource(io.github.trevarj.motd.R.string.settings_upload_termbin),
-                subtitle = stringResource(io.github.trevarj.motd.R.string.settings_upload_termbin_desc),
-                selected = config.protocol == PasteProtocol.TERMBIN,
-                enabled = true,
-                onClick = { viewModel.update { it.copy(protocol = PasteProtocol.TERMBIN) } },
+            AttachmentBackend.entries.forEach { backend ->
+                RadioRow(
+                    label = backend.label,
+                    subtitle = backendDescription(backend),
+                    selected = config.backend == backend,
+                    enabled = true,
+                    onClick = { viewModel.update { it.forBackend(backend) } },
+                )
+            }
+        }
+    }
+
+    if (config.backend == AttachmentBackend.TERMBIN) {
+        UploadWarning(stringResource(io.github.trevarj.motd.R.string.settings_upload_termbin_warning))
+    }
+    if (config.backend == AttachmentBackend.CUSTOM_0X0) {
+        SettingsGroup(title = stringResource(io.github.trevarj.motd.R.string.settings_upload_endpoint)) {
+            val endpointError = customEndpoint.isNotBlank() && validateEndpoint(customEndpoint) == null
+            OutlinedTextField(
+                value = customEndpoint,
+                onValueChange = { value ->
+                    customEndpoint = value
+                    validateEndpoint(value)?.let { endpoint ->
+                        viewModel.update { it.copy(endpoint = endpoint, customEndpoint = endpoint) }
+                    }
+                },
+                label = { Text(stringResource(io.github.trevarj.motd.R.string.settings_upload_custom_url)) },
+                isError = endpointError,
+                supportingText = {
+                    Text(stringResource(
+                        if (endpointError) io.github.trevarj.motd.R.string.settings_upload_custom_error
+                        else io.github.trevarj.motd.R.string.settings_upload_custom_desc,
+                    ))
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                    .testTag("settings_upload_custom_endpoint"),
             )
         }
     }
 
-    if (config.protocol == PasteProtocol.TERMBIN) {
-        UploadWarning(stringResource(io.github.trevarj.motd.R.string.settings_upload_termbin_warning))
-    } else {
-        SettingsGroup(title = stringResource(io.github.trevarj.motd.R.string.settings_upload_endpoint)) {
-            Column(Modifier.selectableGroup()) {
-                EndpointPreset.entries.forEach { option ->
-                    val endpoint = option.endpoint
-                    RadioRow(
-                        label = when (option) {
-                            EndpointPreset.CRAFTERBIN -> "CrafterBin"
-                            EndpointPreset.ZERO_X_ZERO -> "0x0.st"
-                            EndpointPreset.CUSTOM -> stringResource(io.github.trevarj.motd.R.string.settings_upload_custom)
-                        },
-                        subtitle = endpoint,
-                        selected = selectedPreset == option,
-                        enabled = true,
-                        onClick = {
-                            selectedPreset = option
-                            if (endpoint != null) viewModel.update { it.copy(endpoint = endpoint) }
-                            else if (customEndpoint.isNotBlank()) {
-                                validateEndpoint(customEndpoint)?.let { valid -> viewModel.update { it.copy(endpoint = valid) } }
-                            }
-                        },
-                    )
-                }
-            }
-            if (selectedPreset == EndpointPreset.CUSTOM) {
-                val endpointError = customEndpoint.isNotBlank() && validateEndpoint(customEndpoint) == null
-                OutlinedTextField(
-                    value = customEndpoint,
-                    onValueChange = { value ->
-                        customEndpoint = value
-                        validateEndpoint(value)?.let { endpoint -> viewModel.update { it.copy(endpoint = endpoint) } }
-                    },
-                    label = { Text(stringResource(io.github.trevarj.motd.R.string.settings_upload_custom_url)) },
-                    isError = endpointError,
-                    supportingText = {
-                        Text(stringResource(
-                            if (endpointError) io.github.trevarj.motd.R.string.settings_upload_custom_error
-                            else io.github.trevarj.motd.R.string.settings_upload_custom_desc,
-                        ))
-                    },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-                        .testTag("settings_upload_custom_endpoint"),
-                )
-            }
-        }
-
+    when (config.backend) {
+        AttachmentBackend.CRAFTERBIN, AttachmentBackend.ZERO_X_ZERO, AttachmentBackend.CUSTOM_0X0 ->
         SettingsGroup(title = stringResource(io.github.trevarj.motd.R.string.settings_upload_privacy)) {
             SwitchRow(
                 title = stringResource(io.github.trevarj.motd.R.string.settings_upload_secret),
@@ -138,10 +113,35 @@ fun UploadsSettingsContent(viewModel: AttachmentSettingsViewModel = hiltViewMode
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
+        AttachmentBackend.LITTERBOX -> SettingsGroup(
+            title = stringResource(io.github.trevarj.motd.R.string.settings_upload_privacy),
+        ) {
+            Column(Modifier.selectableGroup()) {
+                LITTERBOX_EXPIRIES.forEach { expiry ->
+                    RadioRow(
+                        label = litterboxExpiryLabel(expiry),
+                        subtitle = stringResource(io.github.trevarj.motd.R.string.settings_upload_litterbox_expiry_desc),
+                        selected = config.litterboxExpiry == expiry,
+                        enabled = true,
+                        onClick = { viewModel.update { it.copy(litterboxExpiry = expiry) } },
+                    )
+                }
+            }
+        }
+        AttachmentBackend.UGUU -> UploadWarning(
+            stringResource(io.github.trevarj.motd.R.string.settings_upload_uguu_warning),
+            caution = false,
+        )
+        AttachmentBackend.CNET -> UploadWarning(
+            stringResource(io.github.trevarj.motd.R.string.settings_upload_cnet_warning),
+            caution = false,
+        )
+        AttachmentBackend.CATBOX -> UploadWarning(stringResource(io.github.trevarj.motd.R.string.settings_upload_catbox_warning))
+        AttachmentBackend.TERMBIN -> Unit
     }
 
     SettingsGroup(title = stringResource(io.github.trevarj.motd.R.string.settings_upload_limits)) {
-        val maximumMiB = uploadLimitMaximumMiB(config.endpoint)
+        val maximumMiB = uploadLimitMaximumMiB(config.backend)
         OutlinedTextField(
             value = (config.sizeLimitBytes / MIB).toString(),
             onValueChange = { value ->
@@ -159,24 +159,41 @@ fun UploadsSettingsContent(viewModel: AttachmentSettingsViewModel = hiltViewMode
 }
 
 @Composable
-private fun UploadWarning(message: String) {
+private fun UploadWarning(message: String, caution: Boolean = true) {
+    val colors = androidx.compose.material3.MaterialTheme.colorScheme
     androidx.compose.material3.Surface(
-        color = androidx.compose.material3.MaterialTheme.colorScheme.errorContainer,
+        color = if (caution) colors.errorContainer else colors.surfaceContainerHigh,
         shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
     ) {
         Text(
             message,
-            color = androidx.compose.material3.MaterialTheme.colorScheme.onErrorContainer,
+            color = if (caution) colors.onErrorContainer else colors.onSurface,
             modifier = Modifier.fillMaxWidth().padding(16.dp),
         )
     }
 }
 
-internal fun endpointPreset(endpoint: String): EndpointPreset =
-    EndpointPreset.entries.firstOrNull { it.endpoint == endpoint } ?: EndpointPreset.CUSTOM
-
-internal fun uploadLimitMaximumMiB(endpoint: String): Long =
-    if (endpointPreset(endpoint) == EndpointPreset.CUSTOM) MAX_CUSTOM_LIMIT_BYTES / MIB
+internal fun uploadLimitMaximumMiB(backend: AttachmentBackend): Long =
+    if (backend == AttachmentBackend.CUSTOM_0X0) MAX_CUSTOM_LIMIT_BYTES / MIB
     else DEFAULT_PUBLIC_LIMIT_BYTES / MIB
+
+internal fun backendDescription(backend: AttachmentBackend): String = when (backend) {
+    AttachmentBackend.CRAFTERBIN -> "Files, photos, and text • configurable expiry"
+    AttachmentBackend.ZERO_X_ZERO -> "Files, photos, and text • public service"
+    AttachmentBackend.CUSTOM_0X0 -> "Your own HTTPS 0x0-compatible endpoint"
+    AttachmentBackend.CNET -> "Files, photos, and text • rolling 180 days • deletable"
+    AttachmentBackend.UGUU -> "Files, photos, and text • 3 hours"
+    AttachmentBackend.LITTERBOX -> "Files, photos, and text • 1–72 hours"
+    AttachmentBackend.CATBOX -> "Files, photos, and text • long-lived"
+    AttachmentBackend.TERMBIN -> "Text only • unencrypted TCP"
+}
+
+internal fun litterboxExpiryLabel(expiry: String): String = when (expiry) {
+    "1h" -> "1 hour"
+    "12h" -> "12 hours"
+    "24h" -> "24 hours"
+    "72h" -> "72 hours"
+    else -> expiry
+}
 
 private const val MIB = 1024L * 1024L

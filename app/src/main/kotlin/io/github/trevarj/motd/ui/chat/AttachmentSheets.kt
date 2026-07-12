@@ -10,7 +10,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,7 +46,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -83,11 +81,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.attachment.AttachmentSource
-import io.github.trevarj.motd.attachment.EndpointPreset
+import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.PasteBackendConfig
-import io.github.trevarj.motd.attachment.PasteProtocol
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
+import io.github.trevarj.motd.attachment.forBackend
+import io.github.trevarj.motd.attachment.supports
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -105,25 +104,9 @@ private sealed interface AttachmentFlow {
 internal data class UploadDestination(val label: String, val config: PasteBackendConfig)
 
 internal fun uploadDestinations(source: AttachmentSource, config: PasteBackendConfig): List<UploadDestination> {
-    val destinations = mutableListOf<UploadDestination>()
-    if (source is AttachmentSource.Text) {
-        destinations += UploadDestination("Termbin", config.copy(protocol = PasteProtocol.TERMBIN))
+    return AttachmentBackend.entries.filter { it.supports(source) }.map { backend ->
+        UploadDestination(backend.label, config.forBackend(backend))
     }
-    destinations += UploadDestination(
-        "CrafterBin",
-        config.copy(protocol = PasteProtocol.MULTIPART_0X0, endpoint = EndpointPreset.CRAFTERBIN.endpoint!!),
-    )
-    destinations += UploadDestination(
-        "0x0.st",
-        config.copy(protocol = PasteProtocol.MULTIPART_0X0, endpoint = EndpointPreset.ZERO_X_ZERO.endpoint!!),
-    )
-    if (EndpointPreset.entries.none { it.endpoint == config.endpoint }) {
-        destinations += UploadDestination(
-            "Custom",
-            config.copy(protocol = PasteProtocol.MULTIPART_0X0),
-        )
-    }
-    return destinations.distinctBy { it.config.protocol to it.config.endpoint }
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -146,6 +129,7 @@ fun AttachmentSheets(
     var pasteText by remember { mutableStateOf("") }
     var lastAttempt by remember { mutableStateOf<AttachmentFlow.Confirm?>(null) }
     var deleteTarget by remember { mutableStateOf<UploadRecord?>(null) }
+    var backendPickerRequest by remember { mutableStateOf<AttachmentFlow.Confirm?>(null) }
 
     LaunchedEffect(open, startWithCurrentDraft) {
         if (!open) return@LaunchedEffect
@@ -231,9 +215,27 @@ fun AttachmentSheets(
         )
         is AttachmentFlow.Confirm -> ConfirmationSheet(
             request = current,
-            onConfigChange = { flow = current.copy(config = it) },
+            onChangeDestination = {
+                backendPickerRequest = current
+                flow = AttachmentFlow.Idle
+            },
             onDismiss = ::closeSourceSheet,
             onUpload = { startUpload(current) },
+        )
+    }
+
+    backendPickerRequest?.let { request ->
+        BackendPickerSheet(
+            source = request.source,
+            config = request.config,
+            onSelect = { selected ->
+                flow = request.copy(config = selected)
+                backendPickerRequest = null
+            },
+            onDismiss = {
+                flow = request
+                backendPickerRequest = null
+            },
         )
     }
 
@@ -362,7 +364,7 @@ private fun RecentUploadRow(
     ListItem(
         headlineContent = { Text(record.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
-            Text("${stringResource(if (record.backend == PasteProtocol.TERMBIN) R.string.upload_backend_termbin else R.string.upload_backend_0x0)} • ${record.sizeBytes?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown)}", maxLines = 1)
+            Text("${record.backend.label} • ${record.sizeBytes?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown)}", maxLines = 1)
         },
         leadingContent = { Icon(if (record.mimeType?.startsWith("image/") == true) Icons.Outlined.Image else Icons.Outlined.Description, null) },
         trailingContent = {
@@ -409,12 +411,11 @@ private fun TextPasteSheet(text: String, onTextChange: (String) -> Unit, onDismi
 @Composable
 private fun ConfirmationSheet(
     request: AttachmentFlow.Confirm,
-    onConfigChange: (PasteBackendConfig) -> Unit,
+    onChangeDestination: () -> Unit,
     onDismiss: () -> Unit,
     onUpload: () -> Unit,
 ) {
     val context = LocalContext.current
-    val destinations = remember(request.source, request.config.endpoint) { uploadDestinations(request.source, request.config) }
     val thumbnail by produceState<android.graphics.Bitmap?>(null, request.source) {
         value = if (request.source is AttachmentSource.Photo) {
             withContext(Dispatchers.IO) {
@@ -437,15 +438,12 @@ private fun ConfirmationSheet(
             AttachmentMetadata(request.source)
             Spacer(Modifier.height(16.dp))
             Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                destinations.forEach { destination ->
-                    FilterChip(
-                        selected = sameDestination(request.config, destination.config),
-                        onClick = { onConfigChange(destination.config) },
-                        label = { Text(destination.label) },
-                    )
-                }
-            }
+            ListItem(
+                headlineContent = { Text(request.config.backend.label, fontWeight = FontWeight.SemiBold) },
+                supportingContent = { Text(backendRetention(request.config)) },
+                trailingContent = { Text(stringResource(R.string.upload_destination_change), color = MaterialTheme.colorScheme.primary) },
+                modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onChangeDestination),
+            )
             Spacer(Modifier.height(12.dp))
             UploadPrivacyCard(request.config)
             Spacer(Modifier.height(16.dp))
@@ -456,6 +454,36 @@ private fun ConfirmationSheet(
             }
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_cancel)) }
             Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun BackendPickerSheet(
+    source: AttachmentSource,
+    config: PasteBackendConfig,
+    onSelect: (PasteBackendConfig) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            uploadDestinations(source, config).forEach { destination ->
+                ListItem(
+                    headlineContent = { Text(destination.label, fontWeight = FontWeight.SemiBold) },
+                    supportingContent = { Text(backendRetention(destination.config)) },
+                    trailingContent = if (sameDestination(config, destination.config)) {
+                        { Text("Selected", color = MaterialTheme.colorScheme.primary) }
+                    } else null,
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSelect(destination.config) },
+                )
+            }
+            Spacer(Modifier.height(20.dp))
         }
     }
 }
@@ -484,8 +512,9 @@ private fun AttachmentMetadata(source: AttachmentSource) {
 
 @Composable
 private fun UploadPrivacyCard(config: PasteBackendConfig) {
-    val termbin = config.protocol == PasteProtocol.TERMBIN
-    val safe = !termbin && config.secretUrl
+    val termbin = config.backend == AttachmentBackend.TERMBIN
+    val safe = config.backend == AttachmentBackend.CNET ||
+        (config.protocol == io.github.trevarj.motd.attachment.PasteProtocol.MULTIPART_0X0 && config.secretUrl)
     Surface(
         shape = RoundedCornerShape(18.dp),
         color = if (safe) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.errorContainer,
@@ -495,15 +524,24 @@ private fun UploadPrivacyCard(config: PasteBackendConfig) {
             Spacer(Modifier.width(12.dp))
             Column {
                 Text(
-                    if (termbin) stringResource(R.string.upload_termbin_unencrypted) else stringResource(R.string.upload_privacy_title),
+                    when {
+                        termbin -> stringResource(R.string.upload_termbin_unencrypted)
+                        config.backend == AttachmentBackend.CNET -> "Unguessable, deletable link"
+                        safe -> stringResource(R.string.upload_privacy_title)
+                        else -> "Public link"
+                    },
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    stringResource(
-                        if (safe) R.string.upload_privacy_secret else R.string.upload_privacy_public,
-                        config.expiry ?: stringResource(R.string.upload_expiry_default),
-                    ),
+                    if (config.backend == AttachmentBackend.CATBOX) {
+                        "Anyone with the link can access it. Anonymous uploads cannot be deleted."
+                    } else {
+                        stringResource(
+                            if (safe) R.string.upload_privacy_secret else R.string.upload_privacy_public,
+                            backendRetention(config),
+                        )
+                    },
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -534,7 +572,23 @@ private fun UploadProgressSheet(progress: UploadProgress, onCancel: () -> Unit) 
 }
 
 private fun sameDestination(a: PasteBackendConfig, b: PasteBackendConfig): Boolean =
-    a.protocol == b.protocol && (a.protocol == PasteProtocol.TERMBIN || a.endpoint == b.endpoint)
+    a.backend == b.backend && (a.backend != AttachmentBackend.CUSTOM_0X0 || a.endpoint == b.endpoint)
+
+internal fun backendRetention(config: PasteBackendConfig): String = when (config.backend) {
+    AttachmentBackend.CRAFTERBIN, AttachmentBackend.ZERO_X_ZERO, AttachmentBackend.CUSTOM_0X0 ->
+        config.expiry ?: "server default"
+    AttachmentBackend.CNET -> "rolling 180 days"
+    AttachmentBackend.UGUU -> "3 hours"
+    AttachmentBackend.LITTERBOX -> when (config.litterboxExpiry) {
+        "1h" -> "1 hour"
+        "12h" -> "12 hours"
+        "24h" -> "24 hours"
+        "72h" -> "72 hours"
+        else -> config.litterboxExpiry
+    }
+    AttachmentBackend.CATBOX -> "up to 2 years without access"
+    AttachmentBackend.TERMBIN -> "server default"
+}
 
 internal fun formatBytes(bytes: Long): String = when {
     bytes < 1024 -> "$bytes B"

@@ -1,6 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
-import io.github.trevarj.motd.attachment.EndpointPreset
+import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
@@ -23,10 +23,10 @@ class SettingsUiModelsTest {
 
     @Test
     fun `upload endpoint classification controls the visible size maximum`() {
-        assertEquals(EndpointPreset.CRAFTERBIN, endpointPreset(EndpointPreset.CRAFTERBIN.endpoint!!))
-        assertEquals(EndpointPreset.CUSTOM, endpointPreset("https://paste.example"))
-        assertEquals(25L, uploadLimitMaximumMiB(EndpointPreset.ZERO_X_ZERO.endpoint!!))
-        assertEquals(512L, uploadLimitMaximumMiB("https://paste.example"))
+        assertEquals(25L, uploadLimitMaximumMiB(AttachmentBackend.CRAFTERBIN))
+        assertEquals(25L, uploadLimitMaximumMiB(AttachmentBackend.LITTERBOX))
+        assertEquals(512L, uploadLimitMaximumMiB(AttachmentBackend.CUSTOM_0X0))
+        assertEquals("24 hours", litterboxExpiryLabel("24h"))
     }
 
     @Test

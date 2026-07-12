@@ -54,16 +54,25 @@ class AttachmentPrefsImpl @Inject constructor(
     }
 
     private fun encodeConfig(c: PasteBackendConfig) = buildJsonObject {
-        put("protocol", c.protocol.name); put("endpoint", c.endpoint); put("expiry", c.expiry)
+        put("backend", c.backend.name); put("protocol", c.protocol.name); put("endpoint", c.endpoint)
+        put("customEndpoint", c.customEndpoint)
+        put("expiry", c.expiry); put("litterboxExpiry", c.litterboxExpiry)
         put("secret", c.secretUrl); put("limit", c.sizeLimitBytes)
     }.toString()
 
     private fun decodeConfig(raw: String) = runCatching {
         val o = json.parseToJsonElement(raw).jsonObject
+        val endpoint = o["endpoint"]?.jsonPrimitive?.content ?: EndpointPreset.CRAFTERBIN.endpoint!!
+        val backend = o["backend"]?.jsonPrimitive?.content?.let { value ->
+            runCatching { AttachmentBackend.valueOf(value) }.getOrNull()
+        } ?: legacyAttachmentBackend(o["protocol"]?.jsonPrimitive?.content, endpoint)
         normalizedConfig(PasteBackendConfig(
-            protocol = o["protocol"]?.jsonPrimitive?.content?.let(PasteProtocol::valueOf) ?: PasteProtocol.MULTIPART_0X0,
-            endpoint = o["endpoint"]?.jsonPrimitive?.content ?: EndpointPreset.CRAFTERBIN.endpoint!!,
+            backend = backend,
+            endpoint = endpoint,
+            customEndpoint = o["customEndpoint"]?.jsonPrimitive?.content ?: endpoint,
             expiry = o["expiry"]?.jsonPrimitive?.contentOrNull,
+            litterboxExpiry = o["litterboxExpiry"]?.jsonPrimitive?.content
+                ?: DEFAULT_LITTERBOX_EXPIRY,
             secretUrl = o["secret"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: true,
             sizeLimitBytes = o["limit"]?.jsonPrimitive?.longOrNull ?: DEFAULT_PUBLIC_LIMIT_BYTES,
         ))
@@ -81,10 +90,24 @@ class AttachmentPrefsImpl @Inject constructor(
         json.parseToJsonElement(raw).jsonArray.mapNotNull { element ->
             val o = element.jsonObject
             val url = o["url"]?.jsonPrimitive?.content ?: return@mapNotNull null
-            UploadRecord(url, PasteProtocol.valueOf(o["backend"]!!.jsonPrimitive.content),
+            val endpoint = o["endpoint"]?.jsonPrimitive?.contentOrNull
+            val backendValue = o["backend"]?.jsonPrimitive?.content
+            val backend = backendValue?.let { runCatching { AttachmentBackend.valueOf(it) }.getOrNull() }
+                ?: legacyAttachmentBackend(backendValue, endpoint)
+            UploadRecord(url, backend,
                 o["name"]?.jsonPrimitive?.content ?: url, o["mime"]?.jsonPrimitive?.contentOrNull,
                 o["size"]?.jsonPrimitive?.longOrNull, o["at"]?.jsonPrimitive?.longOrNull ?: 0,
-                o["token"]?.jsonPrimitive?.contentOrNull, o["endpoint"]?.jsonPrimitive?.contentOrNull)
+                o["token"]?.jsonPrimitive?.contentOrNull, endpoint)
         }.take(MAX_UPLOAD_HISTORY)
     }.getOrDefault(emptyList())
+
+}
+
+internal fun legacyAttachmentBackend(protocol: String?, endpoint: String?): AttachmentBackend = when (protocol) {
+    PasteProtocol.TERMBIN.name -> AttachmentBackend.TERMBIN
+    else -> when (endpoint?.trimEnd('/')) {
+        EndpointPreset.CRAFTERBIN.endpoint -> AttachmentBackend.CRAFTERBIN
+        EndpointPreset.ZERO_X_ZERO.endpoint -> AttachmentBackend.ZERO_X_ZERO
+        else -> AttachmentBackend.CUSTOM_0X0
+    }
 }

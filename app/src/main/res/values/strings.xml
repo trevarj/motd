@@ -111,13 +111,8 @@
     <string name="settings_uploads">Uploads</string>
     <string name="settings_uploads_summary">Paste and file upload defaults</string>
     <string name="settings_upload_destination">Default destination</string>
-    <string name="settings_upload_0x0">0x0-compatible</string>
-    <string name="settings_upload_0x0_desc">HTTPS uploads for files, photos, and text</string>
-    <string name="settings_upload_termbin">Termbin</string>
-    <string name="settings_upload_termbin_desc">Public, unencrypted, text-only paste service</string>
     <string name="settings_upload_termbin_warning">Termbin sends text without encryption to a public service. Never upload passwords or private information.</string>
     <string name="settings_upload_endpoint">Service endpoint</string>
-    <string name="settings_upload_custom">Custom</string>
     <string name="settings_upload_custom_url">Custom HTTPS URL</string>
     <string name="settings_upload_custom_desc">Custom endpoints may allow uploads up to 512 MiB.</string>
     <string name="settings_upload_custom_error">Enter a valid HTTPS URL without credentials.</string>
@@ -126,6 +121,10 @@
     <string name="settings_upload_secret_desc">Ask the service not to list the upload publicly.</string>
     <string name="settings_upload_expiry">Default expiry</string>
     <string name="settings_upload_expiry_desc">Service duration such as 7d; leave blank for its default.</string>
+    <string name="settings_upload_litterbox_expiry_desc">The link is removed automatically after this duration.</string>
+    <string name="settings_upload_uguu_warning">Uguu uploads are public to anyone with the link and expire after 3 hours.</string>
+    <string name="settings_upload_cnet_warning">paste.c-net.org uses an unguessable link and supports deletion. Retention resets to 180 days whenever the file is accessed.</string>
+    <string name="settings_upload_catbox_warning">Catbox uploads are long-lived, cannot be deleted anonymously, and may remain until 2 years without access.</string>
     <string name="settings_upload_limits">Upload limit</string>
     <string name="settings_upload_limit">Maximum size (MiB)</string>
     <string name="settings_upload_limit_desc">Maximum for this endpoint: %1$d MiB.</string>
@@ -259,8 +258,6 @@
     <string name="upload_type_unknown">Unknown type</string>
     <string name="upload_type_photo">Photo</string>
     <string name="upload_metadata">%1$s • %2$s</string>
-    <string name="upload_backend_termbin">Termbin</string>
-    <string name="upload_backend_0x0">0x0-compatible</string>
     <string name="upload_text_title">New text paste</string>
     <string name="upload_text_placeholder">Paste or type text</string>
     <plurals name="upload_character_count">
@@ -269,12 +266,12 @@
     </plurals>
     <string name="upload_confirm_title">Ready to upload</string>
     <string name="upload_destination">Destination</string>
+    <string name="upload_destination_change">Change destination</string>
     <string name="upload_action">Upload</string>
     <string name="upload_privacy_title">Secret link requested</string>
     <string name="upload_privacy_secret">Anyone with the link can access it. Expires: %1$s.</string>
     <string name="upload_privacy_public">This is a public upload. Do not include sensitive information. Expires: %1$s.</string>
     <string name="upload_termbin_unencrypted">Unencrypted public upload</string>
-    <string name="upload_expiry_default">server default</string>
     <string name="upload_uploading">Uploading…</string>
     <string name="upload_progress_of">%1$s of %2$s</string>
     <string name="upload_failed">Upload failed</string>
