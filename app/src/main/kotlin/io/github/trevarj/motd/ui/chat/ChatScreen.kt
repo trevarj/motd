@@ -542,12 +542,24 @@ fun ChatContent(
         }
     }
 
-    // Auto-stick-to-bottom for incoming messages (autoscroll-to-newest bug). When a new row is
+    // Auto-stick-to-bottom for incoming messages. When a new row is
     // prepended at index 0 the reverse-layout viewport does NOT follow it (stable keys anchor the
     // existing rows), so an explicit scroll is needed. We snapshot whether the user was at the bottom
     // *before* the count grew via [wasAtBottom]; a user scrolled up reading history is never yanked.
     // Own-send scrolls unconditionally in the composer, so it doesn't route through this path.
     var wasAtBottom by remember { mutableStateOf(true) }
+    // Record user intent only on real/programmatic scroll-state edges. A Paging prepend can move
+    // the anchored viewport off index 0 without starting a scroll; observing [atBottom] directly
+    // therefore mistook an incoming row's layout shift for the user scrolling up and disabled
+    // auto-follow before the item-count effect ran.
+    LaunchedEffect(listState, initialPositionSettled) {
+        if (!initialPositionSettled) return@LaunchedEffect
+        snapshotFlow { listState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { scrolling ->
+                wasAtBottom = if (scrolling) false else atBottom
+            }
+    }
     var prevItemCount by remember { mutableStateOf(items.itemCount) }
     LaunchedEffect(items.itemCount, initialPositionSettled) {
         if (!initialPositionSettled) return@LaunchedEffect
@@ -563,9 +575,6 @@ fun ChatContent(
         }
         prevItemCount = newCount
     }
-    // Track the at-bottom state on every settle so the next arrival reads the pre-add position.
-    LaunchedEffect(atBottom) { wasAtBottom = atBottom }
-
     val buffer = state.buffer
     // Mark read on new-message-while-at-bottom only (plans/07/15 #2): syncing while scrolled up
     // reading history would clear unread on other clients and destroy the local unread UX.
