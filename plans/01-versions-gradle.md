@@ -27,6 +27,7 @@ okio = "3.9.1"
 coroutines = "1.10.1"
 serialization = "1.8.0"
 unifiedpush = "2.5.0"
+firebaseBom = "34.15.0"
 junit = "4.13.2"
 turbine = "1.2.0"
 robolectric = "4.14.1"
@@ -62,6 +63,8 @@ coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutin
 coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 unifiedpush-connector = { group = "org.unifiedpush.android", name = "connector", version.ref = "unifiedpush" }
+firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
+firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
@@ -82,6 +85,7 @@ hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 - Gradle wrapper **8.13** (`gradle-8.13-bin.zip` in `gradle-wrapper.properties`)
 - compileSdk **35**, targetSdk **35**, minSdk **26**
 - JDK **17** via `kotlin { jvmToolchain(17) }` in BOTH modules
+- Node.js **22** from the pinned Nix shell for the Firebase Functions relay
 
 ## `settings.gradle.kts`
 

@@ -24,6 +24,7 @@ import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.service.DeliveryMode
+import io.github.trevarj.motd.data.prefs.PushProvider
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Notifications & delivery category: delivery mode (persistent/push) and battery optimization. */
@@ -36,8 +37,10 @@ fun DeliverySettingsScreen(
     DeliverySettingsContent(
         deliveryMode = state.settings.deliveryMode,
         pushAvailability = state.pushAvailability,
+        pushProvider = state.pushProvider,
         onBack = onBack,
         onDeliveryMode = viewModel::setDeliveryMode,
+        onPushProvider = viewModel::setPushProvider,
     )
 }
 
@@ -45,8 +48,10 @@ fun DeliverySettingsScreen(
 fun DeliverySettingsContent(
     deliveryMode: DeliveryMode,
     pushAvailability: PushAvailability,
+    pushProvider: PushProvider,
     onBack: () -> Unit,
     onDeliveryMode: (DeliveryMode) -> Unit,
+    onPushProvider: (PushProvider) -> Unit,
 ) {
     val context = LocalContext.current
     SettingsScaffold(title = stringResource(R.string.settings_delivery), onBack = onBack) {
@@ -54,7 +59,9 @@ fun DeliverySettingsContent(
         DeliveryGroup(
             current = deliveryMode,
             availability = pushAvailability,
+            provider = pushProvider,
             onSelect = onDeliveryMode,
+            onSelectProvider = onPushProvider,
             // No distributor installed: guide the user to install one (ntfy on F-Droid) via an
             // ACTION_VIEW web intent. Registration self-heals once a distributor appears.
             onInstallDistributor = {
@@ -91,7 +98,9 @@ fun DeliverySettingsContent(
 private fun DeliveryGroup(
     current: DeliveryMode,
     availability: PushAvailability,
+    provider: PushProvider,
     onSelect: (DeliveryMode) -> Unit,
+    onSelectProvider: (PushProvider) -> Unit,
     onInstallDistributor: () -> Unit,
 ) {
     Column(Modifier.selectableGroup()) {
@@ -113,9 +122,9 @@ private fun DeliveryGroup(
         RadioRow(
             label = stringResource(R.string.settings_delivery_push),
             subtitle = subtitle,
-            selected = current == DeliveryMode.UNIFIED_PUSH,
+            selected = current == DeliveryMode.UNIFIED_PUSH && provider == PushProvider.UNIFIED_PUSH,
             enabled = availability.selectable,
-            onClick = { onSelect(DeliveryMode.UNIFIED_PUSH) },
+            onClick = { onSelectProvider(PushProvider.UNIFIED_PUSH) },
         )
         // Install-a-distributor action, shown only when push is selectable but no distributor exists.
         // Opens ntfy's F-Droid listing so the user can fix the missing-distributor gap in one tap.
@@ -129,6 +138,19 @@ private fun DeliveryGroup(
                 Text(stringResource(R.string.settings_delivery_push_install_distributor))
             }
         }
+        if (availability.fcmAvailable) {
+            RadioRow(
+                label = stringResource(R.string.settings_delivery_fcm),
+                subtitle = if (availability.selectable) {
+                    stringResource(R.string.settings_delivery_fcm_desc)
+                } else {
+                    stringResource(R.string.settings_delivery_push_unavailable)
+                },
+                selected = current == DeliveryMode.UNIFIED_PUSH && provider == PushProvider.FCM,
+                enabled = availability.selectable,
+                onClick = { onSelectProvider(PushProvider.FCM) },
+            )
+        }
     }
 }
 
@@ -139,7 +161,9 @@ private fun DeliverySettingsPreview() {
         DeliverySettingsContent(
             deliveryMode = DeliveryMode.PERSISTENT_SOCKET,
             pushAvailability = PushAvailability(),
+            pushProvider = PushProvider.UNIFIED_PUSH,
             onBack = {}, onDeliveryMode = {},
+            onPushProvider = {},
         )
     }
 }

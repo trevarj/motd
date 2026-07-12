@@ -27,7 +27,7 @@ break selectors.
    provides the Android SDK platform-tools. On a bare Guix host without the dev
    shell, `lib.sh` falls back to `guix shell android-tools -- adb`.
 3. **App built.** A debuggable APK at `MOTD_APK` for clean install, or the app
-   already installed on the device. Hermetic CI uses `:app:assembleE2e`, whose
+   already installed on the device. Hermetic CI uses `:app:assembleFossE2e`, whose
    APK keeps the `.debug` id while omitting arm64-only libbox JNI; the E2E flow
    exercises plain IRC through soju, never embedded obfuscation.
 4. **Bouncer reachable.** The soju test bouncer (§0) reachable from the device

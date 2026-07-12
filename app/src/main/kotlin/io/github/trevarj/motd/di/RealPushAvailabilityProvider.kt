@@ -2,6 +2,7 @@ package io.github.trevarj.motd.di
 
 import android.content.Context
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.BuildConfig
 import io.github.trevarj.motd.push.WebPushRegistrar
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.settings.PushAvailability
@@ -46,6 +47,7 @@ class RealPushAvailabilityProvider(
                 PushAvailability(
                     bouncerWebpush = bouncerWebpush,
                     distributorInstalled = hasDistributor(),
+                    fcmAvailable = BuildConfig.FCM_AVAILABLE,
                 )
             }
             .distinctUntilChanged()

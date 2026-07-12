@@ -40,3 +40,11 @@ Plex Mono Bold Italic, copyright © 2017 IBM Corp. IBM Plex is licensed under
 the SIL Open Font License 1.1. The exact source pin and license are recorded in
 [`docs/assets/brand/`](docs/assets/brand/README.md). The font binary is not
 distributed; the SVG and Android assets contain converted glyph outlines.
+
+## Google distribution: Firebase Cloud Messaging
+
+Only the `google` APK includes the Firebase Android SDK for Cloud Messaging. The Firebase Android
+SDK is distributed under the Apache License 2.0; message delivery also uses the separately operated
+Google Firebase service and is subject to its terms. The `foss` APK contains no Firebase dependency.
+The optional relay source under `firebase/` uses the MIT-licensed Firebase Functions SDK and the
+Apache-2.0-licensed Firebase Admin SDK; exact versions are recorded in its lockfile.

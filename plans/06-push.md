@@ -80,3 +80,11 @@ inverse (implement a package-private `encrypt` used only by tests) to cover the 
 persistence + per-network REGISTER/UNREGISTER orchestration), `push/PushEventHandler.kt`.
 WP9 depends only on WP1 contracts: `IrcMessage.parse`, `IrcEventSink`, `PushPrefs`,
 `ConnectionManager`. Real wiring to the WP4/WP5 implementations happens in WP10.
+
+## FCM distribution
+
+The `google` flavor adds FCM beneath the existing frozen `DeliveryMode.UNIFIED_PUSH`; `foss`
+remains Google-free. A separate `PushProvider` preference selects UnifiedPush or FCM. A
+project-owned Firebase Function exposes opaque endpoints to soju and forwards the encrypted
+RFC8291 body as a high-priority FCM data message. The app reuses `WebPushCrypto` and
+`PushEventHandler`. See `docs/firebase-push.md` for deployment and build configuration.

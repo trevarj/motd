@@ -1,7 +1,10 @@
 package io.github.trevarj.motd.push
 
+import android.util.Log
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.prefs.PushPrefs
+import io.github.trevarj.motd.data.prefs.PushProvider
+import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.service.DeliveryMode
 import javax.inject.Inject
@@ -26,6 +29,8 @@ class PushInstanceCoordinator @Inject constructor(
     private val networkDao: NetworkDao,
     private val pushPrefs: PushPrefs,
     private val up: UnifiedPushApi,
+    private val providerPrefs: PushProviderPrefs = DefaultPushProviderPrefs,
+    private val fcm: FcmPushApi = NoopFcmPushApi,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -35,10 +40,14 @@ class PushInstanceCoordinator @Inject constructor(
     fun start() {
         if (started) return
         started = true
+        fcm.start()
         scope.launch {
-            combine(settingsRepository.settings, networkDao.observeAll()) { s, nets ->
-                s.deliveryMode to nets.filter { it.autoConnect }.map { it.id }.toSet()
-            }.distinctUntilChanged().collect { (mode, ids) -> reconcile(mode, ids) }
+            combine(settingsRepository.settings, providerPrefs.provider, networkDao.observeAll()) { s, provider, nets ->
+                Triple(s.deliveryMode, provider, nets.filter { it.autoConnect }.map { it.id }.toSet())
+            }.distinctUntilChanged().collect { (mode, provider, ids) ->
+                runCatching { reconcile(mode, provider, ids) }
+                    .onFailure { Log.w(TAG, "push provider reconciliation failed", it) }
+            }
         }
     }
 
@@ -53,7 +62,30 @@ class PushInstanceCoordinator @Inject constructor(
      * Public for direct unit tests with a FakeUnifiedPushApi.
      */
     suspend fun reconcile(mode: DeliveryMode, connectable: Set<Long>) {
-        val desired = if (mode == DeliveryMode.UNIFIED_PUSH) connectable else emptySet()
+        reconcile(mode, PushProvider.UNIFIED_PUSH, connectable)
+    }
+
+    suspend fun reconcile(mode: DeliveryMode, provider: PushProvider, connectable: Set<Long>) {
+        if (mode != DeliveryMode.UNIFIED_PUSH) {
+            fcm.reconcile(emptySet())
+            reconcileUnifiedPush(emptySet(), connectable)
+            return
+        }
+        if (provider == PushProvider.FCM) {
+            if (!fcm.available) {
+                settingsRepository.setDeliveryMode(DeliveryMode.PERSISTENT_SOCKET)
+                return
+            }
+            // Stop connector registrations before replacing their endpoints with relay endpoints.
+            for (id in connectable) up.unregisterApp(id.toString())
+            fcm.reconcile(connectable)
+        } else {
+            fcm.reconcile(emptySet())
+            reconcileUnifiedPush(connectable, connectable)
+        }
+    }
+
+    private suspend fun reconcileUnifiedPush(desired: Set<Long>, connectable: Set<Long>) {
         if (desired.isNotEmpty() && up.getAckDistributor() == null) {
             // No installed distributor: nothing to register against — silent no-op until one exists.
             val distributor = up.getDistributors().firstOrNull() ?: return
@@ -64,4 +96,20 @@ class PushInstanceCoordinator @Inject constructor(
             up.unregisterApp(id.toString())
         }
     }
+
+    private companion object { const val TAG = "PushCoordinator" }
+}
+
+private object DefaultPushProviderPrefs : PushProviderPrefs {
+    override val provider = kotlinx.coroutines.flow.flowOf(PushProvider.UNIFIED_PUSH)
+    override suspend fun setProvider(provider: PushProvider) = Unit
+    override suspend fun fcmSubscriptions() = emptyMap<Long, io.github.trevarj.motd.data.prefs.FcmSubscription>()
+    override suspend fun setFcmSubscription(networkId: Long, subscription: io.github.trevarj.motd.data.prefs.FcmSubscription?) = Unit
+}
+
+private object NoopFcmPushApi : FcmPushApi {
+    override val available = false
+    override fun start() = Unit
+    override suspend fun reconcile(connectable: Set<Long>) = Unit
+    override suspend fun onTokenChanged(token: String) = Unit
 }

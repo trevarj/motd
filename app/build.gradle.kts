@@ -77,6 +77,32 @@ android {
         testInstrumentationRunner = "io.github.trevarj.motd.SmokeTestRunner"
     }
 
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("foss") {
+            dimension = "distribution"
+            buildConfigField("boolean", "FCM_AVAILABLE", "false")
+        }
+        create("google") {
+            dimension = "distribution"
+            val firebaseApiKey = System.getenv("MOTD_FIREBASE_API_KEY").orEmpty()
+            val firebaseAppId = System.getenv("MOTD_FIREBASE_APP_ID").orEmpty()
+            val firebaseProjectId = System.getenv("MOTD_FIREBASE_PROJECT_ID").orEmpty()
+            val firebaseSenderId = System.getenv("MOTD_FIREBASE_SENDER_ID").orEmpty()
+            val relayUrl = System.getenv("MOTD_FCM_RELAY_URL").orEmpty().trimEnd('/')
+            val fcmConfigured = listOf(
+                firebaseApiKey, firebaseAppId, firebaseProjectId, firebaseSenderId, relayUrl,
+            ).all { it.isNotBlank() }
+            fun quoted(value: String) = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+            buildConfigField("boolean", "FCM_AVAILABLE", fcmConfigured.toString())
+            buildConfigField("String", "FIREBASE_API_KEY", quoted(firebaseApiKey))
+            buildConfigField("String", "FIREBASE_APP_ID", quoted(firebaseAppId))
+            buildConfigField("String", "FIREBASE_PROJECT_ID", quoted(firebaseProjectId))
+            buildConfigField("String", "FIREBASE_SENDER_ID", quoted(firebaseSenderId))
+            buildConfigField("String", "FCM_RELAY_URL", quoted(relayUrl))
+        }
+    }
+
     // Signing only when CI secrets are present; local/debug builds never fail on this.
     val keystorePath = System.getenv("MOTD_KEYSTORE_PATH")
     if (keystorePath != null) {
@@ -114,7 +140,10 @@ android {
     }
     // Production APKs remain arm64-only while this is the only packaged libbox artifact. The
     // debuggable E2E variant is deliberately x86_64 and contains no libbox JNI (see above).
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     testBuildType = "e2e"
     testOptions {
         unitTests { isIncludeAndroidResources = true }  // Robolectric
@@ -144,6 +173,14 @@ android {
         // The pinned libbox artifact is arm64-only; ChromeOS x86_64 translation support is outside
         // the current APK contract.
         disable += "ChromeOsAbiSupport"
+    }
+}
+
+androidComponents {
+    // Hermetic E2E uses an AOSP image with no Google Play services. Building a Google E2E APK
+    // adds a large, unusable variant and needlessly doubles the emulator-test compilation graph.
+    beforeVariants(selector().withBuildType("e2e")) { variant ->
+        if (variant.productFlavors.contains("distribution" to "google")) variant.enable = false
     }
 }
 
@@ -197,6 +234,8 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.serialization.json)
     implementation(libs.unifiedpush.connector)
+    "googleImplementation"(platform(libs.firebase.bom))
+    "googleImplementation"(libs.firebase.messaging)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.turbine)

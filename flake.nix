@@ -38,7 +38,7 @@
         sdkRoot = "${androidSdk}/libexec/android-sdk";
       in {
         devShells.default = pkgs.mkShell {
-          packages = [ pkgs.jdk17 androidSdk ];
+          packages = [ pkgs.jdk17 pkgs.nodejs_22 androidSdk ];
           JAVA_HOME = pkgs.jdk17.home;
           ANDROID_HOME = sdkRoot;
           ANDROID_SDK_ROOT = sdkRoot;

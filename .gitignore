@@ -15,6 +15,10 @@ captures/
 *.jks
 *.keystore
 keystore.properties
+.firebaserc
+firebase/functions/.env.*
+firebase/functions/lib/
+firebase/functions/node_modules/
 
 # direnv
 .direnv/

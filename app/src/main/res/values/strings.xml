@@ -77,12 +77,14 @@
     <string name="settings_delivery">Message delivery</string>
     <string name="settings_delivery_socket">Persistent connection</string>
     <string name="settings_delivery_socket_desc">Keeps a foreground connection alive.</string>
-    <string name="settings_delivery_push">Push (UnifiedPush)</string>
+    <string name="settings_delivery_push">UnifiedPush</string>
     <string name="settings_delivery_push_desc">Battery-friendly push via your bouncer.</string>
     <string name="settings_delivery_push_unavailable">Requires a bouncer with Web Push (connect to your soju bouncer first).</string>
     <string name="settings_delivery_push_needs_distributor">No push distributor installed — install one like ntfy to receive push.</string>
     <string name="settings_delivery_push_install_distributor">Install distributor</string>
     <string name="settings_delivery_push_distributor_url">https://f-droid.org/packages/io.heckel.ntfy/</string>
+    <string name="settings_delivery_fcm">Firebase Cloud Messaging (Google)</string>
+    <string name="settings_delivery_fcm_desc">Battery-friendly Google push via your bouncer.</string>
     <string name="settings_battery">Battery optimization</string>
     <string name="settings_battery_desc">Exempt motd to keep connections reliable.</string>
     <string name="settings_networks">Networks</string>

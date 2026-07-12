@@ -43,12 +43,15 @@ commands under `nix develop`.
 
 ```sh
 nix develop -c ./gradlew :irc:test               # protocol tests (pure JVM)
-nix develop -c ./gradlew :app:testDebugUnitTest  # app unit tests (Robolectric)
-nix develop -c ./gradlew :app:assembleDebug      # arm64 debug APK
+nix develop -c ./gradlew :app:testFossDebugUnitTest  # app unit tests (Robolectric)
+nix develop -c ./gradlew :app:assembleFossDebug      # Google-free arm64 debug APK
 nix develop -c ./gradlew build                   # tests + lint + APKs
 ```
 
-The debug APK lands under `app/build/outputs/apk/debug/`. Install it with `adb
+Firebase Cloud Messaging is available in the separate Google flavor; see
+[Firebase push setup](docs/firebase-push.md).
+
+The debug APK lands under `app/build/outputs/apk/foss/debug/`. Install it with `adb
 install`. The debug build carries the `.debug` application-id suffix, so it can
 coexist with a release install.
 
@@ -111,7 +114,7 @@ third-party notice. Required
 repository secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`,
 `KEY_PASSWORD` (see [`plans/08-ci-release.md`](plans/08-ci-release.md)).
 
-To dry-run locally, run `nix develop -c ./gradlew :app:assembleRelease` with the
+To dry-run locally, run `nix develop -c ./gradlew :app:assembleFossRelease` with the
 signing env set (or the debug signing config).
 
 ## LLM disclaimer

@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.service
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -42,6 +43,9 @@ class IrcForegroundService : LifecycleService() {
         return START_STICKY
     }
 
+    // The merged manifest for every flavor declares specialUse. AGP lint loses that declaration
+    // when analyzing the shared service against the Google flavor's manifest overlay.
+    @SuppressLint("ForegroundServiceType")
     private fun startAsForeground() {
         val notification = notifications.statusNotification(connectedCount = 0, reconnecting = true)
         // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is an API 34 constant; only pass the type on 34+.

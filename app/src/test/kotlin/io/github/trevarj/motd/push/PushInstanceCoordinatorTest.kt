@@ -8,6 +8,9 @@ import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.PushKeys
+import io.github.trevarj.motd.data.prefs.FcmSubscription
+import io.github.trevarj.motd.data.prefs.PushProvider
+import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
@@ -48,6 +51,20 @@ class PushInstanceCoordinatorTest {
         override suspend fun clearEndpoints() { endpoints.clear() }
         override suspend fun keys(): PushKeys? = null
         override suspend fun setKeys(keys: PushKeys) = Unit
+    }
+
+    private class FakeProviderPrefs(initial: PushProvider) : PushProviderPrefs {
+        override val provider = MutableStateFlow(initial)
+        override suspend fun setProvider(provider: PushProvider) { this.provider.value = provider }
+        override suspend fun fcmSubscriptions(): Map<Long, FcmSubscription> = emptyMap()
+        override suspend fun setFcmSubscription(networkId: Long, subscription: FcmSubscription?) = Unit
+    }
+
+    private class FakeFcmPushApi(override val available: Boolean = true) : FcmPushApi {
+        val reconciled = mutableListOf<Set<Long>>()
+        override fun start() = Unit
+        override suspend fun reconcile(connectable: Set<Long>) { reconciled += connectable }
+        override suspend fun onTokenChanged(token: String) = Unit
     }
 
     private class FakeSettingsRepository(mode: DeliveryMode) : SettingsRepository {
@@ -143,6 +160,45 @@ class PushInstanceCoordinatorTest {
         assertEquals(listOf("1"), up.registered)
         // held {1,9} + connectable {1} - desired {1} = {9}
         assertEquals(setOf("9"), up.unregistered.toSet())
+    }
+
+    @Test
+    fun fcm_provider_disables_unifiedpush_and_reconciles_fcm_networks() = runTest {
+        val up = FakeUnifiedPushApi(acked = "dist.a")
+        val fcm = FakeFcmPushApi()
+        val coordinator = PushInstanceCoordinator(
+            FakeSettingsRepository(DeliveryMode.UNIFIED_PUSH),
+            FakeNetworkDao(emptyList()),
+            FakePushPrefs(),
+            up,
+            FakeProviderPrefs(PushProvider.FCM),
+            fcm,
+        )
+
+        coordinator.reconcile(DeliveryMode.UNIFIED_PUSH, PushProvider.FCM, setOf(1L, 2L))
+
+        assertEquals(setOf("1", "2"), up.unregistered.toSet())
+        assertTrue(up.registered.isEmpty())
+        assertEquals(listOf(setOf(1L, 2L)), fcm.reconciled)
+    }
+
+    @Test
+    fun socket_mode_cleans_up_fcm_subscriptions() = runTest {
+        val up = FakeUnifiedPushApi()
+        val fcm = FakeFcmPushApi()
+        val coordinator = PushInstanceCoordinator(
+            FakeSettingsRepository(DeliveryMode.PERSISTENT_SOCKET),
+            FakeNetworkDao(emptyList()),
+            FakePushPrefs(),
+            up,
+            FakeProviderPrefs(PushProvider.FCM),
+            fcm,
+        )
+
+        coordinator.reconcile(DeliveryMode.PERSISTENT_SOCKET, PushProvider.FCM, setOf(1L))
+
+        assertEquals(listOf(emptySet<Long>()), fcm.reconciled)
+        assertEquals(listOf("1"), up.unregistered)
     }
 
     @Test

@@ -96,6 +96,25 @@ interface PushPrefs {
     suspend fun setKeys(keys: PushKeys)
 }
 
+/** Push transport selected while the frozen [DeliveryMode] remains in push mode. */
+enum class PushProvider { UNIFIED_PUSH, FCM }
+
+data class FcmSubscription(
+    val networkId: Long,
+    val endpoint: String,
+    val subscriptionId: String,
+    val managementSecret: String,
+    val token: String,
+)
+
+/** Provider selection and FCM relay credentials, kept outside the frozen Settings contract. */
+interface PushProviderPrefs {
+    val provider: Flow<PushProvider>
+    suspend fun setProvider(provider: PushProvider)
+    suspend fun fcmSubscriptions(): Map<Long, FcmSubscription>
+    suspend fun setFcmSubscription(networkId: Long, subscription: FcmSubscription?)
+}
+
 /**
  * TOFU cert pins for self-signed / bare-IP TLS bouncers (plans/12). Persists the accepted leaf
  * SHA-256 (lowercase hex) per host:port. A pinned host skips CA/hostname validation; a pin mismatch

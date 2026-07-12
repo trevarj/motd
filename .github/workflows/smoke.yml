@@ -26,7 +26,7 @@ jobs:
 
       - name: Run Kotlin onboarding and connectivity smoke test
         run: |
-          ./gradlew smokeApi34E2eAndroidTest \
+          ./gradlew smokeApi34FossE2eAndroidTest \
             -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect \
             -Pandroid.testInstrumentationRunnerArguments.sojuHost=10.0.2.2 \
             -Pandroid.testInstrumentationRunnerArguments.sojuPort=6697 \

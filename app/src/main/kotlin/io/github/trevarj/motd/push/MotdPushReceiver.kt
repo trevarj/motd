@@ -8,11 +8,14 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.prefs.PushPrefs
+import io.github.trevarj.motd.data.prefs.PushProvider
+import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.DeliveryMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.unifiedpush.android.connector.MessagingReceiver
 
 /**
@@ -43,6 +46,7 @@ class MotdPushReceiver : MessagingReceiver() {
         fun pushPrefs(): PushPrefs
         fun networkDao(): NetworkDao
         fun unifiedPush(): UnifiedPushApi
+        fun pushProviderPrefs(): PushProviderPrefs
     }
 
     private fun entry(context: Context): PushEntryPoint =
@@ -51,6 +55,7 @@ class MotdPushReceiver : MessagingReceiver() {
     override fun onNewEndpoint(context: Context, endpoint: String, instance: String) {
         val e = entry(context)
         runOnWakelock {
+            if (e.pushProviderPrefs().provider.first() != PushProvider.UNIFIED_PUSH) return@runOnWakelock
             val networkId = resolveInstance(e, instance) ?: return@runOnWakelock
             // Mode is user-driven and precedes registration; do NOT flip it here.
             e.registrar().onNewEndpoint(networkId, endpoint)
@@ -62,6 +67,7 @@ class MotdPushReceiver : MessagingReceiver() {
     override fun onMessage(context: Context, message: ByteArray, instance: String) {
         val e = entry(context)
         runOnWakelock {
+            if (e.pushProviderPrefs().provider.first() != PushProvider.UNIFIED_PUSH) return@runOnWakelock
             val networkId = resolveInstance(e, instance) ?: return@runOnWakelock
             val keys = e.registrar().loadOrCreateKeys()
             e.eventHandler().handle(networkId, message, keys)
@@ -73,6 +79,7 @@ class MotdPushReceiver : MessagingReceiver() {
         // to persistent-socket mode and restart the subsystem so no network is left dark.
         val e = entry(context)
         runOnWakelock {
+            if (e.pushProviderPrefs().provider.first() != PushProvider.UNIFIED_PUSH) return@runOnWakelock
             e.settingsRepository().setDeliveryMode(DeliveryMode.PERSISTENT_SOCKET)
             e.connectionManager().startAll()
         }
@@ -81,6 +88,7 @@ class MotdPushReceiver : MessagingReceiver() {
     override fun onUnregistered(context: Context, instance: String) {
         val e = entry(context)
         runOnWakelock {
+            if (e.pushProviderPrefs().provider.first() != PushProvider.UNIFIED_PUSH) return@runOnWakelock
             val networkId = instance.toLongOrNull()
             if (networkId != null) {
                 e.registrar().onUnregisteredNetwork(networkId)

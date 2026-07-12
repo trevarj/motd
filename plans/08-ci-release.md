@@ -42,23 +42,25 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
       - name: App unit tests
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        run: ./gradlew :app:testFossDebugUnitTest :app:testGoogleDebugUnitTest --stacktrace
       - name: Android lint (warnings as errors)
         run: |
           for attempt in 1 2; do
             echo "::group::lint attempt $attempt"
-            ./gradlew :app:lintDebug --stacktrace --no-daemon \
+            ./gradlew :app:lintFossDebug :app:lintGoogleDebug --stacktrace --no-daemon \
               -Dorg.gradle.workers.max=1 && { echo "::endgroup::"; exit 0; }
             echo "::endgroup::"
             echo "lint attempt $attempt failed; retrying" >&2
           done
           exit 1
       - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+        run: ./gradlew :app:assembleFossDebug :app:assembleGoogleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: motd-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            app/build/outputs/apk/foss/debug/app-foss-debug.apk
+            app/build/outputs/apk/google/debug/app-google-debug.apk
 ```
 
 ## `.github/workflows/release.yml`
@@ -84,6 +86,10 @@ anyone.
   (monotonic per workflow). Local builds: `0.0.0-dev` / 1.
 
 ## One-time signing setup (human runbook — requires the repo to exist on GitHub)
+
+The Google FCM artifact additionally requires repository secrets `FIREBASE_API_KEY`,
+`FIREBASE_APP_ID`, `FIREBASE_PROJECT_ID`, `FIREBASE_SENDER_ID`, and `FCM_RELAY_URL`. CI also runs
+the locked Firebase Functions build, tests, and production dependency audit.
 
 ```sh
 # 1. generate a keystore (25+ year validity), store it OUTSIDE the repo

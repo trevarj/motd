@@ -18,7 +18,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: firebase/functions/package-lock.json }
       - uses: gradle/actions/setup-gradle@v4
+      - name: Verify Firebase relay
+        run: |
+          npm ci --prefix firebase/functions --ignore-scripts
+          npm test --prefix firebase/functions
+          npm audit --prefix firebase/functions --omit=dev
       - name: Decode keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/keystore.jks"
       - name: Full build, tests, lint, and signed release APK
@@ -29,21 +36,32 @@ jobs:
           MOTD_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           MOTD_VERSION_NAME: ${{ github.ref_name }}
           MOTD_VERSION_CODE: ${{ github.run_number }}
-        run: ./gradlew build :app:lintDebug --stacktrace --no-daemon
+          MOTD_FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          MOTD_FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+          MOTD_FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          MOTD_FIREBASE_SENDER_ID: ${{ secrets.FIREBASE_SENDER_ID }}
+          MOTD_FCM_RELAY_URL: ${{ secrets.FCM_RELAY_URL }}
+        run: |
+          test -n "$MOTD_FIREBASE_API_KEY" -a -n "$MOTD_FIREBASE_APP_ID" \
+            -a -n "$MOTD_FIREBASE_PROJECT_ID" -a -n "$MOTD_FIREBASE_SENDER_ID" \
+            -a -n "$MOTD_FCM_RELAY_URL"
+          ./gradlew build :app:lintFossDebug :app:lintGoogleDebug --stacktrace --no-daemon --max-workers=1
       - name: Prepare licensed release assets
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           ./third_party/sing-box/prepare-release-assets.sh \
             "${{ github.ref_name }}" \
-            app/build/outputs/apk/release/app-release.apk \
+            app/build/outputs/apk/foss/release/app-foss-release.apk \
+            app/build/outputs/apk/google/release/app-google-release.apk \
             release-assets
       - uses: softprops/action-gh-release@v2
         with:
           body_path: release-assets/release-compliance.md
           fail_on_unmatched_files: true
           files: |
-            release-assets/motd-${{ github.ref_name }}.apk
+            release-assets/motd-${{ github.ref_name }}-foss.apk
+            release-assets/motd-${{ github.ref_name }}-google.apk
             release-assets/motd-libbox-source-${{ github.ref_name }}.tar.gz
             release-assets/LICENSE
             release-assets/IBM-PLEX-LICENSE.txt

@@ -33,6 +33,8 @@ internal object PrefKeys {
     val DELIVERY_MODE = stringPreferencesKey("delivery_mode")
     val PUSH_ENDPOINTS = stringPreferencesKey("push_endpoints")
     val PUSH_KEYS = stringPreferencesKey("push_keys")
+    val PUSH_PROVIDER = stringPreferencesKey("push_provider")
+    val FCM_SUBSCRIPTIONS = stringPreferencesKey("fcm_subscriptions")
     val STS_POLICIES = stringPreferencesKey("sts_policies")
     val CERT_PINS = stringPreferencesKey("cert_pins")
     // Round 4 (plans/13)
@@ -85,7 +87,7 @@ internal fun encodeHueOverrides(map: Map<String, Int>): String =
 @Singleton
 class DataStoreSettingsRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-) : SettingsRepository, PushPrefs, CertTrustStore {
+) : SettingsRepository, PushPrefs, PushProviderPrefs, CertTrustStore {
     private val store get() = context.settingsDataStore
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -274,6 +276,60 @@ class DataStoreSettingsRepository @Inject constructor(
         }.toString()
         store.edit { it[PrefKeys.PUSH_KEYS] = encoded }
     }
+
+    // -- PushProviderPrefs --
+
+    override val provider: Flow<PushProvider> = store.data.map { prefs ->
+        prefs[PrefKeys.PUSH_PROVIDER]
+            ?.let { runCatching { PushProvider.valueOf(it) }.getOrNull() }
+            ?: PushProvider.UNIFIED_PUSH
+    }
+
+    override suspend fun setProvider(provider: PushProvider) {
+        store.edit { it[PrefKeys.PUSH_PROVIDER] = provider.name }
+    }
+
+    override suspend fun fcmSubscriptions(): Map<Long, FcmSubscription> =
+        decodeFcmSubscriptions(store.data.first()[PrefKeys.FCM_SUBSCRIPTIONS])
+
+    override suspend fun setFcmSubscription(networkId: Long, subscription: FcmSubscription?) {
+        store.edit { prefs ->
+            val current = decodeFcmSubscriptions(prefs[PrefKeys.FCM_SUBSCRIPTIONS]).toMutableMap()
+            if (subscription == null) current.remove(networkId) else current[networkId] = subscription
+            if (current.isEmpty()) prefs.remove(PrefKeys.FCM_SUBSCRIPTIONS)
+            else prefs[PrefKeys.FCM_SUBSCRIPTIONS] = encodeFcmSubscriptions(current)
+        }
+    }
+
+    private fun decodeFcmSubscriptions(raw: String?): Map<Long, FcmSubscription> {
+        if (raw == null) return emptyMap()
+        return runCatching {
+            val root = json.parseToJsonElement(raw) as JsonObject
+            root.entries.mapNotNull { (key, value) ->
+                val id = key.toLongOrNull() ?: return@mapNotNull null
+                val obj = value as? JsonObject ?: return@mapNotNull null
+                id to FcmSubscription(
+                    networkId = id,
+                    endpoint = obj.getValue("endpoint").jsonPrimitive.content,
+                    subscriptionId = obj.getValue("subscriptionId").jsonPrimitive.content,
+                    managementSecret = obj.getValue("managementSecret").jsonPrimitive.content,
+                    token = obj.getValue("token").jsonPrimitive.content,
+                )
+            }.toMap()
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun encodeFcmSubscriptions(map: Map<Long, FcmSubscription>): String =
+        buildJsonObject {
+            for ((id, subscription) in map) {
+                put(id.toString(), buildJsonObject {
+                    put("endpoint", subscription.endpoint)
+                    put("subscriptionId", subscription.subscriptionId)
+                    put("managementSecret", subscription.managementSecret)
+                    put("token", subscription.token)
+                })
+            }
+        }.toString()
 
     // -- CertTrustStore (TOFU cert pins; JSON {"host:port":"<sha256 hex>"} under one key) --
 

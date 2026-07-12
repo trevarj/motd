@@ -22,6 +22,7 @@ serialization = "1.8.0"
 # plans/01 pins 2.4.0, but that version was never published to Maven Central
 # (JitPack-only under com.github.UnifiedPush); 2.5.0 is the first Central release.
 unifiedpush = "2.5.0"
+firebaseBom = "34.15.0"
 junit = "4.13.2"
 turbine = "1.2.0"
 robolectric = "4.14.1"
@@ -61,6 +62,8 @@ coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutin
 coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 unifiedpush-connector = { group = "org.unifiedpush.android", name = "connector", version.ref = "unifiedpush" }
+firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
+firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }

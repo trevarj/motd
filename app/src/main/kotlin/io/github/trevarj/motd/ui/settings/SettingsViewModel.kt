@@ -11,6 +11,8 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.PushProvider
+import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.service.DeliveryMode
@@ -25,6 +27,7 @@ data class SettingsUiState(
     val settings: Settings = Settings(),
     val networks: List<NetworkEntity> = emptyList(),
     val pushAvailability: PushAvailability = PushAvailability(),
+    val pushProvider: PushProvider = PushProvider.UNIFIED_PUSH,
 )
 
 @HiltViewModel
@@ -32,6 +35,7 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val networkRepository: NetworkRepository,
     private val pushAvailability: PushAvailabilityProvider,
+    private val pushProviderPrefs: PushProviderPrefs,
 ) : ViewModel() {
 
     val state: StateFlow<SettingsUiState> =
@@ -41,11 +45,13 @@ class SettingsViewModel @Inject constructor(
             // Reactive: recomputes as connections reach Ready / distributors appear, so the push
             // toggle enables live once the soju bouncer advertises webpush.
             pushAvailability.availability(),
-        ) { settings, networks, availability ->
+            pushProviderPrefs.provider,
+        ) { settings, networks, availability, provider ->
             SettingsUiState(
                 settings = settings,
                 networks = networks,
                 pushAvailability = availability,
+                pushProvider = provider,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -63,6 +69,11 @@ class SettingsViewModel @Inject constructor(
 
     fun setDeliveryMode(mode: DeliveryMode) = viewModelScope.launch {
         settingsRepository.setDeliveryMode(mode)
+    }
+
+    fun setPushProvider(provider: PushProvider) = viewModelScope.launch {
+        pushProviderPrefs.setProvider(provider)
+        settingsRepository.setDeliveryMode(DeliveryMode.UNIFIED_PUSH)
     }
 
     // Round 4 (plans/13): appearance/chat/people settings.

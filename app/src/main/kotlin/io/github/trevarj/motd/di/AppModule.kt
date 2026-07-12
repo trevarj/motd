@@ -10,6 +10,7 @@ import dagger.hilt.components.SingletonComponent
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
+import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.BufferRepositoryImpl
@@ -70,6 +71,9 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun pushPrefs(impl: DataStoreSettingsRepository): PushPrefs
+
+    @Binds @Singleton
+    abstract fun pushProviderPrefs(impl: DataStoreSettingsRepository): PushProviderPrefs
 
     /** TOFU cert-pin store (plans/12); same DataStore-backed impl. */
     @Binds @Singleton

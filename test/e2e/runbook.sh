@@ -27,7 +27,7 @@ fi
 
 # Package + APK.
 : "${MOTD_PKG:=io.github.trevarj.motd.debug}"
-: "${MOTD_APK:=}"                 # path to app-debug.apk; required for install
+: "${MOTD_APK:=}"                 # path to a .debug APK; required for install
 # Safety: this harness runs destructive pm clear / force-stop against MOTD_PKG. Refuse to touch
 # the release install (real account) — only ever the .debug variant.
 case "$MOTD_PKG" in
@@ -722,8 +722,8 @@ phase_f() {
 
   # 52. Push availability (no distributor on CI -> specific disabled string).
   step "Push delivery availability"
-  if [ -n "$(bounds_of_text "Push (UnifiedPush)")" ]; then
-    assert_text "Push (UnifiedPush)"
+  if [ -n "$(bounds_of_text "UnifiedPush")" ]; then
+    assert_text "UnifiedPush"
     if [ -n "$(bounds_of_text "Install a UnifiedPush distributor like ntfy to receive push.")" ]; then
       ok "push disabled with expected 'install distributor' hint"
     else

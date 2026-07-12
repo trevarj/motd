@@ -21,6 +21,7 @@ import javax.inject.Inject
 data class PushAvailability(
     val bouncerWebpush: Boolean = false,
     val distributorInstalled: Boolean = false,
+    val fcmAvailable: Boolean = false,
 ) {
     /** Push may be selected once the bouncer advertises webpush, even if a distributor is missing. */
     val selectable: Boolean get() = bouncerWebpush
