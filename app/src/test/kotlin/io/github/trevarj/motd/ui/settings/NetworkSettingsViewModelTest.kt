@@ -260,4 +260,23 @@ class NetworkSettingsViewModelTest {
         assertEquals(listOf("update:1"), repo.operations)
         assertTrue(done)
     }
+
+    @Test
+    fun autoConnectEdit_isStagedUntilSave() = runTest {
+        val repo = FakeNetworkRepository(listOf(root()))
+        val vm = loadedVm(repo)
+
+        vm.setAutoConnect(false)
+        runCurrent()
+
+        assertTrue(repo.operations.isEmpty())
+        assertTrue(vm.state.value.hasUnsavedChanges)
+        assertTrue(vm.state.value.canSave)
+
+        vm.save {}
+        runCurrent()
+
+        assertEquals(listOf("update:1"), repo.operations)
+        assertFalse(repo.networks.getValue(1).autoConnect)
+    }
 }

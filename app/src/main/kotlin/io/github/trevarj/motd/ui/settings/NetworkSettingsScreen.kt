@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,8 +12,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -42,6 +46,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,7 +90,6 @@ fun NetworkSettingsScreen(
         onProxyHostChange = viewModel::editProxyHost,
         onProxyPortChange = viewModel::editProxyPort,
         onObfsLinkChange = viewModel::editObfsLink,
-        onUseTor = viewModel::useTorShortcut,
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
         onSave = { viewModel.save(onBack) },
@@ -112,7 +116,6 @@ fun NetworkSettingsContent(
     onProxyHostChange: (String) -> Unit = {},
     onProxyPortChange: (String) -> Unit = {},
     onObfsLinkChange: (String) -> Unit = {},
-    onUseTor: () -> Unit = {},
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
     onSave: () -> Unit,
@@ -127,114 +130,130 @@ fun NetworkSettingsContent(
     onOpenServerMessages: () -> Unit = {},
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showDiscardConfirm by remember { mutableStateOf(false) }
+    val requestBack = { if (state.hasUnsavedChanges) showDiscardConfirm = true else onBack() }
+    BackHandler(enabled = state.hasUnsavedChanges) { showDiscardConfirm = true }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
                 title = { Text(state.entity?.name ?: stringResource(R.string.network_settings_title)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = requestBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.onboarding_back))
                     }
                 },
+                actions = {
+                    TextButton(
+                        onClick = onSave,
+                        enabled = state.canSave,
+                        modifier = Modifier.testTag("network_settings_save"),
+                    ) { Text(stringResource(R.string.network_settings_save)) }
+                },
             )
-        },
-        floatingActionButton = {
-            if (state.canSave) {
-                FloatingActionButton(onClick = onSave) {
-                    Icon(Icons.Filled.Check, contentDescription = stringResource(R.string.network_settings_save))
-                }
-            }
         },
     ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            // Status header: live connection state + connect/disconnect/reconnect (plans/16 §5.3).
-            StatusCard(
-                connState = state.connState,
-                onConnect = onConnect,
-                onDisconnect = onDisconnect,
-            )
-            // Editable display name (alias): rename a network so the drawer/list show a friendly
-            // label (e.g. "soju") instead of the raw host/IP. Persisted with the Save (check) FAB.
-            OutlinedTextField(
-                value = state.displayName,
-                onValueChange = onDisplayNameChange,
-                label = { Text(stringResource(R.string.network_settings_display_name)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("network_display_name"),
-            )
-            // Opt-in IRC-over-WebSocket URL (plans/19 §3.3). A bound child inherits its bouncer
-            // root's transport, so the field is only shown for the endpoint-owning rows.
-            if (state.entity?.role != NetworkRole.BOUNCER_CHILD) {
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+            Column(
+                modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp).verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                SettingsGroup { StatusCard(state.connState, onConnect, onDisconnect) }
+                SettingsGroup(title = stringResource(R.string.network_settings_general_section)) {
                     OutlinedTextField(
-                        value = state.wsUrl,
-                        onValueChange = onWsUrlChange,
-                        label = { Text(stringResource(R.string.network_settings_ws_url)) },
-                        placeholder = { Text("wss://bnc.example.com:443/") },
+                        value = state.displayName,
+                        onValueChange = onDisplayNameChange,
+                        label = { Text(stringResource(R.string.network_settings_display_name)) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("network_ws_url"),
+                        modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("network_display_name"),
                     )
-                    Text(
-                        stringResource(R.string.network_settings_ws_url_desc),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    AutoConnectRow(checked = state.autoConnect, onCheckedChange = onSetAutoConnect)
+                }
+                if (state.entity?.role == NetworkRole.BOUNCER_CHILD) {
+                    SettingsGroup(title = stringResource(R.string.network_settings_connection_section)) {
+                        ListItem(
+                            headlineContent = { Text(stringResource(R.string.network_settings_managed_by, state.parentName.orEmpty())) },
+                            supportingContent = { Text(stringResource(R.string.network_settings_managed_by_desc)) },
+                            colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+                    }
+                } else {
+                    SettingsGroup(title = stringResource(R.string.network_settings_connection_section)) {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            NetworkEndpointFields(state.server, onServerChange)
+                        }
+                        androidx.compose.material3.HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                        TransportSection(wsUrl = state.wsUrl, onWsUrlChange = onWsUrlChange)
+                        androidx.compose.material3.HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                        ObfuscationSection(
+                            mode = state.obfsMode,
+                            proxyHost = state.proxyHost,
+                            proxyPort = state.proxyPort,
+                            obfsLink = state.obfsLink,
+                            onModeChange = onObfsModeChange,
+                            onProxyHostChange = onProxyHostChange,
+                            onProxyPortChange = onProxyPortChange,
+                            onObfsLinkChange = onObfsLinkChange,
+                        )
+                    }
+                    SettingsGroup(title = stringResource(R.string.network_settings_identity_section)) {
+                        Column(Modifier.padding(16.dp)) {
+                            NetworkIdentityFields(
+                                server = state.server,
+                                auth = state.auth,
+                                onServerChange = onServerChange,
+                                onAuthChange = onAuthChange,
+                                soju = state.entity?.role == NetworkRole.BOUNCER_ROOT,
+                            )
+                        }
+                    }
+                }
+                SettingsGroup(title = stringResource(R.string.network_settings_tools_section)) {
+                    if (state.entity?.role == NetworkRole.BOUNCER_ROOT) {
+                        ListItem(
+                            headlineContent = { Text(stringResource(R.string.network_settings_bouncer_networks)) },
+                            supportingContent = { Text(stringResource(R.string.network_settings_bouncer_networks_desc)) },
+                            modifier = Modifier.clickable { onOpenBouncerNetworks() },
+                            colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+                    }
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.network_settings_server_messages)) },
+                        modifier = Modifier.clickable { onOpenServerMessages() },
+                        colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
                     )
                 }
-                // Collapsible obfuscation section (plans/20 Phase 1), off by default. A bound child
-                // inherits the root's transport, so only endpoint-owning rows show it.
-                ObfuscationSection(
-                    mode = state.obfsMode,
-                    proxyHost = state.proxyHost,
-                    proxyPort = state.proxyPort,
-                    obfsLink = state.obfsLink,
-                    onModeChange = onObfsModeChange,
-                    onProxyHostChange = onProxyHostChange,
-                    onProxyPortChange = onProxyPortChange,
-                    onObfsLinkChange = onObfsLinkChange,
-                    onUseTor = onUseTor,
-                )
-            }
-            // autoConnect toggle — persisted immediately.
-            AutoConnectRow(checked = state.autoConnect, onCheckedChange = onSetAutoConnect)
-            when (state.entity?.role) {
-                NetworkRole.BOUNCER_ROOT -> ListItem(
-                    headlineContent = { Text(stringResource(R.string.network_settings_bouncer_networks)) },
-                    supportingContent = { Text(stringResource(R.string.network_settings_bouncer_networks_desc)) },
-                    modifier = Modifier.clickable { onOpenBouncerNetworks() },
-                )
-                NetworkRole.BOUNCER_CHILD -> ListItem(
-                    headlineContent = {
-                        Text(stringResource(R.string.network_settings_managed_by, state.parentName.orEmpty()))
-                    },
-                    supportingContent = { Text(stringResource(R.string.network_settings_managed_by_desc)) },
-                )
-                else -> Unit
-            }
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.network_settings_server_messages)) },
-                modifier = Modifier.clickable { onOpenServerMessages() },
-            )
-            NetworkForm(
-                server = state.server,
-                auth = state.auth,
-                onServerChange = onServerChange,
-                onAuthChange = onAuthChange,
-                // Bouncer root/child edit uses the collapsed soju form (username/password only).
-                soju = state.entity?.role == NetworkRole.BOUNCER_ROOT ||
-                    state.entity?.role == NetworkRole.BOUNCER_CHILD,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            OutlinedButton(
-                onClick = { showDeleteConfirm = true },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            ) {
-                Text(stringResource(R.string.network_settings_delete), color = Color.Red)
+                SettingsGroup(title = stringResource(R.string.network_settings_danger_section)) {
+                    OutlinedButton(
+                        onClick = { showDeleteConfirm = true },
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    ) { Text(stringResource(R.string.network_settings_delete), color = MaterialTheme.colorScheme.error) }
+                }
             }
         }
+    }
+
+    if (showDiscardConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDiscardConfirm = false },
+            title = { Text(stringResource(R.string.network_settings_unsaved_title)) },
+            text = { Text(stringResource(R.string.network_settings_unsaved_message)) },
+            confirmButton = {
+                TextButton(onClick = { showDiscardConfirm = false; onSave() }, enabled = state.isValid) {
+                    Text(stringResource(R.string.network_settings_save))
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { showDiscardConfirm = false }) { Text(stringResource(R.string.network_settings_keep_editing)) }
+                    TextButton(onClick = { showDiscardConfirm = false; onBack() }) {
+                        Text(stringResource(R.string.network_settings_discard), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+        )
     }
 
     if (showDeleteConfirm) {
@@ -366,8 +385,7 @@ private fun AutoConnectRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit)
 /**
  * Collapsible "Connection / Obfuscation" section (plans/20 Phase 1). Off by default: a header row
  * with an expand toggle reveals the mode selector; SOCKS5 reveals host/port and embedded REALITY
- * accepts only a share link. A "Route via Tor (Orbot)" shortcut pins 127.0.0.1:9050. Stateless —
- * the ViewModel owns the values.
+ * accepts only a share link. The header always exposes the current value and expansion affordance.
  */
 @Composable
 private fun ObfuscationSection(
@@ -379,44 +397,52 @@ private fun ObfuscationSection(
     onProxyHostChange: (String) -> Unit,
     onProxyPortChange: (String) -> Unit,
     onObfsLinkChange: (String) -> Unit,
-    onUseTor: () -> Unit,
 ) {
-    // Auto-expand when a non-default mode is already configured so an edited network shows its proxy.
-    var expanded by remember { mutableStateOf(mode != ObfsMode.NONE) }
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+    var expanded by rememberSaveable { mutableStateOf(mode == ObfsMode.EMBEDDED_REALITY && vlessLinkValidationError(obfsLink) != null) }
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { expanded = !expanded }
+                .padding(horizontal = 16.dp, vertical = 14.dp)
                 .testTag("network_obfs_header"),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                stringResource(R.string.network_settings_obfs_section),
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.weight(1f),
-            )
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.network_settings_routing), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    stringResource(R.string.network_settings_current_value, obfsModeLabel(mode)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!expanded) Text(
+                    stringResource(R.string.network_settings_tap_configure),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             Icon(
                 imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                contentDescription = null,
+                contentDescription = stringResource(
+                    if (expanded) R.string.network_settings_collapse else R.string.network_settings_expand,
+                ),
             )
         }
-        if (!expanded) return@Column
-
-        Text(
-            stringResource(R.string.network_settings_obfs_section_desc),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 4.dp),
-        )
-        Column(Modifier.selectableGroup()) {
-            ObfsOption(ObfsMode.NONE, mode, stringResource(R.string.network_settings_obfs_mode_none), onModeChange)
-            ObfsOption(ObfsMode.SOCKS5, mode, stringResource(R.string.network_settings_obfs_mode_socks5), onModeChange)
-            ObfsOption(ObfsMode.TOR, mode, stringResource(R.string.network_settings_obfs_mode_tor), onModeChange)
-            ObfsOption(ObfsMode.EMBEDDED_REALITY, mode, stringResource(R.string.network_settings_obfs_mode_reality), onModeChange)
-        }
-        // TOR pins Orbot's endpoint; embedded REALITY is fully configured by its share link.
-        when (mode) {
+        AnimatedVisibility(visible = expanded) {
+            Column(Modifier.padding(start = 8.dp, end = 16.dp, bottom = 16.dp)) {
+                Text(
+                    stringResource(R.string.network_settings_obfs_section_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 8.dp, bottom = 6.dp),
+                )
+                Column(Modifier.selectableGroup()) {
+                    ObfsOption(ObfsMode.NONE, mode, stringResource(R.string.network_settings_obfs_mode_none), onModeChange)
+                    ObfsOption(ObfsMode.SOCKS5, mode, stringResource(R.string.network_settings_obfs_mode_socks5), onModeChange)
+                    ObfsOption(ObfsMode.TOR, mode, stringResource(R.string.network_settings_obfs_mode_tor), onModeChange)
+                    ObfsOption(ObfsMode.EMBEDDED_REALITY, mode, stringResource(R.string.network_settings_obfs_mode_reality), onModeChange)
+                }
+                when (mode) {
             ObfsMode.TOR -> Text(
                 stringResource(R.string.network_settings_obfs_tor_desc),
                 style = MaterialTheme.typography.bodySmall,
@@ -447,9 +473,6 @@ private fun ObfuscationSection(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                     modifier = Modifier.fillMaxWidth().testTag("network_obfs_port"),
                 )
-                TextButton(onClick = onUseTor) {
-                    Text(stringResource(R.string.network_settings_obfs_tor_shortcut))
-                }
                 Text(
                     stringResource(R.string.network_settings_obfs_dns_note),
                     style = MaterialTheme.typography.bodySmall,
@@ -488,9 +511,84 @@ private fun ObfuscationSection(
                 )
             }
             ObfsMode.NONE -> Unit
+                }
+            }
         }
     }
 }
+
+@Composable
+private fun TransportSection(wsUrl: String, onWsUrlChange: (String) -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var websocketSelected by rememberSaveable { mutableStateOf(wsUrl.isNotBlank()) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }
+                .padding(horizontal = 16.dp, vertical = 14.dp).testTag("network_transport_header"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.network_settings_transport), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    stringResource(
+                        R.string.network_settings_current_value,
+                        stringResource(if (websocketSelected) R.string.network_settings_transport_websocket else R.string.network_settings_transport_tcp),
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!expanded) Text(
+                    stringResource(R.string.network_settings_tap_configure),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Icon(
+                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = stringResource(if (expanded) R.string.network_settings_collapse else R.string.network_settings_expand),
+            )
+        }
+        AnimatedVisibility(expanded) {
+            Column(Modifier.padding(start = 8.dp, end = 16.dp, bottom = 16.dp).selectableGroup()) {
+                RadioRow(
+                    label = stringResource(R.string.network_settings_transport_tcp),
+                    subtitle = stringResource(R.string.network_settings_transport_tcp_desc),
+                    selected = !websocketSelected,
+                    enabled = true,
+                    onClick = { websocketSelected = false; onWsUrlChange("") },
+                )
+                RadioRow(
+                    label = stringResource(R.string.network_settings_transport_websocket),
+                    subtitle = stringResource(R.string.network_settings_transport_websocket_desc),
+                    selected = websocketSelected,
+                    enabled = true,
+                    onClick = { websocketSelected = true },
+                )
+                if (websocketSelected) {
+                    OutlinedTextField(
+                        value = wsUrl,
+                        onValueChange = onWsUrlChange,
+                        label = { Text(stringResource(R.string.network_settings_ws_url)) },
+                        placeholder = { Text("wss://bnc.example.com:443/") },
+                        singleLine = true,
+                        supportingText = { Text(stringResource(R.string.network_settings_ws_url_desc)) },
+                        modifier = Modifier.fillMaxWidth().padding(start = 8.dp).testTag("network_ws_url"),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun obfsModeLabel(mode: ObfsMode): String = stringResource(
+    when (mode) {
+        ObfsMode.NONE -> R.string.network_settings_obfs_mode_none
+        ObfsMode.SOCKS5 -> R.string.network_settings_obfs_mode_socks5
+        ObfsMode.TOR -> R.string.network_settings_obfs_mode_tor
+        ObfsMode.EMBEDDED_REALITY -> R.string.network_settings_obfs_mode_reality
+    },
+)
 
 @Composable
 private fun ObfsOption(
@@ -500,10 +598,14 @@ private fun ObfsOption(
     onSelect: (ObfsMode) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        modifier = Modifier.fillMaxWidth().selectable(
+            selected = mode == selected,
+            role = androidx.compose.ui.semantics.Role.RadioButton,
+            onClick = { onSelect(mode) },
+        ).padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = mode == selected, onClick = { onSelect(mode) })
+        RadioButton(selected = mode == selected, onClick = null)
         Text(label, modifier = Modifier.padding(start = 8.dp))
     }
 }

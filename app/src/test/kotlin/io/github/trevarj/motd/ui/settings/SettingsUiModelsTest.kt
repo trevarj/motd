@@ -1,0 +1,86 @@
+package io.github.trevarj.motd.ui.settings
+
+import io.github.trevarj.motd.attachment.EndpointPreset
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.ThemeMode
+import io.github.trevarj.motd.ui.onboarding.AuthForm
+import io.github.trevarj.motd.ui.onboarding.AuthMode
+import io.github.trevarj.motd.ui.onboarding.ServerForm
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class SettingsUiModelsTest {
+    @Test
+    fun `theme groups are complete and alphabetically arranged by display label`() {
+        assertEquals(
+            listOf(ThemeMode.CATPPUCCIN_LATTE, ThemeMode.GRUVBOX_LIGHT, ThemeMode.LIGHT, ThemeMode.SOLARIZED_LIGHT),
+            LIGHT_THEME_MODES,
+        )
+        assertEquals(
+            listOf(
+                ThemeMode.AMOLED, ThemeMode.CATPPUCCIN_MOCHA, ThemeMode.DARK, ThemeMode.DRACULA,
+                ThemeMode.GRUVBOX_DARK, ThemeMode.NORD, ThemeMode.SOLARIZED_DARK, ThemeMode.TOKYO_NIGHT,
+            ),
+            DARK_THEME_MODES,
+        )
+        assertEquals(ThemeMode.entries.toSet(), (listOf(ThemeMode.SYSTEM) + LIGHT_THEME_MODES + DARK_THEME_MODES).toSet())
+    }
+
+    @Test
+    fun `upload endpoint classification controls the visible size maximum`() {
+        assertEquals(EndpointPreset.CRAFTERBIN, endpointPreset(EndpointPreset.CRAFTERBIN.endpoint!!))
+        assertEquals(EndpointPreset.CUSTOM, endpointPreset("https://paste.example"))
+        assertEquals(25L, uploadLimitMaximumMiB(EndpointPreset.ZERO_X_ZERO.endpoint!!))
+        assertEquals(512L, uploadLimitMaximumMiB("https://paste.example"))
+    }
+
+    @Test
+    fun `networks are grouped with children directly under alphabetized roots`() {
+        val rootB = network(2, "Zulu", NetworkRole.BOUNCER_ROOT)
+        val rootA = network(1, "Alpha", NetworkRole.BOUNCER_ROOT)
+        val childB = network(4, "beta", NetworkRole.BOUNCER_CHILD, parentId = 1)
+        val childA = network(3, "AlphaNet", NetworkRole.BOUNCER_CHILD, parentId = 1)
+        val direct = network(5, "Libera", NetworkRole.DIRECT)
+
+        val organized = organizeNetworks(listOf(rootB, childB, direct, childA, rootA))
+
+        assertEquals(listOf(rootA, rootB), organized.bouncerRoots)
+        assertEquals(listOf(childA, childB), organized.childrenByRoot[1])
+        assertEquals(listOf(direct), organized.direct)
+    }
+
+    @Test
+    fun `network save requires a valid dirty form and includes auto connect`() {
+        val entity = network(1, "Libera", NetworkRole.DIRECT).copy(
+            nick = "me", username = "me", realname = "Me", autoConnect = true,
+        )
+        val clean = NetworkSettingsUiState(
+            entity = entity,
+            displayName = entity.name,
+            server = entity.toServerForm(),
+            auth = entity.toAuthForm(),
+            autoConnect = true,
+        )
+        assertFalse(clean.hasUnsavedChanges)
+        assertFalse(clean.canSave)
+        assertTrue(clean.copy(autoConnect = false).canSave)
+        assertFalse(clean.copy(server = ServerForm()).canSave)
+    }
+
+    private fun network(id: Long, name: String, role: NetworkRole, parentId: Long? = null) = NetworkEntity(
+        id = id,
+        name = name,
+        role = role,
+        parentId = parentId,
+        host = "irc.example",
+        port = 6697,
+        tls = true,
+        nick = "me",
+        username = "me",
+        realname = "Me",
+        saslMechanism = AuthMode.NONE.name,
+    )
+}

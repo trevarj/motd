@@ -56,41 +56,34 @@ fun DeliverySettingsContent(
     val context = LocalContext.current
     SettingsScaffold(title = stringResource(R.string.settings_delivery), onBack = onBack) {
         val distributorUrl = stringResource(R.string.settings_delivery_push_distributor_url)
-        DeliveryGroup(
-            current = deliveryMode,
-            availability = pushAvailability,
-            provider = pushProvider,
-            onSelect = onDeliveryMode,
-            onSelectProvider = onPushProvider,
-            // No distributor installed: guide the user to install one (ntfy on F-Droid) via an
-            // ACTION_VIEW web intent. Registration self-heals once a distributor appears.
-            onInstallDistributor = {
-                context.startActivity(Intent(Intent.ACTION_VIEW, distributorUrl.toUri()))
-            },
-        )
-
-        HorizontalDivider()
-
-        ListItem(
-            headlineContent = { Text(stringResource(R.string.settings_battery)) },
-            supportingContent = { Text(stringResource(R.string.settings_battery_desc)) },
-            modifier = Modifier.clickable {
-                // Directly request the Doze exemption for this app (keeps the persistent socket
-                // alive in the background). If already exempt, open the OS list so the user can
-                // review/revoke it.
-                val pm = context.getSystemService(PowerManager::class.java)
-                if (pm?.isIgnoringBatteryOptimizations(context.packageName) == true) {
-                    context.startActivity(
-                        Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
-                    )
-                } else {
-                    context.startActivity(
-                        Intent(AndroidSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                            .setData("package:${context.packageName}".toUri()),
-                    )
-                }
-            },
-        )
+        SettingsGroup(title = stringResource(R.string.settings_delivery_method)) {
+            DeliveryGroup(
+                current = deliveryMode,
+                availability = pushAvailability,
+                provider = pushProvider,
+                onSelect = onDeliveryMode,
+                onSelectProvider = onPushProvider,
+                onInstallDistributor = { context.startActivity(Intent(Intent.ACTION_VIEW, distributorUrl.toUri())) },
+            )
+        }
+        SettingsGroup(title = stringResource(R.string.settings_background_reliability)) {
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.settings_battery)) },
+                supportingContent = { Text(stringResource(R.string.settings_battery_desc)) },
+                colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                modifier = Modifier.clickable {
+                    val pm = context.getSystemService(PowerManager::class.java)
+                    if (pm?.isIgnoringBatteryOptimizations(context.packageName) == true) {
+                        context.startActivity(Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                    } else {
+                        context.startActivity(
+                            Intent(AndroidSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                .setData("package:${context.packageName}".toUri()),
+                        )
+                    }
+                },
+            )
+        }
     }
 }
 

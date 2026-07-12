@@ -42,7 +42,21 @@ data class NetworkSettingsUiState(
 ) {
     val vlessLinkError: String?
         get() = if (obfsMode == ObfsMode.EMBEDDED_REALITY) vlessLinkValidationError(obfsLink) else null
-    val canSave: Boolean get() = server.isValid && auth.isValid && vlessLinkError == null
+    val hasUnsavedChanges: Boolean get() {
+        val current = entity ?: return false
+        return displayName.trim().ifBlank { current.name } != current.name ||
+            wsUrl.trim().ifBlank { null } != current.wsUrl?.trim()?.ifBlank { null } ||
+            obfsMode != (current.obfsMode ?: ObfsMode.NONE) ||
+            (obfsMode == ObfsMode.SOCKS5 && (
+                proxyHost.trim().ifBlank { null } != current.proxyHost?.trim()?.ifBlank { null } ||
+                    proxyPort.toIntOrNull() != current.proxyPort
+                )) ||
+            (obfsMode == ObfsMode.EMBEDDED_REALITY &&
+                obfsLink.trim().ifBlank { null } != current.obfsLink?.trim()?.ifBlank { null }) ||
+            server != current.toServerForm() || auth != current.toAuthForm() || autoConnect != current.autoConnect
+    }
+    val isValid: Boolean get() = server.isValid && auth.isValid && vlessLinkError == null
+    val canSave: Boolean get() = isValid && hasUnsavedChanges
 }
 
 /** User-safe validation copy for the VLESS field; never echoes a potentially sensitive URI. */
@@ -140,11 +154,8 @@ class NetworkSettingsViewModel @Inject constructor(
     fun connect() = viewModelScope.launch { connectionManager.connect(networkId) }
     fun disconnect() = viewModelScope.launch { connectionManager.disconnect(networkId) }
 
-    /** Persist autoConnect immediately; reconcile reacts (sticky intent guards live state, §4). */
-    fun setAutoConnect(enabled: Boolean) = viewModelScope.launch {
-        _state.value = _state.value.copy(autoConnect = enabled)
-        _state.value.entity?.let { networkRepository.updateNetwork(it.copy(autoConnect = enabled)) }
-    }
+    /** Auto-connect is staged with the rest of the form so the labeled Save action is coherent. */
+    fun setAutoConnect(enabled: Boolean) { _state.value = _state.value.copy(autoConnect = enabled) }
 
     fun openServerBuffer(onOpen: (Long) -> Unit) = viewModelScope.launch {
         onOpen(connectionManager.ensureServerBuffer(networkId))

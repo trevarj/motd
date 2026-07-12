@@ -108,6 +108,73 @@ fun NetworkForm(
     }
 }
 
+/** Endpoint-only editor used by the reorganized network settings connection card. */
+@Composable
+internal fun NetworkEndpointFields(server: ServerForm, onServerChange: (ServerForm) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        HostField(server, onServerChange)
+        PortField(server, onServerChange)
+        TlsRow(server, onServerChange)
+    }
+}
+
+/** Identity and authentication editor, separated from endpoint/transport settings. */
+@Composable
+internal fun NetworkIdentityFields(
+    server: ServerForm,
+    auth: AuthForm,
+    onServerChange: (ServerForm) -> Unit,
+    onAuthChange: (AuthForm) -> Unit,
+    soju: Boolean,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        NickField(server, onServerChange, imeAction = ImeAction.Next)
+        if (soju) {
+            OutlinedTextField(
+                value = auth.saslUser,
+                onValueChange = { onAuthChange(auth.copy(saslUser = it)) },
+                label = { Text(stringResource(R.string.onboarding_field_username)) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrectEnabled = false,
+                    imeAction = ImeAction.Next,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            PasswordField(
+                value = auth.saslPassword,
+                onValueChange = { onAuthChange(auth.copy(saslPassword = it)) },
+                label = stringResource(R.string.onboarding_auth_sasl_password),
+            )
+        } else {
+            OutlinedTextField(
+                value = server.username,
+                onValueChange = { onServerChange(server.copy(username = it)) },
+                label = { Text(stringResource(R.string.onboarding_field_username)) },
+                placeholder = { Text(stringResource(R.string.onboarding_field_username_hint)) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = server.realname,
+                onValueChange = { onServerChange(server.copy(realname = it)) },
+                label = { Text(stringResource(R.string.onboarding_field_realname)) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                stringResource(R.string.onboarding_auth_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            AuthSection(auth, onAuthChange)
+        }
+    }
+}
+
 /**
  * soju bouncer form: host/port/TLS/nick + one Username + one Password. The Username/Password map
  * to the SASL login ([AuthForm.saslUser]/[AuthForm.saslPassword]); mechanism is always PLAIN.

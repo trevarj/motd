@@ -74,7 +74,16 @@
     <string name="settings_theme_amoled">AMOLED (true black)</string>
     <string name="settings_dynamic_color">Dynamic color</string>
     <string name="settings_dynamic_color_desc">Use colors from your wallpaper (Android 12+).</string>
+    <string name="settings_dynamic_color_unavailable">Dynamic color is unavailable for named themes.</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_section">Color theme</string>
+    <string name="settings_theme_system_group">System</string>
+    <string name="settings_theme_light_group">Light</string>
+    <string name="settings_theme_dark_group">Dark</string>
+    <string name="settings_layout_section">Chat layout</string>
     <string name="settings_delivery">Message delivery</string>
+    <string name="settings_delivery_method">Delivery method</string>
+    <string name="settings_background_reliability">Background reliability</string>
     <string name="settings_delivery_socket">Persistent connection</string>
     <string name="settings_delivery_socket_desc">Keeps a foreground connection alive.</string>
     <string name="settings_delivery_push">UnifiedPush</string>
@@ -88,12 +97,38 @@
     <string name="settings_battery">Battery optimization</string>
     <string name="settings_battery_desc">Exempt motd to keep connections reliable.</string>
     <string name="settings_networks">Networks</string>
+    <string name="settings_bouncers_section">Bouncers</string>
+    <string name="settings_direct_networks_section">Direct networks</string>
+    <string name="settings_managed_networks_section">Managed networks</string>
     <string name="settings_about">About</string>
     <!-- Settings category submenu summaries (top-level Settings list). -->
     <string name="settings_appearance_summary">Theme, density, avatars, nick colors, wallpaper</string>
     <string name="settings_chat_summary">Fools, join/part/quit, and chat behavior</string>
+    <string name="settings_messages_section">Message display</string>
+    <string name="settings_composer_section">Composer</string>
     <string name="settings_delivery_summary">Delivery mode, push, battery optimization</string>
     <string name="settings_networks_summary">Manage your IRC networks and bouncers</string>
+    <string name="settings_uploads">Uploads</string>
+    <string name="settings_uploads_summary">Paste and file upload defaults</string>
+    <string name="settings_upload_destination">Default destination</string>
+    <string name="settings_upload_0x0">0x0-compatible</string>
+    <string name="settings_upload_0x0_desc">HTTPS uploads for files, photos, and text</string>
+    <string name="settings_upload_termbin">Termbin</string>
+    <string name="settings_upload_termbin_desc">Public, unencrypted, text-only paste service</string>
+    <string name="settings_upload_termbin_warning">Termbin sends text without encryption to a public service. Never upload passwords or private information.</string>
+    <string name="settings_upload_endpoint">Service endpoint</string>
+    <string name="settings_upload_custom">Custom</string>
+    <string name="settings_upload_custom_url">Custom HTTPS URL</string>
+    <string name="settings_upload_custom_desc">Custom endpoints may allow uploads up to 512 MiB.</string>
+    <string name="settings_upload_custom_error">Enter a valid HTTPS URL without credentials.</string>
+    <string name="settings_upload_privacy">Privacy and retention</string>
+    <string name="settings_upload_secret">Secret URL</string>
+    <string name="settings_upload_secret_desc">Ask the service not to list the upload publicly.</string>
+    <string name="settings_upload_expiry">Default expiry</string>
+    <string name="settings_upload_expiry_desc">Service duration such as 7d; leave blank for its default.</string>
+    <string name="settings_upload_limits">Upload limit</string>
+    <string name="settings_upload_limit">Maximum size (MiB)</string>
+    <string name="settings_upload_limit_desc">Maximum for this endpoint: %1$d MiB.</string>
     <string name="settings_github">GitHub</string>
     <string name="settings_github_url">https://github.com/trevarj/motd</string>
     <string name="network_settings_title">Network</string>
@@ -101,7 +136,6 @@
     <string name="network_settings_ws_url">WebSocket URL (wss://)</string>
     <string name="network_settings_ws_url_desc">Optional. Tunnels IRC over a WebSocket (e.g. wss://bnc.example.com:443/) to look like ordinary HTTPS and bypass networks that block IRC. Requires a WebSocket listener on your soju server. Leave blank for a normal TCP/TLS connection.</string>
     <!-- Connection / Obfuscation (plans/20 Phase 1): opt-in SOCKS5 / Tor proxy. -->
-    <string name="network_settings_obfs_section">Connection / Obfuscation</string>
     <string name="network_settings_obfs_section_desc">Route this network through a proxy to bypass censorship. Opt-in and may add latency. The strongest options (Tor .onion bouncer, VLESS+REALITY) require setup on your own soju server.</string>
     <string name="network_settings_obfs_mode_none">Direct (no proxy)</string>
     <string name="network_settings_obfs_mode_socks5">SOCKS5 proxy</string>
@@ -109,7 +143,6 @@
     <string name="network_settings_obfs_mode_reality">VLESS + REALITY (sing-box)</string>
     <string name="network_settings_obfs_proxy_host">Proxy host</string>
     <string name="network_settings_obfs_proxy_port">Proxy port</string>
-    <string name="network_settings_obfs_tor_shortcut">Route via Tor (Orbot)</string>
     <string name="network_settings_obfs_tor_desc">Sets a SOCKS5 proxy at 127.0.0.1:9050. Requires Orbot running on this device.</string>
     <string name="network_settings_obfs_reality_desc">Paste the VLESS + REALITY share link for this network. MOTD starts its embedded tunnel and keeps the loopback proxy private.</string>
     <string name="network_settings_obfs_reality_link">VLESS + REALITY link</string>
@@ -118,6 +151,25 @@
     <string name="network_settings_delete_confirm_title">Delete network?</string>
     <string name="network_settings_delete_confirm_message">This removes the network and all of its buffers and history.</string>
     <string name="network_settings_save">Save</string>
+    <string name="network_settings_general_section">General</string>
+    <string name="network_settings_connection_section">Connection</string>
+    <string name="network_settings_identity_section">Identity and authentication</string>
+    <string name="network_settings_tools_section">Network tools</string>
+    <string name="network_settings_danger_section">Danger zone</string>
+    <string name="network_settings_transport">Transport</string>
+    <string name="network_settings_transport_tcp">TCP / TLS</string>
+    <string name="network_settings_transport_tcp_desc">Connect directly using the server and TLS settings above.</string>
+    <string name="network_settings_transport_websocket">WebSocket</string>
+    <string name="network_settings_transport_websocket_desc">Tunnel IRC through a WSS endpoint that looks like ordinary HTTPS.</string>
+    <string name="network_settings_routing">Routing and obfuscation</string>
+    <string name="network_settings_current_value">Current: %1$s</string>
+    <string name="network_settings_tap_configure">Tap to configure</string>
+    <string name="network_settings_expand">Expand settings</string>
+    <string name="network_settings_collapse">Collapse settings</string>
+    <string name="network_settings_unsaved_title">Discard unsaved changes?</string>
+    <string name="network_settings_unsaved_message">Your network edits have not been saved.</string>
+    <string name="network_settings_keep_editing">Keep editing</string>
+    <string name="network_settings_discard">Discard</string>
     <string name="action_delete">Delete</string>
     <string name="action_cancel">Cancel</string>
 
@@ -371,6 +423,8 @@
 
     <!-- Add network (WP-V2, §5.4) -->
     <string name="add_network_title">Add network</string>
+    <string name="add_network_type_section">Connection type</string>
+    <string name="add_network_details_section">Server and login</string>
     <string name="add_network_kind_network">IRC network</string>
     <string name="add_network_kind_soju">soju bouncer</string>
     <string name="add_network_connect_save">Connect &amp; save</string>
@@ -462,7 +516,6 @@
     <string name="chatlist_unmute">Unmute</string>
 
     <!-- Terminal color schemes (theme picker) -->
-    <string name="settings_theme_terminal_schemes">Terminal color schemes</string>
     <string name="settings_theme_gruvbox_dark">Gruvbox Dark</string>
     <string name="settings_theme_gruvbox_light">Gruvbox Light</string>
     <string name="settings_theme_solarized_dark">Solarized Dark</string>

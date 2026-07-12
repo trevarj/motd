@@ -2,12 +2,14 @@ package io.github.trevarj.motd.ui.settings.addnetwork
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -42,6 +44,7 @@ import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.ConnectionChoice
 import io.github.trevarj.motd.ui.onboarding.ServerForm
 import io.github.trevarj.motd.ui.settings.NetworkForm
+import io.github.trevarj.motd.ui.settings.SettingsGroup
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Stateful entry: wires the ViewModel and drives navigation (plans/16 §5.4). */
@@ -85,6 +88,7 @@ fun AddNetworkContent(
     BackHandler(enabled = hasHalfCreated) { onAbandon() }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.add_network_title)) },
@@ -99,43 +103,41 @@ fun AddNetworkContent(
             )
         },
     ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            KindSelector(
-                kind = state.kind,
-                enabled = state.phase == AddNetworkPhase.FORM,
-                onSetKind = onSetKind,
-            )
-            NetworkForm(
-                server = state.server,
-                auth = state.auth,
-                onServerChange = onServerChange,
-                onAuthChange = onAuthChange,
-                // soju collapses to host/port/TLS/nick + username/password (no picker/ident).
-                soju = state.isSoju,
-            )
-            Button(
-                onClick = onSubmit,
-                enabled = state.canSubmit,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .testTag("connect_save_button"),
+        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
+            Column(
+                modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp).verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(stringResource(R.string.add_network_connect_save))
-            }
+                SettingsGroup(title = stringResource(R.string.add_network_type_section)) {
+                    KindSelector(kind = state.kind, enabled = state.phase == AddNetworkPhase.FORM, onSetKind = onSetKind)
+                }
+                SettingsGroup(title = stringResource(R.string.add_network_details_section)) {
+                    NetworkForm(
+                        server = state.server,
+                        auth = state.auth,
+                        onServerChange = onServerChange,
+                        onAuthChange = onAuthChange,
+                        soju = state.isSoju,
+                        modifier = Modifier.padding(vertical = 16.dp),
+                    )
+                }
+                Button(
+                    onClick = onSubmit,
+                    enabled = state.canSubmit,
+                    modifier = Modifier.fillMaxWidth().testTag("connect_save_button"),
+                ) { Text(stringResource(R.string.add_network_connect_save)) }
 
-            when (state.phase) {
-                AddNetworkPhase.TESTING -> TestingRow(state.connState)
-                AddNetworkPhase.FAILED -> FailedSection(
-                    error = state.error,
-                    onEditForm = onEditForm,
-                    onSaveAnyway = onSaveAnyway,
-                    onRetry = onRetry,
-                )
-                AddNetworkPhase.FORM -> Unit
+                when (state.phase) {
+                    AddNetworkPhase.TESTING -> TestingRow(state.connState)
+                    AddNetworkPhase.FAILED -> FailedSection(
+                        error = state.error,
+                        onEditForm = onEditForm,
+                        onSaveAnyway = onSaveAnyway,
+                        onRetry = onRetry,
+                    )
+                    AddNetworkPhase.FORM -> Unit
+                }
             }
         }
     }

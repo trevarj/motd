@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
@@ -29,6 +30,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -88,6 +90,7 @@ fun BouncerNetworksContent(
     var showAddDialog by remember { mutableStateOf(false) }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.bouncer_title)) },
@@ -108,10 +111,16 @@ fun BouncerNetworksContent(
                 return@Column
             }
             if (state.loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            LazyColumn(modifier = Modifier.weight(1f)) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(state.rows, key = { it.netId }) { row ->
                     BouncerRow(row = row, onToggleImport = onToggleImport, onDeleteFromBouncer = onDeleteFromBouncer)
                 }
+            }
             }
             OutlinedButton(
                 onClick = { showAddDialog = true },
@@ -197,6 +206,7 @@ private fun BouncerRow(
                 }
             }
         },
+        colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
     )
 
     if (showDeleteConfirm) {
