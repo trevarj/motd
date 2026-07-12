@@ -338,12 +338,13 @@ private fun SojuAuthPage(
                 autoCorrectEnabled = false,
                 imeAction = ImeAction.Next,
             ),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("onboarding_username_field"),
         )
         PasswordField(
             value = state.auth.saslPassword,
             onValueChange = { onAuthChange(state.auth.copy(saslPassword = it)) },
             label = stringResource(R.string.onboarding_auth_soju_password),
+            modifier = Modifier.testTag("onboarding_password_field"),
             imeAction = ImeAction.Done,
         )
     }

@@ -5,21 +5,14 @@ name: E2E (hermetic emulator)
 # drives the app via the device runbook (test/e2e/runbook.sh) against the LOCAL
 # bouncer. No external network, no secrets.
 #
-# Not run on every PR (it's slow). Manual dispatch + a nightly schedule.
+# The exhaustive shell-driven journey is intentionally non-blocking: manual + nightly only.
 on:
-  workflow_call:
-    inputs:
-      phases:
-        description: 'Phases to run (space-separated)'
-        required: false
-        type: string
-        default: 'a b c'
   workflow_dispatch:
     inputs:
       phases:
         description: 'Phases to run (space-separated, e.g. "a b c" or "a b c d e f g h i")'
         required: false
-        default: 'a b c'
+        default: 'a b c d e f g h i'
   schedule:
     # Nightly at 04:17 UTC (odd minute to avoid the top-of-hour stampede).
     - cron: '17 4 * * *'
@@ -69,7 +62,7 @@ jobs:
       # --- CI env for the runbook (runbook.sh sources test/e2e/.env) --------
       - name: Install CI env
         env:
-          E2E_PHASES_INPUT: ${{ inputs.phases }}
+          E2E_PHASES_INPUT: ${{ github.event.inputs.phases || 'a b c d e f g h i' }}
         run: |
           cp test/e2e/.env.ci test/e2e/.env
           # Allow the workflow input to widen/narrow phase coverage.

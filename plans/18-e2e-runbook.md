@@ -512,29 +512,23 @@ scripted, mark those rows **conditional** and skip without failing the run.
 
 ---
 
-## 3. Execution model recommendation
+## 3. Execution model
 
-**Recommendation: an external host-driven bash + uiautomator harness** (`test/e2e/`),
-with this markdown as the source of truth. Reasons:
+Release gating uses the focused Kotlin instrumented smoke suite in
+`app/src/androidTest/`: it onboards against the hermetic Docker soju/ergo stack,
+accepts the TLS certificate, reaches IRC ready state, and verifies bouncer-network
+discovery. Gradle Managed Devices owns the CI emulator lifecycle; see
+`.github/workflows/smoke.yml`.
 
-- **The bouncer is private.** Instrumented Compose UI tests (`androidTest`) run
-  on the device/emulator and would need the app to reach `104.168.59.26:6697`
-  and complete a real SASL + TOFU handshake plus bouncer-network import. That is
-  exactly the integration this run must exercise; mocking it defeats the purpose,
-  and letting `connectedAndroidTest` reach the private bouncer is brittle and
-  couples CI to network reachability.
-- **Real-network flakiness** (latency, reconnects, chathistory paging, typing
-  timing) is inherent to what we validate. An external harness can poll with
-  generous timeouts and retry dumps, which is awkward inside `ComposeTestRule`.
-- **Crash detection is out-of-process** anyway (`logcat -b crash`), which the
-  external harness already owns.
-- **The driving capability already exists** (orchestrator uses `adb input`,
-  `uiautomator dump`, `screencap`, `logcat -b crash`). We formalize it into a
-  helper library rather than reinventing it as instrumentation.
+The external host-driven bash + uiautomator harness remains the exhaustive device
+journey. It runs nightly or by manual dispatch through `.github/workflows/e2e.yml`
+and does not gate releases.
 
-Instrumented Compose tests remain the right tool for **pure-UI logic** already
-covered by unit tests (grouping, sectioning, command parsing) — they are not a
-substitute for this end-to-end acceptance run.
+The focused suite deliberately stops after proving the release-critical boundary:
+the app can complete onboarding, trust the local certificate, authenticate with
+soju, and discover the provisioned network. Protocol, repository, and ViewModel
+behavior stays in fast JVM tests. Broader interaction, rendering, paging, and
+crash-sweep coverage stays in the long external harness.
 
 Harness shape (`test/e2e/`):
 

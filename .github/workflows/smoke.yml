@@ -1,0 +1,54 @@
+name: E2E smoke (hermetic)
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  onboarding-connectivity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Start hermetic soju and ergo
+        run: docker compose -f test/e2e/hermetic/docker-compose.yml up --build -d --wait
+
+      - name: Run Kotlin onboarding and connectivity smoke test
+        run: |
+          ./gradlew smokeApi34E2eAndroidTest \
+            -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect \
+            -Pandroid.testInstrumentationRunnerArguments.sojuHost=10.0.2.2 \
+            -Pandroid.testInstrumentationRunnerArguments.sojuPort=6697 \
+            -Pandroid.testInstrumentationRunnerArguments.sojuUser=motd \
+            -Pandroid.testInstrumentationRunnerArguments.sojuPassword=motdtest \
+            -Pandroid.testInstrumentationRunnerArguments.nick=motdadb \
+            --stacktrace
+
+      - name: Upload smoke reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onboarding-connectivity-smoke-reports
+          path: |
+            app/build/reports/androidTests/**
+            app/build/outputs/androidTest-results/**
+          if-no-files-found: ignore
+
+      - name: Dump bouncer logs on failure
+        if: failure()
+        run: docker compose -f test/e2e/hermetic/docker-compose.yml logs --no-color || true
+
+      - name: Tear down hermetic stack
+        if: always()
+        run: docker compose -f test/e2e/hermetic/docker-compose.yml down -v || true

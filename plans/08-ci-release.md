@@ -63,42 +63,15 @@ jobs:
 
 ## `.github/workflows/release.yml`
 
-```yaml
-name: Release
-on:
-  push:
-    tags: ['v*']
+Tagged releases first call `.github/workflows/smoke.yml`. That focused gate starts
+the hermetic Docker soju/ergo stack and runs the Kotlin onboarding/connectivity
+suite on a Gradle Managed Device. Only after it passes does `release.yml` build,
+sign, and publish the APK and licensed libbox source/compliance assets.
 
-permissions:
-  contents: write
-
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: 17 }
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Decode keystore
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/keystore.jks"
-      - name: Build signed release APK
-        env:
-          MOTD_KEYSTORE_PATH: ${{ runner.temp }}/keystore.jks
-          MOTD_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          MOTD_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          MOTD_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          MOTD_VERSION_NAME: ${{ github.ref_name }}
-          MOTD_VERSION_CODE: ${{ github.run_number }}
-        run: ./gradlew :app:assembleRelease --stacktrace
-      - name: Rename artifact
-        run: cp app/build/outputs/apk/release/app-release.apk motd-${{ github.ref_name }}.apk
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: motd-${{ github.ref_name }}.apk
-          generate_release_notes: true
-```
+The exhaustive A-I device journey in `.github/workflows/e2e.yml` runs nightly or
+by manual dispatch. It is diagnostic coverage and intentionally does not gate a
+release. Fast protocol, repository, and ViewModel tests remain in `ci.yml` and in
+the release build's Gradle `build` task.
 
 Note: `MOTD_VERSION_NAME` receives the raw tag (`v0.1.0`); `app/build.gradle.kts` uses it
 as-is — acceptable for v1 (versionName "v0.1.0"). Strip the `v` there later if it bothers

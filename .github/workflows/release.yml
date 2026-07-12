@@ -7,14 +7,11 @@ permissions:
   contents: write
 
 jobs:
-  hermetic-e2e:
-    # Set repository variable ENABLE_RELEASE_HERMETIC_E2E=true to re-enable.
-    if: ${{ vars.ENABLE_RELEASE_HERMETIC_E2E == 'true' }}
-    uses: ./.github/workflows/e2e.yml
-    with:
-      phases: 'a b c'
+  smoke-e2e:
+    uses: ./.github/workflows/smoke.yml
 
   release:
+    needs: smoke-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

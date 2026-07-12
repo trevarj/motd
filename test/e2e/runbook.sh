@@ -118,7 +118,9 @@ phase_a() {
   while [ "$_w" -lt 30 ]; do
     dump || true
     [ -n "$(bounds_of_text 'Welcome to motd')" ] && break
+    # AOSP images expose this label as uppercase ALLOW while other devices use Allow.
     if [ -n "$(bounds_of_text 'Allow')" ]; then tap_text "Allow"; sleep 1; continue; fi
+    if [ -n "$(bounds_of_text 'ALLOW')" ]; then tap_text "ALLOW"; sleep 1; continue; fi
     sleep 1; _w=$(( _w + 1 ))
   done
   assert_text "Welcome to motd"          # redirected into onboarding (§1.1)

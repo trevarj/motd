@@ -74,6 +74,7 @@ android {
         // CI derives these from the git tag / run number (see plans/08).
         versionName = System.getenv("MOTD_VERSION_NAME") ?: "0.0.0-dev"
         versionCode = System.getenv("MOTD_VERSION_CODE")?.toIntOrNull() ?: 1
+        testInstrumentationRunner = "io.github.trevarj.motd.SmokeTestRunner"
     }
 
     // Signing only when CI secrets are present; local/debug builds never fail on this.
@@ -114,7 +115,19 @@ android {
     // Production APKs remain arm64-only while this is the only packaged libbox artifact. The
     // debuggable E2E variant is deliberately x86_64 and contains no libbox JNI (see above).
     buildFeatures { compose = true }
-    testOptions { unitTests { isIncludeAndroidResources = true } }  // Robolectric
+    testBuildType = "e2e"
+    testOptions {
+        unitTests { isIncludeAndroidResources = true }  // Robolectric
+        managedDevices {
+            localDevices {
+                create("smokeApi34") {
+                    device = "Pixel 6"
+                    apiLevel = 34
+                    systemImageSource = "aosp"
+                }
+            }
+        }
+    }
 
     lint {
         warningsAsErrors = true

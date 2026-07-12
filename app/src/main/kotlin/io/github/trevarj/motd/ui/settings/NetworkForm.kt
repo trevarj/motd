@@ -27,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -208,7 +209,7 @@ private fun HostField(server: ServerForm, onServerChange: (ServerForm) -> Unit) 
             autoCorrectEnabled = false,
             imeAction = ImeAction.Next,
         ),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("network_host_field"),
     )
 }
 
@@ -223,7 +224,7 @@ private fun PortField(server: ServerForm, onServerChange: (ServerForm) -> Unit) 
             keyboardType = KeyboardType.Number,
             imeAction = ImeAction.Next,
         ),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("network_port_field"),
     )
 }
 
@@ -256,7 +257,7 @@ private fun NickField(
             autoCorrectEnabled = false,
             imeAction = imeAction,
         ),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("network_nick_field"),
     )
 }
 
