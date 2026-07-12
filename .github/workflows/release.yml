@@ -41,11 +41,9 @@ jobs:
           MOTD_FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           MOTD_FIREBASE_SENDER_ID: ${{ secrets.FIREBASE_SENDER_ID }}
           MOTD_FCM_RELAY_URL: ${{ secrets.FCM_RELAY_URL }}
-        run: |
-          test -n "$MOTD_FIREBASE_API_KEY" -a -n "$MOTD_FIREBASE_APP_ID" \
-            -a -n "$MOTD_FIREBASE_PROJECT_ID" -a -n "$MOTD_FIREBASE_SENDER_ID" \
-            -a -n "$MOTD_FCM_RELAY_URL"
-          ./gradlew build :app:lintFossDebug :app:lintGoogleDebug --stacktrace --no-daemon --max-workers=1
+        # Firebase is optional for now. With empty secrets the Google flavor compiles with
+        # FCM_AVAILABLE=false and exposes no Firebase push setup at runtime.
+        run: ./gradlew build :app:lintFossDebug :app:lintGoogleDebug --stacktrace --no-daemon --max-workers=1
       - name: Prepare licensed release assets
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
