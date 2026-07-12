@@ -26,8 +26,10 @@ break selectors.
 2. **adb on PATH.** Run inside the project dev shell (`nix develop`), which
    provides the Android SDK platform-tools. On a bare Guix host without the dev
    shell, `lib.sh` falls back to `guix shell android-tools -- adb`.
-3. **App built.** A debug APK at `MOTD_APK` for clean install, or the app already
-   installed on the device.
+3. **App built.** A debuggable APK at `MOTD_APK` for clean install, or the app
+   already installed on the device. Hermetic CI uses `:app:assembleE2e`, whose
+   APK keeps the `.debug` id while omitting arm64-only libbox JNI; the E2E flow
+   exercises plain IRC through soju, never embedded obfuscation.
 4. **Bouncer reachable.** The soju test bouncer (§0) reachable from the device
    for the run, and from the host for seeding.
 5. **Config.** Copy `.env.example` to `test/e2e/.env` and fill in the bouncer
@@ -102,14 +104,16 @@ connection-failure grep) in addition to the step's own assertion.
 - **Seeding is best-effort.** `fixtures/seed.sh` needs the bouncer reachable from
   the host and uses only `openssl s_client`.
 
-## Selectors that depend on pending testTags (§4)
+## Stable selectors
 
-The companion work package adds `testTag`s / content-descriptions across `ui/`.
-Until they merge, these steps use text/desc fallbacks (marked `TODO tag: …` in
-`runbook.sh`) and will become more robust once the tags land:
+The harness prefers the `testTag`s/content descriptions already exposed by the
+Compose UI. Popup windows use their accessibility descriptions because the
+Activity root's test-tag export does not propagate into a separate Compose
+window. Visible text remains where a runtime database id makes a dynamic tag
+unknowable to the host or where the visible copy is the intended oracle:
 
 - `onboarding_forward_button`, `onboarding_choice_soju`,
-  `onboarding_bouncer_row_<id>` / `onboarding_bouncer_switch_<id>` (Phase A).
+  `onboarding_bouncer_switch_<id>` (Phase A).
 - `drawer_network_row_<id>`, `drawer_status_dot_<id>` (Phase B; status is
   color-only today).
 - `chat_message_<msgid>`, `chat_composer_field`, `message_more_reactions`

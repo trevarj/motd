@@ -7,6 +7,13 @@ name: E2E (hermetic emulator)
 #
 # Not run on every PR (it's slow). Manual dispatch + a nightly schedule.
 on:
+  workflow_call:
+    inputs:
+      phases:
+        description: 'Phases to run (space-separated)'
+        required: false
+        type: string
+        default: 'a b c'
   workflow_dispatch:
     inputs:
       phases:
@@ -28,12 +35,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # --- Build the debug APK (mirrors ci.yml's Java/SDK setup) -------------
+      # --- Build the debuggable, x86-installable E2E APK ----------------------
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
-      - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+      - name: Assemble E2E APK
+        run: ./gradlew :app:assembleE2e --stacktrace
+      - name: Verify E2E APK omits the arm64-only native core
+        run: |
+          if unzip -Z1 app/build/outputs/apk/e2e/app-e2e.apk | grep -q '/libbox.so$'; then
+            echo "E2E APK unexpectedly contains libbox JNI" >&2
+            exit 1
+          fi
 
       # --- KVM for a fast, hardware-accelerated emulator --------------------
       - name: Enable KVM
@@ -55,11 +68,14 @@ jobs:
 
       # --- CI env for the runbook (runbook.sh sources test/e2e/.env) --------
       - name: Install CI env
+        env:
+          E2E_PHASES_INPUT: ${{ inputs.phases }}
         run: |
           cp test/e2e/.env.ci test/e2e/.env
           # Allow the workflow input to widen/narrow phase coverage.
-          if [ -n "${{ github.event.inputs.phases }}" ]; then
-            echo "E2E_PHASES=${{ github.event.inputs.phases }}" >> test/e2e/.env
+          if [ -n "$E2E_PHASES_INPUT" ]; then
+            # %q emits a source-safe shell assignment even when phases contains spaces.
+            printf 'E2E_PHASES=%q\n' "$E2E_PHASES_INPUT" >> test/e2e/.env
           fi
 
       # --- Headless emulator + runbook --------------------------------------
@@ -75,7 +91,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
           script: |
-            adb install -r -g app/build/outputs/apk/debug/app-debug.apk
+            adb install -r -g app/build/outputs/apk/e2e/app-e2e.apk
             ./test/e2e/runbook.sh
 
       # --- Artifacts on failure ---------------------------------------------

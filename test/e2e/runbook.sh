@@ -11,8 +11,8 @@
 # Config comes from the environment (see .env.example). NEVER hardcode secrets.
 # If test/e2e/.env exists (gitignored) it is sourced automatically.
 #
-# Selectors: text/content-desc today, testTags from §4 as they land. Where a §4
-# testTag is not yet merged, we fall back to a text/desc selector with a TODO.
+# Selectors prefer stable testTags, then content descriptions. Visible text remains only where a
+# runtime-id-suffixed tag cannot identify the intended row without knowing its database id.
 set -euo pipefail
 
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -126,14 +126,14 @@ phase_a() {
 
   # 2. Welcome -> Choice.
   step "Advance from Welcome to Choice"
-  tap_text "Get started"                 # TODO tag: onboarding_forward_button (§4)
+  tap_tag onboarding_forward_button
   assert_text "How do you connect?"
   assert_no_crash
 
   # 3. Choose soju.
   step "Choose the soju bouncer path"
-  tap_text "I have a soju bouncer"       # TODO tag: onboarding_choice_soju (§4)
-  tap_text "Next"                        # TODO tag: onboarding_forward_button (§4)
+  tap_tag onboarding_choice_soju
+  tap_tag onboarding_forward_button
   assert_text "Host"                     # SERVER page fields present
   assert_no_crash
 
@@ -150,7 +150,7 @@ phase_a() {
 
   # 5. Advance to auth.
   step "Advance to Authentication"
-  tap_text "Next"
+  tap_tag onboarding_forward_button
   assert_text "Authentication"
   assert_text "Username"
   assert_text "Password"
@@ -166,7 +166,7 @@ phase_a() {
 
   # 7. Connect.
   step "Start connect test"
-  tap_text "Next"
+  tap_tag onboarding_forward_button
   # "Connecting" is transient and, for a self-signed bouncer, is immediately superseded by the
   # TOFU cert dialog — treat it as a soft signal, not a hard assertion. No assert_no_crash here:
   # the app logs an expected "certificate not trusted" until we accept the cert in step 8.
@@ -176,6 +176,9 @@ phase_a() {
   # 8. Trust cert (TOFU). Every pm clear re-triggers this (§5, §7).
   step "Handle TOFU cert-trust prompt"
   if wait_for_text "Trust this certificate?" 25; then
+    # AlertDialog is hosted in a separate Compose window, so the Activity root's
+    # testTagsAsResourceId setting does not propagate here. Its visible title/fingerprint and
+    # button labels are the stable accessibility contract for device automation.
     assert_text "SHA-256 fingerprint"
     tap_text "Trust"                     # buttons carry text (§4 note)
     note "trusted cert"
@@ -199,10 +202,10 @@ phase_a() {
   # poll for the libera row rather than asserting immediately (confirmed on the bouncer:
   # BOUNCER NETWORK 2 name=libera state=connected).
   wait_for_text "libera" 25 || true
-  assert_text "libera"                   # TODO tag: onboarding_bouncer_row_<id> (§4)
+  assert_text "libera"
   # Select libera (rows default to unselected) so it is imported as a child network and later
   # phases have real buffers/channels to drive. The row is clickable and toggles its switch.
-  tap_text "libera"
+  tap_tag_prefix onboarding_bouncer_switch_
   sleep 1
   note "selected libera for import"
   assert_no_crash
@@ -214,8 +217,8 @@ phase_a() {
   tap_tag onboarding_forward_button      # CONNECT -> FINISH
   sleep 1
   tap_tag onboarding_forward_button      # FINISH -> ChatList
-  wait_for_text "motd" 15 || true
-  assert_text "motd"                     # top bar on ChatList (§1.2)
+  wait_for_desc "New conversation" 15 || true
+  assert_desc_present "New conversation"  # stable ChatList action anchor (§1.2)
   assert_no_text "Welcome to motd"
   assert_no_crash
 }
@@ -230,7 +233,7 @@ phase_b() {
   # 11. Drawer open.
   step "Open the navigation drawer"
   tap_desc "Open navigation drawer"
-  assert_text "All chats"
+  assert_text "NETWORKS"
   assert_text "libera"
   assert_text "Add network"
   assert_text "Settings"
@@ -256,7 +259,7 @@ phase_b() {
   # 14. Clear scope.
   step "Clear network scope"
   tap_desc "Clear network filter"
-  assert_text "motd"
+  assert_desc_present "New conversation"
   assert_no_crash
 
   # 15. Server messages buffer.
@@ -274,8 +277,8 @@ phase_b() {
   # 16. Back to list.
   step "Back to chat list"
   adb_shell input keyevent 4
-  wait_for_text "motd" 8 || true
-  assert_text "motd"
+  wait_for_desc "New conversation" 8 || true
+  assert_desc_present "New conversation"
   assert_no_crash
 }
 
@@ -320,7 +323,6 @@ phase_c() {
   # style UX), so start the text with a capital letter — otherwise the IME uppercases the first
   # char and the sent/echoed text ("Hello…") would not match a lowercase assertion.
   step "Send a message"
-  # TODO tag: chat_composer_field (§4). Fall back to placeholder text label.
   input_tag chat_composer_field "Hello from e2e"
   redump
   tap_desc "Send"
@@ -387,8 +389,10 @@ phase_c() {
   step "More reactions grid"
   scroll_to_text "Hello from e2e" || true; long_press_text "Hello from e2e"
   if wait_for_text "More reactions" 5 || [ -n "$(bounds_of_desc "More reactions")" ]; then
-    tap_desc "More reactions" || true
-    note "opened more-reactions grid (TODO tag: message_more_reactions, §4)"
+    # ModalBottomSheet is a separate Compose window; its explicit content description is exported
+    # reliably to uiautomator even when the parallel testTag is not.
+    tap_desc "More reactions"
+    note "opened more-reactions grid"
   else
     note "more-reactions control not detected; dismissing"
     adb_shell input keyevent 4
@@ -512,7 +516,7 @@ phase_d() {
   # We cannot reliably know a member nick without the seed; use second identity
   # if provided, else best-effort.
   if [ -n "$MOTD_SECOND_NICK" ] && [ -n "$(bounds_of_text "$MOTD_SECOND_NICK")" ]; then
-    tap_text "$MOTD_SECOND_NICK"         # TODO tag: channelinfo_member_<nick> (§4)
+    tap_tag "channelinfo_member_${MOTD_SECOND_NICK}"
     if wait_for_text "Message" 5; then
       assert_text "Add to friends"
       # 35. Add friend.
@@ -630,10 +634,9 @@ phase_f() {
 
   # 45. Colored nicknames off/on.
   step "Toggle Colored nicknames"
-  # TODO tag: settings_switch_nick_colors (§4) to read checked state directly.
   if [ -n "$(bounds_of_text "Colored nicknames")" ]; then
-    tap_text "Colored nicknames"
-    tap_text "Colored nicknames"         # toggle back
+    tap_tag settings_switch_nick_colors
+    tap_tag settings_switch_nick_colors   # toggle back
     ok "toggled Colored nicknames off/on"
   else
     note "Colored nicknames switch not visible"
@@ -706,10 +709,9 @@ phase_f() {
 
   # 51. Show join/part toggle.
   step "Show join/part toggle"
-  # TODO tag: settings_switch_show_jpq (§4).
   if [ -n "$(bounds_of_text "Show join/part messages")" ]; then
-    tap_text "Show join/part messages"
-    tap_text "Show join/part messages"   # restore
+    tap_tag settings_switch_show_jpq
+    tap_tag settings_switch_show_jpq      # restore
     ok "toggled show join/part"
   else
     note "join/part switch not visible"

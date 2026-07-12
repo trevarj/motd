@@ -6,6 +6,7 @@ import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.TaskAction
+import org.gradle.api.tasks.bundling.Zip
 
 plugins {
     alias(libs.plugins.android.application)
@@ -14,6 +15,18 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+}
+
+// The release/debug APKs ship the pinned arm64 native core. Hermetic UI tests exercise plain IRC
+// on an x86_64 emulator, so derive an AAR that retains the generated Java API but omits JNI. This
+// keeps the E2E build installable without pretending that embedded obfuscation supports x86_64.
+val libboxE2eAar by tasks.registering(Zip::class) {
+    from(zipTree(layout.projectDirectory.file("libs/libbox.aar")))
+    exclude("jni/**")
+    archiveFileName.set("libbox-e2e-no-jni.aar")
+    destinationDirectory.set(layout.buildDirectory.dir("generated/e2e-libs"))
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
 }
 
 abstract class VerifyLibboxArtifact : DefaultTask() {
@@ -61,7 +74,6 @@ android {
         // CI derives these from the git tag / run number (see plans/08).
         versionName = System.getenv("MOTD_VERSION_NAME") ?: "0.0.0-dev"
         versionCode = System.getenv("MOTD_VERSION_CODE")?.toIntOrNull() ?: 1
-        ndk { abiFilters += "arm64-v8a" }
     }
 
     // Signing only when CI secrets are present; local/debug builds never fail on this.
@@ -83,14 +95,24 @@ android {
             // (they carry different signing keys; same id + different key = install failure).
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            ndk { abiFilters += "arm64-v8a" }
         }
         release {
             isMinifyEnabled = false      // deliberate: zero R8 risk in v1
             if (keystorePath != null) signingConfig = signingConfigs.getByName("release")
+            ndk { abiFilters += "arm64-v8a" }
+        }
+        create("e2e") {
+            isDebuggable = true
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("debug")
+            ndk { abiFilters += "x86_64" }
         }
     }
-    // The embedded libbox artifact is currently arm64-v8a-only, so every APK built from this
-    // source set is intentionally arm64-only until another libbox ABI is pinned and verified.
+    // Production APKs remain arm64-only while this is the only packaged libbox artifact. The
+    // debuggable E2E variant is deliberately x86_64 and contains no libbox JNI (see above).
     buildFeatures { compose = true }
     testOptions { unitTests { isIncludeAndroidResources = true } }  // Robolectric
 
@@ -129,7 +151,9 @@ kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation(project(":irc"))
-    implementation(files("libs/libbox.aar"))
+    debugImplementation(files("libs/libbox.aar"))
+    releaseImplementation(files("libs/libbox.aar"))
+    add("e2eImplementation", files(libboxE2eAar))
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)

@@ -201,6 +201,22 @@ bounds_of_tag() {
     | sed -E 's/^bounds="(.*)"$/\1/'
 }
 
+# bounds_of_tag_prefix "<testTag-prefix>" — first testTag whose resource-id begins with the
+# supplied stable prefix. This is for tags with a runtime database id suffix, where the harness
+# deliberately cannot know the id (for example onboarding_bouncer_switch_<netId>).
+bounds_of_tag_prefix() {
+  local prefix="$1"
+  _e2e_have_dump || return 1
+  local esc
+  # shellcheck disable=SC2016
+  esc="$(printf '%s' "$prefix" | sed 's/[][\.*^$(){}?+|/]/\\&/g')"
+  grep -oE "<node[^>]* resource-id=\"[^\"]*${esc}[^\"]*\"[^>]*>" "$_E2E_DUMP" 2>/dev/null \
+    | head -n1 \
+    | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' \
+    | head -n1 \
+    | sed -E 's/^bounds="(.*)"$/\1/'
+}
+
 # _e2e_center <bounds> — given "[x1,y1][x2,y2]" print "cx cy" (integer centre).
 _e2e_center() {
   printf '%s' "$1" | sed -E 's/\[([0-9]+),([0-9]+)\]\[([0-9]+),([0-9]+)\]/\1 \2 \3 \4/' \
@@ -237,6 +253,9 @@ tap_desc() { _e2e_tap_bounds_fn bounds_of_desc "$1" "desc"; }
 # tap_tag "<testTag>" — tap by resource-id (Compose testTag).
 tap_tag() { _e2e_tap_bounds_fn bounds_of_tag "$1" "tag"; }
 
+# tap_tag_prefix "<testTag-prefix>" — tap the first runtime-id-suffixed stable tag.
+tap_tag_prefix() { _e2e_tap_bounds_fn bounds_of_tag_prefix "$1" "tag prefix"; }
+
 # _e2e_long_press_fn <bounds-fn> <selector> <label> — long-press (500ms) the
 # centre of a matched node via `input swipe x y x y 600` (same start/end point).
 _e2e_long_press_fn() {
@@ -259,6 +278,7 @@ EOF
 # long_press_text / long_press_tag — long-press by text / testTag.
 long_press_text() { _e2e_long_press_fn bounds_of_text "$1" "text"; }
 long_press_tag() { _e2e_long_press_fn bounds_of_tag "$1" "tag"; }
+long_press_tag_prefix() { _e2e_long_press_fn bounds_of_tag_prefix "$1" "tag prefix"; }
 
 # --- text input ------------------------------------------------------------
 
@@ -383,6 +403,20 @@ wait_for_text() {
   local t="$1" timeout="${2:-20}" waited=0
   while [ "$waited" -lt "$timeout" ]; do
     if dump && [ -n "$(bounds_of_text "$t")" ]; then
+      return 0
+    fi
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
+  return 1
+}
+
+# wait_for_desc "<contentDesc>" <timeout_s> — content-description counterpart to
+# wait_for_text. Use this for icon/wordmark anchors that intentionally have no visible Text node.
+wait_for_desc() {
+  local d="$1" timeout="${2:-20}" waited=0
+  while [ "$waited" -lt "$timeout" ]; do
+    if dump && [ -n "$(bounds_of_desc "$d")" ]; then
       return 0
     fi
     sleep 1
