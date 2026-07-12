@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +37,7 @@ fun AutocompletePanel(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 3.dp,
         shadowElevation = 3.dp,
+        shape = RoundedCornerShape(18.dp),
     ) {
         LazyColumn(modifier = Modifier.heightIn(max = 180.dp)) {
             items(candidates, key = { it }) { candidate ->
