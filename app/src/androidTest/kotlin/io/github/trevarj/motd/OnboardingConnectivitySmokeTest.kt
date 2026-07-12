@@ -36,7 +36,7 @@ class OnboardingConnectivitySmokeTest(
         val password = arguments.getString("sojuPassword") ?: "motdtest"
         val nick = arguments.getString("nick") ?: "motdadb"
 
-        clickTag("onboarding_forward_button")
+        enterConnectionChoice()
         clickTag("onboarding_choice_soju")
         clickTag("onboarding_forward_button")
 
@@ -67,6 +67,31 @@ class OnboardingConnectivitySmokeTest(
     private fun clickTag(tag: String) = click(waitFor(15_000, "enabled tag $tag") {
         findTag(tag)?.takeIf(AccessibilityNodeInfo::isEnabled)
     })
+
+    /**
+     * Compose can acknowledge an accessibility click before delivering it to the button. The
+     * welcome page is safe to retry because the next page's forward button is disabled until a
+     * connection type is selected.
+     */
+    private fun enterConnectionChoice() {
+        val deadline = SystemClock.uptimeMillis() + 15_000
+        var nextAttemptAt = 0L
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (findTag("onboarding_choice_soju") != null) return
+
+            val now = SystemClock.uptimeMillis()
+            if (now >= nextAttemptAt) {
+                findTag("onboarding_forward_button")
+                    ?.takeIf(AccessibilityNodeInfo::isEnabled)
+                    ?.let(::click)
+                nextAttemptAt = now + 1_000
+            }
+            SystemClock.sleep(200)
+        }
+        error(
+            "Timed out entering connection choice; visible UI: ${visibleUiSummary()}",
+        )
+    }
 
     private fun setText(tag: String, value: String) {
         val node = waitFor(15_000, "editable tag $tag") { findTag(tag) }
@@ -120,6 +145,22 @@ class OnboardingConnectivitySmokeTest(
             repeat(node.childCount) { index -> node.getChild(index)?.let(queue::addLast) }
         }
         return null
+    }
+
+    private fun visibleUiSummary(): String {
+        val root = ui.rootInActiveWindow ?: return "<no active window>"
+        val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+        val visible = mutableListOf<String>()
+        while (queue.isNotEmpty() && visible.size < 30) {
+            val node = queue.removeFirst()
+            val tag = node.viewIdResourceName?.substringAfterLast('/')
+            val label = node.text?.toString() ?: node.contentDescription?.toString()
+            if (tag != null || !label.isNullOrBlank()) {
+                visible += listOfNotNull(tag, label).joinToString("=")
+            }
+            repeat(node.childCount) { index -> node.getChild(index)?.let(queue::addLast) }
+        }
+        return visible.joinToString(", ")
     }
 
     private fun <T> waitFor(timeoutMs: Long, label: String, block: () -> T?): T {
