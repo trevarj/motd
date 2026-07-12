@@ -11,6 +11,7 @@ import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
 import javax.inject.Inject
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,7 +36,7 @@ class AttachmentViewModel @Inject constructor(
         job?.cancel()
         _error.value = null
         job = viewModelScope.launch {
-            runCatching {
+            try {
                 uploader.upload(source, override).collect { update ->
                     _progress.value = update
                     if (update is UploadProgress.Complete) {
@@ -43,8 +44,13 @@ class AttachmentViewModel @Inject constructor(
                         onComplete(update.record)
                     }
                 }
-            }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it else _error.value = it.message ?: "Upload failed" }
-            _progress.value = null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                _error.value = failure.message ?: "Upload failed"
+            } finally {
+                _progress.value = null
+            }
         }
     }
 

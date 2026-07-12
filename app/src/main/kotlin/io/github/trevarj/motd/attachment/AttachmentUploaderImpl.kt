@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -78,6 +79,11 @@ class AttachmentUploaderImpl @Inject constructor(
             setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
             setChunkedStreamingMode(STREAM_BUFFER_BYTES)
         }
+        // HttpURLConnection uses blocking I/O. Disconnect from the cancellation callback so a
+        // dismissed progress sheet does not wait for a stalled write/read timeout.
+        val cancellationHandle = currentCoroutineContext()[Job]?.invokeOnCompletion {
+            connection.disconnect()
+        }
         try {
             connection.outputStream.use { output ->
                 if (config.secretUrl) output.write(MultipartEncoding.field(boundary, "secret", ""))
@@ -107,6 +113,7 @@ class AttachmentUploaderImpl @Inject constructor(
             return UploadProgress.Complete(UploadRecord(resultUrl, PasteProtocol.MULTIPART_0X0,
                 source.displayName(), source.mimeType(), source.sizeOrNull(), deletionToken = connection.getHeaderField("X-Token"), endpoint = config.endpoint))
         } finally {
+            cancellationHandle?.dispose()
             connection.disconnect()
         }
     }

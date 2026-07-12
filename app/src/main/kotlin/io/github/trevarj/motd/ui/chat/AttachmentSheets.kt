@@ -63,6 +63,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -87,6 +88,8 @@ import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.PasteProtocol
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private sealed interface AttachmentFlow {
     data object Idle : AttachmentFlow
@@ -147,7 +150,6 @@ fun AttachmentSheets(
     LaunchedEffect(open, startWithCurrentDraft) {
         if (!open) return@LaunchedEffect
         flow = if (startWithCurrentDraft && currentDraft.isNotBlank()) {
-            onDismiss()
             AttachmentFlow.Confirm(AttachmentSource.Text(currentDraft), true, defaultConfig)
         } else {
             AttachmentFlow.Sources
@@ -175,6 +177,7 @@ fun AttachmentSheets(
         viewModel.upload(request.source, request.config) { record ->
             if (request.replaceDraft) onReplaceDraft(record.url) else onInsertUrl(record.url)
             lastAttempt = null
+            onDismiss()
         }
     }
 
@@ -221,7 +224,7 @@ fun AttachmentSheets(
         AttachmentFlow.EditText -> TextPasteSheet(
             text = pasteText,
             onTextChange = { pasteText = it },
-            onDismiss = { flow = AttachmentFlow.Idle },
+            onDismiss = ::closeSourceSheet,
             onContinue = {
                 flow = AttachmentFlow.Confirm(AttachmentSource.Text(pasteText), false, defaultConfig)
             },
@@ -229,7 +232,7 @@ fun AttachmentSheets(
         is AttachmentFlow.Confirm -> ConfirmationSheet(
             request = current,
             onConfigChange = { flow = current.copy(config = it) },
-            onDismiss = { flow = AttachmentFlow.Idle },
+            onDismiss = ::closeSourceSheet,
             onUpload = { startUpload(current) },
         )
     }
@@ -412,13 +415,21 @@ private fun ConfirmationSheet(
 ) {
     val context = LocalContext.current
     val destinations = remember(request.source, request.config.endpoint) { uploadDestinations(request.source, request.config) }
+    val thumbnail by produceState<android.graphics.Bitmap?>(null, request.source) {
+        value = if (request.source is AttachmentSource.Photo) {
+            withContext(Dispatchers.IO) {
+                context.contentResolver.sampledThumbnail(request.source.uri)
+            }
+        } else {
+            null
+        }
+    }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(12.dp))
             if (request.source is AttachmentSource.Photo) {
-                remember(request.source.uri) { context.contentResolver.sampledThumbnail(request.source.uri) }
-                    ?.let { bitmap ->
+                thumbnail?.let { bitmap ->
                         Image(bitmap.asImageBitmap(), null, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(20.dp)), contentScale = ContentScale.Crop)
                         Spacer(Modifier.height(12.dp))
                     }
@@ -503,7 +514,7 @@ private fun UploadPrivacyCard(config: PasteBackendConfig) {
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun UploadProgressSheet(progress: UploadProgress, onCancel: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = {}, dragHandle = null) {
+    ModalBottomSheet(onDismissRequest = onCancel, dragHandle = null) {
         Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Outlined.CloudUpload, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(12.dp))
