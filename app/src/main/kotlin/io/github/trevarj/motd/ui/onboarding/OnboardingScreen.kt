@@ -149,7 +149,7 @@ private fun WizardBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (state.step != OnboardingStep.WELCOME) {
-            // Stable handle: Back is icon-agnostic across steps (plans/18 §4).
+            // Stable handle: Back is icon-agnostic across steps.
             TextButton(onClick = onBack, modifier = Modifier.testTag("onboarding_back_button")) {
                 Text(stringResource(R.string.onboarding_back))
             }

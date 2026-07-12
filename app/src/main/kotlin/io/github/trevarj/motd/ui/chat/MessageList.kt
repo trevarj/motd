@@ -444,7 +444,7 @@ private fun MessageRow(
 
     MessageBubble(
         // Per-message handle for long-press/react/reply/deep-jump. Prefer the stable server msgid;
-        // pending rows (null msgid) fall back to the local entity id (plans/18 §4).
+        // Pending rows (null msgid) fall back to the local entity id for stable E2E selection.
         modifier = Modifier.testTag(messageTag(msg)),
         sender = msg.sender,
         text = msg.text,

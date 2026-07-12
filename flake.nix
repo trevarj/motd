@@ -26,7 +26,7 @@
             android_sdk.accept_license = true;
           };
         };
-        # Match compileSdk/buildTools pinned in gradle/libs.versions.toml (plans/01).
+        # Match compileSdk/buildTools used by the current Gradle configuration.
         androidComposition = pkgs.androidenv.composeAndroidPackages {
           platformVersions = [ "35" ];
           buildToolsVersions = [ "35.0.0" ];

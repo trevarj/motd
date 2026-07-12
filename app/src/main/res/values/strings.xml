@@ -499,7 +499,7 @@
     <string name="settings_density_two_line_desc">Compact rows: avatar, nick, and time above the message.</string>
 
     <!-- Chat-list row long-press menu (previously inline literals; moved to resources so they are
-         localizable and stable for the e2e harness, plans/18 §4). -->
+         localizable and stable for the e2e harness). -->
     <string name="chatlist_pin">Pin</string>
     <string name="chatlist_unpin">Unpin</string>
     <string name="chatlist_mute">Mute</string>
@@ -557,8 +557,8 @@
     <string name="settings_avatar_monogram">Monogram</string>
     <string name="settings_avatar_initials">Initials</string>
 
-    <!-- Badge content-descriptions: carry the real (uncapped) count for the e2e harness (plans/18
-         §4). The visible badge text caps at "99+" / "@". -->
+    <!-- Badge content-descriptions carry the real (uncapped) count for the e2e harness. The
+         visible badge text caps at "99+" / "@". -->
     <plurals name="badge_unread">
         <item quantity="one">%1$d unread</item>
         <item quantity="other">%1$d unread</item>

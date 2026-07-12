@@ -165,7 +165,7 @@ private fun BouncerRow(
     val showInMotdLabel = stringResource(R.string.bouncer_show_in_motd)
 
     ListItem(
-        // Per-network handle (switch CD "Shown in MOTD" collides across rows, plans/18 §4).
+        // Per-network handle because the switch description collides across rows.
         modifier = Modifier.testTag("bouncer_row_${row.netId}"),
         headlineContent = { Text(row.name) },
         supportingContent = { row.host?.let { Text(it) } },

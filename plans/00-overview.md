@@ -1,5 +1,9 @@
 # 00 — MOTD overview
 
+> **Historical design record.** This file describes the original implementation
+> plan. Current code, tests, workflows, `ARCHITECTURE.md`, and `AGENTS.md` take
+> precedence; see [`README.md`](README.md) in this directory.
+
 **MOTD** is a native Android IRCv3 client with Telegram-grade UX. Package
 `io.github.trevarj.motd`, repo `trevarj/motd`. One IRCv3 core connects directly to networks
 (Libera.Chat) or through a soju bouncer; bouncer capabilities light up via CAP detection and

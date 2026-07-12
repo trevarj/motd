@@ -377,7 +377,7 @@ private fun MemberRow(member: MemberEntity, isFriend: Boolean, onClick: () -> Un
         } else {
             null
         },
-        // Per-member handle so the harness selects a specific member row (plans/18 §4).
+        // Per-member handle so the harness selects a specific member row.
         modifier = Modifier.testTag("channelinfo_member_${member.nick}").clickable(onClick = onClick),
     )
 }

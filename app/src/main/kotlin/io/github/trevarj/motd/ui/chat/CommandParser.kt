@@ -62,7 +62,7 @@ val COMMAND_HINTS: List<String> = listOf(
 
 /**
  * Parse [raw] composer input into a [ChatCommand]. See the type doc for the rules. This is the
- * single source of truth for slash-command behavior and the target of the WP7 parser unit test.
+ * single source of truth for slash-command behavior and its parser unit tests.
  */
 fun parseCommand(raw: String): ChatCommand {
     val trimmed = raw.trim()

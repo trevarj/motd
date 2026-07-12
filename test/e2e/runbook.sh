@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # test/e2e/runbook.sh — device-driven E2E acceptance run for MOTD.
 #
-# Implements the ordered traversal in plans/18-e2e-runbook.md §2 (Phases A–I)
-# against a real physical device + a real soju test bouncer. Drives the app via
+# Implements the A–I traversal documented in test/e2e/README.md against a
+# physical device or emulator and a real soju test bouncer. Drives the app via
 # adb + uiautomator using the helpers in lib.sh.
 #
 # Run inside the project dev shell so adb is on PATH:
@@ -39,7 +39,7 @@ esac
 # to guarantee we only ever drive the debug app — never the release install (real account).
 MOTD_ACTIVITY="${MOTD_PKG}/io.github.trevarj.motd.MainActivity"
 
-# Bouncer / account (see §0). No defaults for secrets.
+# Bouncer / account. No defaults for non-local credentials.
 : "${MOTD_SOJU_HOST:=}"
 : "${MOTD_SOJU_PORT:=6697}"
 : "${MOTD_SOJU_USER:=}"
@@ -47,8 +47,8 @@ MOTD_ACTIVITY="${MOTD_PKG}/io.github.trevarj.motd.MainActivity"
 : "${MOTD_NICK:=motdadb}"
 : "${MOTD_TEST_CHANNEL:=##motdtest}"
 
-# Optional second identity (drives DM/mention/typing). When unset those steps
-# are skipped without failing (§2 note, §5).
+# Optional second identity (drives DM/mention/typing). When unset, those steps
+# are skipped without failing.
 : "${MOTD_SECOND_NICK:=}"
 
 export MOTD_PKG
@@ -123,7 +123,7 @@ phase_a() {
     if [ -n "$(bounds_of_text 'ALLOW')" ]; then tap_text "ALLOW"; sleep 1; continue; fi
     sleep 1; _w=$(( _w + 1 ))
   done
-  assert_text "Welcome to motd"          # redirected into onboarding (§1.1)
+  assert_text "Welcome to motd"          # redirected into onboarding
   assert_no_crash
 
   # 2. Welcome -> Choice.
@@ -139,7 +139,7 @@ phase_a() {
   assert_text "Host"                     # SERVER page fields present
   assert_no_crash
 
-  # 4. Server fields (re-dump after each IME open, §2).
+  # 4. Server fields (re-dump after each IME open).
   step "Fill server host/port/nick"
   input_by_text_label "Host" "$MOTD_SOJU_HOST"
   redump
@@ -175,14 +175,14 @@ phase_a() {
   if wait_for_text "Connecting" 6; then ok "connect started (Connecting shown)"
   else note "Connecting not caught (superseded by cert prompt); continuing"; fi
 
-  # 8. Trust cert (TOFU). Every pm clear re-triggers this (§5, §7).
+  # 8. Trust cert (TOFU). Every pm clear re-triggers this.
   step "Handle TOFU cert-trust prompt"
   if wait_for_text "Trust this certificate?" 25; then
     # AlertDialog is hosted in a separate Compose window, so the Activity root's
     # testTagsAsResourceId setting does not propagate here. Its visible title/fingerprint and
     # button labels are the stable accessibility contract for device automation.
     assert_text "SHA-256 fingerprint"
-    tap_text "Trust"                     # buttons carry text (§4 note)
+    tap_text "Trust"                     # buttons carry visible text
     note "trusted cert"
     clear_crash                          # reset the expected pre-trust 'not trusted' baseline
   else
@@ -220,7 +220,7 @@ phase_a() {
   sleep 1
   tap_tag onboarding_forward_button      # FINISH -> ChatList
   wait_for_desc "New conversation" 15 || true
-  assert_desc_present "New conversation"  # stable ChatList action anchor (§1.2)
+  assert_desc_present "New conversation"  # stable ChatList action anchor
   assert_no_text "Welcome to motd"
   assert_no_crash
 }
@@ -244,17 +244,17 @@ phase_b() {
   # 12. Network subtitle (Ready as nick, or a state string).
   step "Check libera network subtitle/state"
   # Subtitle text is the nick when Ready; we assert the nick is somewhere in the
-  # drawer. Status dot color is unreadable without drawer_status_dot CD (§4).
+  # drawer. Status dot color is unreadable without a state content description.
   if [ -n "$(bounds_of_text "$MOTD_NICK")" ]; then
     ok "libera subtitle shows nick '$MOTD_NICK' (Ready)"
   else
-    note "nick not shown; network may be Connecting/Registering (color-only dot, §4)"
+    note "nick not shown; network may be Connecting/Registering (color-only dot)"
   fi
   assert_no_crash
 
   # 13. Scope to network.
   step "Scope list to libera"
-  tap_text "libera"                      # TODO tag: drawer_network_row_<id> (§4)
+  tap_text "libera"                      # TODO tag: drawer_network_row_<id>
   assert_text "libera"                   # ScopeChip / title
   assert_no_crash
 
@@ -270,7 +270,7 @@ phase_b() {
   long_press_text "libera"
   if wait_for_text "Server messages" 5; then
     tap_text "Server messages"
-    assert_text "Send a command…"        # SERVER composer placeholder (§1.5)
+    assert_text "Send a command…"        # SERVER composer placeholder
   else
     note "long-press menu did not surface 'Server messages'; skipping"
   fi
@@ -307,7 +307,7 @@ phase_c() {
   elif [ -n "$(bounds_of_text "Channel")" ]; then
     input_by_text_label "Channel" "$MOTD_TEST_CHANNEL"
   else
-    note "join field label unknown; TODO tag for join field (§4 candidate)"
+    note "join field label unknown; TODO stable tag for join field"
   fi
   tap_text "Join" || true
   wait_for_text "$MOTD_TEST_CHANNEL" 15 || true
@@ -316,7 +316,7 @@ phase_c() {
 
   # 19. Open channel.
   step "Open ${MOTD_TEST_CHANNEL} chat"
-  tap_text "$MOTD_TEST_CHANNEL"          # TODO tag: chatlist_row_<bufferId> (§4)
+  tap_text "$MOTD_TEST_CHANNEL"          # TODO tag: chatlist_row_<bufferId>
   assert_text "$MOTD_TEST_CHANNEL"
   assert_text "Message"                  # composer placeholder
   assert_no_crash
@@ -332,7 +332,7 @@ phase_c() {
   assert_text "Hello from e2e"
   assert_no_crash
 
-  # 21. Nick autocomplete (needs a second member; §5/§8).
+  # 21. Nick autocomplete (needs a second member).
   step "Nick autocomplete"
   if [ -n "$MOTD_SECOND_NICK" ]; then
     input_tag chat_composer_field "${MOTD_SECOND_NICK:0:2}"
@@ -346,7 +346,7 @@ phase_c() {
     # No BACK here: input_tag already closed the keyboard, so a second BACK would pop the chat
     # screen (and then exit the app). The next step's input_tag clears the composer text itself.
   else
-    note "MOTD_SECOND_NICK unset; skipping nick autocomplete (conditional, §5)"
+    note "MOTD_SECOND_NICK unset; skipping conditional nick autocomplete"
   fi
   assert_no_crash
 
@@ -378,7 +378,7 @@ phase_c() {
 
   # 24. Reaction add.
   step "Add a reaction"
-  scroll_to_text "Hello from e2e" || true; long_press_text "Hello from e2e"       # TODO tag: chat_message_<msgid> (§4)
+  scroll_to_text "Hello from e2e" || true; long_press_text "Hello from e2e"       # TODO tag: chat_message_<msgid>
   if wait_for_text "👍" 5; then
     tap_text "👍"
     ok "reaction quick-row present; tapped 👍"
@@ -419,7 +419,7 @@ phase_c() {
   step "Copy action (no crash)"
   scroll_to_text "Hello from e2e" || true; long_press_text "Hello from e2e"
   if wait_for_text "Copy" 5; then
-    tap_text "Copy"                      # clipboard not asserted via UI (§2 step 27)
+    tap_text "Copy"                      # clipboard is not asserted through UI
     ok "Copy tapped"
   else
     note "Copy action not detected; dismissing"
@@ -613,11 +613,11 @@ phase_f() {
   assert_text "Appearance"
   assert_no_crash
 
-  # 43. Theme AMOLED (color-only oracle -> screencap per §6).
+  # 43. Theme AMOLED (color-only oracle uses a screenshot).
   step "Theme: AMOLED"
   if [ -n "$(bounds_of_text "AMOLED (true black)")" ]; then
     tap_text "AMOLED (true black)"
-    screencap_step "amoled_background"   # color-only oracle (§6)
+    screencap_step "amoled_background"   # color-only oracle
     ok "selected AMOLED (background asserted via screencap only)"
   else
     note "AMOLED radio not visible; may need scroll"
@@ -809,7 +809,7 @@ phase_g() {
   # "Hello from e2e" only exists as its own node in the bubble layouts.
   scroll_to_text "${MOTD_NICK}: Hello from e2e" 8 || true
   assert_text "${MOTD_NICK}: Hello from e2e"
-  note "compact vs bubble structure needs chat_message_<msgid> tag to assert (§4)"
+  note "compact vs bubble structure needs chat_message_<msgid> tag to assert"
   assert_no_crash
 
   # 59. Restore Comfortable.
@@ -844,7 +844,7 @@ phase_h() {
     assert_desc_present "Full-screen image"
     tap_desc "Back" || true
   else
-    note "no inline image present (seed an image URL to exercise, §5); skipping"
+    note "no inline image present; seed a reachable image URL to exercise"
   fi
   adb_shell input keyevent 4 || true
   assert_no_crash

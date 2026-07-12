@@ -1,59 +1,67 @@
 # AGENTS.md — MOTD ground rules
 
-Implementation agents: read `plans/00-overview.md` first, then the plan doc(s) for your work
-package (`plans/09-work-packages.md`). These rules are absolute:
+This file is the mandatory policy layer for work in this repository. Detailed
+workflows live in [`.agents/`](.agents/README.md); operational E2E instructions
+live beside the harness in [`test/e2e/`](test/e2e/README.md).
 
-1. **Pinned versions are law.** Use `gradle/libs.versions.toml` exactly as specified in
-   `plans/01-versions-gradle.md`. Never bump, downgrade, or add a dependency outside it.
-2. **Contracts are frozen.** Cross-package types/interfaces are defined verbatim in
-   `plans/10-contracts.md`. Implement against them; never edit them. If a contract seems wrong,
-   stop and report instead of changing it.
-3. **No kapt** — Hilt and Room via KSP only. **No minification** — `isMinifyEnabled = false`.
-   **No OkHttp** — okio over `Socket`/`SSLSocket` for IRC, `HttpURLConnection` for previews.
-4. **Directory ownership.** Each work package owns an exclusive set of directories
-   (`plans/09-work-packages.md`). Never create or edit files outside your ownership.
-5. `:irc` is pure JVM — zero Android imports. All protocol logic must be unit-testable with a
-   fake transport.
-6. Kotlin style: idiomatic coroutines/Flow, sealed hierarchies for events/state, brief intent
-   comments. Compose: stateless composables + ViewModel state holders.
-7. Verification before done: your WP's acceptance criteria checklist, plus
-   `./gradlew build` compiles green.
-8. **Local environment is the Nix flake** (host is Guix, but dev tooling comes from Nix):
-   `nix develop -c ./gradlew ...`. Never suggest guix install/apt/brew or a global SDK.
+## Start here
 
-## Local bouncer stack (play / manual + e2e)
+1. Read the user request, then inspect `git status`, the relevant diff, and the
+   implementation before editing. Existing changes belong to the user unless
+   proven otherwise; preserve them and stage only your own work.
+2. Treat current source, Gradle configuration, tests, scripts, and GitHub
+   workflows as authoritative. `plans/` records the original design process and
+   is historical reference material, not a contract.
+3. Read [`ARCHITECTURE.md`](ARCHITECTURE.md) and the task-specific guide linked
+   from [`.agents/README.md`](.agents/README.md). Prefer `rg`/`rg --files` when
+   locating code.
 
-Native ergo + soju (no Docker) for exercising the app against a real bouncer on a
-USB device or emulator. Binaries come from nixpkgs on demand; the app reaches soju
-over `adb reverse` at `127.0.0.1:6697`.
+## Architecture and implementation rules
 
-```sh
-./test/e2e/local-stack.sh up      # fresh stack + provision + seed + adb reverse tcp:6697
-./test/e2e/local-stack.sh status  # pids + soju upstream status
-./test/e2e/local-stack.sh seed    # re-post the seed history into ##motdtest
-./test/e2e/local-stack.sh down    # stop ergo/soju, drop the reverse
-```
+- `:irc` is pure JVM: no Android imports. Keep parsing, protocol state, and
+  transport behavior testable with fake transports.
+- `EventProcessor` is the sole writer of IRC-derived state to Room. UI reads
+  state through repositories and delegates connection/protocol actions to
+  `ConnectionManager`; feature-local Android work may use its own repository or
+  service boundary.
+- Use idiomatic coroutines and `Flow`, sealed state/event hierarchies, and
+  constructor injection. Compose screens should be stateless where practical,
+  with ViewModels owning state and side effects. Add stable semantics/test tags
+  when UI behavior needs automation.
+- Keep dependency versions centralized in `gradle/libs.versions.toml`. Do not
+  add or change dependencies casually; explain and test any necessary catalog
+  change. Hilt and Room use KSP only—never kapt. Release minification remains
+  disabled unless the maintainer explicitly scopes a change to it.
+- Transport constraints are boundary-specific: IRC TCP/TLS in `:irc` uses
+  okio over `Socket`/`SSLSocket`; app-side WSS uses the pinned OkHttp stack;
+  existing preview/upload code uses `HttpURLConnection` and streams content.
+  Do not introduce a second networking stack without an explicit reason.
+- Preserve database migrations and serialized preference compatibility unless
+  the user explicitly says migration is unnecessary for that change.
 
-`up` registers upstream account `motd`, creates `##motdtest`, starts soju with a
-self-signed TLS cert, provisions soju user **`motd` / `motdtest`** and bouncer
-network **`libera`** → ergo (auto-joins `##motdtest`), then seeds deterministic
-history. Onboard the **motd debug** app via "I have a soju bouncer":
+## Build and verification
 
-| Field | Value |
-| --- | --- |
-| Host | `127.0.0.1` (via adb reverse) |
-| Port | `6697` — TLS on; **Trust** the self-signed cert prompt |
-| Username / Password | `motd` / `motdtest` |
+- The supported local environment is the Nix flake. Run project tooling as
+  `nix develop -c ...`; do not recommend Guix packages, apt, Homebrew, a global
+  Android SDK, or unpinned replacement tooling.
+- Match verification to the affected surface, using the command matrix in
+  [`.agents/testing.md`](.agents/testing.md). Tests for changed behavior are
+  part of the implementation, not optional follow-up work.
+- CI treats both FOSS and Google flavors as supported. Lint warnings are errors.
+  When a change crosses modules or release behavior, run the full documented
+  build rather than only the nearest unit test.
+- Device-sensitive UI, lifecycle, connection, and performance work requires an
+  appropriate emulator or physical-device check when one is available. Use the
+  local bouncer and E2E runbook rather than a live personal network.
 
-Import network `libera`, open `##motdtest` (seeded backfill/search).
+## Changes, commits, and releases
 
-Notes:
-- State + logs live under `/tmp/motd-stack` (override with `MOTD_STACK_DIR`). All
-  creds are ephemeral local test creds, never secrets.
-- `up` fails loudly if `6667`/`6697` are already held (a stale stack). Kill it or
-  run `down` first — don't let a foreign daemon hijack provisioning.
-- Kill stray daemons by **PID** (`ss -ltnp | grep :669`), never
-  `pkill -f "ergo run"` (the pattern matches the calling shell — it self-kills).
-- Docker + emulator (`10.0.2.2`) variant: `test/e2e/hermetic/`. Full UI runbook:
-  `cp test/e2e/.env.ci test/e2e/.env && nix develop -c ./test/e2e/runbook.sh`
-  (for a physical device set `MOTD_SOJU_HOST=127.0.0.1` to use the reverse).
+- Do not rewrite, discard, or reformat unrelated changes. Avoid destructive Git
+  commands. Do not commit, push, tag, install on a device, publish, or cut a
+  release unless the user requests that action.
+- Keep commits narrowly scoped and report the verification performed. A request
+  to release authorizes the documented release workflow, not unrelated cleanup
+  or silently moving an existing tag.
+- Release procedure and recovery rules live in
+  [`.agents/releases.md`](.agents/releases.md). GitHub workflow files remain the
+  final authority when documentation and automation disagree.

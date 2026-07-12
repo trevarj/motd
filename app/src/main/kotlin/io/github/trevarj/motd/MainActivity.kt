@@ -82,7 +82,7 @@ class MainActivity : ComponentActivity() {
                 // Root Surface paints the themed background under every screen (incl. non-Scaffold
                 // ones like onboarding) so the window follows the color scheme instead of white.
                 // testTagsAsResourceId is enabled once here so every Compose testTag in the tree
-                // surfaces as a uiautomator resource-id for the e2e harness (plans/18 §4).
+                // surfaces as a uiautomator resource-id for the E2E harness.
                 Surface(
                     modifier = Modifier
                         .fillMaxSize()

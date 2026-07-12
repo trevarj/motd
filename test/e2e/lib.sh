@@ -3,14 +3,13 @@
 #
 # Source this from runbook.sh; it provides adb wrappers, uiautomator dump parsing,
 # tap/input primitives, assertions, crash detection, and step/pass/fail logging.
-# See plans/18-e2e-runbook.md §3 for the design and the helper contract.
+# See test/e2e/README.md for the selector contract and operating guide.
 #
 # Selection is ALWAYS by text / content-desc / testTag (resource-id). Coordinates
 # come only from parsing a matched node's bounds, so layout shifts and keyboard
 # scroll don't break selectors.
 #
-# Requires: coreutils, grep, sed, awk, and adb (on PATH under `nix develop`, or
-# fell back to `guix shell android-tools -- adb` on a bare Guix host).
+# Requires: coreutils, grep, sed, awk, and adb on PATH under `nix develop`.
 
 # --- runtime state ---------------------------------------------------------
 
@@ -25,7 +24,7 @@ export E2E_LIB_DIR
 # auto-select it; if multiple are attached the caller MUST set SERIAL.
 : "${SERIAL:=}"
 
-# Package under test (mirrors §0). runbook.sh sets this; default here for safety.
+# Package under test. runbook.sh sets this; default here for safety.
 : "${MOTD_PKG:=io.github.trevarj.motd.debug}"
 
 # Cached path of the most recent uiautomator XML dump (host side).
@@ -47,18 +46,15 @@ fi
 
 # --- adb wrapper -----------------------------------------------------------
 
-# Resolve how to invoke adb once. Prefer adb on PATH (the case under
-# `nix develop`); otherwise fall back to a Guix ephemeral shell.
-_E2E_ADB_MODE=""
+# Resolve adb once and fail with the supported environment command.
+_E2E_ADB_READY=""
 _e2e_resolve_adb() {
-  [ -n "$_E2E_ADB_MODE" ] && return 0
+  [ -n "$_E2E_ADB_READY" ] && return 0
   if command -v adb >/dev/null 2>&1; then
-    _E2E_ADB_MODE="path"
-  elif command -v guix >/dev/null 2>&1; then
-    _E2E_ADB_MODE="guix"
+    _E2E_ADB_READY=1
   else
-    echo "${_C_RED}FATAL: adb not found on PATH and guix unavailable.${_C_RST}" >&2
-    echo "Run inside 'nix develop' or install android-tools." >&2
+    echo "${_C_RED}FATAL: adb not found on PATH.${_C_RST}" >&2
+    echo "Run the harness with 'nix develop -c ./test/e2e/runbook.sh'." >&2
     exit 127
   fi
 }
@@ -67,18 +63,10 @@ _e2e_resolve_adb() {
 # every adb call goes through the same resolution/serial logic.
 adb_() {
   _e2e_resolve_adb
-  if [ "$_E2E_ADB_MODE" = "guix" ]; then
-    if [ -n "$SERIAL" ]; then
-      guix shell android-tools -- adb -s "$SERIAL" "$@"
-    else
-      guix shell android-tools -- adb "$@"
-    fi
+  if [ -n "$SERIAL" ]; then
+    adb -s "$SERIAL" "$@"
   else
-    if [ -n "$SERIAL" ]; then
-      adb -s "$SERIAL" "$@"
-    else
-      adb "$@"
-    fi
+    adb "$@"
   fi
 }
 
@@ -532,8 +520,8 @@ _e2e_slug() {
   printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-60
 }
 
-# screencap_step <name> — save a PNG to the artifacts dir. Per §6/§7 these are
-# for color-only oracles (AMOLED black, status-dot color) and failure
+# screencap_step <name> — save a PNG to the artifacts dir. These are for
+# color-only oracles (AMOLED black, status-dot color) and failure
 # diagnostics only, never the primary assertion. Keep usage minimal.
 screencap_step() {
   local name="$1"

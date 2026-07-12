@@ -71,7 +71,7 @@ android {
         applicationId = "io.github.trevarj.motd"
         minSdk = 26
         targetSdk = 35
-        // CI derives these from the git tag / run number (see plans/08).
+        // Release CI derives these from the git tag and GitHub run number.
         versionName = System.getenv("MOTD_VERSION_NAME") ?: "0.0.0-dev"
         versionCode = System.getenv("MOTD_VERSION_CODE")?.toIntOrNull() ?: 1
         testInstrumentationRunner = "io.github.trevarj.motd.SmokeTestRunner"
@@ -160,11 +160,11 @@ android {
 
     lint {
         warningsAsErrors = true
-        // Dependency versions are pinned by policy (plans/01); upgrade nags are intentional noise.
+        // Dependency versions are catalog-pinned; upgrade nags are intentional noise.
         disable += "GradleDependency"
-        // AGP version is pinned by policy (plans/01); the upgrade nag is intentional noise.
+        // The AGP version is catalog-pinned; the upgrade nag is intentional noise.
         disable += "AndroidGradlePluginVersion"
-        // SDK levels are pinned by policy (plans/01). CI runners ship a newer SDK than the
+        // SDK levels are deliberately pinned. CI runners ship a newer SDK than the
         // pinned platform, so lint flags targetSdk 35 as "old"; that nag is intentional noise.
         disable += "OldTargetApi"
         // The Doze battery-exemption request is a justified core use: an always-on IRC/bouncer

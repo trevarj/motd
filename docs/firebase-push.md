@@ -48,9 +48,10 @@ nix develop -c ./gradlew :app:assembleGoogleDebug
 
 The API key and application identifiers are client configuration, not service-account secrets.
 The APK lands under `app/build/outputs/apk/google/debug/`. A Google build with incomplete values
-compiles for local checks but reports FCM unavailable; release CI rejects missing values.
+compiles and reports FCM unavailable. Release CI currently treats the client values as optional,
+while still building and testing the Firebase relay itself.
 
-For GitHub releases, create repository secrets `FIREBASE_API_KEY`, `FIREBASE_APP_ID`,
+To enable FCM in GitHub release APKs, create repository secrets `FIREBASE_API_KEY`, `FIREBASE_APP_ID`,
 `FIREBASE_PROJECT_ID`, `FIREBASE_SENDER_ID`, and `FCM_RELAY_URL` with the corresponding values.
 
 ## Use it

@@ -325,7 +325,7 @@ internal fun SwitchRow(
             Text(title, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        // Stable handle so the harness reads/sets the checked state directly (plans/18 §4).
+        // Stable handle so the harness reads/sets the checked state directly.
         Switch(
             checked = checked,
             onCheckedChange = null,

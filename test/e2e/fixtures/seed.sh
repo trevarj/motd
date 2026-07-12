@@ -4,7 +4,7 @@
 # Connects a second identity to the bouncer over raw TLS, registers (NICK/USER +
 # SASL PLAIN, PASS fallback), JOINs $MOTD_TEST_CHANNEL, sets a topic, and posts a
 # handful of PRIVMSGs (plain lines, an ACTION, a URL, an image URL) so the chat
-# screen has deterministic history to assert against (§5).
+# screen has deterministic history to assert against.
 #
 # Dependency-light: openssl only (`openssl s_client`). This is BEST-EFFORT and
 # needs the bouncer reachable FROM THE HOST running this script. It does not
@@ -51,7 +51,7 @@ fi
 
 # SASL PLAIN payload: base64("\0user\0pass"). We build the NUL-delimited blob
 # with printf and pipe through base64 (coreutils). soju accepts SASL PLAIN over
-# TLS for the bouncer account (§0).
+# TLS for the bouncer account.
 sasl_b64="$(printf '\0%s\0%s' "$MOTD_SEED_USER" "$MOTD_SEED_PASS" | base64 | tr -d '\n')"
 
 # Build the IRC line stream. CRLF terminates each line per RFC 1459/IRCv3. We
@@ -75,7 +75,7 @@ gen_lines() {
   printf 'PRIVMSG %s :\001ACTION waves at the room\001\r\n' "$MOTD_TEST_CHANNEL"
   printf 'PRIVMSG %s :check this link https://example.com/page\r\n' "$MOTD_TEST_CHANNEL"
   printf 'PRIVMSG %s :and an image https://example.com/cat.png\r\n' "$MOTD_TEST_CHANNEL"
-  # Mention + DM to the app's identity (drives mention/unread badges, §5).
+  # Mention + DM to the app's identity (drives mention/unread badges).
   printf 'PRIVMSG %s :%s: welcome\r\n' "$MOTD_TEST_CHANNEL" "$MOTD_TARGET_NICK"
   printf 'PRIVMSG %s :hi from the seeder\r\n' "$MOTD_TARGET_NICK"
 }

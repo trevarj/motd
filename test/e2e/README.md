@@ -1,125 +1,165 @@
-# MOTD end-to-end device harness
+# MOTD device and end-to-end testing
 
-Host-driven UI acceptance run for MOTD against a **physical Android device**
-(adb + uiautomator) and a **real soju test bouncer**. This harness mirrors
-`plans/18-e2e-runbook.md` step-for-step; that doc is the source of truth for the
-coverage matrix and selectors.
+This is the canonical operator guide for MOTD’s Android device harness. The
+scripts in this directory are the behavioral authority; historical design notes
+under `plans/` are not required to run it.
 
-## What it is
+The harness drives only `io.github.trevarj.motd.debug` through `adb` and
+uiautomator. It refuses any package id without the `.debug` suffix because its
+setup and teardown deliberately clear application data.
 
-- `lib.sh` — sourced helper library: adb wrapper, uiautomator dump + XML
-  parsing, tap/input primitives, assertions, crash detection, step logging.
-- `runbook.sh` — the ordered traversal, Phases A–I (§2 of the runbook).
-- `fixtures/seed.sh` — best-effort seeding of `##motdtest` over raw TLS.
-- `.env.example` — template for the required config; copy to `.env` (gitignored).
+## Choose a test mode
 
-Selection is always by visible text, content-description, or Compose testTag
-(surfaced as `resource-id`) — never raw coordinates. Coordinates come only from
-a matched node's parsed bounds, so layout shifts and keyboard scroll do not
-break selectors.
+| Mode | Best for | Entry point |
+| --- | --- | --- |
+| Native local stack + USB device | Manual feature work, physical-device checks, quick iteration | `./test/e2e/local-stack.sh` |
+| Host-driven A–I runbook | Broad UI interaction and crash sweep on a device or emulator | `./test/e2e/runbook.sh` |
+| Managed-device smoke | Onboarding, TLS trust, SASL, and soju discovery | `.github/workflows/smoke.yml` |
+| Hermetic emulator run | Scheduled/manual exhaustive CI diagnostics | `.github/workflows/e2e.yml` |
+
+The smoke and exhaustive E2E workflows are currently diagnostic and do not gate
+tagged releases. Release CI still runs unit tests, lint, and both release builds.
 
 ## Prerequisites
 
-1. **Device.** A physical device connected and authorized (`adb devices` shows
-   it as `device`, not `unauthorized`/`offline`). USB debugging on, RSA prompt
-   accepted. If multiple devices are attached, set `SERIAL`.
-2. **adb on PATH.** Run inside the project dev shell (`nix develop`), which
-   provides the Android SDK platform-tools. On a bare Guix host without the dev
-   shell, `lib.sh` falls back to `guix shell android-tools -- adb`.
-3. **App built.** A debuggable APK at `MOTD_APK` for clean install, or the app
-   already installed on the device. Hermetic CI uses `:app:assembleFossE2e`, whose
-   APK keeps the `.debug` id while omitting arm64-only libbox JNI; the E2E flow
-   exercises plain IRC through soju, never embedded obfuscation.
-4. **Bouncer reachable.** The soju test bouncer (§0) reachable from the device
-   for the run, and from the host for seeding.
-5. **Config.** Copy `.env.example` to `test/e2e/.env` and fill in the bouncer
-   creds. `.env` is gitignored; never commit secrets.
+- Enter the project environment with `nix develop`; it supplies JDK 17 and
+  Android platform tools. Do not install or invoke a separate host SDK.
+- Connect and authorize a device. `adb devices` must show it as `device`. Set
+  `SERIAL` when more than one device/emulator is attached.
+- Build the appropriate APK:
 
-## Run
+  ```sh
+  nix develop -c ./gradlew :app:assembleFossDebug
+  ```
+
+  The physical-device APK is
+  `app/build/outputs/apk/foss/debug/app-foss-debug.apk`. The x86_64 hermetic
+  emulator uses `app/build/outputs/apk/foss/e2e/app-foss-e2e.apk`, which omits
+  the arm64-only libbox core.
+
+## Native local bouncer stack
+
+The native stack runs ephemeral ergo and soju instances under
+`/tmp/motd-stack`, publishes TLS soju on host port `6697`, and uses `adb reverse`
+so a USB device reaches it at `127.0.0.1:6697`.
 
 ```sh
-# 1. (optional) seed the channel with deterministic history:
-nix develop -c ./test/e2e/fixtures/seed.sh
+./test/e2e/local-stack.sh up
+./test/e2e/local-stack.sh status
+./test/e2e/local-stack.sh seed
+./test/e2e/local-stack.sh down
+```
 
-# 2. run the full acceptance sweep:
+`up` wipes previous stack state, provisions accounts and the `libera` bouncer
+network, seeds `##motdtest`, and installs the reverse. It fails if ports `6667`
+or `6697` are already occupied. Stop the owner by its exact PID; never use a
+broad `pkill -f` pattern for ergo or soju.
+
+Onboard the debug app with **I have a soju bouncer**:
+
+| Field | Value |
+| --- | --- |
+| Host | `127.0.0.1` |
+| Port / TLS | `6697`, TLS enabled |
+| Username | `motd` |
+| Password | `motdtest` |
+
+Trust the local self-signed certificate, import `libera`, and open
+`##motdtest`. These credentials are local test fixtures, not secrets.
+
+The same script exposes `obfs-*` and `obfs-xray-*` commands for VLESS + REALITY
+compatibility and negative-path validation. Run the base stack first and see
+[`../../docs/obfuscation.md`](../../docs/obfuscation.md) for the product model.
+
+## Run the host-driven UI sweep
+
+Copy the local template and adjust only when needed:
+
+```sh
+cp test/e2e/.env.example test/e2e/.env
 nix develop -c ./test/e2e/runbook.sh
 ```
 
-Subset of phases:
+`test/e2e/.env` is ignored and sourced automatically. Environment variables
+override its values. Important options are:
+
+- `MOTD_APK`, `MOTD_PKG` — APK and debug package under test.
+- `MOTD_SOJU_HOST`, `MOTD_SOJU_PORT`, `MOTD_SOJU_USER`, `MOTD_SOJU_PASS` —
+  bouncer connection.
+- `MOTD_NICK`, `MOTD_TEST_CHANNEL`, `MOTD_SECOND_NICK` — deterministic fixture
+  identities and channel.
+- `SERIAL` — explicit device selection.
+- `E2E_PHASES` — space-separated phase letters, for example:
+
+  ```sh
+  E2E_PHASES="a b c" nix develop -c ./test/e2e/runbook.sh
+  ```
+
+The harness selects nodes by exact visible text, content description, or stable
+Compose test tag surfaced as a resource id. Coordinates are derived only from a
+matched node’s bounds. After every step it checks the crash log and connection
+failure log.
+
+### Phase coverage
+
+| Phase | Coverage | Hermetic status |
+| --- | --- | --- |
+| A | Clean install, onboarding, TLS trust, bouncer import | Expected green |
+| B | Chat list, server drawer, connection state and scoping | Expected green |
+| C | Join, send, history, autocomplete, actions, reactions, reply, search | Expected green |
+| D | Channel info, topic, mute/pin, members, leave dialog | Best effort; live member state matters |
+| E | Channel browser and LIST search | Best effort |
+| F | Settings, themes, message presentation, delivery, networks, about | Best effort |
+| G | Compact and comfortable rendering | Best effort |
+| H | Inline image viewer | Conditional on a reachable seeded image |
+| I | Delete-chat cancellation, final crash sweep, clean reset | Expected green |
+
+The hermetic default is A–C. The scheduled/manual workflow may widen this to
+A–I. DM, mention, typing, member, and moderation checks need a live second
+identity; missing optional fixture state is reported as a skip rather than a
+false failure.
+
+### Results and diagnostics
+
+Each step logs `ok`, `FAIL`, or a note, followed by a final check/failure count.
+The command exits non-zero on failures. XML dumps and diagnostic screenshots go
+to `test/e2e/artifacts/`, which is ignored. Screenshots are diagnostic or used
+for color-only checks; accessibility/semantic state is the preferred oracle.
+
+Common failure causes:
+
+- `unauthorized`/`offline` device or an unset `SERIAL` with multiple devices;
+- a stale process holding `6667` or `6697`;
+- a notification or certificate dialog covering onboarding;
+- IME movement between dump and tap;
+- delayed IRC registration/history; or
+- missing second-identity/image fixtures in optional phases.
+
+Use `local-stack.sh status`, inspect the saved artifact and XML dump, and check
+the exact failing step before increasing timeouts or changing selectors.
+
+## Hermetic Docker and emulator path
+
+The hermetic stack is ergo → soju with self-signed TLS and deterministic
+CHATHISTORY, exposed to Android emulators at `10.0.2.2:6697`.
 
 ```sh
-E2E_PHASES="a b c" nix develop -c ./test/e2e/runbook.sh
+docker compose -f test/e2e/hermetic/docker-compose.yml up --build -d --wait
+cp test/e2e/.env.ci test/e2e/.env
+nix develop -c ./gradlew :app:assembleFossE2e
+nix develop -c ./test/e2e/runbook.sh
+docker compose -f test/e2e/hermetic/docker-compose.yml down -v
 ```
 
-Config is read from the environment or `test/e2e/.env`. Required:
-`MOTD_SOJU_HOST`, `MOTD_SOJU_USER`, `MOTD_SOJU_PASS`. Optional: `MOTD_APK`,
-`MOTD_NICK`, `MOTD_TEST_CHANNEL`, `MOTD_SECOND_NICK`, `SERIAL`, `E2E_PHASES`.
+Running this manually requires an already-booted x86_64 emulator. CI supplies
+the emulator and installs the E2E APK before invoking the same runbook. Stack
+topology and intentional image/version pins are documented in
+[`hermetic/README.md`](hermetic/README.md).
 
-## What it asserts
+## Stable selector policy
 
-Per phase (see §2 of the runbook for the exact steps):
-
-- **A** — `pm clear`, launch into onboarding, fill soju server/auth, **trust the
-  TOFU cert**, reach Ready, import `libera`, finish to the chat list.
-- **B** — drawer contents, network subtitle, scope/unscope, SERVER buffer.
-- **C** — join `##motdtest`, send a message, nick/command autocomplete, `/me`,
-  reactions, reply, copy, scroll-to-bottom FAB, in-buffer search.
-- **D** — channel info: topic dialog, mute/pin toggles, member nick sheet, add
-  friend, leave dialog.
-- **E** — channel browser: search, gated states.
-- **F** — settings sweep: theme (AMOLED), message style, colored nicknames,
-  palette, nick color overrides, friends/fools manage, join/part toggle, push
-  availability, battery optimization, networks list, bouncer networks, about.
-- **G** — Compact vs Comfortable render.
-- **H** — image viewer (conditional on a seeded image message).
-- **I** — teardown: delete-chat swipe (cancel), final crash sweep, `pm clear`.
-
-After **every** step it runs `assert_no_crash` (logcat crash buffer + MotdConn
-connection-failure grep) in addition to the step's own assertion.
-
-## Reading results
-
-- Each step logs `ok` / `FAIL` / `..` (note) lines with a running check counter.
-- The final `E2E summary` prints total checks + failures; the script exits
-  non-zero if any check failed.
-- Diagnostic screenshots and the latest dump land in `test/e2e/artifacts/`
-  (created on demand). Screenshots are used only for color-only oracles (AMOLED
-  black background) and on-failure diagnostics, never as the primary oracle.
-
-## Known limitations (from §6/§7 of the runbook)
-
-- **Flaky real network.** Connect/registration/chathistory timing varies; the
-  harness polls with generous `wait_for_text` timeouts and dump retries instead
-  of fixed sleeps. Some steps still depend on live server behavior.
-- **Cert-trust.** Every `pm clear` re-triggers the TOFU dialog (intentional
-  coverage). The changed-cert dialog is hard to force and is not automated.
-- **State encoded as color** (drawer status dots, badge severity) is unreadable
-  via text dump until the §4 content-descriptions land; those assertions fall
-  back to indirect signals (subtitle text, nick) or screencap.
-- **Second identity.** DM/mention/typing and nick-autocomplete need
-  `MOTD_SECOND_NICK` actively present in the channel (seed it). Without it those
-  steps are skipped, not failed.
-- **IME-shifted layout.** Field bounds move once the keyboard opens; every field
-  step re-dumps after input. This is the most likely source of mis-taps.
-- **Seeding is best-effort.** `fixtures/seed.sh` needs the bouncer reachable from
-  the host and uses only `openssl s_client`.
-
-## Stable selectors
-
-The harness prefers the `testTag`s/content descriptions already exposed by the
-Compose UI. Popup windows use their accessibility descriptions because the
-Activity root's test-tag export does not propagate into a separate Compose
-window. Visible text remains where a runtime database id makes a dynamic tag
-unknowable to the host or where the visible copy is the intended oracle:
-
-- `onboarding_forward_button`, `onboarding_choice_soju`,
-  `onboarding_bouncer_switch_<id>` (Phase A).
-- `drawer_network_row_<id>`, `drawer_status_dot_<id>` (Phase B; status is
-  color-only today).
-- `chat_message_<msgid>`, `chat_composer_field`, `message_more_reactions`
-  (Phase C; long-press/react/reply/compact-vs-bubble targeting).
-- `channelinfo_member_<nick>` (Phase D).
-- `settings_switch_nick_colors`, `settings_switch_show_jpq` (Phase F; needed to
-  read a switch's checked state directly).
-- `network_settings_status` / `network_settings_conn_button`,
-  `bouncer_row_<id>` / `bouncer_switch_<id>`, `search_result_<msgid>`.
+Prefer a stable per-item test tag for repeatable rows and a content description
+for icon-only or color-only state. Existing anchors include onboarding controls,
+drawer network rows, message containers, the composer field, channel members,
+settings switches, bouncer rows, and search results. If UI copy or hierarchy
+changes, update the semantics and the runbook in the same change.

@@ -245,7 +245,7 @@ private fun DrawerNetworkItem(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // State is color-only in the dot; expose it as a CD ("status:Ready") + tag so the
-            // harness can read a per-network connection state from a text dump (plans/18 §4).
+            // harness can read a per-network connection state from a text dump.
             val statusCd = "status:${statusName(row.state)}"
             Box(
                 modifier = Modifier

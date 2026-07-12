@@ -1,5 +1,9 @@
 # 10 — Frozen cross-package contracts
 
+> **Historical design record.** These signatures were frozen for the initial
+> work-package implementation only. Current source and tests define today’s
+> interfaces; do not restore or enforce this file verbatim.
+
 These signatures are **law**. Every work package codes against them verbatim. WP1 realizes them
 as code (stubs where noted); no later WP may edit a contract file. If a contract is wrong, stop
 and report — do not "fix" it locally.

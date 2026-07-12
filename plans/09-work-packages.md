@@ -1,5 +1,9 @@
 # 09 — Work packages
 
+> **Historical design record.** Directory ownership and work-package boundaries
+> in this file applied only to the initial parallel build. They do not constrain
+> current maintenance; follow repository `AGENTS.md` and preserve active edits.
+
 Execution contract for implementation agents: read `00-overview.md`, `10-contracts.md`, your
 WP's doc(s), and repo `AGENTS.md` before writing code. Ownership is directory-exclusive —
 never touch files outside your set. Acceptance = your checklist + `./gradlew build` green.

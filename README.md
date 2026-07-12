@@ -29,14 +29,14 @@ plain network it falls back to local-only history and a persistent socket.
 | Read state | `draft/read-marker` (MARKREAD) sync through a single `ConnectionManager` entry point. |
 | Multi-network | `soju.im/bouncer-networks` (BOUNCER BIND): one root connection plus per-network child bindings. |
 | Delivery | Persistent-socket foreground service, or UnifiedPush + `soju.im/webpush` with on-device RFC 8291 (aes128gcm) decryption. |
-| Theming | Material You dynamic color on Android 12+, plus SYSTEM/LIGHT/DARK/AMOLED themes. |
+| Theming | Material You dynamic color, curated editor/terminal palettes, custom nick colors, and refined generated chat wallpapers. |
 | Transport | okio over `SSLSocket`, SASL PLAIN/EXTERNAL, client certificates via Android KeyChain, IRCv3 STS pinning. |
 
 Requires Android 8.0 (API 26) or newer.
 
 ## Building
 
-The canonical build environment is CI (see
+GitHub Actions defines the canonical CI jobs (see
 [`.github/workflows/`](.github/workflows/)). For local work, the Nix flake
 provides JDK 17 and the Android SDK; direnv loads it via `.envrc`, or run the
 commands under `nix develop`.
@@ -97,10 +97,14 @@ Questions, bug reports, and feedback: join `#motd` on
 
 ## Releasing
 
-Releases are cut by pushing a `v*` tag. The tag workflow first passes the
-hermetic E2E gate and the full Gradle build (tests and lint), then builds the
-signed APK. `versionName` comes from the tag and `versionCode` from the CI run
-number.
+Releases are cut by pushing a signed `v*` tag. The tag workflow verifies the
+Firebase relay, runs the full Gradle build and both-flavor lint, then builds and
+signs the FOSS and Google APKs. `versionName` comes from the tag and
+`versionCode` from the CI run number.
+
+The managed-device smoke and exhaustive emulator journey remain available as
+separate workflows, but currently do not gate releases because hosted emulator
+System UI failures can occur before MOTD starts.
 
 ```sh
 git tag -s v0.1.0 -m "v0.1.0"
@@ -113,7 +117,9 @@ signing env (`MOTD_KEYSTORE_PATH`, `MOTD_KEYSTORE_PASSWORD`, `MOTD_KEY_ALIAS`,
 deterministic complete libbox source, `SHA256SUMS`, and release-specific
 third-party notice. Required
 repository secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`,
-`KEY_PASSWORD` (see [`plans/08-ci-release.md`](plans/08-ci-release.md)).
+`KEY_PASSWORD`. Firebase client values are optional; when absent, the Google APK
+builds with Firebase push unavailable. Maintainer and agent details are in the
+[release runbook](.agents/releases.md).
 
 To dry-run locally, run `nix develop -c ./gradlew :app:assembleFossRelease` with the
 signing env set (or the debug signing config).
