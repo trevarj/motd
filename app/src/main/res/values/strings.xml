@@ -332,6 +332,8 @@
     <string name="settings_show_jpq_desc">Show join, part, and quit events in channels.</string>
     <string name="settings_composer_emoji">Emoji button</string>
     <string name="settings_composer_emoji_desc">Show the emoji button in the message composer.</string>
+    <string name="settings_reply_prefix">Visible reply prefix</string>
+    <string name="settings_reply_prefix_desc">Prefix channel replies with the recipient’s nick for clients that do not render reply tags.</string>
     <string name="settings_wallpaper">Chat wallpaper</string>
     <string name="settings_wallpaper_none">None</string>
     <string name="settings_people">People</string>
@@ -478,6 +480,8 @@
     <string name="chat_server_composer_hint">Send a command…</string>
     <string name="chat_server_invalid_command">Not a valid IRC command</string>
     <string name="chat_react_failed">Couldn\'t react — message not confirmed</string>
+    <string name="chat_reaction_blocked">This server does not allow shared reactions</string>
+    <string name="chat_reaction_send_failed">Couldn\'t update reaction — try again</string>
 
     <!-- Topic edit from ChannelInfo (WP-V3, §5.8) -->
     <string name="channelinfo_topic_edit_title">Edit topic</string>

@@ -15,6 +15,8 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.PushProvider
 import io.github.trevarj.motd.data.prefs.PushProviderPrefs
+import io.github.trevarj.motd.data.prefs.ReplyConfig
+import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.service.DeliveryMode
@@ -31,6 +33,7 @@ data class SettingsUiState(
     val pushAvailability: PushAvailability = PushAvailability(),
     val pushProvider: PushProvider = PushProvider.UNIFIED_PUSH,
     val appearance: AppearanceConfig = AppearanceConfig(),
+    val reply: ReplyConfig = ReplyConfig(),
 )
 
 @HiltViewModel
@@ -40,7 +43,10 @@ class SettingsViewModel @Inject constructor(
     private val pushAvailability: PushAvailabilityProvider,
     private val pushProviderPrefs: PushProviderPrefs,
     private val appearancePrefs: AppearancePrefs,
+    private val replyPrefs: ReplyPrefs,
 ) : ViewModel() {
+
+    private val appearanceAndReply = combine(appearancePrefs.config, replyPrefs.config, ::Pair)
 
     val state: StateFlow<SettingsUiState> =
         combine(
@@ -50,14 +56,15 @@ class SettingsViewModel @Inject constructor(
             // toggle enables live once the soju bouncer advertises webpush.
             pushAvailability.availability(),
             pushProviderPrefs.provider,
-            appearancePrefs.config,
-        ) { settings, networks, availability, provider, appearance ->
+            appearanceAndReply,
+        ) { settings, networks, availability, provider, (appearance, reply) ->
             SettingsUiState(
                 settings = settings,
                 networks = networks,
                 pushAvailability = availability,
                 pushProvider = provider,
                 appearance = appearance,
+                reply = reply,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -113,5 +120,9 @@ class SettingsViewModel @Inject constructor(
 
     fun setShowComposerEmoji(show: Boolean) = viewModelScope.launch {
         settingsRepository.setShowComposerEmoji(show)
+    }
+
+    fun setVisibleReplyPrefix(show: Boolean) = viewModelScope.launch {
+        replyPrefs.setVisibleChannelPrefix(show)
     }
 }

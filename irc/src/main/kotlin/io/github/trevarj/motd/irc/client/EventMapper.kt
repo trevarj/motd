@@ -165,7 +165,7 @@ internal class EventMapper(
             target = target,
             text = text,
             isSelf = isSelf(msg.source),
-            replyToMsgid = msg.tags["+draft/reply"],
+            replyToMsgid = msg.replyReference(),
         )
     }
 
@@ -173,8 +173,11 @@ internal class EventMapper(
         val source = msg.source ?: Prefix(nick = "")
         val target = msg.params.getOrNull(0).orEmpty()
         val react = msg.tags["+draft/react"]
-        // On a react, +draft/reply carries the reacted-to msgid; otherwise it's a typing reply hint.
-        val replyTag = msg.tags["+draft/reply"]
+        val unreact = msg.tags["+draft/unreact"]
+        // Preserve the frozen event contract: unreact travels as Raw and is removed by the app's
+        // sole Room writer. Live and CHATHISTORY paths therefore share the same idempotent delete.
+        if (unreact != null) return IrcEvent.Raw(msg)
+        val replyTag = msg.replyReference()
         return IrcEvent.TagMessage(
             ctx = ctx,
             source = source,
@@ -184,6 +187,8 @@ internal class EventMapper(
             reactTargetMsgid = if (react != null) replyTag else null,
         )
     }
+
+    private fun IrcMessage.replyReference(): String? = tags["+reply"] ?: tags["+draft/reply"]
 
     private fun mapJoin(msg: IrcMessage, ctx: MessageContext): IrcEvent {
         val nick = msg.source?.nick ?: return IrcEvent.Raw(msg)

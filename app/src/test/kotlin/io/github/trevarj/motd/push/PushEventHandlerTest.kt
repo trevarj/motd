@@ -57,6 +57,29 @@ class PushEventHandlerTest {
     }
 
     @Test
+    fun mapToEvent_ratified_reply_wins_over_legacy_reply() {
+        val msg = IrcMessage.parse(
+            "@+reply=new;+draft/reply=old :alice!u@h PRIVMSG #chan :reply",
+        )
+        val event = PushEventHandler.mapToEvent(msg) as IrcEvent.ChatMessage
+        assertEquals("new", event.replyToMsgid)
+    }
+
+    @Test
+    fun mapToEvent_reaction_and_unreact_mutation() {
+        val react = PushEventHandler.mapToEvent(
+            IrcMessage.parse("@+draft/react=👍;+reply=m1 :alice!u@h TAGMSG #chan"),
+        ) as IrcEvent.TagMessage
+        assertEquals("👍", react.reactEmoji)
+        assertEquals("m1", react.reactTargetMsgid)
+
+        val unreact = PushEventHandler.mapToEvent(
+            IrcMessage.parse("@+draft/unreact=👍;+reply=m1 :alice!u@h TAGMSG #chan"),
+        ) as IrcEvent.Raw
+        assertEquals("👍", unreact.message.tags["+draft/unreact"])
+    }
+
+    @Test
     fun mapToEvent_ignores_non_chat_and_other_ctcp() {
         assertNull(PushEventHandler.mapToEvent(IrcMessage.parse("PING :x")))
         assertNull(PushEventHandler.mapToEvent(IrcMessage.parse(":a!a@h PRIVMSG #c :VERSION")))

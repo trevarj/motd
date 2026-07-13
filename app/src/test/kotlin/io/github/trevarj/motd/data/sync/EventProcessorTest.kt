@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
+import io.github.trevarj.motd.irc.proto.IrcMessage
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -117,6 +118,77 @@ class EventProcessorTest {
     }
 
     @Test
+    fun replyToOwnKnownParent_setsMention_withoutTextMention() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "parent"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "#chan", text = "parent text",
+            isSelf = true, replyToMsgid = null,
+        ))
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "child", time = 1001), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "plain child",
+            isSelf = false, replyToMsgid = "parent",
+        ))
+
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        assertTrue(pagingList(buffer.id).first { it.msgid == "child" }.hasMention)
+    }
+
+    @Test
+    fun replyToOwnKnownParent_notifiesExactlyOnce() = runTest {
+        var notifications = 0
+        val notifying = EventProcessor(db, TypingTrackerImpl(), object : MessageNotifier {
+            override suspend fun onIncoming(
+                networkId: Long,
+                bufferId: Long,
+                type: BufferType,
+                hasMention: Boolean,
+                message: IrcEvent.ChatMessage,
+            ) {
+                notifications++
+                assertTrue(hasMention)
+            }
+        })
+        notifying.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+        notifying.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "parent"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "#chan", text = "parent",
+            isSelf = true, replyToMsgid = null,
+        ))
+        notifying.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "child", time = 1001), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "plain child",
+            isSelf = false, replyToMsgid = "parent",
+        ))
+
+        assertEquals(1, notifications)
+    }
+
+    @Test
+    fun replyToOtherOrMissingParent_doesNotInventMention() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "other-parent"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("bob"), target = "#chan", text = "parent text",
+            isSelf = false, replyToMsgid = null,
+        ))
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "other-child", time = 1001), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "plain child",
+            isSelf = false, replyToMsgid = "other-parent",
+        ))
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "missing-child", time = 1002), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "another plain child",
+            isSelf = false, replyToMsgid = "missing",
+        ))
+
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        val rows = pagingList(buffer.id)
+        assertFalse(rows.first { it.msgid == "other-child" }.hasMention)
+        assertFalse(rows.first { it.msgid == "missing-child" }.hasMention)
+    }
+
+    @Test
     fun quit_fansOutToEveryMemberBuffer() = runTest {
         // alice joins two channels.
         processor.process(networkId, IrcEvent.Joined(ctx(), "alice", "#a", null, null, false))
@@ -145,6 +217,11 @@ class EventProcessorTest {
 
     @Test
     fun reaction_upserted() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "m1"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "parent",
+            isSelf = false, replyToMsgid = null,
+        ))
         processor.process(networkId, IrcEvent.TagMessage(
             ctx = ctx(), source = Prefix("alice"), target = "#chan",
             typing = null, reactEmoji = "👍", reactTargetMsgid = "m1",
@@ -153,6 +230,38 @@ class EventProcessorTest {
         val reactions = db.reactionDao().observeFor(buffer.id, listOf("m1")).first()
         assertEquals(1, reactions.size)
         assertEquals("👍", reactions.single().emoji)
+    }
+
+    @Test
+    fun unreact_removesMatchingReaction_andReplayIsIdempotent() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "m1"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "parent",
+            isSelf = false, replyToMsgid = null,
+        ))
+        processor.process(networkId, IrcEvent.TagMessage(
+            ctx = ctx(), source = Prefix("bob"), target = "#chan",
+            typing = null, reactEmoji = "👍", reactTargetMsgid = "m1",
+        ))
+        val unreact = IrcEvent.Raw(
+            IrcMessage.parse("@+draft/unreact=👍;+reply=m1 :bob!u@h TAGMSG #chan"),
+        )
+
+        processor.process(networkId, unreact)
+        processor.process(networkId, unreact)
+
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        assertTrue(db.reactionDao().observeFor(buffer.id, listOf("m1")).first().isEmpty())
+    }
+
+    @Test
+    fun reactionForMissingParent_isIgnoredWithoutCreatingBuffer() = runTest {
+        processor.process(networkId, IrcEvent.TagMessage(
+            ctx = ctx(), source = Prefix("alice"), target = "#missing",
+            typing = null, reactEmoji = "👍", reactTargetMsgid = "absent",
+        ))
+
+        assertNull(db.bufferDao().byName(networkId, "#missing"))
     }
 
     @Test

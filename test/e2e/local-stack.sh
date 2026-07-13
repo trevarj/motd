@@ -140,6 +140,10 @@ history:
     znc-maxmessages: 100
     restrictions: { expire-time: 0 }
     persistent: { enabled: false }
+    # A reaction removal must survive replay with the reaction it cancels.
+    tagmsg-storage:
+        default: false
+        whitelist: ["+draft/react", "+draft/unreact", "+react"]
 datastore:
     path: /tmp/motd-stack/ergo/ircd.db
     autoupgrade: true

@@ -243,6 +243,10 @@ class IrcClient(
             return
         }
 
+        // 005 normally arrives after 001. Keep Ready's snapshot current so app-owned feature
+        // gates (notably CLIENTTAGDENY) do not operate on the empty registration-time map.
+        if (msg.command == "005") updateRuntimeIsupport(msg)
+
         when (val outcome = batches.route(msg)) {
             BatchAssembler.Outcome.Buffered -> return
             is BatchAssembler.Outcome.Closed -> emitBatch(outcome)
@@ -313,6 +317,15 @@ class IrcClient(
         }
     }
 
+    private suspend fun updateRuntimeIsupport(msg: IrcMessage) {
+        val isupport = _isupport.get()
+        isupport.update(msg.params.drop(1).dropLast(1))
+        val current = _state.value as? IrcClientState.Ready ?: return
+        val snapshot = isupportToMap(isupport)
+        _state.value = current.copy(isupport = snapshot)
+        _events.emit(IrcEvent.Registered(current.nick, current.caps, snapshot))
+    }
+
     private suspend fun emitDisconnected(reason: String?) {
         _events.emit(IrcEvent.Disconnected(reason))
     }
@@ -357,7 +370,7 @@ class IrcClient(
         beforeSend: suspend (String) -> Unit = {},
     ): String {
         val t = transport ?: return ""
-        val tags = buildMap { if (replyToMsgid != null) put("+draft/reply", replyToMsgid) }
+        val tags = buildMap { if (replyToMsgid != null) put("+reply", replyToMsgid) }
         val base = IrcMessage(tags = tags, command = "PRIVMSG", params = listOf(target, text))
         if (!hasCap("labeled-response")) {
             beforeSend("")
@@ -384,7 +397,7 @@ class IrcClient(
         if (!hasCap("message-tags")) return
         val t = transport ?: return
         val msg = IrcMessage(
-            tags = mapOf("+draft/react" to emoji, "+draft/reply" to msgid),
+            tags = mapOf("+draft/react" to emoji, "+reply" to msgid),
             command = "TAGMSG",
             params = listOf(target),
         )
@@ -554,7 +567,16 @@ class IrcClient(
 /** Snapshot ISUPPORT into the plain map exposed on Ready/Registered. */
 private fun isupportToMap(isupport: Isupport): Map<String, String> {
     val out = LinkedHashMap<String, String>()
-    for (key in listOf("CASEMAPPING", "CHANTYPES", "PREFIX", "CHATHISTORY", "BOUNCER_NETID", "VAPID", "NETWORK")) {
+    for (key in listOf(
+        "CASEMAPPING",
+        "CHANTYPES",
+        "PREFIX",
+        "CHATHISTORY",
+        "BOUNCER_NETID",
+        "VAPID",
+        "NETWORK",
+        "CLIENTTAGDENY",
+    )) {
         isupport[key]?.let { out[key] = it }
     }
     return out

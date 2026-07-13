@@ -68,6 +68,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
@@ -364,9 +365,16 @@ fun ChatContent(
     // buffer (plans/16 §5.6), or a queued reaction whose message never confirmed (plans/15 reactions).
     val invalidCommand = stringResource(R.string.chat_server_invalid_command)
     val reactFailed = stringResource(R.string.chat_react_failed)
+    val reactionBlocked = stringResource(R.string.chat_reaction_blocked)
+    val reactionSendFailed = stringResource(R.string.chat_reaction_send_failed)
     LaunchedEffect(rawSendSnackbar) {
         val sentinel = rawSendSnackbar ?: return@LaunchedEffect
-        val text = if (sentinel == "react_failed") reactFailed else invalidCommand
+        val text = when (sentinel) {
+            "react_failed" -> reactFailed
+            "reaction_blocked" -> reactionBlocked
+            "reaction_send_failed" -> reactionSendFailed
+            else -> invalidCommand
+        }
         snackbarHostState.showSnackbar(text)
         onSnackbarShown()
     }
@@ -933,6 +941,13 @@ fun ChatContent(
             // Pass the whole target: the VM queues the react when target.msgid is still null (own
             // pending message) instead of silently dropping it.
             onReact = { emoji -> hideThen { onReact(target, emoji) } },
+            reactionEnabled = { emoji ->
+                val ready = state.connState as? IrcClientState.Ready
+                val mine = target.msgid?.let { msgid ->
+                    reactionChips(msgid).firstOrNull { it.emoji == emoji }?.mine
+                } == true
+                ready != null && canSendReactionTags(ready.caps, ready.isupport, remove = mine)
+            },
             onCopy = {
                 hideThen {
                     scope.launch {

@@ -60,7 +60,7 @@ files.
 
 ### A1. Reactions do not sync to other users
 
-- **Priority / size / status:** P0, M, Ready.
+- **Priority / size / status:** P0, M, Complete (2026-07-13).
 - **Depends on:** none. Implement together with A2.
 - **Evidence:** `IrcClient.sendReact` currently emits `+draft/react` with
   `+draft/reply`; `EventMapper` and push mapping only read the legacy reply
@@ -89,6 +89,18 @@ files.
   tags; `CLIENTTAGDENY` wildcard/exemption matrix; optimistic add/remove and
   rollback; duplicate replay; push mapping. Exercise two MOTD clients on the
   Ergo/soju stack and, when available, one compatible independent client.
+- **2026-07-13 evidence:** MOTD now sends the ratified `+reply` reference,
+  accepts ratified and legacy references in live, push, and history paths, and
+  models `CLIENTTAGDENY` without changing frozen contracts. Reaction add/remove
+  is optimistic, idempotent on replay, and rolls back only its own failed
+  mutation. The action sheet and chips disable blocked operations with a
+  snackbar instead of creating local-only state. Unit coverage includes the
+  wildcard/exemption matrix, exact wire tags, push/history mapping, missing
+  parents, duplicate removal, and add/remove rollback. An opt-in test drove two
+  real `IrcClient` instances through the local Ergo fixture and proved reply,
+  react, and unreact delivery plus CHATHISTORY replay. The fixture now stores
+  `+draft/react` and `+draft/unreact` symmetrically; Ergo's default omitted the
+  removal tag and could otherwise resurrect a reaction after reconnect.
 - **References:** [IRCv3 reply](https://ircv3.net/specs/client-tags/reply),
   [IRCv3 reactions](https://ircv3.net/specs/client-tags/react),
   [IRCv3 message tags](https://ircv3.net/specs/extensions/message-tags), and
@@ -96,7 +108,7 @@ files.
 
 ### A2. Replies do not render for other users or notify the replied-to user
 
-- **Priority / size / status:** P0, M, Ready; coupled to A1.
+- **Priority / size / status:** P0, M, Complete (2026-07-13); coupled to A1.
 - **Depends on:** A1 tag parsing and `CLIENTTAGDENY` model.
 - **Implementation:**
   1. Send `+reply=<msgid>` and receive `+reply` with legacy
@@ -121,6 +133,17 @@ files.
 - **Focused tests:** outgoing channel/DM matrix for preference on/off and tags
   allowed/blocked; receive ratified/legacy tags; self-parent mention resolution;
   missing parent; muted/fool/foreground precedence; history and push replay.
+- **2026-07-13 evidence:** reply delivery is computed by a pure helper before
+  send: semantic tags are preferred, an optional global Chat setting adds a
+  visible channel prefix, and denied tags degrade to one visible prefix in both
+  channels and DMs. Incoming replies resolve only a locally known same-buffer
+  parent; a reply to the current user's message enters the existing mention and
+  notification precedence exactly once, while another or missing parent does
+  not. Local pending/echo reconciliation retains the original relationship.
+  Focused tests cover the channel/DM preference and denial matrix, duplicate
+  prefix avoidance, ratified/legacy receive, missing parents, self-parent
+  mention notification, history, and push replay. The two-client real-Ergo test
+  verified that a second client receives and replays the reply relationship.
 
 ## B. One visible-timeline definition
 

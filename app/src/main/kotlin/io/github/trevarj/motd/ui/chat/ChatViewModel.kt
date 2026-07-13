@@ -23,6 +23,7 @@ import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
+import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
@@ -43,6 +44,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -276,12 +278,26 @@ class ChatViewModel @Inject constructor(
      * arrived) surface a snackbar rather than failing silently.
      */
     fun react(message: MessageEntity, emoji: String) = viewModelScope.launch {
+        val ready = connState.value as? IrcClientState.Ready
+        val removing = message.msgid?.let { msgid ->
+            reactionChips.value[msgid]?.firstOrNull { it.emoji == emoji }?.mine
+        } == true
+        if (ready == null || !canSendReactionTags(ready.caps, ready.isupport, removing)) {
+            _snackbar.value = "reaction_blocked"
+            return@launch
+        }
         val msgid = message.msgid ?: messageRepository.awaitMsgid(message.id, REACT_QUEUE_TIMEOUT_MS)
         if (msgid == null) {
             _snackbar.value = "react_failed" // sentinel; screen maps to chat_react_failed
             return@launch
         }
-        connectionManager.sendReact(bufferId, msgid, emoji)
+        try {
+            connectionManager.sendReact(bufferId, msgid, emoji)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            _snackbar.value = "reaction_send_failed"
+        }
     }
 
     /**

@@ -82,6 +82,13 @@ history:
         expire-time: 0
     persistent:
         enabled: false
+    # Keep reaction additions and removals together in CHATHISTORY.
+    tagmsg-storage:
+        default: false
+        whitelist:
+            - "+draft/react"
+            - "+draft/unreact"
+            - "+react"
 
 datastore:
     path: /ircd/ircd.db

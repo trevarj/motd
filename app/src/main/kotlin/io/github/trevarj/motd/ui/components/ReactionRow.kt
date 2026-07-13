@@ -26,9 +26,8 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 data class ReactionChip(val emoji: String, val count: Int, val mine: Boolean)
 
 /**
- * Chip row under a bubble. Tapping a chip adds the reaction (add-only in v1); tapping one you
- * already reacted with is a no-op (plans/07) — the caller wires that via [onReact], which the row
- * suppresses for `mine` chips.
+ * Chip row under a bubble. Tapping an unowned chip adds the reaction; tapping an owned chip asks
+ * the caller to remove it with `draft/unreact`.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -45,7 +44,7 @@ fun ReactionRow(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         reactions.forEach { chip ->
-            ReactionChipView(chip = chip, onClick = { if (!chip.mine) onReact(chip.emoji) })
+            ReactionChipView(chip = chip, onClick = { onReact(chip.emoji) })
         }
     }
 }

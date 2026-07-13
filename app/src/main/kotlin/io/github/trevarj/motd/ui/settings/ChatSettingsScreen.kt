@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import androidx.compose.material.icons.Icons
@@ -35,24 +36,28 @@ fun ChatSettingsScreen(
     val state by viewModel.state.collectAsState()
     ChatSettingsContent(
         settings = state.settings,
+        reply = state.reply,
         onBack = onBack,
         onOpenFriends = onOpenFriends,
         onOpenFools = onOpenFools,
         onShowJoinPartQuit = viewModel::setShowJoinPartQuit,
         onFoolsMode = viewModel::setFoolsMode,
         onShowComposerEmoji = viewModel::setShowComposerEmoji,
+        onVisibleReplyPrefix = viewModel::setVisibleReplyPrefix,
     )
 }
 
 @Composable
 fun ChatSettingsContent(
     settings: Settings,
+    reply: ReplyConfig,
     onBack: () -> Unit,
     onOpenFriends: () -> Unit,
     onOpenFools: () -> Unit,
     onShowJoinPartQuit: (Boolean) -> Unit,
     onFoolsMode: (FoolsMode) -> Unit,
     onShowComposerEmoji: (Boolean) -> Unit,
+    onVisibleReplyPrefix: (Boolean) -> Unit,
 ) {
     SettingsScaffold(title = stringResource(R.string.settings_chat), onBack = onBack) {
         SettingsGroup(title = stringResource(R.string.settings_messages_section)) {
@@ -71,6 +76,14 @@ fun ChatSettingsContent(
                 checked = settings.showComposerEmoji,
                 onCheckedChange = onShowComposerEmoji,
                 switchTag = "settings_switch_composer_emoji",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_reply_prefix),
+                subtitle = stringResource(R.string.settings_reply_prefix_desc),
+                checked = reply.visibleChannelPrefix,
+                onCheckedChange = onVisibleReplyPrefix,
+                switchTag = "settings_switch_reply_prefix",
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_people)) {
@@ -119,8 +132,10 @@ private fun ChatSettingsPreview() {
     MotdTheme {
         ChatSettingsContent(
             settings = Settings(friends = setOf("alice"), fools = setOf("bob", "carol")),
+            reply = ReplyConfig(),
             onBack = {}, onOpenFriends = {}, onOpenFools = {},
             onShowJoinPartQuit = {}, onFoolsMode = {}, onShowComposerEmoji = {},
+            onVisibleReplyPrefix = {},
         )
     }
 }

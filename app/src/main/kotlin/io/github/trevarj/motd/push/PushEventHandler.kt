@@ -15,8 +15,8 @@ import javax.inject.Inject
  * pushed message reaches Room by the same write path as a live message.
  *
  * The `:irc` [io.github.trevarj.motd.irc.client] event mapper is module-`internal`, so this
- * reimplements the small subset that soju webpush actually delivers: PRIVMSG/NOTICE, including
- * CTCP ACTION. Notification posting is delegated to [notifier] (WP5's MessagingStyle rules) so
+ * reimplements the small subset that soju webpush actually delivers: PRIVMSG/NOTICE/TAGMSG,
+ * including CTCP ACTION and reaction mutations. Notification posting is delegated to [notifier] so
  * the mapping stays pure and unit-testable without an Android context.
  */
 class PushEventHandler(
@@ -57,6 +57,7 @@ class PushEventHandler(
          */
         fun mapToEvent(msg: IrcMessage): IrcEvent? = when (msg.command.uppercase()) {
             "PRIVMSG", "NOTICE" -> mapChat(msg)
+            "TAGMSG" -> mapTagMessage(msg)
             else -> null
         }
 
@@ -89,9 +90,26 @@ class PushEventHandler(
                 target = target,
                 text = text,
                 isSelf = false, // push is delivered while we are offline; never our own echo
-                replyToMsgid = msg.tags["+draft/reply"],
+                replyToMsgid = msg.replyReference(),
             )
         }
+
+        private fun mapTagMessage(msg: IrcMessage): IrcEvent? {
+            if (msg.tags["+draft/unreact"] != null) return IrcEvent.Raw(msg)
+            val source = msg.source ?: return null
+            val target = msg.params.firstOrNull() ?: return null
+            val react = msg.tags["+draft/react"]
+            return IrcEvent.TagMessage(
+                ctx = context(msg),
+                source = source,
+                target = target,
+                typing = msg.tags["+typing"],
+                reactEmoji = react,
+                reactTargetMsgid = react?.let { msg.replyReference() },
+            )
+        }
+
+        private fun IrcMessage.replyReference(): String? = tags["+reply"] ?: tags["+draft/reply"]
 
         private fun context(msg: IrcMessage): MessageContext = MessageContext(
             msgid = msg.tags["msgid"],

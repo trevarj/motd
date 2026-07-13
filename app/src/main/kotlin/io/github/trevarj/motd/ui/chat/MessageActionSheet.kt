@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -61,7 +62,7 @@ val EMOJI_GRID = listOf(
 
 /**
  * Long-press action sheet: quick-reaction row + Reply/Copy/Quote actions, expandable to the full
- * emoji grid. Reactions are add-only (plans/07). Callbacks dismiss the sheet at the call site.
+ * emoji grid. Selecting an already-owned reaction toggles it off in the mutation layer.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +71,7 @@ fun MessageActionSheet(
     onDismiss: () -> Unit,
     onReply: () -> Unit,
     onReact: (String) -> Unit,
+    reactionEnabled: (String) -> Boolean = { true },
     onCopy: () -> Unit,
     onQuote: () -> Unit,
     // SERVER buffers have no msgids/targets: reply + reactions are inert and hidden (plans/16 §5.6).
@@ -93,11 +95,13 @@ fun MessageActionSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 QUICK_REACTIONS.forEach { emoji ->
+                    val enabled = reactionEnabled(emoji)
                     Box(
                         // >=48dp touch target (plans/15 #24).
                         modifier = Modifier
                             .minimumInteractiveComponentSize()
-                            .clickable { onReact(emoji) },
+                            .alpha(if (enabled) 1f else 0.38f)
+                            .clickable(enabled = enabled) { onReact(emoji) },
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(text = emoji, fontSize = 28.sp)
@@ -134,10 +138,12 @@ fun MessageActionSheet(
                         .padding(horizontal = 12.dp),
                 ) {
                     items(EMOJI_GRID) { emoji ->
+                        val enabled = reactionEnabled(emoji)
                         Box(
                             modifier = Modifier
                                 .minimumInteractiveComponentSize()
-                                .clickable { onReact(emoji) },
+                                .alpha(if (enabled) 1f else 0.38f)
+                                .clickable(enabled = enabled) { onReact(emoji) },
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(text = emoji, fontSize = 24.sp, textAlign = TextAlign.Center)

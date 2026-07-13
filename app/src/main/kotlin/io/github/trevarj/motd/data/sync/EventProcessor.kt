@@ -14,6 +14,7 @@ import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.service.IrcEventSink
+import io.github.trevarj.motd.service.RoomReactionMutationStore
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -39,6 +40,7 @@ class EventProcessor @Inject constructor(
     private val memberDao get() = db.memberDao()
     private val reactionDao get() = db.reactionDao()
     private val userDao get() = db.userDao()
+    private val reactionMutations = RoomReactionMutationStore(db)
 
     private val states = ConcurrentHashMap<Long, NetworkState>()
 
@@ -142,7 +144,15 @@ class EventProcessor @Inject constructor(
         val type = if (isDm) BufferType.QUERY else BufferType.CHANNEL
         val bufferId = ensureBuffer(networkId, bufferName, type, st)
 
-        val hasMention = !e.isSelf && st.mentionRegex.containsMatchIn(e.text)
+        val replyReference = e.replyToMsgid
+        val replyMentionsSelf = if (!e.isSelf && replyReference != null) {
+            messageDao.byMsgid(bufferId, replyReference)?.let { parent ->
+                parent.isSelf || st.normalize(parent.sender) == st.normalize(st.selfNick)
+            } == true
+        } else {
+            false
+        }
+        val hasMention = !e.isSelf && (replyMentionsSelf || st.mentionRegex.containsMatchIn(e.text))
         val row = MessageEntity(
             bufferId = bufferId,
             msgid = e.ctx.msgid,
@@ -257,7 +267,12 @@ class EventProcessor @Inject constructor(
     private suspend fun onTag(networkId: Long, e: IrcEvent.TagMessage) {
         val st = stateFor(networkId)
         val isDm = !isChannel(e.target, st)
-        val bufferName = if (isDm) e.source.nick else e.target
+        val sourceIsSelf = st.normalize(e.source.nick) == st.normalize(st.selfNick)
+        val bufferName = if (isDm) {
+            if (sourceIsSelf) e.target else e.source.nick
+        } else {
+            e.target
+        }
         val type = if (isDm) BufferType.QUERY else BufferType.CHANNEL
         // typing: routed to tracker, never persisted.
         e.typing?.let { typingState ->
@@ -268,7 +283,8 @@ class EventProcessor @Inject constructor(
         val emoji = e.reactEmoji
         val targetMsgid = e.reactTargetMsgid
         if (emoji != null && targetMsgid != null) {
-            val bufferId = ensureBuffer(networkId, bufferName, type, st)
+            val bufferId = bufferDao.byName(networkId, st.normalize(bufferName))?.id ?: return
+            if (messageDao.byMsgid(bufferId, targetMsgid) == null) return
             reactionDao.upsert(
                 ReactionEntity(
                     bufferId = bufferId,
@@ -433,12 +449,35 @@ class EventProcessor @Inject constructor(
 
     /** Whitelisted informational numerics → SERVER buffer, kind SERVER_INFO (our nick dropped). */
     private suspend fun onRaw(networkId: Long, e: IrcEvent.Raw) {
+        if (removeReaction(networkId, e.message)) return
         if (e.message.command !in SERVER_INFO_NUMERICS) return
         val st = stateFor(networkId)
         val bufferId = ensureServerBuffer(networkId, st)
         // params[0] is our nick for these numerics; drop it and join the rest as the info line.
         val text = e.message.params.drop(1).joinToString(" ").trim()
         insertSystem(bufferId, serverCtx(), MessageKind.SERVER_INFO, "", text)
+    }
+
+    /** `draft/unreact` stays Raw to preserve the frozen event contract; consume it here. */
+    private suspend fun removeReaction(networkId: Long, message: io.github.trevarj.motd.irc.proto.IrcMessage): Boolean {
+        if (message.command != "TAGMSG") return false
+        val emoji = message.tags["+draft/unreact"] ?: return false
+        val targetMsgid = message.tags["+reply"] ?: message.tags["+draft/reply"] ?: return true
+        val source = message.source?.nick ?: return true
+        val target = message.params.firstOrNull() ?: return true
+        val st = stateFor(networkId)
+        val isDm = !isChannel(target, st)
+        val sourceIsSelf = st.normalize(source) == st.normalize(st.selfNick)
+        val bufferName = if (isDm) {
+            if (sourceIsSelf) target else source
+        } else {
+            target
+        }
+        val bufferId = bufferDao.byName(networkId, st.normalize(bufferName))?.id ?: return true
+        if (messageDao.byMsgid(bufferId, targetMsgid) == null) return true
+        val previous = reactionMutations.findOwn(bufferId, targetMsgid, source, st::normalize)
+        if (previous?.emoji == emoji) reactionMutations.remove(previous)
+        return true
     }
 
     /** Disconnected marker → SERVER buffer for cheap in-history reconnect visibility. */

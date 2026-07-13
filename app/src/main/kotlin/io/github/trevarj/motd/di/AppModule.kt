@@ -10,6 +10,8 @@ import dagger.hilt.components.SingletonComponent
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
+import io.github.trevarj.motd.data.prefs.ReplyPrefs
+import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.PushProviderPrefs
@@ -77,6 +79,9 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun appearancePrefs(impl: AppearancePrefsImpl): AppearancePrefs
+
+    @Binds @Singleton
+    abstract fun replyPrefs(impl: ReplyPrefsImpl): ReplyPrefs
 
     @Binds @Singleton
     abstract fun pushPrefs(impl: DataStoreSettingsRepository): PushPrefs

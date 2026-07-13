@@ -15,6 +15,7 @@ import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
+import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.obfs.VlessLink
@@ -22,6 +23,8 @@ import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.SaslMechanism
+import io.github.trevarj.motd.irc.client.canSendClientTag
+import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.transport.TransportFactory
@@ -54,6 +57,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val eventProcessor: EventProcessor,
     private val settings: DataStoreSettingsRepository,
     private val pushPrefs: PushPrefs,
+    private val replyPrefs: ReplyPrefs,
     private val certStore: CertTrustStore,
     private val baseTransportFactory: TransportFactory,
     private val localSocksProvider: LocalSocksProvider,
@@ -65,6 +69,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val networkDao get() = db.networkDao()
     private val bufferDao get() = db.bufferDao()
     private val messageDao get() = db.messageDao()
+    private val reactionMutations = RoomReactionMutationStore(db)
 
     private val actors = HashMap<Long, ConnectionActor>()
     // Fingerprint of the config each actor was built from, so config changes trigger a restart.
@@ -403,15 +408,28 @@ class ConnectionManagerImpl @Inject constructor(
         val buffer = bufferDao.observeById(bufferId) ?: return
         val client = clientFor(buffer.networkId) ?: return
         val target = buffer.name
+        val ready = client.state.value as? IrcClientState.Ready
+        val replyTagAllowed = ready != null && canSendClientTag(ready.caps, ready.isupport, "+reply")
+        val parentSender = replyToMsgid?.let { messageDao.byMsgid(bufferId, it)?.sender }
+        val replyConfig = if (replyToMsgid != null) replyPrefs.config.first() else null
+        val delivery = prepareReplyDelivery(
+            text = text,
+            replyToMsgid = replyToMsgid,
+            parentSender = parentSender,
+            bufferType = buffer.type,
+            visibleChannelPrefix = replyConfig?.visibleChannelPrefix == true,
+            replyTagAllowed = replyTagAllowed,
+        )
+        val outgoingText = delivery.text
 
         // /me → CTCP ACTION wrapped in \x01. Only the FIRST physical line of a multiline
         // paste can carry the /me action; the rest are plain PRIVMSGs.
-        val isAction = text.startsWith("/me ")
+        val isAction = outgoingText.startsWith("/me ")
 
         // A composer can contain embedded newlines (multiline paste); each physical line must be
         // its own IRC message or the server would parse the tail as a raw command (line injection).
         // Split on CR/LF first, then apply the >400-byte UTF-8 word-boundary split per line.
-        val lines = text.split(Regex("\r\n|\r|\n")).filter { it.isNotEmpty() }
+        val lines = outgoingText.split(Regex("\r\n|\r|\n")).filter { it.isNotEmpty() }
         if (lines.isEmpty()) return
 
         for ((lineIndex, line) in lines.withIndex()) {
@@ -431,7 +449,7 @@ class ConnectionManagerImpl @Inject constructor(
                 }
                 // Persist the pending row in beforeSend — BEFORE the PRIVMSG hits the wire — so a
                 // fast labeled echo can't be processed ahead of the insert and duplicate the send.
-                val label = client.sendMessage(target, chunk, replyToMsgid) { lbl ->
+                val label = client.sendMessage(target, chunk, delivery.wireReplyToMsgid) { lbl ->
                     if (lbl.isNotEmpty()) {
                         eventProcessor.insertPending(bufferId, lbl, buffer_meNick(client), displayChunk, replyToMsgid, kind)
                     }
@@ -508,20 +526,29 @@ class ConnectionManagerImpl @Inject constructor(
     override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) {
         val buffer = bufferDao.observeById(bufferId) ?: return
         val client = clientFor(buffer.networkId) ?: return
-        // Optimistic own-reaction: upsert a local row keyed (bufferId, targetMsgid, sender) BEFORE the
-        // TAGMSG round-trips so the chip appears instantly regardless of whether soju/ergo echoes our
-        // own react back. The reactions table's UNIQUE(bufferId, targetMsgid, sender) with REPLACE
-        // means a returning echo collapses onto this exact row — no duplicate (plans/15 reactions).
-        db.reactionDao().upsert(
-            ReactionEntity(
-                bufferId = bufferId,
-                targetMsgid = msgid,
-                sender = buffer_meNick(client),
-                emoji = emoji,
-                serverTime = System.currentTimeMillis(),
-            ),
+        val ready = client.state.value as? IrcClientState.Ready ?: return
+        val sender = ready.nick
+        val normalize: (String) -> String = client.isupport::normalize
+        val previous = reactionMutations.findOwn(bufferId, msgid, sender, normalize)
+        val removing = previous?.emoji == emoji
+        // Recheck at the mutation boundary so a stale sheet cannot create local-only state after a
+        // capability or CLIENTTAGDENY change.
+        if (!canSendReactionTags(ready.caps, ready.isupport, removing)) return
+
+        val reaction = ReactionEntity(
+            bufferId = bufferId,
+            targetMsgid = msgid,
+            sender = sender,
+            emoji = emoji,
+            serverTime = System.currentTimeMillis(),
         )
-        client.sendReact(buffer.name, msgid, emoji)
+        mutateReaction(reactionMutations, previous, reaction) { kind ->
+            if (kind == ReactionMutationKind.REMOVE) {
+                client.send(reactionTagMessage(buffer.name, msgid, emoji, kind))
+            } else {
+                client.sendReact(buffer.name, msgid, emoji)
+            }
+        }
     }
 
     override suspend fun joinChannel(networkId: Long, channel: String) {
