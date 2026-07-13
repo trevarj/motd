@@ -437,6 +437,7 @@
     <string name="add_network_preset_secure">Secure networks</string>
     <string name="add_network_preset_legacy">Legacy unencrypted</string>
     <string name="add_network_preset_unencrypted">Unencrypted</string>
+    <string name="add_network_preset_libera_motd">Joins #motd once after connecting</string>
     <string name="add_network_plaintext_title">Connect without encryption?</string>
     <string name="add_network_plaintext_message">Your password and messages may be visible to the network. Continue only if this server does not support TLS.</string>
     <string name="add_network_plaintext_continue">Connect anyway</string>

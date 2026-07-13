@@ -187,9 +187,14 @@ private fun NetworkPresetPicker(
         )
         SubLabel(stringResource(R.string.add_network_preset_secure))
         COMMON_NETWORK_PRESETS.filterNot(NetworkPreset::legacyUnencrypted).forEach { preset ->
+            val endpoint = "${preset.host}:${preset.port} · TLS"
             RadioRow(
                 label = preset.displayName,
-                subtitle = "${preset.host}:${preset.port} · TLS",
+                subtitle = if (preset.id == NetworkPresetId.LIBERA) {
+                    "$endpoint · ${stringResource(R.string.add_network_preset_libera_motd)}"
+                } else {
+                    endpoint
+                },
                 selected = selected == preset.id,
                 enabled = true,
                 onClick = { onSelect(preset.id) },

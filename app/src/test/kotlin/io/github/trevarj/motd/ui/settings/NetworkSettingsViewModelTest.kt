@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.settings
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.CertPrompt
@@ -31,6 +32,13 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class NetworkSettingsViewModelTest {
+
+    private class FakePresetEnrollmentPrefs : PresetEnrollmentPrefs {
+        val revoked = mutableSetOf<Long>()
+        override suspend fun markLiberaEligible(networkId: Long) = Unit
+        override suspend fun claimLiberaMotdJoin(networkId: Long) = false
+        override suspend fun revokeLiberaEligibility(networkId: Long) { revoked += networkId }
+    }
 
     private class FakeNetworkRepository(initial: List<NetworkEntity>) : NetworkRepository {
         val networks = initial.associateByTo(mutableMapOf()) { it.id }
@@ -111,8 +119,11 @@ class NetworkSettingsViewModelTest {
         bouncerNetId = id.toString(),
     )
 
-    private fun TestScope.loadedVm(repo: FakeNetworkRepository): NetworkSettingsViewModel {
-        return NetworkSettingsViewModel(repo, FakeConnectionManager()).also {
+    private fun TestScope.loadedVm(
+        repo: FakeNetworkRepository,
+        prefs: PresetEnrollmentPrefs = FakePresetEnrollmentPrefs(),
+    ): NetworkSettingsViewModel {
+        return NetworkSettingsViewModel(repo, FakeConnectionManager(), prefs).also {
             it.init(1)
             runCurrent()
         }
@@ -259,6 +270,24 @@ class NetworkSettingsViewModelTest {
         assertNull(vm.state.value.pendingBouncerIdentityChange)
         assertEquals(listOf("update:1"), repo.operations)
         assertTrue(done)
+    }
+
+    @Test
+    fun changing_an_eligible_direct_endpoint_revokes_enrollment_before_save() = runTest {
+        val directLibera = root(host = "irc.libera.chat", port = 6697).copy(
+            role = NetworkRole.DIRECT,
+            parentId = null,
+        )
+        val repo = FakeNetworkRepository(listOf(directLibera))
+        val prefs = FakePresetEnrollmentPrefs()
+        val vm = loadedVm(repo, prefs)
+        vm.editServer(vm.state.value.server.copy(host = "irc.example.org"))
+
+        vm.save {}
+        runCurrent()
+
+        assertEquals(setOf(1L), prefs.revoked)
+        assertEquals("irc.example.org", repo.networks.getValue(1).host)
     }
 
     @Test

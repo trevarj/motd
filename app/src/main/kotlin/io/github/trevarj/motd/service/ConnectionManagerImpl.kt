@@ -61,6 +61,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val baseTransportFactory: TransportFactory,
     private val localSocksProvider: LocalSocksProvider,
     private val historyResyncCoordinator: HistoryResyncCoordinator,
+    private val presetEnrollmentCoordinator: PresetEnrollmentCoordinator,
     // Lazy to break the WebPushRegistrar <-> ConnectionManager ctor cycle.
     private val webPushRegistrar: dagger.Lazy<WebPushRegistrar>,
 ) : ConnectionManager {
@@ -343,6 +344,17 @@ class ConnectionManagerImpl @Inject constructor(
         // Persist STS policy if the server advertised one.
         val stsValue = client.caps.firstOrNull { it == "sts" || it.startsWith("sts=") }?.substringAfter('=', "")
         stsStore.parse(row.host, stsValue?.ifEmpty { null }, row.tls, row.port)?.let { stsStore.upsert(it) }
+        val enrollmentResult = presetEnrollmentCoordinator.onReady(
+            networkId = row.id,
+            isCurrent = isCurrent,
+        ) { channel ->
+            client.send(
+                io.github.trevarj.motd.irc.proto.IrcMessage(command = "JOIN", params = listOf(channel)),
+            )
+        }
+        if (enrollmentResult == EnrollmentJoinResult.FAILED) {
+            Log.w(TAG, "One-shot Libera #motd JOIN write failed for network ${row.id}")
+        }
         // In push mode, re-arm webpush on this network if we already hold its endpoint (the
         // socket just reached Ready after a reconnect / quick foreground connect).
         if (settings.settings.first().deliveryMode == DeliveryMode.UNIFIED_PUSH) {

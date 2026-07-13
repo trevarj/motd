@@ -510,7 +510,7 @@ with unrelated predicates at individual call sites.
 
 ### D3. Auto-join `#motd` for first-time direct Libera users
 
-- **Priority / size / status:** P1, S/M, Ready after F2.
+- **Priority / size / status:** P1, S/M, Complete (2026-07-13).
 - **Depends on:** F2 preset identity and `PresetEnrollmentPrefs`.
 - **Implementation:** disclose the behavior in the Libera preset UI. Only a
   newly created direct Libera preset is eligible. Atomically mark the one-shot
@@ -523,6 +523,22 @@ with unrelated predicates at individual call sites.
   feedback rather than a hidden loop.
 - **Acceptance / tests:** eligible first Ready, process-death atomicity,
   reconnect idempotence, failed JOIN, and every exclusion above.
+- **Implementation evidence:** a dedicated `preset_enrollment` DataStore keeps
+  eligible and attempted network-id sets separate from settings. Add Network
+  marks only a newly inserted, unchanged Libera preset before connecting and
+  revokes provisional rows on retry/abandon; Custom, existing, soju, imported,
+  and bouncer-child paths never mark eligibility. The Libera choice discloses
+  the one-time `#motd` JOIN. On the first current Ready generation, the service
+  atomically consumes the durable claim before validating the persisted direct
+  TLS endpoint and writing `JOIN #motd`; reconnect, process death, endpoint
+  edits, cancellation, or a failed write cannot enqueue it again. Server JOIN
+  errors still arrive through the ordinary IRC event stream.
+- **Verification evidence:** focused tests cover DataStore recreation,
+  atomic claim/revoke, first Ready and reconnect, obsolete generations, failed
+  writes, durable endpoint validation, and every creation-path exclusion. The
+  complete FOSS debug and release unit suites passed, followed by warnings-as-
+  errors `:app:lintFossDebug`, debug assembly, and the full FOSS release-parity
+  gate through `:app:assembleFossRelease`.
 
 ### D4. Verify the reported fool-menu crash on the current release
 
@@ -857,8 +873,9 @@ user explicitly requests it.
 - Connection changes cover cancellation, stale generations, capability absence,
   deduplication, and current error presentation.
 - UI changes include localized accessibility labels and Compose behavior tests.
-- Run the focused module tests, both flavor lint tasks when UI/resources change,
-  and `nix develop -c ./gradlew build` as documented in `.agents/testing.md`.
+- Run the focused module tests and FOSS lint/assembly tasks when UI/resources
+  change, plus the FOSS release-parity command documented in `.agents/testing.md`.
+  The unfinished Google/FCM flavor is dormant and is not a build or release gate.
 - Device-only lifecycle, scrolling, or performance claims are verified on a
   physical device and recorded with the tested commit/build and relevant
   `adb dumpsys gfxinfo` sample.

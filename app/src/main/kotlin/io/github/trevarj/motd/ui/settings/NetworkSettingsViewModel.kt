@@ -7,9 +7,11 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.liberaEndpointChanged
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.ServerForm
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,6 +93,7 @@ private fun String?.normalizedOptional(): String? = this?.trim()?.ifBlank { null
 class NetworkSettingsViewModel @Inject constructor(
     private val networkRepository: NetworkRepository,
     private val connectionManager: ConnectionManager,
+    private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(NetworkSettingsUiState())
@@ -175,6 +178,9 @@ class NetworkSettingsViewModel @Inject constructor(
                 pendingBouncerIdentityChange = BouncerIdentityChange(children.size),
             )
         } else {
+            if (liberaEndpointChanged(current, updated)) {
+                presetEnrollmentPrefs.revokeLiberaEligibility(current.id)
+            }
             networkRepository.updateNetwork(updated)
             onDone()
         }
@@ -237,7 +243,10 @@ class NetworkSettingsViewModel @Inject constructor(
         ).copy(autoConnect = _state.value.autoConnect)
 
     fun delete(onDone: () -> Unit) = viewModelScope.launch {
-        _state.value.entity?.let { networkRepository.deleteNetwork(it.id) }
+        _state.value.entity?.let {
+            presetEnrollmentPrefs.revokeLiberaEligibility(it.id)
+            networkRepository.deleteNetwork(it.id)
+        }
         onDone()
     }
 }

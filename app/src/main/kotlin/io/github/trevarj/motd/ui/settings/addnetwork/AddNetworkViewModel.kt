@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.onboarding.AuthForm
@@ -16,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -48,6 +50,7 @@ data class AddNetworkUiState(
 class AddNetworkViewModel @Inject constructor(
     private val networkRepository: NetworkRepository,
     private val connectionManager: ConnectionManager,
+    private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AddNetworkUiState())
@@ -128,7 +131,11 @@ class AddNetworkViewModel @Inject constructor(
                 role = s.role,
                 name = networkPreset(s.presetId)?.displayName ?: s.server.host,
             )
+            val existingNetworkIds = networkRepository.observeNetworks().first().mapTo(mutableSetOf()) { it.id }
             val networkId = networkRepository.addNetwork(entity)
+            if (networkId !in existingNetworkIds && s.presetId == NetworkPresetId.LIBERA) {
+                presetEnrollmentPrefs.markLiberaEligible(networkId)
+            }
             _state.value = _state.value.copy(
                 phase = AddNetworkPhase.TESTING,
                 networkId = networkId,
@@ -204,6 +211,9 @@ class AddNetworkViewModel @Inject constructor(
 
     private suspend fun deleteHalfCreated() {
         testJob?.cancel()
-        _state.value.networkId?.let { networkRepository.deleteNetwork(it) }
+        _state.value.networkId?.let { networkId ->
+            presetEnrollmentPrefs.revokeLiberaEligibility(networkId)
+            networkRepository.deleteNetwork(networkId)
+        }
     }
 }
