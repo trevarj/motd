@@ -1,25 +1,39 @@
 package io.github.trevarj.motd.data.repo
 
 import android.util.LruCache
+import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 // OG-tag link preview. HttpURLConnection GET, 5s connect/read timeouts, only text/html, body
 // capped at 512 KB. Results (including nulls for unfetchable / non-HTML pages) are cached in an
 // in-memory LruCache(256) so repeated renders don't refetch. The OG parser is a small
 // regex-based extractor (no HTML-parser dependency) and is unit-tested against fixtures.
 @Singleton
-class LinkPreviewRepositoryImpl @Inject constructor() : LinkPreviewRepository {
+class LinkPreviewRepositoryImpl @Inject constructor(
+    private val contentPreviewPrefs: ContentPreviewPrefs,
+) : LinkPreviewRepository {
     // LruCache does not permit null values, so wrap results in an Optional-ish holder.
     private val cache = LruCache<String, Holder>(CACHE_SIZE)
+    private val fetchScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override suspend fun preview(url: String): LinkPreview? {
+        // Gate before even consulting cached metadata: disabled means neither network nor render.
+        if (!contentPreviewPrefs.config.first().showLinkPreviews) return null
         cache.get(url)?.let { return it.value }
         val result = try {
             fetch(url)
@@ -34,23 +48,45 @@ class LinkPreviewRepositoryImpl @Inject constructor() : LinkPreviewRepository {
         return result
     }
 
-    private suspend fun fetch(url: String): LinkPreview? = withContext(Dispatchers.IO) {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = TIMEOUT_MS
-            readTimeout = TIMEOUT_MS
-            instanceFollowRedirects = true
-            setRequestProperty("Accept", "text/html")
+    private suspend fun fetch(url: String): LinkPreview? = suspendCancellableCoroutine { continuation ->
+        val connection = AtomicReference<HttpURLConnection?>()
+        val worker = AtomicReference<Job?>()
+        continuation.invokeOnCancellation {
+            // HttpURLConnection reads do not reliably honor interruption. Detach the caller
+            // immediately, close asynchronously because disconnect itself may block, and bound
+            // any reluctant worker by the existing five-second socket timeout.
+            worker.get()?.cancel()
+            connection.get()?.let { conn -> fetchScope.launch { conn.disconnect() } }
         }
-        try {
-            conn.connect()
-            if (conn.responseCode !in 200..299) return@withContext null
-            val contentType = conn.contentType?.substringBefore(';')?.trim()?.lowercase()
-            if (contentType != "text/html") return@withContext null
-            val html = conn.inputStream.readCapped(MAX_BYTES)
-            parseOgTags(url, html)
-        } finally {
-            conn.disconnect()
+        val job = fetchScope.launch {
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = TIMEOUT_MS
+                readTimeout = TIMEOUT_MS
+                instanceFollowRedirects = true
+                setRequestProperty("Accept", "text/html")
+            }
+            connection.set(conn)
+            try {
+                conn.connect()
+                val result = if (conn.responseCode !in 200..299) {
+                    null
+                } else {
+                    val contentType = conn.contentType?.substringBefore(';')?.trim()?.lowercase()
+                    if (contentType != "text/html") null
+                    else parseOgTags(url, conn.inputStream.readCapped(MAX_BYTES))
+                }
+                if (continuation.isActive) continuation.resume(result)
+            } catch (error: Exception) {
+                if (continuation.isActive) continuation.resumeWithException(error)
+            } finally {
+                conn.disconnect()
+            }
+        }
+        worker.set(job)
+        if (!continuation.isActive) {
+            job.cancel()
+            connection.get()?.let { conn -> fetchScope.launch { conn.disconnect() } }
         }
     }
 

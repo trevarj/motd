@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -37,6 +38,7 @@ fun ChatSettingsScreen(
     ChatSettingsContent(
         settings = state.settings,
         reply = state.reply,
+        contentPreviews = state.contentPreviews,
         onBack = onBack,
         onOpenFriends = onOpenFriends,
         onOpenFools = onOpenFools,
@@ -44,6 +46,8 @@ fun ChatSettingsScreen(
         onFoolsMode = viewModel::setFoolsMode,
         onShowComposerEmoji = viewModel::setShowComposerEmoji,
         onVisibleReplyPrefix = viewModel::setVisibleReplyPrefix,
+        onShowImages = viewModel::setShowImages,
+        onShowLinkPreviews = viewModel::setShowLinkPreviews,
     )
 }
 
@@ -51,6 +55,7 @@ fun ChatSettingsScreen(
 fun ChatSettingsContent(
     settings: Settings,
     reply: ReplyConfig,
+    contentPreviews: ContentPreviewConfig,
     onBack: () -> Unit,
     onOpenFriends: () -> Unit,
     onOpenFools: () -> Unit,
@@ -58,6 +63,8 @@ fun ChatSettingsContent(
     onFoolsMode: (FoolsMode) -> Unit,
     onShowComposerEmoji: (Boolean) -> Unit,
     onVisibleReplyPrefix: (Boolean) -> Unit,
+    onShowImages: (Boolean) -> Unit,
+    onShowLinkPreviews: (Boolean) -> Unit,
 ) {
     SettingsScaffold(title = stringResource(R.string.settings_chat), onBack = onBack) {
         SettingsGroup(title = stringResource(R.string.settings_messages_section)) {
@@ -67,6 +74,22 @@ fun ChatSettingsContent(
                 checked = settings.showJoinPartQuit,
                 onCheckedChange = onShowJoinPartQuit,
                 switchTag = "settings_switch_show_jpq",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_show_images),
+                subtitle = stringResource(R.string.settings_show_images_desc),
+                checked = contentPreviews.showImages,
+                onCheckedChange = onShowImages,
+                switchTag = "settings_switch_show_images",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_show_link_previews),
+                subtitle = stringResource(R.string.settings_show_link_previews_desc),
+                checked = contentPreviews.showLinkPreviews,
+                onCheckedChange = onShowLinkPreviews,
+                switchTag = "settings_switch_show_link_previews",
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_composer_section)) {
@@ -133,9 +156,11 @@ private fun ChatSettingsPreview() {
         ChatSettingsContent(
             settings = Settings(friends = setOf("alice"), fools = setOf("bob", "carol")),
             reply = ReplyConfig(),
+            contentPreviews = ContentPreviewConfig(),
             onBack = {}, onOpenFriends = {}, onOpenFools = {},
             onShowJoinPartQuit = {}, onFoolsMode = {}, onShowComposerEmoji = {},
             onVisibleReplyPrefix = {},
+            onShowImages = {}, onShowLinkPreviews = {},
         )
     }
 }

@@ -481,7 +481,7 @@ with unrelated predicates at individual call sites.
 
 ### D2. Independently disable images and link previews
 
-- **Priority / size / status:** P1, M, Ready.
+- **Priority / size / status:** P1, M, Complete (2026-07-13).
 - **Depends on:** none; F1 must later honor these gates.
 - **Implementation:** add app-owned `ContentPreviewPrefs` with `showImages` and
   `showLinkPreviews`, both default on, and two Chat settings switches.
@@ -494,6 +494,19 @@ with unrelated predicates at individual call sites.
 - **Acceptance / tests:** no repository/image request in each disabled mode;
   exact combined matrix; persistence/defaults; runtime toggle cancellation;
   clickable links; stable list position.
+- **Implementation evidence:** app-owned `ContentPreviewPrefs` persists two
+  independent default-on gates and Chat settings exposes both with stable
+  semantics. The chat starts network content closed until DataStore emits,
+  gates URL work before request creation, cancels row work when a gate changes,
+  removes direct-image and link-thumbnail models from Coil, and gates the link
+  repository before both cache and HTTP. Linkified message text remains
+  independent and clickable. Interruptible HTTP work disconnects in `finally`
+  when its row is cancelled.
+- **Verification evidence:** focused FOSS tests cover persistence/defaults, all
+  four image/link combinations, thumbnail removal with metadata retained, and
+  a real MockWebServer proving disabled and cached link previews make zero new
+  requests. The shared policy feeds every comfortable, compact, and two-line
+  message density without changing paging items or list state.
 
 ### D3. Auto-join `#motd` for first-time direct Libera users
 

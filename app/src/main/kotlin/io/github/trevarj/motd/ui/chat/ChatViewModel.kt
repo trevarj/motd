@@ -19,6 +19,8 @@ import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
+import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
+import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
@@ -99,9 +101,17 @@ class ChatViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val visibilityReader: MessageVisibilityReader,
     private val historyResyncCoordinator: HistoryResyncCoordinator,
+    contentPreviewPrefs: ContentPreviewPrefs,
     appearancePrefs: AppearancePrefs,
 ) : ViewModel() {
     val appearance = appearancePrefs.config
+    val contentPreviews: StateFlow<ContentPreviewConfig> = contentPreviewPrefs.config
+        // Start closed until DataStore emits, so a persisted opt-out cannot race initial composition.
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            ContentPreviewConfig(showImages = false, showLinkPreviews = false),
+        )
 
     private val route: ChatRoute = savedStateHandle.toRoute<ChatRoute>()
     val bufferId: Long = route.bufferId
@@ -330,7 +340,8 @@ class ChatViewModel @Inject constructor(
         messageRepository.deleteMessage(message.id)
     }
 
-    suspend fun linkPreview(url: String): LinkPreview? = linkPreviewRepository.preview(url)
+    suspend fun linkPreview(url: String): LinkPreview? =
+        if (contentPreviews.value.showLinkPreviews) linkPreviewRepository.preview(url) else null
 
     /** Transient one-shot messages surfaced as a snackbar by the screen (plans/16 §5.6). */
     private val _snackbar = MutableStateFlow<String?>(null)

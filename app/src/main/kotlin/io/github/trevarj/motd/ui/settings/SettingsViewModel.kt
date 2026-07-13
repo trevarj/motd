@@ -8,6 +8,8 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
+import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
@@ -34,6 +36,7 @@ data class SettingsUiState(
     val pushProvider: PushProvider = PushProvider.UNIFIED_PUSH,
     val appearance: AppearanceConfig = AppearanceConfig(),
     val reply: ReplyConfig = ReplyConfig(),
+    val contentPreviews: ContentPreviewConfig = ContentPreviewConfig(),
 )
 
 @HiltViewModel
@@ -44,9 +47,15 @@ class SettingsViewModel @Inject constructor(
     private val pushProviderPrefs: PushProviderPrefs,
     private val appearancePrefs: AppearancePrefs,
     private val replyPrefs: ReplyPrefs,
+    private val contentPreviewPrefs: ContentPreviewPrefs,
 ) : ViewModel() {
 
-    private val appearanceAndReply = combine(appearancePrefs.config, replyPrefs.config, ::Pair)
+    private val appearanceReplyAndPreviews = combine(
+        appearancePrefs.config,
+        replyPrefs.config,
+        contentPreviewPrefs.config,
+        ::Triple,
+    )
 
     val state: StateFlow<SettingsUiState> =
         combine(
@@ -56,8 +65,9 @@ class SettingsViewModel @Inject constructor(
             // toggle enables live once the soju bouncer advertises webpush.
             pushAvailability.availability(),
             pushProviderPrefs.provider,
-            appearanceAndReply,
-        ) { settings, networks, availability, provider, (appearance, reply) ->
+            appearanceReplyAndPreviews,
+        ) { settings, networks, availability, provider, appearanceReplyPreviews ->
+            val (appearance, reply, contentPreviews) = appearanceReplyPreviews
             SettingsUiState(
                 settings = settings,
                 networks = networks,
@@ -65,6 +75,7 @@ class SettingsViewModel @Inject constructor(
                 pushProvider = provider,
                 appearance = appearance,
                 reply = reply,
+                contentPreviews = contentPreviews,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -124,5 +135,13 @@ class SettingsViewModel @Inject constructor(
 
     fun setVisibleReplyPrefix(show: Boolean) = viewModelScope.launch {
         replyPrefs.setVisibleChannelPrefix(show)
+    }
+
+    fun setShowImages(show: Boolean) = viewModelScope.launch {
+        contentPreviewPrefs.setShowImages(show)
+    }
+
+    fun setShowLinkPreviews(show: Boolean) = viewModelScope.launch {
+        contentPreviewPrefs.setShowLinkPreviews(show)
     }
 }

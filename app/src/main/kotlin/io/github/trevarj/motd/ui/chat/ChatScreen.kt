@@ -150,6 +150,7 @@ fun ChatScreen(
     val appearance by viewModel.appearance.collectAsStateWithLifecycle(
         initialValue = io.github.trevarj.motd.data.prefs.AppearanceConfig(),
     )
+    val contentPreviews by viewModel.contentPreviews.collectAsStateWithLifecycle()
     // Round 5: nick sheet + raw-send snackbar (plans/16 §5.6/§5.8).
     val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
     val snackbarMessage by viewModel.snackbar.collectAsStateWithLifecycle()
@@ -166,6 +167,8 @@ fun ChatScreen(
         showJoinPartQuit = settings.showJoinPartQuit,
         chatWallpaper = appearance.wallpaper,
         showComposerEmoji = settings.showComposerEmoji,
+        showImages = contentPreviews.showImages,
+        showLinkPreviews = contentPreviews.showLinkPreviews,
         reactionChips = reactionChipsForMessage,
         replyPreview = viewModel::replyPreview,
         memberNicks = memberNicks,
@@ -272,6 +275,8 @@ fun ChatContent(
     showJoinPartQuit: Boolean = true,
     chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection = io.github.trevarj.motd.data.prefs.WallpaperSelection(),
     showComposerEmoji: Boolean = true,
+    showImages: Boolean = true,
+    showLinkPreviews: Boolean = true,
     readMarkerSnapshot: Long? = null,
     // Live buffer read marker (advances with markRead); drives the FAB unread badge count.
     readMarkerLive: Long? = null,
@@ -869,7 +874,9 @@ fun ChatContent(
                         onRetry = onRetry,
                         onDelete = onDelete,
                         loadPreview = loadPreview,
-                        previewsEnabled = initialPositionSettled,
+                        richContentReady = initialPositionSettled,
+                        showImages = showImages,
+                        showLinkPreviews = showLinkPreviews,
                         // Link-preview tap opens the URL in the system browser.
                         onOpenLink = { ctx.startActivity(Intent(Intent.ACTION_VIEW, it.toUri())) },
                         highlightMsgid = highlightMsgid,

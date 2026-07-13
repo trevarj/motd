@@ -340,6 +340,10 @@
     <string name="settings_nick_color_overrides">Nick color overrides</string>
     <string name="settings_show_jpq">Show join/part messages</string>
     <string name="settings_show_jpq_desc">Show join, part, and quit events in channels.</string>
+    <string name="settings_show_images">Show images</string>
+    <string name="settings_show_images_desc">Load inline images and preview thumbnails</string>
+    <string name="settings_show_link_previews">Show link previews</string>
+    <string name="settings_show_link_previews_desc">Fetch page titles and descriptions for links</string>
     <string name="settings_composer_emoji">Emoji button</string>
     <string name="settings_composer_emoji_desc">Show the emoji button in the message composer.</string>
     <string name="settings_reply_prefix">Visible reply prefix</string>

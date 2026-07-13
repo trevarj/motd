@@ -136,7 +136,9 @@ fun MessageList(
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> LinkPreview?,
-    previewsEnabled: Boolean,
+    richContentReady: Boolean,
+    showImages: Boolean,
+    showLinkPreviews: Boolean,
     onOpenLink: (String) -> Unit,
     modifier: Modifier = Modifier,
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
@@ -159,7 +161,7 @@ fun MessageList(
     onSenderClick: (String) -> Unit = {},
 ) {
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
-    val richContentEnabled = previewsEnabled && !scrolling
+    val richContentEnabled = richContentReady && !scrolling && (showImages || showLinkPreviews)
     val formatMessageTime = rememberMessageTimeFormatter()
     LazyColumn(
         state = listState,
@@ -242,7 +244,8 @@ fun MessageList(
                 onRetry = onRetry,
                 onDelete = onDelete,
                 loadPreview = loadPreview,
-                previewsEnabled = previewsEnabled,
+                showImages = showImages,
+                showLinkPreviews = showLinkPreviews,
                 richContentEnabled = richContentEnabled,
                 onOpenLink = onOpenLink,
                 onSenderClick = onSenderClick,
@@ -371,7 +374,8 @@ private fun MessageRow(
     onRetry: (MessageEntity) -> Unit,
     onDelete: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> LinkPreview?,
-    previewsEnabled: Boolean,
+    showImages: Boolean,
+    showLinkPreviews: Boolean,
     richContentEnabled: Boolean,
     onOpenLink: (String) -> Unit,
     onSenderClick: (String) -> Unit,
@@ -414,14 +418,15 @@ private fun MessageRow(
         snapshotFlow { latestRichContentEnabled }.first { it }
         richUrls = withContext(Dispatchers.Default) { messageUrls(msg.text) }
     }
-    val imageUrl = richUrls?.imageUrl
-    val linkUrl = richUrls?.linkUrl
+    val visibleUrls = richUrls?.gated(showImages, showLinkPreviews)
+    val imageUrl = visibleUrls?.imageUrl
+    val linkUrl = visibleUrls?.linkUrl
 
     // Lazily fetch a link preview for the first non-image URL once the timeline is idle. The
     // completion state retains a null result (fetch failed / not HTML), so it does not retry or
     // leave a loading skeleton behind (plans/15 #3).
     var previewState by remember(msg.id, linkUrl) { mutableStateOf<PreviewState>(PreviewState.Idle) }
-    val latestPreviewsEnabled by rememberUpdatedState(previewsEnabled && richContentEnabled)
+    val latestPreviewsEnabled by rememberUpdatedState(richContentEnabled)
     LaunchedEffect(msg.id, linkUrl) {
         val url = linkUrl ?: return@LaunchedEffect
         snapshotFlow { latestPreviewsEnabled }.first { it }
@@ -436,7 +441,7 @@ private fun MessageRow(
         }
         previewState = PreviewState.Done(preview)
     }
-    val preview = (previewState as? PreviewState.Done)?.preview
+    val preview = (previewState as? PreviewState.Done)?.preview?.withImageGate(showImages)
     val previewLoading = linkUrl != null && previewState is PreviewState.Loading
     val formattedTime = remember(msg.serverTime, formatTime) { formatTime(msg.serverTime) }
 
