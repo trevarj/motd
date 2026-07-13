@@ -460,7 +460,7 @@ with unrelated predicates at individual call sites.
 
 ### D1. Add a clear-search X
 
-- **Priority / size / status:** P1, S, Ready.
+- **Priority / size / status:** P1, S, Complete (2026-07-13).
 - **Depends on:** none.
 - **Implementation:** show a trailing clear `IconButton` only for non-empty
   search input. One action atomically clears the local `TextFieldValue` and
@@ -471,6 +471,13 @@ with unrelated predicates at individual call sites.
 - **Acceptance / tests:** icon visibility, click and accessibility semantics;
   selection/composition reset; ViewModel empty-query state; stale result
   suppression.
+- **Implementation evidence:** non-empty search input exposes a localized,
+  accessibility-labeled clear action with stable `search_clear` semantics. The
+  action resets the complete local `TextFieldValue` while retaining the
+  existing focused field and immediately clears the ViewModel query.
+- **Verification evidence:** focused tests cover IME selection/composition
+  reset, immediate empty-query state, and rejection of a late result emitted by
+  the cancelled pre-clear search flow.
 
 ### D2. Independently disable images and link previews
 

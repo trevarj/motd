@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -113,6 +114,24 @@ fun SearchContent(
                             .fillMaxWidth()
                             .focusRequester(focusRequester),
                         placeholder = { Text(stringResource(R.string.search_hint)) },
+                        trailingIcon = if (text.text.isNotEmpty()) {
+                            {
+                                IconButton(
+                                    onClick = {
+                                        text = clearedSearchText()
+                                        onQueryChange("")
+                                    },
+                                    modifier = Modifier.testTag("search_clear"),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Clear,
+                                        contentDescription = stringResource(R.string.search_clear),
+                                    )
+                                }
+                            }
+                        } else {
+                            null
+                        },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         colors = TextFieldDefaults.colors(
@@ -169,6 +188,9 @@ fun SearchContent(
         }
     }
 }
+
+/** Clear the visible IME value, including any selection or active composition. */
+internal fun clearedSearchText(): TextFieldValue = TextFieldValue("")
 
 @Composable
 private fun SearchResults(

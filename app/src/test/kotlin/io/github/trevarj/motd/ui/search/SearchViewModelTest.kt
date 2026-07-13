@@ -1,12 +1,15 @@
 package io.github.trevarj.motd.ui.search
 
 import app.cash.turbine.test
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.repo.SearchRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -86,6 +89,48 @@ class SearchViewModelTest {
             assertEquals("coroutine", results.rawQuery)
             assertEquals(1, results.groups.size)
             assertEquals(1L, results.groups.first().bufferId)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun clear_resets_selection_and_composition() {
+        val editing = TextFieldValue(
+            text = "coroutine",
+            selection = TextRange(2, 7),
+            composition = TextRange(0, 9),
+        )
+
+        val cleared = clearedSearchText()
+
+        assertEquals("", cleared.text)
+        assertEquals(TextRange.Zero, cleared.selection)
+        assertEquals(null, cleared.composition)
+        assertTrue(editing != cleared)
+    }
+
+    @Test
+    fun clearing_query_suppresses_late_results_from_cancelled_search() = runTest {
+        val pending = MutableStateFlow<List<SearchHit>>(emptyList())
+        val repo = object : SearchRepository {
+            override fun search(query: String, bufferId: Long?): Flow<List<SearchHit>> = pending
+        }
+        val vm = SearchViewModel(repo)
+
+        vm.state.test {
+            awaitItem()
+            vm.onQueryChange("coroutine")
+            advanceTimeBy(300)
+            runCurrent()
+            assertEquals("coroutine", awaitItem().rawQuery)
+
+            vm.onQueryChange("")
+            runCurrent()
+            assertEquals(SearchUiState(), awaitItem())
+
+            pending.value = listOf(hit(1, "late coroutine result"))
+            runCurrent()
+            expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
     }
