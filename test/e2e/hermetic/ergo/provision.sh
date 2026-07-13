@@ -36,6 +36,7 @@ ERGO_HOST="${ERGO_HOST:-ergo}"
 ERGO_PORT="${ERGO_PORT:-6667}"
 TEST_CHANNEL="${TEST_CHANNEL:-##motdtest}"
 APP_NICK="${APP_NICK:-motdadb}"
+SEED_HOLD_SECONDS="${SEED_HOLD_SECONDS:-1}"
 
 UP_ACCOUNT="${UP_ACCOUNT:-motd}"
 UP_PASS="${UP_PASS:-motdupstream}"
@@ -115,7 +116,10 @@ do_seed() {
     printf 'PRIVMSG %s :check this link https://example.com/page\r\n' "$TEST_CHANNEL"
     printf 'PRIVMSG %s :and an image https://example.com/cat.png\r\n' "$TEST_CHANNEL"
     printf 'PRIVMSG %s :%s: welcome to the seed channel\r\n' "$TEST_CHANNEL" "$APP_NICK"
-    sleep 1
+    printf 'PRIVMSG %s :hi from the seeded member\r\n' "$APP_NICK"
+    # Device checks can keep the second identity visible in Channel info without a separate
+    # daemon. The ordinary seed remains a short one-shot fixture.
+    sleep "$SEED_HOLD_SECONDS"
     printf 'QUIT :seed done\r\n'
   } | feed_irc
 }

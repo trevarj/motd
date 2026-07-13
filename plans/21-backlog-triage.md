@@ -541,7 +541,7 @@ with unrelated predicates at individual call sites.
 
 ### D4. Verify the reported fool-menu crash on the current release
 
-- **Priority / size / status:** P0 if reproducible; S verification first.
+- **Priority / size / status:** P0, S, Complete (2026-07-14).
 - **Depends on:** none.
 - **Evidence:** commit `0436d50` removed blocking suspend reads from the
   notification path, and `MotdNotificationsFoolTest` covers adding a fool then
@@ -554,6 +554,21 @@ with unrelated predicates at individual call sites.
   evidence and do not change code. If either crashes, save the exact stack
   trace, add a failing focused regression test, fix the traced cause, and rerun
   both paths. Do not apply a speculative second fix.
+- **Implementation evidence:** the physical-device procedure reproduced
+  `IllegalStateException: Attempt to collect twice from pageEventFlow` as soon
+  as the sender sheet added a fool. The chat ViewModel had combined a changed
+  visibility spec with the same single-collector `PagingData` generation. It
+  now starts a fresh repository Paging generation with `flatMapLatest` for each
+  distinct behavioral filter and caches the resulting stream. A focused flow
+  test locks the new-generation invariant. The local seed fixture can hold its
+  second member in-channel and emits a deterministic DM for this procedure.
+- **Verification evidence:** on physical A059 `00152151K005265`, the current
+  FOSS debug build passed adding/removing `motdadb2` from both the seeded
+  message-sender sheet and live channel-member sheet, receiving its fresh DM,
+  opening the collapsed Fools section and DM row, expanding its channel
+  placeholder, and reopening the DM through the sender’s Message action. The
+  debug PID remained alive and the crash buffer stayed empty after every fixed
+  trigger. The same run’s A-C baseline passed 108 checks with zero failures.
 
 ## E. Message interaction, layout, and formatting
 

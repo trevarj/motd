@@ -52,6 +52,10 @@ so a USB device reaches it at `127.0.0.1:6697`.
 ./test/e2e/local-stack.sh down
 ```
 
+For member-sheet checks, keep the seeder joined long enough to drive the UI in
+another terminal: `SEED_HOLD_SECONDS=180 ./test/e2e/local-stack.sh seed`. The
+seed also sends a deterministic direct message to `motdadb`.
+
 For the debug-only auto-follow trace, enable the log tag before launching the
 chat and capture only its structured records:
 

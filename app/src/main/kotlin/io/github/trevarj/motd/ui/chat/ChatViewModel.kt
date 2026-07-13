@@ -86,6 +86,18 @@ internal fun MessageEntity.toReplyPreviewData(): ReplyPreviewData = ReplyPreview
 fun resendText(kind: io.github.trevarj.motd.data.db.MessageKind, text: String): String =
     if (kind == io.github.trevarj.motd.data.db.MessageKind.ACTION) "/me $text" else text
 
+/**
+ * Recreate the repository Paging generation when a behavioral filter changes. Transforming the
+ * same PagingData from `combine` would emit its single-collector pageEventFlow a second time.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+internal fun filteredMessagePages(
+    source: () -> Flow<PagingData<MessageEntity>>,
+    specs: Flow<MessageVisibilitySpec>,
+): Flow<PagingData<MessageEntity>> = specs.flatMapLatest { spec ->
+    source().map { paging -> paging.filter { keepMessage(it, spec) } }
+}
+
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
@@ -126,8 +138,10 @@ class ChatViewModel @Inject constructor(
 
     /** Cached Paging stream filtered per [MessageFilterSpec]; collected once in the screen. */
     val messages: Flow<PagingData<MessageEntity>> =
-        messageRepository.messages(bufferId)
-            .combine(filterSpec) { paging, spec -> paging.filter { keepMessage(it, spec) } }
+        filteredMessagePages(
+            source = { messageRepository.messages(bufferId) },
+            specs = filterSpec,
+        )
             .cachedIn(viewModelScope)
 
     /** Newest stored wire row, including ignored tails; effective bottom may acknowledge it. */
