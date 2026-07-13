@@ -5,6 +5,9 @@ import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -15,12 +18,18 @@ class ChatModelsTest {
     private fun react(msgid: String, sender: String, emoji: String) =
         ReactionEntity(bufferId = 1L, targetMsgid = msgid, sender = sender, emoji = emoji, serverTime = 0L)
 
-    private fun message(kind: MessageKind = MessageKind.PRIVMSG, self: Boolean = false, failed: Boolean = false) =
+    private fun message(
+        kind: MessageKind = MessageKind.PRIVMSG,
+        self: Boolean = false,
+        failed: Boolean = false,
+        id: Long = 1L,
+        sender: String = "nick",
+    ) =
         MessageEntity(
-            id = 1L,
+            id = id,
             bufferId = 1L,
             serverTime = 1L,
-            sender = "nick",
+            sender = sender,
             kind = kind,
             text = "text",
             isSelf = self,
@@ -131,6 +140,36 @@ class ChatModelsTest {
         tracker.requestFollow()
 
         assertTrue(tracker.onItemCountChanged(11))
+    }
+
+    @Test fun `ignored tail growth does not trigger follow until meaningful identity changes`() {
+        val tracker = AutoFollowTracker(initialItemCount = 10)
+        tracker.reset(itemCount = 10, atBottom = true, newestEffectiveId = 7)
+
+        assertFalse(tracker.onTimelineChanged(newItemCount = 11, newNewestEffectiveId = 7))
+        assertTrue(tracker.onTimelineChanged(newItemCount = 12, newNewestEffectiveId = 8))
+    }
+
+    @Test fun `collapsed fool tail counts as effective bottom and cannot become saved anchor`() {
+        val rows = listOf(
+            message(id = 3, sender = "fool"),
+            message(id = 2, sender = "alice"),
+            message(id = 1, sender = "bob"),
+        )
+        val policy = MessageVisibilityPolicy(
+            MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.COLLAPSE),
+        )
+
+        assertTrue(isAtEffectiveBottom(1, 0, rows.size, rows::getOrNull, policy))
+        assertEquals(2L, newestEffectiveMessageId(rows.size, rows::getOrNull, policy))
+        assertEquals(2L, nearestAnchorRow(0, rows.size, rows::getOrNull, policy)?.second?.id)
+    }
+
+    @Test fun `meaningful row below viewport means it is not effective bottom`() {
+        val rows = listOf(message(id = 2), message(id = 1))
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec())
+
+        assertFalse(isAtEffectiveBottom(1, 0, rows.size, rows::getOrNull, policy))
     }
 
     @Test fun `normal entry scrolls newest only when retained state is off bottom`() {

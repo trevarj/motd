@@ -19,6 +19,8 @@ import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
+import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
@@ -40,6 +42,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -92,6 +95,7 @@ class ChatViewModel @Inject constructor(
     private val scrollPositionStore: ChatScrollPositionStore,
     private val eventSink: IrcEventSink,
     private val settingsRepository: SettingsRepository,
+    private val visibilityReader: MessageVisibilityReader,
     appearancePrefs: AppearancePrefs,
 ) : ViewModel() {
     val appearance = appearancePrefs.config
@@ -103,14 +107,19 @@ class ChatViewModel @Inject constructor(
     // re-emit the paging stream (plans/13 §2.5). ChatState is untouched — the screen collects
     // [settings] separately (mirrors R1 keeping the 5-ary combine stable).
     private val filterSpec = settingsRepository.settings
-        .map { MessageFilterSpec(it.showJoinPartQuit, it.fools, it.foolsMode) }
+        .map(MessageVisibilitySpec::from)
         .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, MessageVisibilitySpec())
 
     /** Cached Paging stream filtered per [MessageFilterSpec]; collected once in the screen. */
     val messages: Flow<PagingData<MessageEntity>> =
         messageRepository.messages(bufferId)
             .combine(filterSpec) { paging, spec -> paging.filter { keepMessage(it, spec) } }
             .cachedIn(viewModelScope)
+
+    /** Newest stored wire row, including ignored tails; effective bottom may acknowledge it. */
+    val rawNewestTime: StateFlow<Long?> = visibilityReader.observeLatestRawTime(bufferId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Full settings for the timeline (friends/fools/foolsMode/nick styling); collected in the screen. */
     val settings: StateFlow<Settings> = settingsRepository.settings
@@ -496,24 +505,35 @@ class ChatViewModel @Inject constructor(
      * requires a live client with `draft/chathistory`, fetches ~100 messages around [timeMs], and
      * feeds them through the sole IRC→Room writer. Returns true when events were persisted.
      */
-    private val resolver = ChatJumpResolver(messageRepository) { name, timeMs, limit ->
-        val networkId = state.value.buffer?.networkId ?: return@ChatJumpResolver false
-        val client = connectionManager.clientFor(networkId) ?: return@ChatJumpResolver false
-        if (!client.hasCap("draft/chathistory")) return@ChatJumpResolver false
-        val result = runCatching {
-            client.chathistory(
-                ChatHistoryRequest(
-                    subcommand = ChatHistoryRequest.Subcommand.AROUND,
-                    target = name,
-                    bound1 = "timestamp=${Instant.ofEpochMilli(timeMs)}",
-                    limit = limit,
-                ),
+    private val resolver = ChatJumpResolver(
+        messages = messageRepository,
+        fetchAround = fetch@ { name, timeMs, limit ->
+            val networkId = state.value.buffer?.networkId ?: return@fetch false
+            val client = connectionManager.clientFor(networkId) ?: return@fetch false
+            if (!client.hasCap("draft/chathistory")) return@fetch false
+            val result = runCatching {
+                client.chathistory(
+                    ChatHistoryRequest(
+                        subcommand = ChatHistoryRequest.Subcommand.AROUND,
+                        target = name,
+                        bound1 = "timestamp=${Instant.ofEpochMilli(timeMs)}",
+                        limit = limit,
+                    ),
+                )
+            }.getOrNull() ?: return@fetch false
+            if (result.events.isEmpty()) return@fetch false
+            eventSink.process(networkId, IrcEvent.HistoryBatch(name, result.events))
+            true
+        },
+        countNewer = { targetBufferId, serverTime, id ->
+            visibilityReader.countTimelineNewer(
+                targetBufferId,
+                serverTime,
+                id,
+                MessageVisibilitySpec.from(settingsRepository.settings.first()),
             )
-        }.getOrNull() ?: return@ChatJumpResolver false
-        if (result.events.isEmpty()) return@ChatJumpResolver false
-        eventSink.process(networkId, IrcEvent.HistoryBatch(name, result.events))
-        true
-    }
+        },
+    )
 
     private val _jumpTarget = MutableStateFlow<ChatJumpResolver.Result.Target?>(null)
     /** Resolved jump target (index + optional highlight msgid); null when nothing to jump to. */
@@ -568,35 +588,55 @@ class ChatViewModel @Inject constructor(
         // never trip the "new messages" divider or the scroll-down badge, since you have read what
         // you just sent. Null (no real marker, or nothing unread from others) hides both.
         viewModelScope.launch {
+            val entrySpec = MessageVisibilitySpec.from(settingsRepository.settings.first())
             val realMarker = bufferRepository.observeBuffer(bufferId).firstOrNull()?.readMarkerTime
             _readMarkerSnapshot.value = if (realMarker == null) {
                 null
             } else {
-                messageRepository.firstUnreadOtherTime(bufferId, realMarker)?.let { it - 1 }
+                visibilityReader.firstVisibleUnreadTime(bufferId, realMarker, entrySpec)
+                    ?.let { it - 1 }
             }
             // A deep-link owns positioning. A normal open first restores this buffer's last
             // in-memory viewport, then falls back to oldest unread incoming, then newest.
             if (!hasDeepJump && !_entryPositionSettled.value) {
-                _initialTarget.value = restoredScrollPosition()
-                    ?: unreadEntryPosition(realMarker)
+                _initialTarget.value = restoredScrollPosition(entrySpec)
+                    ?: unreadEntryPosition(realMarker, entrySpec)
                     ?: ChatInitialPosition(index = 0)
             }
         }
     }
 
-    private suspend fun restoredScrollPosition(): ChatInitialPosition? {
+    private suspend fun restoredScrollPosition(spec: MessageVisibilitySpec): ChatInitialPosition? {
         val saved = scrollPositionStore.get(bufferId) ?: return null
-        val index = saved.msgid?.let { msgid ->
-            messageRepository.byMsgid(bufferId, msgid)?.let { row ->
-                messageRepository.countNewerThan(bufferId, row.serverTime, row.id)
-            }
-        } ?: messageRepository.countNewerThan(bufferId, saved.serverTime, saved.rowId)
-        return ChatInitialPosition(index = index, offset = saved.offset, fromSavedPosition = true)
+        val anchor = visibilityReader.resolveSavedAnchor(
+            bufferId = bufferId,
+            msgid = saved.msgid,
+            serverTime = saved.serverTime,
+            id = saved.rowId,
+            spec = spec,
+        ) ?: run {
+            scrollPositionStore.remove(bufferId)
+            return null
+        }
+        val index = visibilityReader.countTimelineNewer(
+            bufferId,
+            anchor.serverTime,
+            anchor.id,
+            spec,
+        )
+        return ChatInitialPosition(
+            index = index,
+            offset = saved.offset.takeIf { anchor.id == saved.rowId } ?: 0,
+            fromSavedPosition = true,
+        )
     }
 
-    private suspend fun unreadEntryPosition(realMarker: Long?): ChatInitialPosition? {
+    private suspend fun unreadEntryPosition(
+        realMarker: Long?,
+        spec: MessageVisibilitySpec,
+    ): ChatInitialPosition? {
         val targetTime = realMarker?.let {
-            messageRepository.firstUnreadOtherTime(bufferId, it)
+            visibilityReader.firstVisibleUnreadTime(bufferId, it, spec)
         } ?: return null
         return when (val result = resolver.resolve(bufferId, null, targetTime, null)) {
             is ChatJumpResolver.Result.Target -> ChatInitialPosition(index = result.index)
@@ -640,6 +680,10 @@ class ChatViewModel @Inject constructor(
 
     fun saveScrollPosition(position: ChatScrollPosition) {
         scrollPositionStore.put(bufferId, position)
+    }
+
+    fun clearScrollPosition() {
+        scrollPositionStore.remove(bufferId)
     }
 
     /** A target could not be loaded safely; retain the read gate rather than marking it read. */

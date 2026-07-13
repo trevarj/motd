@@ -17,6 +17,8 @@ import io.github.trevarj.motd.data.repo.MessageRepository
  */
 class ChatJumpResolver(
     private val messages: MessageRepository,
+    private val countNewer: suspend (bufferId: Long, serverTime: Long, id: Long) -> Int =
+        { bufferId, serverTime, id -> messages.countNewerThan(bufferId, serverTime, id) },
     private val fetchAround: suspend (bufferName: String, timeMs: Long, limit: Int) -> Boolean,
 ) {
     sealed interface Result {
@@ -40,19 +42,19 @@ class ChatJumpResolver(
             // No exact target: approximate by time. Long.MAX_VALUE id makes the count include
             // every row at the same serverTime, landing at (or just above) the time boundary.
             if (timeMs <= 0) return Result.NotFound
-            val index = messages.countNewerThan(bufferId, timeMs, Long.MAX_VALUE)
+            val index = countNewer(bufferId, timeMs, Long.MAX_VALUE)
             return Result.Target(index, highlightMsgid = null)
         }
 
         // 1. Local hit → its index is the count of strictly-newer rows.
         messages.byMsgid(bufferId, msgid)?.let { row ->
-            return Result.Target(messages.countNewerThan(bufferId, row.serverTime, row.id), msgid)
+            return Result.Target(countNewer(bufferId, row.serverTime, row.id), msgid)
         }
 
         // 2. Miss + we have a time + a name → fetch AROUND, then retry the local lookup once.
         if (timeMs > 0 && bufferName != null && fetchAround(bufferName, timeMs, 100)) {
             messages.byMsgid(bufferId, msgid)?.let { row ->
-                return Result.Target(messages.countNewerThan(bufferId, row.serverTime, row.id), msgid)
+                return Result.Target(countNewer(bufferId, row.serverTime, row.id), msgid)
             }
         }
 

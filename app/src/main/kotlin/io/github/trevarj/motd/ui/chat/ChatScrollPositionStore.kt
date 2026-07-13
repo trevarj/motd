@@ -12,4 +12,8 @@ class ChatScrollPositionStore @Inject constructor() {
     fun put(bufferId: Long, position: ChatScrollPosition) {
         positions[bufferId] = position
     }
+
+    fun remove(bufferId: Long) {
+        positions.remove(bufferId)
+    }
 }

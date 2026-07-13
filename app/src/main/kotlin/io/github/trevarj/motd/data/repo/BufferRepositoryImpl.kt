@@ -5,16 +5,27 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MemberDao
 import io.github.trevarj.motd.data.db.MemberEntity
+import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 // Buffer-level reads and pin/mute toggles. Mark-read is intentionally NOT here: it flows through
 // ConnectionManager.markRead (single entry point) so Room advance + MARKREAD stay coupled.
 class BufferRepositoryImpl @Inject constructor(
     private val bufferDao: BufferDao,
     private val memberDao: MemberDao,
+    private val settings: SettingsRepository,
+    private val visibilityReader: MessageVisibilityReader,
 ) : BufferRepository {
-    override fun observeChatList(): Flow<List<ChatListRow>> = bufferDao.observeChatList()
+    override fun observeChatList(): Flow<List<ChatListRow>> = combine(
+        bufferDao.observeChatList(),
+        settings.settings.map(MessageVisibilitySpec::from).distinctUntilChanged(),
+    ) { rows, spec -> visibilityReader.resolveChatList(rows, spec) }
 
     override fun observeBuffer(id: Long): Flow<BufferEntity?> = bufferDao.observe(id)
 

@@ -66,6 +66,8 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.client.canSendReactionTags
@@ -133,6 +135,7 @@ fun ChatScreen(
     val readMarkerSnapshot by viewModel.readMarkerSnapshot.collectAsStateWithLifecycle()
     // Live read marker drives the FAB unread badge so it clears as messages are read (not on exit).
     val readMarkerTime by viewModel.readMarkerTime.collectAsStateWithLifecycle()
+    val rawNewestTime by viewModel.rawNewestTime.collectAsStateWithLifecycle()
     // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val appearance by viewModel.appearance.collectAsStateWithLifecycle(
@@ -150,6 +153,7 @@ fun ChatScreen(
         friends = settings.friends,
         fools = settings.fools,
         foolsMode = settings.foolsMode,
+        showJoinPartQuit = settings.showJoinPartQuit,
         chatWallpaper = appearance.wallpaper,
         showComposerEmoji = settings.showComposerEmoji,
         reactionChips = reactionChipsForMessage,
@@ -158,6 +162,7 @@ fun ChatScreen(
         knownNicks = knownNicks,
         readMarkerSnapshot = readMarkerSnapshot,
         readMarkerLive = readMarkerTime,
+        rawNewestTime = rawNewestTime,
         onMarkRead = viewModel::markRead,
         onBack = onBack,
         // SERVER buffers have no ChannelInfo (no members/topic); tapping the title is inert.
@@ -184,6 +189,7 @@ fun ChatScreen(
         onInitialPositionHandled = viewModel::onInitialPositionHandled,
         onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
         onScrollPositionChanged = viewModel::saveScrollPosition,
+        onClearScrollPosition = viewModel::clearScrollPosition,
         onVisibleMsgidsChanged = viewModel::setVisibleMsgids,
         onNeedMembers = viewModel::ensureMembersObserved,
         onJumpUnresolved = viewModel::onJumpUnresolved,
@@ -250,11 +256,13 @@ fun ChatContent(
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    showJoinPartQuit: Boolean = true,
     chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection = io.github.trevarj.motd.data.prefs.WallpaperSelection(),
     showComposerEmoji: Boolean = true,
     readMarkerSnapshot: Long? = null,
     // Live buffer read marker (advances with markRead); drives the FAB unread badge count.
     readMarkerLive: Long? = null,
+    rawNewestTime: Long? = null,
     onMarkRead: (Long) -> Unit = {},
     onDelete: (MessageEntity) -> Unit = {},
     consumePrefill: () -> String? = { null },
@@ -270,6 +278,7 @@ fun ChatContent(
     onInitialPositionHandled: () -> Unit = {},
     onInitialPositionUnresolved: () -> Unit = {},
     onScrollPositionChanged: (ChatScrollPosition) -> Unit = {},
+    onClearScrollPosition: () -> Unit = {},
     onVisibleMsgidsChanged: (List<String>) -> Unit = {},
     onNeedMembers: () -> Unit = {},
     onJumpUnresolved: () -> Unit = {},
@@ -282,6 +291,9 @@ fun ChatContent(
 ) {
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
+    val visibilityPolicy = remember(showJoinPartQuit, fools, foolsMode) {
+        MessageVisibilityPolicy(MessageVisibilitySpec(showJoinPartQuit, fools, foolsMode))
+    }
     val traceBufferId = state.buffer?.id
     val traceSessionId = remember(traceBufferId) {
         traceBufferId?.let { AutoFollowTrace.nextSessionId() }
@@ -424,6 +436,10 @@ fun ChatContent(
                 AutoFollowTrace.record("deep_jump_settled", traceBufferId, traceSessionId) {
                     "target_index=${j.index} item_count=${items.itemCount} rounds=$rounds"
                 }
+                val targetRow = items.peek(j.index)
+                if (targetRow != null && visibilityPolicy.isFool(targetRow)) {
+                    expandedFools += targetRow.id
+                }
                 highlightMsgid = j.highlightMsgid
                 initialPositionSettled = true
                 suppressNextAutoFollow = true
@@ -507,20 +523,37 @@ fun ChatContent(
     fun saveCurrentScrollPosition() {
         if (!initialPositionSettled) return
         val index = listState.firstVisibleItemIndex
+        if (isAtEffectiveBottom(
+                firstVisibleIndex = index,
+                firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                itemCount = items.itemCount,
+                peek = items::peek,
+                policy = visibilityPolicy,
+            )
+        ) {
+            onClearScrollPosition()
+            return
+        }
         // Paging can replace the outgoing buffer's snapshot with the incoming empty QUERY snapshot
         // between itemCount/index reads and onDispose. Treat that transition as no anchor to save;
         // never index the stale snapshot (the previous direct peek crashed DM navigation).
-        val row = pagingSnapshotItemOrNull(index, items.itemCount) { items.peek(it) } ?: return
-        val savedAtBottom = index == 0 &&
-            listState.firstVisibleItemScrollOffset <= AUTOSCROLL_BOTTOM_TOLERANCE_PX
+        val (anchorIndex, row) = nearestAnchorRow(
+            firstVisibleIndex = index,
+            itemCount = items.itemCount,
+            peek = items::peek,
+            policy = visibilityPolicy,
+        ) ?: run {
+            onClearScrollPosition()
+            return
+        }
         AutoFollowTrace.record("position_saved", traceBufferId, traceSessionId) {
-            "index=$index offset=${listState.firstVisibleItemScrollOffset} row=${row.id} " +
-                "at_bottom=$savedAtBottom following=${autoFollow.following}"
+            "index=$index anchor_index=$anchorIndex offset=${listState.firstVisibleItemScrollOffset} " +
+                "row=${row.id} at_bottom=false following=${autoFollow.following}"
         }
         onScrollPositionChanged(
             ChatScrollPosition(
-                index = index,
-                offset = listState.firstVisibleItemScrollOffset,
+                index = anchorIndex,
+                offset = listState.firstVisibleItemScrollOffset.takeIf { anchorIndex == index } ?: 0,
                 msgid = row.msgid,
                 serverTime = row.serverTime,
                 rowId = row.id,
@@ -531,13 +564,13 @@ fun ChatContent(
     // The previous collector allocated and wrote to the position cache for nearly every pixel of a
     // fling. We only need the final anchor: persist when scrolling settles, plus once on disposal so
     // a back gesture during an active fling still retains the current location.
-    LaunchedEffect(initialPositionSettled, listState) {
+    LaunchedEffect(initialPositionSettled, listState, visibilityPolicy) {
         if (!initialPositionSettled) return@LaunchedEffect
         snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
             .collect { scrolling -> if (!scrolling) saveCurrentScrollPosition() }
     }
-    DisposableEffect(initialPositionSettled, listState) {
+    DisposableEffect(initialPositionSettled, listState, visibilityPolicy) {
         onDispose { saveCurrentScrollPosition() }
     }
 
@@ -564,12 +597,16 @@ fun ChatContent(
     var sheetTarget by remember { mutableStateOf<MessageEntity?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
-    // At-bottom detection (reversed list: bottom == index 0). A small scroll-offset tolerance keeps
-    // "at bottom" true while the newest row is only marginally scrolled, so autoscroll still pins.
-    val atBottom by remember {
+    // Raw ignored tails do not make the user leave the meaningful bottom of the conversation.
+    val atBottom by remember(listState, items, visibilityPolicy) {
         derivedStateOf {
-            listState.firstVisibleItemIndex == 0 &&
-                listState.firstVisibleItemScrollOffset <= AUTOSCROLL_BOTTOM_TOLERANCE_PX
+            isAtEffectiveBottom(
+                firstVisibleIndex = listState.firstVisibleItemIndex,
+                firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                itemCount = items.itemCount,
+                peek = items::peek,
+                policy = visibilityPolicy,
+            )
         }
     }
 
@@ -623,15 +660,17 @@ fun ChatContent(
     // that animation also set isScrollInProgress, the replacement effect believed the user had
     // scrolled away and permanently stopped following a burst. Live arrivals snap to index zero;
     // animation is reserved for explicit send/FAB actions.
-    LaunchedEffect(items, initialPositionSettled) {
+    LaunchedEffect(items, initialPositionSettled, visibilityPolicy) {
         if (!initialPositionSettled) return@LaunchedEffect
-        snapshotFlow { items.itemCount }
+        snapshotFlow {
+            items.itemCount to newestEffectiveMessageId(items.itemCount, items::peek, visibilityPolicy)
+        }
             .distinctUntilChanged()
-            .collect { newCount ->
+            .collect { (newCount, newestEffectiveId) ->
                 val oldCount = autoFollow.presentedItemCount
                 val followingBefore = autoFollow.following
                 if (suppressNextAutoFollow) {
-                    autoFollow.reset(newCount, atBottom)
+                    autoFollow.reset(newCount, atBottom, newestEffectiveId)
                     suppressNextAutoFollow = false
                     AutoFollowTrace.record("paging_initial", traceBufferId, traceSessionId) {
                         "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
@@ -639,7 +678,7 @@ fun ChatContent(
                             "append=${loadStateName(items.loadState.append)}"
                     }
                 } else {
-                    val shouldFollow = autoFollow.onItemCountChanged(newCount)
+                    val shouldFollow = autoFollow.onTimelineChanged(newCount, newestEffectiveId)
                     val newest = if (newCount > 0) items.peek(0) else null
                     AutoFollowTrace.record("follow_decision", traceBufferId, traceSessionId) {
                         "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
@@ -656,8 +695,8 @@ fun ChatContent(
     val buffer = state.buffer
     // Mark read on new-message-while-at-bottom only (plans/07/15 #2): syncing while scrolled up
     // reading history would clear unread on other clients and destroy the local unread UX.
-    val newestTime = if (items.itemCount > 0) items.peek(0)?.serverTime ?: 0L else 0L
-    LaunchedEffect(newestTime, atBottom, initialPositionSettled) {
+    LaunchedEffect(rawNewestTime, atBottom, initialPositionSettled) {
+        val newestTime = rawNewestTime ?: return@LaunchedEffect
         if (initialPositionSettled && atBottom && newestTime > 0) {
             AutoFollowTrace.record("viewport_markread", traceBufferId, traceSessionId) {
                 "marker=$newestTime item_count=${items.itemCount}"
@@ -807,6 +846,7 @@ fun ChatContent(
                         items = items,
                         listState = listState,
                         readMarker = readMarkerLive,
+                        visibilityPolicy = visibilityPolicy,
                         visible = initialPositionSettled && !atBottom && !autoScrolling,
                         onClick = { scope.launch { scrollToNewest(animate = true, reason = "jump_fab") } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
@@ -854,11 +894,10 @@ fun ChatContent(
                                 }
                                 onSubmit(text)
                                 composerText = TextFieldValue("")
+                                scope.launch {
+                                    scrollToNewest(animate = true, reason = "composer_send_action")
+                                }
                             }
-                            // Sending should always reveal the just-sent message: return the reverse
-                            // list back to the newest row (index 0) even if the user had scrolled up.
-                            // Routes through scrollToNewest so the FAB stays gated off for the scroll.
-                            scope.launch { scrollToNewest(animate = true, reason = "composer_send_action") }
                         }
                     },
                     enabled = composerEnabled,
@@ -916,6 +955,7 @@ fun ChatContent(
                     longDraftPrompt = false
                     onSubmit(composerText.text)
                     composerText = TextFieldValue("")
+                    scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
                 }) { Text("Send as messages") }
                 androidx.compose.material3.TextButton(onClick = {
                     AutoFollowTrace.record("long_draft_cancel", traceBufferId, traceSessionId)
@@ -1105,6 +1145,7 @@ private fun ViewportScrollToBottomFab(
     items: LazyPagingItems<MessageEntity>,
     listState: androidx.compose.foundation.lazy.LazyListState,
     readMarker: Long?,
+    visibilityPolicy: MessageVisibilityPolicy,
     visible: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1112,7 +1153,7 @@ private fun ViewportScrollToBottomFab(
     val firstVisible by remember(listState) {
         derivedStateOf { listState.firstVisibleItemIndex }
     }
-    val unreadIndex = remember { UnreadViewportIndex() }
+    val unreadIndex = remember(visibilityPolicy) { UnreadViewportIndex() }
     val unread = readMarker?.let { marker ->
         // History growth appends older Paging rows. The compact index reads only the unread prefix
         // (and never more than the displayed 99+ cap); index-zero identity detects refreshes.
@@ -1121,6 +1162,7 @@ private fun ViewportScrollToBottomFab(
             peek = items::peek,
             maxNonSelf = MAX_UNREAD_BADGE_COUNT,
             stopAtOrBefore = marker,
+            include = visibilityPolicy::visibleUnread,
         )
         unreadIndex.count(firstVisible, marker)
     } ?: 0

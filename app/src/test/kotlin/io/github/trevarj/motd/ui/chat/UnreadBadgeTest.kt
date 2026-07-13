@@ -136,10 +136,24 @@ class UnreadBadgeTest {
         assertEquals(true, reads <= 12)
     }
 
-    private fun row(index: Int, time: Long, isSelf: Boolean) =
+    @Test fun `visibility predicate excludes collapsed fool rows from badge`() {
+        val rows = listOf(
+            row(0, 130, false, sender = "fool"),
+            row(1, 120, false, sender = "alice"),
+        )
+        val index = UnreadViewportIndex()
+        index.update(
+            itemCount = rows.size,
+            include = { it.sender != "fool" },
+        ) { rows[it] }
+
+        assertEquals(1, index.count(firstVisibleIndex = 2, marker = 100))
+    }
+
+    private fun row(index: Int, time: Long, isSelf: Boolean, sender: String = "nick") =
         io.github.trevarj.motd.data.db.MessageEntity(
             id = index.toLong(), bufferId = 1, msgid = "m$index", serverTime = time,
-            sender = "nick", kind = io.github.trevarj.motd.data.db.MessageKind.PRIVMSG,
+            sender = sender, kind = io.github.trevarj.motd.data.db.MessageKind.PRIVMSG,
             text = "text", dedupKey = "m$index", isSelf = isSelf,
         )
 }

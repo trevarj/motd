@@ -2,9 +2,15 @@ package io.github.trevarj.motd.data.repo
 
 import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import javax.inject.Inject
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 
 // FTS4 search. User input is sanitized into a safe MATCH expression: each whitespace-delimited
 // token is stripped of FTS operator characters (quotes, *, ^, -, :, parens) and given a bare `*`
@@ -14,11 +20,18 @@ import kotlinx.coroutines.flow.flowOf
 // malformed MATCH.
 class SearchRepositoryImpl @Inject constructor(
     private val messageDao: MessageDao,
+    private val settings: SettingsRepository,
 ) : SearchRepository {
     override fun search(query: String, bufferId: Long?): Flow<List<SearchHit>> {
         val match = sanitizeFtsQuery(query)
         if (match.isEmpty()) return flowOf(emptyList())
-        return messageDao.search(match, bufferId)
+        return combine(
+            messageDao.search(match, bufferId),
+            settings.settings.map(MessageVisibilitySpec::from).distinctUntilChanged(),
+        ) { hits, spec ->
+            val policy = MessageVisibilityPolicy(spec)
+            hits.filter { policy.search(it.message) }
+        }
     }
 
     companion object {

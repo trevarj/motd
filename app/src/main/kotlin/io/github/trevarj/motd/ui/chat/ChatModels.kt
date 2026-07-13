@@ -3,25 +3,23 @@ package io.github.trevarj.motd.ui.chat
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
-import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.normalizeNick
+import io.github.trevarj.motd.data.visibility.JOIN_PART_QUIT_KINDS
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.ui.components.ReactionChip
 
 // --- timeline message filtering (plans/13 §2.4/§2.5) ---
 
 /** JOIN/PART/QUIT kinds hidden when `showJoinPartQuit == false`. */
-val JPQ_KINDS: Set<MessageKind> = setOf(MessageKind.JOIN, MessageKind.PART, MessageKind.QUIT)
+val JPQ_KINDS: Set<MessageKind> = JOIN_PART_QUIT_KINDS
 
 /**
  * Behavioral filter spec fed into [keepMessage]. Derived from the observed Settings in
  * [ChatViewModel]; passed to `PagingData.filter` so grouping/day-separator/read-marker math only
  * sees visible rows.
  */
-data class MessageFilterSpec(
-    val showJoinPartQuit: Boolean = true,
-    val fools: Set<String> = emptySet(),
-    val foolsMode: FoolsMode = FoolsMode.COLLAPSE,
-)
+typealias MessageFilterSpec = MessageVisibilitySpec
 
 /** True when [sender] is a fool (never for own messages). Normalized, case-insensitive compare. */
 fun isFoolSender(sender: String, isSelf: Boolean, fools: Set<String>): Boolean =
@@ -33,11 +31,7 @@ fun isFoolSender(sender: String, isSelf: Boolean, fools: Set<String>): Boolean =
  * so it can render as a tap-to-expand placeholder in the timeline.
  */
 fun keepMessage(msg: MessageEntity, spec: MessageFilterSpec): Boolean =
-    !(msg.kind in JPQ_KINDS && !spec.showJoinPartQuit) &&
-        !(
-            spec.foolsMode == FoolsMode.HIDE && !isSystemKind(msg.kind) &&
-                isFoolSender(msg.sender, msg.isSelf, spec.fools)
-            )
+    MessageVisibilityPolicy(spec).timeline(msg)
 
 /** Grouping window: consecutive same-sender messages within this span share one header. */
 const val GROUP_WINDOW_MS: Long = 3 * 60 * 1000
@@ -92,6 +86,7 @@ class UnreadViewportIndex {
         itemCount: Int,
         maxNonSelf: Int = Int.MAX_VALUE,
         stopAtOrBefore: Long? = null,
+        include: (MessageEntity) -> Boolean = { !it.isSelf },
         peek: (Int) -> MessageEntity?,
     ) {
         // Paging emits an empty snapshot while invalidating/refreshing. Never probe index zero for
@@ -123,7 +118,7 @@ class UnreadViewportIndex {
                     stoppedAtMarker = stopAtOrBefore
                     break
                 }
-                if (!row.isSelf) {
+                if (include(row)) {
                     ensureCapacity(size + 1)
                     rowIndices[size] = index
                     serverTimes[size] = row.serverTime
@@ -202,13 +197,15 @@ internal class AutoFollowTracker(initialItemCount: Int) {
         private set
 
     private var itemCount: Int = initialItemCount
+    private var newestEffectiveId: Long? = null
 
     val presentedItemCount: Int
         get() = itemCount
 
     /** Consume the first post-entry Paging snapshot without treating it as a live arrival. */
-    fun reset(itemCount: Int, atBottom: Boolean) {
+    fun reset(itemCount: Int, atBottom: Boolean, newestEffectiveId: Long? = null) {
         this.itemCount = itemCount
+        this.newestEffectiveId = newestEffectiveId
         following = atBottom
     }
 
@@ -232,6 +229,56 @@ internal class AutoFollowTracker(initialItemCount: Int) {
         itemCount = newItemCount
         return shouldFollow
     }
+
+    /** Ignore Paging growth whose newest meaningful identity did not change (JPQ/fool tails). */
+    fun onTimelineChanged(newItemCount: Int, newNewestEffectiveId: Long?): Boolean {
+        val shouldFollow = following && itemCount > 0 && newItemCount > itemCount &&
+            newNewestEffectiveId != null && newNewestEffectiveId != newestEffectiveId
+        itemCount = newItemCount
+        newestEffectiveId = newNewestEffectiveId
+        return shouldFollow
+    }
+}
+
+fun newestEffectiveMessageId(
+    itemCount: Int,
+    peek: (Int) -> MessageEntity?,
+    policy: MessageVisibilityPolicy,
+): Long? = (0 until itemCount).firstNotNullOfOrNull { index ->
+    peek(index)?.takeIf(policy::effectiveBottom)?.id
+}
+
+/** Reverse-list bottom with any raw tail ignored by policy treated as already settled. */
+fun isAtEffectiveBottom(
+    firstVisibleIndex: Int,
+    firstVisibleOffset: Int,
+    itemCount: Int,
+    peek: (Int) -> MessageEntity?,
+    policy: MessageVisibilityPolicy,
+): Boolean {
+    if (firstVisibleOffset > AUTOSCROLL_BOTTOM_TOLERANCE_PX) return false
+    val belowViewport = minOf(firstVisibleIndex, itemCount)
+    return (0 until belowViewport).none { index ->
+        peek(index)?.let(policy::effectiveBottom) == true
+    }
+}
+
+/** Prefer an eligible row at or older than the viewport; used to avoid saving fool anchors. */
+fun nearestAnchorRow(
+    firstVisibleIndex: Int,
+    itemCount: Int,
+    peek: (Int) -> MessageEntity?,
+    policy: MessageVisibilityPolicy,
+): Pair<Int, MessageEntity>? {
+    for (index in firstVisibleIndex until itemCount) {
+        val row = peek(index) ?: continue
+        if (policy.anchor(row)) return index to row
+    }
+    for (index in minOf(firstVisibleIndex - 1, itemCount - 1) downTo 0) {
+        val row = peek(index) ?: continue
+        if (policy.anchor(row)) return index to row
+    }
+    return null
 }
 
 data class ChatInitialPosition(

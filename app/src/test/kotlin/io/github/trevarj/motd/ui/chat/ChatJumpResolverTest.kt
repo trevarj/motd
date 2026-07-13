@@ -194,4 +194,21 @@ class ChatJumpResolverTest {
         val result = resolver.resolve(bufferId = 7, msgid = null, timeMs = 200, bufferName = null)
         assertEquals(1, (result as ChatJumpResolver.Result.Target).index)
     }
+
+    @Test fun `policy-backed count controls the presented timeline index`() = runTest {
+        val repo = FakeMessageRepository(
+            listOf(
+                msg(1, 7, serverTime = 100, msgid = "target"),
+                msg(2, 7, serverTime = 200, msgid = "ignored"),
+            ),
+        )
+        val resolver = ChatJumpResolver(
+            messages = repo,
+            countNewer = { _, _, _ -> 0 },
+            fetchAround = { _, _, _ -> false },
+        )
+
+        val result = resolver.resolve(7, "target", 100, "#chan")
+        assertEquals(0, (result as ChatJumpResolver.Result.Target).index)
+    }
 }

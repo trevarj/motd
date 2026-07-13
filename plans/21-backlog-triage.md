@@ -153,7 +153,7 @@ with unrelated predicates at individual call sites.
 
 ### B1. Hidden and collapsed content must not corrupt position or read state
 
-- **Priority / size / status:** P0, L, Ready.
+- **Priority / size / status:** P0, L, Complete (2026-07-13).
 - **Depends on:** B3 baseline reproduction should run first. B2 may land as the
   first slice if its query shape remains compatible with this policy.
 - **Product policy:**
@@ -196,6 +196,15 @@ with unrelated predicates at individual call sites.
 - **Focused tests:** matrix for every newest-row kind, JPQ shown/hidden, fool
   Collapse/Hide, fool-only buffers, stale saved anchors, search/open behavior,
   visible counts, chat ordering, FAB, auto-follow, and local/wire markers.
+- **2026-07-13 implementation evidence:** one app-owned
+  `MessageVisibilityPolicy` now defines timeline, preview/activity, visible
+  unread, search, saved-anchor, and effective-bottom eligibility. Paging,
+  chat-list fallback and ordering, search, unread entry/FAB state, saved
+  positions, auto-follow, and raw-tail read advancement consume that policy.
+  The database reader walks fixed 128-row pages and keeps a bounded 256-entry
+  chat-list cache, so the dynamic fool set never becomes an unbounded SQL
+  clause. Tests cover JPQ and both fool modes, a fool-only buffer, a 300-row
+  ignored tail, stale anchors, search, counts, ordering, and follow decisions.
 
 ### B2. Chat-list previews never show join/part/quit
 
@@ -220,8 +229,8 @@ with unrelated predicates at individual call sites.
 
 ### B3. Deeply re-verify auto-follow on the v0.4.5 baseline
 
-- **Priority / size / status:** P0, S. Baseline captured on 2026-07-13;
-  confirmed defects move into B1 and the B3 follow-up test/fix.
+- **Priority / size / status:** P0, S, Complete (2026-07-13). Baseline and
+  post-fix physical-device matrix captured.
 - **Depends on:** attached physical device for final evidence.
 - **Investigation:** reproduce before editing the tracker. Cover idle at bottom
   receiving a burst, user scrolled up, own send from both positions, hidden JPQ
@@ -275,6 +284,21 @@ with unrelated predicates at individual call sites.
   preferences were restored byte-for-byte from the pre-test backup, the debug
   trace property was disabled, the local stack was stopped, and the installed
   release app was untouched.
+- **Post-fix device evidence:** installed FOSS debug APK SHA-256
+  `266763674a3219c26a8a2abe1cafb7babf7f3e648c8c7f12d23fb0236e9e5d8c` on
+  the same A059. Cancelling the long-draft prompt while reading history emitted
+  no scroll; explicit **Send as messages** scrolled only after submission.
+  Hidden PART/QUIT rows did not change the presented count or follow state;
+  retained MODE remained meaningful. A collapsed 12-message fool burst grew
+  the presented placeholder tail but every follow decision stayed false; Hide
+  kept the presented count unchanged. In both modes the raw marker advanced,
+  reopening settled at effective bottom, fool activity never became the chat
+  preview, Collapse search expanded its target, and Hide search excluded it.
+  The crash buffer was empty. A follow-up timeline traversal/re-entry sample
+  recorded 741 frames, 7.15% jank, p50 12 ms, p90 23 ms, p95 26 ms, and p99
+  65 ms. Trace and animation settings were restored, the debug app was stopped,
+  the local stack/reverse were removed, and the running release app was not
+  modified or stopped.
 
 ## C. Connection loss, reconnect, and history
 
