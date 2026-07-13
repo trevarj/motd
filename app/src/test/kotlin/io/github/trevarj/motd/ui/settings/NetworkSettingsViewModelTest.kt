@@ -17,6 +17,7 @@ import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.avatar.SelfAvatarSetting
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -63,8 +64,10 @@ class NetworkSettingsViewModelTest {
             networks.values.filter { it.parentId == rootId }
     }
 
-    private class FakeConnectionManager : ConnectionManager {
-        override val connectionStates = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
+    private class FakeConnectionManager(
+        initial: Map<Long, IrcClientState> = emptyMap(),
+    ) : ConnectionManager {
+        override val connectionStates = MutableStateFlow(initial)
         override fun clientFor(networkId: Long): IrcClient? = null
         override suspend fun startAll() = Unit
         override suspend fun stopAll() = Unit
@@ -93,16 +96,25 @@ class NetworkSettingsViewModelTest {
     }
 
     private object FakeAvatarController : AvatarController {
+        var available = false
+        val published = mutableListOf<Pair<Long, String?>>()
         override suspend fun setShowSharedAvatars(show: Boolean) = Unit
-        override suspend fun setSelfAvatar(networkId: Long, url: String?) = true
+        override suspend fun setSelfAvatar(networkId: Long, url: String?): Boolean {
+            published += networkId to url
+            return available
+        }
         override suspend fun stopManagingSelfAvatar(networkId: Long) = Unit
         override suspend fun clearNetworkState(networkId: Long) = Unit
-        override fun publishingAvailable(networkId: Long) = false
+        override fun publishingAvailable(networkId: Long) = available
     }
 
     private val dispatcher = StandardTestDispatcher()
 
-    @Before fun setUp() = Dispatchers.setMain(dispatcher)
+    @Before fun setUp() {
+        Dispatchers.setMain(dispatcher)
+        FakeAvatarController.available = false
+        FakeAvatarController.published.clear()
+    }
     @After fun tearDown() = Dispatchers.resetMain()
 
     private fun root(
@@ -332,5 +344,68 @@ class NetworkSettingsViewModelTest {
 
         assertEquals(listOf("update:1"), repo.operations)
         assertFalse(repo.networks.getValue(1).autoConnect)
+    }
+
+    @Test
+    fun unavailableAvatarPublishing_isNotAttempted_andShowsFailure() = runTest {
+        val repo = FakeNetworkRepository(listOf(root()))
+        val ready = IrcClientState.Ready("motd", emptySet(), emptyMap())
+        val vm = NetworkSettingsViewModel(
+            repo,
+            FakeConnectionManager(mapOf(1L to ready)),
+            FakePresetEnrollmentPrefs(),
+            FakeAvatarPrefs(),
+            FakeAvatarController,
+        )
+        vm.init(1)
+        runCurrent()
+        vm.editAvatarUrl("https://example.com/avatar.png")
+
+        vm.publishAvatar()
+        runCurrent()
+
+        assertTrue(FakeAvatarController.published.isEmpty())
+        assertTrue(vm.state.value.avatarPublishError)
+    }
+
+    @Test
+    fun lateNetworkLookup_preservesReadyAndAvatarCapabilityState() = runTest {
+        val root = root()
+        val lookupStarted = CompletableDeferred<Unit>()
+        val releaseLookup = CompletableDeferred<Unit>()
+        val repo = object : NetworkRepository {
+            override fun observeNetworks() = flowOf(listOf(root))
+            override suspend fun addNetwork(n: NetworkEntity) = error("unused")
+            override suspend fun updateNetwork(n: NetworkEntity) = error("unused")
+            override suspend fun deleteNetwork(id: Long) = error("unused")
+            override suspend fun networkById(id: Long): NetworkEntity {
+                lookupStarted.complete(Unit)
+                releaseLookup.await()
+                return root
+            }
+            override suspend fun childrenOf(rootId: Long) = emptyList<NetworkEntity>()
+        }
+        val ready = IrcClientState.Ready("motd", emptySet(), emptyMap())
+        FakeAvatarController.available = true
+        val vm = NetworkSettingsViewModel(
+            repo,
+            FakeConnectionManager(mapOf(1L to ready)),
+            FakePresetEnrollmentPrefs(),
+            FakeAvatarPrefs(),
+            FakeAvatarController,
+        )
+
+        vm.init(1)
+        runCurrent()
+        assertTrue(lookupStarted.isCompleted)
+        assertTrue(vm.state.value.connState is IrcClientState.Ready)
+        assertTrue(vm.state.value.avatarPublishingAvailable)
+
+        releaseLookup.complete(Unit)
+        runCurrent()
+
+        assertTrue(vm.state.value.connState is IrcClientState.Ready)
+        assertTrue(vm.state.value.avatarPublishingAvailable)
+        assertEquals(root, vm.state.value.entity)
     }
 }

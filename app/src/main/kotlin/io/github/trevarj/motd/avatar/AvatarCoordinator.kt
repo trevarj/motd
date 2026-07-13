@@ -35,15 +35,19 @@ class AvatarCoordinator @Inject constructor(
 
     suspend fun onReady(networkId: Long, client: IrcClient) {
         if (!client.hasCap(AVATAR_CAP)) return
-        if (prefs.config.first().showSharedAvatars) {
+        if (prefs.config.first().showSharedAvatars && supportsAvatarSubscription(client.caps)) {
             client.send(subscribeAvatarMessage())
         } else {
             client.send(unsubscribeAvatarMessage())
         }
         when (val self = prefs.selfSetting(networkId).first()) {
             SelfAvatarSetting.Unmanaged -> Unit
-            SelfAvatarSetting.ExplicitlyCleared -> client.send(publishAvatarMessage(null))
-            is SelfAvatarSetting.Set -> client.send(publishAvatarMessage(self.url))
+            SelfAvatarSetting.ExplicitlyCleared -> if (supportsAvatarMutation(client.caps)) {
+                client.send(publishAvatarMessage(null))
+            }
+            is SelfAvatarSetting.Set -> if (supportsAvatarPublishing(client.caps, self.url)) {
+                client.send(publishAvatarMessage(self.url))
+            }
         }
     }
 
@@ -55,7 +59,7 @@ class AvatarCoordinator @Inject constructor(
                 store.rename(networkId, event.nick, event.nick, event.account)
             }
             is IrcEvent.Joined -> if (event.isSelf && prefs.config.first().showSharedAvatars) {
-                connections.get().clientFor(networkId)?.takeIf { it.hasCap(AVATAR_CAP) }
+                connections.get().clientFor(networkId)?.takeIf { supportsAvatarSubscription(it.caps) }
                     ?.send(syncAvatarMessage(event.channel))
             }
             is IrcEvent.CapsChanged -> if (event.added.any { it == AVATAR_CAP || it.startsWith("$AVATAR_CAP=") }) {
@@ -88,7 +92,7 @@ class AvatarCoordinator @Inject constructor(
             try {
                 delay(metadata.retryAfterSeconds.coerceAtMost(MAX_SYNC_DELAY_SECONDS) * 1_000)
                 if (!prefs.config.first().showSharedAvatars) return@launch
-                connections.get().clientFor(networkId)?.takeIf { it.hasCap(AVATAR_CAP) }
+                connections.get().clientFor(networkId)?.takeIf { supportsAvatarSubscription(it.caps) }
                     ?.send(syncAvatarMessage(metadata.target))
             } finally {
                 delayedSyncs.remove(key)
@@ -100,19 +104,29 @@ class AvatarCoordinator @Inject constructor(
         prefs.setShowSharedAvatars(show)
         if (!show) store.clearAll()
         for (networkId in connections.get().connectionStates.value.keys) {
-            connections.get().clientFor(networkId)?.takeIf { it.hasCap(AVATAR_CAP) }?.send(
-                if (show) subscribeAvatarMessage() else unsubscribeAvatarMessage(),
-            )
+            connections.get().clientFor(networkId)?.let { client ->
+                if (!client.hasCap(AVATAR_CAP)) return@let
+                client.send(
+                    if (show && supportsAvatarSubscription(client.caps)) subscribeAvatarMessage()
+                    else unsubscribeAvatarMessage(),
+                )
+            }
         }
     }
 
     override suspend fun setSelfAvatar(networkId: Long, url: String?): Boolean {
         val validated = url?.let(::validateAvatarUrl)
         if (url != null && validated == null) return false
+        val client = connections.get().clientFor(networkId)
+        if (validated != null && client != null && !supportsAvatarPublishing(client.caps, validated)) {
+            return false
+        }
         val setting = validated?.let(SelfAvatarSetting::Set) ?: SelfAvatarSetting.ExplicitlyCleared
         prefs.setSelfSetting(networkId, setting)
-        val client = connections.get().clientFor(networkId)
-        client?.takeIf { it.hasCap(AVATAR_CAP) }?.send(publishAvatarMessage(validated))
+        client?.takeIf {
+            if (validated == null) supportsAvatarMutation(it.caps)
+            else supportsAvatarPublishing(it.caps, validated)
+        }?.send(publishAvatarMessage(validated))
         val selfNick = (client?.state?.value as? io.github.trevarj.motd.irc.event.IrcClientState.Ready)?.nick
         if (selfNick != null && prefs.config.first().showSharedAvatars) {
             if (validated != null) store.upsert(networkId, selfNick, account = null, url = validated)
@@ -131,7 +145,7 @@ class AvatarCoordinator @Inject constructor(
     }
 
     override fun publishingAvailable(networkId: Long): Boolean =
-        connections.get().clientFor(networkId)?.hasCap(AVATAR_CAP) == true
+        connections.get().clientFor(networkId)?.let { supportsAvatarPublishing(it.caps) } == true
 
     private companion object {
         const val MAX_SYNC_DELAY_SECONDS = 60L * 60L

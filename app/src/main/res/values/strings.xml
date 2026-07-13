@@ -363,7 +363,8 @@
     <string name="network_settings_avatar_experimental">Experimental IRCv3 metadata feature. MOTD stores only the HTTPS URL; it never uploads an image.</string>
     <string name="network_settings_avatar_url">Avatar HTTPS URL</string>
     <string name="network_settings_avatar_url_desc">You may use {size} as a pixel-size placeholder.</string>
-    <string name="network_settings_avatar_unavailable">This network does not currently advertise draft/metadata-2. Your choice is retained for later.</string>
+    <string name="network_settings_avatar_unavailable">This connection does not currently allow publishing avatar metadata. Your existing choice is retained for later.</string>
+    <string name="network_settings_avatar_publish_failed">The server rejected this avatar URL or its metadata limits changed.</string>
     <string name="network_settings_avatar_publish">Publish</string>
     <string name="network_settings_avatar_clear">Clear</string>
     <string name="network_settings_avatar_unmanage">Leave unchanged</string>

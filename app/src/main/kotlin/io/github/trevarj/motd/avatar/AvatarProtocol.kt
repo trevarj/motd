@@ -5,6 +5,44 @@ import io.github.trevarj.motd.irc.proto.IrcMessage
 const val AVATAR_CAP = "draft/metadata-2"
 const val AVATAR_KEY = "avatar"
 
+data class MetadataCapabilityLimits(
+    val maxSubscriptions: Int? = null,
+    val maxKeys: Int? = null,
+    val maxValueBytes: Int? = null,
+)
+
+/** Parse only limits defined by the metadata draft; absent limits remain unrestricted. */
+fun metadataCapabilityLimits(caps: Set<String>): MetadataCapabilityLimits? {
+    val advertised = caps.firstOrNull { it == AVATAR_CAP || it.startsWith("$AVATAR_CAP=") }
+        ?: return null
+    if ('=' !in advertised) return MetadataCapabilityLimits()
+    val values = advertised.substringAfter('=').split(',').associate { token ->
+        token.substringBefore('=') to token.substringAfter('=', missingDelimiterValue = "")
+    }
+    fun numeric(name: String): Int? {
+        if (name !in values) return null
+        return values.getValue(name).toIntOrNull()?.coerceAtLeast(0) ?: 0
+    }
+    return MetadataCapabilityLimits(
+        maxSubscriptions = numeric("max-subs"),
+        maxKeys = numeric("max-keys"),
+        maxValueBytes = numeric("max-value-bytes"),
+    )
+}
+
+fun supportsAvatarSubscription(caps: Set<String>): Boolean =
+    metadataCapabilityLimits(caps)?.let { it.maxSubscriptions != 0 } == true
+
+fun supportsAvatarMutation(caps: Set<String>): Boolean =
+    metadataCapabilityLimits(caps)?.let { it.maxKeys != 0 } == true
+
+fun supportsAvatarPublishing(caps: Set<String>, url: String? = null): Boolean {
+    val limits = metadataCapabilityLimits(caps) ?: return false
+    if (!supportsAvatarMutation(caps)) return false
+    val requiredBytes = (url ?: MINIMUM_AVATAR_URL).encodeToByteArray().size
+    return limits.maxValueBytes?.let { it >= requiredBytes } != false
+}
+
 sealed interface AvatarMetadataEvent {
     data class Changed(val target: String, val url: String) : AvatarMetadataEvent
     data class Removed(val target: String) : AvatarMetadataEvent
@@ -47,3 +85,5 @@ fun parseAvatarMetadata(message: IrcMessage): AvatarMetadataEvent? {
         else -> null
     }
 }
+
+private const val MINIMUM_AVATAR_URL = "https://a.b"

@@ -99,6 +99,7 @@ class IrcClient(
     private val selfNick = AtomicReference(config.nick)
     private val _isupport = AtomicReference(Isupport())
     private val ackedCaps = AtomicReference<Set<String>>(emptySet())
+    private val runtimeAdvertisedCaps = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private val labels = LabelCorrelator()
     private val batches = BatchAssembler()
@@ -129,6 +130,8 @@ class IrcClient(
         val t = transport
         transport = null
         registered = false
+        ackedCaps.set(emptySet())
+        runtimeAdvertisedCaps.clear()
         if (t != null) scope.launch { runCatching { t.close() } }
         if (_state.value != IrcClientState.Disconnected) {
             _state.value = IrcClientState.Disconnected
@@ -288,24 +291,45 @@ class IrcClient(
 
     private suspend fun handleRuntimeCap(msg: IrcMessage, t: IrcTransport) {
         val sub = msg.params.getOrNull(1) ?: return
-        val caps = msg.params.last().split(' ').filter { it.isNotEmpty() }.map { it.substringBefore('=') }.toSet()
+        val tokens = msg.params.last().split(' ').filter { it.isNotEmpty() }
+        val caps = tokens.map { it.removePrefix("-").substringBefore('=') }.toSet()
         when (sub) {
             "NEW" -> {
+                for (token in tokens) {
+                    val name = token.substringBefore('=')
+                    runtimeAdvertisedCaps[name] = token.substringAfter('=', missingDelimiterValue = "")
+                }
                 // REQ any tier cap newly advertised that we want.
-                val want = CapNegotiator.requestSet(caps, config.extraCaps)
+                val alreadyAcked = ackedCaps.get().map { it.substringBefore('=') }.toSet()
+                val want = CapNegotiator.requestSet(caps + alreadyAcked, config.extraCaps) - alreadyAcked
                 if (want.isNotEmpty()) {
                     for (b in CapNegotiator.batches(want)) runCatching { t.send("CAP REQ :$b") }
                 }
             }
             "DEL" -> {
+                caps.forEach(runtimeAdvertisedCaps::remove)
                 ackedCaps.set(ackedCaps.get().filterNot { it.substringBefore('=') in caps }.toSet())
                 updateReadyCaps(ackedCaps.get())
                 _events.emit(IrcEvent.CapsChanged(emptySet(), caps))
             }
             "ACK" -> {
-                ackedCaps.set(ackedCaps.get() + caps)
+                val removed = tokens.filter { it.startsWith("-") }
+                    .map { it.removePrefix("-").substringBefore('=') }
+                    .toSet()
+                val added = tokens.filterNot { it.startsWith("-") }.map { token ->
+                    val name = token.substringBefore('=')
+                    val value = token.substringAfter(
+                        '=',
+                        missingDelimiterValue = runtimeAdvertisedCaps[name].orEmpty(),
+                    )
+                    if (value.isEmpty()) name else "$name=$value"
+                }.toSet()
+                val updated = ackedCaps.get()
+                    .filterNot { it.substringBefore('=') in removed }
+                    .toSet() + added
+                ackedCaps.set(updated)
                 updateReadyCaps(ackedCaps.get())
-                _events.emit(IrcEvent.CapsChanged(caps, emptySet()))
+                _events.emit(IrcEvent.CapsChanged(added.map { it.substringBefore('=') }.toSet(), removed))
             }
         }
     }

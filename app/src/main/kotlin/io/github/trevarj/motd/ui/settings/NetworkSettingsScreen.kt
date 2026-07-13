@@ -232,22 +232,27 @@ fun NetworkSettingsContent(
                             label = { Text(stringResource(R.string.network_settings_avatar_url)) },
                             supportingText = {
                                 Text(
-                                    if (state.avatarPublishingAvailable) {
+                                    if (state.avatarPublishError) {
+                                        stringResource(R.string.network_settings_avatar_publish_failed)
+                                    } else if (state.avatarPublishingAvailable) {
                                         stringResource(R.string.network_settings_avatar_url_desc)
                                     } else {
                                         stringResource(R.string.network_settings_avatar_unavailable)
                                     },
                                 )
                             },
-                            isError = state.avatarInput.isNotBlank() &&
-                                io.github.trevarj.motd.avatar.validateAvatarUrl(state.avatarInput) == null,
+                            isError = state.avatarPublishError || (
+                                state.avatarInput.isNotBlank() &&
+                                    io.github.trevarj.motd.avatar.validateAvatarUrl(state.avatarInput) == null
+                                ),
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().testTag("network_avatar_url"),
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = onPublishAvatar,
-                                enabled = io.github.trevarj.motd.avatar.validateAvatarUrl(state.avatarInput) != null,
+                                enabled = state.avatarPublishingAvailable &&
+                                    io.github.trevarj.motd.avatar.validateAvatarUrl(state.avatarInput) != null,
                             ) { Text(stringResource(R.string.network_settings_avatar_publish)) }
                             TextButton(onClick = onClearAvatar) {
                                 Text(stringResource(R.string.network_settings_avatar_clear))

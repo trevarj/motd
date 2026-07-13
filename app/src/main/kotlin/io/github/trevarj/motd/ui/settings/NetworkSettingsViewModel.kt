@@ -21,6 +21,7 @@ import io.github.trevarj.motd.avatar.validateAvatarUrl
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -48,6 +49,7 @@ data class NetworkSettingsUiState(
     val selfAvatar: SelfAvatarSetting = SelfAvatarSetting.Unmanaged,
     val avatarInput: String = "",
     val avatarPublishingAvailable: Boolean = false,
+    val avatarPublishError: Boolean = false,
 ) {
     val vlessLinkError: String?
         get() = if (obfsMode == ObfsMode.EMBEDDED_REALITY) vlessLinkValidationError(obfsLink) else null
@@ -117,20 +119,22 @@ class NetworkSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val n = networkRepository.networkById(networkId)
             val parentName = n?.parentId?.let { networkRepository.networkById(it)?.name }
-            _state.value = NetworkSettingsUiState(
-                loaded = true,
-                entity = n,
-                displayName = n?.name.orEmpty(),
-                wsUrl = n?.wsUrl.orEmpty(),
-                obfsMode = n?.obfsMode ?: ObfsMode.NONE,
-                proxyHost = n?.proxyHost.orEmpty(),
-                proxyPort = n?.proxyPort?.toString().orEmpty(),
-                obfsLink = n?.obfsLink.orEmpty(),
-                server = n?.toServerForm() ?: ServerForm(),
-                auth = n?.toAuthForm() ?: AuthForm(),
-                autoConnect = n?.autoConnect ?: true,
-                parentName = parentName,
-            )
+            _state.update { current ->
+                current.copy(
+                    loaded = true,
+                    entity = n,
+                    displayName = n?.name.orEmpty(),
+                    wsUrl = n?.wsUrl.orEmpty(),
+                    obfsMode = n?.obfsMode ?: ObfsMode.NONE,
+                    proxyHost = n?.proxyHost.orEmpty(),
+                    proxyPort = n?.proxyPort?.toString().orEmpty(),
+                    obfsLink = n?.obfsLink.orEmpty(),
+                    server = n?.toServerForm() ?: ServerForm(),
+                    auth = n?.toAuthForm() ?: AuthForm(),
+                    autoConnect = n?.autoConnect ?: true,
+                    parentName = parentName,
+                )
+            }
         }
         // Mirror this network's live connection state into the status header.
         viewModelScope.launch {
@@ -178,15 +182,21 @@ class NetworkSettingsViewModel @Inject constructor(
     /** Auto-connect is staged with the rest of the form so the labeled Save action is coherent. */
     fun setAutoConnect(enabled: Boolean) { _state.value = _state.value.copy(autoConnect = enabled) }
 
-    fun editAvatarUrl(url: String) { _state.value = _state.value.copy(avatarInput = url) }
+    fun editAvatarUrl(url: String) {
+        _state.value = _state.value.copy(avatarInput = url, avatarPublishError = false)
+    }
 
     fun publishAvatar() = viewModelScope.launch {
         val value = _state.value.avatarInput
-        if (validateAvatarUrl(value) != null) avatarController.setSelfAvatar(networkId, value)
+        val published = validateAvatarUrl(value) != null &&
+            _state.value.avatarPublishingAvailable &&
+            avatarController.setSelfAvatar(networkId, value)
+        _state.value = _state.value.copy(avatarPublishError = !published)
     }
 
     fun clearPublishedAvatar() = viewModelScope.launch {
         avatarController.setSelfAvatar(networkId, null)
+        _state.value = _state.value.copy(avatarPublishError = false)
     }
 
     fun stopManagingAvatar() = viewModelScope.launch {

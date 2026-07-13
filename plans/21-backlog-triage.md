@@ -736,16 +736,23 @@ with unrelated predicates at individual call sites.
   a model. One indexed composition-local resolver supplies every existing
   `Avatar` surface and preserves deterministic monograms underneath failures.
   Network settings label publishing experimental and retain unsupported-server
-  intent; Chat settings provide a full receive opt-out.
+  intent; Chat settings provide a full receive opt-out. Capability-value limits
+  (`max-subs`, `max-keys`, and `max-value-bytes`) distinguish receive-only
+  servers from publish-capable ones, survive both initial and runtime CAP
+  negotiation, and gate the settings action without racing the initial network
+  lookup.
 - **Verification evidence:** pure tests lock capability dependency, exact
   SUB/SYNC/SET/remove framing, notification/snapshot/removal/delayed-sync
   parsing, HTTPS and `{size}` validation, and three-state self persistence.
   Room tests cover invalid-value rejection, account/nick rekeying, per-network
   cleanup, and full opt-out cleanup; resolver tests prove network isolation and
-  the disabled no-model boundary. All IRC tests, FOSS debug/release unit tests,
-  FOSS debug lint/assembly, and isolated FOSS release assembly pass. A server
-  advertising the draft capability and a physical device are still required
-  for the manual publish/fallback/request trace.
+  the disabled no-model boundary. Runtime-cap tests preserve advertised limits
+  across a value-less ACK and cover a newly advertised capability whose `batch`
+  dependency is already active; settings tests cover receive-only publishing
+  and late-load/live-state ordering. All IRC tests, FOSS debug/release unit
+  tests, FOSS debug lint, and FOSS release assembly pass. A publish-capable
+  server advertising the draft capability and a physical device are still
+  required for the manual publish/fallback/request trace.
 
 ### F2. Common IRC network presets
 
