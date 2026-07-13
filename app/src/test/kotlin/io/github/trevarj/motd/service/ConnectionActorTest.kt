@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -122,6 +123,41 @@ class ConnectionActorTest {
         actor.onNetworkAvailable()
         scope.testScheduler.runCurrent()
         assertTrue(conns.size >= 2)
+        actor.stop()
+    }
+
+    @Test
+    fun connectionLeavingReady_cancelsConnectionOwnedSetup() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val conn = FakeConnection()
+        var setupStarted = false
+        var setupCancelled = false
+        val actor = ConnectionActor(
+            networkId = 1,
+            scope = scope,
+            connectionFactory = { conn },
+            onState = { _, _ -> },
+            onEvent = { _, _ -> },
+            onReady = {
+                setupStarted = true
+                try {
+                    awaitCancellation()
+                } finally {
+                    setupCancelled = true
+                }
+            },
+            random = { 0.5 },
+        )
+        actor.start()
+        scope.testScheduler.runCurrent()
+        conn._state.value = IrcClientState.Ready("motd", emptySet(), emptyMap())
+        scope.testScheduler.runCurrent()
+        assertTrue(setupStarted)
+
+        conn._state.value = IrcClientState.Disconnected
+        scope.testScheduler.runCurrent()
+        assertTrue(setupCancelled)
         actor.stop()
     }
 }

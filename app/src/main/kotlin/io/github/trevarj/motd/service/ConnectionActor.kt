@@ -142,14 +142,21 @@ class ConnectionActor(
     private suspend fun runConnection(conn: ManagedConnection, resetBackoff: () -> Unit): Outcome {
         var state = conn.state.first { it !is IrcClientState.Connecting }
         var stableJob: Job? = null
+        var readyJob: Job? = null
         try {
             while (true) {
                 when (state) {
                     is IrcClientState.Ready -> {
                         onState(networkId, state)
-                        onReady(conn)
+                        // Connection-scoped setup may wait for capabilities and retry transient
+                        // operations such as CHATHISTORY. Run it alongside state observation so a
+                        // dead socket cancels that work immediately instead of leaving the actor
+                        // blocked in onReady for a series of request timeouts.
+                        readyJob = scope.launch { onReady(conn) }
                         stableJob = scope.launch { delay(STABLE_RESET_MS); resetBackoff() }
                         val next = conn.state.first { it !is IrcClientState.Ready }
+                        readyJob.cancel()
+                        readyJob = null
                         stableJob.cancel()
                         stableJob = null
                         onState(networkId, next)
@@ -169,6 +176,7 @@ class ConnectionActor(
                 }
             }
         } finally {
+            readyJob?.cancel()
             stableJob?.cancel()
         }
     }

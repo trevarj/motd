@@ -42,6 +42,9 @@ class CatchUp(
         val since = openBuffers.mapNotNull { messageDao.newestTime(it.first) }.maxOrNull()
 
         val discovered = if (since != null) {
+            // TARGETS is an optimization for discovering buffers not yet mirrored locally. A
+            // server may omit or reject it while still supporting per-target history, so failure
+            // here must not prevent known buffers from catching up.
             runCatching {
                 history.chathistory(
                     ChatHistoryRequest(
@@ -67,10 +70,10 @@ class CatchUp(
         // Pull the most recent page via LATEST first so the buffer paints newest-first (plans/04:
         // "null → LATEST each joined buffer"). Subsequent AFTER pages then fill any gap forward.
         if (localNewest == null) {
-            val latest = runCatching {
-                history.chathistory(ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = pageLimit))
-            }.getOrNull()
-            if (latest != null && latest.events.isNotEmpty()) {
+            val latest = history.chathistory(
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = pageLimit),
+            )
+            if (latest.events.isNotEmpty()) {
                 processor.process(networkId, IrcEvent.HistoryBatch(target, latest.events))
                 localNewest = bufferDao.byName(networkId, normalize(target))?.let { messageDao.newestTime(it.id) }
                 if (latest.events.size < pageLimit) return // short page: nothing newer to page AFTER
@@ -80,9 +83,9 @@ class CatchUp(
         }
         while (true) {
             val bound = "timestamp=${Instant.ofEpochMilli(localNewest!!)}"
-            val result = runCatching {
-                history.chathistory(ChatHistoryRequest(ChatHistoryRequest.Subcommand.AFTER, target, bound1 = bound, limit = pageLimit))
-            }.getOrNull() ?: break
+            val result = history.chathistory(
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.AFTER, target, bound1 = bound, limit = pageLimit),
+            )
             if (result.events.isEmpty()) break
             processor.process(networkId, IrcEvent.HistoryBatch(target, result.events))
             val newNewest = bufferDao.byName(networkId, normalize(target))?.let { messageDao.newestTime(it.id) }

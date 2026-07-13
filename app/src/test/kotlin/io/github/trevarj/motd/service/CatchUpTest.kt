@@ -184,4 +184,31 @@ class CatchUpTest {
         assertTrue(history.afterCalls.isEmpty())
         assertTrue(history.markReadFetched.isEmpty())
     }
+
+    @Test
+    fun transientHistoryFailure_isNotSilentlyReportedAsSuccess() = runTest {
+        db.bufferDao().insert(BufferEntity(networkId = networkId, name = "#chan", displayName = "#chan", type = BufferType.CHANNEL))
+        val history = object : CatchUp.HistorySource {
+            override fun hasCap(cap: String) = true
+            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResult =
+                throw java.io.IOException("SOCKS connection reset")
+            override suspend fun fetchReadMarker(target: String) = Unit
+        }
+        val catchUp = CatchUp(db.bufferDao(), db.messageDao(), processor, history, normalize = { it.lowercase() })
+
+        var failure: Throwable? = null
+        try {
+            catchUp.run(networkId, listOf(db.bufferDao().byName(networkId, "#chan")!!.id to "#chan"))
+        } catch (error: Throwable) {
+            failure = error
+        }
+        assertTrue(failure is java.io.IOException)
+    }
+
+    @Test
+    fun reconnectRetryBackoff_isBounded() {
+        assertEquals(2_000L, catchUpRetryDelayMs(0))
+        assertEquals(4_000L, catchUpRetryDelayMs(1))
+        assertEquals(30_000L, catchUpRetryDelayMs(20))
+    }
 }

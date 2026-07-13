@@ -3,6 +3,7 @@ package io.github.trevarj.motd.service
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageKind
@@ -35,6 +36,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterIsInstance
 
 /**
  * Hilt @Singleton connection subsystem (plans/05). Outlives the foreground service — the service
@@ -254,9 +258,6 @@ class ConnectionManagerImpl @Inject constructor(
 
     private suspend fun handleConnectionEvent(networkId: Long, event: IrcEvent) {
         eventProcessor.process(networkId, event)
-        if (event is IrcEvent.CapsChanged && event.added.any(::capShouldTriggerCatchUp)) {
-            clientFor(networkId)?.let { catchUp(networkId, it) }
-        }
     }
 
     private fun fingerprint(row: NetworkEntity): String = networkFingerprint(
@@ -325,7 +326,7 @@ class ConnectionManagerImpl @Inject constructor(
                 connect(childId)
             }
         }
-        catchUp(row.id, client)
+        catchUpForConnection(row.id, client)
     }
 
     // -- catch-up (plans/04) -------------------------------------------------
@@ -339,6 +340,32 @@ class ConnectionManagerImpl @Inject constructor(
             normalize = { client.isupport.normalize(it) },
         )
         catchUp.run(networkId, openBuffers(networkId))
+    }
+
+    /**
+     * Own reconnect catch-up for the lifetime of this exact client. soju child connections can
+     * report Ready before their post-bind feature CAP ACK arrives, so wait for CHATHISTORY rather
+     * than treating the early Ready snapshot as a permanent lack of support. Transient tunnel,
+     * timeout, and protocol failures retry idempotently; ConnectionActor cancels this coroutine as
+     * soon as the socket leaves Ready.
+     */
+    private suspend fun catchUpForConnection(networkId: Long, client: IrcClient) {
+        client.state.filterIsInstance<IrcClientState.Ready>().first { ready ->
+            ready.caps.any { it == CHATHISTORY_CAP || it.startsWith("$CHATHISTORY_CAP=") }
+        }
+        var attempt = 0
+        while (clientFor(networkId) === client) {
+            try {
+                catchUp(networkId, client)
+                return
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                val retryMs = catchUpRetryDelayMs(attempt++)
+                Log.w(TAG, "CHATHISTORY catch-up failed for network $networkId; retrying in ${retryMs}ms", error)
+                delay(retryMs)
+            }
+        }
     }
 
     /** Adapt a live [IrcClient] to the [CatchUp.HistorySource] seam. */
@@ -638,9 +665,9 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     companion object {
-        // Stable logcat tag for connection failures (#43).
+        // Stable logcat tag for reconnect catch-up failures.
+        private const val TAG = "MotdCatchUp"
         const val CHATHISTORY_CAP = "draft/chathistory"
-        const val READ_MARKER_CAP = "draft/read-marker"
         const val WEBPUSH_CAP = "soju.im/webpush"
         const val ECHO_TIMEOUT_MS = 30_000L
         const val MAX_BYTES = 400
@@ -653,8 +680,8 @@ class ConnectionManagerImpl @Inject constructor(
     }
 }
 
-internal fun capShouldTriggerCatchUp(cap: String): Boolean =
-    cap == ConnectionManagerImpl.CHATHISTORY_CAP || cap == ConnectionManagerImpl.READ_MARKER_CAP
+internal fun catchUpRetryDelayMs(attempt: Int): Long =
+    (2_000L * (1L shl attempt.coerceIn(0, 4))).coerceAtMost(30_000L)
 
 /**
  * Pure wanted-set computation for [ConnectionManagerImpl.reconcile] (plans/16 §4), extracted for
