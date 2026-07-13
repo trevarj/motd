@@ -10,27 +10,31 @@ narrowest useful check and expand when a change crosses boundaries.
 | Documentation only | `git diff --check`; verify links, commands, and referenced paths |
 | Shell harness/config | `bash -n test/e2e/*.sh test/e2e/fixtures/*.sh test/e2e/hermetic/*/*.sh` plus the relevant dry run |
 | IRC parser/client/transport | `nix develop -c ./gradlew :irc:test --stacktrace` |
-| Android repositories, services, preferences, or ViewModels | `nix develop -c ./gradlew :app:testFossDebugUnitTest :app:testGoogleDebugUnitTest --stacktrace` |
+| Android repositories, services, preferences, or ViewModels | `nix develop -c ./gradlew :app:testFossDebugUnitTest --stacktrace` |
 | Firebase relay | `nix develop -c npm ci --prefix firebase/functions --ignore-scripts`, then `npm test` and `npm audit --omit=dev` with the same prefix |
-| Compose/resources/manifest | App unit tests, both-flavor lint, and both debug assemblies |
+| Compose/resources/manifest | App unit tests, FOSS lint, and the FOSS debug assembly |
 | Cross-module or release-sensitive work | The full release-parity Gradle command below |
 
-Both-flavor lint and debug assembly:
+FOSS lint and debug assembly:
 
 ```sh
 nix develop -c ./gradlew \
-  :app:lintFossDebug :app:lintGoogleDebug \
-  :app:assembleFossDebug :app:assembleGoogleDebug \
+  :app:lintFossDebug :app:assembleFossDebug \
   --stacktrace --no-daemon --max-workers=1
 ```
 
 Full release-parity Gradle verification:
 
 ```sh
-nix develop -c ./gradlew build \
-  :app:lintFossDebug :app:lintGoogleDebug \
+nix develop -c ./gradlew \
+  :irc:build \
+  :app:testFossDebugUnitTest :app:testFossReleaseUnitTest \
+  :app:lintFossDebug :app:assembleFossRelease \
   --stacktrace --no-daemon --max-workers=1
 ```
+
+The Google/FCM flavor is dormant. Do not run Google Gradle tasks or build a
+Google APK unless the maintainer explicitly reactivates that distribution.
 
 Lint warnings are errors. Keep the single-worker/no-daemon form for final lint
 and release checks because it avoids a known Android lint worker race.

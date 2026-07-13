@@ -46,9 +46,10 @@ flowchart TD
 - IRC TCP/TLS uses okio over `Socket`/`SSLSocket`. App-side WebSocket transport
   uses the pinned OkHttp dependency. HTTP previews and attachment uploads use
   their existing `HttpURLConnection`-based streaming implementations.
-- FOSS and Google are supported product flavors. The Google flavor adds optional
-  Firebase Cloud Messaging; the FOSS flavor remains Google-free. The E2E build
-  is x86_64-compatible and intentionally omits the arm64-only libbox JNI.
+- FOSS is the supported product and release flavor. The dormant Google flavor
+  contains unfinished Firebase Cloud Messaging integration and is intentionally
+  excluded from CI APK builds and releases. The E2E build is x86_64-compatible
+  and intentionally omits the arm64-only libbox JNI.
 
 ## Where to work
 

@@ -45,10 +45,11 @@ commands under `nix develop`.
 nix develop -c ./gradlew :irc:test               # protocol tests (pure JVM)
 nix develop -c ./gradlew :app:testFossDebugUnitTest  # app unit tests (Robolectric)
 nix develop -c ./gradlew :app:assembleFossDebug      # Google-free arm64 debug APK
-nix develop -c ./gradlew build                   # tests + lint + APKs
+nix develop -c ./gradlew :app:lintFossDebug :app:assembleFossDebug  # FOSS checks + APK
 ```
 
-Firebase Cloud Messaging is available in the separate Google flavor; see
+The unfinished Google/FCM flavor is currently excluded from CI APK builds and
+releases. Its paused implementation notes remain in
 [Firebase push setup](docs/firebase-push.md).
 For Google-free push, see [ntfy and UnifiedPush setup](docs/ntfy-push.md).
 
@@ -97,9 +98,9 @@ Questions, bug reports, and feedback: join `#motd` on
 
 ## Releasing
 
-Releases are cut by pushing a signed `v*` tag. The tag workflow verifies the
-Firebase relay, runs the full Gradle build and both-flavor lint, then builds and
-signs the FOSS and Google APKs. `versionName` comes from the tag and
+Releases are cut by pushing a signed `v*` tag. The tag workflow runs FOSS
+release-parity tests and lint, then builds and signs the FOSS APK. `versionName`
+comes from the tag and
 `versionCode` from the CI run number.
 
 The managed-device smoke and exhaustive emulator journey remain available as
@@ -117,8 +118,8 @@ signing env (`MOTD_KEYSTORE_PATH`, `MOTD_KEYSTORE_PASSWORD`, `MOTD_KEY_ALIAS`,
 deterministic complete libbox source, `SHA256SUMS`, and release-specific
 third-party notice. Required
 repository secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`,
-`KEY_PASSWORD`. Firebase client values are optional; when absent, the Google APK
-builds with Firebase push unavailable. Maintainer and agent details are in the
+`KEY_PASSWORD`. The Google/FCM APK is not built or published. Maintainer and
+agent details are in the
 [release runbook](.agents/releases.md).
 
 To dry-run locally, run `nix develop -c ./gradlew :app:assembleFossRelease` with the

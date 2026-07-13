@@ -1,8 +1,9 @@
 # Firebase Cloud Messaging push
 
-MOTD publishes two APKs. The `foss` APK supports persistent sockets and UnifiedPush. The
-`google` APK also supports Firebase Cloud Messaging (FCM). Both push paths require soju's
-`soju.im/webpush` capability.
+MOTD currently publishes only the `foss` APK, with persistent sockets and
+UnifiedPush. The Google/FCM flavor below is unfinished and paused: it is not a
+CI APK build or release artifact, and agents should not build or publish it
+unless the maintainer explicitly reactivates the integration.
 
 FCM cannot accept a Web Push endpoint directly. The included Firebase Function gives soju an
 opaque endpoint, forwards the encrypted RFC8291 body as an FCM data message, and leaves decryption
@@ -33,9 +34,10 @@ Firestore rules deny all client access. The function uses credentials supplied b
 Subscription IDs and management secrets are random; registration and delivery are rate-limited,
 and Firestore TTL removes stale subscriptions.
 
-## Build the Google APK
+## Future reactivation inputs
 
-Get these identifiers from Firebase project settings and export them for the build:
+When the integration is reactivated, these identifiers will be required from
+Firebase project settings:
 
 ```sh
 export MOTD_FIREBASE_API_KEY='...'
@@ -43,16 +45,12 @@ export MOTD_FIREBASE_APP_ID='1:...:android:...'
 export MOTD_FIREBASE_PROJECT_ID='...'
 export MOTD_FIREBASE_SENDER_ID='...'
 export MOTD_FCM_RELAY_URL='https://us-central1-PROJECT_ID.cloudfunctions.net/relay'
-nix develop -c ./gradlew :app:assembleGoogleDebug
 ```
 
-The API key and application identifiers are client configuration, not service-account secrets.
-The APK lands under `app/build/outputs/apk/google/debug/`. A Google build with incomplete values
-compiles and reports FCM unavailable. Release CI currently treats the client values as optional,
-while still building and testing the Firebase relay itself.
-
-To enable FCM in GitHub release APKs, create repository secrets `FIREBASE_API_KEY`, `FIREBASE_APP_ID`,
-`FIREBASE_PROJECT_ID`, `FIREBASE_SENDER_ID`, and `FCM_RELAY_URL` with the corresponding values.
+The API key and application identifiers are client configuration, not
+service-account secrets. No Google APK is currently built by CI or the release
+workflow. Reactivation must first define its test gates, Firebase secrets, relay
+deployment, and release support as one explicit work package.
 
 ## Use it
 

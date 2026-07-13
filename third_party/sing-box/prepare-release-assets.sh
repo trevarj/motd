@@ -5,12 +5,11 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 release_tag="${1:-}"
 foss_apk_path="${2:-}"
-google_apk_path="${3:-}"
-output_dir="${4:-$root_dir/release-assets}"
+output_dir="${3:-$root_dir/release-assets}"
 repository="${GITHUB_REPOSITORY:-}"
 
-[[ -n "$release_tag" && -f "$foss_apk_path" && -f "$google_apk_path" && -n "$repository" ]] || {
-  echo "usage: GITHUB_REPOSITORY=owner/repo $0 <release-tag> <foss-apk> <google-apk> [output-dir]" >&2
+[[ -n "$release_tag" && -f "$foss_apk_path" && -n "$repository" ]] || {
+  echo "usage: GITHUB_REPOSITORY=owner/repo $0 <release-tag> <foss-apk> [output-dir]" >&2
   exit 2
 }
 [[ "$release_tag" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid release tag" >&2; exit 2; }
@@ -21,11 +20,9 @@ output_dir="$(cd "$output_dir" && pwd)"
 "$root_dir/third_party/sing-box/package-source.sh" "$release_tag" "$output_dir"
 
 foss_apk_name="motd-${release_tag}-foss.apk"
-google_apk_name="motd-${release_tag}-google.apk"
 source_name="motd-libbox-source-${release_tag}.tar.gz"
 notice_name="motd-${release_tag}-THIRD_PARTY_NOTICES.md"
 install -m 0644 "$foss_apk_path" "$output_dir/$foss_apk_name"
-install -m 0644 "$google_apk_path" "$output_dir/$google_apk_name"
 install -m 0644 "$root_dir/LICENSE" "$output_dir/LICENSE"
 install -m 0644 "$root_dir/docs/assets/brand/IBM-PLEX-LICENSE.txt" \
   "$output_dir/IBM-PLEX-LICENSE.txt"
@@ -33,7 +30,6 @@ install -m 0644 "$root_dir/docs/assets/brand/IBM-PLEX-LICENSE.txt" \
 source_sha256="$(sha256sum "$output_dir/$source_name" | cut -d ' ' -f1)"
 source_url="https://github.com/${repository}/releases/download/${release_tag}/${source_name}"
 foss_apk_url="https://github.com/${repository}/releases/download/${release_tag}/${foss_apk_name}"
-google_apk_url="https://github.com/${repository}/releases/download/${release_tag}/${google_apk_name}"
 
 install -m 0644 "$root_dir/THIRD_PARTY_NOTICES.md" "$output_dir/$notice_name"
 cat >> "$output_dir/$notice_name" <<EOF
@@ -41,7 +37,6 @@ cat >> "$output_dir/$notice_name" <<EOF
 ## Release-specific source provenance: ${release_tag}
 
 - FOSS object code: [${foss_apk_name}](${foss_apk_url})
-- Google FCM object code: [${google_apk_name}](${google_apk_url})
 - Complete libbox corresponding source: [${source_name}](${source_url})
 - Source archive SHA-256: \`${source_sha256}\`
 
@@ -52,7 +47,7 @@ EOF
 
 (
   cd "$output_dir"
-  sha256sum "$foss_apk_name" "$google_apk_name" "$source_name" LICENSE IBM-PLEX-LICENSE.txt "$notice_name" > SHA256SUMS
+  sha256sum "$foss_apk_name" "$source_name" LICENSE IBM-PLEX-LICENSE.txt "$notice_name" > SHA256SUMS
 )
 
 cat > "$output_dir/release-compliance.md" <<EOF

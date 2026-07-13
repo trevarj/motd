@@ -7,19 +7,15 @@ automation in `.github/workflows/release.yml` is authoritative.
 
 1. Inspect the branch, status, staged diff, and recent tags. Do not include
    unrelated work or assume uncommitted user changes should be released.
-2. Run the full release-parity checks from [`testing.md`](testing.md). Run the
-   Firebase relay install, tests, and production audit when its files changed or
-   before a release intended to match CI exactly.
+2. Run the FOSS release-parity checks from [`testing.md`](testing.md).
 3. Confirm the requested semantic version and that the `v<semver>` tag does not
    already exist locally or remotely.
 4. Confirm the four signing secrets exist in GitHub: `KEYSTORE_BASE64`,
    `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD`.
 
-FCM client values (`FIREBASE_API_KEY`, `FIREBASE_APP_ID`,
-`FIREBASE_PROJECT_ID`, `FIREBASE_SENDER_ID`, and `FCM_RELAY_URL`) are currently
-optional. If incomplete, the Google flavor still builds but reports Firebase
-push unavailable. The Firebase Functions build, tests, and production audit
-still run in the release workflow.
+The Google/FCM distribution is paused. Do not build, sign, attach, or publish a
+Google APK, and do not require Firebase client or relay configuration for a
+release, until the maintainer explicitly reactivates it.
 
 ## Cut the release
 
@@ -29,10 +25,10 @@ git push origin v0.1.0
 ```
 
 Replace the example version with the approved tag. The workflow uses the tag as
-`versionName` and the GitHub run number as `versionCode`, builds and signs both
-FOSS and Google APKs, and publishes:
+`versionName` and the GitHub run number as `versionCode`, builds and signs the
+FOSS APK, and publishes:
 
-- renamed FOSS and Google APKs;
+- the renamed FOSS APK;
 - complete corresponding libbox source;
 - GPL and IBM Plex license files;
 - release-specific third-party notices; and
@@ -41,12 +37,12 @@ FOSS and Google APKs, and publishes:
 The focused managed-device smoke remains available separately, and exhaustive
 E2E runs manually/nightly. Neither currently gates a release because the hosted
 managed emulator can fail in System UI before MOTD starts. The release job still
-runs Firebase verification, the full Gradle build, tests, and lint.
+runs the FOSS release build, tests, and lint.
 
 ## Failure recovery
 
 - Inspect the failed job before changing code or secrets; distinguish runner,
-  signing, Firebase, Gradle, and packaging failures.
+  signing, Gradle, and packaging failures.
 - A retry runs against the same tagged commit. A source fix on `main` is not in
   that tag.
 - Do not force-move a tag or delete a published release without explicit

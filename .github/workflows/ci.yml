@@ -9,17 +9,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  firebase-relay:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: firebase/functions/package-lock.json }
-      - run: npm ci --prefix firebase/functions --ignore-scripts
-      - run: npm test --prefix firebase/functions
-      - run: npm audit --prefix firebase/functions --omit=dev
-
   # Pure-JVM protocol module: fast, no Android SDK needed. Runs in parallel
   # with the app job so a slow/hanging app build never blocks irc feedback.
   irc:
@@ -44,7 +33,7 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v4
       - name: App unit tests
-        run: ./gradlew :app:testFossDebugUnitTest :app:testGoogleDebugUnitTest --stacktrace
+        run: ./gradlew :app:testFossDebugUnitTest --stacktrace
       # Lint runs isolated with a single worker and no daemon to avoid the
       # flaky Gradle-worker classloader race that surfaces as
       # NoClassDefFoundError in ModifierDeclarationDetector. A bounded retry
@@ -53,17 +42,15 @@ jobs:
         run: |
           for attempt in 1 2; do
             echo "::group::lint attempt $attempt"
-            ./gradlew :app:lintFossDebug :app:lintGoogleDebug --stacktrace \
+            ./gradlew :app:lintFossDebug --stacktrace \
               -Dorg.gradle.workers.max=1 && { echo "::endgroup::"; exit 0; }
             echo "::endgroup::"
             echo "lint attempt $attempt failed; retrying" >&2
           done
           exit 1
       - name: Assemble debug APK
-        run: ./gradlew :app:assembleFossDebug :app:assembleGoogleDebug --stacktrace
+        run: ./gradlew :app:assembleFossDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: motd-debug
-          path: |
-            app/build/outputs/apk/foss/debug/app-foss-debug.apk
-            app/build/outputs/apk/google/debug/app-google-debug.apk
+          path: app/build/outputs/apk/foss/debug/app-foss-debug.apk
