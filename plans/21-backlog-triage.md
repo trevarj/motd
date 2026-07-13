@@ -560,7 +560,8 @@ with unrelated predicates at individual call sites.
 
 ### E1. Swipe to reply
 
-- **Priority / size / status:** P2, M, Ready.
+- **Priority / size / status:** P2, M, Implemented (2026-07-13); physical
+  gesture verification pending.
 - **Depends on:** E3 should land first so gesture work targets the stable row.
 - **Implementation:** drag toward the reply direction (right in LTR, left in
   RTL) with horizontal touch slop, resistance, a maximum visual offset around
@@ -576,6 +577,21 @@ with unrelated predicates at individual call sites.
 - **Acceptance / tests:** below/above threshold, cancellation, vertical
   arbitration, LTR/RTL, edge gesture, one haptic/one invocation, exclusions,
   accessibility action, and existing reply state rendering.
+- **Implementation evidence:** one shared wrapper now fronts every ordinary
+  message density. It waits for reply-direction horizontal touch slop before
+  consuming, leaves vertical scroll and existing link/long-press handlers in
+  control until then, applies resistance with a 56-dp threshold and 80-dp cap,
+  reveals a directional reply icon, haptics once, commits only a completed
+  armed drag, and springs back on release/cancel. LTR drags right, RTL drags
+  left, the platform system-gesture inset is excluded, and TalkBack receives a
+  localized custom Reply action through the same callback. System runs and
+  collapsed fool placeholders bypass the wrapper.
+- **Verification evidence:** focused pure tests cover resisted/capped LTR and
+  RTL geometry, threshold boundaries, cancellation versus completion, one-shot
+  haptic gating, and physical edge exclusion. The complete FOSS debug and
+  release unit suites, warnings-as-errors lint, and both FOSS APK assemblies
+  pass. Real-device arbitration, haptic feel, and child-tap smoke testing remain
+  pending because the device is disconnected.
 
 ### E2. UI and conversation font-size sliders
 

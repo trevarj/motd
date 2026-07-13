@@ -869,6 +869,7 @@ fun ChatContent(
                         reactionChips = reactionChips,
                         replyPreview = replyPreview,
                         onLongPress = { sheetTarget = it },
+                        onReply = onSetReply,
                         onReact = onReact,
                         onImageClick = onOpenImage,
                         onRetry = onRetry,

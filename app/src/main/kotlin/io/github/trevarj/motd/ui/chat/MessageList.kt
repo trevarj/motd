@@ -55,6 +55,7 @@ import io.github.trevarj.motd.ui.components.NewMessagesDivider
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.components.SystemEventPill
+import io.github.trevarj.motd.ui.components.SwipeToReplyContainer
 import io.github.trevarj.motd.ui.components.DaySeparator
 import io.github.trevarj.motd.ui.components.dayStart
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
@@ -130,6 +131,7 @@ fun MessageList(
     listState: LazyListState,
     readMarkerTime: Long?,
     onLongPress: (MessageEntity) -> Unit,
+    onReply: (MessageEntity) -> Unit,
     // React to a message; the whole entity is passed so a still-pending own row (msgid == null) is
     // queued by the VM instead of silently dropped (bug: react on a just-sent message did nothing).
     onReact: (MessageEntity, String) -> Unit,
@@ -239,6 +241,7 @@ fun MessageList(
                 reactions = msg.msgid?.let(reactionChips).orEmpty(),
                 knownNicks = knownNicks,
                 onLongPress = onLongPress,
+                onReply = onReply,
                 onReact = onReact,
                 onImageClick = onImageClick,
                 onRetry = onRetry,
@@ -369,6 +372,7 @@ private fun MessageRow(
     reactions: List<ReactionChip>,
     knownNicks: Set<String>,
     onLongPress: (MessageEntity) -> Unit,
+    onReply: (MessageEntity) -> Unit,
     onReact: (MessageEntity, String) -> Unit,
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
@@ -447,36 +451,40 @@ private fun MessageRow(
 
     onCollapseFool?.let { FoolCollapseChip(sender = msg.sender, onCollapse = it) }
 
-    MessageBubble(
-        // Per-message handle for long-press/react/reply/deep-jump. Prefer the stable server msgid;
-        // Pending rows (null msgid) fall back to the local entity id for stable E2E selection.
+    SwipeToReplyContainer(
         modifier = Modifier.testTag(messageTag(msg)),
-        sender = msg.sender,
-        text = msg.text,
-        timeMs = msg.serverTime,
-        formattedTime = formattedTime,
-        isSelf = msg.isSelf,
-        kind = msg.kind,
-        showSender = showsSender(msg, older),
-        senderIsFriend = senderIsFriend,
-        failed = msg.failed,
-        // Subtle "sending…" state before the 30s failure flip (plans/15 #21).
-        pending = msg.pendingLabel != null,
-        reply = reply,
-        imageUrl = imageUrl,
-        linkPreview = preview,
-        linkPreviewLoading = previewLoading,
-        reactions = reactions,
-        knownNicks = knownNicks,
-        onLongPress = { onLongPress(msg) },
-        // Pass the entity, not just msgid: a chip re-tap on a confirmed message has a msgid, but the
-        // VM handles the pending case uniformly (queue) so we never silently drop a react.
-        onReact = { emoji -> onReact(msg, emoji) },
-        onImageClick = onImageClick,
-        onLinkPreviewClick = { linkUrl?.let(onOpenLink) },
-        // Only non-self senders open the nick sheet (self has no social/moderation actions).
-        onSenderClick = if (msg.isSelf) null else ({ onSenderClick(msg.sender) }),
-    )
+        onReply = { onReply(msg) },
+    ) { rowModifier ->
+        MessageBubble(
+            // Per-message handle for long-press/react/reply/deep-jump. Prefer the stable server
+            // msgid; pending rows fall back to the local id for stable E2E selection.
+            modifier = rowModifier,
+            sender = msg.sender,
+            text = msg.text,
+            timeMs = msg.serverTime,
+            formattedTime = formattedTime,
+            isSelf = msg.isSelf,
+            kind = msg.kind,
+            showSender = showsSender(msg, older),
+            senderIsFriend = senderIsFriend,
+            failed = msg.failed,
+            // Subtle "sending…" state before the 30s failure flip (plans/15 #21).
+            pending = msg.pendingLabel != null,
+            reply = reply,
+            imageUrl = imageUrl,
+            linkPreview = preview,
+            linkPreviewLoading = previewLoading,
+            reactions = reactions,
+            knownNicks = knownNicks,
+            onLongPress = { onLongPress(msg) },
+            // Pass the entity, not just msgid: the VM also handles a pending reaction uniformly.
+            onReact = { emoji -> onReact(msg, emoji) },
+            onImageClick = onImageClick,
+            onLinkPreviewClick = { linkUrl?.let(onOpenLink) },
+            // Only non-self senders open the nick sheet (self has no social/moderation actions).
+            onSenderClick = if (msg.isSelf) null else ({ onSenderClick(msg.sender) }),
+        )
+    }
     if (msg.failed) {
         RetryRow(onRetry = { onRetry(msg) }, onDelete = { onDelete(msg) })
     }
