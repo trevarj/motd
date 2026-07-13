@@ -13,6 +13,7 @@ import io.github.trevarj.motd.ui.onboarding.ConnectionChoice
 import io.github.trevarj.motd.ui.onboarding.ServerForm
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkPhase
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkViewModel
+import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -221,5 +222,46 @@ class AddNetworkViewModelTest {
         runCurrent()
         assertTrue(back)
         assertTrue(repo.networks.containsKey(id))
+    }
+
+    @Test
+    fun preset_selection_clears_auth_and_endpoint_edits_become_custom() = runTest {
+        val vm = vm(FakeNetworkRepository(), FakeConnectionManager())
+        vm.editServer(ServerForm(nick = "trev", username = "ident", realname = "Trev"))
+        vm.editAuth(AuthForm(AuthMode.PLAIN, "old-account", "old-password", "old-cert"))
+
+        vm.selectPreset(NetworkPresetId.LIBERA)
+
+        assertEquals(NetworkPresetId.LIBERA, vm.state.value.presetId)
+        assertEquals("irc.libera.chat", vm.state.value.server.host)
+        assertEquals("trev", vm.state.value.server.nick)
+        assertEquals("ident", vm.state.value.server.username)
+        assertEquals("Trev", vm.state.value.server.realname)
+        assertEquals(AuthForm(), vm.state.value.auth)
+
+        vm.editServer(vm.state.value.server.copy(nick = "newnick"))
+        assertEquals(NetworkPresetId.LIBERA, vm.state.value.presetId)
+        vm.editServer(vm.state.value.server.copy(port = "7000"))
+        assertEquals(NetworkPresetId.CUSTOM, vm.state.value.presetId)
+    }
+
+    @Test
+    fun plaintext_direct_network_requires_explicit_confirmation() = runTest {
+        val repo = FakeNetworkRepository()
+        val cm = FakeConnectionManager()
+        val vm = vm(repo, cm)
+        vm.selectPreset(NetworkPresetId.QUAKENET)
+        vm.editServer(vm.state.value.server.copy(nick = "trev"))
+
+        vm.submit(onOpenBouncerNetworks = {}, onDone = {})
+        runCurrent()
+        assertTrue(vm.state.value.showPlaintextWarning)
+        assertTrue(repo.networks.isEmpty())
+
+        vm.confirmPlaintext(onOpenBouncerNetworks = {}, onDone = {})
+        runCurrent()
+        assertEquals(AddNetworkPhase.TESTING, vm.state.value.phase)
+        assertEquals("QuakeNet", repo.networks.values.single().name)
+        assertFalse(repo.networks.values.single().tls)
     }
 }

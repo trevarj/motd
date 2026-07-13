@@ -431,6 +431,15 @@
     <string name="add_network_title">Add network</string>
     <string name="add_network_type_section">Connection type</string>
     <string name="add_network_details_section">Server and login</string>
+    <string name="add_network_preset_section">Network</string>
+    <string name="add_network_preset_custom">Custom</string>
+    <string name="add_network_preset_custom_desc">Enter any IRC server manually</string>
+    <string name="add_network_preset_secure">Secure networks</string>
+    <string name="add_network_preset_legacy">Legacy unencrypted</string>
+    <string name="add_network_preset_unencrypted">Unencrypted</string>
+    <string name="add_network_plaintext_title">Connect without encryption?</string>
+    <string name="add_network_plaintext_message">Your password and messages may be visible to the network. Continue only if this server does not support TLS.</string>
+    <string name="add_network_plaintext_continue">Connect anyway</string>
     <string name="add_network_kind_network">IRC network</string>
     <string name="add_network_kind_soju">soju bouncer</string>
     <string name="add_network_connect_save">Connect &amp; save</string>

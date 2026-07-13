@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -44,7 +45,9 @@ import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.ConnectionChoice
 import io.github.trevarj.motd.ui.onboarding.ServerForm
 import io.github.trevarj.motd.ui.settings.NetworkForm
+import io.github.trevarj.motd.ui.settings.RadioRow
 import io.github.trevarj.motd.ui.settings.SettingsGroup
+import io.github.trevarj.motd.ui.settings.SubLabel
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Stateful entry: wires the ViewModel and drives navigation (plans/16 §5.4). */
@@ -59,6 +62,7 @@ fun AddNetworkScreen(
         state = state,
         onBack = onBack,
         onSetKind = viewModel::setKind,
+        onSelectPreset = viewModel::selectPreset,
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
         onSubmit = { viewModel.submit(onOpenBouncerNetworks, onBack) },
@@ -66,6 +70,8 @@ fun AddNetworkScreen(
         onSaveAnyway = { viewModel.saveAnyway(onBack) },
         onEditForm = viewModel::editForm,
         onAbandon = { viewModel.abandon(onBack) },
+        onConfirmPlaintext = { viewModel.confirmPlaintext(onOpenBouncerNetworks, onBack) },
+        onDismissPlaintext = viewModel::dismissPlaintextWarning,
     )
 }
 
@@ -75,6 +81,7 @@ fun AddNetworkContent(
     state: AddNetworkUiState,
     onBack: () -> Unit,
     onSetKind: (ConnectionChoice) -> Unit,
+    onSelectPreset: (NetworkPresetId) -> Unit,
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
     onSubmit: () -> Unit,
@@ -82,6 +89,8 @@ fun AddNetworkContent(
     onSaveAnyway: () -> Unit,
     onEditForm: () -> Unit,
     onAbandon: () -> Unit,
+    onConfirmPlaintext: () -> Unit,
+    onDismissPlaintext: () -> Unit,
 ) {
     // During TESTING/FAILED a row already exists; back-press must delete it first.
     val hasHalfCreated = state.phase != AddNetworkPhase.FORM
@@ -112,6 +121,9 @@ fun AddNetworkContent(
                 SettingsGroup(title = stringResource(R.string.add_network_type_section)) {
                     KindSelector(kind = state.kind, enabled = state.phase == AddNetworkPhase.FORM, onSetKind = onSetKind)
                 }
+                if (!state.isSoju && state.phase == AddNetworkPhase.FORM) {
+                    NetworkPresetPicker(selected = state.presetId, onSelect = onSelectPreset)
+                }
                 SettingsGroup(title = stringResource(R.string.add_network_details_section)) {
                     NetworkForm(
                         server = state.server,
@@ -139,6 +151,59 @@ fun AddNetworkContent(
                     AddNetworkPhase.FORM -> Unit
                 }
             }
+        }
+    }
+
+    if (state.showPlaintextWarning) {
+        AlertDialog(
+            modifier = Modifier.testTag("plaintext_network_warning"),
+            onDismissRequest = onDismissPlaintext,
+            title = { Text(stringResource(R.string.add_network_plaintext_title)) },
+            text = { Text(stringResource(R.string.add_network_plaintext_message)) },
+            confirmButton = {
+                Button(onClick = onConfirmPlaintext) {
+                    Text(stringResource(R.string.add_network_plaintext_continue))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissPlaintext) { Text(stringResource(R.string.dialog_cancel)) }
+            },
+        )
+    }
+}
+
+@Composable
+private fun NetworkPresetPicker(
+    selected: NetworkPresetId,
+    onSelect: (NetworkPresetId) -> Unit,
+) {
+    SettingsGroup(title = stringResource(R.string.add_network_preset_section)) {
+        RadioRow(
+            label = stringResource(R.string.add_network_preset_custom),
+            subtitle = stringResource(R.string.add_network_preset_custom_desc),
+            selected = selected == NetworkPresetId.CUSTOM,
+            enabled = true,
+            onClick = { onSelect(NetworkPresetId.CUSTOM) },
+        )
+        SubLabel(stringResource(R.string.add_network_preset_secure))
+        COMMON_NETWORK_PRESETS.filterNot(NetworkPreset::legacyUnencrypted).forEach { preset ->
+            RadioRow(
+                label = preset.displayName,
+                subtitle = "${preset.host}:${preset.port} · TLS",
+                selected = selected == preset.id,
+                enabled = true,
+                onClick = { onSelect(preset.id) },
+            )
+        }
+        SubLabel(stringResource(R.string.add_network_preset_legacy))
+        COMMON_NETWORK_PRESETS.filter(NetworkPreset::legacyUnencrypted).forEach { preset ->
+            RadioRow(
+                label = preset.displayName,
+                subtitle = "${preset.host}:${preset.port} · ${stringResource(R.string.add_network_preset_unencrypted)}",
+                selected = selected == preset.id,
+                enabled = true,
+                onClick = { onSelect(preset.id) },
+            )
         }
     }
 }
@@ -226,8 +291,9 @@ private fun AddNetworkFormPreview() {
             state = AddNetworkUiState(
                 server = ServerForm(host = "irc.libera.chat", port = "6697", nick = "me"),
             ),
-            onBack = {}, onSetKind = {}, onServerChange = {}, onAuthChange = {},
+            onBack = {}, onSetKind = {}, onSelectPreset = {}, onServerChange = {}, onAuthChange = {},
             onSubmit = {}, onRetry = {}, onSaveAnyway = {}, onEditForm = {}, onAbandon = {},
+            onConfirmPlaintext = {}, onDismissPlaintext = {},
         )
     }
 }
@@ -242,8 +308,9 @@ private fun AddNetworkFailedPreview() {
                 phase = AddNetworkPhase.FAILED,
                 error = "SASL authentication failed",
             ),
-            onBack = {}, onSetKind = {}, onServerChange = {}, onAuthChange = {},
+            onBack = {}, onSetKind = {}, onSelectPreset = {}, onServerChange = {}, onAuthChange = {},
             onSubmit = {}, onRetry = {}, onSaveAnyway = {}, onEditForm = {}, onAbandon = {},
+            onConfirmPlaintext = {}, onDismissPlaintext = {},
         )
     }
 }

@@ -30,6 +30,9 @@ data class AddNetworkUiState(
     val networkId: Long? = null,          // created row during the connect test
     val connState: IrcClientState? = null,
     val error: String? = null,
+    val presetId: NetworkPresetId = NetworkPresetId.CUSTOM,
+    val showPlaintextWarning: Boolean = false,
+    val plaintextConfirmed: Boolean = false,
 ) {
     val isSoju: Boolean get() = kind == ConnectionChoice.SOJU
     val role: NetworkRole get() = if (isSoju) NetworkRole.BOUNCER_ROOT else NetworkRole.DIRECT
@@ -61,10 +64,47 @@ class AddNetworkViewModel @Inject constructor(
         } else {
             _state.value.auth
         }
-        _state.value = _state.value.copy(kind = kind, auth = auth)
+        _state.value = _state.value.copy(
+            kind = kind,
+            auth = auth,
+            presetId = if (kind == ConnectionChoice.NETWORK) _state.value.presetId else NetworkPresetId.CUSTOM,
+            showPlaintextWarning = false,
+            plaintextConfirmed = false,
+        )
     }
 
-    fun editServer(server: ServerForm) { _state.value = _state.value.copy(server = server) }
+    fun editServer(server: ServerForm) {
+        val current = _state.value
+        val selected = networkPreset(current.presetId)
+        _state.value = current.copy(
+            server = server,
+            presetId = if (selected?.matches(server) == true) current.presetId else NetworkPresetId.CUSTOM,
+            showPlaintextWarning = false,
+            plaintextConfirmed = false,
+        )
+    }
+
+    fun selectPreset(id: NetworkPresetId) {
+        val current = _state.value
+        val preset = networkPreset(id)
+        if (preset == null) {
+            _state.value = current.copy(
+                presetId = NetworkPresetId.CUSTOM,
+                showPlaintextWarning = false,
+                plaintextConfirmed = false,
+            )
+            return
+        }
+        val (server, auth) = applyNetworkPreset(preset, current.server)
+        _state.value = current.copy(
+            kind = ConnectionChoice.NETWORK,
+            server = server,
+            auth = auth,
+            presetId = id,
+            showPlaintextWarning = false,
+            plaintextConfirmed = false,
+        )
+    }
 
     fun editAuth(auth: AuthForm) {
         // Re-pin PLAIN for soju so a NONE/EXTERNAL choice can't sneak in on the root.
@@ -75,6 +115,10 @@ class AddNetworkViewModel @Inject constructor(
     /** Create the row, connect, and observe its live state. */
     fun submit(onOpenBouncerNetworks: (Long) -> Unit, onDone: () -> Unit) {
         if (!_state.value.canSubmit) return
+        if (!_state.value.isSoju && !_state.value.server.tls && !_state.value.plaintextConfirmed) {
+            _state.value = _state.value.copy(showPlaintextWarning = true)
+            return
+        }
         testJob?.cancel()
         testJob = viewModelScope.launch {
             val s = _state.value
@@ -82,7 +126,7 @@ class AddNetworkViewModel @Inject constructor(
                 server = s.server,
                 auth = s.auth,
                 role = s.role,
-                name = s.server.host,
+                name = networkPreset(s.presetId)?.displayName ?: s.server.host,
             )
             val networkId = networkRepository.addNetwork(entity)
             _state.value = _state.value.copy(
@@ -105,6 +149,15 @@ class AddNetworkViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    fun confirmPlaintext(onOpenBouncerNetworks: (Long) -> Unit, onDone: () -> Unit) {
+        _state.value = _state.value.copy(showPlaintextWarning = false, plaintextConfirmed = true)
+        submit(onOpenBouncerNetworks, onDone)
+    }
+
+    fun dismissPlaintextWarning() {
+        _state.value = _state.value.copy(showPlaintextWarning = false)
     }
 
     /** Retry after a failed test: delete the half-created row, keep the fields, resubmit. */

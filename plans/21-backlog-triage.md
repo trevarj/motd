@@ -666,7 +666,7 @@ with unrelated predicates at individual call sites.
 
 ### F2. Common IRC network presets
 
-- **Priority / size / status:** P2, M, Ready.
+- **Priority / size / status:** P2, M, Complete (2026-07-13).
 - **Depends on:** none; D3 depends on it.
 - **Implementation:** keep a compile-time catalog outside composables. Selecting
   a preset fills the existing editable server form, preserves the user's IRC
@@ -697,6 +697,18 @@ with unrelated predicates at individual call sites.
   mapping; identity preservation; auth clearing; editing into Custom state;
   plaintext warning; D3 eligibility only for a newly saved unchanged Libera
   preset.
+- **Implementation evidence:** the add-network flow now reads a compile-time
+  nine-network catalog, presents Custom first, groups seven TLS choices before
+  two legacy unencrypted choices, and leaves the populated form editable.
+  Applying a preset changes only host/port/TLS, preserves nick/username/real
+  name, clears SASL/certificate state, and retains explicit preset identity
+  only while its endpoint remains unchanged. Every direct plaintext endpoint,
+  including Custom, must pass an explicit warning before a row is created.
+- **Verification evidence:** focused FOSS tests lock every host, port, transport,
+  and ordering entry; identity/auth mapping; identity-only edits; transition to
+  Custom on endpoint edits; and the no-row-before-confirmation plaintext path.
+  The Libera preset identity remains available through successful row creation
+  for D3's one-shot enrollment handoff.
 
 ## G. Soju bouncer administration
 
