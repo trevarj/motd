@@ -401,10 +401,11 @@ with unrelated predicates at individual call sites.
   visible and two successive refreshes returned `History is up to date` without
   a crash.
 
-### C3. Add a native ZNC fixture and assess `parenworks/cloak`
+### C3. Add a native ZNC fixture; treat `parenworks/cloak` as compatible
 
-- **Priority / size / status:** P1, L, Complete (2026-07-13) for ZNC; Cloak
-  deliberately deferred under the ZNC-compatible behavior assumption.
+- **Priority / size / status:** P1, L, Complete (2026-07-13). Cloak-specific
+  fixture and validation work is intentionally out of scope under the
+  ZNC-compatible behavior assumption.
 - **Depends on:** none; do not block direct/soju correctness on Cloak.
 - **ZNC implementation:** add a sibling native fixture under `test/e2e/` rather
   than complicating `local-stack.sh`. Run ZNC against the existing Ergo test
@@ -413,19 +414,17 @@ with unrelated predicates at individual call sites.
   native playback and timestamps, channel/query routing, echo/self messages,
   reconnect gaps, and two attached clients. Record the actual advertised
   capabilities; do not assume ZNC implements `draft/chathistory`.
-- **Cloak spike:** evaluate the exact `parenworks/cloak` project with a pinned
-  source revision. Record whether it boots reproducibly, its transport/history
-  model, CAP set, and whether it adds distinct app behavior worth a fixture.
-  Previous work reached an SBCL/Quicklisp `REQUIRE sb-cltl2` runtime failure. If
-  that remains reproducible after a bounded dependency/runtime-path check,
-  document the blocker and stop; do not invent acceptance behavior for a stack
-  that cannot run.
+- **Cloak scope decision:** assume Cloak exposes the same app-relevant
+  degradation as ZNC: persistent upstream connectivity and timestamped backlog
+  replay without `draft/chathistory`. Do not build, package, or validate Cloak
+  separately. Reopen this decision only for a reproducible Cloak-specific app
+  failure or evidence that its downstream IRC behavior differs materially.
 - **Failure behavior:** fixtures fail loudly on occupied ports, preserve logs
   under a separate `/tmp` directory, and clean up by recorded PID rather than
   broad `pkill` patterns.
 - **Acceptance:** ZNC setup is deterministic from the Nix environment and its
-  observed degradation is covered in app tests/docs. Cloak finishes with either
-  a reproducible fixture plan or an evidence-backed blocked/no-value result.
+  observed degradation is covered in app tests/docs. That coverage is the
+  accepted Cloak proxy until the scope decision above is reopened.
 - **Reference:** [official ZNC repository](https://github.com/znc/znc) and
   [parenworks/cloak](https://github.com/parenworks/cloak).
 - **2026-07-13 ZNC evidence:** `test/e2e/znc-stack.sh` provisions pinned Nix
@@ -889,8 +888,8 @@ with unrelated predicates at individual call sites.
 1. Run B3 baseline instrumentation and physical-device matrix.
 2. Implement A1 and A2 together; verify live and replay interoperability.
 3. Implement B2, then B1; repeat B3 device verification after the policy lands.
-4. Build the native ZNC fixture, then implement C1 and C2. The Cloak spike runs
-   independently and does not block this sequence.
+4. Build the native ZNC fixture, then implement C1 and C2. Use its degradation
+   coverage for Cloak; perform no separate Cloak work.
 5. Implement D1 and D2 and verify D4.
 6. Implement F2, then D3.
 7. Implement E3, E1, E2, and E4 in that order.
@@ -916,7 +915,7 @@ user explicitly requests it.
 | 8 | Investigate correct scroll-to-bottom behavior used by other chat apps | B3 |
 | 9 | Never show join/part in chat-list previews | B2 |
 | 10 | Add image/link preview controls | D2 |
-| 11 | Add local ZNC/Cloak stack coverage | C3 |
+| 11 | Add local ZNC coverage and assume Cloak compatibility | C3 |
 | 12 | Force-fetch or revalidate history on reconnect | C2 |
 | 13 | Remove read-receipt/send races from auto-follow UX | B3, then B1 |
 | 14 | Add a clear-search X | D1 |
