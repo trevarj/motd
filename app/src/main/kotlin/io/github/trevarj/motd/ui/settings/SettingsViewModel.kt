@@ -21,6 +21,9 @@ import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.avatar.AvatarConfig
+import io.github.trevarj.motd.avatar.AvatarController
+import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.service.DeliveryMode
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +40,14 @@ data class SettingsUiState(
     val appearance: AppearanceConfig = AppearanceConfig(),
     val reply: ReplyConfig = ReplyConfig(),
     val contentPreviews: ContentPreviewConfig = ContentPreviewConfig(),
+    val avatars: AvatarConfig = AvatarConfig(),
+)
+
+private data class ChatUiPrefs(
+    val appearance: AppearanceConfig,
+    val reply: ReplyConfig,
+    val contentPreviews: ContentPreviewConfig,
+    val avatars: AvatarConfig,
 )
 
 @HiltViewModel
@@ -48,13 +59,16 @@ class SettingsViewModel @Inject constructor(
     private val appearancePrefs: AppearancePrefs,
     private val replyPrefs: ReplyPrefs,
     private val contentPreviewPrefs: ContentPreviewPrefs,
+    private val avatarPrefs: AvatarPrefs,
+    private val avatarController: AvatarController,
 ) : ViewModel() {
 
     private val appearanceReplyAndPreviews = combine(
         appearancePrefs.config,
         replyPrefs.config,
         contentPreviewPrefs.config,
-        ::Triple,
+        avatarPrefs.config,
+        ::ChatUiPrefs,
     )
 
     val state: StateFlow<SettingsUiState> =
@@ -67,7 +81,7 @@ class SettingsViewModel @Inject constructor(
             pushProviderPrefs.provider,
             appearanceReplyAndPreviews,
         ) { settings, networks, availability, provider, appearanceReplyPreviews ->
-            val (appearance, reply, contentPreviews) = appearanceReplyPreviews
+            val (appearance, reply, contentPreviews, avatars) = appearanceReplyPreviews
             SettingsUiState(
                 settings = settings,
                 networks = networks,
@@ -76,6 +90,7 @@ class SettingsViewModel @Inject constructor(
                 appearance = appearance,
                 reply = reply,
                 contentPreviews = contentPreviews,
+                avatars = avatars,
             )
         }.stateIn(
             scope = viewModelScope,
@@ -147,6 +162,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setShowImages(show: Boolean) = viewModelScope.launch {
         contentPreviewPrefs.setShowImages(show)
+    }
+
+    fun setShowSharedAvatars(show: Boolean) = viewModelScope.launch {
+        avatarController.setShowSharedAvatars(show)
     }
 
     fun setShowLinkPreviews(show: Boolean) = viewModelScope.launch {

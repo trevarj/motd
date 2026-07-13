@@ -51,6 +51,12 @@ import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
 import io.github.trevarj.motd.attachment.AttachmentUploader
 import io.github.trevarj.motd.attachment.AttachmentUploaderImpl
+import io.github.trevarj.motd.avatar.AvatarController
+import io.github.trevarj.motd.avatar.AvatarCoordinator
+import io.github.trevarj.motd.avatar.AvatarPrefs
+import io.github.trevarj.motd.avatar.AvatarPrefsImpl
+import io.github.trevarj.motd.avatar.AvatarStore
+import io.github.trevarj.motd.avatar.AvatarStoreImpl
 import javax.inject.Singleton
 
 /**
@@ -108,6 +114,15 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun attachmentUploader(impl: AttachmentUploaderImpl): AttachmentUploader
+
+    @Binds @Singleton
+    abstract fun avatarPrefs(impl: AvatarPrefsImpl): AvatarPrefs
+
+    @Binds @Singleton
+    abstract fun avatarStore(impl: AvatarStoreImpl): AvatarStore
+
+    @Binds @Singleton
+    abstract fun avatarController(impl: AvatarCoordinator): AvatarController
 
     // -- data/sync (WP5) --
     @Binds @Singleton

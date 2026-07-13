@@ -17,6 +17,7 @@ import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.avatar.AvatarCoordinator
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.irc.client.IrcClient
@@ -62,6 +63,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val localSocksProvider: LocalSocksProvider,
     private val historyResyncCoordinator: HistoryResyncCoordinator,
     private val presetEnrollmentCoordinator: PresetEnrollmentCoordinator,
+    private val avatarCoordinator: AvatarCoordinator,
     // Lazy to break the WebPushRegistrar <-> ConnectionManager ctor cycle.
     private val webPushRegistrar: dagger.Lazy<WebPushRegistrar>,
 ) : ConnectionManager {
@@ -292,6 +294,7 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     private suspend fun handleConnectionEvent(networkId: Long, event: IrcEvent) {
+        avatarCoordinator.onEvent(networkId, event)
         eventProcessor.process(networkId, event)
     }
 
@@ -340,6 +343,8 @@ class ConnectionManagerImpl @Inject constructor(
         client: IrcClient,
         isCurrent: () -> Boolean,
     ) {
+        if (!isCurrent()) return
+        avatarCoordinator.onReady(row.id, client)
         if (!isCurrent()) return
         // Persist STS policy if the server advertised one.
         val stsValue = client.caps.firstOrNull { it == "sts" || it.startsWith("sts=") }?.substringAfter('=', "")

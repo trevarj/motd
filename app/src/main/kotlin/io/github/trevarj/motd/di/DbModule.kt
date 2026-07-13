@@ -2,6 +2,8 @@ package io.github.trevarj.motd.di
 
 import android.content.Context
 import androidx.room.Room
+import io.github.trevarj.motd.avatar.AvatarDao
+import io.github.trevarj.motd.avatar.AvatarDatabase
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -23,6 +25,13 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 internal object DbModule {
+
+    @Provides
+    @Singleton
+    fun provideAvatarDatabase(@ApplicationContext context: Context): AvatarDatabase =
+        Room.databaseBuilder(context, AvatarDatabase::class.java, "avatars.db").build()
+
+    @Provides fun provideAvatarDao(db: AvatarDatabase): AvatarDao = db.avatarDao()
 
     @Provides
     @Singleton

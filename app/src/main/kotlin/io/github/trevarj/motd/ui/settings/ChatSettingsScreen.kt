@@ -21,6 +21,7 @@ import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Block
@@ -39,6 +40,7 @@ fun ChatSettingsScreen(
         settings = state.settings,
         reply = state.reply,
         contentPreviews = state.contentPreviews,
+        avatars = state.avatars,
         onBack = onBack,
         onOpenFriends = onOpenFriends,
         onOpenFools = onOpenFools,
@@ -48,6 +50,7 @@ fun ChatSettingsScreen(
         onVisibleReplyPrefix = viewModel::setVisibleReplyPrefix,
         onShowImages = viewModel::setShowImages,
         onShowLinkPreviews = viewModel::setShowLinkPreviews,
+        onShowSharedAvatars = viewModel::setShowSharedAvatars,
     )
 }
 
@@ -56,6 +59,7 @@ fun ChatSettingsContent(
     settings: Settings,
     reply: ReplyConfig,
     contentPreviews: ContentPreviewConfig,
+    avatars: AvatarConfig,
     onBack: () -> Unit,
     onOpenFriends: () -> Unit,
     onOpenFools: () -> Unit,
@@ -65,6 +69,7 @@ fun ChatSettingsContent(
     onVisibleReplyPrefix: (Boolean) -> Unit,
     onShowImages: (Boolean) -> Unit,
     onShowLinkPreviews: (Boolean) -> Unit,
+    onShowSharedAvatars: (Boolean) -> Unit,
 ) {
     SettingsScaffold(title = stringResource(R.string.settings_chat), onBack = onBack) {
         SettingsGroup(title = stringResource(R.string.settings_messages_section)) {
@@ -90,6 +95,14 @@ fun ChatSettingsContent(
                 checked = contentPreviews.showLinkPreviews,
                 onCheckedChange = onShowLinkPreviews,
                 switchTag = "settings_switch_show_link_previews",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_show_shared_avatars),
+                subtitle = stringResource(R.string.settings_show_shared_avatars_desc),
+                checked = avatars.showSharedAvatars,
+                onCheckedChange = onShowSharedAvatars,
+                switchTag = "settings_switch_show_shared_avatars",
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_composer_section)) {
@@ -157,10 +170,11 @@ private fun ChatSettingsPreview() {
             settings = Settings(friends = setOf("alice"), fools = setOf("bob", "carol")),
             reply = ReplyConfig(),
             contentPreviews = ContentPreviewConfig(),
+            avatars = AvatarConfig(),
             onBack = {}, onOpenFriends = {}, onOpenFools = {},
             onShowJoinPartQuit = {}, onFoolsMode = {}, onShowComposerEmoji = {},
             onVisibleReplyPrefix = {},
-            onShowImages = {}, onShowLinkPreviews = {},
+            onShowImages = {}, onShowLinkPreviews = {}, onShowSharedAvatars = {},
         )
     }
 }

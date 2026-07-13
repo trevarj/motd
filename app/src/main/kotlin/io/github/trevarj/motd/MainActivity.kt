@@ -14,6 +14,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -28,12 +29,19 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
+import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
+import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.avatar.AvatarConfig
+import io.github.trevarj.motd.avatar.AvatarPrefs
+import io.github.trevarj.motd.avatar.AvatarStore
 import io.github.trevarj.motd.service.ConnectionManagerImpl
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.IrcForegroundService
 import io.github.trevarj.motd.service.MotdNotifications
 import io.github.trevarj.motd.ui.components.CertPromptViewModel
 import io.github.trevarj.motd.ui.components.CertTrustDialog
+import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
+import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.nav.MotdNavGraph
 import io.github.trevarj.motd.ui.nav.NotificationTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -46,6 +54,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var appearancePrefs: AppearancePrefs
+    @Inject lateinit var avatarPrefs: AvatarPrefs
+    @Inject lateinit var avatarStore: AvatarStore
+    @Inject lateinit var contentPreviewPrefs: ContentPreviewPrefs
     @Inject lateinit var db: MotdDatabase
 
     // POST_NOTIFICATIONS runtime permission (API 33+); result is advisory, no action needed.
@@ -70,6 +81,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             val settings by settingsRepository.settings.collectAsState(initial = Settings())
             val appearance by appearancePrefs.config.collectAsState(initial = AppearanceConfig())
+            val avatarConfig by avatarPrefs.config.collectAsState(initial = AvatarConfig())
+            val avatarRecords by avatarStore.records.collectAsState(initial = emptyList())
+            val contentPreviews by contentPreviewPrefs.config.collectAsState(initial = ContentPreviewConfig())
             MotdTheme(
                 themePreset = appearance.theme,
                 dynamicColor = settings.dynamicColor,
@@ -80,23 +94,28 @@ class MainActivity : ComponentActivity() {
                 avatarStyle = settings.avatarStyle,
                 uiFontScalePercent = appearance.uiFontScalePercent,
             ) {
-                // Root Surface paints the themed background under every screen (incl. non-Scaffold
-                // ones like onboarding) so the window follows the color scheme instead of white.
-                // testTagsAsResourceId is enabled once here so every Compose testTag in the tree
-                // surfaces as a uiautomator resource-id for the E2E harness.
-                Surface(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .semantics { testTagsAsResourceId = true },
-                    color = MaterialTheme.colorScheme.background,
+                CompositionLocalProvider(
+                    LocalRemoteAvatars provides RemoteAvatarState(
+                        enabled = avatarConfig.showSharedAvatars && contentPreviews.showImages,
+                        records = avatarRecords,
+                    ),
                 ) {
-                    MotdNavGraph(
-                        notificationTarget = notificationTarget,
-                        onNotificationTargetHandled = { notificationTarget = null },
-                    )
-                    // Global TOFU cert-trust dialog host: shows above the whole nav graph so it works
-                    // for onboarding connect-tests, chat-list reconnects, etc. (plans/12).
-                    CertTrustDialogHost()
+                    // Root Surface paints the themed background under every screen (incl.
+                    // non-Scaffold ones like onboarding) so the window follows the color scheme.
+                    // Expose test tags once here for the uiautomator E2E harness.
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .semantics { testTagsAsResourceId = true },
+                        color = MaterialTheme.colorScheme.background,
+                    ) {
+                        MotdNavGraph(
+                            notificationTarget = notificationTarget,
+                            onNotificationTargetHandled = { notificationTarget = null },
+                        )
+                        // Global TOFU cert-trust dialog host, above the whole navigation graph.
+                        CertTrustDialogHost()
+                    }
                 }
             }
         }

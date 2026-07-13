@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
@@ -102,6 +103,10 @@ fun NetworkSettingsScreen(
         onSetAutoConnect = viewModel::setAutoConnect,
         onOpenBouncerNetworks = { onOpenBouncerNetworks(networkId) },
         onOpenServerMessages = { viewModel.openServerBuffer(onOpenBuffer) },
+        onAvatarUrlChange = viewModel::editAvatarUrl,
+        onPublishAvatar = viewModel::publishAvatar,
+        onClearAvatar = viewModel::clearPublishedAvatar,
+        onStopManagingAvatar = viewModel::stopManagingAvatar,
     )
 }
 
@@ -128,6 +133,10 @@ fun NetworkSettingsContent(
     onSetAutoConnect: (Boolean) -> Unit = {},
     onOpenBouncerNetworks: () -> Unit = {},
     onOpenServerMessages: () -> Unit = {},
+    onAvatarUrlChange: (String) -> Unit = {},
+    onPublishAvatar: () -> Unit = {},
+    onClearAvatar: () -> Unit = {},
+    onStopManagingAvatar: () -> Unit = {},
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
@@ -207,6 +216,47 @@ fun NetworkSettingsContent(
                                 onAuthChange = onAuthChange,
                                 soju = state.entity?.role == NetworkRole.BOUNCER_ROOT,
                             )
+                        }
+                    }
+                }
+                SettingsGroup(title = stringResource(R.string.network_settings_avatar_section)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = stringResource(R.string.network_settings_avatar_experimental),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        OutlinedTextField(
+                            value = state.avatarInput,
+                            onValueChange = onAvatarUrlChange,
+                            label = { Text(stringResource(R.string.network_settings_avatar_url)) },
+                            supportingText = {
+                                Text(
+                                    if (state.avatarPublishingAvailable) {
+                                        stringResource(R.string.network_settings_avatar_url_desc)
+                                    } else {
+                                        stringResource(R.string.network_settings_avatar_unavailable)
+                                    },
+                                )
+                            },
+                            isError = state.avatarInput.isNotBlank() &&
+                                io.github.trevarj.motd.avatar.validateAvatarUrl(state.avatarInput) == null,
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("network_avatar_url"),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = onPublishAvatar,
+                                enabled = io.github.trevarj.motd.avatar.validateAvatarUrl(state.avatarInput) != null,
+                            ) { Text(stringResource(R.string.network_settings_avatar_publish)) }
+                            TextButton(onClick = onClearAvatar) {
+                                Text(stringResource(R.string.network_settings_avatar_clear))
+                            }
+                            if (state.selfAvatar !is io.github.trevarj.motd.avatar.SelfAvatarSetting.Unmanaged) {
+                                TextButton(onClick = onStopManagingAvatar) {
+                                    Text(stringResource(R.string.network_settings_avatar_unmanage))
+                                }
+                            }
                         }
                     }
                 }

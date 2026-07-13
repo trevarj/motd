@@ -73,6 +73,7 @@ fun ChatListRowItem(
         Avatar(
             name = row.displayName,
             isChannel = row.type == BufferType.CHANNEL,
+            networkId = row.networkId,
         )
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {

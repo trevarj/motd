@@ -11,6 +11,10 @@ import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
+import io.github.trevarj.motd.avatar.AvatarConfig
+import io.github.trevarj.motd.avatar.AvatarController
+import io.github.trevarj.motd.avatar.AvatarPrefs
+import io.github.trevarj.motd.avatar.SelfAvatarSetting
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -81,6 +85,21 @@ class NetworkSettingsViewModelTest {
         override fun dismissCertPrompt(prompt: CertPrompt) = Unit
     }
 
+    private class FakeAvatarPrefs : AvatarPrefs {
+        override val config = flowOf(AvatarConfig())
+        override fun selfSetting(networkId: Long) = flowOf<SelfAvatarSetting>(SelfAvatarSetting.Unmanaged)
+        override suspend fun setShowSharedAvatars(show: Boolean) = Unit
+        override suspend fun setSelfSetting(networkId: Long, setting: SelfAvatarSetting) = Unit
+    }
+
+    private object FakeAvatarController : AvatarController {
+        override suspend fun setShowSharedAvatars(show: Boolean) = Unit
+        override suspend fun setSelfAvatar(networkId: Long, url: String?) = true
+        override suspend fun stopManagingSelfAvatar(networkId: Long) = Unit
+        override suspend fun clearNetworkState(networkId: Long) = Unit
+        override fun publishingAvailable(networkId: Long) = false
+    }
+
     private val dispatcher = StandardTestDispatcher()
 
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
@@ -123,7 +142,13 @@ class NetworkSettingsViewModelTest {
         repo: FakeNetworkRepository,
         prefs: PresetEnrollmentPrefs = FakePresetEnrollmentPrefs(),
     ): NetworkSettingsViewModel {
-        return NetworkSettingsViewModel(repo, FakeConnectionManager(), prefs).also {
+        return NetworkSettingsViewModel(
+            repo,
+            FakeConnectionManager(),
+            prefs,
+            FakeAvatarPrefs(),
+            FakeAvatarController,
+        ).also {
             it.init(1)
             runCurrent()
         }

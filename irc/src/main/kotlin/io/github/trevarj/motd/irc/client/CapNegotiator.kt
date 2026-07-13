@@ -33,6 +33,7 @@ internal object CapTiers {
         "draft/chathistory",
         "draft/event-playback",
         "draft/read-marker",
+        "draft/metadata-2",
         "soju.im/bouncer-networks",
         "soju.im/bouncer-networks-notify",
         "soju.im/webpush",
@@ -54,6 +55,10 @@ internal object CapNegotiator {
         // event-playback only makes sense alongside chathistory.
         if ("draft/event-playback" in req && "draft/chathistory" !in advertised) {
             req.remove("draft/event-playback")
+        }
+        // metadata-2 uses metadata batches for snapshots and therefore requires batch.
+        if ("draft/metadata-2" in req && "batch" !in advertised) {
+            req.remove("draft/metadata-2")
         }
         return req
     }

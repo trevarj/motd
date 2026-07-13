@@ -160,6 +160,7 @@ fun ChannelInfoContent(
                 items(section.members, key = { "${section.prefix}-${it.nick}" }) { member ->
                     MemberRow(
                         member = member,
+                        networkId = buffer?.networkId,
                         isFriend = normalizeNick(member.nick) in state.friends,
                         onClick = { onMemberClick(member.nick) },
                     )
@@ -176,7 +177,12 @@ fun ChannelInfoContent(
                 if (foolsExpanded) {
                     items(state.foolMembers, key = { "fool-${it.nick}" }) { member ->
                         Box(modifier = Modifier.alpha(0.55f)) {
-                            MemberRow(member = member, isFriend = false, onClick = { onMemberClick(member.nick) })
+                            MemberRow(
+                                member = member,
+                                networkId = buffer?.networkId,
+                                isFriend = false,
+                                onClick = { onMemberClick(member.nick) },
+                            )
                         }
                     }
                 }
@@ -271,7 +277,12 @@ private fun ChannelHeader(buffer: BufferEntity?, memberCount: Int, onEditTopic: 
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         val name = buffer?.displayName ?: ""
-        Avatar(name = name, size = 88.dp, isChannel = buffer?.type == BufferType.CHANNEL)
+        Avatar(
+            name = name,
+            size = 88.dp,
+            isChannel = buffer?.type == BufferType.CHANNEL,
+            networkId = buffer?.networkId,
+        )
         Text(
             text = name,
             style = MaterialTheme.typography.headlineSmall,
@@ -361,10 +372,10 @@ private fun ActionItem(
 }
 
 @Composable
-private fun MemberRow(member: MemberEntity, isFriend: Boolean, onClick: () -> Unit) {
+private fun MemberRow(member: MemberEntity, networkId: Long?, isFriend: Boolean, onClick: () -> Unit) {
     ListItem(
         headlineContent = { Text(member.prefixes.take(1) + member.nick) },
-        leadingContent = { Avatar(name = member.nick, size = 36.dp) },
+        leadingContent = { Avatar(name = member.nick, size = 36.dp, networkId = networkId) },
         trailingContent = if (isFriend) {
             {
                 Icon(

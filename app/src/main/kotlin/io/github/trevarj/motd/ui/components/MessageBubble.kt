@@ -86,6 +86,8 @@ fun MessageBubble(
     kind: MessageKind,
     showSender: Boolean,
     modifier: Modifier = Modifier,
+    networkId: Long? = null,
+    senderAccount: String? = null,
     formattedTime: String? = null,
     senderIsFriend: Boolean = false,
     failed: Boolean = false,
@@ -154,6 +156,8 @@ fun MessageBubble(
     if (spacing.twoLine) {
         TwoLineMessageRow(
             sender = sender,
+            networkId = networkId,
+            senderAccount = senderAccount,
             text = text,
             formattedTime = displayedTime,
             isSelf = isSelf,
@@ -263,7 +267,13 @@ fun MessageBubble(
             if (showSender) {
                 val avatarMod = Modifier.padding(end = 8.dp, top = 2.dp)
                     .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
-                Avatar(name = sender, size = spacing.bubbleAvatar, modifier = avatarMod)
+                Avatar(
+                    name = sender,
+                    size = spacing.bubbleAvatar,
+                    modifier = avatarMod,
+                    networkId = networkId,
+                    account = senderAccount,
+                )
             } else {
                 Box(Modifier.width(spacing.bubbleAvatarColumn))
             }
@@ -405,6 +415,8 @@ fun MessageBubble(
 @Composable
 private fun TwoLineMessageRow(
     sender: String,
+    networkId: Long?,
+    senderAccount: String?,
     text: String,
     formattedTime: String,
     isSelf: Boolean,
@@ -461,7 +473,13 @@ private fun TwoLineMessageRow(
                 val avatarMod = Modifier.padding(end = 6.dp)
                     .align(Alignment.CenterVertically)
                     .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
-                Avatar(name = sender, size = spacing.bubbleAvatar, modifier = avatarMod)
+                Avatar(
+                    name = sender,
+                    size = spacing.bubbleAvatar,
+                    modifier = avatarMod,
+                    networkId = networkId,
+                    account = senderAccount,
+                )
                 Text(
                     text = sender,
                     color = nameColor,

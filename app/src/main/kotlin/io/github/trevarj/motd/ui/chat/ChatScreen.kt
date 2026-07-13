@@ -226,6 +226,7 @@ fun ChatScreen(
         val normSelf = io.github.trevarj.motd.data.prefs.normalizeNick(sheet.nick)
         NickActionSheet(
             nick = sheet.nick,
+            networkId = state.buffer?.networkId,
             isSelf = isSelf,
             isFriend = normSelf in settings.friends,
             isFool = normSelf in settings.fools,
@@ -776,6 +777,7 @@ fun ChatContent(
                             name = buffer?.displayName ?: "",
                             size = 34.dp,
                             isChannel = buffer?.type == BufferType.CHANNEL,
+                            networkId = buffer?.networkId,
                         )
                         Column(modifier = Modifier.padding(start = 10.dp)) {
                             Text(
@@ -868,6 +870,7 @@ fun ChatContent(
                     MessageList(
                         items = items,
                         listState = listState,
+                        networkId = state.buffer?.networkId,
                         // Frozen read-marker so the "— New messages —" divider stays put (plans/15 #2).
                         readMarkerTime = readMarkerSnapshot,
                         reactionChips = reactionChips,
@@ -992,6 +995,7 @@ fun ChatContent(
                             AutocompletePanel(
                                 candidates = completions.map { it.display },
                                 isCommand = completions.firstOrNull()?.isCommand == true,
+                                networkId = state.buffer?.networkId,
                                 onPick = { picked ->
                                     composerText = applyPick(composerText, picked)
                                 },

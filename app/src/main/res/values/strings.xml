@@ -350,6 +350,16 @@
     <string name="settings_show_images_desc">Load inline images and preview thumbnails</string>
     <string name="settings_show_link_previews">Show link previews</string>
     <string name="settings_show_link_previews_desc">Fetch page titles and descriptions for links</string>
+    <string name="settings_show_shared_avatars">Show shared user avatars</string>
+    <string name="settings_show_shared_avatars_desc">Experimental · Receive HTTPS avatar URLs shared through IRCv3 metadata</string>
+    <string name="network_settings_avatar_section">Shared avatar</string>
+    <string name="network_settings_avatar_experimental">Experimental IRCv3 metadata feature. MOTD stores only the HTTPS URL; it never uploads an image.</string>
+    <string name="network_settings_avatar_url">Avatar HTTPS URL</string>
+    <string name="network_settings_avatar_url_desc">You may use {size} as a pixel-size placeholder.</string>
+    <string name="network_settings_avatar_unavailable">This network does not currently advertise draft/metadata-2. Your choice is retained for later.</string>
+    <string name="network_settings_avatar_publish">Publish</string>
+    <string name="network_settings_avatar_clear">Clear</string>
+    <string name="network_settings_avatar_unmanage">Leave unchanged</string>
     <string name="settings_composer_emoji">Emoji button</string>
     <string name="settings_composer_emoji_desc">Show the emoji button in the message composer.</string>
     <string name="settings_reply_prefix">Visible reply prefix</string>

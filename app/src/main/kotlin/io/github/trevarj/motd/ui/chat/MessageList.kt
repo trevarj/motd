@@ -129,6 +129,7 @@ fun showsSender(current: MessageEntity, olderNeighbor: MessageEntity?): Boolean 
 fun MessageList(
     items: LazyPagingItems<MessageEntity>,
     listState: LazyListState,
+    networkId: Long?,
     readMarkerTime: Long?,
     onLongPress: (MessageEntity) -> Unit,
     onReply: (MessageEntity) -> Unit,
@@ -231,6 +232,7 @@ fun MessageList(
             Column(modifier = Modifier.fillMaxWidth().background(highlightColor)) {
             MessageRow(
                 msg = msg,
+                networkId = networkId,
                 older = older,
                 formatTime = formatMessageTime,
                 readMarkerTime = readMarkerTime,
@@ -365,6 +367,7 @@ private sealed interface PreviewState {
 @Composable
 private fun MessageRow(
     msg: MessageEntity,
+    networkId: Long?,
     older: MessageEntity?,
     formatTime: (Long) -> String,
     readMarkerTime: Long?,
@@ -460,6 +463,8 @@ private fun MessageRow(
             // msgid; pending rows fall back to the local id for stable E2E selection.
             modifier = rowModifier,
             sender = msg.sender,
+            networkId = networkId,
+            senderAccount = msg.senderAccount,
             text = msg.text,
             timeMs = msg.serverTime,
             formattedTime = formattedTime,

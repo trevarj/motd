@@ -14,6 +14,10 @@ import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.liberaEndpointChanged
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.ServerForm
+import io.github.trevarj.motd.avatar.AvatarController
+import io.github.trevarj.motd.avatar.AvatarPrefs
+import io.github.trevarj.motd.avatar.SelfAvatarSetting
+import io.github.trevarj.motd.avatar.validateAvatarUrl
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +45,9 @@ data class NetworkSettingsUiState(
     val parentName: String? = null,   // root name for a BOUNCER_CHILD's "Managed by" row
     /** A bouncer transport/login change can invalidate all locally imported child mirrors. */
     val pendingBouncerIdentityChange: BouncerIdentityChange? = null,
+    val selfAvatar: SelfAvatarSetting = SelfAvatarSetting.Unmanaged,
+    val avatarInput: String = "",
+    val avatarPublishingAvailable: Boolean = false,
 ) {
     val vlessLinkError: String?
         get() = if (obfsMode == ObfsMode.EMBEDDED_REALITY) vlessLinkValidationError(obfsLink) else null
@@ -94,6 +101,8 @@ class NetworkSettingsViewModel @Inject constructor(
     private val networkRepository: NetworkRepository,
     private val connectionManager: ConnectionManager,
     private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
+    private val avatarPrefs: AvatarPrefs,
+    private val avatarController: AvatarController,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(NetworkSettingsUiState())
@@ -128,6 +137,15 @@ class NetworkSettingsViewModel @Inject constructor(
             connectionManager.connectionStates.collect { states ->
                 _state.value = _state.value.copy(
                     connState = states[networkId] ?: IrcClientState.Disconnected,
+                    avatarPublishingAvailable = avatarController.publishingAvailable(networkId),
+                )
+            }
+        }
+        viewModelScope.launch {
+            avatarPrefs.selfSetting(networkId).collect { setting ->
+                _state.value = _state.value.copy(
+                    selfAvatar = setting,
+                    avatarInput = (setting as? SelfAvatarSetting.Set)?.url.orEmpty(),
                 )
             }
         }
@@ -159,6 +177,21 @@ class NetworkSettingsViewModel @Inject constructor(
 
     /** Auto-connect is staged with the rest of the form so the labeled Save action is coherent. */
     fun setAutoConnect(enabled: Boolean) { _state.value = _state.value.copy(autoConnect = enabled) }
+
+    fun editAvatarUrl(url: String) { _state.value = _state.value.copy(avatarInput = url) }
+
+    fun publishAvatar() = viewModelScope.launch {
+        val value = _state.value.avatarInput
+        if (validateAvatarUrl(value) != null) avatarController.setSelfAvatar(networkId, value)
+    }
+
+    fun clearPublishedAvatar() = viewModelScope.launch {
+        avatarController.setSelfAvatar(networkId, null)
+    }
+
+    fun stopManagingAvatar() = viewModelScope.launch {
+        avatarController.stopManagingSelfAvatar(networkId)
+    }
 
     fun openServerBuffer(onOpen: (Long) -> Unit) = viewModelScope.launch {
         onOpen(connectionManager.ensureServerBuffer(networkId))
@@ -245,6 +278,7 @@ class NetworkSettingsViewModel @Inject constructor(
     fun delete(onDone: () -> Unit) = viewModelScope.launch {
         _state.value.entity?.let {
             presetEnrollmentPrefs.revokeLiberaEligibility(it.id)
+            avatarController.clearNetworkState(it.id)
             networkRepository.deleteNetwork(it.id)
         }
         onDone()

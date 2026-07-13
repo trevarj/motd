@@ -9,9 +9,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
@@ -23,9 +25,52 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.avatar.AvatarRecord
+import io.github.trevarj.motd.avatar.avatarIdentity
+import io.github.trevarj.motd.avatar.canonicalAvatarNick
+import io.github.trevarj.motd.avatar.expandAvatarUrl
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import coil.compose.AsyncImage
+
+data class RemoteAvatarState(
+    val enabled: Boolean = false,
+    val records: List<AvatarRecord> = emptyList(),
+) {
+    private val byNetworkIdentity by lazy(LazyThreadSafetyMode.NONE) {
+        records.associateBy { it.networkId to it.identity }
+    }
+    private val byNetworkNick by lazy(LazyThreadSafetyMode.NONE) {
+        records.associateBy { it.networkId to it.nick }
+    }
+    private val unambiguousByIdentity by lazy(LazyThreadSafetyMode.NONE) {
+        records.groupBy { it.identity }.mapValues { (_, matches) ->
+            matches.distinctBy { it.url }.singleOrNull()
+        }
+    }
+    private val unambiguousByNick by lazy(LazyThreadSafetyMode.NONE) {
+        records.groupBy { it.nick }.mapValues { (_, matches) ->
+            matches.distinctBy { it.url }.singleOrNull()
+        }
+    }
+
+    fun url(networkId: Long?, name: String, account: String?, sizePx: Int): String? {
+        if (!enabled) return null
+        val identity = avatarIdentity(name, account)
+        val normalizedNick = canonicalAvatarNick(name)
+        val record = if (networkId != null) {
+            byNetworkIdentity[networkId to identity] ?: byNetworkNick[networkId to normalizedNick]
+        } else {
+            // Global friends/fools management has no network context. Use a remote image only when
+            // every matching network agrees on one URL; ambiguity falls back to the monogram.
+            unambiguousByIdentity[identity] ?: unambiguousByNick[normalizedNick]
+        }
+        return record?.url?.let { expandAvatarUrl(it, sizePx) }
+    }
+}
+
+val LocalRemoteAvatars = staticCompositionLocalOf { RemoteAvatarState() }
 
 /**
  * Darkness of the *applied* theme, derived from the resolved background luminance rather than
@@ -54,13 +99,27 @@ fun Avatar(
     modifier: Modifier = Modifier,
     size: Dp = 44.dp,
     isChannel: Boolean = false,
+    networkId: Long? = null,
+    account: String? = null,
 ) {
     // Avatars keep their generated/override color even when nick coloring is disabled (an all-gray
     // avatar column would be unusable, plans/13 confirmed decision #5); avatar() ignores the flag.
     val nick = LocalNickColors.current.avatar(name)
-    when (LocalAvatarStyle.current) {
-        AvatarStyle.MONOGRAM -> MonogramAvatar(name, nick, size, isChannel, modifier)
-        AvatarStyle.INITIALS -> InitialsAvatar(name, nick, size, isChannel, modifier)
+    Box(modifier = modifier.size(size), contentAlignment = Alignment.Center) {
+        when (LocalAvatarStyle.current) {
+            AvatarStyle.MONOGRAM -> MonogramAvatar(name, nick, size, isChannel, Modifier)
+            AvatarStyle.INITIALS -> InitialsAvatar(name, nick, size, isChannel, Modifier)
+        }
+        LocalRemoteAvatars.current.url(networkId, name, account, size.value.toInt())?.let { url ->
+            // The deterministic monogram stays underneath, so failed/cancelled loads fall back
+            // without erasing valid metadata or flashing an empty avatar.
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(size).clip(CircleShape),
+            )
+        }
     }
 }
 

@@ -30,6 +30,7 @@ fun AutocompletePanel(
     onPick: (String) -> Unit,
     modifier: Modifier = Modifier,
     isCommand: Boolean = false,
+    networkId: Long? = null,
 ) {
     if (candidates.isEmpty()) return
     Surface(
@@ -51,7 +52,12 @@ fun AutocompletePanel(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (!isCommand) {
-                        Avatar(name = candidate, size = 24.dp, modifier = Modifier.padding(end = 10.dp))
+                        Avatar(
+                            name = candidate,
+                            size = 24.dp,
+                            modifier = Modifier.padding(end = 10.dp),
+                            networkId = networkId,
+                        )
                     }
                     Text(
                         text = candidate,

@@ -689,7 +689,8 @@ with unrelated predicates at individual call sites.
 
 ### F1. Interoperable URL-based user avatars
 
-- **Priority / size / status:** P2, L, Ready as an experimental feature.
+- **Priority / size / status:** P2, L, Implemented; physical interoperability
+  verification pending.
 - **Depends on:** D2 request gating.
 - **Protocol/product scope:** use IRCv3 work-in-progress `draft/metadata-2` user
   metadata for an avatar HTTPS URL, optionally containing `{size}`. Label the
@@ -726,6 +727,26 @@ with unrelated predicates at individual call sites.
   request/performance bounds.
 - **Reference:** [IRCv3 metadata draft](https://ircv3.net/specs/extensions/metadata)
   and [avatar metadata registry entry](https://ircv3.net/registry#user-metadata).
+- **Implementation evidence:** `draft/metadata-2` is negotiated only with its
+  required `batch` capability. A connection-generation-scoped coordinator
+  subscribes/unsubscribes `avatar`, consumes live and snapshot metadata,
+  handles removals and delayed SYNC, follows nick/account identity changes,
+  and reapplies per-network publish/clear intent after reconnect. Remote HTTPS
+  URLs live in a separate `avatars.db`; disabling shared avatars unsubscribes
+  and clears it, while the independent image gate prevents Coil from receiving
+  a model. One indexed composition-local resolver supplies every existing
+  `Avatar` surface and preserves deterministic monograms underneath failures.
+  Network settings label publishing experimental and retain unsupported-server
+  intent; Chat settings provide a full receive opt-out.
+- **Verification evidence:** pure tests lock capability dependency, exact
+  SUB/SYNC/SET/remove framing, notification/snapshot/removal/delayed-sync
+  parsing, HTTPS and `{size}` validation, and three-state self persistence.
+  Room tests cover invalid-value rejection, account/nick rekeying, per-network
+  cleanup, and full opt-out cleanup; resolver tests prove network isolation and
+  the disabled no-model boundary. All IRC tests, FOSS debug/release unit tests,
+  FOSS debug lint/assembly, and isolated FOSS release assembly pass. A server
+  advertising the draft capability and a physical device are still required
+  for the manual publish/fallback/request trace.
 
 ### F2. Common IRC network presets
 

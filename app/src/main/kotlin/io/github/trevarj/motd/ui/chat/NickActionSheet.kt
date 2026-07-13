@@ -47,6 +47,7 @@ import io.github.trevarj.motd.ui.components.Avatar
 @Composable
 fun NickActionSheet(
     nick: String,
+    networkId: Long? = null,
     isSelf: Boolean,
     isFriend: Boolean,
     isFool: Boolean,
@@ -73,7 +74,7 @@ fun NickActionSheet(
             ListItem(
                 headlineContent = { Text(nick) },
                 supportingContent = { WhoisSummary(whois) },
-                leadingContent = { Avatar(name = nick, size = 40.dp) },
+                leadingContent = { Avatar(name = nick, size = 40.dp, networkId = networkId) },
             )
             HorizontalDivider()
 
