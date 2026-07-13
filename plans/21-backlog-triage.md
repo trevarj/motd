@@ -712,8 +712,7 @@ with unrelated predicates at individual call sites.
 
 ### F1. Interoperable URL-based user avatars
 
-- **Priority / size / status:** P2, L, Implemented; physical interoperability
-  verification pending.
+- **Priority / size / status:** P2, L, Complete (2026-07-14).
 - **Depends on:** D2 request gating.
 - **Protocol/product scope:** use IRCv3 work-in-progress `draft/metadata-2` user
   metadata for an avatar HTTPS URL, optionally containing `{size}`. Label the
@@ -764,7 +763,9 @@ with unrelated predicates at individual call sites.
   (`max-subs`, `max-keys`, and `max-value-bytes`) distinguish receive-only
   servers from publish-capable ones, survive both initial and runtime CAP
   negotiation, and gate the settings action without racing the initial network
-  lookup.
+  lookup. Valued CAP LS/NEW state is also retained when a bouncer child becomes
+  Ready from a pre-welcome capability mutation, so its later value-less deferred
+  ACK cannot accidentally widen server limits.
 - **Verification evidence:** pure tests lock capability dependency, exact
   SUB/SYNC/SET/remove framing, notification/snapshot/removal/delayed-sync
   parsing, HTTPS and `{size}` validation, and three-state self persistence.
@@ -774,9 +775,19 @@ with unrelated predicates at individual call sites.
   across a value-less ACK and cover a newly advertised capability whose `batch`
   dependency is already active; settings tests cover receive-only publishing
   and late-load/live-state ordering. All IRC tests, FOSS debug/release unit
-  tests, FOSS debug lint, and FOSS release assembly pass. A publish-capable
-  server advertising the draft capability and a physical device are still
-  required for the manual publish/fallback/request trace.
+  tests, FOSS debug lint, and FOSS release assembly pass. A deterministic
+  publish-capable IRC fixture now lives at
+  `test/e2e/fixtures/avatar-metadata-server.py`. On physical A059
+  `00152151K005265`, it negotiated the valued capability and captured exact
+  `SUB`, channel `SYNC`, self `SET`, and removal commands. Its remote `{size}`
+  HTTPS URL rendered the GitHub Octocat in the message row; disabling shared
+  avatars sent `UNSUB` and immediately restored the deterministic monogram,
+  while re-enabling sent a fresh `SUB` and restored the image. The disposable
+  network was then deleted. A direct TLS CAP probe confirmed the local Soju
+  advertises `max-keys=0,max-value-bytes=1`; after a fresh FOSS debug reconnect,
+  the child network displayed the receive-only warning and disabled Publish.
+  The pre-welcome bouncer sequence is locked by an IRC client regression test,
+  and the physical crash buffer remained empty.
 
 ### F2. Common IRC network presets
 

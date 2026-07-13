@@ -187,6 +187,10 @@ class IrcClient(
                     return@collect
                 }
                 if (!registered) {
+                    // Bouncer children can receive valued CAP NEW immediately before the
+                    // registration machine marks them Ready. Retain those values so the
+                    // subsequent value-less deferred ACK cannot widen a limited capability.
+                    rememberAdvertisedCaps(msg)
                     for (a in reg.onMessage(msg)) applyRegAction(a, t)
                 } else {
                     dispatch(msg, t)
@@ -293,12 +297,9 @@ class IrcClient(
         val sub = msg.params.getOrNull(1) ?: return
         val tokens = msg.params.last().split(' ').filter { it.isNotEmpty() }
         val caps = tokens.map { it.removePrefix("-").substringBefore('=') }.toSet()
+        rememberAdvertisedCaps(msg)
         when (sub) {
             "NEW" -> {
-                for (token in tokens) {
-                    val name = token.substringBefore('=')
-                    runtimeAdvertisedCaps[name] = token.substringAfter('=', missingDelimiterValue = "")
-                }
                 // REQ any tier cap newly advertised that we want.
                 val alreadyAcked = ackedCaps.get().map { it.substringBefore('=') }.toSet()
                 val want = CapNegotiator.requestSet(caps + alreadyAcked, config.extraCaps) - alreadyAcked
@@ -307,7 +308,6 @@ class IrcClient(
                 }
             }
             "DEL" -> {
-                caps.forEach(runtimeAdvertisedCaps::remove)
                 ackedCaps.set(ackedCaps.get().filterNot { it.substringBefore('=') in caps }.toSet())
                 updateReadyCaps(ackedCaps.get())
                 _events.emit(IrcEvent.CapsChanged(emptySet(), caps))
@@ -330,6 +330,22 @@ class IrcClient(
                 ackedCaps.set(updated)
                 updateReadyCaps(ackedCaps.get())
                 _events.emit(IrcEvent.CapsChanged(added.map { it.substringBefore('=') }.toSet(), removed))
+            }
+        }
+    }
+
+    private fun rememberAdvertisedCaps(msg: IrcMessage) {
+        if (msg.command != "CAP") return
+        val sub = msg.params.getOrNull(1) ?: return
+        val tokens = msg.params.lastOrNull()?.split(' ')?.filter(String::isNotEmpty).orEmpty()
+        when (sub) {
+            "LS", "NEW" -> tokens.forEach { token ->
+                val normalized = token.removePrefix("-")
+                val name = normalized.substringBefore('=')
+                runtimeAdvertisedCaps[name] = normalized.substringAfter('=', missingDelimiterValue = "")
+            }
+            "DEL" -> tokens.forEach { token ->
+                runtimeAdvertisedCaps.remove(token.removePrefix("-").substringBefore('='))
             }
         }
     }

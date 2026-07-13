@@ -146,6 +146,34 @@ extensions, but not `draft/chathistory`. App recovery must therefore accept
 ZNC's native playback and must not issue CHATHISTORY merely because the Ergo
 upstream supports it.
 
+## Avatar metadata fixture
+
+The dependency-free plaintext IRC fixture advertises a publish-capable
+`draft/metadata-2`, creates `#avatars`, and logs every client/server line. Use it
+for physical subscription, SYNC, publish/remove, image, and fallback checks:
+
+```sh
+nix shell nixpkgs#python3 -c python3 \
+  test/e2e/fixtures/avatar-metadata-server.py
+adb reverse tcp:6670 tcp:6670
+```
+
+Add a custom IRC network in the debug app with host `127.0.0.1`, port `6670`,
+TLS off, authentication None, and any valid identity. Confirm the plaintext
+warning because the connection exists only over `adb reverse`. The fixture
+publishes a remote HTTPS avatar containing `{size}` and writes its transcript
+to `/tmp/motd-avatar-metadata.log` by default. Network settings should allow a
+self HTTPS URL to be published and cleared. Turning off **Show shared user
+avatars** should send `METADATA * UNSUB avatar`, clear the remote image, and
+show the monogram fallback; restore it before finishing.
+
+Delete the disposable network, remove the reverse, and stop the fixture with
+Ctrl-C:
+
+```sh
+adb reverse --remove tcp:6670
+```
+
 ## Run the host-driven UI sweep
 
 Copy the local template and adjust only when needed:
