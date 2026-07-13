@@ -20,6 +20,7 @@
 #   ./test/e2e/local-stack.sh stop-soju   # deterministic EOF while preserving soju DB/config
 #   ./test/e2e/local-stack.sh start-soju  # restart the preserved soju instance
 #   ./test/e2e/local-stack.sh status    # show pids + soju network status
+#   ./test/e2e/local-stack.sh control-check # BouncerServ admin/non-admin and mutation proof
 #   ./test/e2e/local-stack.sh obfs-up   # VLESS+REALITY layer: sing-box server + Xray SOCKS client
 #   ./test/e2e/local-stack.sh obfs-down # stop the reality layer + drop its adb reverse
 #   ./test/e2e/local-stack.sh obfs-validate  # socket-level proof: IRC/TLS to soju THROUGH reality
@@ -49,6 +50,8 @@ export SEED_NICK=motdadb2
 export SEED_PASS=motdadb2pass
 SOJU_USER=motd
 SOJU_PASS=motdtest
+SOJU_NONADMIN_USER=motduser
+SOJU_NONADMIN_PASS=motdusertest
 NETWORK_NAME=libera
 
 # Obfuscation layer (plans/20 Phase 1 validation). REALITY server on :8443 (avoid clashing with a
@@ -74,6 +77,9 @@ die() { printf '\033[31m[local-stack] FATAL:\033[0m %s\n' "$*" >&2; exit 1; }
 # nix shell providing whatever the command needs but is missing from PATH.
 need_reexec=false
 case "$CMD" in
+  control-check)
+    command -v soju >/dev/null 2>&1 && command -v ergo >/dev/null 2>&1 && \
+      command -v python3 >/dev/null 2>&1 || need_reexec=true ;;
   obfs-*)
     for b in soju ergo sing-box xray python3; do
       command -v "$b" >/dev/null 2>&1 || { need_reexec=true; break; }
@@ -230,6 +236,9 @@ up() {
   log "soju: provision user '$SOJU_USER' + network '$NETWORK_NAME' -> ergo"
   ctl user create -username "$SOJU_USER" -password "$SOJU_PASS" -realname "motd local" -admin 2>/dev/null \
     || log "user $SOJU_USER already exists (ok)"
+  ctl user create -username "$SOJU_NONADMIN_USER" -password "$SOJU_NONADMIN_PASS" \
+    -realname "motd local non-admin" 2>/dev/null \
+    || log "user $SOJU_NONADMIN_USER already exists (ok)"
   ctl user run "$SOJU_USER" network create \
     -addr "irc+insecure://127.0.0.1:$ERGO_PORT" \
     -name "$NETWORK_NAME" \
@@ -263,6 +272,10 @@ Onboard the app (motd debug) → "I have a soju bouncer":
   Password: $SOJU_PASS
 Import the bouncer network "$NETWORK_NAME", then open $TEST_CHANNEL (seeded history).
 
+BouncerServ non-admin capability check (separate app profile/device):
+  Username: $SOJU_NONADMIN_USER
+  Password: $SOJU_NONADMIN_PASS
+
 Re-seed:  ./test/e2e/local-stack.sh seed
 Tear down: ./test/e2e/local-stack.sh down
 EOF
@@ -285,6 +298,13 @@ status() {
     fi
   done
   [ -S "$ADMIN_SOCK" ] && ctl user run "$SOJU_USER" network status 2>/dev/null || true
+}
+
+control_check() {
+  [ -S "$ADMIN_SOCK" ] || die "soju admin socket not found; run '$0 up' first"
+  nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null || die "soju is not listening on 127.0.0.1:$SOJU_PORT"
+  log "running BouncerServ admin/non-admin capability and mutation proof"
+  python3 "$REPO/test/e2e/fixtures/bouncerserv-probe.py" --port "$SOJU_PORT"
 }
 
 signal_soju() { # signal description
@@ -674,6 +694,7 @@ case "$CMD" in
   stop-soju) stop_soju_for_reconnect ;;
   start-soju) start_soju_for_reconnect ;;
   status) status ;;
+  control-check) control_check ;;
   obfs-up) obfs_up ;;
   obfs-down) obfs_down ;;
   obfs-validate) obfs_validate ;;
@@ -681,5 +702,5 @@ case "$CMD" in
   obfs-xray-down) xray_obfs_down ;;
   obfs-xray-validate) xray_obfs_validate ;;
   obfs-xray-negative) xray_obfs_negative ;;
-  *) die "unknown command '$CMD' (want up|down|seed|burst|jpq|pause-soju|resume-soju|stop-soju|start-soju|status|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-negative)" ;;
+  *) die "unknown command '$CMD' (want up|down|seed|burst|jpq|pause-soju|resume-soju|stop-soju|start-soju|status|control-check|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-negative)" ;;
 esac

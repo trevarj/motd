@@ -51,6 +51,39 @@ class BouncerServCommandsTest {
         )
     }
 
+    @Test fun user_update_enforces_soju_own_user_boundaries() {
+        assertEquals(
+            "user create -username bob -password secret -admin=true -enabled=false",
+            BouncerServCommands.userCreate("bob", "secret", admin = true, enabled = false).wire,
+        )
+        assertEquals(
+            "user update -password <redacted> -nick newNick",
+            BouncerServCommands.userUpdate(
+                username = null,
+                currentUsername = "alice",
+                administrator = false,
+                changed = UserCommandFields(nick = "newNick", password = "secret"),
+            ).display,
+        )
+        assertEquals(
+            "user update bob -admin true -enabled false",
+            BouncerServCommands.userUpdate(
+                username = "bob",
+                currentUsername = "alice",
+                administrator = true,
+                changed = UserCommandFields(administrator = true, enabled = false),
+            ).wire,
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            BouncerServCommands.userUpdate(
+                username = "bob",
+                currentUsername = "alice",
+                administrator = false,
+                changed = UserCommandFields(enabled = false),
+            )
+        }
+    }
+
     @Test fun rejects_multiline_and_blank_console_commands() {
         assertThrows(IllegalArgumentException::class.java) { BouncerServCommand("help\nserver status") }
         assertThrows(IllegalArgumentException::class.java) { BouncerServCommand("  ") }

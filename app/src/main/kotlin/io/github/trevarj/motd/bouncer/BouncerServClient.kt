@@ -94,6 +94,9 @@ class BouncerServClientImpl @Inject constructor(
                         // deduplicates its echo against that same safe text.
                         session.send(command.wire)
                         val lines = mutableListOf<String>()
+                        if (!command.expectsReply) {
+                            return@coroutineScope BouncerServResult.Success(command.display, lines)
+                        }
                         val completed = withTimeoutOrNull(HARD_LIMIT_MS) {
                             val first = withTimeoutOrNull(FIRST_REPLY_MS) { replies.receive() }
                                 ?: return@withTimeoutOrNull false

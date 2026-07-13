@@ -3,35 +3,57 @@ package io.github.trevarj.motd.ui.settings.bouncer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.bouncer.BouncerServCapabilities
+import io.github.trevarj.motd.bouncer.BouncerServClient
+import io.github.trevarj.motd.bouncer.BouncerServCommand
+import io.github.trevarj.motd.bouncer.BouncerServCommands
+import io.github.trevarj.motd.bouncer.BouncerServResult
+import io.github.trevarj.motd.bouncer.ChannelCommandFields
+import io.github.trevarj.motd.bouncer.NetworkCommandFields
+import io.github.trevarj.motd.bouncer.UserCommandFields
+import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
+import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
+import kotlinx.coroutines.withContext
 
 data class BouncerNetworksUiState(
     val root: NetworkEntity? = null,
     val rootState: IrcClientState = IrcClientState.Disconnected,
     val rows: List<BouncerNetRow> = emptyList(),
+    val capabilities: BouncerServCapabilities = BouncerServCapabilities(),
+    val transcript: List<BouncerTranscriptEntry> = emptyList(),
+    val channels: List<BouncerChannelRow> = emptyList(),
+    val selectedTab: BouncerControlTab = BouncerControlTab.NETWORKS,
     val loading: Boolean = false,
-    val busyNetIds: Set<String> = emptySet(),   // per-row in-flight guard
+    val probing: Boolean = false,
+    val commandBusy: Boolean = false,
+    val busyNetIds: Set<String> = emptySet(),
+    val notice: String? = null,
     val error: String? = null,
+    val pendingUserDeletion: PendingUserDeletion? = null,
 )
 
 /**
- * soju bound-network manager (plans/16 §5.5): lists the networks the soju root knows about, lets
- * the user import/remove local mirrors and add/delete networks on the bouncer. Requires the root
- * connection to be Ready; otherwise the screen shows a connect card.
+ * soju control center. Machine-readable BOUNCER state remains authoritative for network identity;
+ * BouncerServ supplies the guided account/channel/admin actions and the persistent console.
  */
 @HiltViewModel
 class BouncerNetworksViewModel @Inject constructor(
     private val networkRepository: NetworkRepository,
     private val connectionManager: ConnectionManager,
+    private val bouncerServ: BouncerServClient,
+    private val database: MotdDatabase,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(BouncerNetworksUiState())
@@ -45,44 +67,43 @@ class BouncerNetworksViewModel @Inject constructor(
         initialized = true
         this.rootNetworkId = rootNetworkId
         viewModelScope.launch {
-            _state.value = _state.value.copy(root = networkRepository.networkById(rootNetworkId))
+            val root = networkRepository.networkById(rootNetworkId)
+            _state.update { current -> current.copy(root = root) }
+        }
+        viewModelScope.launch {
+            database.invalidationTracker.createFlow("messages", "buffers", emitInitialState = true)
+                .collectLatest { loadTranscript() }
         }
         viewModelScope.launch {
             connectionManager.connectionStates.collect { states ->
-                val cs = states[rootNetworkId] ?: IrcClientState.Disconnected
+                val connectionState = states[rootNetworkId] ?: IrcClientState.Disconnected
                 val wasReady = _state.value.rootState is IrcClientState.Ready
-                _state.value = _state.value.copy(rootState = cs)
-                // Refresh on the transition into Ready (the client is only usable then).
-                if (cs is IrcClientState.Ready && !wasReady) refresh()
+                _state.value = _state.value.copy(rootState = connectionState)
+                if (connectionState is IrcClientState.Ready && !wasReady) {
+                    refreshInline(showLoading = true)
+                    probeInline()
+                }
             }
         }
     }
 
     fun connect() = viewModelScope.launch { connectionManager.connect(rootNetworkId) }
 
-    /** Re-read the live listing and local children, then merge. */
-    fun refresh() = viewModelScope.launch {
-        _state.value = _state.value.copy(loading = true, error = null)
-        val client = connectionManager.clientFor(rootNetworkId)
-        val listing = if (client == null) {
-            emptyList()
-        } else {
-            runCatching { client.bouncerListNetworks() }.getOrElse {
-                _state.value = _state.value.copy(loading = false, error = it.message)
-                return@launch
-            }
-        }
-        val children = networkRepository.childrenOf(rootNetworkId)
-        _state.value = _state.value.copy(
-            loading = false,
-            rows = mergeBouncerRows(listing, children),
-        )
+    fun selectTab(tab: BouncerControlTab) {
+        _state.value = _state.value.copy(selectedTab = tab)
     }
+
+    fun clearFeedback() {
+        _state.value = _state.value.copy(notice = null, error = null)
+    }
+
+    fun refresh() = viewModelScope.launch { refreshInline(showLoading = true) }
+
+    fun probeCapabilities() = viewModelScope.launch { probeInline() }
 
     /** Insert the local BOUNCER_CHILD mirror; no-op if the netId is already imported. */
     fun importNetwork(row: BouncerNetRow) = viewModelScope.launch {
         val root = _state.value.root ?: return@launch
-        // Re-read children inside the action to avoid the notify-mirror duplicate race (§9 risks).
         val existing = networkRepository.childrenOf(rootNetworkId)
         if (existing.any { it.bouncerNetId == row.netId }) {
             refreshInline()
@@ -107,61 +128,213 @@ class BouncerNetworksViewModel @Inject constructor(
         refreshInline()
     }
 
-    /** Delete the network on the bouncer (and its local child if present). */
-    fun deleteFromBouncer(row: BouncerNetRow) = viewModelScope.launch {
-        withBusy(row.netId) {
-            val client = connectionManager.clientFor(rootNetworkId)
-            runCatching { client?.bouncerDeleteNetwork(row.netId) }.onFailure {
-                _state.value = _state.value.copy(error = it.message)
-            }
-            // Remove the local child directly rather than relying on the BOUNCER NETWORK notify.
+    fun createNetwork(fields: NetworkCommandFields) {
+        buildAndExecute(refreshNetworks = true) { BouncerServCommands.networkCreate(fields) }
+    }
+
+    fun updateNetwork(name: String, changed: NetworkCommandFields) {
+        execute(BouncerServCommands.networkUpdate(name, changed), refreshNetworks = true)
+    }
+
+    fun deleteFromBouncer(row: BouncerNetRow) {
+        execute(BouncerServCommands.networkDelete(row.name), refreshNetworks = true) {
             row.childNetworkId?.let { networkRepository.deleteNetwork(it) }
         }
-        refreshInline()
     }
 
-    /** Add a network on the bouncer, then import its mirror (idempotent per importNetwork). */
-    fun addNetwork(name: String, host: String, port: String?, nick: String?) = viewModelScope.launch {
-        val client = connectionManager.clientFor(rootNetworkId) ?: return@launch
-        val attrs = buildMap {
-            if (name.isNotBlank()) put("name", name)
-            if (host.isNotBlank()) put("host", host)
-            port?.takeIf { it.isNotBlank() }?.let { put("port", it) }
-            nick?.takeIf { it.isNotBlank() }?.let { put("nickname", it) }
-        }
-        val netId = runCatching { client.bouncerAddNetwork(attrs) }.getOrElse {
-            _state.value = _state.value.copy(error = it.message)
-            return@launch
-        }
-        // Refresh to pick up the new listing; import explicitly if the notify mirror lagged.
-        refreshInline()
-        if (netId.isNotBlank()) {
-            val row = _state.value.rows.firstOrNull { it.netId == netId }
-            if (row != null && row.childNetworkId == null) importNetwork(row)
+    fun channelStatus(network: String) = executeWithResult(BouncerServCommands.channelStatus(network)) { result ->
+        if (result is BouncerServResult.Success) {
+            _state.value = _state.value.copy(channels = parseChannelStatus(result.replies))
         }
     }
 
-    // Synchronous refresh body reused by the actions (they already run in viewModelScope).
-    private suspend fun refreshInline() {
-        val client = connectionManager.clientFor(rootNetworkId)
-        val listing = if (client == null) emptyList()
-        else runCatching { client.bouncerListNetworks() }.getOrElse {
-            _state.value = _state.value.copy(error = it.message)
+    fun createChannel(channel: String, network: String, fields: ChannelCommandFields) =
+        execute(BouncerServCommands.channelCreate(channel, network, fields))
+
+    fun updateChannel(channel: String, network: String, fields: ChannelCommandFields) =
+        execute(BouncerServCommands.channelUpdate(channel, network, fields))
+
+    fun deleteChannel(channel: String, network: String) =
+        execute(BouncerServCommands.channelDelete(channel, network))
+
+    fun updateAccount(nick: String?, realName: String?) =
+        execute(BouncerServCommands.accountUpdate(nick, realName))
+
+    fun saslStatus(network: String) = execute(BouncerServCommands.saslStatus(network))
+
+    fun setSaslPlain(network: String, username: String, password: String) =
+        execute(BouncerServCommands.saslSetPlain(network, username, password))
+
+    fun resetSasl(network: String) = execute(BouncerServCommands.saslReset(network))
+
+    fun generateCertFp(network: String, keyType: String) =
+        execute(BouncerServCommands.certFpGenerate(network, keyType))
+
+    fun showCertFp(network: String) = execute(BouncerServCommands.certFpFingerprint(network))
+
+    fun userStatus(username: String?) = execute(BouncerServCommands.userStatus(username))
+
+    fun createUser(username: String, password: String, administrator: Boolean, enabled: Boolean) =
+        execute(BouncerServCommands.userCreate(username, password, administrator, enabled))
+
+    fun updateUser(username: String?, changed: UserCommandFields) {
+        val root = _state.value.root ?: return
+        buildAndExecute {
+            BouncerServCommands.userUpdate(
+                username = username,
+                currentUsername = root.username,
+                administrator = _state.value.capabilities.administrator,
+                changed = changed,
+            )
+        }
+    }
+
+    fun requestUserDeletion(username: String) {
+        executeWithResult(BouncerServCommands.userDelete(username)) { result ->
+            val success = result as? BouncerServResult.Success ?: return@executeWithResult
+            val token = extractUserDeletionToken(username, success.replies) ?: return@executeWithResult
+            _state.value = _state.value.copy(pendingUserDeletion = PendingUserDeletion(username, token))
+        }
+    }
+
+    fun confirmUserDeletion() {
+        val pending = _state.value.pendingUserDeletion ?: return
+        _state.value = _state.value.copy(pendingUserDeletion = null)
+        execute(BouncerServCommands.userDelete(pending.username, pending.token))
+    }
+
+    fun cancelUserDeletion() {
+        _state.value = _state.value.copy(pendingUserDeletion = null)
+    }
+
+    fun runAsUser(username: String, nestedCommand: String) = buildAndExecute {
+        BouncerServCommands.userRun(username, BouncerServCommand(nestedCommand))
+    }
+
+    fun serverStatus() = execute(BouncerServCommands.serverStatus())
+    fun sendServerNotice(message: String) = execute(BouncerServCommands.serverNotice(message))
+    fun setServerDebug(enabled: Boolean) = execute(BouncerServCommands.serverDebug(enabled))
+
+    fun submitConsole(raw: String) {
+        val command = runCatching { BouncerServCommand(raw) }.getOrElse {
+            _state.value = _state.value.copy(error = it.message, notice = null)
             return
         }
-        val children = networkRepository.childrenOf(rootNetworkId)
-        _state.value = _state.value.copy(rows = mergeBouncerRows(listing, children))
+        execute(command)
     }
 
-    private inline fun BouncerNetworksUiState.busy(netId: String, on: Boolean): BouncerNetworksUiState =
-        copy(busyNetIds = if (on) busyNetIds + netId else busyNetIds - netId)
+    private fun execute(
+        command: BouncerServCommand,
+        refreshNetworks: Boolean = false,
+        onSuccess: suspend () -> Unit = {},
+    ) = executeWithResult(command, refreshNetworks) { result ->
+        if (result is BouncerServResult.Success) onSuccess()
+    }
 
-    private suspend fun withBusy(netId: String, block: suspend () -> Unit) {
-        _state.value = _state.value.busy(netId, true)
-        try {
-            block()
-        } finally {
-            _state.value = _state.value.busy(netId, false)
+    private fun buildAndExecute(
+        refreshNetworks: Boolean = false,
+        build: () -> BouncerServCommand,
+    ) {
+        val command = runCatching(build).getOrElse {
+            _state.value = _state.value.copy(error = it.message, notice = null)
+            return
         }
+        execute(command, refreshNetworks)
+    }
+
+    private fun executeWithResult(
+        command: BouncerServCommand,
+        refreshNetworks: Boolean = false,
+        onResult: suspend (BouncerServResult) -> Unit,
+    ) {
+        if (_state.value.commandBusy) return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(commandBusy = true, notice = null, error = null)
+            val result = bouncerServ.execute(rootNetworkId, command)
+            onResult(result)
+            val failed = result !is BouncerServResult.Success
+            _state.value = _state.value.copy(
+                commandBusy = false,
+                notice = result.safeSummary().takeUnless { failed },
+                error = result.safeSummary().takeIf { failed },
+            )
+            if (refreshNetworks && result is BouncerServResult.Success) refreshInline()
+            if (result.indicatesCapabilityDrift()) probeInline()
+        }
+    }
+
+    private suspend fun probeInline() {
+        if (_state.value.probing || _state.value.rootState !is IrcClientState.Ready) return
+        _state.value = _state.value.copy(probing = true)
+        val capabilities = bouncerServ.probe(rootNetworkId)
+        _state.value = _state.value.copy(
+            probing = false,
+            capabilities = capabilities,
+            selectedTab = if (
+                _state.value.selectedTab == BouncerControlTab.ADMIN && !capabilities.administrator
+            ) BouncerControlTab.CONSOLE else _state.value.selectedTab,
+        )
+    }
+
+    private suspend fun refreshInline(showLoading: Boolean = false) {
+        if (showLoading) _state.value = _state.value.copy(loading = true, error = null)
+        val client = connectionManager.clientFor(rootNetworkId)
+        val listing = if (client == null) {
+            emptyList()
+        } else {
+            runCatching { client.bouncerListNetworks() }.getOrElse {
+                _state.value = _state.value.copy(loading = false, error = it.message)
+                return
+            }
+        }
+        val children = networkRepository.childrenOf(rootNetworkId)
+        _state.value = _state.value.copy(
+            loading = false,
+            rows = mergeBouncerRows(listing, children),
+        )
+    }
+
+    private suspend fun loadTranscript() {
+        if (rootNetworkId == 0L) return
+        val entries = withContext(Dispatchers.IO) {
+            val db = database.openHelper.readableDatabase
+            db.query(
+                """
+                SELECT m.sender, m.text, m.serverTime, m.isSelf
+                FROM messages m
+                JOIN buffers b ON b.id = m.bufferId
+                WHERE b.networkId = ? AND lower(b.name) = 'bouncerserv'
+                ORDER BY m.serverTime DESC, m.id DESC
+                LIMIT 100
+                """.trimIndent(),
+                arrayOf(rootNetworkId),
+            ).use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) {
+                        add(
+                            BouncerTranscriptEntry(
+                                sender = cursor.getString(0),
+                                text = cursor.getString(1),
+                                serverTime = cursor.getLong(2),
+                                isSelf = cursor.getInt(3) != 0,
+                            ),
+                        )
+                    }
+                }.asReversed()
+            }
+        }
+        _state.value = _state.value.copy(transcript = entries)
+    }
+}
+
+private fun BouncerServResult.indicatesCapabilityDrift(): Boolean {
+    val replies = when (this) {
+        is BouncerServResult.Success -> replies
+        is BouncerServResult.Timeout -> replies
+        else -> emptyList()
+    }
+    return replies.any { reply ->
+        val lower = reply.lowercase()
+        "command not found" in lower || "permission" in lower || "must be an admin" in lower
     }
 }

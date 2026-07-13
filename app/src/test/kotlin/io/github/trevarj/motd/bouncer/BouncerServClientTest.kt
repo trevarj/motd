@@ -64,6 +64,16 @@ class BouncerServClientTest {
         first.await(); second.await()
     }
 
+    @Test fun known_silent_command_completes_after_write_without_inventing_state() = runTest {
+        val events = MutableSharedFlow<IrcEvent>()
+        val sent = mutableListOf<String>()
+        val result = BouncerServClientImpl(FakeSessions(events) { sent += it })
+            .execute(1, BouncerServCommands.serverDebug(true))
+
+        assertEquals(listOf("server debug true"), sent)
+        assertEquals(BouncerServResult.Success("server debug true", emptyList()), result)
+    }
+
     @Test fun probe_expands_advertised_command_families() = runTest {
         val events = MutableSharedFlow<IrcEvent>(extraBufferCapacity = 16)
         val provider = FakeSessions(events) { wire ->

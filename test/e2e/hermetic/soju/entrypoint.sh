@@ -73,6 +73,8 @@ ctl() { sojuctl -config "$CONFIG" "$@"; }
 log "provisioning user $SOJU_USER"
 ctl user create -username "$SOJU_USER" -password "$SOJU_PASS" -realname "motd e2e" -admin 2>/dev/null \
   || log "user $SOJU_USER already exists (ok)"
+ctl user create -username motduser -password motdusertest -realname "motd e2e non-admin" 2>/dev/null \
+  || log "user motduser already exists (ok)"
 
 # Provision the upstream network as "$NETWORK_NAME" for that user, via
 # `user run <user> <command>` (the admin-only way to act as another user).

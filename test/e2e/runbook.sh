@@ -19,11 +19,25 @@ E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- config / secrets ------------------------------------------------------
 
-# Source untracked local overrides first so they can set every var below.
+# Source untracked defaults, then restore values explicitly supplied by the caller. This makes the
+# documented precedence real and prevents a stale .env APK from silently replacing the artifact a
+# device-validation command intended to test.
+_explicit_config=()
+for _name in \
+  MOTD_PKG MOTD_APK MOTD_SOJU_HOST MOTD_SOJU_PORT MOTD_SOJU_USER MOTD_SOJU_PASS \
+  MOTD_NICK MOTD_TEST_CHANNEL MOTD_SECOND_NICK SERIAL E2E_OUT_DIR E2E_PHASES; do
+  if [[ -v "$_name" ]]; then
+    _explicit_config+=("$(declare -p "$_name")")
+  fi
+done
 if [ -f "${E2E_DIR}/.env" ]; then
   # shellcheck disable=SC1091 # runtime-provided, untracked file
   . "${E2E_DIR}/.env"
 fi
+for _declaration in "${_explicit_config[@]}"; do
+  eval "$_declaration"
+done
+unset _explicit_config _declaration _name
 
 # Package + APK.
 : "${MOTD_PKG:=io.github.trevarj.motd.debug}"
@@ -762,13 +776,27 @@ phase_f() {
   step "Bouncer networks (root)"
   if [ -n "$(bounds_of_text "Bouncer networks")" ]; then
     tap_text "Bouncer networks"
-    wait_for_text "Bouncer networks" 6 || true
+    wait_for_text "Soju control center" 10 || true
+    assert_text "Soju control center"
     if [ -n "$(bounds_of_text "Add network to bouncer")" ]; then
       tap_text "Add network to bouncer"
-      wait_for_text "Name" 5 || true
-      assert_text "Host"
+      wait_for_text "Server address" 5 || true
+      assert_text "Server address"
       tap_text "Cancel"
     fi
+    tap_tag bouncer_tab_channels
+    assert_text "Channel controls"
+    tap_tag bouncer_tab_account
+    assert_text "Fallback identity"
+    if wait_for_text "Admin" 10; then
+      tap_tag bouncer_tab_admin
+      assert_text "Users"
+      assert_text "Server"
+    else
+      fail "admin BouncerServ commands were not discovered"
+    fi
+    tap_tag bouncer_tab_console
+    assert_text "One BouncerServ command"
     adb_shell input keyevent 4            # back to network settings
   else
     note "Bouncer networks row not visible"
@@ -893,6 +921,87 @@ EOF
 }
 
 # ==========================================================================
+# Phase J — focused Soju control center (safe, non-destructive)
+# ==========================================================================
+phase_j() {
+  echo ""
+  echo "${_C_CYA}########## Phase J: Soju control center ##########${_C_RST}"
+
+  step "Open root bouncer tools"
+  tap_desc "Settings"
+  wait_for_text "Networks" 8 || true
+  tap_text "Networks"
+  wait_for_text "Bouncers" 8 || true
+  assert_text "Bouncers"
+  tap_text "$MOTD_SOJU_HOST"
+  # Opening settings does not imply that the root IRC session is ready. In particular, a prior
+  # run can leave this screen backed by cached state while the app is disconnected. Do not enter
+  # the control center until the status action proves the root is ready; otherwise every disabled
+  # capability assertion below is a misleading probe failure.
+  local connection_attempt
+  for connection_attempt in 1 2 3; do
+    if wait_for_text "Disconnect" 2; then
+      break
+    fi
+    if wait_for_text "Connect" 2; then
+      tap_text "Connect"
+    elif wait_for_text "Reconnect" 2; then
+      tap_text "Reconnect"
+    fi
+    wait_for_text "Disconnect" 15 && break
+  done
+  assert_text "Disconnect"
+  local attempt
+  for attempt in 1 2 3 4; do
+    dump || true
+    [ -n "$(bounds_of_text "Bouncer networks")" ] && break
+    adb_shell input swipe 540 1800 540 600 300
+    sleep 1
+  done
+  assert_text "Bouncer networks"
+  tap_text "Bouncer networks"
+  wait_for_text "Soju control center" 15 || true
+  assert_text "Soju control center"
+  assert_no_crash
+
+  step "Wait for server-verified BouncerServ capabilities"
+  wait_for_text "BouncerServ commands verified for this connection." 20 || true
+  assert_text "BouncerServ commands verified for this connection."
+
+  step "Inspect guided panels and safe create dialog"
+  tap_tag bouncer_tab_networks
+  assert_tag_present bouncer_networks_panel
+  tap_tag bouncer_add_network
+  assert_text "Server address"
+  tap_text "Cancel"
+  tap_tag bouncer_tab_channels
+  assert_tag_present bouncer_channels_panel
+  tap_tag bouncer_tab_account
+  assert_tag_present bouncer_account_panel
+  if wait_for_text "Admin" 15; then
+    tap_tag bouncer_tab_admin
+    assert_tag_present bouncer_admin_panel
+  else
+    fail "admin BouncerServ commands were not discovered"
+  fi
+  tap_tag bouncer_tab_console
+  assert_tag_present bouncer_console_panel
+  assert_tag_present bouncer_console_input
+  assert_no_crash
+
+  step "Run safe BouncerServ console command"
+  input_tag bouncer_console_input "network status"
+  tap_desc "Send"
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    dump || true
+    [ -n "$(bounds_of_tag "bouncer_command_notice")" ] && break
+    sleep 1
+  done
+  assert_tag_present bouncer_command_notice
+  assert_no_crash
+}
+
+# ==========================================================================
 # Driver — phases toggled by env (default: all). E2E_PHASES="a c f" runs a subset.
 # ==========================================================================
 main() {
@@ -932,6 +1041,7 @@ main() {
       g) phase_g ;;
       h) phase_h ;;
       i) phase_i ;;
+      j) phase_j ;;
       *) note "unknown phase '$p' skipped" ;;
     esac || fail "phase '$p' aborted early (see output above)"
   done

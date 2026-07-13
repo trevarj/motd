@@ -19,7 +19,7 @@ setup and teardown deliberately clear application data.
 | Hermetic emulator run | Scheduled/manual exhaustive CI diagnostics | `.github/workflows/e2e.yml` |
 
 The smoke and exhaustive E2E workflows are currently diagnostic and do not gate
-tagged releases. Release CI still runs unit tests, lint, and both release builds.
+tagged releases. Release CI still runs unit tests, lint, and the FOSS release build.
 
 ## Prerequisites
 
@@ -48,6 +48,7 @@ so a USB device reaches it at `127.0.0.1:6697`.
 ./test/e2e/local-stack.sh up
 ./test/e2e/local-stack.sh status
 ./test/e2e/local-stack.sh seed
+./test/e2e/local-stack.sh control-check
 ./test/e2e/local-stack.sh down
 ```
 
@@ -81,6 +82,11 @@ The native stack provides deterministic inputs for the baseline matrix:
 ./test/e2e/local-stack.sh start-soju  # restart and exercise client reconnect/catch-up
 ```
 
+`control-check` connects through the public TLS listener as both the admin and
+non-admin fixture users. It verifies help-based authorization, channels,
+temporary network/user mutations, SASL, CertFP, broadcast notices, and debug
+enable/disable cleanup without adding Python dependencies beyond the Nix shell.
+
 Always pair `pause-soju` with `resume-soju`; both target the exact PID recorded
 by the fixture rather than matching processes by command line.
 
@@ -100,6 +106,11 @@ Onboard the debug app with **I have a soju bouncer**:
 
 Trust the local self-signed certificate, import `libera`, and open
 `##motdtest`. These credentials are local test fixtures, not secrets.
+
+For BouncerServ authorization checks, the same stack also provisions the
+non-admin account `motduser` / `motdusertest`. Use a separate debug app profile
+or clear only the debug package before switching accounts. The admin account
+must expose `user` and `server` command families; the non-admin account must not.
 
 The same script exposes `obfs-*` and `obfs-xray-*` commands for VLESS + REALITY
 compatibility and negative-path validation. Run the base stack first and see
@@ -173,6 +184,7 @@ failure log.
 | G | Compact and comfortable rendering | Best effort |
 | H | Inline image viewer | Conditional on a reachable seeded image |
 | I | Delete-chat cancellation, final crash sweep, clean reset | Expected green |
+| J | Soju control-center panels, admin discovery, safe console command | Expected green with local admin fixture |
 
 The hermetic default is A–C. The scheduled/manual workflow may widen this to
 A–I. DM, mention, typing, member, and moderation checks need a live second

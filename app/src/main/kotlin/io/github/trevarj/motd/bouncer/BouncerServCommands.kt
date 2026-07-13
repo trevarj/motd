@@ -1,6 +1,6 @@
 package io.github.trevarj.motd.bouncer
 
-data class BouncerServCommand(val wire: String) {
+data class BouncerServCommand(val wire: String, val expectsReply: Boolean = true) {
     init {
         require('\r' !in wire && '\n' !in wire) { "Exactly one BouncerServ command is allowed" }
         require(wire.isNotBlank()) { "BouncerServ command cannot be blank" }
@@ -27,6 +27,16 @@ data class ChannelCommandFields(
     val reattachOn: String? = null,
     val detachAfter: String? = null,
     val detachOn: String? = null,
+)
+
+data class UserCommandFields(
+    val password: String? = null,
+    val disablePassword: Boolean = false,
+    val administrator: Boolean? = null,
+    val nick: String? = null,
+    val realName: String? = null,
+    val enabled: Boolean? = null,
+    val maxNetworks: Int? = null,
 )
 
 object BouncerServCommands {
@@ -82,8 +92,41 @@ object BouncerServCommands {
     fun userStatus(username: String? = null) = command("user status", username)
     fun userCreate(username: String, password: String, admin: Boolean, enabled: Boolean) = BouncerServCommand(
         "user create -username ${quoteBouncerArg(username)} -password ${quoteBouncerArg(password)} " +
-            "-admin $admin -enabled $enabled",
+            "-admin=$admin -enabled=$enabled",
     )
+    fun userUpdate(
+        username: String?,
+        currentUsername: String,
+        administrator: Boolean,
+        changed: UserCommandFields,
+    ): BouncerServCommand {
+        val target = username?.takeIf(String::isNotBlank) ?: currentUsername
+        val ownUser = target == currentUsername
+        require(ownUser || administrator) { "Only administrators can update another user" }
+        require(ownUser || (changed.nick == null && changed.realName == null)) {
+            "Nick and real name can only be changed for your own account"
+        }
+        require(!ownUser || (changed.administrator == null && changed.enabled == null)) {
+            "Admin and enabled status cannot be changed for your own account"
+        }
+        require(administrator || changed.maxNetworks == null) {
+            "Only administrators can change the network limit"
+        }
+        require(changed.password == null || !changed.disablePassword) {
+            "Password and disable-password are mutually exclusive"
+        }
+        return BouncerServCommand(buildList {
+            add("user"); add("update")
+            if (!ownUser) add(quoteBouncerArg(target))
+            changed.password?.let { add("-password"); add(quoteBouncerArg(it)) }
+            if (changed.disablePassword) add("-disable-password")
+            changed.administrator?.let { add("-admin"); add(it.toString()) }
+            changed.nick?.let { add("-nick"); add(quoteBouncerArg(it)) }
+            changed.realName?.let { add("-realname"); add(quoteBouncerArg(it)) }
+            changed.enabled?.let { add("-enabled"); add(it.toString()) }
+            changed.maxNetworks?.let { add("-max-networks"); add(it.toString()) }
+        }.joinToString(" "))
+    }
     fun userDelete(username: String, confirmationToken: String? = null) = BouncerServCommand(
         buildList {
             add("user"); add("delete"); add(quoteBouncerArg(username))
@@ -95,7 +138,8 @@ object BouncerServCommands {
     )
     fun serverStatus() = BouncerServCommand("server status")
     fun serverNotice(message: String) = command("server notice", message)
-    fun serverDebug(enabled: Boolean) = BouncerServCommand("server debug $enabled")
+    // soju 0.10.1 intentionally prints no response for this command.
+    fun serverDebug(enabled: Boolean) = BouncerServCommand("server debug $enabled", expectsReply = false)
 
     private fun command(path: String, argument: String?): BouncerServCommand = BouncerServCommand(
         if (argument.isNullOrBlank()) path else "$path ${quoteBouncerArg(argument)}",

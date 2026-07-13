@@ -797,7 +797,7 @@ with unrelated predicates at individual call sites.
 
 ### G1. Guided BouncerServ control center and command console
 
-- **Priority / size / status:** P2, L, Ready.
+- **Priority / size / status:** P2, L, Complete (2026-07-13).
 - **Depends on:** use C1's connection-generation and cancellation model. The
   UI, builders, and parsers may proceed earlier. F2 presets may enhance network
   creation later but are not a dependency.
@@ -880,6 +880,26 @@ with unrelated predicates at individual call sites.
   confirmations. Extend the pinned soju v0.10.1 stack with admin and non-admin
   users and exercise temporary network/channel/user mutations, SASL/CertFP,
   notice, and debug enable/disable cleanup on a physical device.
+- **Implementation evidence:** the existing bouncer-network manager is now a
+  five-panel Soju control center with server-verified Networks, Channels,
+  Account, Admin, and Console actions. An app-owned serialized client captures
+  only BouncerServ `PRIVMSG` replies, honors connection generations and quiet /
+  hard timeouts, and leaves cached Room transcript output readable offline.
+  Exact builders enforce Soju's root channel and user-update rules; one shared
+  redactor protects guided, console, and ordinary BouncerServ sends. The UI
+  waits for advertised help paths before enabling mutations and preserves raw
+  console fallback when capabilities drift. Initialization uses atomic state
+  updates so a late root database read cannot overwrite a live Ready state.
+- **Verification evidence:** focused command, redaction, parser, client timing,
+  notification classification, model, and initialization-race tests pass. The
+  pinned native Soju 0.10.1 stack passed admin and non-admin `control-check`,
+  including temporary network/channel/user operations, SASL, CertFP, notice,
+  and debug cleanup. On physical device `00152151K005265`, the FOSS debug APK's
+  focused Phase J passed 30/30 checks: reconnect gating, capability discovery,
+  create confirmation, all five panels, Admin visibility, safe console send,
+  and returned notice. The complete FOSS debug/release unit matrix, warnings-as-
+  errors debug lint, IRC build, and FOSS release assembly pass; no Google/FCM
+  task or APK is part of verification or release.
 - **References:** [soju BouncerServ manual](https://soju.im/doc/soju.1.html)
   and [pinned v0.10.1 service implementation](https://github.com/emersion/soju/blob/v0.10.1/service.go).
 
