@@ -43,7 +43,7 @@ class ChatHistoryRemoteMediator(
 
     /**
      * Minimal seam over the live [io.github.trevarj.motd.irc.client.IrcClient] (mirrors
-     * [io.github.trevarj.motd.service.CatchUp.HistorySource]) so the load logic is unit-testable
+     * reconnect coordinator's history-source seam) so the load logic is unit-testable
      * against scripted responses without a socket. Resolved per-load so a client that connects after
      * the buffer opens is picked up on the next boundary hit.
      */

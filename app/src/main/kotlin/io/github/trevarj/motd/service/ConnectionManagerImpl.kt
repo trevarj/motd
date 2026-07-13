@@ -21,7 +21,6 @@ import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcClientConfig
-import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.irc.client.canSendClientTag
 import io.github.trevarj.motd.irc.client.canSendReactionTags
@@ -41,7 +40,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
 
@@ -62,6 +60,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val certStore: CertTrustStore,
     private val baseTransportFactory: TransportFactory,
     private val localSocksProvider: LocalSocksProvider,
+    private val historyResyncCoordinator: HistoryResyncCoordinator,
     // Lazy to break the WebPushRegistrar <-> ConnectionManager ctor cycle.
     private val webPushRegistrar: dagger.Lazy<WebPushRegistrar>,
 ) : ConnectionManager {
@@ -388,17 +387,6 @@ class ConnectionManagerImpl @Inject constructor(
 
     // -- catch-up (plans/04) -------------------------------------------------
 
-    private suspend fun catchUp(networkId: Long, client: IrcClient) {
-        val catchUp = CatchUp(
-            bufferDao = bufferDao,
-            messageDao = messageDao,
-            processor = eventProcessor,
-            history = clientHistorySource(client),
-            normalize = { client.isupport.normalize(it) },
-        )
-        catchUp.run(networkId, openBuffers(networkId))
-    }
-
     /**
      * Own reconnect catch-up for the lifetime of this exact client. soju child connections can
      * report Ready before their post-bind feature CAP ACK arrives, so wait for CHATHISTORY rather
@@ -412,27 +400,28 @@ class ConnectionManagerImpl @Inject constructor(
         }
         var attempt = 0
         while (clientFor(networkId) === client) {
-            try {
-                catchUp(networkId, client)
-                return
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                val retryMs = catchUpRetryDelayMs(attempt++)
-                Log.w(TAG, "CHATHISTORY catch-up failed for network $networkId; retrying in ${retryMs}ms", error)
-                delay(retryMs)
+            val buffers = openBuffers(networkId)
+            when (val result = historyResyncCoordinator.resyncNetwork(
+                networkId = networkId,
+                openBuffers = buffers,
+                client = client,
+                isCurrent = { clientFor(networkId) === client },
+            )) {
+                is HistoryResyncState.Failed -> {
+                    if (clientFor(networkId) !== client) return
+                    val retryMs = catchUpRetryDelayMs(attempt++)
+                    Log.w(TAG, "CHATHISTORY catch-up failed for network $networkId; retrying in ${retryMs}ms: ${result.reason}")
+                    delay(retryMs)
+                }
+                else -> {
+                    if (clientFor(networkId) === client) {
+                        for ((_, name) in buffers) runCatching { client.fetchReadMarker(name) }
+                    }
+                    return
+                }
             }
         }
     }
-
-    /** Adapt a live [IrcClient] to the [CatchUp.HistorySource] seam. */
-    private fun clientHistorySource(client: IrcClient): CatchUp.HistorySource =
-        object : CatchUp.HistorySource {
-            override fun hasCap(cap: String): Boolean = client.hasCap(cap)
-            override suspend fun chathistory(req: ChatHistoryRequest): io.github.trevarj.motd.irc.client.ChatHistoryResult =
-                client.chathistory(req)
-            override suspend fun fetchReadMarker(target: String) = client.fetchReadMarker(target)
-        }
 
     private suspend fun openBuffers(networkId: Long): List<Pair<Long, String>> =
         kotlinx.coroutines.withContext(Dispatchers.IO) {

@@ -12,16 +12,22 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -52,6 +58,8 @@ import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
@@ -71,6 +79,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.client.canSendReactionTags
+import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
@@ -144,6 +153,7 @@ fun ChatScreen(
     // Round 5: nick sheet + raw-send snackbar (plans/16 §5.6/§5.8).
     val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
     val snackbarMessage by viewModel.snackbar.collectAsStateWithLifecycle()
+    val historyResyncState by viewModel.historyResyncState.collectAsStateWithLifecycle()
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
 
     ChatContent(
@@ -198,6 +208,9 @@ fun ChatScreen(
         onSenderClick = viewModel::openNickSheet,
         rawSendSnackbar = snackbarMessage,
         onSnackbarShown = viewModel::consumeSnackbar,
+        historyResyncState = historyResyncState,
+        onRefreshHistory = viewModel::refreshHistory,
+        onHistoryResyncShown = viewModel::consumeHistoryResyncState,
     )
 
     // Nick sheet (plans/16 §5.8): actions render immediately; whois fills in when it lands.
@@ -288,6 +301,9 @@ fun ChatContent(
     onSenderClick: (String) -> Unit = {},
     rawSendSnackbar: String? = null,
     onSnackbarShown: () -> Unit = {},
+    historyResyncState: HistoryResyncState = HistoryResyncState.Idle,
+    onRefreshHistory: () -> Unit = {},
+    onHistoryResyncShown: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
@@ -312,6 +328,7 @@ fun ChatContent(
     var attachmentSheetOpen by rememberSaveable { mutableStateOf(false) }
     var uploadCurrentDraftDirectly by rememberSaveable { mutableStateOf(false) }
     var longDraftPrompt by rememberSaveable { mutableStateOf(false) }
+    var overflowOpen by rememberSaveable { mutableStateOf(false) }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
     // Global fool expand/collapse toggle (plans/13 §2.4): when true every collapsed fool row in the
     // buffer renders expanded; per-row toggles still override individually via [expandedFools] and
@@ -379,16 +396,39 @@ fun ChatContent(
     val reactFailed = stringResource(R.string.chat_react_failed)
     val reactionBlocked = stringResource(R.string.chat_reaction_blocked)
     val reactionSendFailed = stringResource(R.string.chat_reaction_send_failed)
+    val historyOffline = stringResource(R.string.chat_history_offline)
     LaunchedEffect(rawSendSnackbar) {
         val sentinel = rawSendSnackbar ?: return@LaunchedEffect
         val text = when (sentinel) {
             "react_failed" -> reactFailed
             "reaction_blocked" -> reactionBlocked
             "reaction_send_failed" -> reactionSendFailed
+            "history_offline" -> historyOffline
             else -> invalidCommand
         }
         snackbarHostState.showSnackbar(text)
         onSnackbarShown()
+    }
+
+    val historyUpdatedCount = (historyResyncState as? HistoryResyncState.Updated)?.inserted ?: 0
+    val historyUpdated = pluralStringResource(
+        R.plurals.chat_history_updated,
+        historyUpdatedCount,
+        historyUpdatedCount,
+    )
+    val historyUpToDate = stringResource(R.string.chat_history_up_to_date)
+    val historyUnsupported = stringResource(R.string.chat_history_unsupported)
+    val historyFailed = stringResource(R.string.chat_history_failed)
+    LaunchedEffect(historyResyncState) {
+        val text = when (val result = historyResyncState) {
+            is HistoryResyncState.Updated -> historyUpdated
+            HistoryResyncState.UpToDate -> historyUpToDate
+            HistoryResyncState.Unsupported -> historyUnsupported
+            is HistoryResyncState.Failed -> result.reason.ifBlank { historyFailed }
+            HistoryResyncState.Idle, HistoryResyncState.Running -> return@LaunchedEffect
+        }
+        snackbarHostState.showSnackbar(text)
+        onHistoryResyncShown()
     }
 
     // Deep-jump scroll: bounded APPEND loop (placeholders OFF, so tail loads never shift indices).
@@ -775,6 +815,30 @@ fun ChatContent(
                         Icon(
                             Icons.Outlined.Search,
                             contentDescription = stringResource(R.string.chat_search),
+                        )
+                    }
+                    IconButton(
+                        onClick = { overflowOpen = true },
+                        modifier = Modifier.testTag("chat_overflow"),
+                    ) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+                    }
+                    DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                        DropdownMenuItem(
+                            modifier = Modifier.testTag("chat_refresh_history"),
+                            text = { Text(stringResource(R.string.chat_refresh_history)) },
+                            onClick = {
+                                overflowOpen = false
+                                onRefreshHistory()
+                            },
+                            enabled = historyResyncState !is HistoryResyncState.Running,
+                            leadingIcon = {
+                                if (historyResyncState is HistoryResyncState.Running) {
+                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                } else {
+                                    Icon(Icons.Outlined.Refresh, contentDescription = null)
+                                }
+                            },
                         )
                     }
                 },

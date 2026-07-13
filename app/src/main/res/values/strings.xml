@@ -9,6 +9,15 @@
     <string name="chatlist_pinned">Pinned</string>
     <string name="chatlist_empty_title">No conversations yet</string>
     <string name="chatlist_empty_message">Connect to a network to start chatting.</string>
+    <string name="chat_refresh_history">Refresh history</string>
+    <plurals name="chat_history_updated">
+        <item quantity="one">History updated · %1$d new message</item>
+        <item quantity="other">History updated · %1$d new messages</item>
+    </plurals>
+    <string name="chat_history_up_to_date">History is up to date</string>
+    <string name="chat_history_unsupported">History refresh is not supported by this server</string>
+    <string name="chat_history_failed">History refresh failed</string>
+    <string name="chat_history_offline">Reconnect before refreshing history</string>
 
     <!-- New-conversation bottom sheet (WP6) -->
     <string name="new_sheet_join_channel">Join channel</string>

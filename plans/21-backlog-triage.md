@@ -358,7 +358,7 @@ with unrelated predicates at individual call sites.
 
 ### C2. Manual and automatic history revalidation
 
-- **Priority / size / status:** P1, M, Ready after the C1 state model is clear.
+- **Priority / size / status:** P1, M, Complete (2026-07-13).
 - **Depends on:** C1 generation/cancellation semantics.
 - **Implementation:**
   1. Add `HistoryResyncCoordinator` as the sole resync entry point for automatic
@@ -384,6 +384,22 @@ with unrelated predicates at individual call sites.
   recent LATEST overlap, pagination/server limits, empty result, dedup,
   timeout/retry/cancel, unsupported capability, concurrent reasons, and stale
   generation completion.
+- **Implementation evidence:** the singleton `HistoryResyncCoordinator` is the
+  only reconnect/manual tail-revalidation entry point. It coalesces identical
+  work, serializes different requests per network, prefers msgid AFTER bounds
+  only when `MSGREFTYPES` permits them, falls back to timestamp or bounded
+  LATEST, and gives manual refresh a recent LATEST overlap. Every page rechecks
+  the exact live client before the sole IRC-to-Room writer receives it. The old
+  reconnect-only catch-up implementation was removed. Chat overflow now exposes
+  **Refresh history** with Running, Updated, Up to date, Unsupported, offline,
+  and retryable failure feedback.
+- **Verification evidence:** the FOSS suite covers tail and middle-gap repair,
+  repeated idempotency, empty stores, rejected selectors, msgid/timestamp bounds,
+  TARGETS discovery, full/short pagination, timeout, unsupported capability,
+  concurrent coalescing, stale-generation discard, and read-marker preservation.
+  On the attached A059/API 36 device against local soju, the overflow action was
+  visible and two successive refreshes returned `History is up to date` without
+  a crash.
 
 ### C3. Add a native ZNC fixture and assess `parenworks/cloak`
 

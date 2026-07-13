@@ -29,6 +29,8 @@ import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
+import io.github.trevarj.motd.service.HistoryResyncCoordinator
+import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.ui.nav.ChatRoute
@@ -96,6 +98,7 @@ class ChatViewModel @Inject constructor(
     private val eventSink: IrcEventSink,
     private val settingsRepository: SettingsRepository,
     private val visibilityReader: MessageVisibilityReader,
+    private val historyResyncCoordinator: HistoryResyncCoordinator,
     appearancePrefs: AppearancePrefs,
 ) : ViewModel() {
     val appearance = appearancePrefs.config
@@ -143,6 +146,9 @@ class ChatViewModel @Inject constructor(
             buffer?.let { states[it.networkId] } ?: IrcClientState.Disconnected
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), IrcClientState.Disconnected)
+
+    val historyResyncState: StateFlow<HistoryResyncState> = historyResyncCoordinator.state(bufferId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryResyncState.Idle)
 
     val state: StateFlow<ChatState> = combine(
         buffer,
@@ -331,6 +337,24 @@ class ChatViewModel @Inject constructor(
     val snackbar: StateFlow<String?> = _snackbar.asStateFlow()
 
     fun consumeSnackbar() { _snackbar.value = null }
+
+    fun refreshHistory() {
+        val currentBuffer = buffer.value ?: return
+        val client = connectionManager.clientFor(currentBuffer.networkId)
+        if (client == null || connState.value !is IrcClientState.Ready) {
+            _snackbar.value = "history_offline"
+            return
+        }
+        viewModelScope.launch {
+            historyResyncCoordinator.resyncBuffer(
+                buffer = currentBuffer,
+                client = client,
+                isCurrent = { connectionManager.clientFor(currentBuffer.networkId) === client },
+            )
+        }
+    }
+
+    fun consumeHistoryResyncState() = historyResyncCoordinator.consumeState(bufferId)
 
     /**
      * Parse [raw] and execute the resulting [ChatCommand]. `onOpenBuffer` navigates for /msg /query;
