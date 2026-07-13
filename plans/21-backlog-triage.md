@@ -580,7 +580,7 @@ with unrelated predicates at individual call sites.
 
 ### E3. Fix two-line multiline indentation
 
-- **Priority / size / status:** P1, S/M, Ready.
+- **Priority / size / status:** P1, S/M, Complete (2026-07-13).
 - **Depends on:** none.
 - **Implementation:** in two-line density, every message body begins under the
   nick's text column after the reserved avatar gap, including the first sender
@@ -592,6 +592,15 @@ with unrelated predicates at individual call sites.
 - **Acceptance / tests:** narrow-width previews and Compose geometry assertions
   for first/grouped rows, one-line/wrapped text, reply, image/card, reactions,
   and every layout density affected by the shared component.
+- **Implementation evidence:** TWO_LINE now uses one body-column token—avatar
+  width plus the header's six-dp gap—for both first and grouped messages. The
+  reply preview, notice label, plain/rich body, image, link card, and reactions
+  all live inside that single tagged column; compact and comfortable renderers
+  are unchanged.
+- **Verification evidence:** the narrow 280-dp preview includes a wrapping
+  first row, grouped continuation, reply, image, card, and reactions. A focused
+  token test locks the body start to the 20-dp TWO_LINE avatar plus six-dp gap,
+  and the FOSS suites compile every density route.
 
 ### E4. Inline backtick and Emacs-style code spans
 

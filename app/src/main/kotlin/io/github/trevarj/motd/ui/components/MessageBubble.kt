@@ -34,6 +34,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -452,15 +453,17 @@ private fun TwoLineMessageRow(
             }
         }
 
-        // Line 2 (body): reply preview, body, inline image, link preview, reactions. Continuations
-        // reserve the avatar's horizontal space (avatar + its 6dp gap) so text lines up under the
-        // group's body; the header build already indents by the same amount via the avatar column.
-        val bodyIndent = if (showSender) 0.dp else spacing.bubbleAvatar + 6.dp
+        // Line 2 always starts under the nick text column. The previous first-row special case
+        // started at the row edge while continuations reserved the avatar, producing a visible
+        // zig-zag and misaligning rich children within the same sender group.
+        val bodyIndent = twoLineBodyIndent(spacing)
         Column(
-            modifier = Modifier.padding(
-                start = bodyIndent,
-                top = if (showSender) spacing.bubbleInnerVPad else 0.dp,
-            ),
+            modifier = Modifier
+                .padding(
+                    start = bodyIndent,
+                    top = if (showSender) spacing.bubbleInnerVPad else 0.dp,
+                )
+                .testTag("message_two_line_body"),
         ) {
             reply?.let { ReplyMiniBubble(it, nickColors) }
 
@@ -522,6 +525,10 @@ private fun TwoLineMessageRow(
         }
     }
 }
+
+/** Horizontal start shared by first and grouped TWO_LINE bodies: avatar width plus header gap. */
+internal fun twoLineBodyIndent(spacing: io.github.trevarj.motd.ui.theme.MotdSpacing) =
+    spacing.bubbleAvatar + 6.dp
 
 /**
  * Delivery status of an own message, in priority order. IRC has no per-recipient read receipt
@@ -844,16 +851,35 @@ private fun MessageBubbleFailedPreview() {
 private fun MessageBubbleTwoLinePreview() {
     // TWO_LINE theme so MessageBubble routes into TwoLineMessageRow.
     MotdTheme(layoutDensity = io.github.trevarj.motd.data.prefs.LayoutDensity.TWO_LINE) {
-        Column {
-            MessageBubble(
-                sender = "alice", text = "hey, welcome to the channel!",
-                timeMs = 0L, isSelf = false, kind = MessageKind.PRIVMSG, showSender = true,
-                reactions = listOf(ReactionChip("👍", 2, mine = false)),
-            )
-            MessageBubble(
-                sender = "me", text = "my two-line reply", timeMs = 0L,
-                isSelf = true, kind = MessageKind.PRIVMSG, showSender = false,
-            )
+        Box(Modifier.width(280.dp)) {
+            Column {
+                MessageBubble(
+                    sender = "alice",
+                    text = "A narrow first message that wraps onto multiple lines without leaving the nick column.",
+                    timeMs = 0L,
+                    isSelf = false,
+                    kind = MessageKind.PRIVMSG,
+                    showSender = true,
+                    reply = ReplyPreviewData("bob", "Earlier message"),
+                    imageUrl = "https://example.com/image.png",
+                    linkPreview = LinkPreview(
+                        url = "https://example.com",
+                        title = "Example preview",
+                        description = "Card alignment",
+                        imageUrl = null,
+                        siteName = "Example",
+                    ),
+                    reactions = listOf(ReactionChip("👍", 2, mine = false)),
+                )
+                MessageBubble(
+                    sender = "alice",
+                    text = "Grouped continuation uses the exact same body column.",
+                    timeMs = 0L,
+                    isSelf = false,
+                    kind = MessageKind.PRIVMSG,
+                    showSender = false,
+                )
+            }
         }
     }
 }
