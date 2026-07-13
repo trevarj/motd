@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.UserEntity
+import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.service.IrcEventSink
@@ -175,15 +176,15 @@ class EventProcessor @Inject constructor(
             if (label != null) {
                 val pending = messageDao.byPendingLabel(bufferId, label)
                 if (pending != null) {
-                    messageDao.update(
-                        pending.copy(
-                            msgid = e.ctx.msgid,
-                            serverTime = e.ctx.serverTime,
-                            dedupKey = EchoDeduper.keyFor(e.ctx, e.source.nick, e.text),
-                            pendingLabel = null,
-                            failed = false,
-                        ),
+                    val confirmed = pending.copy(
+                        msgid = e.ctx.msgid,
+                        serverTime = e.ctx.serverTime,
+                        dedupKey = EchoDeduper.keyFor(e.ctx, e.source.nick, e.text),
+                        pendingLabel = null,
+                        failed = false,
                     )
+                    messageDao.update(confirmed)
+                    traceMessageWrite("room_echo_update", confirmed, e.ctx.batchId != null)
                     return
                 }
             }
@@ -203,19 +204,21 @@ class EventProcessor @Inject constructor(
                 // the idempotent short-circuit above already returned if that msgid existed.
                 val echoMsgid = e.ctx.msgid
                 if (echoMsgid != null) {
-                    messageDao.update(
-                        candidate.copy(
-                            msgid = echoMsgid,
-                            serverTime = e.ctx.serverTime,
-                            dedupKey = echoMsgid,
-                            pendingLabel = null,
-                            failed = false,
-                        ),
+                    val confirmed = candidate.copy(
+                        msgid = echoMsgid,
+                        serverTime = e.ctx.serverTime,
+                        dedupKey = echoMsgid,
+                        pendingLabel = null,
+                        failed = false,
                     )
+                    messageDao.update(confirmed)
+                    traceMessageWrite("room_echo_update", confirmed, e.ctx.batchId != null)
                 } else if (candidate.pendingLabel != null || candidate.failed) {
                     // Confirm a still-pending/failed row even without a msgid so the UI stops
                     // showing "sending…"/retry; keep its local dedupKey.
-                    messageDao.update(candidate.copy(pendingLabel = null, failed = false))
+                    val confirmed = candidate.copy(pendingLabel = null, failed = false)
+                    messageDao.update(confirmed)
+                    traceMessageWrite("room_echo_update", confirmed, e.ctx.batchId != null)
                 }
                 return
             }
@@ -232,14 +235,14 @@ class EventProcessor @Inject constructor(
             if (incomingMsgid != null) {
                 val orphan = messageDao.findSelfMsgidlessCandidate(bufferId, e.text)
                 if (orphan != null) {
-                    messageDao.update(
-                        orphan.copy(
-                            msgid = incomingMsgid,
-                            dedupKey = incomingMsgid,
-                            pendingLabel = null,
-                            failed = false,
-                        ),
+                    val confirmed = orphan.copy(
+                        msgid = incomingMsgid,
+                        dedupKey = incomingMsgid,
+                        pendingLabel = null,
+                        failed = false,
                     )
+                    messageDao.update(confirmed)
+                    traceMessageWrite("room_echo_update", confirmed, e.ctx.batchId != null)
                     return
                 }
             }
@@ -247,6 +250,7 @@ class EventProcessor @Inject constructor(
 
         val inserted = messageDao.insertAll(listOf(row)).single()
         if (inserted <= 0L) return // dedup no-op
+        traceMessageWrite("room_insert", row.copy(id = inserted), e.ctx.batchId != null)
         maybeNotify(networkId, bufferId, type, hasMention, e)
     }
 
@@ -369,6 +373,7 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         val bufferId = bufferDao.byName(networkId, st.normalize(e.target))?.id ?: return
         bufferDao.advanceReadMarker(bufferId, ts)
+        AutoFollowTrace.record("wire_markread_in", bufferId) { "marker=$ts" }
     }
 
     private suspend fun onBouncerNetworkState(networkId: Long, e: IrcEvent.BouncerNetworkState) {
@@ -482,13 +487,17 @@ class EventProcessor @Inject constructor(
             pendingLabel = label,
             dedupKey = EchoDeduper.pendingKey(label),
         )
-        return messageDao.insertAll(listOf(row)).single()
+        val inserted = messageDao.insertAll(listOf(row)).single()
+        if (inserted > 0L) traceMessageWrite("room_pending_insert", row.copy(id = inserted), fromHistory = false)
+        return inserted
     }
 
     /** Mark a pending row failed if it is still pending after the echo timeout. */
     suspend fun failIfStillPending(bufferId: Long, label: String) {
         val pending = messageDao.byPendingLabel(bufferId, label) ?: return
-        messageDao.update(pending.copy(failed = true))
+        val failed = pending.copy(failed = true)
+        messageDao.update(failed)
+        traceMessageWrite("room_pending_failed", failed, fromHistory = false)
     }
 
     // -- helpers ------------------------------------------------------------
@@ -543,7 +552,15 @@ class EventProcessor @Inject constructor(
             text = text,
             dedupKey = dedupKey ?: EchoDeduper.keyFor(ctx.msgid, ctx.serverTime, sender, text),
         )
-        messageDao.insertAll(listOf(row))
+        val inserted = messageDao.insertAll(listOf(row)).single()
+        if (inserted > 0L) traceMessageWrite("room_insert", row.copy(id = inserted), ctx.batchId != null)
+    }
+
+    private fun traceMessageWrite(event: String, row: MessageEntity, fromHistory: Boolean) {
+        AutoFollowTrace.record(event, row.bufferId) {
+            "row=${row.id} kind=${row.kind.name} self=${row.isSelf} history=$fromHistory " +
+                "server_time=${row.serverTime} pending=${row.pendingLabel != null} failed=${row.failed}"
+        }
     }
 
     /**

@@ -50,6 +50,37 @@ so a USB device reaches it at `127.0.0.1:6697`.
 ./test/e2e/local-stack.sh down
 ```
 
+For the debug-only auto-follow trace, enable the log tag before launching the
+chat and capture only its structured records:
+
+```sh
+adb shell setprop log.tag.MotdAutoFollow DEBUG
+adb logcat -c
+adb logcat -v epoch MotdAutoFollow:D '*:S'
+```
+
+The trace records row identity/classification, Paging state, follow decisions,
+viewport settlement, and read-marker timing; it never records message text,
+nicks, addresses, or credentials. It is disabled in release builds and remains
+dormant in debug builds until the log tag is enabled. Reset the tag to
+its normal threshold after capture:
+
+```sh
+adb shell setprop log.tag.MotdAutoFollow INFO
+```
+
+The native stack provides deterministic inputs for the baseline matrix:
+
+```sh
+./test/e2e/local-stack.sh burst       # 12 numbered PRIVMSGs, then QUIT
+./test/e2e/local-stack.sh jpq         # JOIN/PART/JOIN/QUIT, no chat text
+./test/e2e/local-stack.sh pause-soju  # delay socket processing without disconnecting
+./test/e2e/local-stack.sh resume-soju
+```
+
+Always pair `pause-soju` with `resume-soju`; both target the exact PID recorded
+by the fixture rather than matching processes by command line.
+
 `up` wipes previous stack state, provisions accounts and the `libera` bouncer
 network, seeds `##motdtest`, and installs the reverse. It fails if ports `6667`
 or `6697` are already occupied. Stop the owner by its exact PID; never use a

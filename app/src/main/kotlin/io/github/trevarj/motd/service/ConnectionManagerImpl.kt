@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
@@ -565,11 +566,16 @@ class ConnectionManagerImpl @Inject constructor(
 
     override suspend fun markRead(bufferId: Long, upToTime: Long) {
         bufferDao.advanceReadMarker(bufferId, upToTime)
+        AutoFollowTrace.record("local_markread", bufferId) { "marker=$upToTime" }
         val buffer = bufferDao.observeById(bufferId) ?: return
         // SERVER buffers use "*" as their name, which is not a valid MARKREAD target; the Room
         // read-marker advance above still runs. Skip the wire send for them (plans/16 §4).
         if (buffer.type == BufferType.SERVER) return
-        clientFor(buffer.networkId)?.markRead(buffer.name, upToTime)
+        val client = clientFor(buffer.networkId)
+        AutoFollowTrace.record("wire_markread_out", bufferId) {
+            "marker=$upToTime connected=${client != null} supported=${client?.hasCap("draft/read-marker") == true}"
+        }
+        client?.markRead(buffer.name, upToTime)
     }
 
     override suspend fun evaluatePushMode() {

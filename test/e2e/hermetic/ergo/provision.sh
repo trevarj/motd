@@ -17,6 +17,10 @@
 #             CHATHISTORY backfill (Phase C) return content — soju only logs
 #             traffic it sees while connected, so seeding must happen post-connect.
 #
+#   burst     Post a numbered live burst for auto-follow diagnostics.
+#
+#   jpq       Emit JOIN/PART/QUIT activity without chat messages.
+#
 #   all       register then seed (for standalone/local use without soju ordering).
 #
 # Talks plaintext IRC to ergo over TCP using busybox `nc`. Idempotent: re-running
@@ -116,11 +120,49 @@ do_seed() {
   } | feed_irc
 }
 
+do_burst() {
+  log "posting auto-follow burst into $TEST_CHANNEL as $SEED_NICK"
+  {
+    printf 'NICK %s\r\n' "$SEED_NICK"
+    printf 'USER %s 0 * :motd auto-follow fixture\r\n' "$SEED_NICK"
+    printf 'NICKSERV IDENTIFY %s %s\r\n' "$SEED_NICK" "$SEED_PASS"
+    sleep 2
+    printf 'JOIN %s\r\n' "$TEST_CHANNEL"
+    sleep 1
+    i=1
+    while [ "$i" -le 12 ]; do
+      printf 'PRIVMSG %s :auto-follow burst %02d\r\n' "$TEST_CHANNEL" "$i"
+      i=$((i + 1))
+    done
+    sleep 1
+    printf 'QUIT :auto-follow burst complete\r\n'
+  } | feed_irc
+}
+
+do_jpq() {
+  log "posting JOIN/PART/QUIT-only activity into $TEST_CHANNEL as $SEED_NICK"
+  {
+    printf 'NICK %s\r\n' "$SEED_NICK"
+    printf 'USER %s 0 * :motd auto-follow fixture\r\n' "$SEED_NICK"
+    printf 'NICKSERV IDENTIFY %s %s\r\n' "$SEED_NICK" "$SEED_PASS"
+    sleep 2
+    printf 'JOIN %s\r\n' "$TEST_CHANNEL"
+    sleep 1
+    printf 'PART %s :auto-follow part\r\n' "$TEST_CHANNEL"
+    sleep 1
+    printf 'JOIN %s\r\n' "$TEST_CHANNEL"
+    sleep 1
+    printf 'QUIT :auto-follow quit\r\n'
+  } | feed_irc
+}
+
 wait_for_ergo
 case "$MODE" in
   register) do_register ;;
   seed)     do_seed ;;
+  burst)    do_burst ;;
+  jpq)      do_jpq ;;
   all)      do_register; do_seed ;;
-  *) log "FATAL: unknown mode '$MODE' (want register|seed|all)"; exit 2 ;;
+  *) log "FATAL: unknown mode '$MODE' (want register|seed|burst|jpq|all)"; exit 2 ;;
 esac
 log "done"

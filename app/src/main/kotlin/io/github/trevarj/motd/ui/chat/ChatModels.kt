@@ -203,6 +203,9 @@ internal class AutoFollowTracker(initialItemCount: Int) {
 
     private var itemCount: Int = initialItemCount
 
+    val presentedItemCount: Int
+        get() = itemCount
+
     /** Consume the first post-entry Paging snapshot without treating it as a live arrival. */
     fun reset(itemCount: Int, atBottom: Boolean) {
         this.itemCount = itemCount

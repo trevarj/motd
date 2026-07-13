@@ -13,6 +13,10 @@
 #   ./test/e2e/local-stack.sh up        # fresh stack (wipes prior state) + adb reverse + seed
 #   ./test/e2e/local-stack.sh down      # stop ergo/soju, drop the adb reverse
 #   ./test/e2e/local-stack.sh seed      # re-post the seed messages into ##motdtest
+#   ./test/e2e/local-stack.sh burst     # post a numbered 12-message live burst
+#   ./test/e2e/local-stack.sh jpq       # emit JOIN/PART/QUIT-only activity
+#   ./test/e2e/local-stack.sh pause-soju  # delay echo/MARKREAD processing via SIGSTOP
+#   ./test/e2e/local-stack.sh resume-soju # resume soju via SIGCONT
 #   ./test/e2e/local-stack.sh status    # show pids + soju network status
 #   ./test/e2e/local-stack.sh obfs-up   # VLESS+REALITY layer: sing-box server + Xray SOCKS client
 #   ./test/e2e/local-stack.sh obfs-down # stop the reality layer + drop its adb reverse
@@ -275,6 +279,16 @@ status() {
     fi
   done
   [ -S "$ADMIN_SOCK" ] && ctl user run "$SOJU_USER" network status 2>/dev/null || true
+}
+
+signal_soju() { # signal description
+  local signal="$1" description="$2" pid_file="$RUN/soju.pid"
+  [ -f "$pid_file" ] || die "soju pid file missing; run '$0 up' first"
+  local pid
+  pid="$(cat "$pid_file")"
+  kill -0 "$pid" 2>/dev/null || die "soju pid $pid is not running"
+  kill "-$signal" "$pid"
+  log "soju $description (pid $pid)"
 }
 
 # ---- Obfuscation layer: VLESS + REALITY (plans/20) -----------------------------------------
@@ -617,6 +631,10 @@ case "$CMD" in
   up) up ;;
   down) down ;;
   seed) sh "$PROVISION" seed ;;
+  burst) sh "$PROVISION" burst ;;
+  jpq) sh "$PROVISION" jpq ;;
+  pause-soju) signal_soju STOP paused ;;
+  resume-soju) signal_soju CONT resumed ;;
   status) status ;;
   obfs-up) obfs_up ;;
   obfs-down) obfs_down ;;
@@ -625,5 +643,5 @@ case "$CMD" in
   obfs-xray-down) xray_obfs_down ;;
   obfs-xray-validate) xray_obfs_validate ;;
   obfs-xray-negative) xray_obfs_negative ;;
-  *) die "unknown command '$CMD' (want up|down|seed|status|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-negative)" ;;
+  *) die "unknown command '$CMD' (want up|down|seed|burst|jpq|pause-soju|resume-soju|status|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-negative)" ;;
 esac

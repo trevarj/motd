@@ -66,6 +66,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AutocompletePanel
@@ -280,6 +281,10 @@ fun ChatContent(
 ) {
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
+    val traceBufferId = state.buffer?.id
+    val traceSessionId = remember(traceBufferId) {
+        traceBufferId?.let { AutoFollowTrace.nextSessionId() }
+    }
     val scope = rememberCoroutineScope()
     // Expanded fool rows (plans/13 §2.4): keyed by MessageEntity.id, expand-only for the session.
     // Ephemeral by design (lost on config change; accepted per plans/13 Risks #6).
@@ -303,8 +308,12 @@ fun ChatContent(
     // individually reversible). Cleared whenever expand-all is toggled off.
     var collapsedFools by remember { mutableStateOf(setOf<Long>()) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(traceBufferId) {
+        if (traceBufferId == null) return@LaunchedEffect
         withFrameNanos {
+            AutoFollowTrace.record("first_frame", traceBufferId, traceSessionId) {
+                "item_count=${items.itemCount}"
+            }
             Trace.beginSection("MOTD chat first frame")
             try {
                 // Instant-like marker for Perfetto/gfx correlation without spanning suspension.
@@ -365,6 +374,9 @@ fun ChatContent(
     // Deep-jump scroll: bounded APPEND loop (placeholders OFF, so tail loads never shift indices).
     LaunchedEffect(jumpTarget) {
         val j = jumpTarget ?: return@LaunchedEffect
+        AutoFollowTrace.record("deep_jump_start", traceBufferId, traceSessionId) {
+            "target_index=${j.index} item_count=${items.itemCount}"
+        }
         // Guard #1: the jump resolves in VM init, often before the first paging emission. Touching
         // items[itemCount-1] with itemCount == 0 throws IndexOutOfBounds; wait for the first page.
         snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
@@ -401,6 +413,9 @@ fun ChatContent(
             if (!deepJumpTargetMatches(j.highlightMsgid, items.peek(j.index)?.msgid)) {
                 onReresolveJump()
             } else {
+                AutoFollowTrace.record("deep_jump_settled", traceBufferId, traceSessionId) {
+                    "target_index=${j.index} item_count=${items.itemCount} rounds=$rounds"
+                }
                 highlightMsgid = j.highlightMsgid
                 initialPositionSettled = true
                 suppressNextAutoFollow = true
@@ -416,6 +431,10 @@ fun ChatContent(
     // a deep link always wins and so a completed normal entry cannot be replayed on recomposition.
     LaunchedEffect(initialTarget) {
         val target = initialTarget ?: return@LaunchedEffect
+        AutoFollowTrace.record("initial_position_start", traceBufferId, traceSessionId) {
+            "target_index=${target.index} target_offset=${target.offset} " +
+                "saved=${target.fromSavedPosition} item_count=${items.itemCount}"
+        }
         snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
             .first { (refresh, append, count) ->
                 refresh is LoadState.NotLoading &&
@@ -445,6 +464,10 @@ fun ChatContent(
             if (shouldScrollToInitialTarget(target, currentlyAtBottom)) {
                 listState.scrollToItem(target.index, target.offset)
             }
+            AutoFollowTrace.record("initial_position_settled", traceBufferId, traceSessionId) {
+                "target_index=${target.index} index=${listState.firstVisibleItemIndex} " +
+                    "offset=${listState.firstVisibleItemScrollOffset} at_bottom=$currentlyAtBottom rounds=$rounds"
+            }
             initialPositionSettled = true
             suppressNextAutoFollow = true
             onInitialPositionHandled()
@@ -457,6 +480,10 @@ fun ChatContent(
             onInitialPositionHandled()
         } else {
             // An APPEND cap/error must not turn an unread target into a read acknowledgement.
+            AutoFollowTrace.record("initial_position_unresolved", traceBufferId, traceSessionId) {
+                "target_index=${target.index} item_count=${items.itemCount} rounds=$rounds " +
+                    "append=${loadStateName(items.loadState.append)}"
+            }
             onInitialPositionUnresolved()
         }
     }
@@ -476,6 +503,12 @@ fun ChatContent(
         // between itemCount/index reads and onDispose. Treat that transition as no anchor to save;
         // never index the stale snapshot (the previous direct peek crashed DM navigation).
         val row = pagingSnapshotItemOrNull(index, items.itemCount) { items.peek(it) } ?: return
+        val savedAtBottom = index == 0 &&
+            listState.firstVisibleItemScrollOffset <= AUTOSCROLL_BOTTOM_TOLERANCE_PX
+        AutoFollowTrace.record("position_saved", traceBufferId, traceSessionId) {
+            "index=$index offset=${listState.firstVisibleItemScrollOffset} row=${row.id} " +
+                "at_bottom=$savedAtBottom following=${autoFollow.following}"
+        }
         onScrollPositionChanged(
             ChatScrollPosition(
                 index = index,
@@ -536,13 +569,21 @@ fun ChatContent(
     // an explicit animation, and the cancelled animation must not briefly masquerade as a user drag.
     var programmaticScrolls by remember { mutableIntStateOf(0) }
     val autoScrolling = programmaticScrolls > 0
-    suspend fun scrollToNewest(animate: Boolean) {
+    suspend fun scrollToNewest(animate: Boolean, reason: String) {
+        AutoFollowTrace.record("scroll_start", traceBufferId, traceSessionId) {
+            "reason=$reason animate=$animate index=${listState.firstVisibleItemIndex} " +
+                "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
+        }
         autoFollow.requestFollow()
         programmaticScrolls++
         try {
             if (animate) listState.animateScrollToItem(0) else listState.scrollToItem(0)
         } finally {
             programmaticScrolls--
+            AutoFollowTrace.record("scroll_end", traceBufferId, traceSessionId) {
+                "reason=$reason index=${listState.firstVisibleItemIndex} " +
+                    "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
+            }
         }
     }
 
@@ -553,7 +594,19 @@ fun ChatContent(
         snapshotFlow { listState.isScrollInProgress to (programmaticScrolls > 0) }
             .distinctUntilChanged()
             .collect { (scrolling, programmatic) ->
+                val before = autoFollow.following
                 autoFollow.onScrollStateChanged(scrolling, programmatic, atBottom)
+                AutoFollowTrace.record("scroll_intent", traceBufferId, traceSessionId) {
+                    "scrolling=$scrolling programmatic=$programmatic at_bottom=$atBottom " +
+                        "following_before=$before following_after=${autoFollow.following} " +
+                        "index=${listState.firstVisibleItemIndex} offset=${listState.firstVisibleItemScrollOffset}"
+                }
+                if (!scrolling) {
+                    AutoFollowTrace.record("viewport_settled", traceBufferId, traceSessionId) {
+                        "at_bottom=$atBottom following=${autoFollow.following} " +
+                            "index=${listState.firstVisibleItemIndex} offset=${listState.firstVisibleItemScrollOffset}"
+                    }
+                }
             }
     }
 
@@ -567,11 +620,28 @@ fun ChatContent(
         snapshotFlow { items.itemCount }
             .distinctUntilChanged()
             .collect { newCount ->
+                val oldCount = autoFollow.presentedItemCount
+                val followingBefore = autoFollow.following
                 if (suppressNextAutoFollow) {
                     autoFollow.reset(newCount, atBottom)
                     suppressNextAutoFollow = false
-                } else if (autoFollow.onItemCountChanged(newCount)) {
-                    scrollToNewest(animate = false)
+                    AutoFollowTrace.record("paging_initial", traceBufferId, traceSessionId) {
+                        "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
+                            "following=${autoFollow.following} refresh=${loadStateName(items.loadState.refresh)} " +
+                            "append=${loadStateName(items.loadState.append)}"
+                    }
+                } else {
+                    val shouldFollow = autoFollow.onItemCountChanged(newCount)
+                    val newest = if (newCount > 0) items.peek(0) else null
+                    AutoFollowTrace.record("follow_decision", traceBufferId, traceSessionId) {
+                        "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
+                            "following_before=$followingBefore following_after=${autoFollow.following} " +
+                            "follow=$shouldFollow newest_row=${newest?.id ?: -1} " +
+                            "newest_kind=${newest?.kind?.name ?: "NONE"} " +
+                            "refresh=${loadStateName(items.loadState.refresh)} " +
+                            "append=${loadStateName(items.loadState.append)}"
+                    }
+                    if (shouldFollow) scrollToNewest(animate = false, reason = "live_arrival")
                 }
             }
     }
@@ -580,7 +650,12 @@ fun ChatContent(
     // reading history would clear unread on other clients and destroy the local unread UX.
     val newestTime = if (items.itemCount > 0) items.peek(0)?.serverTime ?: 0L else 0L
     LaunchedEffect(newestTime, atBottom, initialPositionSettled) {
-        if (initialPositionSettled && atBottom && newestTime > 0) onMarkRead(newestTime)
+        if (initialPositionSettled && atBottom && newestTime > 0) {
+            AutoFollowTrace.record("viewport_markread", traceBufferId, traceSessionId) {
+                "marker=$newestTime item_count=${items.itemCount}"
+            }
+            onMarkRead(newestTime)
+        }
     }
     val recentSpeakers = remember(items.itemCount) {
         // Exclude system-event senders and self so recency ranking reflects real conversation
@@ -725,7 +800,7 @@ fun ChatContent(
                         listState = listState,
                         readMarker = readMarkerLive,
                         visible = initialPositionSettled && !atBottom && !autoScrolling,
-                        onClick = { scope.launch { scrollToNewest(animate = true) } },
+                        onClick = { scope.launch { scrollToNewest(animate = true, reason = "jump_fab") } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                     )
                 }
@@ -763,15 +838,19 @@ fun ChatContent(
                         val text = composerText.text
                         if (text.isNotBlank()) {
                             if (isLongDraft(text)) {
+                                AutoFollowTrace.record("long_draft_prompt_open", traceBufferId, traceSessionId)
                                 longDraftPrompt = true
                             } else {
+                                AutoFollowTrace.record("composer_submit", traceBufferId, traceSessionId) {
+                                    "long_draft=false"
+                                }
                                 onSubmit(text)
                                 composerText = TextFieldValue("")
                             }
                             // Sending should always reveal the just-sent message: return the reverse
                             // list back to the newest row (index 0) even if the user had scrolled up.
                             // Routes through scrollToNewest so the FAB stays gated off for the scroll.
-                            scope.launch { scrollToNewest(animate = true) }
+                            scope.launch { scrollToNewest(animate = true, reason = "composer_send_action") }
                         }
                     },
                     enabled = composerEnabled,
@@ -811,21 +890,29 @@ fun ChatContent(
     )
     if (longDraftPrompt) {
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { longDraftPrompt = false },
+            onDismissRequest = {
+                AutoFollowTrace.record("long_draft_dismiss", traceBufferId, traceSessionId)
+                longDraftPrompt = false
+            },
             title = { Text("Long draft") },
             text = { Text("Upload the draft as a paste, or send it as ordinary IRC messages?") },
             confirmButton = { androidx.compose.material3.TextButton(onClick = {
+                AutoFollowTrace.record("long_draft_upload", traceBufferId, traceSessionId)
                 longDraftPrompt = false
                 uploadCurrentDraftDirectly = true
                 attachmentSheetOpen = true
             }) { Text("Upload as paste") } },
             dismissButton = { Row {
                 androidx.compose.material3.TextButton(onClick = {
+                    AutoFollowTrace.record("long_draft_send_messages", traceBufferId, traceSessionId)
                     longDraftPrompt = false
                     onSubmit(composerText.text)
                     composerText = TextFieldValue("")
                 }) { Text("Send as messages") }
-                androidx.compose.material3.TextButton(onClick = { longDraftPrompt = false }) { Text("Cancel") }
+                androidx.compose.material3.TextButton(onClick = {
+                    AutoFollowTrace.record("long_draft_cancel", traceBufferId, traceSessionId)
+                    longDraftPrompt = false
+                }) { Text("Cancel") }
             } },
         )
     }
@@ -906,6 +993,12 @@ internal fun initialPagingPage(itemCount: Int, append: LoadState): InitialPaging
 }
 
 internal enum class InitialPagingPage { Pending, RowsAvailable, TerminalEmpty }
+
+internal fun loadStateName(state: LoadState): String = when (state) {
+    is LoadState.Loading -> "LOADING"
+    is LoadState.NotLoading -> if (state.endOfPaginationReached) "DONE" else "IDLE"
+    is LoadState.Error -> "ERROR"
+}
 
 internal fun visibleReactionMsgids(
     items: LazyPagingItems<MessageEntity>,

@@ -190,7 +190,8 @@ with unrelated predicates at individual call sites.
 
 ### B3. Deeply re-verify auto-follow on the v0.4.5 baseline
 
-- **Priority / size / status:** P0, S investigation before B1 changes.
+- **Priority / size / status:** P0, S. Baseline captured on 2026-07-13;
+  confirmed defects move into B1 and the B3 follow-up test/fix.
 - **Depends on:** attached physical device for final evidence.
 - **Investigation:** reproduce before editing the tracker. Cover idle at bottom
   receiving a burst, user scrolled up, own send from both positions, hidden JPQ
@@ -213,6 +214,37 @@ with unrelated predicates at individual call sites.
 - **Focused tests:** extend pure `AutoFollowTracker` and Compose list behavior
   tests for effective bottom, ignored tails, explicit send, prompt cancel, and
   delayed Paging/read state.
+- **2026-07-13 evidence:** tested a FOSS debug APK built from the v0.4.5
+  baseline plus trace-only instrumentation on a physical A059 (Android 16,
+  API 36; serial `00152151K005265`). APK SHA-256:
+  `4e16589c7e475d392151d2fee7551538ae756c6cac1d506c6eac8676ab80ff30`.
+  Both app flavor unit suites and `:app:assembleFossDebug` passed before the
+  install. The deterministic local Ergo + soju fixture supplied numbered
+  bursts and JPQ-only activity; a recorded-PID STOP/CONT pair supplied delayed
+  echo and marker acknowledgments.
+- **Matrix result:** at-bottom bursts followed; intentionally scrolled history
+  stayed fixed with the jump FAB; an own send from history resumed follow; the
+  delayed server echo updated the existing row without changing item count;
+  local `MARKREAD` and viewport following remained independent while soju was
+  paused; background/resume opened on the newest burst; and process reconnect
+  inserted all twelve missed rows as history before channel entry settled at
+  index zero. Paging entry loaded 139 rows at index zero, and manual traversal
+  to the oldest loaded row (index 134) preserved the history position.
+- **Confirmed defects:** cancelling the long-draft prompt scrolls because the
+  composer invokes `scrollToNewest` immediately after opening the prompt,
+  before a send choice exists. Choosing **Send as messages** exhibits the same
+  premature scroll and only then inserts the messages. With JPQ display off,
+  JOIN/PART/QUIT rows still increased the presented count and triggered follow
+  decisions (the renderer merely summarized them). **Collapse** likewise kept
+  all twelve fool rows as placeholders and advanced follow state; **Hide**
+  removed the fool PRIVMSG rows, but the retained JPQ tail still advanced it.
+  These observations define the regression tests and fix boundary for B1.
+- **Performance / safety:** `dumpsys gfxinfo` recorded 780 frames, 14.74% jank,
+  p50 13 ms, p90 23 ms, p95 30 ms, and p99 61 ms across the deliberately
+  scripted burst/deep-scroll matrix. The crash buffer was empty. Device
+  preferences were restored byte-for-byte from the pre-test backup, the debug
+  trace property was disabled, the local stack was stopped, and the installed
+  release app was untouched.
 
 ## C. Connection loss, reconnect, and history
 

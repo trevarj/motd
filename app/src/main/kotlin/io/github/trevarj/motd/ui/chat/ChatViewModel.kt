@@ -19,6 +19,7 @@ import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
+import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -236,10 +237,12 @@ class ChatViewModel @Inject constructor(
     // --- lifecycle: foreground tracker + mark-read (plans/07) ---
 
     fun onResume() {
+        AutoFollowTrace.record("chat_resume", bufferId)
         foregroundBufferTracker.set(bufferId)
     }
 
     fun onPause() {
+        AutoFollowTrace.record("chat_pause", bufferId)
         foregroundBufferTracker.set(null)
     }
 
@@ -250,6 +253,7 @@ class ChatViewModel @Inject constructor(
      */
     fun markRead(time: Long) {
         if (time <= 0) return
+        AutoFollowTrace.record("markread_request", bufferId) { "marker=$time" }
         viewModelScope.launch { connectionManager.markRead(bufferId, time) }
     }
 
