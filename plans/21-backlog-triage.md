@@ -613,8 +613,7 @@ with unrelated predicates at individual call sites.
 
 ### E2. UI and conversation font-size sliders
 
-- **Priority / size / status:** P2, L, Implemented (2026-07-13); physical
-  min/max accessibility verification pending.
+- **Priority / size / status:** P2, L, Complete (2026-07-14).
 - **Depends on:** E3 stable layout recommended first.
 - **Implementation:** add separate UI and Conversation scales from 80% through
   140% in 5% steps, default/reset 100%. Multiply rather than replace Android's
@@ -645,8 +644,14 @@ with unrelated predicates at individual call sites.
   FOSS debug/release unit suites, warnings-as-errors lint, debug APK, and FOSS
   release APK pass; the first combined run lost its Gradle daemon only during
   final packaging, and an isolated incremental `assembleFossRelease` completed.
-  Physical control reachability at both extremes remains pending because the
-  device is disconnected.
+  On physical A059 `00152151K005265`, both sliders reached and reported 80% and
+  140% independently. At 80%, list, channel, ordinary message, composer, Send,
+  attachment, and overflow actions remained reachable. At the worst case of
+  both app scales at 140% plus Android system font scale 1.5x, Appearance still
+  exposed both labeled sliders and Reset actions; chat still exposed its
+  header, timeline content, composer, emoji/attachment/Send actions, Back,
+  Search, and More actions without a crash. The system font scale was restored
+  to its original 1.0 and both app scales were reset to 100% after verification.
 
 ### E3. Fix two-line multiline indentation
 
