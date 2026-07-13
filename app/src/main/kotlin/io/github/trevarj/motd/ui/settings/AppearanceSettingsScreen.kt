@@ -20,6 +20,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -28,9 +30,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
@@ -41,6 +47,10 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.isFixedPalette
 import io.github.trevarj.motd.data.prefs.isDark
+import io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT
+import io.github.trevarj.motd.data.prefs.FONT_SCALE_STEP_PERCENT
+import io.github.trevarj.motd.data.prefs.MAX_FONT_SCALE_PERCENT
+import io.github.trevarj.motd.data.prefs.MIN_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import androidx.compose.material.icons.Icons
@@ -49,6 +59,7 @@ import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.foundation.shape.CircleShape
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
+import kotlin.math.roundToInt
 
 /** Appearance category: theme, dynamic color, layout density, avatar style, nick colors, wallpaper. */
 @Composable
@@ -70,6 +81,8 @@ fun AppearanceSettingsScreen(
         onNickColorsEnabled = viewModel::setNickColorsEnabled,
         onNickColorPalette = viewModel::setNickColorPalette,
         onWallpaper = viewModel::setWallpaper,
+        onUiFontScale = viewModel::setUiFontScale,
+        onConversationFontScale = viewModel::setConversationFontScale,
     )
 }
 
@@ -86,6 +99,8 @@ fun AppearanceSettingsContent(
     onNickColorsEnabled: (Boolean) -> Unit,
     onNickColorPalette: (NickColorPalette) -> Unit,
     onWallpaper: (io.github.trevarj.motd.data.prefs.WallpaperSelection) -> Unit,
+    onUiFontScale: (Int) -> Unit,
+    onConversationFontScale: (Int) -> Unit,
 ) {
     var showThemeSheet by remember { mutableStateOf(false) }
     SettingsScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
@@ -130,6 +145,22 @@ fun AppearanceSettingsContent(
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_layout_section)) {
+            FontScaleSlider(
+                title = stringResource(R.string.settings_ui_font_size),
+                description = stringResource(R.string.settings_ui_font_size_desc),
+                value = appearance.uiFontScalePercent,
+                tag = "settings_ui_font_scale",
+                onValue = onUiFontScale,
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            FontScaleSlider(
+                title = stringResource(R.string.settings_conversation_font_size),
+                description = stringResource(R.string.settings_conversation_font_size_desc),
+                value = appearance.conversationFontScalePercent,
+                tag = "settings_conversation_font_scale",
+                onValue = onConversationFontScale,
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SubLabel(stringResource(R.string.settings_density))
             DensityGroup(current = settings.layoutDensity, onSelect = onLayoutDensity)
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -146,6 +177,58 @@ fun AppearanceSettingsContent(
             onSelect = { mode -> onThemePreset(mode); showThemeSheet = false },
             onDismiss = { showThemeSheet = false },
         )
+    }
+}
+
+@Composable
+private fun FontScaleSlider(
+    title: String,
+    description: String,
+    value: Int,
+    tag: String,
+    onValue: (Int) -> Unit,
+) {
+    var pending by remember(value) { mutableStateOf(value.toFloat()) }
+    val displayed = pending.toInt()
+    val percent = stringResource(R.string.settings_font_size_percent, displayed)
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(percent, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        }
+        Slider(
+            value = pending,
+            onValueChange = { raw ->
+                pending = (raw / FONT_SCALE_STEP_PERCENT).roundToInt() * FONT_SCALE_STEP_PERCENT.toFloat()
+            },
+            onValueChangeFinished = { onValue(pending.toInt()) },
+            valueRange = MIN_FONT_SCALE_PERCENT.toFloat()..MAX_FONT_SCALE_PERCENT.toFloat(),
+            steps = (MAX_FONT_SCALE_PERCENT - MIN_FONT_SCALE_PERCENT) / FONT_SCALE_STEP_PERCENT - 1,
+            modifier = Modifier
+                .testTag(tag)
+                .semantics {
+                    contentDescription = title
+                    stateDescription = percent
+                },
+        )
+        if (displayed != DEFAULT_FONT_SCALE_PERCENT) {
+            TextButton(
+                onClick = {
+                    pending = DEFAULT_FONT_SCALE_PERCENT.toFloat()
+                    onValue(DEFAULT_FONT_SCALE_PERCENT)
+                },
+                modifier = Modifier.align(androidx.compose.ui.Alignment.End),
+            ) {
+                Text(stringResource(R.string.settings_font_size_reset))
+            }
+        }
     }
 }
 
@@ -356,7 +439,38 @@ private fun AppearanceSettingsPreview() {
             appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(theme = ColorThemePreset.DARK),
             onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onDynamicColor = {},
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
-            onNickColorPalette = {}, onWallpaper = {},
+            onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
+            onConversationFontScale = {},
+        )
+    }
+}
+
+@Preview(name = "Interface 80%", fontScale = 1f)
+@Composable
+private fun AppearanceSettingsMinTextPreview() {
+    MotdTheme(uiFontScalePercent = 80) {
+        AppearanceSettingsContent(
+            settings = Settings(dynamicColor = true),
+            appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(uiFontScalePercent = 80),
+            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onDynamicColor = {},
+            onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
+            onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
+            onConversationFontScale = {},
+        )
+    }
+}
+
+@Preview(name = "Interface 140% + large system font", fontScale = 1.5f)
+@Composable
+private fun AppearanceSettingsMaxTextPreview() {
+    MotdTheme(uiFontScalePercent = 140) {
+        AppearanceSettingsContent(
+            settings = Settings(dynamicColor = true),
+            appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(uiFontScalePercent = 140),
+            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onDynamicColor = {},
+            onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
+            onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
+            onConversationFontScale = {},
         )
     }
 }

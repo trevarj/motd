@@ -9,13 +9,16 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.irc.event.IrcClientState
 import kotlinx.coroutines.flow.flowOf
+import io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT
 
 /**
  * Preview-only chat content: a scripted mix (groups, system pill, reply, reactions, inline image,
  * link preview, failed message) fed through fake [PagingData] with no ViewModel (WP7 acceptance).
  */
 @Composable
-fun ChatContentPreviewBody() {
+fun ChatContentPreviewBody(
+    conversationFontScalePercent: Int = DEFAULT_FONT_SCALE_PERCENT,
+) {
     val now = System.currentTimeMillis()
     val messages = listOf(
         MessageEntity(
@@ -76,5 +79,6 @@ fun ChatContentPreviewBody() {
         onSubmit = {}, onTyping = {}, onSetReply = {}, onReact = { _, _ -> }, onRetry = {},
         memberNicks = listOf("alice", "bob", "carol"),
         loadPreview = { null },
+        conversationFontScalePercent = conversationFontScalePercent,
     )
 }

@@ -15,6 +15,8 @@ private val Context.appearanceDataStore by preferencesDataStore("appearance")
 private val THEME = stringPreferencesKey("theme_preset_v1")
 private val WALLPAPER = stringPreferencesKey("wallpaper_preset_v1")
 private val WALLPAPER_INTENSITY = intPreferencesKey("wallpaper_intensity_v1")
+private val UI_FONT_SCALE = intPreferencesKey("ui_font_scale_percent_v1")
+private val CONVERSATION_FONT_SCALE = intPreferencesKey("conversation_font_scale_percent_v1")
 
 @Singleton
 class AppearancePrefsImpl @Inject constructor(
@@ -31,6 +33,12 @@ class AppearancePrefsImpl @Inject constructor(
                     ?: ChatWallpaperPreset.CHATTER,
                 intensity = (prefs[WALLPAPER_INTENSITY] ?: DEFAULT_WALLPAPER_INTENSITY).coerceIn(0, 100),
             ),
+            uiFontScalePercent = normalizeFontScalePercent(
+                prefs[UI_FONT_SCALE] ?: DEFAULT_FONT_SCALE_PERCENT,
+            ),
+            conversationFontScalePercent = normalizeFontScalePercent(
+                prefs[CONVERSATION_FONT_SCALE] ?: DEFAULT_FONT_SCALE_PERCENT,
+            ),
         )
     }
 
@@ -44,5 +52,13 @@ class AppearancePrefsImpl @Inject constructor(
             it[WALLPAPER] = normalized.preset.name
             it[WALLPAPER_INTENSITY] = normalized.intensity
         }
+    }
+
+    override suspend fun setUiFontScale(percent: Int) {
+        store.edit { it[UI_FONT_SCALE] = normalizeFontScalePercent(percent) }
+    }
+
+    override suspend fun setConversationFontScale(percent: Int) {
+        store.edit { it[CONVERSATION_FONT_SCALE] = normalizeFontScalePercent(percent) }
     }
 }

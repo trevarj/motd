@@ -595,7 +595,8 @@ with unrelated predicates at individual call sites.
 
 ### E2. UI and conversation font-size sliders
 
-- **Priority / size / status:** P2, L, Ready.
+- **Priority / size / status:** P2, L, Implemented (2026-07-13); physical
+  min/max accessibility verification pending.
 - **Depends on:** E3 stable layout recommended first.
 - **Implementation:** add separate UI and Conversation scales from 80% through
   140% in 5% steps, default/reset 100%. Multiply rather than replace Android's
@@ -609,6 +610,25 @@ with unrelated predicates at individual call sites.
 - **Acceptance / tests:** persistence, defaults/reset, clamping/rounding,
   independent theme derivation, all listed surfaces, settings semantics, and
   screenshot/Compose checks at min/max plus large Android font scale.
+- **Implementation evidence:** `AppearancePrefs` now persists independent UI
+  and Conversation percentages, normalizing corrupt/input values to 5% steps
+  from 80–140% with a 100% default. Two labeled, discrete sliders in Chat
+  layout show the live percentage and expose Reset to 100%. The app theme
+  scales all Material typography tokens for chrome/settings while leaving dp
+  geometry and icons unchanged. Chat installs a nested conversation typography
+  derived from the unscaled base—not the UI-scaled theme—across the timeline,
+  system pills, rich/reply content, autocomplete, and composer; explicit
+  timeline timestamps use the same conversation factor. Android's `sp`
+  conversion still applies the system font scale afterward.
+- **Verification evidence:** focused tests cover defaults, independent
+  persistence, clamping/nearest-step rounding, min/max factors, and independent
+  base-token derivation. Min/max previews include 140% app text combined with
+  1.5x Android font scale for both settings and conversation reflow. The full
+  FOSS debug/release unit suites, warnings-as-errors lint, debug APK, and FOSS
+  release APK pass; the first combined run lost its Gradle daemon only during
+  final packaging, and an isolated incremental `assembleFossRelease` completed.
+  Physical control reachability at both extremes remains pending because the
+  device is disconnected.
 
 ### E3. Fix two-line multiline indentation
 

@@ -121,6 +121,14 @@ class SettingsViewModel @Inject constructor(
         appearancePrefs.setWallpaper(selection)
     }
 
+    fun setUiFontScale(percent: Int) = viewModelScope.launch {
+        appearancePrefs.setUiFontScale(percent)
+    }
+
+    fun setConversationFontScale(percent: Int) = viewModelScope.launch {
+        appearancePrefs.setConversationFontScale(percent)
+    }
+
     fun setFoolsMode(mode: FoolsMode) = viewModelScope.launch {
         settingsRepository.setFoolsMode(mode)
     }

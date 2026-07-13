@@ -328,6 +328,12 @@
          tagged so lint (warningsAsErrors) stays green mid-wave.
          WP-U4 strips the markers once the usages exist. -->
     <string name="settings_density">Message style</string>
+    <string name="settings_ui_font_size">Interface text</string>
+    <string name="settings_ui_font_size_desc">Menus, settings, navigation, and app controls</string>
+    <string name="settings_conversation_font_size">Conversation text</string>
+    <string name="settings_conversation_font_size_desc">Messages, composer, replies, and suggestions</string>
+    <string name="settings_font_size_percent">%1$d%%</string>
+    <string name="settings_font_size_reset">Reset to 100%</string>
     <string name="settings_density_compact">Compact</string>
     <string name="settings_density_comfortable">Comfortable</string>
     <string name="settings_density_two_line">Two-line</string>

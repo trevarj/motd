@@ -55,6 +55,7 @@ import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
+import io.github.trevarj.motd.ui.theme.LocalConversationFontScale
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
 import java.text.DateFormat as JavaDateFormat
@@ -110,6 +111,7 @@ fun MessageBubble(
     // is the only action entry, labeled for TalkBack (plans/15 #31).
     // Density tokens + nick-color scheme flow through CompositionLocals; no signature churn.
     val spacing = LocalSpacing.current
+    val conversationFontScale = LocalConversationFontScale.current
     val nickColors = LocalNickColors.current
 
     // COMPACT density = classic single-line IRC rendering (`nick: text`). Delegate the whole row to
@@ -200,7 +202,7 @@ fun MessageBubble(
                 MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                 Text(
                     text = displayedTime,
-                    fontSize = 10.sp,
+                    fontSize = 10.sp * conversationFontScale,
                     color = if (failed) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 )
@@ -342,7 +344,7 @@ fun MessageBubble(
                 MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                 Text(
                     text = displayedTime,
-                    fontSize = 10.sp,
+                    fontSize = 10.sp * conversationFontScale,
                     color = if (failed) MaterialTheme.colorScheme.error
                     else textColor.copy(alpha = 0.6f),
                     modifier = Modifier.align(Alignment.CenterVertically),
@@ -392,6 +394,7 @@ private fun TwoLineMessageRow(
     onSenderClick: (() -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
+    val conversationFontScale = LocalConversationFontScale.current
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val bodyColor = MaterialTheme.colorScheme.onSurface
     // Per-nick row wash (same treatment as COMPACT): a faint tint of the sender's own nick color
@@ -445,7 +448,7 @@ private fun TwoLineMessageRow(
                     MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                     Text(
                         text = formattedTime,
-                        fontSize = 10.sp,
+                        fontSize = 10.sp * conversationFontScale,
                         color = if (failed) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     )

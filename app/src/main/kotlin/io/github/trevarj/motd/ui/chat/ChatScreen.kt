@@ -86,6 +86,7 @@ import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ConversationTypography
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -166,6 +167,7 @@ fun ChatScreen(
         foolsMode = settings.foolsMode,
         showJoinPartQuit = settings.showJoinPartQuit,
         chatWallpaper = appearance.wallpaper,
+        conversationFontScalePercent = appearance.conversationFontScalePercent,
         showComposerEmoji = settings.showComposerEmoji,
         showImages = contentPreviews.showImages,
         showLinkPreviews = contentPreviews.showLinkPreviews,
@@ -274,6 +276,7 @@ fun ChatContent(
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
     showJoinPartQuit: Boolean = true,
     chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection = io.github.trevarj.motd.data.prefs.WallpaperSelection(),
+    conversationFontScalePercent: Int = io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT,
     showComposerEmoji: Boolean = true,
     showImages: Boolean = true,
     showLinkPreviews: Boolean = true,
@@ -856,6 +859,7 @@ fun ChatContent(
         // the reverse list stays anchored at index 0. An imePadding() here would double-count the
         // IME inset (window already resized) and shove the whole column up above the keyboard.
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            ConversationTypography(conversationFontScalePercent) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.weight(1f)) {
                     // Subtle IRC-themed wallpaper layered UNDER the message list only (never over the
@@ -995,6 +999,7 @@ fun ChatContent(
                         }
                     } else null,
                 )
+            }
             }
         }
     }
@@ -1262,5 +1267,13 @@ private fun ViewportScrollToBottomFab(
 private fun ChatContentPreview() {
     MotdTheme {
         ChatContentPreviewBody()
+    }
+}
+
+@Preview(name = "Conversation 140% + large system font", fontScale = 1.5f)
+@Composable
+private fun ChatContentLargeTextPreview() {
+    MotdTheme {
+        ChatContentPreviewBody(conversationFontScalePercent = 140)
     }
 }
