@@ -438,6 +438,55 @@ class EventProcessorTest {
         assertNotNull(serverBuffer())
     }
 
+    @Test
+    fun rootBouncerServ_privmsg_isPersistedSeenWithoutNotification_butNoticeRemainsOrdinary() = runTest {
+        val direct = db.networkDao().byId(networkId)!!
+        db.networkDao().update(direct.copy(role = NetworkRole.BOUNCER_ROOT))
+        val notifiedKinds = mutableListOf<IrcEvent.ChatKind>()
+        val recording = EventProcessor(db, TypingTrackerImpl(), object : MessageNotifier {
+            override suspend fun onIncoming(
+                networkId: Long,
+                bufferId: Long,
+                type: BufferType,
+                hasMention: Boolean,
+                message: IrcEvent.ChatMessage,
+            ) {
+                notifiedKinds += message.kind
+            }
+        })
+        recording.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+
+        recording.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "service-reply", time = 2_000), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("BouncerServ"), target = "me", text = "network status for me",
+            isSelf = false, replyToMsgid = null,
+        ))
+        val buffer = db.bufferDao().byName(networkId, "bouncerserv")!!
+        assertEquals(2_000L, db.bufferDao().observeById(buffer.id)!!.readMarkerTime)
+        assertTrue(notifiedKinds.isEmpty())
+
+        recording.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "service-notice", time = 3_000), kind = IrcEvent.ChatKind.NOTICE,
+            source = Prefix("BouncerServ"), target = "me", text = "detached relay",
+            isSelf = false, replyToMsgid = null,
+        ))
+        assertEquals(listOf(IrcEvent.ChatKind.NOTICE), notifiedKinds)
+    }
+
+    @Test
+    fun bouncerServ_self_echo_is_redacted_before_room_and_dedup() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "secret-command"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "BouncerServ",
+            text = "sasl set-plain -network libera alice hunter2",
+            isSelf = true, replyToMsgid = null,
+        ))
+        val buffer = db.bufferDao().byName(networkId, "bouncerserv")!!
+        val row = pagingList(buffer.id).single()
+        assertFalse(row.text.contains("hunter2"))
+        assertTrue(row.text.contains("<redacted>"))
+    }
+
     // --- own-message single-row across the three echo scenarios (plans/03/04, bug 4) ---
 
     /** Buffer id for a self-send target, creating the query/channel buffer as onChat would. */

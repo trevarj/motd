@@ -57,6 +57,10 @@ import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.avatar.AvatarPrefsImpl
 import io.github.trevarj.motd.avatar.AvatarStore
 import io.github.trevarj.motd.avatar.AvatarStoreImpl
+import io.github.trevarj.motd.bouncer.BouncerServClient
+import io.github.trevarj.motd.bouncer.BouncerServClientImpl
+import io.github.trevarj.motd.bouncer.BouncerServSessionProvider
+import io.github.trevarj.motd.bouncer.ConnectionBouncerServSessionProvider
 import javax.inject.Singleton
 
 /**
@@ -123,6 +127,14 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun avatarController(impl: AvatarCoordinator): AvatarController
+
+    @Binds @Singleton
+    abstract fun bouncerServClient(impl: BouncerServClientImpl): BouncerServClient
+
+    @Binds @Singleton
+    abstract fun bouncerServSessionProvider(
+        impl: ConnectionBouncerServSessionProvider,
+    ): BouncerServSessionProvider
 
     // -- data/sync (WP5) --
     @Binds @Singleton

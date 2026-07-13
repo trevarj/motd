@@ -10,6 +10,8 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.UserEntity
+import io.github.trevarj.motd.bouncer.redactBouncerServCommand
+import io.github.trevarj.motd.bouncer.redactBouncerServReply
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
@@ -143,6 +145,14 @@ class EventProcessor @Inject constructor(
         }
         val type = if (isDm) BufferType.QUERY else BufferType.CHANNEL
         val bufferId = ensureBuffer(networkId, bufferName, type, st)
+        val isBouncerServQuery = isDm && bufferName.equals("BouncerServ", ignoreCase = true)
+        val storedText = when {
+            !isBouncerServQuery -> e.text
+            e.isSelf -> redactBouncerServCommand(e.text)
+            else -> redactBouncerServReply(e.text)
+        }
+        val isRootServiceReply = isBouncerServQuery && !e.isSelf &&
+            e.kind == IrcEvent.ChatKind.PRIVMSG && networkDao.byId(networkId)?.role == NetworkRole.BOUNCER_ROOT
 
         val replyReference = e.replyToMsgid
         val replyMentionsSelf = if (!e.isSelf && replyReference != null) {
@@ -152,7 +162,8 @@ class EventProcessor @Inject constructor(
         } else {
             false
         }
-        val hasMention = !e.isSelf && (replyMentionsSelf || st.mentionRegex.containsMatchIn(e.text))
+        val hasMention = !e.isSelf && !isRootServiceReply &&
+            (replyMentionsSelf || st.mentionRegex.containsMatchIn(storedText))
         val row = MessageEntity(
             bufferId = bufferId,
             msgid = e.ctx.msgid,
@@ -160,11 +171,11 @@ class EventProcessor @Inject constructor(
             sender = e.source.nick,
             senderAccount = e.ctx.account,
             kind = kindOf(e.kind),
-            text = e.text,
+            text = storedText,
             isSelf = e.isSelf,
             hasMention = hasMention,
             replyToMsgid = e.replyToMsgid,
-            dedupKey = EchoDeduper.keyFor(e.ctx, e.source.nick, e.text),
+            dedupKey = EchoDeduper.keyFor(e.ctx, e.source.nick, storedText),
         )
 
         // Own message dedup (plans/03 echo degradation, plans/04 echo flow). A self-send surfaces
@@ -189,7 +200,7 @@ class EventProcessor @Inject constructor(
                     val confirmed = pending.copy(
                         msgid = e.ctx.msgid,
                         serverTime = e.ctx.serverTime,
-                        dedupKey = EchoDeduper.keyFor(e.ctx, e.source.nick, e.text),
+                        dedupKey = EchoDeduper.keyFor(e.ctx, e.source.nick, storedText),
                         pendingLabel = null,
                         failed = false,
                     )
@@ -205,7 +216,7 @@ class EventProcessor @Inject constructor(
             // buffer with the same text inside the echo window and collapse into it, promoting the
             // real msgid/serverTime when the echo carries one. If none matches this is a genuinely
             // new self message (e.g. sent from another client) → fall through to a normal insert.
-            val candidate = findSelfEchoCandidate(bufferId, e.text, e.ctx.serverTime)
+            val candidate = findSelfEchoCandidate(bufferId, storedText, e.ctx.serverTime)
             if (candidate != null) {
                 // Only rewrite the dedupKey/time forward when the echo brings a real msgid; a
                 // bare echo (no msgid) keeps the existing row so a later msgid-bearing CHATHISTORY
@@ -243,7 +254,7 @@ class EventProcessor @Inject constructor(
             // distinct second self-send is unaffected: its own echo already stamped it with its own
             // msgid, so it is never returned as a msgid-less candidate.
             if (incomingMsgid != null) {
-                val orphan = messageDao.findSelfMsgidlessCandidate(bufferId, e.text)
+                val orphan = messageDao.findSelfMsgidlessCandidate(bufferId, storedText)
                 if (orphan != null) {
                     val confirmed = orphan.copy(
                         msgid = incomingMsgid,
@@ -261,6 +272,10 @@ class EventProcessor @Inject constructor(
         val inserted = messageDao.insertAll(listOf(row)).single()
         if (inserted <= 0L) return // dedup no-op
         traceMessageWrite("room_insert", row.copy(id = inserted), e.ctx.batchId != null)
+        if (isRootServiceReply) {
+            bufferDao.advanceReadMarker(bufferId, e.ctx.serverTime)
+            return
+        }
         maybeNotify(networkId, bufferId, type, hasMention, e)
     }
 

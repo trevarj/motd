@@ -18,6 +18,7 @@ import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.avatar.AvatarCoordinator
+import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.irc.client.IrcClient
@@ -465,6 +466,7 @@ class ConnectionManagerImpl @Inject constructor(
         val buffer = bufferDao.observeById(bufferId) ?: return
         val client = clientFor(buffer.networkId) ?: return
         val target = buffer.name
+        val isBouncerServ = target.equals("BouncerServ", ignoreCase = true)
         val ready = client.state.value as? IrcClientState.Ready
         val replyTagAllowed = ready != null && canSendClientTag(ready.caps, ready.isupport, "+reply")
         val parentSender = replyToMsgid?.let { messageDao.byMsgid(bufferId, it)?.sender }
@@ -478,6 +480,12 @@ class ConnectionManagerImpl @Inject constructor(
             replyTagAllowed = replyTagAllowed,
         )
         val outgoingText = delivery.text
+
+        // BouncerServ interprets one PRIVMSG as one shell command. Never turn a newline or an
+        // oversized command into multiple independently executable service commands.
+        if (isBouncerServ && ('\r' in outgoingText || '\n' in outgoingText || outgoingText.toByteArray().size > MAX_BYTES)) {
+            return
+        }
 
         // /me → CTCP ACTION wrapped in \x01. Only the FIRST physical line of a multiline
         // paste can carry the /me action; the rest are plain PRIVMSGs.
@@ -499,11 +507,12 @@ class ConnectionManagerImpl @Inject constructor(
             val chunks = splitUtf8(body, MAX_BYTES)
             for (chunk in chunks) {
                 // Stored display text = wire chunk minus the CTCP ACTION \x01 wrapper.
-                val displayChunk = if (lineIsAction) {
+                val rawDisplayChunk = if (lineIsAction) {
                     chunk.removePrefix("ACTION ").removeSuffix("")
                 } else {
                     chunk
                 }
+                val displayChunk = if (isBouncerServ) redactBouncerServCommand(rawDisplayChunk) else rawDisplayChunk
                 // Persist the pending row in beforeSend — BEFORE the PRIVMSG hits the wire — so a
                 // fast labeled echo can't be processed ahead of the insert and duplicate the send.
                 val label = client.sendMessage(target, chunk, delivery.wireReplyToMsgid) { lbl ->
