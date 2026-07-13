@@ -124,6 +124,10 @@ class ConnectionActor(
             when (outcome) {
                 Outcome.Fatal -> return
                 Outcome.Retry -> {
+                    // A disconnected/non-fatal Failed snapshot describes the socket that just
+                    // ended. Publish the current operation (retrying) during backoff so the UI
+                    // does not retain a stale SOCKS/tunnel error until the next dial begins.
+                    onState(networkId, IrcClientState.Connecting)
                     val delayMs = backoffDelayMs(attempt)
                     attempt++
                     waitBeforeRetry(delayMs)

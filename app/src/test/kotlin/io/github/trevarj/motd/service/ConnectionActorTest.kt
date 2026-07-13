@@ -105,6 +105,32 @@ class ConnectionActorTest {
     }
 
     @Test
+    fun retryBackoffPublishesCurrentConnectingStateInsteadOfStaleFailure() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val conn = FakeConnection()
+        val states = mutableListOf<IrcClientState>()
+        val actor = ConnectionActor(
+            networkId = 1,
+            scope = scope,
+            connectionFactory = { conn },
+            onState = { _, state -> states += state },
+            onEvent = { _, _ -> },
+            onReady = {},
+            random = { 0.5 },
+        )
+        actor.start()
+        scope.testScheduler.runCurrent()
+
+        conn._state.value = IrcClientState.Failed("SOCKS5 proxy not connected", fatal = false)
+        scope.testScheduler.runCurrent()
+
+        assertTrue(states.any { it is IrcClientState.Failed })
+        assertEquals(IrcClientState.Connecting, states.last())
+        actor.stop()
+    }
+
+    @Test
     fun networkAvailable_skipsRemainingBackoff() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val scope = TestScope(dispatcher)

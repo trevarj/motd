@@ -1089,7 +1089,18 @@ internal fun composerNeedsMemberNicks(value: TextFieldValue): Boolean {
     return token.text.length >= 2 || atPrefixed
 }
 
-private fun chatSubtitle(state: ChatState, context: android.content.Context): String? {
+internal fun chatSubtitle(state: ChatState, context: android.content.Context): String? {
+    when (val connection = state.connState) {
+        IrcClientState.Connecting -> return context.getString(R.string.drawer_state_connecting)
+        IrcClientState.Registering -> return context.getString(R.string.drawer_state_registering)
+        IrcClientState.Disconnected -> return context.getString(R.string.drawer_state_disconnected)
+        is IrcClientState.Failed -> return if (connection.fatal) {
+            connection.reason
+        } else {
+            context.getString(R.string.drawer_state_connecting)
+        }
+        is IrcClientState.Ready -> Unit
+    }
     if (state.typingNicks.isNotEmpty()) {
         return typingText(context, state.typingNicks)
     }

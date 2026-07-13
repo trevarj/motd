@@ -31,8 +31,8 @@ class MotdApplication : Application() {
         // Canonical app-wide foreground signal (survives Activity recreation, single trigger per
         // process foreground). onStart re-drives the connection subsystem so an actor that died or
         // parked while backgrounded (Doze / network drop) is revived for a seamless reconnect. It
-        // no-ops unless the subsystem is started and never disturbs healthy/retrying actors, so this
-        // cannot cause a reconnect storm (see ConnectionManagerImpl.reconnectStale / shouldRebuildActor).
+        // no-ops unless the subsystem is started, never disturbs healthy/manual-disconnect state, and
+        // wakes a retrying actor through its conflated backoff signal rather than rebuilding it.
         ProcessLifecycleOwner.get().lifecycle.addObserver(
             object : DefaultLifecycleObserver {
                 override fun onStart(owner: LifecycleOwner) {

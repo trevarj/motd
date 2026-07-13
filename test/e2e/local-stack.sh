@@ -17,6 +17,8 @@
 #   ./test/e2e/local-stack.sh jpq       # emit JOIN/PART/QUIT-only activity
 #   ./test/e2e/local-stack.sh pause-soju  # delay echo/MARKREAD processing via SIGSTOP
 #   ./test/e2e/local-stack.sh resume-soju # resume soju via SIGCONT
+#   ./test/e2e/local-stack.sh stop-soju   # deterministic EOF while preserving soju DB/config
+#   ./test/e2e/local-stack.sh start-soju  # restart the preserved soju instance
 #   ./test/e2e/local-stack.sh status    # show pids + soju network status
 #   ./test/e2e/local-stack.sh obfs-up   # VLESS+REALITY layer: sing-box server + Xray SOCKS client
 #   ./test/e2e/local-stack.sh obfs-down # stop the reality layer + drop its adb reverse
@@ -293,6 +295,36 @@ signal_soju() { # signal description
   kill -0 "$pid" 2>/dev/null || die "soju pid $pid is not running"
   kill "-$signal" "$pid"
   log "soju $description (pid $pid)"
+}
+
+stop_soju_for_reconnect() {
+  local pid_file="$RUN/soju.pid"
+  [ -f "$pid_file" ] || die "soju pid file missing; run '$0 up' first"
+  local pid
+  pid="$(cat "$pid_file")"
+  kill "$pid" 2>/dev/null || true
+  for _ in 1 2 3 4 5; do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+  kill -9 "$pid" 2>/dev/null || true
+  rm -f "$pid_file" "$ADMIN_SOCK"
+  log "soju stopped for reconnect test; DB/config preserved"
+}
+
+start_soju_for_reconnect() {
+  [ -f "$CONF_SOJU" ] || die "soju config missing; run '$0 up' first"
+  if nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null; then
+    die "port $SOJU_PORT is already occupied; inspect its exact PID before retrying"
+  fi
+  rm -f "$ADMIN_SOCK"
+  setsid soju -config "$CONF_SOJU" >"$RUN/soju.log" 2>&1 &
+  echo $! >"$RUN/soju.pid"
+  local count=0
+  until [ -S "$ADMIN_SOCK" ]; do
+    count=$((count + 1))
+    [ "$count" -gt 60 ] && die "soju admin socket did not return (see $RUN/soju.log)"
+    sleep 1
+  done
+  wait_port 127.0.0.1 "$SOJU_PORT" soju
+  log "soju restarted from preserved state (pid $(cat "$RUN/soju.pid"))"
 }
 
 # ---- Obfuscation layer: VLESS + REALITY (plans/20) -----------------------------------------
@@ -639,6 +671,8 @@ case "$CMD" in
   jpq) sh "$PROVISION" jpq ;;
   pause-soju) signal_soju STOP paused ;;
   resume-soju) signal_soju CONT resumed ;;
+  stop-soju) stop_soju_for_reconnect ;;
+  start-soju) start_soju_for_reconnect ;;
   status) status ;;
   obfs-up) obfs_up ;;
   obfs-down) obfs_down ;;
@@ -647,5 +681,5 @@ case "$CMD" in
   obfs-xray-down) xray_obfs_down ;;
   obfs-xray-validate) xray_obfs_validate ;;
   obfs-xray-negative) xray_obfs_negative ;;
-  *) die "unknown command '$CMD' (want up|down|seed|burst|jpq|pause-soju|resume-soju|status|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-negative)" ;;
+  *) die "unknown command '$CMD' (want up|down|seed|burst|jpq|pause-soju|resume-soju|stop-soju|start-soju|status|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-negative)" ;;
 esac

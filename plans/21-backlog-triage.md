@@ -304,7 +304,7 @@ with unrelated predicates at individual call sites.
 
 ### C1. Seamless connection loss and recovery
 
-- **Priority / size / status:** P1, L, Investigation followed by fix.
+- **Priority / size / status:** P1, L, Complete (2026-07-13).
 - **Depends on:** ZNC fixture from C3 for its coverage; soju/direct work may
   proceed first.
 - **Required UX:** cached chats and the composer remain usable while offline or
@@ -335,6 +335,26 @@ with unrelated predicates at individual call sites.
 - **Verification:** scripted service tests with virtual time and attempt IDs,
   local direct/soju/ZNC stacks, plus the attached release-like device path for
   background idle and VLESS+REALITY.
+- **Implementation evidence:** connection callbacks and Ready setup are guarded
+  by a monotonically increasing per-network generation, retryable failures
+  immediately publish `Connecting`, and foregrounding wakes a surviving
+  non-ready actor through its conflated backoff signal. Direct networks restore
+  only durable joined channels before catch-up; parted channels, queries, and
+  bouncer children are excluded. The chat header now prioritizes current
+  connection state over member/typing detail without disabling offline draft
+  editing. The local soju fixture has state-preserving `stop-soju` / `start-soju`
+  fault controls.
+- **Verification evidence:** both flavor unit suites cover generation invalidation,
+  obsolete callbacks, cancellation-owned Ready setup, interruptible virtual-time
+  backoff, durable direct re-JOIN selection, and stale error/subtitle behavior.
+  On the attached A059/API 36 device, stopping soju preserved an unsent draft,
+  changed the chat to `Connecting…`, disabled Send, and did not crash; a 12-message
+  upstream gap appeared after the preserved bouncer restarted. A second run with
+  the final build restored Ready/Send within five seconds of foregrounding while
+  retaining the draft, with no stale SOCKS error. The native ZNC fixture covers
+  detached playback; the local VLESS+REALITY fixture passed SOCKS5 CONNECT,
+  TLS 1.3, and IRC CAP end to end on isolated ports. Cloak is intentionally
+  treated as ZNC-compatible per C3.
 
 ### C2. Manual and automatic history revalidation
 

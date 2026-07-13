@@ -77,6 +77,8 @@ The native stack provides deterministic inputs for the baseline matrix:
 ./test/e2e/local-stack.sh jpq         # JOIN/PART/JOIN/QUIT, no chat text
 ./test/e2e/local-stack.sh pause-soju  # delay socket processing without disconnecting
 ./test/e2e/local-stack.sh resume-soju
+./test/e2e/local-stack.sh stop-soju   # force EOF; preserve config/database
+./test/e2e/local-stack.sh start-soju  # restart and exercise client reconnect/catch-up
 ```
 
 Always pair `pause-soju` with `resume-soju`; both target the exact PID recorded
