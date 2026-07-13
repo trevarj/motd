@@ -656,7 +656,7 @@ with unrelated predicates at individual call sites.
 
 ### E4. Inline backtick and Emacs-style code spans
 
-- **Priority / size / status:** P2, M, Ready.
+- **Priority / size / status:** P2, M, Complete.
 - **Depends on:** E3 for two-line rendering coverage.
 - **Syntax:** paired backticks (`` `foo` ``) and Emacs-style backtick/apostrophe
   (`` `foo' ``) render identically as inline code. When both possible closing
@@ -673,6 +673,17 @@ with unrelated predicates at individual call sites.
 - **Acceptance / tests:** both delimiter styles, precedence, multiple spans,
   unmatched/double/triple literals, Unicode, links/mentions inside and outside,
   ACTION/NOTICE, all densities, and copy semantics.
+- **Implementation evidence:** a dependency-free shared segment parser handles
+  single-backtick and Emacs-style pairs before rich-text annotation. Comfortable,
+  compact, and two-line rows use the same renderer; code spans use the monospace
+  family with a theme-derived surface treatment, suppress URL/mention behavior,
+  and leave the stored raw message untouched for copy actions and logs.
+- **Verification evidence:** focused parser, URL discovery, comfortable-body,
+  and compact-line tests cover delimiter parity and precedence, multiple spans,
+  malformed/doubled/triple input, Unicode, inert links/mentions, and
+  PRIVMSG/ACTION/NOTICE routes. FOSS debug/release unit tests, debug lint, and
+  debug/release assemblies pass; release assembly was rerun alone after the
+  combined Gradle daemon was killed during dex packaging and then passed.
 
 ## F. Identity and onboarding expansion
 

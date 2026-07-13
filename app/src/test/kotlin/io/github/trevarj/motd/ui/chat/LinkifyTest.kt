@@ -35,4 +35,15 @@ class LinkifyTest {
         )
         assertEquals(MessageUrls.Empty, messageUrls("ordinary IRC line"))
     }
+
+    @Test fun ignores_urls_inside_code_but_keeps_urls_outside() {
+        assertEquals(
+            listOf("https://outside.example"),
+            extractUrls("`https://inside.example` https://outside.example"),
+        )
+        assertEquals(
+            MessageUrls.Empty,
+            messageUrls("`https://inside.example/photo.png'"),
+        )
+    }
 }

@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.components
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.font.FontFamily
 import io.github.trevarj.motd.data.db.MessageKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -96,5 +97,23 @@ class CompactLineTest {
             it.start == at && it.end == at + "@carol".length && it.item.color == mention
         }
         assertTrue("expected @carol colored as a single mention token", span != null)
+    }
+
+    @Test
+    fun inline_code_is_shared_by_privmsg_action_and_notice() {
+        for (kind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION, MessageKind.NOTICE)) {
+            val line = buildCompactLine(
+                "alice", "run `echo hi'", kind, nick, body, link, noTint,
+                codeBackground = Color.DarkGray,
+                codeColor = Color.White,
+            )
+            assertTrue(line.text.endsWith("run echo hi"))
+            assertTrue(
+                line.spanStyles.any {
+                    it.item.fontFamily == FontFamily.Monospace &&
+                        line.text.substring(it.start, it.end) == "echo hi"
+                },
+            )
+        }
     }
 }

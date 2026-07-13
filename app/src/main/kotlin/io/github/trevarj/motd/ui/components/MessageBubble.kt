@@ -41,6 +41,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
@@ -53,6 +54,8 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.ui.chat.extractUrls
+import io.github.trevarj.motd.ui.chat.InlineTextSegment
+import io.github.trevarj.motd.ui.chat.parseInlineCode
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalConversationFontScale
@@ -113,6 +116,8 @@ fun MessageBubble(
     val spacing = LocalSpacing.current
     val conversationFontScale = LocalConversationFontScale.current
     val nickColors = LocalNickColors.current
+    val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+    val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     // COMPACT density = classic single-line IRC rendering (`nick: text`). Delegate the whole row to
     // the inline renderer; bubbles/avatars/alignment are the COMFORTABLE/TWO_LINE paradigm only.
@@ -178,6 +183,27 @@ fun MessageBubble(
     // ACTION renders as centered-left italic text, no bubble (plans/07). Still carries reactions +
     // failed + timestamp decorations (plans/15 #16).
     if (kind == MessageKind.ACTION) {
+        val linkColor = MaterialTheme.colorScheme.primary
+        val mentionColor = rememberMentionColor(knownNicks, nickColors)
+        val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
+        val richBody = remember(
+            text, linkColor, mentionsActive, mentionColor, codeBackground, codeColor,
+        ) {
+            linkifiedBody(
+                text,
+                linkColor,
+                mentionsActive,
+                mentionColor,
+                codeBackground,
+                codeColor,
+            )
+        }
+        val actionLine = remember(sender, richBody) {
+            buildAnnotatedString {
+                append("* $sender ")
+                append(richBody)
+            }
+        }
         Column(
             modifier = modifier
                 .fillMaxWidth()
@@ -193,7 +219,7 @@ fun MessageBubble(
         ) {
             reply?.let { ReplyMiniBubble(it, nickColors) }
             Text(
-                text = "* $sender $text",
+                text = actionLine,
                 style = MaterialTheme.typography.bodyMedium,
                 fontStyle = FontStyle.Italic,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -320,8 +346,17 @@ fun MessageBubble(
                 val linkColor = MaterialTheme.colorScheme.primary
                 val mentionColor = rememberMentionColor(knownNicks, nickColors)
                 val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
-                val body = remember(text, linkColor, mentionsActive, mentionColor) {
-                    linkifiedBody(text, linkColor, mentionsActive, mentionColor)
+                val body = remember(
+                    text, linkColor, mentionsActive, mentionColor, codeBackground, codeColor,
+                ) {
+                    linkifiedBody(
+                        text,
+                        linkColor,
+                        mentionsActive,
+                        mentionColor,
+                        codeBackground,
+                        codeColor,
+                    )
                 }
                 Text(
                     text = body,
@@ -397,6 +432,8 @@ private fun TwoLineMessageRow(
     val conversationFontScale = LocalConversationFontScale.current
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val bodyColor = MaterialTheme.colorScheme.onSurface
+    val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+    val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
     // Per-nick row wash (same treatment as COMPACT): a faint tint of the sender's own nick color
     // behind the whole row so runs of a nick's messages are trackable by speaker.
     val rowTint = nameColor.copy(alpha = TWO_LINE_ROW_TINT_ALPHA)
@@ -499,11 +536,22 @@ private fun TwoLineMessageRow(
                 val mentionColor = rememberMentionColor(knownNicks, nickColors)
                 val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
                 // Memoized body build (linkify + mention coloring) so it doesn't re-run per frame.
-                val body = remember(text, kind, sender, linkColor, mentionsActive, mentionColor) {
-                    if (kind == MessageKind.ACTION) {
-                        AnnotatedString("* $sender $text")
-                    } else {
-                        linkifiedBody(text, linkColor, mentionsActive, mentionColor)
+                val richBody = remember(
+                    text, linkColor, mentionsActive, mentionColor, codeBackground, codeColor,
+                ) {
+                    linkifiedBody(
+                        text,
+                        linkColor,
+                        mentionsActive,
+                        mentionColor,
+                        codeBackground,
+                        codeColor,
+                    )
+                }
+                val body = remember(kind, sender, richBody) {
+                    if (kind != MessageKind.ACTION) richBody else buildAnnotatedString {
+                        append("* $sender ")
+                        append(richBody)
                     }
                 }
                 Text(
@@ -617,30 +665,72 @@ internal fun linkifiedBody(
     linkColor: androidx.compose.ui.graphics.Color,
     mentionsActive: Boolean = true,
     mentionColor: (String) -> androidx.compose.ui.graphics.Color? = { null },
+    codeBackground: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+    codeColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
 ): AnnotatedString {
     // Most chat rows are plain text. Avoid the URL regex, nick token walk, and builder allocation
     // when neither link annotations nor mention styling can affect the result.
-    if (!mentionsActive && !text.contains("http://") && !text.contains("https://")) {
+    if (!mentionsActive && !text.contains("http://") && !text.contains("https://") && !text.contains('`')) {
         return AnnotatedString(text)
     }
+    return buildAnnotatedString {
+        appendRichText(
+            text = text,
+            plainStyle = SpanStyle(),
+            linkStyle = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline),
+            codeStyle = SpanStyle(
+                color = codeColor,
+                background = codeBackground,
+                fontFamily = FontFamily.Monospace,
+                fontStyle = FontStyle.Normal,
+            ),
+            mentionColor = if (mentionsActive) mentionColor else ({ null }),
+        )
+    }
+}
+
+/** Code segmentation precedes URL and mention annotation, so code contents stay inert. */
+internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendRichText(
+    text: String,
+    plainStyle: SpanStyle,
+    linkStyle: SpanStyle,
+    codeStyle: SpanStyle,
+    mentionColor: (String) -> androidx.compose.ui.graphics.Color? = { null },
+) {
+    for (segment in parseInlineCode(text)) {
+        when (segment) {
+            is InlineTextSegment.Code -> withStyle(codeStyle) { append(segment.text) }
+            is InlineTextSegment.Plain -> appendPlainLinksAndMentions(
+                segment.text,
+                plainStyle,
+                linkStyle,
+                mentionColor,
+            )
+        }
+    }
+}
+
+private fun androidx.compose.ui.text.AnnotatedString.Builder.appendPlainLinksAndMentions(
+    text: String,
+    plainStyle: SpanStyle,
+    linkStyle: SpanStyle,
+    mentionColor: (String) -> androidx.compose.ui.graphics.Color?,
+) {
     val urls = extractUrls(text)
     if (urls.isEmpty()) {
-        if (!mentionsActive) return AnnotatedString(text)
-        return buildAnnotatedString { appendMentionColored(text, mentionColor) }
+        withStyle(plainStyle) { appendMentionColored(text, mentionColor) }
+        return
     }
-    val linkStyle = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)
-    return buildAnnotatedString {
-        var cursor = 0
-        for (url in urls) {
-            val at = text.indexOf(url, cursor)
-            if (at < 0) continue
-            appendMentionColored(text.substring(cursor, at), mentionColor)
-            withLink(LinkAnnotation.Url(url)) {
-                withStyle(linkStyle) { append(url) }
-            }
-            cursor = at + url.length
-        }
-        if (cursor < text.length) appendMentionColored(text.substring(cursor), mentionColor)
+    var cursor = 0
+    for (url in urls) {
+        val at = text.indexOf(url, cursor)
+        if (at < 0) continue
+        withStyle(plainStyle) { appendMentionColored(text.substring(cursor, at), mentionColor) }
+        withLink(LinkAnnotation.Url(url)) { withStyle(linkStyle) { append(url) } }
+        cursor = at + url.length
+    }
+    if (cursor < text.length) {
+        withStyle(plainStyle) { appendMentionColored(text.substring(cursor), mentionColor) }
     }
 }
 

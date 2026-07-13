@@ -21,13 +21,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -36,7 +35,6 @@ import coil.compose.AsyncImage
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
-import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalConversationFontScale
@@ -92,6 +90,8 @@ internal fun CompactMessageRow(
     // Self text stays on the default body color; others too (IRC is uniform). The nick carries color.
     val bodyColor = MaterialTheme.colorScheme.onSurface
     val linkColor = MaterialTheme.colorScheme.primary
+    val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+    val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
     // Friend highlight: a low-alpha primary background behind the nick, layered under the nick color.
     val friendTint = if (senderIsFriend) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Unspecified
     // Per-nick row wash: a faint tint of the sender's own nick color behind the whole row so runs of
@@ -103,8 +103,14 @@ internal fun CompactMessageRow(
     // Continuation lines (showSender == false) drop the `nick:` prefix so a run reads as one speaker.
     // Known-nick @mentions in the body are colored via the memoized resolver.
     val mentionColor = rememberMentionColor(knownNicks, nickColors)
-    val line = remember(sender, text, kind, nameColor, bodyColor, linkColor, senderIsFriend, showSender, mentionColor) {
-        buildCompactLine(sender, text, kind, nameColor, bodyColor, linkColor, friendTint, showSender, mentionColor)
+    val line = remember(
+        sender, text, kind, nameColor, bodyColor, linkColor, senderIsFriend, showSender,
+        mentionColor, codeBackground, codeColor,
+    ) {
+        buildCompactLine(
+            sender, text, kind, nameColor, bodyColor, linkColor, friendTint, showSender,
+            mentionColor, codeBackground, codeColor,
+        )
     }
 
     Column(
@@ -193,6 +199,8 @@ internal fun buildCompactLine(
     friendTint: Color,
     showSender: Boolean = true,
     mentionColor: (String) -> Color? = { null },
+    codeBackground: Color = Color.Unspecified,
+    codeColor: Color = Color.Unspecified,
 ): AnnotatedString = buildAnnotatedString {
     val nickStyle = SpanStyle(
         color = nameColor,
@@ -221,37 +229,18 @@ internal fun buildCompactLine(
     } else if (kind == MessageKind.ACTION) {
         withStyle(SpanStyle(color = bodyColor)) { append("* ") }
     }
-    appendLinkified(text, bodyColor, linkColor, mentionColor)
-}
-
-/**
- * Append [text] with http(s) URLs turned into tappable links and known-nick @mentions colored via
- * [mentionColor]; the remaining plain body is in [bodyColor]. Mention coloring runs on the non-URL
- * spans so a nick that is part of a URL stays a link.
- */
-private fun androidx.compose.ui.text.AnnotatedString.Builder.appendLinkified(
-    text: String,
-    bodyColor: Color,
-    linkColor: Color,
-    mentionColor: (String) -> Color? = { null },
-) {
-    val urls = extractUrls(text)
-    if (urls.isEmpty()) {
-        withStyle(SpanStyle(color = bodyColor)) { appendMentionColored(text, mentionColor) }
-        return
-    }
-    val linkStyle = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)
-    var cursor = 0
-    for (url in urls) {
-        val at = text.indexOf(url, cursor)
-        if (at < 0) continue
-        withStyle(SpanStyle(color = bodyColor)) { appendMentionColored(text.substring(cursor, at), mentionColor) }
-        withLink(LinkAnnotation.Url(url)) { withStyle(linkStyle) { append(url) } }
-        cursor = at + url.length
-    }
-    if (cursor < text.length) {
-        withStyle(SpanStyle(color = bodyColor)) { appendMentionColored(text.substring(cursor), mentionColor) }
-    }
+    appendRichText(
+        text = text,
+        plainStyle = SpanStyle(color = bodyColor),
+        linkStyle = SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline),
+        codeStyle = SpanStyle(
+            color = codeColor,
+            background = codeBackground,
+            fontFamily = FontFamily.Monospace,
+            fontStyle = FontStyle.Normal,
+        ),
+        mentionColor = mentionColor,
+    )
 }
 
 @Preview

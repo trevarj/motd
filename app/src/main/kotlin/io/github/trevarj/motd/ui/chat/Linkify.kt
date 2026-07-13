@@ -14,7 +14,10 @@ data class MessageUrls(val imageUrl: String?, val linkUrl: String?) {
 
 /** All http(s) URLs in [text], in order of appearance. */
 fun extractUrls(text: String): List<String> =
-    URL_REGEX.findAll(text).map { trimUrl(it.value) }.toList()
+    parseInlineCode(text).asSequence()
+        .filterIsInstance<InlineTextSegment.Plain>()
+        .flatMap { segment -> URL_REGEX.findAll(segment.text).map { trimUrl(it.value) } }
+        .toList()
 
 /**
  * Trim trailing punctuation that commonly abuts a URL in prose. A closing `)` is only stripped when
@@ -58,8 +61,7 @@ fun firstLinkUrl(text: String): String? = messageUrls(text).linkUrl
 fun messageUrls(text: String): MessageUrls {
     var image: String? = null
     var link: String? = null
-    for (match in URL_REGEX.findAll(text)) {
-        val url = trimUrl(match.value)
+    for (url in extractUrls(text)) {
         if (isImageUrl(url)) {
             if (image == null) image = url
         } else if (link == null) {
