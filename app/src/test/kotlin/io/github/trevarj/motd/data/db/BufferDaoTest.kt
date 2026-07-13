@@ -51,9 +51,111 @@ class BufferDaoTest {
         val row = bufDao.observeChatList().first().single()
         assertEquals(2, row.unreadCount)
         assertEquals(1, row.mentionCount)
-        // latest message projection reflects the newest by (serverTime, id).
-        assertEquals("joined", row.lastMessageText)
-        assertEquals(180L, row.lastMessageTime)
+        // JOIN is timeline-only; the newest eligible message supplies every preview field.
+        assertEquals("my own", row.lastMessageText)
+        assertEquals("me", row.lastMessageSender)
+        assertEquals(170L, row.lastMessageTime)
+    }
+
+    @Test
+    fun chatList_joinPartQuitNeverReplacePreviewOrActivity() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val kinds = listOf(MessageKind.JOIN, MessageKind.PART, MessageKind.QUIT)
+
+        kinds.forEachIndexed { index, kind ->
+            val bufferId = bufDao.insert(buffer(networkId, "#ignored-$index"))
+            msgDao.insertAll(
+                listOf(
+                    message(
+                        bufferId,
+                        "meaningful-$index",
+                        sender = "sender-$index",
+                        serverTime = 100L + index,
+                        dedupKey = "meaningful-$index",
+                    ),
+                    message(
+                        bufferId,
+                        "ignored-$kind",
+                        sender = "system-$index",
+                        serverTime = 1_000L + index,
+                        dedupKey = "ignored-$index",
+                        kind = kind,
+                    ),
+                ),
+            )
+        }
+
+        val rows = bufDao.observeChatList().first().associateBy(ChatListRow::displayName)
+        kinds.indices.forEach { index ->
+            val row = checkNotNull(rows["#ignored-$index"])
+            assertEquals("meaningful-$index", row.lastMessageText)
+            assertEquals("sender-$index", row.lastMessageSender)
+            assertEquals(100L + index, row.lastMessageTime)
+        }
+    }
+
+    @Test
+    fun chatList_joinPartQuitOnlyBufferHasBlankPreviewAndNoActivity() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val bufferId = bufDao.insert(buffer(networkId, "#only-ignored"))
+        msgDao.insertAll(
+            listOf(
+                message(bufferId, "join", serverTime = 100, dedupKey = "join", kind = MessageKind.JOIN),
+                message(bufferId, "part", serverTime = 200, dedupKey = "part", kind = MessageKind.PART),
+                message(bufferId, "quit", serverTime = 300, dedupKey = "quit", kind = MessageKind.QUIT),
+            ),
+        )
+
+        val row = bufDao.observeChatList().first().single()
+        assertNull(row.lastMessageText)
+        assertNull(row.lastMessageSender)
+        assertNull(row.lastMessageTime)
+    }
+
+    @Test
+    fun chatList_retainsOtherSystemKindsAndUsesOneSelectedRow() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val kinds = listOf(
+            MessageKind.KICK,
+            MessageKind.NICK,
+            MessageKind.MODE,
+            MessageKind.TOPIC,
+            MessageKind.ERROR,
+        )
+
+        kinds.forEachIndexed { index, kind ->
+            val bufferId = bufDao.insert(buffer(networkId, "#retained-$index"))
+            msgDao.insertAll(
+                listOf(
+                    message(
+                        bufferId,
+                        "older-$index",
+                        sender = "older-sender-$index",
+                        serverTime = 100,
+                        dedupKey = "older-$index",
+                    ),
+                    message(
+                        bufferId,
+                        "selected-$kind",
+                        sender = "selected-sender-$index",
+                        serverTime = 500,
+                        dedupKey = "selected-$index",
+                        kind = kind,
+                    ),
+                ),
+            )
+        }
+
+        val rows = bufDao.observeChatList().first().associateBy(ChatListRow::displayName)
+        kinds.forEachIndexed { index, kind ->
+            val row = checkNotNull(rows["#retained-$index"])
+            assertEquals("selected-$kind", row.lastMessageText)
+            assertEquals("selected-sender-$index", row.lastMessageSender)
+            assertEquals(500L, row.lastMessageTime)
+        }
     }
 
     @Test

@@ -199,7 +199,7 @@ with unrelated predicates at individual call sites.
 
 ### B2. Chat-list previews never show join/part/quit
 
-- **Priority / size / status:** P1, S, Ready first slice of B1.
+- **Priority / size / status:** P1, S, Complete (2026-07-13), first slice of B1.
 - **Depends on:** query/API shape agreed with B1.
 - **Implementation:** make the `lastMessage*` projections derive from the same
   selected newest non-JPQ message identity. Use a CTE/subquery supported by the
@@ -210,6 +210,13 @@ with unrelated predicates at individual call sites.
 - **Acceptance / tests:** DAO tests where a newer JOIN, PART, and QUIT follows a
   chat row; a JPQ-only buffer; each retained system kind; consistent text,
   sender, kind, and timestamp from one row.
+- **2026-07-13 evidence:** `BufferDao.observeChatList` now joins exactly one
+  newest preview-eligible message by row identity and derives its text, sender,
+  timestamp, and activity ordering from that row. JOIN, PART, and QUIT are
+  excluded unconditionally; a JPQ-only buffer has a blank preview and null
+  activity. KICK, NICK, MODE, TOPIC, and ERROR remain eligible. Room tests cover
+  every excluded and retained kind and verify that all exposed fields come from
+  the selected row.
 
 ### B3. Deeply re-verify auto-follow on the v0.4.5 baseline
 

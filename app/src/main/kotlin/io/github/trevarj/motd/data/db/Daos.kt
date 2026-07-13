@@ -49,10 +49,10 @@ interface NetworkDao {
 
 @Dao
 interface BufferDao {
-    // Chat-list projection: each non-SERVER buffer joined with its latest message (correlated
-    // subqueries on the (bufferId, serverTime, id) index) plus unread/mention counts relative to
-    // the buffer's readMarkerTime. Chat kinds only (PRIVMSG/NOTICE/ACTION); self messages never
-    // count as unread. Sort: pinned first, then latest activity DESC (nulls last).
+    // Chat-list projection: each non-SERVER buffer joins one newest preview-eligible message by
+    // identity. JOIN/PART/QUIT are timeline-only events and never become previews or activity.
+    // Unread/mention counts remain chat kinds only; self messages never count as unread.
+    // Sort: pinned first, then latest preview activity DESC (nulls last).
     @Transaction
     @Query(
         """
@@ -64,12 +64,9 @@ interface BufferDao {
             b.type AS type,
             b.pinned AS pinned,
             b.muted AS muted,
-            (SELECT m.text FROM messages m WHERE m.bufferId = b.id
-                ORDER BY m.serverTime DESC, m.id DESC LIMIT 1) AS lastMessageText,
-            (SELECT m.sender FROM messages m WHERE m.bufferId = b.id
-                ORDER BY m.serverTime DESC, m.id DESC LIMIT 1) AS lastMessageSender,
-            (SELECT m.serverTime FROM messages m WHERE m.bufferId = b.id
-                ORDER BY m.serverTime DESC, m.id DESC LIMIT 1) AS lastMessageTime,
+            lm.text AS lastMessageText,
+            lm.sender AS lastMessageSender,
+            lm.serverTime AS lastMessageTime,
             (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
                 AND m.serverTime > COALESCE(b.readMarkerTime, 0)
                 AND m.isSelf = 0
@@ -81,6 +78,12 @@ interface BufferDao {
                 AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS mentionCount
         FROM buffers b
         JOIN networks n ON n.id = b.networkId
+        LEFT JOIN messages lm ON lm.id = (
+            SELECT m.id FROM messages m
+            WHERE m.bufferId = b.id AND m.kind NOT IN ('JOIN', 'PART', 'QUIT')
+            ORDER BY m.serverTime DESC, m.id DESC
+            LIMIT 1
+        )
         WHERE b.type != 'SERVER'
         ORDER BY b.pinned DESC,
                  (lastMessageTime IS NULL) ASC,
