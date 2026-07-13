@@ -53,6 +53,10 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
 - Device-sensitive UI, lifecycle, connection, and performance work requires an
   appropriate emulator or physical-device check when one is available. Use the
   local bouncer and E2E runbook rather than a live personal network.
+- Use `test/e2e/znc-stack.sh` for ZNC-specific SASL, two-client, reconnect-gap,
+  and native-playback work. Its TLS endpoint is adb-reversed at
+  `127.0.0.1:6698`; exact credentials, commands, and the observed degradation
+  contract are in [`test/e2e/README.md`](test/e2e/README.md).
 
 ## Changes, commits, and releases
 

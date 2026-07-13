@@ -367,8 +367,8 @@ with unrelated predicates at individual call sites.
 
 ### C3. Add a native ZNC fixture and assess `parenworks/cloak`
 
-- **Priority / size / status:** P1, L for ZNC; separate feasibility spike for
-  Cloak.
+- **Priority / size / status:** P1, L, Complete (2026-07-13) for ZNC; Cloak
+  deliberately deferred under the ZNC-compatible behavior assumption.
 - **Depends on:** none; do not block direct/soju correctness on Cloak.
 - **ZNC implementation:** add a sibling native fixture under `test/e2e/` rather
   than complicating `local-stack.sh`. Run ZNC against the existing Ergo test
@@ -392,6 +392,33 @@ with unrelated predicates at individual call sites.
   a reproducible fixture plan or an evidence-backed blocked/no-value result.
 - **Reference:** [official ZNC repository](https://github.com/znc/znc) and
   [parenworks/cloak](https://github.com/parenworks/cloak).
+- **2026-07-13 ZNC evidence:** `test/e2e/znc-stack.sh` provisions pinned Nix
+  ZNC 1.10.1 over TLS on `6698`, reuses the deterministic Ergo accounts and
+  history, installs/removes its adb reverse, records logs under a separate
+  `/tmp/motd-znc-stack`, and stops only recorded PIDs. Its dependency-free
+  protocol probe passed SASL PLAIN and PASS login, two attached clients,
+  channel and query routing, self echo, a fully detached reconnect gap, and
+  timestamped native playback. The observed downstream CAP set is `batch`,
+  `cap-notify`, `chghost`, `echo-message`, `invite-notify`, `message-tags`,
+  `multi-prefix`, `sasl=PLAIN`, `server-time`, `userhost-in-names`,
+  `znc.in/batch`, `znc.in/self-message`, and `znc.in/server-time-iso`.
+  `draft/chathistory` is absent even though Ergo advertises it upstream, so C1
+  must accept native playback and C2 must report manual CHATHISTORY refresh as
+  unsupported on this connection.
+- **2026-07-13 Cloak decision:** inspected upstream v0.4.0 at commit
+  `2e1bb3c7b379a3bd91c2b299c0cbaafe159f1de0` with Nix SBCL 2.6.5 and isolated
+  Quicklisp dist 2026-01-01. Supplying the native compiler and explicit pinned
+  OpenSSL runtime path gets past IOLib, CL+SSL, Spinneret, and the previously
+  reported CLTL2 area. Loading then stops at `SYSTEM-NOT-FOUND: fluxion`:
+  Fluxion is required by `cloak.asd`, is absent from Quicklisp, and the README's
+  GitHub dependency URL is not publicly fetchable. The inspected source uses
+  the same `username/network:password` client identity shape as ZNC and offers
+  persistent upstream connectivity plus `server-time`/`batch` backlog replay;
+  its downstream CAP list does not advertise CHATHISTORY. The expected client
+  behavior is therefore sufficiently likely to match the ZNC degradation that
+  no separate fixture is warranted now. Revisit only for a reported
+  Cloak-specific failure or when upstream publishes a reproducible dependency
+  closure.
 
 ## D. Bounded UX and verification work
 

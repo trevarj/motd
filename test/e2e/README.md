@@ -13,6 +13,7 @@ setup and teardown deliberately clear application data.
 | Mode | Best for | Entry point |
 | --- | --- | --- |
 | Native local stack + USB device | Manual feature work, physical-device checks, quick iteration | `./test/e2e/local-stack.sh` |
+| Native ZNC + Ergo stack | ZNC playback, reconnect, SASL, and capability degradation | `./test/e2e/znc-stack.sh` |
 | Host-driven A–I runbook | Broad UI interaction and crash sweep on a device or emulator | `./test/e2e/runbook.sh` |
 | Managed-device smoke | Onboarding, TLS trust, SASL, and soju discovery | `.github/workflows/smoke.yml` |
 | Hermetic emulator run | Scheduled/manual exhaustive CI diagnostics | `.github/workflows/e2e.yml` |
@@ -101,6 +102,32 @@ Trust the local self-signed certificate, import `libera`, and open
 The same script exposes `obfs-*` and `obfs-xray-*` commands for VLESS + REALITY
 compatibility and negative-path validation. Run the base stack first and see
 [`../../docs/obfuscation.md`](../../docs/obfuscation.md) for the product model.
+
+## Native ZNC fixture
+
+The sibling ZNC fixture reuses the deterministic local Ergo network, adds a
+self-signed ZNC 1.10.1 TLS listener on `6698`, and installs a separate adb
+reverse. It owns the base stack it starts and tears it down by recorded PID.
+
+```sh
+./test/e2e/znc-stack.sh up
+./test/e2e/znc-stack.sh status
+./test/e2e/znc-stack.sh probe
+./test/e2e/znc-stack.sh seed
+./test/e2e/znc-stack.sh down
+```
+
+Connect the debug app to `127.0.0.1:6698` with TLS, username `motd/libera`, and
+password `motdtest`; trust the ephemeral certificate. Runtime state and logs
+remain under `/tmp/motd-znc-stack` (override with `MOTD_ZNC_STACK_DIR`).
+
+`probe` is a dependency-free socket test covering CAP negotiation, SASL PLAIN,
+two attached clients, channel/query routing, self echo, a fully detached gap,
+and timestamped native playback. The pinned fixture currently advertises
+`batch`, `echo-message`, `message-tags`, `sasl=PLAIN`, `server-time`, and ZNC
+extensions, but not `draft/chathistory`. App recovery must therefore accept
+ZNC's native playback and must not issue CHATHISTORY merely because the Ergo
+upstream supports it.
 
 ## Run the host-driven UI sweep
 
