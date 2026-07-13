@@ -574,8 +574,7 @@ with unrelated predicates at individual call sites.
 
 ### E1. Swipe to reply
 
-- **Priority / size / status:** P2, M, Implemented (2026-07-13); physical
-  gesture verification pending.
+- **Priority / size / status:** P2, M, Complete (2026-07-14).
 - **Depends on:** E3 should land first so gesture work targets the stable row.
 - **Implementation:** drag toward the reply direction (right in LTR, left in
   RTL) with horizontal touch slop, resistance, a maximum visual offset around
@@ -604,8 +603,13 @@ with unrelated predicates at individual call sites.
   RTL geometry, threshold boundaries, cancellation versus completion, one-shot
   haptic gating, and physical edge exclusion. The complete FOSS debug and
   release unit suites, warnings-as-errors lint, and both FOSS APK assemblies
-  pass. Real-device arbitration, haptic feel, and child-tap smoke testing remain
-  pending because the device is disconnected.
+  pass. On physical A059 `00152151K005265`, a 500-pixel rightward drag on an
+  ordinary self message produced `Replying to motdadb` with the correct preview
+  and exactly one new app-owned threshold-haptic request in
+  `dumpsys vibrator_manager` (the device setting suppressed playback). A
+  below-threshold drag and a vertical drag produced no reply state, vertical
+  scrolling exposed the bottom FAB, and a same-row long press still opened
+  Reply/Copy/Quote/More reactions. The crash buffer remained empty.
 
 ### E2. UI and conversation font-size sliders
 
