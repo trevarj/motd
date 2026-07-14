@@ -56,6 +56,7 @@ import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.ui.chat.NickActionSheet
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.service.RosterLoadState
 
 /** Stateful entry: wires the ViewModel and drives navigation/leave. */
 @Composable
@@ -77,6 +78,7 @@ fun ChannelInfoScreen(
         onLeave = { viewModel.part(onBack) },
         onMemberClick = viewModel::openNickSheet,
         onSetTopic = viewModel::setTopic,
+        onRetryMembers = viewModel::retryMembers,
     )
 
     // Nick sheet (plans/16 §5.8): shared with the chat timeline. Moderation shown only when op.
@@ -112,6 +114,7 @@ fun ChannelInfoContent(
     onLeave: () -> Unit,
     onMemberClick: (String) -> Unit = {},
     onSetTopic: (String) -> Unit = {},
+    onRetryMembers: () -> Unit = {},
 ) {
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var showTopicEdit by remember { mutableStateOf(false) }
@@ -136,6 +139,9 @@ fun ChannelInfoContent(
                 ChannelHeader(
                     buffer = buffer,
                     memberCount = state.memberCount,
+                    rosterState = state.rosterState,
+                    hasStaleMembers = state.hasStaleMembers,
+                    onRetryMembers = onRetryMembers,
                     onEditTopic = { showTopicEdit = true },
                 )
             }
@@ -271,7 +277,14 @@ private fun FoolsSectionHeader(count: Int, expanded: Boolean, onToggle: () -> Un
 }
 
 @Composable
-private fun ChannelHeader(buffer: BufferEntity?, memberCount: Int, onEditTopic: () -> Unit = {}) {
+private fun ChannelHeader(
+    buffer: BufferEntity?,
+    memberCount: Int?,
+    rosterState: RosterLoadState,
+    hasStaleMembers: Boolean,
+    onEditTopic: () -> Unit = {},
+    onRetryMembers: () -> Unit = {},
+) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -314,12 +327,26 @@ private fun ChannelHeader(buffer: BufferEntity?, memberCount: Int, onEditTopic: 
                 }
             }
         }
+        val rosterText = when {
+            memberCount != null -> pluralStringResource(R.plurals.channelinfo_members, memberCount, memberCount)
+            hasStaleMembers -> stringResource(R.string.channelinfo_members_stale)
+            rosterState == RosterLoadState.FAILED -> stringResource(R.string.channelinfo_members_failed)
+            else -> stringResource(R.string.channelinfo_members_loading)
+        }
         Text(
-            text = pluralStringResource(R.plurals.channelinfo_members, memberCount, memberCount),
+            text = rosterText,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp),
+            modifier = Modifier.padding(top = 8.dp).testTag("channelinfo_roster_state"),
         )
+        if (rosterState == RosterLoadState.FAILED) {
+            TextButton(
+                onClick = onRetryMembers,
+                modifier = Modifier.testTag("channelinfo_roster_retry"),
+            ) {
+                Text(stringResource(R.string.channelinfo_members_retry))
+            }
+        }
     }
 }
 
@@ -414,6 +441,7 @@ private fun ChannelInfoContentPreview() {
                     ),
                 ),
                 memberCount = 5,
+                rosterState = RosterLoadState.LOADED,
             ),
             onBack = {}, onSetPinned = {}, onSetMuted = {}, onLeave = {},
         )

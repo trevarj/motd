@@ -31,6 +31,7 @@ import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncCoordinator
 import io.github.trevarj.motd.service.HistoryResyncState
@@ -199,21 +200,27 @@ class ChatViewModel @Inject constructor(
      * member count.
      */
     fun ensureMembersObserved() {
-        if (membersJob != null) return
-        membersJob = viewModelScope.launch {
-            bufferRepository.observeMembers(bufferId)
+        if (membersJob == null) {
+            membersJob = viewModelScope.launch {
+                combine(
+                    bufferRepository.observeMembers(bufferId).distinctUntilChanged(),
+                    connectionManager.rosterStates,
+                ) { members, rosterStates -> members to rosterStates[bufferId] }
                 .distinctUntilChanged()
-                .collect { members ->
+                .collect { (members, rosterState) ->
+                    val authoritative = rosterState == RosterLoadState.LOADED
                     val (nicks, known) = withContext(Dispatchers.Default) {
-                        val nicks = members.map { it.nick }
+                        val nicks = if (authoritative) members.map { it.nick } else emptyList()
                         nicks to nicks.map(::normalizeNick).toSet()
                     }
-                    _members.value = members
+                    _members.value = if (authoritative) members else emptyList()
                     _memberNicks.value = nicks
                     _knownNicks.value = known
-                    _memberCount.value = members.size
+                    _memberCount.value = members.size.takeIf { authoritative }
                 }
+            }
         }
+        viewModelScope.launch { connectionManager.requestMembers(bufferId) }
     }
 
     // --- reactions aggregation (plans/15 #5, #18) ---

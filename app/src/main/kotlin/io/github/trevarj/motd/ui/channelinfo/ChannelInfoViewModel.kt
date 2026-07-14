@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.NickSheetState
 import io.github.trevarj.motd.ui.chat.WhoisInfo
@@ -29,7 +30,9 @@ import javax.inject.Inject
 data class ChannelInfoUiState(
     val buffer: BufferEntity? = null,
     val sections: List<MemberSection> = emptyList(),
-    val memberCount: Int = 0,
+    val memberCount: Int? = null,
+    val rosterState: RosterLoadState = RosterLoadState.NOT_LOADED,
+    val hasStaleMembers: Boolean = false,
     // Round 4 (plans/13 §3.6): global friend/fool sets. Fools are pulled into their own section.
     val foolMembers: List<MemberEntity> = emptyList(),
     val friends: Set<String> = emptySet(),
@@ -37,6 +40,14 @@ data class ChannelInfoUiState(
     // Round 5 (plans/16 §5.8): true when the viewer holds op in this channel (moderation gate).
     val canModerate: Boolean = false,
 )
+
+internal data class RosterPresentation(val memberCount: Int?, val hasStaleMembers: Boolean)
+
+internal fun rosterPresentation(cachedCount: Int, state: RosterLoadState): RosterPresentation =
+    RosterPresentation(
+        memberCount = cachedCount.takeIf { state == RosterLoadState.LOADED },
+        hasStaleMembers = cachedCount > 0 && state != RosterLoadState.LOADED,
+    )
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -49,7 +60,10 @@ class ChannelInfoViewModel @Inject constructor(
 
     private val bufferIdFlow = MutableStateFlow<Long?>(null)
 
-    fun init(bufferId: Long) { bufferIdFlow.value = bufferId }
+    fun init(bufferId: Long) {
+        bufferIdFlow.value = bufferId
+        viewModelScope.launch { connectionManager.requestMembers(bufferId) }
+    }
 
     private val bufferFlow = bufferIdFlow.flatMapLatest { id ->
         if (id == null) flowOf(null) else bufferRepository.observeBuffer(id)
@@ -60,13 +74,22 @@ class ChannelInfoViewModel @Inject constructor(
     }
 
     val state: StateFlow<ChannelInfoUiState> =
-        combine(bufferFlow, membersFlow, settingsRepository.settings) { buffer, members, settings ->
+        combine(
+            bufferFlow,
+            membersFlow,
+            settingsRepository.settings,
+            connectionManager.rosterStates,
+        ) { buffer, members, settings, rosterStates ->
             val order = prefixOrderForBuffer(buffer)
             val social = sectionMembersSocial(members, order, settings.fools)
+            val rosterState = buffer?.let { rosterStates[it.id] } ?: RosterLoadState.NOT_LOADED
+            val presentation = rosterPresentation(members.size, rosterState)
             ChannelInfoUiState(
                 buffer = buffer,
                 sections = social.sections,
-                memberCount = members.size,
+                memberCount = presentation.memberCount,
+                rosterState = rosterState,
+                hasStaleMembers = presentation.hasStaleMembers,
                 foolMembers = social.fools,
                 friends = settings.friends,
                 fools = settings.fools,
@@ -77,6 +100,10 @@ class ChannelInfoViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = ChannelInfoUiState(),
         )
+
+    fun retryMembers() = viewModelScope.launch {
+        state.value.buffer?.let { connectionManager.requestMembers(it.id, force = true) }
+    }
 
     // Resolve prefix order from the live client's ISUPPORT when connected; fallback otherwise.
     private fun prefixOrderForBuffer(buffer: BufferEntity?): String {

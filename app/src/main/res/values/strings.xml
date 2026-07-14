@@ -232,6 +232,10 @@
         <item quantity="one">%1$d member</item>
         <item quantity="other">%1$d members</item>
     </plurals>
+    <string name="channelinfo_members_loading">Loading members…</string>
+    <string name="channelinfo_members_stale">Cached members · stale</string>
+    <string name="channelinfo_members_failed">Members unavailable</string>
+    <string name="channelinfo_members_retry">Retry</string>
     <string name="channelinfo_mute">Mute</string>
     <string name="channelinfo_unmute">Unmute</string>
     <string name="channelinfo_pin">Pin</string>

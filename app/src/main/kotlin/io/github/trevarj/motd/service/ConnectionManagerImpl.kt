@@ -27,6 +27,7 @@ import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcClientConfig
+import io.github.trevarj.motd.irc.client.NO_IMPLICIT_NAMES_ALIASES
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.irc.client.canSendClientTag
 import io.github.trevarj.motd.irc.client.canSendReactionTags
@@ -406,6 +407,9 @@ class ConnectionManagerImpl @Inject constructor(
             is IrcEvent.Parted -> if (event.isSelf) clearRoster(networkId, event.channel)
             is IrcEvent.Kicked -> if (event.isSelf) clearRoster(networkId, event.channel)
             is IrcEvent.Disconnected -> invalidateRosters(networkId)
+            is IrcEvent.CapsChanged -> if (event.removed.any { it in NO_IMPLICIT_NAMES_ALIASES }) {
+                invalidateRosters(networkId)
+            }
             else -> Unit
         }
     }

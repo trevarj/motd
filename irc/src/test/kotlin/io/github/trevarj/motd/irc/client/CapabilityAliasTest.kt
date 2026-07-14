@@ -20,4 +20,23 @@ class CapabilityAliasTest {
         )
         assertEquals(null, preferredNoImplicitNames(emptySet()))
     }
+
+    @Test fun `runtime capability discovery does not switch selected names alias`() {
+        assertEquals(
+            emptySet<String>(),
+            CapNegotiator.runtimeRequestSet(
+                newCaps = setOf("no-implicit-names"),
+                ackedCaps = setOf("draft/no-implicit-names"),
+                extraCaps = emptySet(),
+            ),
+        )
+        assertEquals(
+            setOf("no-implicit-names"),
+            CapNegotiator.runtimeRequestSet(
+                newCaps = setOf("no-implicit-names", "draft/no-implicit-names"),
+                ackedCaps = emptySet(),
+                extraCaps = emptySet(),
+            ),
+        )
+    }
 }

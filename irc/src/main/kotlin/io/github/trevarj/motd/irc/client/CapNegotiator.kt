@@ -69,6 +69,18 @@ internal object CapNegotiator {
         return req
     }
 
+    /** Preserve an already-selected no-implicit-names alias for this connection generation. */
+    fun runtimeRequestSet(newCaps: Set<String>, ackedCaps: Set<String>, extraCaps: Set<String>): Set<String> {
+        val ackedNames = ackedCaps.mapTo(HashSet()) { it.substringBefore('=') }
+        val selected = preferredNoImplicitNames(ackedNames)
+        val advertised = if (selected == null) {
+            newCaps + ackedNames
+        } else {
+            (newCaps - NO_IMPLICIT_NAMES_ALIASES.toSet()) + ackedNames
+        }
+        return requestSet(advertised, extraCaps) - ackedNames
+    }
+
     /** Split caps into space-joined batches whose payload stays within [limit] bytes. */
     fun batches(caps: Collection<String>, limit: Int = 400): List<String> {
         val out = mutableListOf<String>()

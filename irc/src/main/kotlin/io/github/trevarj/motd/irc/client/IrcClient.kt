@@ -323,7 +323,7 @@ class IrcClient(
             "NEW" -> {
                 // REQ any tier cap newly advertised that we want.
                 val alreadyAcked = ackedCaps.get().map { it.substringBefore('=') }.toSet()
-                val want = CapNegotiator.requestSet(caps + alreadyAcked, config.extraCaps) - alreadyAcked
+                val want = CapNegotiator.runtimeRequestSet(caps, alreadyAcked, config.extraCaps)
                 if (want.isNotEmpty()) {
                     for (b in CapNegotiator.batches(want)) runCatching { t.send("CAP REQ :$b") }
                 }
