@@ -610,12 +610,17 @@ class EventProcessor @Inject constructor(
 
     private suspend fun onWhoxRow(networkId: Long, row: IrcEvent.WhoxRow) {
         upsertUser(networkId, row.nick) { existing ->
+            val hostmask = if (row.username != null && row.host != null) {
+                "${row.username}@${row.host}"
+            } else {
+                existing.hostmask
+            }
             existing.copy(
-                username = row.username,
-                hostmask = "${row.username}@${row.host}",
+                username = row.username ?: existing.username,
+                hostmask = hostmask,
                 account = row.account,
-                away = 'G' in row.flags,
-                realname = row.realname.ifBlank { existing.realname },
+                away = row.flags?.let { 'G' in it } ?: existing.away,
+                realname = row.realname?.takeIf(String::isNotBlank) ?: existing.realname,
             )
         }
     }

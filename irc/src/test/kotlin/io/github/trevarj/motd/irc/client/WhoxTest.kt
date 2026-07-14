@@ -8,6 +8,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -36,6 +37,20 @@ class WhoxTest {
         assertEquals("H@", row.flags)
         assertEquals("Real Name", row.realname)
         assertEquals(IrcEvent.WhoxComplete("#Room"), mapper.map(IrcMessage.parse(":srv 315 motd #Room :End")))
+    }
+
+    @Test fun `partial row keeps safely positioned identity fields`() {
+        val mapper = EventMapper({ "motd" }, { Isupport() }, now = { 1L })
+        val row = mapper.map(
+            IrcMessage.parse(":srv 354 motd 8 ~user cloak.example Nick"),
+        ) as IrcEvent.WhoxRow
+
+        assertEquals("~user", row.username)
+        assertEquals("cloak.example", row.host)
+        assertEquals("Nick", row.nick)
+        assertEquals(null, row.account)
+        assertEquals(null, row.flags)
+        assertEquals(null, row.realname)
     }
 
     @Test fun `same normalized mask coalesces and concurrent masks keep tokens separate`() = runTest {
@@ -74,6 +89,39 @@ class WhoxTest {
         assertFalse(result.completed)
         assertTrue(result.rows.isEmpty())
         assertEquals(before, transport.sent.size)
+    }
+
+    @Test fun `timeout returns partial rows as non authoritative and permits retry`() = runTest {
+        val transport = FakeTransport()
+        val client = registeredWhox(transport)
+
+        val first = async { client.whox("#room") }
+        runCurrent()
+        val token = transport.sent.last { it.startsWith("WHO #room ") }.substringAfterLast(',')
+        transport.feed(":srv 354 motd $token u h Nick acct H :Partial")
+        runCurrent()
+        advanceTimeBy(15_001)
+        runCurrent()
+
+        assertFalse(first.await().completed)
+        assertEquals(listOf("Nick"), first.await().rows.map { it.nick })
+
+        val retry = async { client.whox("#room") }
+        runCurrent()
+        assertEquals(2, transport.sent.count { it.startsWith("WHO #room ") })
+        retry.cancel()
+    }
+
+    @Test fun `disconnect cancels an in flight generation`() = runTest {
+        val transport = FakeTransport()
+        val client = registeredWhox(transport)
+        val request = async { client.whox("#room") }
+        runCurrent()
+
+        client.stop()
+        runCurrent()
+
+        assertTrue(request.isCancelled)
     }
 
     private fun TestScope.clientScope(): CoroutineScope =

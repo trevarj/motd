@@ -75,12 +75,12 @@ sealed interface IrcEvent {
     data class RealnameChanged(val nick: String, val realname: String) : IrcEvent
     data class WhoxRow(
         val token: Int,
-        val username: String,
-        val host: String,
+        val username: String?,
+        val host: String?,
         val nick: String,
         val account: String?,
-        val flags: String,
-        val realname: String,
+        val flags: String?,
+        val realname: String?,
     ) : IrcEvent
     data class WhoxComplete(val mask: String) : IrcEvent
     data class MonitorOnline(val identities: List<io.github.trevarj.motd.irc.proto.Prefix>) : IrcEvent

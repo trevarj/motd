@@ -729,6 +729,33 @@ class EventProcessorTest {
     }
 
     @Test
+    fun partialWhoxRow_updatesSafeIdentity_withoutInventingAwayOrErasingRealname() = runTest {
+        processor.process(networkId, IrcEvent.AccountChanged("Nick", "old-account"))
+        processor.process(networkId, IrcEvent.AwayChanged("Nick", "gone"))
+        processor.process(networkId, IrcEvent.RealnameChanged("Nick", "Known Name"))
+
+        processor.process(
+            networkId,
+            IrcEvent.WhoxRow(
+                token = 13,
+                username = "~new",
+                host = "new.example",
+                nick = "NICK",
+                account = null,
+                flags = null,
+                realname = null,
+            ),
+        )
+
+        val user = db.userDao().byNick(networkId, "nick")!!
+        assertEquals("~new", user.username)
+        assertEquals("~new@new.example", user.hostmask)
+        assertEquals(null, user.account)
+        assertTrue(user.away)
+        assertEquals("Known Name", user.realname)
+    }
+
+    @Test
     fun namesSnapshot_replaysJoinThatArrivesBeforeEndOfNames() = runTest {
         processor.process(
             networkId,

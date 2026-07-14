@@ -285,12 +285,12 @@ internal class EventMapper(
         val token = msg.params.getOrNull(1)?.toIntOrNull()
             ?.takeIf { it in 0..999 }
             ?: return IrcEvent.Raw(msg)
-        val username = msg.params.getOrNull(2) ?: return IrcEvent.Raw(msg)
-        val host = msg.params.getOrNull(3) ?: return IrcEvent.Raw(msg)
+        val username = msg.params.getOrNull(2)
+        val host = msg.params.getOrNull(3)
         val nick = msg.params.getOrNull(4) ?: return IrcEvent.Raw(msg)
         val accountRaw = msg.params.getOrNull(5)
-        val flags = msg.params.getOrNull(6) ?: return IrcEvent.Raw(msg)
-        val realname = msg.params.getOrNull(7).orEmpty()
+        val flags = msg.params.getOrNull(6)
+        val realname = msg.params.getOrNull(7)
         val account = accountRaw?.takeUnless { it == "0" || it == "*" }
         return IrcEvent.WhoxRow(token, username, host, nick, account, flags, realname)
     }
