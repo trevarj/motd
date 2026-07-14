@@ -12,6 +12,8 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.PresenceKey
+import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,6 +27,7 @@ import javax.inject.Inject
 data class ChatListState(
     val rows: List<ChatListRow> = emptyList(),
     val connection: Map<Long, IrcClientState> = emptyMap(),
+    val queryPresence: Map<Long, PresenceState> = emptyMap(),
     val networks: List<NetworkEntity> = emptyList(),
     val loading: Boolean = true,
     // Round 4 (plans/13 §3.5): global friend/fool sets drive chat-list sectioning.
@@ -66,10 +69,13 @@ class ChatListViewModel @Inject constructor(
         combine(
             bufferRepository.observeChatList(),
             networkRepository.observeNetworks(),
-            connectionManager.connectionStates,
+            connectionManager.connectionStates.combine(connectionManager.presenceStates) { connection, presence ->
+                connection to presence
+            },
             settingsRepository.settings,
             selection,
-        ) { rows, networks, connection, settings, selected ->
+        ) { rows, networks, connectionAndPresence, settings, selected ->
+            val (connection, presence) = connectionAndPresence
             // If the selected network was deleted, fall back to the unified list.
             val validSelection = selected?.takeIf { id -> networks.any { it.id == id } }
             if (validSelection != selected) setSelection(validSelection)
@@ -77,6 +83,14 @@ class ChatListViewModel @Inject constructor(
             ChatListState(
                 rows = scopeRows(rows, validSelection, networks),
                 connection = connection,
+                queryPresence = rows.asSequence()
+                    .filter { it.type == BufferType.QUERY }
+                    .mapNotNull { row ->
+                        val normalize = connectionManager.clientFor(row.networkId)?.isupport?.let { it::normalize }
+                            ?: return@mapNotNull null
+                        presence[PresenceKey(row.networkId, normalize(row.displayName))]?.let { row.bufferId to it }
+                    }
+                    .toMap(),
                 networks = networks,
                 loading = false,
                 friends = settings.friends,

@@ -236,6 +236,9 @@
     <string name="channelinfo_members_stale">Cached members · stale</string>
     <string name="channelinfo_members_failed">Members unavailable</string>
     <string name="channelinfo_members_retry">Retry</string>
+    <string name="presence_online">Online</string>
+    <string name="presence_offline">Offline</string>
+    <string name="presence_unknown">Presence unknown</string>
     <string name="channelinfo_mute">Mute</string>
     <string name="channelinfo_unmute">Unmute</string>
     <string name="channelinfo_pin">Pin</string>

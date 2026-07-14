@@ -24,6 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,6 +40,7 @@ import io.github.trevarj.motd.ui.components.NetworkChip
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.service.PresenceState
 
 /**
  * One chat-list row: avatar, display name (+ network chip when multi-network), last-message
@@ -57,6 +60,7 @@ fun ChatListRowItem(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     isFriend: Boolean = false,
+    presence: PresenceState? = null,
 ) {
     // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
     val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
@@ -97,6 +101,27 @@ fun ChatListRowItem(
                     overflow = TextOverflow.Ellipsis,
                     modifier = nameModifier,
                 )
+                if (presence != null && row.type == BufferType.QUERY) {
+                    val description = stringResource(
+                        when (presence) {
+                            PresenceState.ONLINE -> R.string.presence_online
+                            PresenceState.OFFLINE -> R.string.presence_offline
+                            PresenceState.UNKNOWN -> R.string.presence_unknown
+                        },
+                    )
+                    Text(
+                        text = "●",
+                        color = when (presence) {
+                            PresenceState.ONLINE -> MaterialTheme.colorScheme.primary
+                            PresenceState.OFFLINE -> MaterialTheme.colorScheme.error
+                            PresenceState.UNKNOWN -> MaterialTheme.colorScheme.outline
+                        },
+                        modifier = Modifier
+                            .padding(start = 5.dp)
+                            .testTag("chatlist_presence_${presence.name.lowercase()}")
+                            .semantics { contentDescription = description },
+                    )
+                }
                 if (isFriend) {
                     Icon(
                         imageVector = Icons.Filled.Star,

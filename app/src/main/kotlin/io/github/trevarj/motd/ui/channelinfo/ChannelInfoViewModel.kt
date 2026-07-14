@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.MemberEntity
+import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.repo.BufferRepository
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import javax.inject.Inject
 
 data class ChannelInfoUiState(
@@ -56,6 +58,7 @@ class ChannelInfoViewModel @Inject constructor(
     private val connectionManager: ConnectionManager,
     private val draftStore: ComposerDraftStore,
     private val settingsRepository: SettingsRepository,
+    private val userDao: UserDao,
 ) : ViewModel() {
 
     private val bufferIdFlow = MutableStateFlow<Long?>(null)
@@ -155,19 +158,35 @@ class ChannelInfoViewModel @Inject constructor(
 
     private val _nickSheet = MutableStateFlow<NickSheetState?>(null)
     val nickSheet: StateFlow<NickSheetState?> = _nickSheet
+    private var nickDetailsJob: Job? = null
 
     /** Open the nick sheet for [nick]; WHOIS via labeled-response when available (see ChatViewModel). */
     fun openNickSheet(nick: String) {
         _nickSheet.value = NickSheetState(nick = nick)
         val networkId = state.value.buffer?.networkId ?: return
-        val client = connectionManager.clientFor(networkId) ?: return
+        viewModelScope.launch { state.value.buffer?.let { connectionManager.requestMembers(it.id) } }
+        val client = connectionManager.clientFor(networkId)
+        val normalized = client?.isupport?.normalize(nick) ?: io.github.trevarj.motd.data.prefs.normalizeNick(nick)
+        nickDetailsJob?.cancel()
+        nickDetailsJob = viewModelScope.launch {
+            combine(
+                userDao.observeByNick(networkId, normalized),
+                connectionManager.presenceStates,
+            ) { cached, presence ->
+                cached to presence[io.github.trevarj.motd.service.PresenceKey(networkId, normalized)]
+            }.collect { (cached, presence) ->
+                val current = _nickSheet.value
+                if (current?.nick == nick) _nickSheet.value = current.copy(cached = cached, presence = presence)
+            }
+        }
+        if (client == null) return
         val whoisMsg = IrcMessage(command = "WHOIS", params = listOf(nick))
         if (client.hasCap("labeled-response")) {
             viewModelScope.launch {
                 val lines = runCatching { client.sendLabeled(whoisMsg) }.getOrNull().orEmpty()
                 val info: WhoisInfo? = parseWhois(lines)
                 if (info != null && _nickSheet.value?.nick == nick) {
-                    _nickSheet.value = NickSheetState(nick = nick, whois = info)
+                    _nickSheet.value = _nickSheet.value?.copy(whois = info)
                 }
             }
         } else {
@@ -175,7 +194,11 @@ class ChannelInfoViewModel @Inject constructor(
         }
     }
 
-    fun dismissNickSheet() { _nickSheet.value = null }
+    fun dismissNickSheet() {
+        nickDetailsJob?.cancel()
+        nickDetailsJob = null
+        _nickSheet.value = null
+    }
 
     // --- moderation executors (plans/16 §5.8) ---
 

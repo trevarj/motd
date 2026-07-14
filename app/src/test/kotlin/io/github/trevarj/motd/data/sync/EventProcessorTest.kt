@@ -789,6 +789,33 @@ class EventProcessorTest {
         assertFalse(buffer.joined)
     }
 
+    @Test
+    fun monitorOnline_enrichesIdentityWithoutTimelineActivity() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.MonitorOnline(listOf(Prefix("Nick", "~user", "cloak.example"))),
+        )
+
+        val user = db.userDao().byNick(networkId, "nick")!!
+        assertEquals("~user", user.username)
+        assertEquals("~user@cloak.example", user.hostmask)
+        assertNull(db.bufferDao().byName(networkId, "nick"))
+    }
+
+    @Test
+    fun monitorLimitExceeded_insertsOneDiagnosticForAllRejectedTargets() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.MonitorLimitExceeded(1, listOf("Alice", "Bob"), "list is full"),
+        )
+
+        val server = db.bufferDao().byName(networkId, "*")!!
+        val rows = pagingList(server.id)
+        assertEquals(1, rows.size)
+        assertEquals(MessageKind.ERROR, rows.single().kind)
+        assertTrue(rows.single().text.contains("Alice,Bob"))
+    }
+
     // --- invitations ------------------------------------------------------
 
     @Test

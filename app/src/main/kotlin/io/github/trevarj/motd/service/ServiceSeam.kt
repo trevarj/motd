@@ -7,8 +7,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 enum class DeliveryMode { PERSISTENT_SOCKET, UNIFIED_PUSH }
 enum class RosterLoadState { NOT_LOADED, LOADING, LOADED, FAILED }
+enum class PresenceState { UNKNOWN, ONLINE, OFFLINE }
+data class PresenceKey(val networkId: Long, val normalizedNick: String)
 
 private val EMPTY_ROSTER_STATES: StateFlow<Map<Long, RosterLoadState>> = MutableStateFlow(emptyMap())
+private val EMPTY_PRESENCE_STATES: StateFlow<Map<PresenceKey, PresenceState>> = MutableStateFlow(emptyMap())
 
 /**
  * A pending TOFU cert-trust decision surfaced to the UI (plans/12). Published when a TLS handshake
@@ -31,6 +34,7 @@ interface ConnectionManager {
     /** Connection state per network row id. */
     val connectionStates: StateFlow<Map<Long, IrcClientState>>
     val rosterStates: StateFlow<Map<Long, RosterLoadState>> get() = EMPTY_ROSTER_STATES
+    val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> get() = EMPTY_PRESENCE_STATES
 
     /** Live client for a connected network, null otherwise. */
     fun clientFor(networkId: Long): IrcClient?

@@ -139,12 +139,12 @@ class EventProcessor @Inject constructor(
             is IrcEvent.RealnameChanged -> upsertUser(networkId, event.nick) { it.copy(realname = event.realname) }
             is IrcEvent.WhoxRow -> onWhoxRow(networkId, event)
             is IrcEvent.WhoxComplete -> Unit
-            is IrcEvent.MonitorOnline,
+            is IrcEvent.MonitorOnline -> onMonitorOnline(networkId, event)
             is IrcEvent.MonitorOffline,
             is IrcEvent.MonitorList,
             is IrcEvent.MonitorListEnd,
-            is IrcEvent.MonitorLimitExceeded,
             -> Unit
+            is IrcEvent.MonitorLimitExceeded -> onMonitorLimitExceeded(networkId, event)
             is IrcEvent.Invited -> onInvited(networkId, event, notify)
             is IrcEvent.ReadMarker -> onReadMarker(networkId, event)
             is IrcEvent.BouncerNetworkState -> onBouncerNetworkState(networkId, event)
@@ -540,6 +540,31 @@ class EventProcessor @Inject constructor(
                 realname = row.realname.ifBlank { existing.realname },
             )
         }
+    }
+
+    private suspend fun onMonitorOnline(networkId: Long, event: IrcEvent.MonitorOnline) {
+        event.identities.forEach { identity ->
+            val username = identity.user
+            val host = identity.host
+            if (username != null && host != null) {
+                upsertUser(networkId, identity.nick) {
+                    it.copy(username = username, hostmask = "$username@$host")
+                }
+            }
+        }
+    }
+
+    private suspend fun onMonitorLimitExceeded(networkId: Long, event: IrcEvent.MonitorLimitExceeded) {
+        val st = stateFor(networkId)
+        val bufferId = ensureServerBuffer(networkId, st)
+        val targets = event.targets.joinToString(",")
+        val text = buildString {
+            append("MONITOR limit exceeded")
+            event.limit?.let { append(" (").append(it).append(')') }
+            if (targets.isNotEmpty()) append(": ").append(targets)
+            if (event.text.isNotBlank()) append(" — ").append(event.text)
+        }
+        insertSystem(bufferId, serverCtx(), MessageKind.ERROR, "", text)
     }
 
     private suspend fun onTopicChanged(networkId: Long, e: IrcEvent.TopicChanged) {

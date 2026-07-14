@@ -289,6 +289,7 @@ fun ChatListContent(
                 } else {
                     ChatList(
                         rows = state.rows,
+                        presence = state.queryPresence,
                         friends = state.friends,
                         fools = state.fools,
                         multiNetwork = showNetworkChip,
@@ -386,6 +387,7 @@ private fun ScopeChip(name: String, onClear: () -> Unit) {
 @Composable
 private fun ChatList(
     rows: List<ChatListRow>,
+    presence: Map<Long, io.github.trevarj.motd.service.PresenceState>,
     friends: Set<String>,
     fools: Set<String>,
     multiNetwork: Boolean,
@@ -410,11 +412,11 @@ private fun ChatList(
                 SectionHeader(stringResource(R.string.chatlist_friends))
             }
             items(sections.friends, key = { "f-${it.bufferId}" }) { row ->
-                RowWithMenu(row, isFriend = true, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
+                RowWithMenu(row, presence[row.bufferId], isFriend = true, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
             }
         }
         items(sections.regular, key = { it.bufferId }) { row ->
-            RowWithMenu(row, isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
+            RowWithMenu(row, presence[row.bufferId], isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
         }
         if (sections.fools.isNotEmpty()) {
             item(key = "fools-header") {
@@ -427,7 +429,7 @@ private fun ChatList(
             if (foolsExpanded) {
                 items(sections.fools, key = { "o-${it.bufferId}" }) { row ->
                     Box(modifier = Modifier.alpha(0.55f)) {
-                        RowWithMenu(row, isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
+                        RowWithMenu(row, presence[row.bufferId], isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
                     }
                 }
             }
@@ -463,6 +465,7 @@ private fun FoolsSectionHeader(count: Int, expanded: Boolean, onToggle: () -> Un
 @Composable
 private fun RowWithMenu(
     row: ChatListRow,
+    presence: io.github.trevarj.motd.service.PresenceState?,
     isFriend: Boolean,
     multiNetwork: Boolean,
     onOpenBuffer: (Long) -> Unit,
@@ -499,6 +502,7 @@ private fun RowWithMenu(
                 onClick = { onOpenBuffer(row.bufferId) },
                 onLongClick = { menuOpen = true },
                 isFriend = isFriend,
+                presence = presence,
             )
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(
@@ -568,6 +572,7 @@ private fun RowWithMenu(
         )
     }
 }
+
 
 /** Red end-aligned trash background revealed while swiping a chat-list row toward delete. */
 @Composable

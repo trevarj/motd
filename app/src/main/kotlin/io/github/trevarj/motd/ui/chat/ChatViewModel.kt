@@ -32,6 +32,8 @@ import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.RosterLoadState
+import io.github.trevarj.motd.service.PresenceKey
+import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncCoordinator
 import io.github.trevarj.motd.service.HistoryResyncState
@@ -76,6 +78,7 @@ data class ChatState(
     val typingNicks: List<String> = emptyList(),
     val replyTo: MessageEntity? = null,
     val connState: IrcClientState = IrcClientState.Disconnected,
+    val presence: Map<PresenceKey, PresenceState> = emptyMap(),
 )
 
 internal fun MessageEntity.toReplyPreviewData(): ReplyPreviewData = ReplyPreviewData(sender, text)
@@ -182,14 +185,16 @@ class ChatViewModel @Inject constructor(
         _memberCount,
         typingTracker.typingNicks(bufferId),
         replyTo,
-        connState,
-    ) { buffer, memberCount, typing, reply, conn ->
+        connState.combine(connectionManager.presenceStates) { conn, presence -> conn to presence },
+    ) { buffer, memberCount, typing, reply, connAndPresence ->
+        val (conn, presence) = connAndPresence
         ChatState(
             buffer = buffer,
             memberCount = memberCount,
             typingNicks = typing,
             replyTo = reply,
             connState = conn,
+            presence = presence,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatState())
 

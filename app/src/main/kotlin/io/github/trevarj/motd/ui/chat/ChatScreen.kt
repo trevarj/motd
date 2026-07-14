@@ -234,6 +234,11 @@ fun ChatScreen(
             isFool = normSelf in settings.fools,
             canModerate = viewModel.canModerate(),
             whois = sheet.details,
+            presence = state.buffer?.networkId?.let { networkId ->
+                state.presence[
+                    io.github.trevarj.motd.service.PresenceKey(networkId, norm(sheet.nick)),
+                ]
+            },
             onDismiss = viewModel::dismissNickSheet,
             onMessage = { viewModel.dismissNickSheet(); viewModel.submit("/query ${sheet.nick}", onOpenBuffer) },
             onMention = {

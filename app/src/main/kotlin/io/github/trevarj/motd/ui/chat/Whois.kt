@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
 import io.github.trevarj.motd.data.db.UserEntity
+import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.irc.proto.IrcMessage
 
 /**
@@ -27,6 +28,7 @@ data class NickSheetState(
     val nick: String,
     val cached: UserEntity? = null,
     val whois: WhoisInfo? = null,
+    val presence: PresenceState? = null,
 ) {
     val details: WhoisInfo? get() = mergeUserDetails(nick, cached, whois)
 }

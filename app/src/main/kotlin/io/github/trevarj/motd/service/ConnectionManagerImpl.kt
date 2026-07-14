@@ -32,8 +32,12 @@ import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.irc.client.canSendClientTag
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.client.preferredNoImplicitNames
+import io.github.trevarj.motd.irc.client.preferredExtendedMonitor
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.ext.MonitorCommands
+import io.github.trevarj.motd.irc.ext.MonitorSupport
+import io.github.trevarj.motd.irc.ext.monitorSupport
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.push.WebPushRegistrar
 import io.github.trevarj.motd.push.PushHealthStore
@@ -47,6 +51,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -62,6 +67,8 @@ import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Hilt @Singleton connection subsystem (plans/05). Outlives the foreground service — the service
@@ -121,6 +128,12 @@ class ConnectionManagerImpl @Inject constructor(
     override val rosterStates: StateFlow<Map<Long, RosterLoadState>> = _rosterStates.asStateFlow()
     private val rosterRequests = java.util.concurrent.ConcurrentHashMap<Long, Deferred<Unit>>()
 
+    private val _presenceStates = MutableStateFlow<Map<PresenceKey, PresenceState>>(emptyMap())
+    override val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> = _presenceStates.asStateFlow()
+    private val monitoredTargets = java.util.concurrent.ConcurrentHashMap<Long, Map<String, String>>()
+    private val monitorInitialized = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+    private val monitorLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
+
     private val stsStore = StsPolicyStore(settings)
     private val pendingEchoTimeouts = HashMap<String, Job>()
 
@@ -137,6 +150,7 @@ class ConnectionManagerImpl @Inject constructor(
     private var reconcileJob: Job? = null
     private var deliveryModeJob: Job? = null
     private var backgroundGraceJob: Job? = null
+    private var monitorDesiredJob: Job? = null
     private val pushSuspendedIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
     private var connectivityCallback: ConnectivityManager.NetworkCallback? = null
 
@@ -167,6 +181,18 @@ class ConnectionManagerImpl @Inject constructor(
                     backgroundGraceJob?.cancel()
                     pushSuspendedIds.clear()
                     reconcile(networkDao.observeAll().first())
+                }
+            }
+        }
+        monitorDesiredJob = scope.launch {
+            combine(settings.settings, bufferDao.observeChatList()) { currentSettings, rows ->
+                currentSettings.friends to rows
+            }.collect { (friends, rows) ->
+                actors.keys.toList().forEach { networkId ->
+                    val client = clientFor(networkId) ?: return@forEach
+                    if (client.state.value is IrcClientState.Ready && networkId in monitorInitialized) {
+                        reconcileMonitor(networkId, client, friends, rows, fresh = false)
+                    }
                 }
             }
         }
@@ -243,6 +269,7 @@ class ConnectionManagerImpl @Inject constructor(
         reconcileJob?.cancel(); reconcileJob = null
         deliveryModeJob?.cancel(); deliveryModeJob = null
         backgroundGraceJob?.cancel(); backgroundGraceJob = null
+        monitorDesiredJob?.cancel(); monitorDesiredJob = null
         unregisterConnectivityCallback()
         for (actor in actors.values) actor.stop()
         actors.clear(); fingerprints.clear()
@@ -256,6 +283,10 @@ class ConnectionManagerImpl @Inject constructor(
         rosterRequests.values.forEach { it.cancel() }
         rosterRequests.clear()
         _rosterStates.value = emptyMap()
+        monitoredTargets.clear()
+        monitorInitialized.clear()
+        monitorLocks.clear()
+        _presenceStates.value = emptyMap()
     }
 
     override suspend fun connect(networkId: Long) {
@@ -287,6 +318,7 @@ class ConnectionManagerImpl @Inject constructor(
         fingerprints.remove(networkId)
         _states.update { it - networkId }
         invalidateRosters(networkId)
+        invalidatePresence(networkId)
     }
 
     override suspend fun reconnectStale() {
@@ -406,9 +438,42 @@ class ConnectionManagerImpl @Inject constructor(
             }
             is IrcEvent.Parted -> if (event.isSelf) clearRoster(networkId, event.channel)
             is IrcEvent.Kicked -> if (event.isSelf) clearRoster(networkId, event.channel)
-            is IrcEvent.Disconnected -> invalidateRosters(networkId)
-            is IrcEvent.CapsChanged -> if (event.removed.any { it in NO_IMPLICIT_NAMES_ALIASES }) {
+            is IrcEvent.Disconnected -> {
                 invalidateRosters(networkId)
+                invalidatePresence(networkId)
+            }
+            is IrcEvent.MonitorOnline -> onMonitorOnline(networkId, event)
+            is IrcEvent.MonitorOffline -> updatePresence(networkId, event.nicks, PresenceState.OFFLINE)
+            is IrcEvent.MonitorLimitExceeded -> {
+                val normalize = clientFor(networkId)?.isupport?.let { it::normalize }
+                if (normalize != null) {
+                    val rejected = event.targets.mapTo(HashSet(), normalize)
+                    monitoredTargets.computeIfPresent(networkId) { _, accepted ->
+                        accepted.filterKeys { it !in rejected }
+                    }
+                }
+                event.targets.forEach { target ->
+                    setPresence(networkId, target, PresenceState.UNKNOWN)
+                }
+            }
+            is IrcEvent.NickChanged -> rekeyPresence(networkId, event.from, event.to)
+            is IrcEvent.CapsChanged -> {
+                if (event.removed.any { it in NO_IMPLICIT_NAMES_ALIASES }) invalidateRosters(networkId)
+                if (
+                    event.added.any { it.substringBefore('=') in io.github.trevarj.motd.irc.client.EXTENDED_MONITOR_ALIASES } ||
+                    event.removed.any { it in io.github.trevarj.motd.irc.client.EXTENDED_MONITOR_ALIASES }
+                ) {
+                    clientFor(networkId)?.let { client ->
+                        val currentSettings = settings.settings.first()
+                        reconcileMonitor(
+                            networkId,
+                            client,
+                            currentSettings.friends,
+                            bufferDao.observeChatList().first(),
+                            fresh = false,
+                        )
+                    }
+                }
             }
             else -> Unit
         }
@@ -436,6 +501,117 @@ class ConnectionManagerImpl @Inject constructor(
         ids.forEach { rosterRequests.remove(it)?.cancel() }
         _rosterStates.update { states ->
             states + ids.associateWith { RosterLoadState.NOT_LOADED }
+        }
+    }
+
+    private suspend fun reconcileMonitor(
+        networkId: Long,
+        client: IrcClient,
+        friends: Set<String>,
+        rows: List<io.github.trevarj.motd.data.db.ChatListRow>,
+        fresh: Boolean,
+    ) {
+        if (networksById[networkId]?.role == NetworkRole.BOUNCER_ROOT) return
+        val ready = client.state.value as? IrcClientState.Ready ?: return
+        val support = monitorSupport(ready.isupport)
+        val selection = selectMonitorTargets(
+            friends = friends,
+            queryRows = rows.filter { it.networkId == networkId && it.type == BufferType.QUERY },
+            limit = (support as? MonitorSupport.Limited)?.limit,
+            normalize = client.isupport::normalize,
+        )
+        updateDesiredPresence(networkId, selection.allDesired, client.isupport::normalize)
+        if (support is MonitorSupport.Unsupported) {
+            monitoredTargets.remove(networkId)
+            if (fresh) monitorInitialized += networkId
+            return
+        }
+        if (support is MonitorSupport.Malformed) {
+            monitoredTargets.remove(networkId)
+            if (fresh) monitorInitialized += networkId
+            if (fresh) {
+                eventProcessor.process(
+                    networkId,
+                    IrcEvent.ServerError("MONITOR", emptyList(), "invalid MONITOR ISUPPORT limit"),
+                )
+            }
+            return
+        }
+
+        monitorLocks.getOrPut(networkId) { Mutex() }.withLock {
+            if (clientFor(networkId) !== client || client.state.value !is IrcClientState.Ready) return@withLock
+            val desired = selection.selected.associateBy(client.isupport::normalize)
+            val previous = if (fresh) emptyMap() else monitoredTargets[networkId].orEmpty()
+            runCatching {
+                if (fresh) client.send(MonitorCommands.clear())
+                MonitorCommands.remove(
+                    previous.filterKeys { it !in desired }.values,
+                ).forEach { client.send(it) }
+                MonitorCommands.add(
+                    desired.filterKeys { it !in previous }.values,
+                ).forEach { client.send(it) }
+                if (fresh) client.send(MonitorCommands.status())
+            }.onSuccess {
+                monitoredTargets[networkId] = desired
+                if (fresh) monitorInitialized += networkId
+            }.onFailure {
+                desired.values.forEach { setPresence(networkId, it, PresenceState.UNKNOWN) }
+            }
+        }
+    }
+
+    private fun updateDesiredPresence(
+        networkId: Long,
+        desired: List<String>,
+        normalize: (String) -> String,
+    ) {
+        val keys = desired.mapTo(HashSet()) { PresenceKey(networkId, normalize(it)) }
+        _presenceStates.update { current ->
+            current.filterKeys { it.networkId != networkId || it in keys } +
+                keys.associateWith { current[it] ?: PresenceState.UNKNOWN }
+        }
+    }
+
+    private fun setPresence(networkId: Long, nick: String, state: PresenceState) {
+        val normalize = clientFor(networkId)?.isupport?.let { support -> support::normalize }
+            ?: { value: String -> value.lowercase() }
+        val key = PresenceKey(networkId, normalize(nick))
+        _presenceStates.update { current ->
+            if (key in current) current + (key to state) else current
+        }
+    }
+
+    private fun updatePresence(networkId: Long, nicks: List<String>, state: PresenceState) {
+        nicks.forEach { setPresence(networkId, it, state) }
+    }
+
+    private fun onMonitorOnline(networkId: Long, event: IrcEvent.MonitorOnline) {
+        val client = clientFor(networkId) ?: return
+        event.identities.forEach { identity ->
+            val key = PresenceKey(networkId, client.isupport.normalize(identity.nick))
+            val wasOnline = _presenceStates.value[key] == PresenceState.ONLINE
+            setPresence(networkId, identity.nick, PresenceState.ONLINE)
+            if (!wasOnline) scope.launch { client.whox(identity.nick) }
+        }
+    }
+
+    private fun rekeyPresence(networkId: Long, from: String, to: String) {
+        val normalize = clientFor(networkId)?.isupport?.let { support -> support::normalize } ?: return
+        val oldKey = PresenceKey(networkId, normalize(from))
+        val newKey = PresenceKey(networkId, normalize(to))
+        _presenceStates.update { current ->
+            val state = current[oldKey] ?: return@update current
+            (current - oldKey) + (newKey to state)
+        }
+    }
+
+    private fun invalidatePresence(networkId: Long) {
+        monitoredTargets.remove(networkId)
+        monitorInitialized.remove(networkId)
+        _presenceStates.update { current ->
+            current.mapValues { (key, state) ->
+                if (key.networkId == networkId && state != PresenceState.UNKNOWN) PresenceState.UNKNOWN else state
+            }
         }
     }
 
@@ -486,6 +662,14 @@ class ConnectionManagerImpl @Inject constructor(
     ) {
         if (!isCurrent()) return
         avatarCoordinator.onReady(row.id, client)
+        if (!isCurrent()) return
+        reconcileMonitor(
+            row.id,
+            client,
+            settings.settings.first().friends,
+            bufferDao.observeChatList().first(),
+            fresh = true,
+        )
         if (!isCurrent()) return
         // Persist STS policy if the server advertised one.
         val stsValue = client.caps.firstOrNull { it == "sts" || it.startsWith("sts=") }?.substringAfter('=', "")

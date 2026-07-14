@@ -37,6 +37,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.service.PresenceState
 
 /**
  * Shared nick bottom sheet (plans/16 §5.8), used from the chat timeline and ChannelInfo. Stateless:
@@ -53,6 +54,7 @@ fun NickActionSheet(
     isFool: Boolean,
     canModerate: Boolean,
     whois: WhoisInfo?,
+    presence: PresenceState? = null,
     onDismiss: () -> Unit,
     onMessage: () -> Unit,
     onMention: () -> Unit,
@@ -73,7 +75,7 @@ fun NickActionSheet(
             // Header: avatar + nick + whois summary (or the fallback line when whois is unavailable).
             ListItem(
                 headlineContent = { Text(nick) },
-                supportingContent = { WhoisSummary(whois) },
+                supportingContent = { WhoisSummary(whois, presence) },
                 leadingContent = { Avatar(name = nick, size = 40.dp, networkId = networkId) },
             )
             HorizontalDivider()
@@ -151,16 +153,30 @@ fun NickActionSheet(
 
 /** WHOIS summary lines, or the "details in server messages" fallback while whois is null. */
 @Composable
-private fun WhoisSummary(whois: WhoisInfo?) {
-    if (whois == null) {
-        Text(
-            text = stringResource(R.string.nick_sheet_details_in_server),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        return
-    }
+private fun WhoisSummary(whois: WhoisInfo?, presence: PresenceState?) {
     Column {
+        if (presence != null) {
+            Text(
+                text = stringResource(
+                    when (presence) {
+                        PresenceState.ONLINE -> R.string.presence_online
+                        PresenceState.OFFLINE -> R.string.presence_offline
+                        PresenceState.UNKNOWN -> R.string.presence_unknown
+                    },
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("nick_sheet_presence_${presence.name.lowercase()}"),
+            )
+        }
+        if (whois == null) {
+            Text(
+                text = stringResource(R.string.nick_sheet_details_in_server),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@Column
+        }
         whois.realname?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         if (whois.username != null && whois.host != null) {
             Text(stringResource(R.string.whois_userhost, whois.username, whois.host), style = MaterialTheme.typography.bodySmall)
