@@ -101,7 +101,7 @@ fun DeliverySettingsContent(
                     )
                 },
                 colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                modifier = Modifier.clickable {
+                modifier = Modifier.testTag("settings_battery_optimization").clickable {
                     val pm = context.getSystemService(PowerManager::class.java)
                     val targetPackage = if (deliveryMode == DeliveryMode.UNIFIED_PUSH) {
                         pushAvailability.selectedDistributor ?: context.packageName

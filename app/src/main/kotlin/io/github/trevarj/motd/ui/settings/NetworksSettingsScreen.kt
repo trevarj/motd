@@ -93,7 +93,7 @@ private fun NetworkRow(
         headlineContent = { Text(network.name) },
         supportingContent = { Text(networkSupporting(network, all, zncNetworkIds)) },
         colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        modifier = Modifier.clickable { onOpenNetwork(network.id) }
+        modifier = Modifier.testTag("settings_network_row_${network.id}").clickable { onOpenNetwork(network.id) }
             .padding(start = if (child) 20.dp else 0.dp),
     )
 }

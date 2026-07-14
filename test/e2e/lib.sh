@@ -474,6 +474,21 @@ scroll_to_text() {
   [ -n "$(bounds_of_text "$t")" ]
 }
 
+# scroll_forward_to_tag "<testTag>" [tries] — in a normal vertically scrolling screen, move
+# toward content below the fold until a stable tag becomes visible. Settings categories use this
+# instead of display text so copy and layout changes cannot silently redirect the harness.
+scroll_forward_to_tag() {
+  local tag="$1" tries="${2:-6}" i
+  for i in $(seq 1 "$tries"); do
+    dump || true
+    [ -n "$(bounds_of_tag "$tag")" ] && return 0
+    adb_shell input swipe 540 1650 540 650 300
+    sleep 1
+  done
+  dump || true
+  [ -n "$(bounds_of_tag "$tag")" ]
+}
+
 # --- crash detection -------------------------------------------------------
 
 # clear_crash — clear the logcat crash + main buffers to establish a baseline.
