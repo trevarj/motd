@@ -45,6 +45,14 @@ sealed interface IrcEvent {
     ) : IrcEvent
     /** Fully reassembled chathistory batch for one target, in server order. */
     data class HistoryBatch(val target: String, val events: List<IrcEvent>) : IrcEvent
+    enum class NetworkBatchKind { NETSPLIT, NETJOIN }
+    data class NetworkBatch(
+        val kind: NetworkBatchKind,
+        val serverA: String,
+        val serverB: String,
+        val events: List<IrcEvent>,
+        val target: String? = null,
+    ) : IrcEvent
 
     // -- membership & user state
     data class Joined(val ctx: MessageContext, val nick: String, val channel: String, val account: String?, val realname: String?, val isSelf: Boolean) : IrcEvent

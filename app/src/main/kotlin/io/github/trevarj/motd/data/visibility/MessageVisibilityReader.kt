@@ -143,7 +143,7 @@ class MessageVisibilityReader @Inject constructor(
     ): ChatListRow {
         val policy = MessageVisibilityPolicy(spec)
         val preview = firstMatchingRow(
-            where = "bufferId = ? AND kind NOT IN ('JOIN', 'PART', 'QUIT')",
+            where = "bufferId = ? AND kind NOT IN ('JOIN', 'PART', 'QUIT', 'NETSPLIT', 'NETJOIN')",
             args = listOf(row.bufferId),
             order = "serverTime DESC, id DESC",
             predicate = policy::preview,

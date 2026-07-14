@@ -816,6 +816,138 @@ class EventProcessorTest {
         assertTrue(rows.single().text.contains("Alice,Bob"))
     }
 
+    @Test
+    fun networkBatches_fanOutMembershipAndOneOrderedPillPerChannelIdempotently() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.Names(
+                "#one",
+                listOf(
+                    IrcEvent.Names.Member("Alice", "@", null, null),
+                    IrcEvent.Names.Member("Bob", "", null, null),
+                ),
+            ),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.Names(
+                "#two",
+                listOf(IrcEvent.Names.Member("Alice", "", null, null)),
+            ),
+        )
+        val split = IrcEvent.NetworkBatch(
+            IrcEvent.NetworkBatchKind.NETSPLIT,
+            "a.example",
+            "b.example",
+            listOf(
+                IrcEvent.Quit(ctx("q1", 10_000).copy(batchId = "split"), "Alice", "split"),
+                IrcEvent.Quit(ctx("q2", 10_001).copy(batchId = "split"), "Bob", "split"),
+            ),
+        )
+        processor.process(networkId, split)
+        processor.process(networkId, split)
+
+        val one = db.bufferDao().byName(networkId, "#one")!!
+        val two = db.bufferDao().byName(networkId, "#two")!!
+        assertTrue(db.memberDao().allNow(one.id).isEmpty())
+        assertTrue(db.memberDao().allNow(two.id).isEmpty())
+        val oneRows = pagingList(one.id)
+        val twoRows = pagingList(two.id)
+        assertEquals(1, oneRows.count { it.kind == MessageKind.NETSPLIT })
+        assertEquals(1, twoRows.count { it.kind == MessageKind.NETSPLIT })
+        assertEquals(0, oneRows.count { it.kind == MessageKind.QUIT })
+        assertEquals(
+            listOf("Alice", "Bob"),
+            NetworkBatchPayloadV1.decode(oneRows.single { it.kind == MessageKind.NETSPLIT }.eventPayload)?.nicks,
+        )
+
+        val join = IrcEvent.NetworkBatch(
+            IrcEvent.NetworkBatchKind.NETJOIN,
+            "a.example",
+            "b.example",
+            listOf(
+                IrcEvent.Joined(
+                    ctx("j1", 20_000).copy(batchId = "join"),
+                    "Alice",
+                    "#one",
+                    null,
+                    null,
+                    false,
+                ),
+                IrcEvent.Joined(
+                    ctx("j2", 20_001).copy(batchId = "join"),
+                    "Bob",
+                    "#one",
+                    null,
+                    null,
+                    false,
+                ),
+            ),
+        )
+        processor.process(networkId, join)
+        assertEquals(setOf("Alice", "Bob"), db.memberDao().allNow(one.id).map { it.nick }.toSet())
+        assertEquals(1, pagingList(one.id).count { it.kind == MessageKind.NETJOIN })
+        assertEquals(0, pagingList(one.id).count { it.kind == MessageKind.JOIN })
+    }
+
+    @Test
+    fun malformedNetworkBatch_isIgnoredWithoutPartialMembershipMutation() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.Names("#room", listOf(IrcEvent.Names.Member("Alice", "", null, null))),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.NetworkBatch(
+                IrcEvent.NetworkBatchKind.NETSPLIT,
+                "a",
+                "b",
+                listOf(
+                    IrcEvent.Quit(ctx(), "Alice", "split"),
+                    IrcEvent.Joined(ctx(), "Bob", "#room", null, null, false),
+                ),
+            ),
+        )
+
+        val room = db.bufferDao().byName(networkId, "#room")!!
+        assertEquals(listOf("Alice"), db.memberDao().allNow(room.id).map { it.nick })
+        assertTrue(pagingList(room.id).none { it.kind == MessageKind.NETSPLIT })
+    }
+
+    @Test
+    fun hundredUserSplit_createsOnePillAndNoPerNickQuitRows() = runTest {
+        val nicks = (1..100).map { "Nick$it" }
+        processor.process(
+            networkId,
+            IrcEvent.Names("#large", nicks.map { IrcEvent.Names.Member(it, "", null, null) }),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.NetworkBatch(
+                IrcEvent.NetworkBatchKind.NETSPLIT,
+                "a",
+                "b",
+                nicks.mapIndexed { index, nick ->
+                    IrcEvent.Quit(
+                        ctx("q$index", 30_000L + index).copy(batchId = "split"),
+                        nick,
+                        "split",
+                    )
+                },
+            ),
+        )
+
+        val large = db.bufferDao().byName(networkId, "#large")!!
+        val rows = pagingList(large.id)
+        assertTrue(db.memberDao().allNow(large.id).isEmpty())
+        assertEquals(1, rows.count { it.kind == MessageKind.NETSPLIT })
+        assertEquals(0, rows.count { it.kind == MessageKind.QUIT })
+        assertEquals(
+            nicks,
+            NetworkBatchPayloadV1.decode(rows.single { it.kind == MessageKind.NETSPLIT }.eventPayload)?.nicks,
+        )
+    }
+
     // --- invitations ------------------------------------------------------
 
     @Test

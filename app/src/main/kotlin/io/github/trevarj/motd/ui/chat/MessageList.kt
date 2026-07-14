@@ -53,6 +53,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
+import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.repo.LinkPreview
@@ -81,6 +82,7 @@ internal data class SystemRunContentKey(val newestId: Long, val oldestId: Long, 
 /** Reuse lazy compositions only across rows with the same structural layout. */
 internal enum class MessageContentType {
     SYSTEM,
+    NETWORK_BATCH,
     INVITE,
     ACTION,
     ACTION_FAILED,
@@ -106,6 +108,7 @@ fun isSystemKind(kind: MessageKind): Boolean = when (kind) {
 
 internal fun messageContentType(message: MessageEntity): MessageContentType = when {
     message.kind == MessageKind.INVITE -> MessageContentType.INVITE
+    message.kind == MessageKind.NETSPLIT || message.kind == MessageKind.NETJOIN -> MessageContentType.NETWORK_BATCH
     isSystemKind(message.kind) -> MessageContentType.SYSTEM
     message.kind == MessageKind.ACTION && message.failed -> MessageContentType.ACTION_FAILED
     message.kind == MessageKind.ACTION -> MessageContentType.ACTION
@@ -206,6 +209,11 @@ fun MessageList(
                 return@items
             }
 
+            if (msg.kind == MessageKind.NETSPLIT || msg.kind == MessageKind.NETJOIN) {
+                NetworkBatchPill(msg)
+                return@items
+            }
+
             // System-event collapse (plans/15 #15): render one pill on the run's *newest* item and
             // skip the rest. In a reversed list the newest of a contiguous system run is the item
             // whose just-newer neighbor is not a system event.
@@ -284,6 +292,31 @@ fun MessageList(
             LoadStateFooter(items.loadState.append)
         }
     }
+}
+
+@Composable
+private fun NetworkBatchPill(message: MessageEntity) {
+    val payload = remember(message.eventPayload) { NetworkBatchPayloadV1.decode(message.eventPayload) }
+    if (payload == null) {
+        SystemEventPill(
+            summary = message.text,
+            lineCount = 1,
+            loadLines = { listOf(message.text) },
+            contentKey = message.id,
+            modifier = Modifier.testTag("chat_network_batch_${message.id}"),
+        )
+        return
+    }
+    val action = if (message.kind == MessageKind.NETSPLIT) "split" else "rejoined"
+    val summary = "${payload.nicks.size} ${if (payload.nicks.size == 1) "user" else "users"} $action " +
+        "(${payload.serverA} ↔ ${payload.serverB})"
+    SystemEventPill(
+        summary = summary,
+        lineCount = payload.nicks.size,
+        loadLines = { payload.nicks },
+        contentKey = message.id,
+        modifier = Modifier.testTag("chat_network_batch_${message.kind.name.lowercase()}_${message.id}"),
+    )
 }
 
 @Composable

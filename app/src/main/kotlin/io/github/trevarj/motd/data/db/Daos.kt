@@ -80,7 +80,7 @@ interface BufferDao {
         JOIN networks n ON n.id = b.networkId
         LEFT JOIN messages lm ON lm.id = (
             SELECT m.id FROM messages m
-            WHERE m.bufferId = b.id AND m.kind NOT IN ('JOIN', 'PART', 'QUIT')
+            WHERE m.bufferId = b.id AND m.kind NOT IN ('JOIN', 'PART', 'QUIT', 'NETSPLIT', 'NETJOIN')
             ORDER BY m.serverTime DESC, m.id DESC
             LIMIT 1
         )
@@ -309,6 +309,13 @@ interface MemberDao {
 
     @Query("SELECT * FROM members WHERE bufferId = :bufferId")
     suspend fun allNow(bufferId: Long): List<MemberEntity>
+
+    @Query(
+        """SELECT m.bufferId FROM members m
+           JOIN buffers b ON b.id = m.bufferId
+           WHERE b.networkId = :networkId AND m.nick = :nick""",
+    )
+    suspend fun bufferIdsForNick(networkId: Long, nick: String): List<Long>
 
     @Query("DELETE FROM members WHERE bufferId = :bufferId")
     suspend fun clear(bufferId: Long)

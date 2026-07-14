@@ -61,7 +61,13 @@ class BufferDaoTest {
     fun chatList_joinPartQuitNeverReplacePreviewOrActivity() = runTest {
         val bufDao = db.bufferDao()
         val msgDao = db.messageDao()
-        val kinds = listOf(MessageKind.JOIN, MessageKind.PART, MessageKind.QUIT)
+        val kinds = listOf(
+            MessageKind.JOIN,
+            MessageKind.PART,
+            MessageKind.QUIT,
+            MessageKind.NETSPLIT,
+            MessageKind.NETJOIN,
+        )
 
         kinds.forEachIndexed { index, kind ->
             val bufferId = bufDao.insert(buffer(networkId, "#ignored-$index"))
@@ -105,6 +111,8 @@ class BufferDaoTest {
                 message(bufferId, "join", serverTime = 100, dedupKey = "join", kind = MessageKind.JOIN),
                 message(bufferId, "part", serverTime = 200, dedupKey = "part", kind = MessageKind.PART),
                 message(bufferId, "quit", serverTime = 300, dedupKey = "quit", kind = MessageKind.QUIT),
+                message(bufferId, "split", serverTime = 400, dedupKey = "split", kind = MessageKind.NETSPLIT),
+                message(bufferId, "join", serverTime = 500, dedupKey = "netjoin", kind = MessageKind.NETJOIN),
             ),
         )
 

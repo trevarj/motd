@@ -208,5 +208,7 @@ class ChatModelsTest {
         assertEquals(MessageContentType.SELF_FAILED, messageContentType(message(self = true, failed = true)))
         assertEquals(MessageContentType.ACTION, messageContentType(message(kind = MessageKind.ACTION)))
         assertEquals(MessageContentType.SYSTEM, messageContentType(message(kind = MessageKind.JOIN)))
+        assertEquals(MessageContentType.NETWORK_BATCH, messageContentType(message(kind = MessageKind.NETSPLIT)))
+        assertEquals(MessageContentType.NETWORK_BATCH, messageContentType(message(kind = MessageKind.NETJOIN)))
     }
 }

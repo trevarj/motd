@@ -124,6 +124,7 @@ class EventProcessor @Inject constructor(
             is IrcEvent.ChatMessage -> onChat(networkId, event, notify)
             is IrcEvent.TagMessage -> onTag(networkId, event)
             is IrcEvent.HistoryBatch -> onHistoryBatch(networkId, event)
+            is IrcEvent.NetworkBatch -> onNetworkBatch(networkId, event, live = notify)
             is IrcEvent.Joined -> onJoined(networkId, event)
             is IrcEvent.Parted -> onParted(networkId, event)
             is IrcEvent.Quit -> onQuit(networkId, event)
@@ -351,6 +352,83 @@ class EventProcessor @Inject constructor(
         db.withTransaction {
             for (ev in batch.events) processEvent(networkId, ev, notify = false)
         }
+    }
+
+    private suspend fun onNetworkBatch(networkId: Long, batch: IrcEvent.NetworkBatch, live: Boolean) {
+        if (batch.events.isEmpty()) return
+        if (batch.kind == IrcEvent.NetworkBatchKind.NETSPLIT && batch.events.any { it !is IrcEvent.Quit }) return
+        if (batch.kind == IrcEvent.NetworkBatchKind.NETJOIN && batch.events.any { it !is IrcEvent.Joined }) return
+        val st = stateFor(networkId)
+        val affected = LinkedHashMap<Long, MutableList<Pair<String, MessageContext>>>()
+        db.withTransaction {
+            when (batch.kind) {
+                IrcEvent.NetworkBatchKind.NETSPLIT -> batch.events.forEach { child ->
+                    val quit = child as IrcEvent.Quit
+                    val targetBufferId = batch.target?.let { target ->
+                        bufferDao.byName(networkId, st.normalize(target))?.id
+                    }
+                    (buffersOfNick(networkId, quit.nick) + listOfNotNull(targetBufferId)).distinct().forEach { bufferId ->
+                        memberDao.remove(bufferId, quit.nick)
+                        if (live) journal(networkId, bufferId, RosterDelta.Remove(quit.nick))
+                        affected.getOrPut(bufferId) { mutableListOf() } += quit.nick to quit.ctx
+                    }
+                }
+                IrcEvent.NetworkBatchKind.NETJOIN -> batch.events.forEach { child ->
+                    val join = child as IrcEvent.Joined
+                    val buffer = bufferDao.byName(networkId, st.normalize(join.channel))
+                        ?: return@forEach
+                    memberDao.upsert(MemberEntity(buffer.id, join.nick))
+                    if (live) journal(networkId, buffer.id, RosterDelta.Upsert(join.nick))
+                    upsertUser(networkId, join.nick) {
+                        it.copy(
+                            account = join.account ?: it.account,
+                            realname = join.realname ?: it.realname,
+                        )
+                    }
+                    affected.getOrPut(buffer.id) { mutableListOf() } += join.nick to join.ctx
+                }
+            }
+            affected.forEach { (bufferId, children) ->
+                insertNetworkBatch(bufferId, batch, children, st)
+            }
+        }
+    }
+
+    private suspend fun insertNetworkBatch(
+        bufferId: Long,
+        batch: IrcEvent.NetworkBatch,
+        children: List<Pair<String, MessageContext>>,
+        st: NetworkState,
+    ) {
+        if (children.isEmpty()) return
+        val buffer = bufferDao.observeById(bufferId) ?: return
+        val nicks = children.map { it.first }
+        val identities = children.map { (nick, ctx) ->
+            ctx.msgid ?: "${st.normalize(nick)}@${ctx.serverTime / NETWORK_BATCH_DEDUP_WINDOW_MS}"
+        }
+        val pair = listOf(batch.serverA.lowercase(), batch.serverB.lowercase()).sorted().joinToString("|")
+        val kind = if (batch.kind == IrcEvent.NetworkBatchKind.NETSPLIT) {
+            MessageKind.NETSPLIT
+        } else {
+            MessageKind.NETJOIN
+        }
+        val eventKey = "network:${kind.name.lowercase()}:$pair:${buffer.name}:" +
+            EchoDeduper.keyFor(null, 0, pair, identities.joinToString("|"))
+        val verb = if (kind == MessageKind.NETSPLIT) "split" else "rejoined"
+        val text = "${nicks.size} ${if (nicks.size == 1) "user" else "users"} $verb " +
+            "(${batch.serverA} ↔ ${batch.serverB})"
+        val row = MessageEntity(
+            bufferId = bufferId,
+            serverTime = children.maxOf { it.second.serverTime },
+            sender = "",
+            kind = kind,
+            text = text,
+            dedupKey = eventKey,
+            eventKey = eventKey,
+            eventPayload = NetworkBatchPayloadV1(batch.serverA, batch.serverB, nicks).encode(),
+        )
+        val inserted = messageDao.insertAll(listOf(row)).single()
+        if (inserted > 0) traceMessageWrite("room_insert", row.copy(id = inserted), !children.any { it.second.batchId == null })
     }
 
     // -- invitations --------------------------------------------------------
@@ -921,18 +999,7 @@ class EventProcessor @Inject constructor(
 
     /** Buffer ids where [nick] is currently a member on [networkId] (for quit/nick fan-out). */
     private suspend fun buffersOfNick(networkId: Long, nick: String): List<Long> =
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val q = androidx.sqlite.db.SimpleSQLiteQuery(
-                "SELECT m.bufferId FROM members m JOIN buffers b ON b.id = m.bufferId " +
-                    "WHERE b.networkId = ? AND m.nick = ?",
-                arrayOf<Any>(networkId, nick),
-            )
-            db.query(q).use { cursor ->
-                val out = ArrayList<Long>(cursor.count)
-                while (cursor.moveToNext()) out.add(cursor.getLong(0))
-                out
-            }
-        }
+        memberDao.bufferIdsForNick(networkId, nick)
 
     private suspend fun upsertUser(networkId: Long, nick: String, mutate: (UserEntity) -> UserEntity) {
         val normalized = stateFor(networkId).normalize(nick)
@@ -965,6 +1032,7 @@ class EventProcessor @Inject constructor(
         // local clock (send time) and the server clock (echo time) can differ in either direction.
         const val ECHO_MATCH_WINDOW_MS = 30_000L
         const val INVITE_DEDUP_WINDOW_MS = 30_000L
+        const val NETWORK_BATCH_DEDUP_WINDOW_MS = 30_000L
 
         /**
          * Informational numerics persisted to the SERVER buffer as SERVER_INFO (plans/16 §5.6.3):

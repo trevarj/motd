@@ -7,7 +7,13 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.normalizeNick
 
 val JOIN_PART_QUIT_KINDS: Set<MessageKind> =
-    setOf(MessageKind.JOIN, MessageKind.PART, MessageKind.QUIT)
+    setOf(
+        MessageKind.JOIN,
+        MessageKind.PART,
+        MessageKind.QUIT,
+        MessageKind.NETSPLIT,
+        MessageKind.NETJOIN,
+    )
 
 val CONVERSATION_KINDS: Set<MessageKind> =
     setOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)

@@ -46,6 +46,8 @@ class MessageFilterTest {
         assertTrue(keepMessage(msg(kind = MessageKind.JOIN), spec))
         assertTrue(keepMessage(msg(kind = MessageKind.PART), spec))
         assertTrue(keepMessage(msg(kind = MessageKind.QUIT), spec))
+        assertTrue(keepMessage(msg(kind = MessageKind.NETSPLIT), spec))
+        assertTrue(keepMessage(msg(kind = MessageKind.NETJOIN), spec))
     }
 
     @Test fun `JPQ dropped when showJoinPartQuit is false`() {
@@ -53,6 +55,8 @@ class MessageFilterTest {
         assertFalse(keepMessage(msg(kind = MessageKind.JOIN), spec))
         assertFalse(keepMessage(msg(kind = MessageKind.PART), spec))
         assertFalse(keepMessage(msg(kind = MessageKind.QUIT), spec))
+        assertFalse(keepMessage(msg(kind = MessageKind.NETSPLIT), spec))
+        assertFalse(keepMessage(msg(kind = MessageKind.NETJOIN), spec))
     }
 
     @Test fun `non-JPQ system kinds always kept regardless of showJoinPartQuit`() {

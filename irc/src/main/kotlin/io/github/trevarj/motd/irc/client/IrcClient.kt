@@ -2,6 +2,8 @@ package io.github.trevarj.motd.irc.client
 
 import io.github.trevarj.motd.irc.event.*
 import io.github.trevarj.motd.irc.ext.BatchAssembler
+import io.github.trevarj.motd.irc.ext.BatchChild
+import io.github.trevarj.motd.irc.ext.BatchTree
 import io.github.trevarj.motd.irc.ext.BouncerCommands
 import io.github.trevarj.motd.irc.ext.ChatHistoryCommands
 import io.github.trevarj.motd.irc.ext.ReadMarkerCommands
@@ -141,6 +143,7 @@ class IrcClient(
         runJob = null
         labels.failAll(CancellationException("client stopped"))
         cancelWhoxRequests("client stopped")
+        batches.reset()
         val t = transport
         transport = null
         registered = false
@@ -226,6 +229,7 @@ class IrcClient(
             wd.stop()
             labels.failAll(CancellationException("connection closed"))
             cancelWhoxRequests("connection closed")
+            batches.reset()
         }
     }
 
@@ -300,17 +304,63 @@ class IrcClient(
     }
 
     private suspend fun emitBatch(closed: BatchAssembler.Outcome.Closed) {
-        val content = closed.messages.filter { it.command != "BATCH" }
-        if (closed.type == "chathistory") {
-            val target = closed.params.firstOrNull().orEmpty()
-            val events = content.mapNotNull { eventMapper.map(it, batchId = closed.ref) }
-            _events.emit(IrcEvent.HistoryBatch(target, events))
-        } else {
-            // Unknown batch type: flatten, emit contents as if live (still tagged with batchId).
-            for (m in content) {
-                val ev = eventMapper.map(m, batchId = closed.ref)
-                if (ev != null) emitEvent(ev)
+        for (event in mapBatchTree(closed.tree)) emitEvent(event)
+    }
+
+    internal fun mapBatchTree(tree: BatchTree): List<IrcEvent> {
+        if (tree.type == "netsplit" || tree.type == "netjoin") {
+            val leaves = tree.leafMessages()
+            val expected = if (tree.type == "netsplit") "QUIT" else "JOIN"
+            if (tree.params.size == 2 && leaves.isNotEmpty() && leaves.all { it.first.command == expected }) {
+                val events = leaves.mapNotNull { (message, batchRef) ->
+                    eventMapper.map(message, batchId = batchRef)
+                }
+                if (events.size == leaves.size) {
+                    return listOf(
+                        IrcEvent.NetworkBatch(
+                            kind = if (tree.type == "netsplit") {
+                                IrcEvent.NetworkBatchKind.NETSPLIT
+                            } else {
+                                IrcEvent.NetworkBatchKind.NETJOIN
+                            },
+                            serverA = tree.params[0],
+                            serverB = tree.params[1],
+                            events = events,
+                        ),
+                    )
+                }
             }
+        }
+
+        val flattened = tree.children.flatMap { child ->
+            when (child) {
+                is BatchChild.Message -> listOfNotNull(eventMapper.map(child.message, batchId = tree.ref))
+                is BatchChild.Nested -> mapBatchTree(child.batch)
+            }
+        }
+        return if (tree.type == "chathistory") {
+            val target = tree.params.firstOrNull().orEmpty()
+            listOf(
+                IrcEvent.HistoryBatch(
+                    target,
+                    flattened.map { event ->
+                        if (event is IrcEvent.NetworkBatch && event.target == null) {
+                            event.copy(target = target)
+                        } else {
+                            event
+                        }
+                    },
+                ),
+            )
+        } else {
+            flattened
+        }
+    }
+
+    private fun BatchTree.leafMessages(): List<Pair<IrcMessage, String>> = children.flatMap { child ->
+        when (child) {
+            is BatchChild.Message -> listOf(child.message to ref)
+            is BatchChild.Nested -> child.batch.leafMessages()
         }
     }
 
