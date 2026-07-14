@@ -20,13 +20,13 @@ servers, soju, and ZNC when its capability or ISUPPORT token is absent.
 
 |ID|Finding                                     |Surface             |Priority|Size|Status                    |
 |--|--------------------------------------------|--------------------|--------|----|--------------------------|
-|I1|Incoming `INVITE` events are discarded      |soju + Libera       |P0      |L   |Ready / included          |
-|P1|`MONITOR` and `extended-monitor` presence   |soju + Libera       |P1      |L   |Ready / included          |
-|U1|WHOX member enrichment                      |soju + Libera       |P1      |L   |Ready / included          |
+|I1|Incoming `INVITE` events are discarded      |soju + Libera       |P0      |L   |Complete (2026-07-14)     |
+|P1|`MONITOR` and `extended-monitor` presence   |soju + Libera       |P1      |L   |Complete (2026-07-14)     |
+|U1|WHOX member enrichment                      |soju + Libera       |P1      |L   |Complete (2026-07-14)     |
 |R1|`draft/message-redaction`                   |soju                |P1      |L   |Draft-version spike first |
-|B1|Netsplit/netjoin batch presentation         |soju + Libera       |P2      |L   |Ready / included          |
-|U2|`userhost-in-names` data is discarded       |direct Libera       |P2      |S   |Ready / included          |
-|N1|Lazy member loading with `no-implicit-names`|soju + Libera       |P2      |L   |Ready / included          |
+|B1|Netsplit/netjoin batch presentation         |soju + Libera       |P2      |L   |Complete (2026-07-14)     |
+|U2|`userhost-in-names` data is discarded       |direct Libera       |P2      |S   |Complete (2026-07-14)     |
+|N1|Lazy member loading with `no-implicit-names`|soju + Libera       |P2      |L   |Complete (2026-07-14)     |
 |A1|`draft/pre-away` background presence        |soju                |P2      |M   |Product decision required |
 |M1|Bot-mode presentation                       |soju; planned Libera|P3      |M   |Deferred                  |
 |M2|Account-extban moderation affordance        |soju + Libera       |P3      |M   |Deferred                  |
@@ -597,11 +597,9 @@ than assuming direct Libera acceptance.
 ## Ready implementation evidence
 
 Status on 2026-07-14: all six Ready implementations, focused JVM/Robolectric
-tests, release-parity build, direct/soju scripted checks, and ZNC degradation
-checks are complete. The final physical-device UI pass is still pending
-maintainer authorization to replace the installed debug package; therefore the
-executive table remains **Ready / included** and the combined goal is not yet
-marked Complete.
+tests, release-parity build, direct/soju scripted checks, ZNC degradation
+checks, and the physical-device UI pass are complete. The executive table and
+combined Ready goal are Complete.
 
 ### I1 evidence
 
@@ -656,6 +654,11 @@ marked Complete.
   chunking, desired-set selection, fresh C/+ /S and live +/- reconciliation,
   connection-scoped presence, metadata WHOX, and accessible query/nick-sheet
   indicators. `7ecba03` exposes and tests the reconciliation/presence reducers.
+- Physical testing found that Ready could precede the server's runtime `005`
+  snapshot and that `MONITOR` was absent from the exposed ISUPPORT whitelist.
+  `0e72cde` initializes subscriptions when runtime registration gains MONITOR;
+  `653a343` exposes MONITOR in Ready/Registered snapshots. Both paths have
+  focused regression coverage.
 - Protocol and app tests cover MONITOR support parsing, priority/limit policy,
   hostmask and malformed numerics, tracked-only updates after rejection,
   friend/query diffs, nick rekey, disconnect-to-unknown, diagnostic
@@ -681,6 +684,27 @@ marked Complete.
   netjoin batches. Pinned soju strips those wrappers but preserves msgid-bearing
   QUIT/JOIN mutations; `ready-check` asserts that clean degradation explicitly.
 
+### Physical-device evidence
+
+- A fresh FOSS debug APK was installed on physical device `00152151K005265`
+  (Nothing A059) on 2026-07-14. The existing local soju profile reconnected
+  after explicit trust of the regenerated fixture certificate.
+- I1/U2: a direct Ergo sender delivered an INVITE through soju with server-time
+  and msgid. The device rendered `chat_invite_card_124` with Join/Dismiss,
+  transitioned it to `chat_invite_resolved_124`, and posted an `invitations`
+  channel notification with open, Join, Dismiss, and swipe/delete intents.
+- U1/N1: opening direct `#ready` Channel Info triggered correlated WHOX and
+  reached `channelinfo_roster_state = 1 member`; `readyfriend` displayed
+  `Ready Fixture User`, `fixture@ready.example`, and account `readyaccount`.
+- P1: after the runtime-ISUPPORT fixes, the direct transcript showed fresh
+  `MONITOR C`, `MONITOR + readyfriend`, `MONITOR S`, 730/732/733 handling, and
+  metadata WHOX. The live chat list exposed `chatlist_presence_online` for
+  `readyfriend` and `chatlist_presence_offline` for the offline query.
+- B1: `daf4828` makes the deterministic fixture emit two users per network
+  batch. The device rendered typed two-user netsplit/netjoin pills; expanding
+  the netjoin exposed `readyfriend` and `splitfriend`. The soju path separately
+  rendered its documented ordinary JOIN/QUIT fallback after wrapper stripping.
+
 ### Shared and compatibility evidence
 
 - `ae289d6` provides schema 6 and the additive 5-to-6 migration. The populated
@@ -689,8 +713,9 @@ marked Complete.
   destructive development-only downgrade boundary remains documented beside
   `MIGRATION_5_6` and `DbModule`.
 - The release-parity matrix from `.agents/testing.md`, plus debug assembly,
-  passed after all audit fixes on 2026-07-14: `:irc:build`, both FOSS unit-test
-  variants, debug lint, and release/debug APK assembly were green.
+  passed again after the device-discovered MONITOR fixes on 2026-07-14:
+  `:irc:build`, both FOSS unit-test variants, debug lint, and release/debug APK
+  assembly were green (`BUILD SUCCESSFUL` in 5m07s).
 - `./test/e2e/znc-stack.sh probe` passed. The pinned ZNC advertises neither
   MONITOR nor no-implicit-names and lacks `draft/chathistory`; connection,
   messaging, two-client routing, reconnect-gap recovery, and timestamped native
