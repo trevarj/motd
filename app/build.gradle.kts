@@ -74,7 +74,8 @@ android {
         // Release CI derives these from the git tag and GitHub run number.
         versionName = System.getenv("MOTD_VERSION_NAME") ?: "0.0.0-dev"
         versionCode = System.getenv("MOTD_VERSION_CODE")?.toIntOrNull() ?: 1
-        testInstrumentationRunner = "io.github.trevarj.motd.SmokeTestRunner"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunnerArguments["clearPackageData"] = "true"
     }
 
     flavorDimensions += "distribution"
@@ -147,9 +148,10 @@ android {
     testBuildType = "e2e"
     testOptions {
         unitTests { isIncludeAndroidResources = true }  // Robolectric
+        execution = "ANDROIDX_TEST_ORCHESTRATOR"
         managedDevices {
             localDevices {
-                create("smokeApi34") {
+                create("headlessApi34") {
                     device = "Pixel 6"
                     apiLevel = 34
                     systemImageSource = "aosp"
@@ -241,6 +243,12 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestUtil(libs.androidx.test.orchestrator)
     // Real WebSocket handshake for the WSS transport framing test (plans/19 §3.3).
     testImplementation(libs.okhttp.mockwebserver)
 }

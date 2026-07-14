@@ -68,6 +68,19 @@ wait_for_ergo() {
   log "ergo reachable"
 }
 
+# Keep a long-lived fixture registered with the IRCd instead of merely keeping
+# its local pipe open. Ergo disconnects silent clients after its ping timeout.
+hold_connection() {
+  remaining="$SEED_HOLD_SECONDS"
+  while [ "$remaining" -gt 0 ]; do
+    delay=20
+    [ "$remaining" -lt "$delay" ] && delay="$remaining"
+    sleep "$delay"
+    printf 'PING :motd-e2e-keepalive\r\n'
+    remaining=$((remaining - delay))
+  done
+}
+
 # Register an ergo account (allow-before-connect is enabled).
 register_account() {
   _nick="$1"; _pass="$2"
@@ -122,7 +135,7 @@ do_seed() {
     printf 'PRIVMSG %s :hi from the seeded member\r\n' "$APP_NICK"
     # Device checks can keep the second identity visible in Channel info without a separate
     # daemon. The ordinary seed remains a short one-shot fixture.
-    sleep "$SEED_HOLD_SECONDS"
+    hold_connection
     printf 'QUIT :seed done\r\n'
   } | feed_irc
 }

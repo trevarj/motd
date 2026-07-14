@@ -12,21 +12,28 @@ setup and teardown deliberately clear application data.
 
 | Mode | Best for | Entry point |
 | --- | --- | --- |
+| Fast headless emulator | Default local feature validation; onboarding, chat, channel, settings, and bouncer journeys | `./test/e2e/headless.sh fast` |
+| Full headless emulator | Local A-I shell-runbook sweep | `./test/e2e/headless.sh full` |
 | Native local stack + USB device | Manual feature work, physical-device checks, quick iteration | `./test/e2e/local-stack.sh` |
 | Native ZNC + Ergo stack | ZNC playback, reconnect, SASL, and capability degradation | `./test/e2e/znc-stack.sh` |
 | Host-driven A–I runbook | Broad UI interaction and crash sweep on a device or emulator | `./test/e2e/runbook.sh` |
-| Managed-device smoke | Onboarding, TLS trust, SASL, and soju discovery | `.github/workflows/smoke.yml` |
+| Managed-device fast suite | Alternate/manual CI execution of the fast journeys | `.github/workflows/smoke.yml` |
 | Hermetic emulator run | Scheduled/manual exhaustive CI diagnostics | `.github/workflows/e2e.yml` |
 
-The smoke and exhaustive E2E workflows are currently diagnostic and do not gate
-tagged releases. Release CI still runs unit tests, lint, and the FOSS release build.
+The fast headless suite is a required pull-request and main-branch CI gate. The
+exhaustive A-I workflow remains scheduled/manual diagnostics. Release CI still
+runs its own unit, lint, and FOSS release build checks.
 
 ## Prerequisites
 
 - Enter the project environment with `nix develop`; it supplies JDK 17 and
   Android platform tools. Do not install or invoke a separate host SDK.
-- Connect and authorize a device. `adb devices` must show it as `device`. Set
-  `SERIAL` when more than one device/emulator is attached.
+- The local headless commands require Linux KVM access. Their first run enters
+  the opt-in `.#emulator` shell and fetches the pinned API 34 AOSP image; normal
+  builds do not carry that large closure.
+- For physical-device modes, connect and authorize a device. `adb devices` must
+  show it as `device`; set `SERIAL` when more than one device is attached. The
+  headless lifecycle wrapper creates and pins its own emulator serial.
 - Build the appropriate APK:
 
   ```sh
@@ -37,6 +44,49 @@ tagged releases. Release CI still runs unit tests, lint, and the FOSS release bu
   `app/build/outputs/apk/foss/debug/app-foss-debug.apk`. The x86_64 hermetic
   emulator uses `app/build/outputs/apk/foss/e2e/app-foss-e2e.apk`, which omits
   the arm64-only libbox core.
+
+## Fast local headless loop
+
+For ordinary app feature work, run:
+
+```sh
+./test/e2e/headless.sh fast
+```
+
+The lifecycle wrapper owns a dedicated AVD, emulator serial, native soju/ergo
+stack, adb reverse, and temporary state. Every adb command includes that serial,
+so an attached phone is never installed to, cleared, reversed, or reconfigured.
+Each journey gets a fresh instrumentation process and cleared debug-app data;
+CI and managed-device runs enforce the same boundary with Android Test
+Orchestrator. The four journeys cover:
+
+- onboarding, self-signed fixture trust, soju login, and network import;
+- channel join, send, emoji and command completion, and message search;
+- channel info, member actions, and leave cancellation; and
+- settings, themes, chat presentation, and Soju control-center panels.
+
+The production Activity, Room database, services, TLS transport, and bouncer
+connection are used. The fixture replaces only the remote IRC network. This is
+therefore strong evidence for functional Android behavior, including semantics,
+navigation, persistence boundaries, and protocol integration. It is not proof
+of physical input latency, GPU-specific rendering, Doze/background delivery,
+UnifiedPush, system picker/provider behavior, OEM notification behavior, or
+release signing/install upgrades; retain a physical-device check for those.
+
+The emulator and stack remain alive after a passing run to make the next run
+fast. Manage their lifecycle explicitly:
+
+```sh
+./test/e2e/headless.sh status
+./test/e2e/headless.sh full
+./test/e2e/headless.sh down
+./test/e2e/headless.sh reset
+```
+
+`full` runs the existing A-I uiautomator sweep on the same isolated emulator.
+`down` preserves the AVD; `reset` deletes only the wrapper's isolated AVD,
+stack, and state directories. Failures save a screenshot, logcat, and local
+bouncer logs under `test/e2e/artifacts/headless/`.
 
 ## Native local bouncer stack
 

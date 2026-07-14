@@ -1,6 +1,6 @@
 # Hermetic E2E bouncer stack
 
-This directory contains the Docker stack used by the managed smoke and
+This directory contains the Docker stack used by the fast headless and
 shell-driven emulator workflows. For commands, environment variables, phase
 coverage, and troubleshooting, use the canonical
 [`../README.md`](../README.md).
@@ -21,6 +21,8 @@ Android emulator --TLS 10.0.2.2:6697--> soju --TCP ergo:6667--> ergo
   named `libera`, and stores CHATHISTORY.
 - `ergo-seed` posts deterministic traffic after soju joins so the messages are
   captured in its store.
+- `ergo-member` then keeps the second fixture identity joined so member and nick
+  actions have deterministic live state throughout a test run.
 
 The published ports are test-only. Credentials in `.env.ci` and the Compose
 configuration are ephemeral local fixtures and must not be reused elsewhere.

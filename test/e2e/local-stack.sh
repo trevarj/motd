@@ -46,10 +46,11 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 PROVISION="$REPO/test/e2e/hermetic/ergo/provision.sh"
 
 # Endpoints + creds (mirror the hermetic stack so onboarding is identical).
-ERGO_PORT=6667
-SOJU_PORT=6697
+ERGO_PORT="${MOTD_ERGO_PORT:-6667}"
+SOJU_PORT="${MOTD_SOJU_PORT:-6697}"
 export ERGO_HOST=127.0.0.1
 export ERGO_PORT
+export SOJU_PORT
 export TEST_CHANNEL='##motdtest'
 export APP_NICK=motdadb
 export UP_ACCOUNT=motd
@@ -61,7 +62,7 @@ SOJU_PASS=motdtest
 SOJU_NONADMIN_USER=motduser
 SOJU_NONADMIN_PASS=motdusertest
 NETWORK_NAME=libera
-READY_PORT=6671
+READY_PORT="${MOTD_READY_PORT:-6671}"
 READY_NETWORK=ready-fixture
 READY_PID="$RUN/ircv3-ready.pid"
 READY_LOG="$RUN/ircv3-ready.log"
@@ -120,13 +121,13 @@ adb() {
 
 write_configs() {
   mkdir -p "$RUN/ergo" "$RUN/soju/tls"
-  cat >"$CONF_ERGO" <<'YAML'
+  cat >"$CONF_ERGO" <<YAML
 network:
     name: MotdLocal
 server:
     name: ergo.local
     listeners:
-        ":6667":
+        ":$ERGO_PORT":
     sts: { enabled: false }
     casemapping: precis
     enforce-utf8: true
@@ -165,7 +166,7 @@ history:
         default: false
         whitelist: ["+draft/react", "+draft/unreact", "+react"]
 datastore:
-    path: /tmp/motd-stack/ergo/ircd.db
+    path: $RUN/ergo/ircd.db
     autoupgrade: true
 languages: { enabled: false }
 limits:
@@ -183,8 +184,6 @@ logging:
     - { method: stderr, type: "* -userinput -useroutput", level: info }
 debug: { recover-from-errors: true }
 YAML
-  # ergo datastore path is fixed above; keep RUN aligned with the default.
-  sed -i "s#/tmp/motd-stack/ergo/ircd.db#$RUN/ergo/ircd.db#" "$CONF_ERGO"
   cat >"$CONF_SOJU" <<EOF
 hostname localhost
 db sqlite3 $RUN/soju/soju.db

@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -55,7 +56,11 @@ fun NewConversationSheet(
     preselectedNetworkId: Long? = null,
     onBrowseChannels: (networkId: Long) -> Unit = {},
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.testTag("new_conversation_sheet"),
+    ) {
         NewConversationSheetContent(
             networks = networks,
             preselectedNetworkId = preselectedNetworkId,
@@ -101,11 +106,13 @@ private fun NewConversationSheetContent(
                 selected = tab == 0,
                 onClick = { tab = 0; input = "" },
                 text = { Text(stringResource(R.string.new_sheet_join_channel)) },
+                modifier = Modifier.testTag("new_conversation_join_tab"),
             )
             Tab(
                 selected = tab == 1,
                 onClick = { tab = 1; input = "" },
                 text = { Text(stringResource(R.string.new_sheet_message_user)) },
+                modifier = Modifier.testTag("new_conversation_message_tab"),
             )
         }
 
@@ -119,7 +126,7 @@ private fun NewConversationSheetContent(
             value = input,
             onValueChange = { input = it },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("new_conversation_input"),
             label = {
                 Text(
                     stringResource(
@@ -138,7 +145,7 @@ private fun NewConversationSheetContent(
                 if (tab == 0) onJoinChannel(net.id, value) else onMessageUser(net.id, value)
             },
             enabled = selectedNetwork != null && input.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("new_conversation_submit"),
         ) {
             Text(
                 stringResource(if (tab == 0) R.string.new_sheet_join else R.string.new_sheet_message),
@@ -151,7 +158,7 @@ private fun NewConversationSheetContent(
             TextButton(
                 onClick = { net?.let { onBrowseChannels(it.id) } },
                 enabled = net != null && net.role != NetworkRole.BOUNCER_ROOT,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("new_conversation_browse"),
             ) {
                 Text(stringResource(R.string.new_sheet_browse))
             }

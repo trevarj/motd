@@ -8,6 +8,7 @@
 #                   ergo as the bouncer network "libera"
 #   ergo-seed       one-shot: posts the seed messages AFTER soju is connected
 #                   (so soju logs them into its message-store for CHATHISTORY)
+#   ergo-member     keeps the deterministic second nick present for member UI
 #
 # The Android emulator reaches the host at 10.0.2.2, so the app connects to
 # 10.0.2.2:6697 (soju). See test/e2e/.env.ci for the matching runbook config.
@@ -20,7 +21,7 @@
 #         → ergo-seed posts messages that soju observes + persists.
 #
 # Wait for BOTH soju healthy AND ergo-seed completed before running the runbook
-# (the workflow gates on ergo-seed).
+# (the workflow gates on ergo-seed, then starts the live member fixture).
 #
 # Local iteration:
 #   docker compose -f test/e2e/hermetic/docker-compose.yml up --build -d
@@ -119,6 +120,21 @@ services:
       soju:
         condition: service_healthy
     environment: *ergo_seed_env
+    restart: "no"
+
+  # Long-lived fixture: Compose/JUnit and shell journeys can assert the actual
+  # member sheet instead of accepting a timing-dependent skip after seeding.
+  ergo-member:
+    build:
+      context: ./ergo
+      dockerfile: Dockerfile.provision
+    command: ["seed"]
+    depends_on:
+      ergo-seed:
+        condition: service_completed_successfully
+    environment:
+      <<: *ergo_seed_env
+      SEED_HOLD_SECONDS: "3600"
     restart: "no"
 
 volumes:

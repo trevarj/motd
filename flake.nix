@@ -36,6 +36,19 @@
         };
         androidSdk = androidComposition.androidsdk;
         sdkRoot = "${androidSdk}/libexec/android-sdk";
+        # Opt-in, large emulator closure for the local headless E2E loop. Keeping this separate
+        # avoids making every ordinary build fetch an API image and emulator runtime.
+        emulatorComposition = pkgs.androidenv.composeAndroidPackages {
+          platformVersions = [ "34" ];
+          buildToolsVersions = [ "35.0.0" ];
+          platformToolsVersion = "35.0.2";
+          includeEmulator = true;
+          includeSystemImages = true;
+          systemImageTypes = [ "default" ];
+          abiVersions = [ "x86_64" ];
+        };
+        emulatorSdk = emulatorComposition.androidsdk;
+        emulatorSdkRoot = "${emulatorSdk}/libexec/android-sdk";
       in {
         devShells.default = pkgs.mkShell {
           packages = [ pkgs.jdk17 pkgs.nodejs_22 androidSdk ];
@@ -45,6 +58,14 @@
           # AGP downloads a dynamically-linked aapt2 that won't run outside FHS;
           # point Gradle at the Nix-provided one instead.
           GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2";
+        };
+        devShells.emulator = pkgs.mkShell {
+          packages = [ pkgs.jdk17 emulatorSdk ];
+          JAVA_HOME = pkgs.jdk17.home;
+          ANDROID_HOME = emulatorSdkRoot;
+          ANDROID_SDK_ROOT = emulatorSdkRoot;
+          LANG = "C.UTF-8";
+          LC_ALL = "C.UTF-8";
         };
         devShells.libbox = libboxPkgs.mkShell {
           # Deliberately omit the NDK: Nix's Android SDK composition fetches a

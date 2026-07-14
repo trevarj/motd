@@ -12,8 +12,8 @@ into a long runbook.
   and socket transport.
 - `firebase/functions/` — optional FCM relay, with its own locked Node package
   graph and tests.
-- `test/e2e/` — physical-device and hermetic emulator harnesses plus the local
-  ergo/soju bouncer stack.
+- `test/e2e/` — fast isolated headless, physical-device, and exhaustive emulator
+  harnesses plus the local ergo/soju bouncer stack.
 - `.github/workflows/` — current CI, smoke, exhaustive E2E, and release behavior.
 - `plans/` — historical design and implementation records. They can explain
   intent, but must not override current code, tests, or workflows.
