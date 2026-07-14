@@ -141,6 +141,7 @@ fun AppearanceSettingsContent(
                     settings.nickColorOverrides.size,
                     settings.nickColorOverrides.size,
                 ),
+                modifier = Modifier.testTag("settings_nick_color_overrides"),
                 onClick = onOpenNickColors,
             )
         }
@@ -282,6 +283,7 @@ private fun ThemeRadioRow(mode: ColorThemePreset, selected: Boolean, onSelect: (
         selected = selected,
         enabled = true,
         onClick = { onSelect(mode) },
+        modifier = Modifier.testTag("settings_theme_${mode.name.lowercase()}"),
         trailing = scheme?.let {
             {
                 Row {
@@ -402,6 +404,7 @@ private fun DensityGroup(current: LayoutDensity, onSelect: (LayoutDensity) -> Un
                 selected = current == density,
                 enabled = true,
                 onClick = { onSelect(density) },
+                modifier = Modifier.testTag("settings_density_${density.name.lowercase()}"),
             )
         }
     }
@@ -425,6 +428,7 @@ private fun PaletteGroup(
                 selected = current == palette,
                 enabled = enabled,
                 onClick = { onSelect(palette) },
+                modifier = Modifier.testTag("settings_palette_${palette.name.lowercase()}"),
             )
         }
     }

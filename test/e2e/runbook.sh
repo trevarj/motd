@@ -687,199 +687,205 @@ phase_f() {
   tap_desc "Settings"
   wait_for_text "Settings" 8 || true
   assert_text "Settings"
+  assert_tag_present settings_category_networks
+  assert_tag_present settings_category_appearance
+  assert_no_crash
+
+  # 43. Networks list -> root NetworkSettings. Bouncer roots are rendered before their children,
+  # so the first tagged network row is deterministic without knowing its Room id.
+  step "Networks list -> NetworkSettings"
+  tap_tag settings_category_networks
+  wait_for_text "Networks" 6 || true
+  assert_tag_present settings_add_network
+  tap_tag_prefix settings_network_row_
+  wait_for_text "Connect automatically" 6 || true
+  assert_text "Connect automatically"
+  scroll_forward_to_tag network_settings_bouncer_networks 12 || true
+  assert_tag_present network_settings_bouncer_networks
+  assert_no_crash
+
+  # 44. Bouncer networks (root).
+  step "Bouncer networks (root)"
+  tap_tag network_settings_bouncer_networks
+  wait_for_text "Soju control center" 10 || true
+  assert_text "Soju control center"
+  if [ -n "$(bounds_of_tag bouncer_add_network)" ]; then
+    tap_tag bouncer_add_network
+    wait_for_text "Server address" 5 || true
+    assert_text "Server address"
+    tap_text "Cancel"
+  fi
+  tap_tag bouncer_tab_channels
+  assert_text "Channel controls"
+  tap_tag bouncer_tab_account
+  assert_text "Fallback identity"
+  if wait_for_text "Admin" 10; then
+    tap_tag bouncer_tab_admin
+    assert_text "Users"
+    assert_text "Server"
+  else
+    fail "admin BouncerServ commands were not discovered"
+  fi
+  tap_tag bouncer_tab_console
+  assert_text "One BouncerServ command"
+  adb_shell input keyevent 4            # NetworkSettings
+  adb_shell input keyevent 4            # Networks category
+  adb_shell input keyevent 4            # Settings root
+  wait_for_text "Settings" 6 || true
+  assert_tag_present settings_category_appearance
+  assert_no_crash
+
+  # 45. Theme AMOLED (color-only oracle uses a screenshot).
+  step "Theme: AMOLED"
+  tap_tag settings_category_appearance
+  wait_for_text "Appearance" 6 || true
+  assert_tag_present settings_theme_picker
+  tap_tag settings_theme_picker
+  # ModalBottomSheet is a separate Compose window. UIAutomator renders its visible text but does
+  # not consistently export testTags as resource ids (the same boundary as AlertDialog buttons),
+  # so use the sheet's exact localized labels here rather than leaving it open and cascading every
+  # later Settings check onto the wrong window.
+  wait_for_text "Search themes" 6 || true
+  assert_text "Search themes"
+  input_by_text_label "Search themes" "AMOLED"
+  wait_for_text "AMOLED (true black)" 6 || true
+  tap_text "AMOLED (true black)"
+  screencap_step "amoled_background"   # color-only oracle
+  ok "selected AMOLED (background asserted via screencap only)"
+  assert_no_crash
+
+  # 46. Colored nicknames off/on.
+  step "Toggle Colored nicknames"
+  tap_tag settings_switch_nick_colors
+  tap_tag settings_switch_nick_colors   # toggle back
+  ok "toggled Colored nicknames off/on"
+  assert_no_crash
+
+  # 47. Palette.
+  step "Palette: Vivid"
+  scroll_forward_to_tag settings_palette_vivid 4 || true
+  tap_tag settings_palette_vivid
+  ok "selected Vivid palette"
+  assert_no_crash
+
+  # 48. Nick color overrides.
+  step "Nick color overrides"
+  scroll_forward_to_tag settings_nick_color_overrides 4 || true
+  tap_tag settings_nick_color_overrides
+  wait_for_text "Nick colors" 6 || true
+  assert_text "Nick colors"
+  input_by_text_label "Nickname" "foo"
+  redump
+  tap_text "Add" || true
+  if wait_for_text "Auto (no override)" 5; then
+    ok "hue picker opened for 'foo'"
+    # Dismiss explicitly, then wait for the separate Compose dialog window to disappear. Sending
+    # BACK twice without this boundary can race recomposition and consume both events in the dialog,
+    # leaving the next density checks stranded on Nick colors.
+    tap_text "Cancel"
+    local _dialog_wait
+    for _dialog_wait in 1 2 3 4 5 6; do
+      dump || true
+      [ -z "$(bounds_of_text "Auto (no override)")" ] && break
+      sleep 1
+    done
+  fi
+  adb_shell input keyevent 4           # back to Appearance
+  wait_for_text "Appearance" 6 || true
   assert_text "Appearance"
   assert_no_crash
 
-  # 43. Theme AMOLED (color-only oracle uses a screenshot).
-  step "Theme: AMOLED"
-  if [ -n "$(bounds_of_text "AMOLED (true black)")" ]; then
-    tap_text "AMOLED (true black)"
-    screencap_step "amoled_background"   # color-only oracle
-    ok "selected AMOLED (background asserted via screencap only)"
-  else
-    note "AMOLED radio not visible; may need scroll"
-  fi
-  assert_no_crash
-
-  # 44. Message style Compact.
+  # 49. Message style Compact. This control lives below the font-size sliders.
   step "Message style: Compact"
-  if [ -n "$(bounds_of_text "Compact")" ]; then
-    tap_text "Compact"
-    ok "selected Compact"
-  else
-    note "Compact radio not visible; may need scroll"
-  fi
+  scroll_forward_to_tag settings_density_compact 8 || true
+  tap_tag settings_density_compact
+  ok "selected Compact"
+  adb_shell input keyevent 4           # back to Settings root
   assert_no_crash
 
-  # 45. Colored nicknames off/on.
-  step "Toggle Colored nicknames"
-  if [ -n "$(bounds_of_text "Colored nicknames")" ]; then
-    tap_tag settings_switch_nick_colors
-    tap_tag settings_switch_nick_colors   # toggle back
-    ok "toggled Colored nicknames off/on"
-  else
-    note "Colored nicknames switch not visible"
-  fi
-  assert_no_crash
-
-  # 46. Palette.
-  step "Palette: Vivid"
-  if [ -n "$(bounds_of_text "Vivid palette")" ]; then
-    tap_text "Vivid palette"
-    ok "selected Vivid palette"
-  else
-    note "palette radios not visible"
-  fi
-  assert_no_crash
-
-  # 47. Nick color overrides.
-  step "Nick color overrides"
-  if [ -n "$(bounds_of_text "Nick color overrides")" ]; then
-    tap_text "Nick color overrides"
-    wait_for_text "Nick colors" 6 || true
-    assert_text "Nick colors"
-    input_by_text_label "Nickname" "foo"
-    redump
-    tap_text "Add" || true
-    if wait_for_text "Auto (no override)" 5; then
-      ok "hue picker opened for 'foo'"
-      adb_shell input keyevent 4         # dismiss dialog
-    fi
-    adb_shell input keyevent 4           # back to settings
-  else
-    note "Nick color overrides row not visible"
-  fi
-  assert_no_crash
-
-  # 48. Friends manage.
-  step "Friends manage screen"
-  if [ -n "$(bounds_of_text "Friends")" ]; then
-    tap_text "Friends"
-    wait_for_text "Friends" 6 || true
-    input_by_text_label "Nickname" "bar"
-    redump
-    tap_text "Add" || true
-    wait_for_text "bar" 5 || true
-    if [ -n "$(bounds_of_desc "Remove")" ]; then
-      tap_desc "Remove"
-      ok "added then removed friend 'bar'"
-    fi
-    adb_shell input keyevent 4
-  else
-    note "Friends row not visible"
-  fi
-  assert_no_crash
-
-  # 49-50. Fools manage + mode.
-  step "Fools manage + mode"
-  if [ -n "$(bounds_of_text "Fools")" ]; then
-    tap_text "Fools"
-    wait_for_text "Fools" 6 || true
-    adb_shell input keyevent 4
-  fi
-  if [ -n "$(bounds_of_text "Hide")" ]; then
-    tap_text "Hide"
-    tap_text "Collapse" || true          # restore
-    ok "toggled fools' messages mode"
-  else
-    note "fools mode radios not visible"
-  fi
-  assert_no_crash
-
-  # 51. Show join/part toggle.
+  # 50. Chat category: join/part, friends, and fools.
   step "Show join/part toggle"
-  if [ -n "$(bounds_of_text "Show join/part messages")" ]; then
-    tap_tag settings_switch_show_jpq
-    tap_tag settings_switch_show_jpq      # restore
-    ok "toggled show join/part"
-  else
-    note "join/part switch not visible"
-  fi
+  scroll_forward_to_tag settings_category_chat 4 || true
+  tap_tag settings_category_chat
+  wait_for_text "Chat" 6 || true
+  tap_tag settings_switch_show_jpq
+  tap_tag settings_switch_show_jpq      # restore
+  ok "toggled show join/part"
   assert_no_crash
 
-  # 52. Push availability (no distributor on CI -> specific disabled string).
+  step "Friends manage screen"
+  scroll_forward_to_tag settings_friends 8 || true
+  tap_tag settings_friends
+  wait_for_text "Friends" 6 || true
+  input_by_text_label "Nickname" "bar"
+  redump
+  tap_text "Add" || true
+  wait_for_text "bar" 5 || true
+  if [ -n "$(bounds_of_desc "Remove")" ]; then
+    tap_desc "Remove"
+    ok "added then removed friend 'bar'"
+  fi
+  adb_shell input keyevent 4
+  assert_no_crash
+
+  step "Fools manage + mode"
+  scroll_forward_to_tag settings_fools 4 || true
+  tap_tag settings_fools
+  wait_for_text "Fools" 6 || true
+  adb_shell input keyevent 4
+  scroll_forward_to_tag settings_fools_mode_hide 4 || true
+  tap_tag settings_fools_mode_hide
+  tap_tag settings_fools_mode_collapse   # restore
+  ok "toggled fools' messages mode"
+  adb_shell input keyevent 4             # back to Settings root
+  assert_no_crash
+
+  # 51. Push availability (no distributor on CI -> specific disabled string).
   step "Push delivery availability"
-  if [ -n "$(bounds_of_text "UnifiedPush")" ]; then
-    assert_text "UnifiedPush"
-    if [ -n "$(bounds_of_text "Install a UnifiedPush distributor like ntfy to receive push.")" ]; then
-      ok "push disabled with expected 'install distributor' hint"
-    else
-      note "push hint string differs (bouncer webpush state / distributor present)"
-    fi
+  scroll_forward_to_tag settings_category_delivery 4 || true
+  tap_tag settings_category_delivery
+  wait_for_text "Message delivery" 6 || true
+  assert_tag_present settings_unified_push_row
+  assert_text "UnifiedPush"
+  if [ -n "$(bounds_of_text "Install a UnifiedPush distributor like ntfy to receive push.")" ]; then
+    ok "push disabled with expected 'install distributor' hint"
   else
-    note "push radio not visible; may need scroll"
+    note "push hint string differs (bouncer webpush state / distributor present)"
   fi
   assert_no_crash
 
-  # 53. Battery optimization (OS intent -> no crash).
+  # 52. Battery optimization (OS intent -> no crash).
   step "Battery optimization intent"
-  if [ -n "$(bounds_of_text "Battery optimization")" ]; then
-    tap_text "Battery optimization"
-    assert_no_crash                       # OS settings intent fired
-    adb_shell input keyevent 4            # return to app
-  else
-    note "Battery optimization row not visible"
-  fi
-  assert_no_crash
-
-  # 54-55. Networks list -> NetworkSettings.
-  step "Networks list -> NetworkSettings"
-  if [ -n "$(bounds_of_text "libera")" ]; then
-    tap_text "libera"
-    wait_for_text "Server messages" 6 || true
-    assert_text "Server messages"
-    assert_text "Connect automatically"
-    ok "network settings controls present"
-  else
-    note "libera row not visible in settings networks list"
-  fi
-  assert_no_crash
-
-  # 56. Bouncer networks (root).
-  step "Bouncer networks (root)"
-  if [ -n "$(bounds_of_text "Bouncer networks")" ]; then
-    tap_text "Bouncer networks"
-    wait_for_text "Soju control center" 10 || true
-    assert_text "Soju control center"
-    if [ -n "$(bounds_of_text "Add network to bouncer")" ]; then
-      tap_text "Add network to bouncer"
-      wait_for_text "Server address" 5 || true
-      assert_text "Server address"
-      tap_text "Cancel"
+  scroll_forward_to_tag settings_battery_optimization 4 || true
+  tap_tag settings_battery_optimization
+  assert_no_crash                       # OS settings intent fired
+  # The system battery activity opens asynchronously. Fixed consecutive BACK presses can race it:
+  # one is consumed before launch and the next merely returns to Message delivery. Back out one
+  # settled screen at a time until a tagged root category proves we actually reached Settings.
+  local _back_attempt
+  for _back_attempt in 1 2 3; do
+    adb_shell input keyevent 4
+    sleep 1
+    dump || true
+    if [ -n "$(bounds_of_tag settings_category_delivery)" ] ||
+       [ -n "$(bounds_of_tag settings_category_uploads)" ] ||
+       [ -n "$(bounds_of_tag settings_category_about)" ]; then
+      break
     fi
-    tap_tag bouncer_tab_channels
-    assert_text "Channel controls"
-    tap_tag bouncer_tab_account
-    assert_text "Fallback identity"
-    if wait_for_text "Admin" 10; then
-      tap_tag bouncer_tab_admin
-      assert_text "Users"
-      assert_text "Server"
-    else
-      fail "admin BouncerServ commands were not discovered"
-    fi
-    tap_tag bouncer_tab_console
-    assert_text "One BouncerServ command"
-    adb_shell input keyevent 4            # back to network settings
-  else
-    note "Bouncer networks row not visible"
-  fi
-  adb_shell input keyevent 4              # back to settings
+  done
+  assert_tag_present settings_category_delivery
   assert_no_crash
 
-  # 57. About.
+  # 53. About. Find the category by tag because it is normally below the root viewport.
   step "About screen"
-  if [ -n "$(bounds_of_text "About")" ]; then
-    tap_text "About"
-    wait_for_text "GitHub" 6 || true
-    assert_text "License"
-    assert_text "GitHub"
-  else
-    note "About row not visible"
-  fi
+  scroll_forward_to_tag settings_category_about 6 || true
+  tap_tag settings_category_about
+  wait_for_text "GitHub" 6 || true
+  assert_text "License"
+  assert_text "GitHub"
   # Back out to chat list.
-  adb_shell input keyevent 4
-  adb_shell input keyevent 4
+  adb_shell input keyevent 4            # Settings root
+  adb_shell input keyevent 4            # chat list
   wait_for_text "motd" 8 || true
   assert_no_crash
 }
@@ -903,18 +909,18 @@ phase_g() {
   note "compact vs bubble structure needs chat_message_<msgid> tag to assert"
   assert_no_crash
 
-  # 59. Restore Comfortable.
+  # 59. Restore Comfortable through the Appearance category.
   step "Restore Comfortable render"
   adb_shell input keyevent 4             # back to list
   tap_desc "Settings"
   wait_for_text "Settings" 6 || true
-  if [ -n "$(bounds_of_text "Comfortable")" ]; then
-    tap_text "Comfortable"
-    ok "restored Comfortable message style"
-  else
-    note "Comfortable radio not visible"
-  fi
-  adb_shell input keyevent 4
+  tap_tag settings_category_appearance
+  wait_for_text "Appearance" 6 || true
+  scroll_forward_to_tag settings_density_comfortable 8 || true
+  tap_tag settings_density_comfortable
+  ok "restored Comfortable message style"
+  adb_shell input keyevent 4            # Settings root
+  adb_shell input keyevent 4            # chat list
   wait_for_text "motd" 8 || true
   assert_no_crash
 }

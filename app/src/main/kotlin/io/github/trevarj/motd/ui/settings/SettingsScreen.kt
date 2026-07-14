@@ -111,36 +111,42 @@ fun SettingsContent(
             icon = Icons.Outlined.Language,
             title = stringResource(R.string.settings_networks),
             summary = stringResource(R.string.settings_networks_summary),
+            modifier = Modifier.testTag("settings_category_networks"),
             onClick = onOpenNetworks,
         )
         CategoryRow(
             icon = Icons.Outlined.Palette,
             title = stringResource(R.string.settings_appearance),
             summary = stringResource(R.string.settings_appearance_summary),
+            modifier = Modifier.testTag("settings_category_appearance"),
             onClick = onOpenAppearance,
         )
         CategoryRow(
             icon = Icons.AutoMirrored.Outlined.Chat,
             title = stringResource(R.string.settings_chat),
             summary = stringResource(R.string.settings_chat_summary),
+            modifier = Modifier.testTag("settings_category_chat"),
             onClick = onOpenChat,
         )
         CategoryRow(
             icon = Icons.Outlined.Notifications,
             title = stringResource(R.string.settings_delivery),
             summary = stringResource(R.string.settings_delivery_summary),
+            modifier = Modifier.testTag("settings_category_delivery"),
             onClick = onOpenDelivery,
         )
         CategoryRow(
             icon = Icons.Outlined.CloudUpload,
             title = stringResource(R.string.settings_uploads),
             summary = stringResource(R.string.settings_uploads_summary),
+            modifier = Modifier.testTag("settings_category_uploads"),
             onClick = onOpenUploads,
         )
         CategoryRow(
             icon = Icons.Outlined.Info,
             title = stringResource(R.string.settings_about),
             summary = appVersion(context),
+            modifier = Modifier.testTag("settings_category_about"),
             onClick = onOpenAbout,
         )
     }
@@ -148,8 +154,15 @@ fun SettingsContent(
 
 /** A tappable category row in the top-level Settings list. */
 @Composable
-private fun CategoryRow(icon: ImageVector, title: String, summary: String, onClick: () -> Unit) {
+private fun CategoryRow(
+    icon: ImageVector,
+    title: String,
+    summary: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     Surface(
+        modifier = modifier,
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 1.dp,

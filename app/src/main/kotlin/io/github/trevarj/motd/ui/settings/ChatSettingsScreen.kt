@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.tooling.preview.Preview
@@ -127,12 +128,14 @@ fun ChatSettingsContent(
                 icon = Icons.Outlined.PersonOutline,
                 title = stringResource(R.string.settings_friends),
                 value = pluralStringResource(R.plurals.settings_nick_count, settings.friends.size, settings.friends.size),
+                modifier = Modifier.testTag("settings_friends"),
                 onClick = onOpenFriends,
             )
             SettingsNavigationRow(
                 icon = Icons.Outlined.Block,
                 title = stringResource(R.string.settings_fools),
                 value = pluralStringResource(R.plurals.settings_nick_count, settings.fools.size, settings.fools.size),
+                modifier = Modifier.testTag("settings_fools"),
                 onClick = onOpenFools,
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -151,6 +154,7 @@ private fun FoolsModeGroup(current: FoolsMode, onSelect: (FoolsMode) -> Unit) {
             selected = current == FoolsMode.COLLAPSE,
             enabled = true,
             onClick = { onSelect(FoolsMode.COLLAPSE) },
+            modifier = Modifier.testTag("settings_fools_mode_collapse"),
         )
         RadioRow(
             label = stringResource(R.string.settings_fools_hide),
@@ -158,6 +162,7 @@ private fun FoolsModeGroup(current: FoolsMode, onSelect: (FoolsMode) -> Unit) {
             selected = current == FoolsMode.HIDE,
             enabled = true,
             onClick = { onSelect(FoolsMode.HIDE) },
+            modifier = Modifier.testTag("settings_fools_mode_hide"),
         )
     }
 }

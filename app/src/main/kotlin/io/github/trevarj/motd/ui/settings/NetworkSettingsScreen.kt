@@ -288,13 +288,15 @@ fun NetworkSettingsContent(
                         ListItem(
                             headlineContent = { Text(stringResource(R.string.network_settings_bouncer_networks)) },
                             supportingContent = { Text(stringResource(R.string.network_settings_bouncer_networks_desc)) },
-                            modifier = Modifier.clickable { onOpenBouncerNetworks() },
+                            modifier = Modifier.testTag("network_settings_bouncer_networks")
+                                .clickable { onOpenBouncerNetworks() },
                             colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
                         )
                     }
                     ListItem(
                         headlineContent = { Text(stringResource(R.string.network_settings_server_messages)) },
-                        modifier = Modifier.clickable { onOpenServerMessages() },
+                        modifier = Modifier.testTag("network_settings_server_messages")
+                            .clickable { onOpenServerMessages() },
                         colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
                     )
                 }
