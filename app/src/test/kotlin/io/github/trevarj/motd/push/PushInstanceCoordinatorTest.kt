@@ -115,6 +115,13 @@ class PushInstanceCoordinatorTest {
         override suspend fun update(n: NetworkEntity) = Unit
         override suspend fun delete(n: NetworkEntity) = Unit
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = emptyList()
+        override suspend fun localTreeIds(id: Long): List<Long> = flow.value
+            .filter { it.id == id || it.parentId == id }
+            .map { it.id }
+        override suspend fun deleteMembersForNetworks(networkIds: List<Long>) = Unit
+        override suspend fun deleteReactionsForNetworks(networkIds: List<Long>) = Unit
+        override suspend fun deleteUsersForNetworks(networkIds: List<Long>) = Unit
+        override suspend fun deleteNetworkRows(networkIds: List<Long>) = Unit
         override suspend fun allNow(): List<NetworkEntity> = flow.value
     }
 

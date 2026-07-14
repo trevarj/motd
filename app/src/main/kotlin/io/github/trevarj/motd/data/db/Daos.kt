@@ -39,6 +39,37 @@ interface NetworkDao {
     @Query("SELECT * FROM networks WHERE parentId = :rootId")
     suspend fun childrenOf(rootId: Long): List<NetworkEntity>
 
+    // A bouncer root and its local child mirrors are not linked by a SQLite FK: children inherit
+    // the root transport at runtime, but deleting the root must still remove every local mirror
+    // and its chat-list buffers in one transaction.
+    @Query("SELECT id FROM networks WHERE id = :id OR parentId = :id")
+    suspend fun localTreeIds(id: Long): List<Long>
+
+    @Query("DELETE FROM members WHERE bufferId IN (SELECT id FROM buffers WHERE networkId IN (:networkIds))")
+    suspend fun deleteMembersForNetworks(networkIds: List<Long>)
+
+    @Query("DELETE FROM reactions WHERE bufferId IN (SELECT id FROM buffers WHERE networkId IN (:networkIds))")
+    suspend fun deleteReactionsForNetworks(networkIds: List<Long>)
+
+    @Query("DELETE FROM users WHERE networkId IN (:networkIds)")
+    suspend fun deleteUsersForNetworks(networkIds: List<Long>)
+
+    @Query("DELETE FROM networks WHERE id IN (:networkIds)")
+    suspend fun deleteNetworkRows(networkIds: List<Long>)
+
+    /** Delete one direct/child row, or a bouncer root together with all of its local mirrors. */
+    @Transaction
+    suspend fun deleteLocalTree(id: Long): List<Long> {
+        val networkIds = localTreeIds(id)
+        if (networkIds.isEmpty()) return emptyList()
+        // buffers/messages cascade off networks/buffers; these tables intentionally have no FKs.
+        deleteMembersForNetworks(networkIds)
+        deleteReactionsForNetworks(networkIds)
+        deleteUsersForNetworks(networkIds)
+        deleteNetworkRows(networkIds)
+        return networkIds
+    }
+
     // Snapshot of all rows for the app-level duplicate check in NetworkRepositoryImpl.addNetwork.
     // A one-shot read (not the observed Flow) so dedup is a simple suspend call; the networks
     // table is tiny (a handful of rows) so a full scan is cheap and avoids a per-identity index

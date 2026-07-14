@@ -335,7 +335,15 @@ fun NetworkSettingsContent(
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text(stringResource(R.string.network_settings_delete_confirm_title)) },
-            text = { Text(stringResource(R.string.network_settings_delete_confirm_message)) },
+            text = {
+                Text(stringResource(
+                    if (state.entity?.role == NetworkRole.BOUNCER_ROOT) {
+                        R.string.network_settings_delete_bouncer_confirm_message
+                    } else {
+                        R.string.network_settings_delete_confirm_message
+                    },
+                ))
+            },
             confirmButton = {
                 TextButton(onClick = { showDeleteConfirm = false; onDelete() }) {
                     Text(stringResource(R.string.action_delete))

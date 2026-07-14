@@ -196,6 +196,7 @@
     <string name="network_settings_delete">Delete network</string>
     <string name="network_settings_delete_confirm_title">Delete network?</string>
     <string name="network_settings_delete_confirm_message">This removes the network and all of its buffers and history.</string>
+    <string name="network_settings_delete_bouncer_confirm_message">This removes the bouncer and all locally imported networks, channels, buffers, and history. It does not delete networks from the bouncer.</string>
     <string name="network_settings_save">Save</string>
     <string name="network_settings_general_section">General</string>
     <string name="network_settings_connection_section">Connection</string>

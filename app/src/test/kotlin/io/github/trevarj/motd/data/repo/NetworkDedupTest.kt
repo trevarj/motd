@@ -3,6 +3,7 @@ package io.github.trevarj.motd.data.repo
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
@@ -31,11 +32,27 @@ class NetworkDedupTest {
         override suspend fun byId(id: Long): NetworkEntity? = rows[id]
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> =
             rows.values.filter { it.parentId == rootId }
+        override suspend fun localTreeIds(id: Long): List<Long> = rows.values
+            .filter { it.id == id || it.parentId == id }
+            .map { it.id }
+        override suspend fun deleteMembersForNetworks(networkIds: List<Long>) = Unit
+        override suspend fun deleteReactionsForNetworks(networkIds: List<Long>) = Unit
+        override suspend fun deleteUsersForNetworks(networkIds: List<Long>) = Unit
+        override suspend fun deleteNetworkRows(networkIds: List<Long>) {
+            networkIds.forEach(rows::remove)
+        }
 
         override fun observeAll(): Flow<List<NetworkEntity>> = flowOf(rows.values.toList())
         override suspend fun connectable(): List<NetworkEntity> = rows.values.filter { it.autoConnect }
         override suspend fun update(n: NetworkEntity) { rows[n.id] = n }
         override suspend fun delete(n: NetworkEntity) { rows.remove(n.id) }
+    }
+
+    private class RecordingBouncerKinds : BouncerKindPrefs {
+        override val zncNetworkIds: Flow<Set<Long>> = flowOf(emptySet())
+        val cleared = mutableListOf<Long>()
+        override suspend fun markZnc(networkId: Long) = Unit
+        override suspend fun clear(networkId: Long) { cleared += networkId }
     }
 
     private fun direct(host: String, port: Int = 6697, nick: String = "motd") = NetworkEntity(
@@ -149,5 +166,21 @@ class NetworkDedupTest {
         repo.addNetwork(child(root1, netId = "1"))
         repo.addNetwork(child(root2, netId = "1"))
         assertEquals(4, dao.rows.size) // two roots + two children
+    }
+
+    @Test
+    fun `deleting a bouncer root deletes every local child and clears their classifications`() = runBlocking {
+        val dao = InMemoryNetworkDao()
+        val kinds = RecordingBouncerKinds()
+        val repo = NetworkRepositoryImpl(dao, kinds)
+        val rootId = repo.addNetwork(root("bnc.example.org", saslUser = "acct"))
+        val childOne = repo.addNetwork(child(rootId, netId = "1"))
+        val childTwo = repo.addNetwork(child(rootId, netId = "2"))
+        val unrelated = repo.addNetwork(direct("irc.example.org"))
+
+        repo.deleteNetwork(rootId)
+
+        assertEquals(setOf(unrelated), dao.rows.keys)
+        assertEquals(setOf(rootId, childOne, childTwo), kinds.cleared.toSet())
     }
 }

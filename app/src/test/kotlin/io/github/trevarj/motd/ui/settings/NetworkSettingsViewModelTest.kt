@@ -57,7 +57,10 @@ class NetworkSettingsViewModelTest {
         }
         override suspend fun deleteNetwork(id: Long) {
             operations += "delete:$id"
-            networks.remove(id)
+            val removed = networks.remove(id)
+            if (removed?.role == NetworkRole.BOUNCER_ROOT) {
+                networks.values.filter { it.parentId == id }.map { it.id }.forEach(networks::remove)
+            }
         }
         override suspend fun networkById(id: Long): NetworkEntity? = networks[id]
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> =
@@ -68,11 +71,12 @@ class NetworkSettingsViewModelTest {
         initial: Map<Long, IrcClientState> = emptyMap(),
     ) : ConnectionManager {
         override val connectionStates = MutableStateFlow(initial)
+        val disconnected = mutableListOf<Long>()
         override fun clientFor(networkId: Long): IrcClient? = null
         override suspend fun startAll() = Unit
         override suspend fun stopAll() = Unit
         override suspend fun connect(networkId: Long) = Unit
-        override suspend fun disconnect(networkId: Long) = Unit
+        override suspend fun disconnect(networkId: Long) { disconnected += networkId }
         override suspend fun reconnectStale() = Unit
         override suspend fun sendMessage(bufferId: Long, text: String, replyToMsgid: String?) = Unit
         override suspend fun sendTyping(bufferId: Long, state: String) = Unit
@@ -98,13 +102,14 @@ class NetworkSettingsViewModelTest {
     private object FakeAvatarController : AvatarController {
         var available = false
         val published = mutableListOf<Pair<Long, String?>>()
+        val cleared = mutableListOf<Long>()
         override suspend fun setShowSharedAvatars(show: Boolean) = Unit
         override suspend fun setSelfAvatar(networkId: Long, url: String?): Boolean {
             published += networkId to url
             return available
         }
         override suspend fun stopManagingSelfAvatar(networkId: Long) = Unit
-        override suspend fun clearNetworkState(networkId: Long) = Unit
+        override suspend fun clearNetworkState(networkId: Long) { cleared += networkId }
         override fun publishingAvailable(networkId: Long) = available
     }
 
@@ -114,6 +119,7 @@ class NetworkSettingsViewModelTest {
         Dispatchers.setMain(dispatcher)
         FakeAvatarController.available = false
         FakeAvatarController.published.clear()
+        FakeAvatarController.cleared.clear()
     }
     @After fun tearDown() = Dispatchers.resetMain()
 
@@ -153,10 +159,11 @@ class NetworkSettingsViewModelTest {
     private fun TestScope.loadedVm(
         repo: FakeNetworkRepository,
         prefs: PresetEnrollmentPrefs = FakePresetEnrollmentPrefs(),
+        connectionManager: FakeConnectionManager = FakeConnectionManager(),
     ): NetworkSettingsViewModel {
         return NetworkSettingsViewModel(
             repo,
-            FakeConnectionManager(),
+            connectionManager,
             prefs,
             FakeAvatarPrefs(),
             FakeAvatarController,
@@ -275,6 +282,25 @@ class NetworkSettingsViewModelTest {
         assertTrue(repo.networks.containsKey(1))
         assertFalse(repo.networks.containsKey(2))
         assertFalse(repo.networks.containsKey(3))
+        assertTrue(done)
+    }
+
+    @Test
+    fun deletingBouncerRoot_disconnectsAndForgetsEveryLocalMirror() = runTest {
+        val repo = FakeNetworkRepository(listOf(root(), child(2), child(3)))
+        val prefs = FakePresetEnrollmentPrefs()
+        val connectionManager = FakeConnectionManager()
+        val vm = loadedVm(repo, prefs, connectionManager)
+        var done = false
+
+        vm.delete { done = true }
+        runCurrent()
+
+        assertEquals(listOf(2L, 3L, 1L), connectionManager.disconnected)
+        assertEquals(setOf(1L, 2L, 3L), prefs.revoked)
+        assertEquals(listOf(2L, 3L, 1L), FakeAvatarController.cleared)
+        assertEquals(listOf("delete:1"), repo.operations)
+        assertTrue(repo.networks.isEmpty())
         assertTrue(done)
     }
 

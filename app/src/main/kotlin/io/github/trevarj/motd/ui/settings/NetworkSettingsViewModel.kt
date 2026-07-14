@@ -270,6 +270,9 @@ class NetworkSettingsViewModel @Inject constructor(
             networkRepository.updateNetwork(updated)
             if (removeLocalMirrors) {
                 networkRepository.childrenOf(updated.id).forEach { child ->
+                    connectionManager.disconnect(child.id)
+                    presetEnrollmentPrefs.revokeLiberaEligibility(child.id)
+                    avatarController.clearNetworkState(child.id)
                     networkRepository.deleteNetwork(child.id)
                 }
             }
@@ -310,10 +313,23 @@ class NetworkSettingsViewModel @Inject constructor(
     }
 
     fun delete(onDone: () -> Unit) = viewModelScope.launch {
-        _state.value.entity?.let {
-            presetEnrollmentPrefs.revokeLiberaEligibility(it.id)
-            avatarController.clearNetworkState(it.id)
-            networkRepository.deleteNetwork(it.id)
+        _state.value.entity?.let { network ->
+            // A root owns local bouncer mirrors outside Room's foreign-key graph. Stop children
+            // before the root, then clear every local identity before the repository atomically
+            // removes the whole tree and its buffers/history.
+            val localTree = (
+                if (network.role == NetworkRole.BOUNCER_ROOT) {
+                    networkRepository.childrenOf(network.id).sortedBy { it.id }
+                } else {
+                    emptyList()
+                }
+            ) + network
+            localTree.forEach { connectionManager.disconnect(it.id) }
+            localTree.forEach {
+                presetEnrollmentPrefs.revokeLiberaEligibility(it.id)
+                avatarController.clearNetworkState(it.id)
+            }
+            networkRepository.deleteNetwork(network.id)
         }
         onDone()
     }

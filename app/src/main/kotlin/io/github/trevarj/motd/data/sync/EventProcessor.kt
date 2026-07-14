@@ -840,7 +840,7 @@ class EventProcessor @Inject constructor(
         val existing = networkDao.childrenOf(root.id).firstOrNull { it.bouncerNetId == e.netId }
         // "*" attrs (empty map) signals deletion of the child network.
         if (e.attrs.isEmpty() && existing != null) {
-            networkDao.delete(existing)
+            networkDao.deleteLocalTree(existing.id)
             return
         }
         if (e.attrs.isEmpty()) return

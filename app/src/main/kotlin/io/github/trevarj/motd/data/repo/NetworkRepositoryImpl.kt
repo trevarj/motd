@@ -8,9 +8,9 @@ import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 
-// Thin pass-through over NetworkDao. Delete resolves the row by id first (Dao.delete takes an
-// entity); a missing row is a no-op. addNetwork additionally dedups against existing rows so
-// re-running onboarding / "Add network" for a server the user already has does not create a
+// Thin pass-through over NetworkDao. Delete treats a bouncer root and its local child mirrors as
+// one local tree; a missing row is a no-op. addNetwork additionally dedups against existing rows
+// so re-running onboarding / "Add network" for a server the user already has does not create a
 // duplicate NetworkEntity (which would spawn a second actor + socket for the same server).
 class NetworkRepositoryImpl @Inject constructor(
     private val networkDao: NetworkDao,
@@ -34,8 +34,9 @@ class NetworkRepositoryImpl @Inject constructor(
     override suspend fun updateNetwork(n: NetworkEntity) = networkDao.update(n)
 
     override suspend fun deleteNetwork(id: Long) {
-        networkDao.byId(id)?.let { networkDao.delete(it) }
-        bouncerKindPrefs.clear(id)
+        networkDao.deleteLocalTree(id).forEach { deletedId ->
+            bouncerKindPrefs.clear(deletedId)
+        }
     }
 
     override suspend fun networkById(id: Long): NetworkEntity? = networkDao.byId(id)
