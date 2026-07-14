@@ -50,6 +50,12 @@ interface ConnectionManager {
     suspend fun sendReact(bufferId: Long, msgid: String, emoji: String)
     suspend fun joinChannel(networkId: Long, channel: String)
 
+    /** Atomically claim a persisted invitation, connect if needed, then send exactly one JOIN. */
+    suspend fun acceptInvite(messageId: Long) = Unit
+
+    /** Resolve a persisted invitation without joining. */
+    suspend fun dismissInvite(messageId: Long) = Unit
+
     /** Part the buffer's channel; [reason] (from `/part <reason>`) becomes the PART trailing param. */
     suspend fun partChannel(bufferId: Long, reason: String? = null)
 

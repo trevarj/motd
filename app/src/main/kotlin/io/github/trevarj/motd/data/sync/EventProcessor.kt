@@ -402,6 +402,13 @@ class EventProcessor @Inject constructor(
         memberDao.upsert(MemberEntity(bufferId, e.nick))
         upsertUser(networkId, e.nick) { it.copy(account = e.account ?: it.account, realname = e.realname ?: it.realname) }
         if (e.isSelf) {
+            if (e.ctx.batchId == null) {
+                val resolvedInviteIds = messageDao.actionableInviteIds(bufferId)
+                if (resolvedInviteIds.isNotEmpty()) {
+                    messageDao.markInvitesJoined(bufferId)
+                    resolvedInviteIds.forEach { notifier.onInvitationResolved(it) }
+                }
+            }
             // Bug: our own JOIN was re-inserted every time the buffer was (re)opened — CHATHISTORY
             // event-playback and each live re-JOIN produced a fresh "you joined" row because the
             // default hash key folds in the volatile serverTime. Make the self-join idempotent per
@@ -790,6 +797,9 @@ interface MessageNotifier {
 
     /** A newly persisted, live, actionable invitation. */
     suspend fun onInvitation(networkId: Long, bufferId: Long, messageId: Long) = Unit
+
+    /** Cancel notification state after Join/Dismiss resolves an invitation. */
+    suspend fun onInvitationResolved(messageId: Long) = Unit
 
     /** No-op notifier for tests / headless contexts. */
     object Noop : MessageNotifier {

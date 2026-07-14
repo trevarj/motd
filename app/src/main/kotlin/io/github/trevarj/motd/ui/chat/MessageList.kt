@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,6 +22,9 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,6 +51,8 @@ import androidx.paging.compose.itemKey
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.db.InviteState
+import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.repo.LinkPreview
@@ -75,6 +81,7 @@ internal data class SystemRunContentKey(val newestId: Long, val oldestId: Long, 
 /** Reuse lazy compositions only across rows with the same structural layout. */
 internal enum class MessageContentType {
     SYSTEM,
+    INVITE,
     ACTION,
     ACTION_FAILED,
     SELF,
@@ -98,6 +105,7 @@ fun isSystemKind(kind: MessageKind): Boolean = when (kind) {
 }
 
 internal fun messageContentType(message: MessageEntity): MessageContentType = when {
+    message.kind == MessageKind.INVITE -> MessageContentType.INVITE
     isSystemKind(message.kind) -> MessageContentType.SYSTEM
     message.kind == MessageKind.ACTION && message.failed -> MessageContentType.ACTION_FAILED
     message.kind == MessageKind.ACTION -> MessageContentType.ACTION
@@ -162,6 +170,8 @@ fun MessageList(
     onToggleFool: (Long) -> Unit = {},
     // Tapping a non-self sender's name/avatar opens the nick sheet (plans/16 §5.8).
     onSenderClick: (String) -> Unit = {},
+    onAcceptInvite: (Long) -> Unit = {},
+    onDismissInvite: (Long) -> Unit = {},
 ) {
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
     val richContentEnabled = richContentReady && !scrolling && (showImages || showLinkPreviews)
@@ -186,6 +196,15 @@ fun MessageList(
             val msg = items[index] ?: return@items
             val older = if (index + 1 < items.itemCount) items.peek(index + 1) else null
             val newer = if (index - 1 >= 0) items.peek(index - 1) else null
+
+            if (msg.kind == MessageKind.INVITE) {
+                InvitationCard(
+                    message = msg,
+                    onJoin = { onAcceptInvite(msg.id) },
+                    onDismiss = { onDismissInvite(msg.id) },
+                )
+                return@items
+            }
 
             // System-event collapse (plans/15 #15): render one pill on the run's *newest* item and
             // skip the rest. In a reversed list the newest of a contiguous system run is the item
@@ -263,6 +282,66 @@ fun MessageList(
         // top of the reversed list, i.e. visually above the oldest message where APPEND loads more.
         item(key = "append-state", contentType = "loadstate") {
             LoadStateFooter(items.loadState.append)
+        }
+    }
+}
+
+@Composable
+private fun InvitationCard(
+    message: MessageEntity,
+    onJoin: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val payload = remember(message.eventPayload) { InvitePayloadV1.decode(message.eventPayload) }
+    val state = message.inviteState
+    if (payload == null || state == null || state == InviteState.HISTORICAL) {
+        SystemEventPill(
+            summary = message.text,
+            lineCount = 1,
+            loadLines = { listOf(message.text) },
+            contentKey = message.id,
+            modifier = Modifier.testTag("chat_invite_compact_${message.id}"),
+        )
+        return
+    }
+    if (state == InviteState.JOINED || state == InviteState.DISMISSED) {
+        val resolution = if (state == InviteState.JOINED) "Joined" else "Dismissed"
+        SystemEventPill(
+            summary = "$resolution ${payload.channel}",
+            lineCount = 1,
+            loadLines = { listOf(message.text) },
+            contentKey = message.id,
+            modifier = Modifier.testTag("chat_invite_resolved_${message.id}"),
+        )
+        return
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .testTag("chat_invite_card_${message.id}"),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Invitation to ${payload.channel}", style = MaterialTheme.typography.titleMedium)
+            Text(message.text, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+            if (state == InviteState.FAILED) {
+                Text("Could not join. You can retry.", color = MaterialTheme.colorScheme.error)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onJoin,
+                    enabled = state != InviteState.JOINING,
+                    modifier = Modifier.testTag("chat_invite_join_${message.id}"),
+                ) {
+                    Text(if (state == InviteState.JOINING) "Joining…" else "Join")
+                }
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.testTag("chat_invite_dismiss_${message.id}"),
+                ) {
+                    Text("Dismiss")
+                }
+            }
         }
     }
 }

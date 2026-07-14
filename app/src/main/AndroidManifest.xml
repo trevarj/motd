@@ -49,6 +49,7 @@
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
         </receiver>
         <receiver android:name=".service.ReplyReceiver" android:exported="false" />
+        <receiver android:name=".service.InviteReceiver" android:exported="false" />
 
         <!-- UnifiedPush entry point (WP9). Distributors deliver endpoint lifecycle + push bodies. -->
         <!-- UnifiedPush distributors deliver by explicit broadcast; the receiver MUST be exported

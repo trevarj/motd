@@ -165,6 +165,25 @@ interface MessageDao {
     @Query("UPDATE messages SET inviteState = :state WHERE id = :id")
     suspend fun setInviteState(id: Long, state: InviteState)
 
+    @Query(
+        """UPDATE messages SET inviteState = 'DISMISSED'
+           WHERE id = :id AND inviteState IN ('PENDING', 'JOINING', 'FAILED')""",
+    )
+    suspend fun dismissInvite(id: Long): Int
+
+    @Query(
+        """SELECT id FROM messages WHERE bufferId = :bufferId AND kind = 'INVITE'
+           AND inviteState IN ('PENDING', 'JOINING', 'FAILED')""",
+    )
+    suspend fun actionableInviteIds(bufferId: Long): List<Long>
+
+    @Query(
+        """UPDATE messages SET inviteState = 'JOINED'
+           WHERE bufferId = :bufferId AND kind = 'INVITE'
+           AND inviteState IN ('PENDING', 'JOINING', 'FAILED')""",
+    )
+    suspend fun markInvitesJoined(bufferId: Long): Int
+
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND pendingLabel = :label")
     suspend fun byPendingLabel(bufferId: Long, label: String): MessageEntity?
 

@@ -678,6 +678,7 @@ class EventProcessorTest {
     @Test
     fun selfInvite_createsUnjoinedChannelRow_andNotifiesOnce() = runTest {
         val notified = mutableListOf<Triple<Long, Long, Long>>()
+        val resolved = mutableListOf<Long>()
         val recording = EventProcessor(db, TypingTrackerImpl(), object : MessageNotifier {
             override suspend fun onIncoming(
                 networkId: Long,
@@ -689,6 +690,10 @@ class EventProcessorTest {
 
             override suspend fun onInvitation(networkId: Long, bufferId: Long, messageId: Long) {
                 notified += Triple(networkId, bufferId, messageId)
+            }
+
+            override suspend fun onInvitationResolved(messageId: Long) {
+                resolved += messageId
             }
         })
         recording.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
@@ -706,6 +711,13 @@ class EventProcessorTest {
         assertEquals(InvitePayloadV1("alice", "ME", "#Secret"), InvitePayloadV1.decode(row.eventPayload))
         assertEquals(1, notified.size)
         assertEquals(row.id, notified.single().third)
+
+        recording.process(
+            networkId,
+            IrcEvent.Joined(ctx("join-echo", 2_000), "me", "#Secret", null, null, isSelf = true),
+        )
+        assertEquals(InviteState.JOINED, db.messageDao().byId(row.id)?.inviteState)
+        assertEquals(listOf(row.id), resolved)
     }
 
     @Test
@@ -729,6 +741,28 @@ class EventProcessorTest {
 
         val buffer = db.bufferDao().byName(networkId, "#old")!!
         assertEquals(InviteState.HISTORICAL, pagingList(buffer.id).single().inviteState)
+    }
+
+    @Test
+    fun inviteState_claimAndDismiss_areAtomicAndJoinDoesNotReviveDismissed() = runTest {
+        processor.process(networkId, IrcEvent.Invited(ctx("invite-state"), "alice", "me", "#state"))
+        val buffer = db.bufferDao().byName(networkId, "#state")!!
+        val row = pagingList(buffer.id).single()
+
+        assertEquals(
+            1,
+            db.messageDao().compareAndSetInviteState(row.id, InviteState.PENDING, InviteState.JOINING),
+        )
+        assertEquals(
+            0,
+            db.messageDao().compareAndSetInviteState(row.id, InviteState.PENDING, InviteState.JOINING),
+        )
+        assertEquals(1, db.messageDao().dismissInvite(row.id))
+        processor.process(
+            networkId,
+            IrcEvent.Joined(ctx("late-join"), "me", "#state", null, null, isSelf = true),
+        )
+        assertEquals(InviteState.DISMISSED, db.messageDao().byId(row.id)?.inviteState)
     }
 
     @Test

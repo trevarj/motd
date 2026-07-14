@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
@@ -18,6 +19,7 @@ import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.avatar.AvatarCoordinator
 import io.github.trevarj.motd.bouncer.redactBouncerServCommand
@@ -751,6 +753,59 @@ class ConnectionManagerImpl @Inject constructor(
         client.send(io.github.trevarj.motd.irc.proto.IrcMessage(command = "JOIN", params = listOf(channel)))
     }
 
+    override suspend fun acceptInvite(messageId: Long) {
+        val initial = messageDao.byId(messageId) ?: return
+        val payload = InvitePayloadV1.decode(initial.eventPayload) ?: return
+        val buffer = bufferDao.observeById(initial.bufferId) ?: return
+        if (buffer.type != BufferType.CHANNEL ||
+            buffer.name != normalize(buffer.networkId, payload.channel)
+        ) return
+        val claimed = when (initial.inviteState) {
+            InviteState.PENDING, InviteState.FAILED -> messageDao.compareAndSetInviteState(
+                messageId,
+                initial.inviteState,
+                InviteState.JOINING,
+            )
+            else -> 0
+        }
+        if (claimed == 0) return
+
+        try {
+            if (connectionStates.value[buffer.networkId] !is IrcClientState.Ready) connect(buffer.networkId)
+            val ready = withTimeoutOrNull(INVITE_READY_TIMEOUT_MS) {
+                connectionStates.map { it[buffer.networkId] }
+                    .filterIsInstance<IrcClientState.Ready>()
+                    .first()
+            }
+            if (ready == null) {
+                messageDao.compareAndSetInviteState(messageId, InviteState.JOINING, InviteState.FAILED)
+                return
+            }
+            // Dismiss can race the connection wait. Recheck before the only wire write.
+            if (messageDao.byId(messageId)?.inviteState != InviteState.JOINING) return
+            val client = clientFor(buffer.networkId)
+            if (client == null) {
+                messageDao.compareAndSetInviteState(messageId, InviteState.JOINING, InviteState.FAILED)
+                return
+            }
+            client.send(
+                io.github.trevarj.motd.irc.proto.IrcMessage(
+                    command = "JOIN",
+                    params = listOf(payload.channel),
+                ),
+            )
+        } catch (cancelled: CancellationException) {
+            messageDao.compareAndSetInviteState(messageId, InviteState.JOINING, InviteState.FAILED)
+            throw cancelled
+        } catch (_: Exception) {
+            messageDao.compareAndSetInviteState(messageId, InviteState.JOINING, InviteState.FAILED)
+        }
+    }
+
+    override suspend fun dismissInvite(messageId: Long) {
+        if (messageDao.dismissInvite(messageId) > 0) messageNotifier.onInvitationResolved(messageId)
+    }
+
     override suspend fun partChannel(bufferId: Long, reason: String?) {
         val buffer = bufferDao.observeById(bufferId) ?: return
         // Append the reason as the PART trailing param when the user supplied one (/part <reason>).
@@ -904,6 +959,7 @@ class ConnectionManagerImpl @Inject constructor(
         const val READ_MARKER_RESPONSE_TIMEOUT_MS = 5_000L
         const val READ_MARKER_PERSIST_TIMEOUT_MS = 2_000L
         const val ECHO_TIMEOUT_MS = 30_000L
+        const val INVITE_READY_TIMEOUT_MS = 30_000L
         const val PUSH_BACKGROUND_GRACE_MS = 30_000L
         const val MAX_BYTES = 400
         // Stable, casemapping-invariant name for the per-network SERVER buffer.

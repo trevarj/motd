@@ -35,6 +35,7 @@ import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.avatar.AvatarStore
 import io.github.trevarj.motd.service.ConnectionManagerImpl
+import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.IrcForegroundService
 import io.github.trevarj.motd.service.MotdNotifications
@@ -58,6 +59,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var avatarStore: AvatarStore
     @Inject lateinit var contentPreviewPrefs: ContentPreviewPrefs
     @Inject lateinit var db: MotdDatabase
+    @Inject lateinit var connectionManager: ConnectionManager
 
     // POST_NOTIFICATIONS runtime permission (API 33+); result is advisory, no action needed.
     private val requestNotifications =
@@ -77,6 +79,7 @@ class MainActivity : ComponentActivity() {
         maybeStartForegroundService()
         // Cold start: the launcher created the activity with the notification's content intent.
         notificationTarget = parseNotificationTarget(intent)
+        acceptInvitationFrom(intent)
 
         setContent {
             val settings by settingsRepository.settings.collectAsState(initial = Settings())
@@ -126,6 +129,13 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         parseNotificationTarget(intent)?.let { notificationTarget = it }
+        acceptInvitationFrom(intent)
+    }
+
+    private fun acceptInvitationFrom(intent: Intent?) {
+        if (intent?.action != MotdNotifications.ACTION_ACCEPT_INVITE) return
+        val messageId = intent.getLongExtra(MotdNotifications.EXTRA_INVITE_MESSAGE_ID, -1L)
+        if (messageId >= 0) lifecycleScope.launch { connectionManager.acceptInvite(messageId) }
     }
 
     /**
@@ -134,7 +144,9 @@ class MainActivity : ComponentActivity() {
      * opens the buffer and the AROUND fallback handles a not-yet-cached target.
      */
     private fun parseNotificationTarget(intent: Intent?): NotificationTarget? {
-        if (intent?.action != MotdNotifications.ACTION_OPEN_BUFFER) return null
+        if (intent?.action != MotdNotifications.ACTION_OPEN_BUFFER &&
+            intent?.action != MotdNotifications.ACTION_ACCEPT_INVITE
+        ) return null
         val bufferId = intent.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1L)
         if (bufferId < 0) return null
         return NotificationTarget(

@@ -298,6 +298,14 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch { connectionManager.markRead(bufferId, time) }
     }
 
+    fun acceptInvite(messageId: Long) = viewModelScope.launch {
+        connectionManager.acceptInvite(messageId)
+    }
+
+    fun dismissInvite(messageId: Long) = viewModelScope.launch {
+        connectionManager.dismissInvite(messageId)
+    }
+
     // --- composer actions ---
 
     fun setReply(message: MessageEntity?) {

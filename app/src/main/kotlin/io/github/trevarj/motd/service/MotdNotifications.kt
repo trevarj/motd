@@ -73,6 +73,9 @@ class MotdNotifications @Inject constructor(
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_MENTIONS, "Mentions", NotificationManager.IMPORTANCE_HIGH),
         )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_INVITATIONS, "Invitations", NotificationManager.IMPORTANCE_HIGH),
+        )
     }
 
     // -- status notification (foreground service) --
@@ -212,16 +215,81 @@ class MotdNotifications @Inject constructor(
         manager.cancel(bufferId.toInt())
     }
 
+    override suspend fun onInvitation(networkId: Long, bufferId: Long, messageId: Long) {
+        val message = db.messageDao().byId(messageId) ?: return
+        val buffer = db.bufferDao().observeById(bufferId) ?: return
+        val contentIntent = PendingIntent.getActivity(
+            context,
+            invitationNotificationId(messageId),
+            Intent(context, MainActivity::class.java)
+                .setAction(ACTION_OPEN_BUFFER)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(EXTRA_BUFFER_ID, bufferId)
+                .putExtra(EXTRA_JUMP_MSGID, message.msgid)
+                .putExtra(EXTRA_JUMP_TIME, message.serverTime),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        fun actionIntent(action: String, requestOffset: Int): PendingIntent =
+            PendingIntent.getBroadcast(
+                context,
+                invitationNotificationId(messageId) + requestOffset,
+                Intent(context, InviteReceiver::class.java)
+                    .setAction(action)
+                    .putExtra(InviteReceiver.EXTRA_MESSAGE_ID, messageId),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+        val dismissIntent = actionIntent(InviteReceiver.ACTION_DISMISS, 1)
+        val joinIntent = PendingIntent.getActivity(
+            context,
+            invitationNotificationId(messageId) + 2,
+            Intent(context, MainActivity::class.java)
+                .setAction(ACTION_ACCEPT_INVITE)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(EXTRA_BUFFER_ID, bufferId)
+                .putExtra(EXTRA_JUMP_MSGID, message.msgid)
+                .putExtra(EXTRA_JUMP_TIME, message.serverTime)
+                .putExtra(EXTRA_INVITE_MESSAGE_ID, messageId),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_INVITATIONS)
+            .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
+            .setContentTitle("Invitation to ${buffer.displayName}")
+            .setContentText(message.text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message.text))
+            .setContentIntent(contentIntent)
+            .setDeleteIntent(dismissIntent)
+            .setAutoCancel(true)
+            .addAction(android.R.drawable.ic_menu_add, "Join", joinIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", dismissIntent)
+            .build()
+        val canPost = android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (canPost) manager.notify(invitationNotificationId(messageId), notification)
+    }
+
+    override suspend fun onInvitationResolved(messageId: Long) {
+        manager.cancel(invitationNotificationId(messageId))
+    }
+
     companion object {
         const val CHANNEL_STATUS = "status"
         const val CHANNEL_MESSAGES = "messages"
         const val CHANNEL_MENTIONS = "mentions"
+        const val CHANNEL_INVITATIONS = "invitations"
 
         // Deep-link extras carried by a message notification's content intent (tap → open + jump).
         const val ACTION_OPEN_BUFFER = "io.github.trevarj.motd.OPEN_BUFFER"
+        const val ACTION_ACCEPT_INVITE = "io.github.trevarj.motd.ACCEPT_INVITE"
         const val EXTRA_BUFFER_ID = "notif_buffer_id"
         const val EXTRA_JUMP_MSGID = "notif_jump_msgid"
         const val EXTRA_JUMP_TIME = "notif_jump_time"
+        const val EXTRA_INVITE_MESSAGE_ID = "notif_invite_message_id"
+
+        internal fun invitationNotificationId(messageId: Long): Int =
+            0x40000000 or (messageId xor (messageId ushr 32)).toInt().and(0x3fffffff)
     }
 }
 
