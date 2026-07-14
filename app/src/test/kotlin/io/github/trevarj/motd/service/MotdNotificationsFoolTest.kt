@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.service
 
 import android.content.Context
+import androidx.core.app.NotificationCompat
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
@@ -109,5 +110,22 @@ class MotdNotificationsFoolTest {
             hasMention = false, message = chat("troll", "hey"),
         )
         assertEquals(1, postedCount())
+    }
+
+    @Test
+    fun duplicateDelivery_addsBodyToMessagingStyleOnlyOnce() = runTest {
+        val message = chat("troll", "only once")
+
+        repeat(2) {
+            notifications.onIncoming(
+                networkId = 1, bufferId = bufferId, type = BufferType.QUERY,
+                hasMention = false, message = message,
+            )
+        }
+
+        val posted = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+            .activeNotifications.single().notification
+        val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted)
+        assertEquals(listOf("only once"), style?.messages?.map { it.text.toString() })
     }
 }
