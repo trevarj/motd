@@ -49,6 +49,7 @@ so a USB device reaches it at `127.0.0.1:6697`.
 ./test/e2e/local-stack.sh status
 ./test/e2e/local-stack.sh seed
 ./test/e2e/local-stack.sh control-check
+./test/e2e/local-stack.sh read-marker-check
 ./test/e2e/local-stack.sh down
 ```
 
@@ -91,6 +92,12 @@ The native stack provides deterministic inputs for the baseline matrix:
 non-admin fixture users. It verifies help-based authorization, channels,
 temporary network/user mutations, SASL, CertFP, broadcast notices, and debug
 enable/disable cleanup without adding Python dependencies beyond the Nix shell.
+
+`read-marker-check` connects two downstream clients to the same Soju network,
+sends a timestamped message, and verifies that `draft/read-marker` broadcasts
+between clients, never regresses after an older SET, and remains available after
+a downstream reconnect. MOTD reconciles its durable local marker with that
+server maximum whenever a read-marker-capable connection becomes ready.
 
 Always pair `pause-soju` with `resume-soju`; both target the exact PID recorded
 by the fixture rather than matching processes by command line.

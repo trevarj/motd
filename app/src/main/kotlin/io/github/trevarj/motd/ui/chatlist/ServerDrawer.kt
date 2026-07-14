@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -81,6 +82,7 @@ fun ServerDrawerContent(
     selectedNetworkId: Long?,
     allUnread: Int,
     allMentions: Int,
+    scopedUnreadCount: Int,
     allOffline: Boolean,
     onSelectNetwork: (Long?) -> Unit,
     onConnect: (Long) -> Unit,
@@ -90,6 +92,7 @@ fun ServerDrawerContent(
     onAddNetwork: () -> Unit,
     onToggleOffline: () -> Unit,
     onOpenSettings: () -> Unit,
+    onMarkAllRead: () -> Unit,
 ) {
     ModalDrawerSheet {
         Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
@@ -129,6 +132,18 @@ fun ServerDrawerContent(
                     onDisconnect = { onDisconnect(row.networkId) },
                     onServerMessages = { onServerMessages(row.networkId) },
                     onOpenNetworkSettings = { onOpenNetworkSettings(row.networkId) },
+                )
+            }
+
+            if (scopedUnreadCount > 0) {
+                NavigationDrawerItem(
+                    icon = { Icon(Icons.Outlined.DoneAll, contentDescription = null) },
+                    label = { Text(stringResource(R.string.drawer_mark_all_read)) },
+                    selected = false,
+                    onClick = onMarkAllRead,
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .testTag("drawer_mark_all_read"),
                 )
             }
 
@@ -354,9 +369,11 @@ private fun ServerDrawerPreview() {
             ),
             selectedNetworkId = 1,
             allUnread = 8, allMentions = 1, allOffline = false,
+            scopedUnreadCount = 8,
             onSelectNetwork = {}, onConnect = {}, onDisconnect = {},
             onServerMessages = {}, onOpenNetworkSettings = {},
             onAddNetwork = {}, onToggleOffline = {}, onOpenSettings = {},
+            onMarkAllRead = {},
         )
     }
 }

@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +36,10 @@ data class ChatListState(
     val allUnread: Int = 0, // "All chats" unread rollup (non-muted)
     val allMentions: Int = 0, // "All chats" mention rollup
 ) {
+    /** Effective unread count for the current drawer scope, including muted chats. */
+    val scopedUnreadCount: Int
+        get() = rows.filterNot { it.type == BufferType.SERVER }.sumOf { it.unreadCount }
+
     /** The scoped network's name, or null when unscoped (drives the top-bar title/chip). */
     val selectedNetworkName: String?
         get() = selectedNetworkId?.let { id -> networks.firstOrNull { it.id == id }?.name }
@@ -49,6 +54,7 @@ class ChatListViewModel @Inject constructor(
     private val bufferRepository: BufferRepository,
     private val networkRepository: NetworkRepository,
     private val connectionManager: ConnectionManager,
+    private val readMarkerRepository: ReadMarkerSnapshotter,
     private val settingsRepository: SettingsRepository,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
@@ -143,6 +149,18 @@ class ChatListViewModel @Inject constructor(
         onOpen(connectionManager.ensureServerBuffer(networkId))
     }
 
+    /** Mark every currently unread chat in the current drawer scope through one Room snapshot. */
+    fun markCurrentScopeRead() {
+        val bufferIds = unreadBufferIds(state.value.rows)
+        if (bufferIds.isEmpty()) return
+        viewModelScope.launch {
+            readMarkerRepository.latestIncoming(bufferIds).forEach { marker ->
+                val timestamp = marker.timestamp ?: return@forEach
+                runCatching { connectionManager.markRead(marker.bufferId, timestamp) }
+            }
+        }
+    }
+
     private fun setSelection(networkId: Long?) {
         selection.value = networkId
         savedStateHandle[KEY_SELECTED] = networkId
@@ -152,3 +170,11 @@ class ChatListViewModel @Inject constructor(
         const val KEY_SELECTED = "selected_network"
     }
 }
+
+/** Pure selection seam: muted rows remain eligible; SERVER/zero-unread rows never do. */
+internal fun unreadBufferIds(rows: List<ChatListRow>): List<Long> = rows
+    .asSequence()
+    .filter { it.type != BufferType.SERVER && it.unreadCount > 0 }
+    .map { it.bufferId }
+    .distinct()
+    .toList()

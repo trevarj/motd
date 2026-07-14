@@ -60,7 +60,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -119,6 +121,7 @@ fun ChatListScreen(
         onOpenNetworkSettings = onOpenNetworkSettings,
         onOpenAddNetwork = onOpenAddNetwork,
         onOpenChannelList = onOpenChannelList,
+        onMarkAllRead = viewModel::markCurrentScopeRead,
     )
 }
 
@@ -144,8 +147,10 @@ fun ChatListContent(
     onOpenNetworkSettings: (Long) -> Unit = {},
     onOpenAddNetwork: () -> Unit = {},
     onOpenChannelList: (Long) -> Unit = {},
+    onMarkAllRead: () -> Unit = {},
 ) {
     var showSheet by remember { mutableStateOf(false) }
+    var showMarkAllReadDialog by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -163,6 +168,7 @@ fun ChatListContent(
                 selectedNetworkId = state.selectedNetworkId,
                 allUnread = state.allUnread,
                 allMentions = state.allMentions,
+                scopedUnreadCount = state.scopedUnreadCount,
                 allOffline = state.allOffline,
                 onSelectNetwork = { id ->
                     onSelectNetwork(id)
@@ -186,6 +192,10 @@ fun ChatListContent(
                 onOpenSettings = {
                     onOpenSettings()
                     scope.launch { drawerState.close() }
+                },
+                onMarkAllRead = {
+                    scope.launch { drawerState.close() }
+                    showMarkAllReadDialog = true
                 },
             )
         },
@@ -309,6 +319,47 @@ fun ChatListContent(
             onBrowseChannels = { networkId ->
                 onOpenChannelList(networkId)
                 scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
+            },
+        )
+    }
+
+    if (showMarkAllReadDialog) {
+        val networkName = state.selectedNetworkName
+        AlertDialog(
+            onDismissRequest = { showMarkAllReadDialog = false },
+            title = {
+                Text(
+                    if (networkName == null) {
+                        stringResource(R.string.mark_all_read_dialog_title_all)
+                    } else {
+                        stringResource(R.string.mark_all_read_dialog_title_network, networkName)
+                    },
+                )
+            },
+            text = {
+                Text(
+                    pluralStringResource(
+                        R.plurals.mark_all_read_dialog_message,
+                        state.scopedUnreadCount,
+                        state.scopedUnreadCount,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showMarkAllReadDialog = false
+                        onMarkAllRead()
+                    },
+                    modifier = Modifier.testTag("drawer_mark_all_read_confirm"),
+                ) {
+                    Text(stringResource(R.string.mark_all_read_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMarkAllReadDialog = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
             },
         )
     }

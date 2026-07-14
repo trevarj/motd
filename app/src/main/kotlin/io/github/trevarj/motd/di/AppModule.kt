@@ -47,6 +47,8 @@ import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.MotdNotifications
 import io.github.trevarj.motd.service.PushNotifierImpl
+import io.github.trevarj.motd.service.ReadMarkerRepository
+import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.ui.settings.PushAvailabilityProvider
 import io.github.trevarj.motd.attachment.AttachmentPrefs
@@ -156,6 +158,11 @@ internal abstract class AppModule {
     // -- service (WP5 / WP1 trivial) --
     @Binds @Singleton
     abstract fun foregroundBufferTracker(impl: ForegroundBufferTrackerImpl): ForegroundBufferTracker
+
+    @Binds @Singleton
+    abstract fun readMarkerSnapshotter(
+        impl: ReadMarkerRepository,
+    ): ReadMarkerSnapshotter
 
     // -- push (WP9 / WP-R2) --
     @Binds @Singleton

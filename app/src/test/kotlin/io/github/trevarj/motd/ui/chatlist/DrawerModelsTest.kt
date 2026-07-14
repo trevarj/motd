@@ -125,4 +125,17 @@ class DrawerModelsTest {
         val out = scopeRows(rows, 1, networks)
         assertEquals(listOf(1L, 2L), out.map { it.bufferId })
     }
+
+    @Test
+    fun `mark all selection includes muted unread and excludes server and read rows`() {
+        val rows = listOf(
+            row(1, networkId = 1, unread = 2),
+            row(2, networkId = 1, muted = true, unread = 4),
+            row(3, networkId = 1, unread = 0),
+            row(4, networkId = 1, unread = 7, type = BufferType.SERVER),
+        )
+
+        assertEquals(listOf(1L, 2L), unreadBufferIds(rows))
+        assertEquals(6, ChatListState(rows = rows).scopedUnreadCount)
+    }
 }

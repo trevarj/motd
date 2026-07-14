@@ -304,19 +304,43 @@ phase_b() {
   fi
   assert_no_crash
 
-  # 13. Scope to network.
+  # 13. Scoped bulk read action. Seeded history normally makes this available; keep the phase
+  # useful when a reused fixture is already fully read.
+  step "Mark all current-scope chats read"
+  dump
+  if [ -n "$(bounds_of_tag drawer_mark_all_read)" ]; then
+    tap_tag drawer_mark_all_read
+    assert_text "Mark all chats as read?"
+    # AlertDialog is a separate Compose window; UIAutomator does not expose its button testTag
+    # reliably, so use the exact localized label (same constraint as the reactions sheet).
+    assert_text "Mark as read"
+    tap_text "Mark as read"
+    wait_for_desc "Open navigation drawer" 5 || true
+    tap_desc "Open navigation drawer"
+    dump
+    if [ -z "$(bounds_of_tag drawer_mark_all_read)" ]; then
+      ok "bulk read action cleared the current scope"
+    else
+      fail "bulk read action remained after confirmation"
+    fi
+  else
+    note "current scope already read; bulk read action correctly hidden"
+  fi
+  assert_no_crash
+
+  # 14. Scope to network.
   step "Scope list to libera"
   tap_text "libera"                      # TODO tag: drawer_network_row_<id>
   assert_text "libera"                   # ScopeChip / title
   assert_no_crash
 
-  # 14. Clear scope.
+  # 15. Clear scope.
   step "Clear network scope"
   tap_desc "Clear network filter"
   assert_desc_present "New conversation"
   assert_no_crash
 
-  # 15. Server messages buffer.
+  # 16. Server messages buffer.
   step "Open the SERVER buffer via drawer long-press"
   tap_desc "Open navigation drawer"
   long_press_text "libera"
@@ -328,7 +352,7 @@ phase_b() {
   fi
   assert_no_crash
 
-  # 16. Back to list.
+  # 17. Back to list.
   step "Back to chat list"
   adb_shell input keyevent 4
   wait_for_desc "New conversation" 8 || true

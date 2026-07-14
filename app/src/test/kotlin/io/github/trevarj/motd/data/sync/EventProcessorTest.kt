@@ -306,6 +306,39 @@ class EventProcessorTest {
     }
 
     @Test
+    fun readMarker_notifiesOnlyForKnownTimestampedTarget() = runTest {
+        val observed = mutableListOf<Pair<Long, Long>>()
+        val notifying = EventProcessor(db, TypingTrackerImpl(), object : MessageNotifier {
+            override suspend fun onIncoming(
+                networkId: Long,
+                bufferId: Long,
+                type: BufferType,
+                hasMention: Boolean,
+                message: IrcEvent.ChatMessage,
+            ) = Unit
+
+            override suspend fun onRead(bufferId: Long, upToTime: Long) {
+                observed += bufferId to upToTime
+            }
+        })
+        notifying.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+        val bufferId = db.bufferDao().insert(
+            io.github.trevarj.motd.data.db.BufferEntity(
+                networkId = networkId,
+                name = "#chan",
+                displayName = "#chan",
+                type = BufferType.CHANNEL,
+            ),
+        )
+
+        notifying.process(networkId, IrcEvent.ReadMarker("#chan", 5000))
+        notifying.process(networkId, IrcEvent.ReadMarker("#missing", 6000))
+        notifying.process(networkId, IrcEvent.ReadMarker("#chan", null))
+
+        assertEquals(listOf(bufferId to 5000L), observed)
+    }
+
+    @Test
     fun bouncerNetworkState_mirrorsChildRow_thenDeletes() = runTest {
         val rootId = db.networkDao().insert(
             NetworkEntity(

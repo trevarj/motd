@@ -404,6 +404,7 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         val bufferId = bufferDao.byName(networkId, st.normalize(e.target))?.id ?: return
         bufferDao.advanceReadMarker(bufferId, ts)
+        notifier.onRead(bufferId, ts)
         AutoFollowTrace.record("wire_markread_in", bufferId) { "marker=$ts" }
     }
 
@@ -708,6 +709,9 @@ interface MessageNotifier {
     // (runBlocking { suspend Room query }) deadlocks/crashes the main thread — same class of bug as
     // the findSelfEchoCandidate fix. Callers are already in suspend context.
     suspend fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage)
+
+    /** A local or synchronized marker advanced through [upToTime]. */
+    suspend fun onRead(bufferId: Long, upToTime: Long) = Unit
 
     /** No-op notifier for tests / headless contexts. */
     object Noop : MessageNotifier {

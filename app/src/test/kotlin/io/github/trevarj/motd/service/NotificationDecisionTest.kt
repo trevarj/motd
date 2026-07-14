@@ -49,4 +49,11 @@ class NotificationDecisionTest {
         // If a nick were somehow in both, fool silencing wins.
         assertFalse(shouldPostNotification(foreground = false, muted = false, senderIsFriend = true, senderIsFool = true))
     }
+
+    @Test
+    fun `read marker dismisses only when it covers the newest notification`() {
+        assertFalse(readMarkerCoversNotification(markerTime = 99, latestNotifiedTime = 100))
+        assertTrue(readMarkerCoversNotification(markerTime = 100, latestNotifiedTime = 100))
+        assertTrue(readMarkerCoversNotification(markerTime = 101, latestNotifiedTime = 100))
+    }
 }

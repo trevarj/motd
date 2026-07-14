@@ -57,6 +57,7 @@ class MotdNotifications @Inject constructor(
 
     // Per-buffer message history for MessagingStyle threading (notificationId = bufferId).
     private val history = HashMap<Long, NotificationCompat.MessagingStyle>()
+    private val latestNotifiedTimes = java.util.concurrent.ConcurrentHashMap<Long, Long>()
 
     init { ensureChannels() }
 
@@ -123,12 +124,14 @@ class MotdNotifications @Inject constructor(
         val channel = if (hasMention) CHANNEL_MENTIONS else CHANNEL_MESSAGES
         val title = buffer?.displayName ?: message.target
         val person = Person.Builder().setName(message.source.nick).build()
-        val style = history.getOrPut(bufferId) {
-            NotificationCompat.MessagingStyle(Person.Builder().setName("me").build())
-                .setConversationTitle(title)
-                .setGroupConversation(type == BufferType.CHANNEL)
+        val style = synchronized(history) {
+            history.getOrPut(bufferId) {
+                NotificationCompat.MessagingStyle(Person.Builder().setName("me").build())
+                    .setConversationTitle(title)
+                    .setGroupConversation(type == BufferType.CHANNEL)
+            }.also { it.addMessage(message.text, message.ctx.serverTime, person) }
         }
-        style.addMessage(message.text, message.ctx.serverTime, person)
+        latestNotifiedTimes.merge(bufferId, message.ctx.serverTime, ::maxOf)
 
         val replyIntent = PendingIntent.getBroadcast(
             context, bufferId.toInt(),
@@ -190,6 +193,23 @@ class MotdNotifications @Inject constructor(
         }
     }
 
+    override suspend fun onRead(bufferId: Long, upToTime: Long) {
+        val activeLatest = runCatching {
+            val notification = manager.activeNotifications
+                .firstOrNull { it.id == bufferId.toInt() }
+                ?.notification
+                ?: return@runCatching null
+            NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification)
+                ?.messages
+                ?.maxOfOrNull { it.timestamp }
+        }.getOrNull()
+        val latest = listOfNotNull(latestNotifiedTimes[bufferId], activeLatest).maxOrNull() ?: return
+        if (!readMarkerCoversNotification(upToTime, latest)) return
+        synchronized(history) { history.remove(bufferId) }
+        latestNotifiedTimes.remove(bufferId)
+        manager.cancel(bufferId.toInt())
+    }
+
     companion object {
         const val CHANNEL_STATUS = "status"
         const val CHANNEL_MESSAGES = "messages"
@@ -202,3 +222,6 @@ class MotdNotifications @Inject constructor(
         const val EXTRA_JUMP_TIME = "notif_jump_time"
     }
 }
+
+internal fun readMarkerCoversNotification(markerTime: Long, latestNotifiedTime: Long): Boolean =
+    markerTime >= latestNotifiedTime

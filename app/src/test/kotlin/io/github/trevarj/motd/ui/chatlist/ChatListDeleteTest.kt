@@ -17,9 +17,11 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.service.BufferReadMarker
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.DeliveryMode
+import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -112,6 +114,11 @@ class ChatListDeleteTest {
             bufferRepository = buffers,
             networkRepository = FakeNetworkRepository(),
             connectionManager = cm,
+            readMarkerRepository = object : ReadMarkerSnapshotter {
+                override suspend fun latestIncoming(
+                    bufferIds: Collection<Long>,
+                ): List<BufferReadMarker> = emptyList()
+            },
             settingsRepository = FakeSettingsRepository(),
             savedStateHandle = SavedStateHandle(),
         )

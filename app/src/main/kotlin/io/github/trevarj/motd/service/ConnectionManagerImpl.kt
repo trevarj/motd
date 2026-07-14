@@ -18,6 +18,7 @@ import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.avatar.AvatarCoordinator
 import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.data.db.ObfsMode
@@ -46,9 +47,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Hilt @Singleton connection subsystem (plans/05). Outlives the foreground service — the service
@@ -68,6 +71,8 @@ class ConnectionManagerImpl @Inject constructor(
     private val baseTransportFactory: TransportFactory,
     private val localSocksProvider: LocalSocksProvider,
     private val historyResyncCoordinator: HistoryResyncCoordinator,
+    private val readMarkerRepository: ReadMarkerRepository,
+    private val messageNotifier: MessageNotifier,
     private val presetEnrollmentCoordinator: PresetEnrollmentCoordinator,
     private val avatarCoordinator: AvatarCoordinator,
     private val pushHealthStore: PushHealthStore,
@@ -468,7 +473,10 @@ class ConnectionManagerImpl @Inject constructor(
             }
         }
         if (!isCurrent()) return
-        catchUpForConnection(row.id, client)
+        coroutineScope {
+            launch { catchUpForConnection(row.id, client) }
+            launch { reconcileReadMarkersForConnection(row, client, isCurrent) }
+        }
     }
 
     // -- catch-up (plans/04) -------------------------------------------------
@@ -481,9 +489,7 @@ class ConnectionManagerImpl @Inject constructor(
      * soon as the socket leaves Ready.
      */
     private suspend fun catchUpForConnection(networkId: Long, client: IrcClient) {
-        client.state.filterIsInstance<IrcClientState.Ready>().first { ready ->
-            ready.caps.any { it == CHATHISTORY_CAP || it.startsWith("$CHATHISTORY_CAP=") }
-        }
+        if (!awaitCapability(client, CHATHISTORY_CAP)) return
         var attempt = 0
         while (clientFor(networkId) === client) {
             val buffers = openBuffers(networkId)
@@ -499,15 +505,38 @@ class ConnectionManagerImpl @Inject constructor(
                     Log.w(TAG, "CHATHISTORY catch-up failed for network $networkId; retrying in ${retryMs}ms: ${result.reason}")
                     delay(retryMs)
                 }
-                else -> {
-                    if (clientFor(networkId) === client) {
-                        for ((_, name) in buffers) runCatching { client.fetchReadMarker(name) }
-                    }
-                    return
-                }
+                else -> return
             }
         }
     }
+
+    /**
+     * Converge the durable local marker with the server maximum. A SET also fetches: IRCv3/soju
+     * replies with its newer value when the local timestamp is stale. Reads performed without a
+     * live socket therefore upload on the next connection instead of being silently lost.
+     */
+    private suspend fun reconcileReadMarkersForConnection(
+        row: NetworkEntity,
+        client: IrcClient,
+        isCurrent: () -> Boolean,
+    ) {
+        if (row.role == NetworkRole.BOUNCER_ROOT || !awaitCapability(client, READ_MARKER_CAP)) return
+        for (request in readMarkerSyncRequests(readMarkerRepository.storedForNetwork(row.id))) {
+            if (!isCurrent()) return
+            runCatching {
+                request.timestamp?.let { client.markRead(request.target, it) }
+                    ?: client.fetchReadMarker(request.target)
+            }
+        }
+    }
+
+    private suspend fun awaitCapability(client: IrcClient, capability: String): Boolean =
+        client.hasCap(capability) || withTimeoutOrNull(CAP_SETTLE_TIMEOUT_MS) {
+            client.state.filterIsInstance<IrcClientState.Ready>().first { ready ->
+                ready.caps.any { it == capability || it.startsWith("$capability=") }
+            }
+            true
+        } == true
 
     private suspend fun openBuffers(networkId: Long): List<Pair<Long, String>> =
         kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -727,6 +756,7 @@ class ConnectionManagerImpl @Inject constructor(
 
     override suspend fun markRead(bufferId: Long, upToTime: Long) {
         bufferDao.advanceReadMarker(bufferId, upToTime)
+        messageNotifier.onRead(bufferId, upToTime)
         AutoFollowTrace.record("local_markread", bufferId) { "marker=$upToTime" }
         val buffer = bufferDao.observeById(bufferId) ?: return
         // SERVER buffers use "*" as their name, which is not a valid MARKREAD target; the Room
@@ -836,7 +866,9 @@ class ConnectionManagerImpl @Inject constructor(
         // Stable logcat tag for reconnect catch-up failures.
         private const val TAG = "MotdCatchUp"
         const val CHATHISTORY_CAP = "draft/chathistory"
+        const val READ_MARKER_CAP = "draft/read-marker"
         const val WEBPUSH_CAP = "soju.im/webpush"
+        const val CAP_SETTLE_TIMEOUT_MS = 15_000L
         const val ECHO_TIMEOUT_MS = 30_000L
         const val PUSH_BACKGROUND_GRACE_MS = 30_000L
         const val MAX_BYTES = 400
@@ -851,6 +883,12 @@ class ConnectionManagerImpl @Inject constructor(
 
 internal fun catchUpRetryDelayMs(attempt: Int): Long =
     (2_000L * (1L shl attempt.coerceIn(0, 4))).coerceAtMost(30_000L)
+
+/** Wire requests needed to converge local markers with a read-marker-capable server. */
+internal fun readMarkerSyncRequests(markers: List<BufferReadMarker>): List<ReadMarkerSyncRequest> =
+    markers.map { ReadMarkerSyncRequest(it.target, it.timestamp) }
+
+internal data class ReadMarkerSyncRequest(val target: String, val timestamp: Long?)
 
 /**
  * Pure wanted-set computation for [ConnectionManagerImpl.reconcile] (plans/16 §4), extracted for
