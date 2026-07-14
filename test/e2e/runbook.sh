@@ -848,8 +848,21 @@ phase_f() {
   scroll_forward_to_tag settings_battery_optimization 4 || true
   tap_tag settings_battery_optimization
   assert_no_crash                       # OS settings intent fired
-  adb_shell input keyevent 4            # return to app
-  adb_shell input keyevent 4            # back to Settings root
+  # The system battery activity opens asynchronously. Fixed consecutive BACK presses can race it:
+  # one is consumed before launch and the next merely returns to Message delivery. Back out one
+  # settled screen at a time until a tagged root category proves we actually reached Settings.
+  local _back_attempt
+  for _back_attempt in 1 2 3; do
+    adb_shell input keyevent 4
+    sleep 1
+    dump || true
+    if [ -n "$(bounds_of_tag settings_category_delivery)" ] ||
+       [ -n "$(bounds_of_tag settings_category_uploads)" ] ||
+       [ -n "$(bounds_of_tag settings_category_about)" ]; then
+      break
+    fi
+  done
+  assert_tag_present settings_category_delivery
   assert_no_crash
 
   # 53. About. Find the category by tag because it is normally below the root viewport.
