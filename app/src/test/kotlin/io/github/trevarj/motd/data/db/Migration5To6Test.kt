@@ -33,6 +33,7 @@ class Migration5To6Test {
                 .callback(object : SupportSQLiteOpenHelper.Callback(5) {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         db.execSQL(CREATE_MESSAGES_V5)
+                        db.execSQL(CREATE_USERS_V5)
                         db.execSQL(CREATE_DEDUP_INDEX)
                         db.execSQL(CREATE_MSGID_INDEX)
                         db.execSQL(CREATE_TIME_INDEX)
@@ -72,6 +73,11 @@ class Migration5To6Test {
             assertTrue(cursor.moveToFirst())
             assertEquals(4, cursor.getInt(0))
         }
+        db.query("PRAGMA table_info(users)").use { cursor ->
+            val nameIndex = cursor.getColumnIndexOrThrow("name")
+            val columns = buildSet { while (cursor.moveToNext()) add(cursor.getString(nameIndex)) }
+            assertTrue("username" in columns)
+        }
     }
 
     private fun insertTyped(id: Long, eventKey: String?): String {
@@ -92,6 +98,13 @@ class Migration5To6Test {
                 kind TEXT NOT NULL, text TEXT NOT NULL, isSelf INTEGER NOT NULL,
                 hasMention INTEGER NOT NULL, replyToMsgid TEXT, pendingLabel TEXT,
                 failed INTEGER NOT NULL, dedupKey TEXT NOT NULL
+            )
+        """
+        const val CREATE_USERS_V5 = """
+            CREATE TABLE users (
+                networkId INTEGER NOT NULL, nick TEXT NOT NULL, account TEXT,
+                away INTEGER NOT NULL, hostmask TEXT, realname TEXT,
+                PRIMARY KEY(networkId, nick)
             )
         """
         const val CREATE_DEDUP_INDEX =

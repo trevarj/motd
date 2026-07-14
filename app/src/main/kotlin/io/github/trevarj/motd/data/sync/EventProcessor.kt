@@ -460,7 +460,18 @@ class EventProcessor @Inject constructor(
     private suspend fun onNames(networkId: Long, e: IrcEvent.Names) {
         val st = stateFor(networkId)
         val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
-        memberDao.replaceAll(bufferId, e.members.map { MemberEntity(bufferId, it.nick, it.prefixes) })
+        db.withTransaction {
+            memberDao.replaceAll(bufferId, e.members.map { MemberEntity(bufferId, it.nick, it.prefixes) })
+            e.members.forEach { member ->
+                val username = member.username
+                val host = member.host
+                if (username != null && host != null) {
+                    upsertUser(networkId, member.nick) {
+                        it.copy(username = username, hostmask = "$username@$host")
+                    }
+                }
+            }
+        }
     }
 
     private suspend fun onTopicChanged(networkId: Long, e: IrcEvent.TopicChanged) {
@@ -742,7 +753,9 @@ class EventProcessor @Inject constructor(
         }
 
     private suspend fun upsertUser(networkId: Long, nick: String, mutate: (UserEntity) -> UserEntity) {
-        val existing = userDao.byNick(networkId, nick) ?: UserEntity(networkId = networkId, nick = nick)
+        val normalized = stateFor(networkId).normalize(nick)
+        val existing = userDao.byNick(networkId, normalized)
+            ?: UserEntity(networkId = networkId, nick = normalized)
         userDao.upsert(mutate(existing))
     }
 

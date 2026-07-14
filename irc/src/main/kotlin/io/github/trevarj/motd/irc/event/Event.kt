@@ -53,7 +53,12 @@ sealed interface IrcEvent {
     data class Kicked(val ctx: MessageContext, val nick: String, val channel: String, val by: String, val reason: String?, val isSelf: Boolean) : IrcEvent
     data class NickChanged(val ctx: MessageContext, val from: String, val to: String, val isSelf: Boolean) : IrcEvent
     data class Names(val channel: String, val members: List<Member>) : IrcEvent {
-        data class Member(val nick: String, val prefixes: String, val account: String?)
+        data class Member(
+            val nick: String,
+            val prefixes: String,
+            val username: String?,
+            val host: String?,
+        )
     }
     data class AwayChanged(val nick: String, val awayMessage: String?) : IrcEvent
     data class AccountChanged(val nick: String, val account: String?) : IrcEvent

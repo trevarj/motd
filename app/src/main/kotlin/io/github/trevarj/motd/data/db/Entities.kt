@@ -135,6 +135,7 @@ data class ReactionEntity(
 @Entity(tableName = "users", primaryKeys = ["networkId", "nick"])
 data class UserEntity(
     val networkId: Long, val nick: String,
+    val username: String? = null,
     val account: String? = null, val away: Boolean = false,
     val hostmask: String? = null, val realname: String? = null,
 )

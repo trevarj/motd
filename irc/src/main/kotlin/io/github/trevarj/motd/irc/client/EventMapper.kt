@@ -239,12 +239,17 @@ internal class EventMapper(
             while (i < entry.length && entry[i] in prefixChars) {
                 prefixes.append(entry[i]); i++
             }
-            var rest = entry.substring(i)
+            val rest = entry.substring(i)
             // userhost-in-names: nick!user@host
-            var account: String? = null
             val bang = rest.indexOf('!')
-            val nick = if (bang >= 0) rest.substring(0, bang) else rest
-            members.add(IrcEvent.Names.Member(nick, prefixes.toString(), account))
+            val at = if (bang >= 0) rest.indexOf('@', bang + 1) else -1
+            if (bang == 0) continue
+            val nick = if (bang > 0) rest.substring(0, bang) else rest
+            if (nick.isEmpty()) continue
+            val validUserhost = bang > 0 && at > bang + 1 && at < rest.lastIndex
+            val username = if (validUserhost) rest.substring(bang + 1, at) else null
+            val host = if (validUserhost) rest.substring(at + 1) else null
+            members.add(IrcEvent.Names.Member(nick, prefixes.toString(), username, host))
         }
     }
 

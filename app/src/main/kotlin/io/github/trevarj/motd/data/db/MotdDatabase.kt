@@ -104,6 +104,7 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         db.execSQL("ALTER TABLE messages ADD COLUMN eventKey TEXT")
         db.execSQL("ALTER TABLE messages ADD COLUMN eventPayload TEXT")
         db.execSQL("ALTER TABLE messages ADD COLUMN inviteState TEXT")
+        db.execSQL("ALTER TABLE users ADD COLUMN username TEXT")
         db.execSQL(
             "CREATE UNIQUE INDEX IF NOT EXISTS index_messages_bufferId_eventKey " +
                 "ON messages(bufferId, eventKey)",

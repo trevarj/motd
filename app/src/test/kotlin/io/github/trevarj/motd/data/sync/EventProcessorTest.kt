@@ -673,6 +673,32 @@ class EventProcessorTest {
         assertEquals(2, pagingList(bufferId).count { it.kind == MessageKind.JOIN })
     }
 
+    @Test
+    fun namesUserhost_convergesIdentityWithoutErasingOnPlainSnapshot() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.Names(
+                "#Room",
+                listOf(IrcEvent.Names.Member("Nick", "@+", "~user", "host.example")),
+            ),
+        )
+        val buffer = db.bufferDao().byName(networkId, "#room")!!
+        assertEquals("@+", db.memberDao().observe(buffer.id).first().single().prefixes)
+        val enriched = db.userDao().byNick(networkId, "nick")!!
+        assertEquals("~user", enriched.username)
+        assertEquals("~user@host.example", enriched.hostmask)
+
+        processor.process(
+            networkId,
+            IrcEvent.Names("#room", listOf(IrcEvent.Names.Member("NICK", "@", null, null))),
+        )
+        assertEquals("~user@host.example", db.userDao().byNick(networkId, "nick")?.hostmask)
+
+        processor.process(networkId, IrcEvent.HostChanged("Nick", "new", "cloak.example"))
+        val changed = db.userDao().byNick(networkId, "nick")!!
+        assertEquals("new@cloak.example", changed.hostmask)
+    }
+
     // --- invitations ------------------------------------------------------
 
     @Test
