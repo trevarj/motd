@@ -689,9 +689,8 @@ marked Complete.
   destructive development-only downgrade boundary remains documented beside
   `MIGRATION_5_6` and `DbModule`.
 - The release-parity matrix from `.agents/testing.md`, plus debug assembly,
-  passed on 2026-07-14. After the later audit fixes, the affected focused tests
-  and FOSS lint also passed; the full matrix must be rerun once more for final
-  closeout.
+  passed after all audit fixes on 2026-07-14: `:irc:build`, both FOSS unit-test
+  variants, debug lint, and release/debug APK assembly were green.
 - `./test/e2e/znc-stack.sh probe` passed. The pinned ZNC advertises neither
   MONITOR nor no-implicit-names and lacks `draft/chathistory`; connection,
   messaging, two-client routing, reconnect-gap recovery, and timestamped native
