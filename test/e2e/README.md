@@ -196,6 +196,40 @@ Ctrl-C:
 adb reverse --remove tcp:6670
 ```
 
+## IRCv3 Ready fixture
+
+The deterministic plaintext fixture on port `6671` is shaped like a capable
+Solanum connection. It negotiates ratified `no-implicit-names`,
+`userhost-in-names`, and `extended-monitor`; advertises `MONITOR` and `WHOX`;
+forwards a two-client invite; and emits nested netsplit/netjoin batches inside
+CHATHISTORY. The probe asserts that no implicit NAMES arrives, then checks the
+explicit NAMES/WHOX snapshot, MONITOR online/offline/list numerics, invite
+delivery and ordered batch traffic directly. The soju leg proves alias
+selection and clean degradation: the pinned bouncer omits upstream
+`userhost-in-names` and strips netsplit batch wrappers while preserving the
+WHOX identity and individual JOIN/QUIT membership mutations.
+`invite-check` separately holds a soju downstream client open while a direct
+Ergo client invites the upstream app nick, proving the two-client bouncer path.
+
+```sh
+./test/e2e/local-stack.sh up
+./test/e2e/local-stack.sh ready-up
+./test/e2e/local-stack.sh ready-check
+./test/e2e/local-stack.sh invite-check
+```
+
+For a physical-device check, add a custom plaintext network at
+`127.0.0.1:6671` with no authentication, or import the `ready-fixture` network
+from the local soju account. Join `#ready`; the server must not send a roster
+until Channel info, completion, or moderation requests it. Send
+`/msg solanum.ready.test READY-BATCHES` to insert the deterministic split/join
+pills. The transcript is `/tmp/motd-stack/ircv3-ready.log`.
+
+```sh
+./test/e2e/local-stack.sh ready-down
+./test/e2e/local-stack.sh down
+```
+
 ## Run the host-driven UI sweep
 
 Copy the local template and adjust only when needed:

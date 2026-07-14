@@ -23,6 +23,10 @@
 #   ./test/e2e/local-stack.sh status    # show pids + soju network status
 #   ./test/e2e/local-stack.sh control-check # BouncerServ admin/non-admin and mutation proof
 #   ./test/e2e/local-stack.sh read-marker-check # two-client marker broadcast/reconnect proof
+#   ./test/e2e/local-stack.sh invite-check # direct sender -> soju downstream INVITE proof
+#   ./test/e2e/local-stack.sh ready-up   # start scripted IRCv3 Ready fixture + soju network
+#   ./test/e2e/local-stack.sh ready-check # direct and soju wire proofs for Ready features
+#   ./test/e2e/local-stack.sh ready-down # remove scripted fixture network + process
 #   ./test/e2e/local-stack.sh obfs-up   # VLESS+REALITY layer: sing-box server + Xray SOCKS client
 #   ./test/e2e/local-stack.sh obfs-down # stop the reality layer + drop its adb reverse
 #   ./test/e2e/local-stack.sh obfs-validate  # socket-level proof: IRC/TLS to soju THROUGH reality
@@ -57,6 +61,10 @@ SOJU_PASS=motdtest
 SOJU_NONADMIN_USER=motduser
 SOJU_NONADMIN_PASS=motdusertest
 NETWORK_NAME=libera
+READY_PORT=6671
+READY_NETWORK=ready-fixture
+READY_PID="$RUN/ircv3-ready.pid"
+READY_LOG="$RUN/ircv3-ready.log"
 
 # Obfuscation layer (plans/20 Phase 1 validation). REALITY server on :8443 (avoid clashing with a
 # real 443), a local SOCKS5 the app dials on 127.0.0.1:1080, and a handshake domain to impersonate.
@@ -81,7 +89,7 @@ die() { printf '\033[31m[local-stack] FATAL:\033[0m %s\n' "$*" >&2; exit 1; }
 # nix shell providing whatever the command needs but is missing from PATH.
 need_reexec=false
 case "$CMD" in
-  control-check|read-marker-check)
+  control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down)
     command -v soju >/dev/null 2>&1 && command -v ergo >/dev/null 2>&1 && \
       command -v python3 >/dev/null 2>&1 || need_reexec=true ;;
   obfs-*)
@@ -321,6 +329,62 @@ read_marker_check() {
     --password "$SOJU_PASS" \
     --network "$NETWORK_NAME" \
     --channel "$TEST_CHANNEL"
+}
+
+invite_check() {
+  [ -S "$ADMIN_SOCK" ] || die "soju admin socket not found; run '$0 up' first"
+  log "running direct Ergo sender -> soju downstream invitation proof"
+  python3 "$REPO/test/e2e/fixtures/invite-delivery-probe.py" \
+    --ergo-port "$ERGO_PORT" --soju-port "$SOJU_PORT" \
+    --username "$SOJU_USER/$NETWORK_NAME" --password "$SOJU_PASS" --target "$APP_NICK"
+}
+
+ready_up() {
+  [ -S "$ADMIN_SOCK" ] || die "soju admin socket not found; run '$0 up' first"
+  if [ -f "$READY_PID" ] && kill -0 "$(cat "$READY_PID")" 2>/dev/null; then
+    die "IRCv3 Ready fixture is already running; use '$0 ready-down' first"
+  fi
+  nc -z 127.0.0.1 "$READY_PORT" 2>/dev/null && die "port $READY_PORT is already in use"
+  log "starting deterministic IRCv3 Ready fixture on :$READY_PORT"
+  setsid python3 "$REPO/test/e2e/fixtures/ircv3-ready-server.py" \
+    --port "$READY_PORT" --log "$READY_LOG" >"$RUN/ircv3-ready.stdout" 2>&1 &
+  echo $! >"$READY_PID"
+  wait_port 127.0.0.1 "$READY_PORT" "IRCv3 Ready fixture"
+  ctl user run "$SOJU_USER" network create \
+    -addr "irc+insecure://127.0.0.1:$READY_PORT" \
+    -name "$READY_NETWORK" -nick motdready -username motdready -enabled=true 2>/dev/null \
+    || log "network $READY_NETWORK already exists (ok)"
+  local i=0
+  until ctl user run "$SOJU_USER" network status 2>/dev/null \
+      | grep "$READY_NETWORK" | grep -q '\[connected\]'; do
+    i=$((i + 1)); [ "$i" -gt 30 ] && die "soju Ready fixture network did not connect"; sleep 1
+  done
+  adb reverse "tcp:$READY_PORT" "tcp:$READY_PORT" \
+    || log "adb reverse failed (no device?) — set it up manually"
+  log "Ready fixture available direct on :$READY_PORT and via soju network '$READY_NETWORK'"
+}
+
+ready_check() {
+  [ -f "$READY_PID" ] && kill -0 "$(cat "$READY_PID")" 2>/dev/null \
+    || die "IRCv3 Ready fixture is not running — run '$0 ready-up' first"
+  log "checking direct Solanum-shaped wire contract"
+  python3 "$REPO/test/e2e/fixtures/ircv3-ready-probe.py" --port "$READY_PORT"
+  log "checking soju forwarding and capability contract"
+  python3 "$REPO/test/e2e/fixtures/ircv3-ready-probe.py" \
+    --port "$SOJU_PORT" --tls \
+    --username "$SOJU_USER/$READY_NETWORK" --password "$SOJU_PASS" --skip-invite
+}
+
+ready_down() {
+  if [ -S "$ADMIN_SOCK" ]; then
+    ctl user run "$SOJU_USER" network delete "$READY_NETWORK" 2>/dev/null || true
+  fi
+  if [ -f "$READY_PID" ]; then
+    kill "$(cat "$READY_PID")" 2>/dev/null || true
+    rm -f "$READY_PID"
+  fi
+  adb reverse --remove "tcp:$READY_PORT" 2>/dev/null || true
+  log "IRCv3 Ready fixture stopped"
 }
 
 signal_soju() { # signal description
@@ -713,6 +777,10 @@ case "$CMD" in
   status) status ;;
   control-check) control_check ;;
   read-marker-check) read_marker_check ;;
+  invite-check) invite_check ;;
+  ready-up) ready_up ;;
+  ready-check) ready_check ;;
+  ready-down) ready_down ;;
   obfs-up) obfs_up ;;
   obfs-down) obfs_down ;;
   obfs-validate) obfs_validate ;;
@@ -720,5 +788,5 @@ case "$CMD" in
   obfs-xray-down) xray_obfs_down ;;
   obfs-xray-validate) xray_obfs_validate ;;
   obfs-xray-negative) xray_obfs_negative ;;
-  *) die "unknown command '$CMD' (want up|down|seed|burst|jpq|push|pause-soju|resume-soju|stop-soju|start-soju|status|control-check|read-marker-check|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-negative)" ;;
+  *) die "unknown command '$CMD' (want up|down|seed|burst|jpq|push|pause-soju|resume-soju|stop-soju|start-soju|status|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-negative)" ;;
 esac
