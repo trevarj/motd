@@ -846,6 +846,7 @@ internal fun ReplyMiniBubble(reply: ReplyPreviewData, nickColors: NickColorSchem
     val accent = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
     Row(
         modifier = Modifier
+            .testTag("chat_reply_preview")
             .padding(vertical = 2.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)),

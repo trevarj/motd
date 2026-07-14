@@ -267,9 +267,9 @@ class ChatViewModel @Inject constructor(
 
     fun replyPreview(msgid: String): StateFlow<ReplyPreviewData?> = synchronized(replyPreviewCache) {
         replyPreviewCache.getOrPut(msgid) {
-            kotlinx.coroutines.flow.flow {
-                emit(messageRepository.byMsgid(bufferId, msgid)?.toReplyPreviewData())
-            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+            messageRepository.observeByMsgid(bufferId, msgid)
+                .map { it?.toReplyPreviewData() }
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
         }
     }
 
