@@ -26,6 +26,9 @@ internal object CapTiers {
         "setname",
         "userhost-in-names",
         "invite-notify",
+        "no-implicit-names",
+        "draft/no-implicit-names",
+        "soju.im/no-implicit-names",
         "sts",
     )
 
@@ -60,6 +63,9 @@ internal object CapNegotiator {
         if ("draft/metadata-2" in req && "batch" !in advertised) {
             req.remove("draft/metadata-2")
         }
+        val selectedNames = preferredNoImplicitNames(advertised)
+        req.removeAll(NO_IMPLICIT_NAMES_ALIASES)
+        if (selectedNames != null) req.add(selectedNames)
         return req
     }
 
@@ -79,4 +85,15 @@ internal object CapNegotiator {
         if (sb.isNotEmpty()) out.add(sb.toString())
         return out
     }
+}
+
+val NO_IMPLICIT_NAMES_ALIASES: List<String> = listOf(
+    "no-implicit-names",
+    "draft/no-implicit-names",
+    "soju.im/no-implicit-names",
+)
+
+fun preferredNoImplicitNames(caps: Set<String>): String? {
+    val names = caps.mapTo(HashSet()) { it.substringBefore('=') }
+    return NO_IMPLICIT_NAMES_ALIASES.firstOrNull { it in names }
 }
