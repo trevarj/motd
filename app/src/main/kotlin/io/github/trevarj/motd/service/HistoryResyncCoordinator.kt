@@ -16,10 +16,12 @@ import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,10 +37,18 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 
+enum class HistoryRefreshRange {
+    MISSING,
+    HOURS_24,
+    DAYS_7,
+    DAYS_30,
+    ALL_AVAILABLE,
+}
+
 sealed interface HistoryResyncState {
     data object Idle : HistoryResyncState
     data object WaitingForCapability : HistoryResyncState
-    data object Running : HistoryResyncState
+    data class Running(val fetched: Int = 0, val limit: Int? = null) : HistoryResyncState
     data class Updated(val inserted: Int) : HistoryResyncState
     data object UpToDate : HistoryResyncState
     data object Unsupported : HistoryResyncState
@@ -86,6 +96,7 @@ class HistoryResyncCoordinator @Inject constructor(
         buffer: BufferEntity,
         client: IrcClient,
         isCurrent: () -> Boolean,
+        range: HistoryRefreshRange = HistoryRefreshRange.MISSING,
     ): HistoryResyncState {
         val source = ClientHistorySource(client)
         if (!source.hasChatHistory()) {
@@ -103,15 +114,27 @@ class HistoryResyncCoordinator @Inject constructor(
                 }
             }
         }
-        states.update { it + (buffer.id to HistoryResyncState.Running) }
+        states.update { it + (buffer.id to HistoryResyncState.Running(limit = range.messageLimit)) }
         return coalesced(RequestKey(buffer.networkId, buffer.id)) {
-            syncTargets(
+            syncBufferRange(
                 networkId = buffer.networkId,
-                targets = listOf(buffer.id to buffer.displayName),
+                bufferId = buffer.id,
+                target = buffer.displayName,
                 source = source,
                 isCurrent = isCurrent,
-                includeRecentOverlap = true,
+                range = range,
             ).also { result -> states.update { it + (buffer.id to result) } }
+        }
+    }
+
+    /** Cancel the active user-requested refresh for [bufferId], if one exists. */
+    fun cancelBufferResync(bufferId: Long) {
+        scope.launch {
+            val request = activeGuard.withLock {
+                active.entries.firstOrNull { it.key.bufferId == bufferId }?.value
+            }
+            request?.cancel()
+            states.update { it - bufferId }
         }
     }
 
@@ -150,6 +173,10 @@ class HistoryResyncCoordinator @Inject constructor(
                     limit = source.pageLimit(),
                 ),
             ).targets.map { null to it.first }
+        } catch (_: TimeoutCancellationException) {
+            return@coalesced HistoryResyncState.Failed("Could not discover history targets")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Exception) {
             return@coalesced HistoryResyncState.Failed(
                 error.message?.take(160) ?: "Could not discover history targets",
@@ -175,8 +202,134 @@ class HistoryResyncCoordinator @Inject constructor(
         target: String,
         source: HistorySource,
         isCurrent: () -> Boolean = { true },
+        range: HistoryRefreshRange = HistoryRefreshRange.MISSING,
     ): HistoryResyncState = coalesced(RequestKey(networkId, bufferId)) {
-        syncTargets(networkId, listOf(bufferId to target), source, isCurrent, includeRecentOverlap = true)
+        syncBufferRange(networkId, bufferId, target, source, isCurrent, range)
+    }
+
+    private suspend fun syncBufferRange(
+        networkId: Long,
+        bufferId: Long,
+        target: String,
+        source: HistorySource,
+        isCurrent: () -> Boolean,
+        range: HistoryRefreshRange,
+    ): HistoryResyncState {
+        if (!source.hasChatHistory()) return HistoryResyncState.Unsupported
+        if (!isCurrent()) return staleConnection()
+        val before = messageCount(bufferId)
+        return try {
+            when (range) {
+                HistoryRefreshRange.MISSING -> syncTarget(
+                    networkId,
+                    bufferId,
+                    target,
+                    source,
+                    isCurrent,
+                    includeRecentOverlap = true,
+                )
+                HistoryRefreshRange.HOURS_24,
+                HistoryRefreshRange.DAYS_7,
+                HistoryRefreshRange.DAYS_30,
+                -> syncSince(
+                    networkId = networkId,
+                    bufferId = bufferId,
+                    target = target,
+                    source = source,
+                    isCurrent = isCurrent,
+                    cutoff = range.cutoffMillis(System.currentTimeMillis())!!,
+                    range = range,
+                )
+                HistoryRefreshRange.ALL_AVAILABLE -> syncAllAvailable(
+                    networkId,
+                    bufferId,
+                    target,
+                    source,
+                    isCurrent,
+                )
+            }
+            val inserted = (messageCount(bufferId) - before).coerceAtLeast(0)
+            if (inserted > 0) HistoryResyncState.Updated(inserted) else HistoryResyncState.UpToDate
+        } catch (_: TimeoutCancellationException) {
+            HistoryResyncState.Failed("History refresh timed out")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: StaleConnectionException) {
+            staleConnection()
+        } catch (error: Exception) {
+            HistoryResyncState.Failed(error.message?.take(160) ?: "History refresh failed")
+        }
+    }
+
+    /** Fetch the requested recent interval forward from its cutoff timestamp. */
+    private suspend fun syncSince(
+        networkId: Long,
+        bufferId: Long,
+        target: String,
+        source: HistorySource,
+        isCurrent: () -> Boolean,
+        cutoff: Long,
+        range: HistoryRefreshRange,
+    ) {
+        val pageLimit = source.pageLimit()
+        var boundary = Boundary(msgid = null, serverTime = cutoff)
+        var fetched = 0
+        while (true) {
+            if (!isCurrent()) throw StaleConnectionException()
+            val page = request(
+                source,
+                ChatHistoryRequest(
+                    ChatHistoryRequest.Subcommand.AFTER,
+                    target,
+                    bound1 = boundary.selector(source.supportsMsgidReferences()),
+                    limit = pageLimit,
+                ),
+            )
+            if (!isCurrent()) throw StaleConnectionException()
+            if (page.events.isEmpty()) return
+            processor.process(networkId, IrcEvent.HistoryBatch(target, page.events))
+            fetched += page.events.size
+            states.update { it + (bufferId to HistoryResyncState.Running(fetched, range.messageLimit)) }
+            val next = pageBoundary(page.events, newest = true) ?: return
+            if (next == boundary || page.events.size < pageLimit) return
+            boundary = next
+        }
+    }
+
+    /** Fetch newest pages first so the all-history cap remains useful for active chats. */
+    private suspend fun syncAllAvailable(
+        networkId: Long,
+        bufferId: Long,
+        target: String,
+        source: HistorySource,
+        isCurrent: () -> Boolean,
+    ) {
+        val pageLimit = source.pageLimit()
+        var boundary: Boundary? = null
+        var fetched = 0
+        while (fetched < ALL_HISTORY_LIMIT) {
+            if (!isCurrent()) throw StaleConnectionException()
+            val requestLimit = minOf(pageLimit, ALL_HISTORY_LIMIT - fetched)
+            val historyRequest = if (boundary == null) {
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = requestLimit)
+            } else {
+                ChatHistoryRequest(
+                    ChatHistoryRequest.Subcommand.BEFORE,
+                    target,
+                    bound1 = boundary.selector(source.supportsMsgidReferences()),
+                    limit = requestLimit,
+                )
+            }
+            val page = request(source, historyRequest)
+            if (!isCurrent()) throw StaleConnectionException()
+            if (page.events.isEmpty()) return
+            processor.process(networkId, IrcEvent.HistoryBatch(target, page.events))
+            fetched += page.events.size
+            states.update { it + (bufferId to HistoryResyncState.Running(fetched, ALL_HISTORY_LIMIT)) }
+            val next = pageBoundary(page.events, newest = false) ?: return
+            if (next == boundary || page.events.size < requestLimit) return
+            boundary = next
+        }
     }
 
     private suspend fun syncTargets(
@@ -202,6 +355,10 @@ class HistoryResyncCoordinator @Inject constructor(
                 )
             }
             if (inserted > 0) HistoryResyncState.Updated(inserted) else HistoryResyncState.UpToDate
+        } catch (_: TimeoutCancellationException) {
+            HistoryResyncState.Failed("History refresh timed out")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: StaleConnectionException) {
             staleConnection()
         } catch (error: Exception) {
@@ -249,6 +406,10 @@ class HistoryResyncCoordinator @Inject constructor(
                     boundary = next
                     if (page.events.size < pageLimit) break
                 }
+            } catch (_: TimeoutCancellationException) {
+                afterRejected = true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: StaleConnectionException) {
                 throw StaleConnectionException()
             } catch (_: Exception) {
@@ -339,6 +500,44 @@ class HistoryResyncCoordinator @Inject constructor(
         if (msgidSupported && !msgid.isNullOrBlank()) "msgid=$msgid"
         else "timestamp=${Instant.ofEpochMilli(serverTime)}"
 
+    private fun pageBoundary(events: List<IrcEvent>, newest: Boolean): Boundary? {
+        val contexts = events.flatMap { it.historyContexts() }
+        val context = if (newest) {
+            contexts.maxByOrNull { it.serverTime }
+        } else {
+            contexts.minByOrNull { it.serverTime }
+        } ?: return null
+        return Boundary(context.msgid, context.serverTime)
+    }
+
+    private fun IrcEvent.historyContexts(): List<io.github.trevarj.motd.irc.event.MessageContext> = when (this) {
+        is IrcEvent.ChatMessage -> listOf(ctx)
+        is IrcEvent.TagMessage -> listOf(ctx)
+        is IrcEvent.Joined -> listOf(ctx)
+        is IrcEvent.Parted -> listOf(ctx)
+        is IrcEvent.Quit -> listOf(ctx)
+        is IrcEvent.Kicked -> listOf(ctx)
+        is IrcEvent.NickChanged -> listOf(ctx)
+        is IrcEvent.TopicChanged -> listOf(ctx)
+        is IrcEvent.ModeChanged -> listOf(ctx)
+        is IrcEvent.Invited -> listOf(ctx)
+        is IrcEvent.NetworkBatch -> events.flatMap { it.historyContexts() }
+        is IrcEvent.HistoryBatch -> events.flatMap { it.historyContexts() }
+        else -> emptyList()
+    }
+
+    private val HistoryRefreshRange.messageLimit: Int?
+        get() = if (this == HistoryRefreshRange.ALL_AVAILABLE) ALL_HISTORY_LIMIT else null
+
+    private fun HistoryRefreshRange.cutoffMillis(now: Long): Long? = when (this) {
+        HistoryRefreshRange.HOURS_24 -> now - HOURS_24_MS
+        HistoryRefreshRange.DAYS_7 -> now - DAYS_7_MS
+        HistoryRefreshRange.DAYS_30 -> now - DAYS_30_MS
+        HistoryRefreshRange.MISSING,
+        HistoryRefreshRange.ALL_AVAILABLE,
+        -> null
+    }
+
     private enum class CapabilityAvailability { AVAILABLE, UNSUPPORTED, PENDING }
 
     private suspend fun awaitBouncerCapability(
@@ -391,5 +590,9 @@ class HistoryResyncCoordinator @Inject constructor(
         const val REQUEST_TIMEOUT_MS = 35_000L
         const val TARGETS_FUZZ_MS = 10_000L
         const val CAPABILITY_WAIT_TIMEOUT_MS = 30_000L
+        const val ALL_HISTORY_LIMIT = 5_000
+        const val HOURS_24_MS = 24L * 60 * 60 * 1_000
+        const val DAYS_7_MS = 7L * 24 * 60 * 60 * 1_000
+        const val DAYS_30_MS = 30L * 24 * 60 * 60 * 1_000
     }
 }

@@ -9,6 +9,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -33,7 +34,9 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SheetState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -80,6 +83,7 @@ import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.service.HistoryResyncState
+import io.github.trevarj.motd.service.HistoryRefreshRange
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
@@ -217,6 +221,7 @@ fun ChatScreen(
         onSnackbarShown = viewModel::consumeSnackbar,
         historyResyncState = historyResyncState,
         onRefreshHistory = viewModel::refreshHistory,
+        onCancelHistoryRefresh = viewModel::cancelHistoryRefresh,
         onHistoryResyncShown = viewModel::consumeHistoryResyncState,
     )
 
@@ -320,7 +325,8 @@ fun ChatContent(
     rawSendSnackbar: String? = null,
     onSnackbarShown: () -> Unit = {},
     historyResyncState: HistoryResyncState = HistoryResyncState.Idle,
-    onRefreshHistory: () -> Unit = {},
+    onRefreshHistory: (HistoryRefreshRange) -> Unit = {},
+    onCancelHistoryRefresh: () -> Unit = {},
     onHistoryResyncShown: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
@@ -347,6 +353,7 @@ fun ChatContent(
     var uploadCurrentDraftDirectly by rememberSaveable { mutableStateOf(false) }
     var longDraftPrompt by rememberSaveable { mutableStateOf(false) }
     var overflowOpen by rememberSaveable { mutableStateOf(false) }
+    var historyRefreshSheetOpen by rememberSaveable { mutableStateOf(false) }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
     // Global fool expand/collapse toggle (plans/13 §2.4): when true every collapsed fool row in the
     // buffer renders expanded; per-row toggles still override individually via [expandedFools] and
@@ -445,7 +452,7 @@ fun ChatContent(
             is HistoryResyncState.Failed -> result.reason.ifBlank { historyFailed }
             HistoryResyncState.Idle,
             HistoryResyncState.WaitingForCapability,
-            HistoryResyncState.Running,
+            is HistoryResyncState.Running,
             -> return@LaunchedEffect
         }
         snackbarHostState.showSnackbar(text)
@@ -657,6 +664,7 @@ fun ChatContent(
     // Long-press action sheet target.
     var sheetTarget by remember { mutableStateOf<MessageEntity?>(null) }
     val sheetState = rememberModalBottomSheetState()
+    val historyRefreshSheetState = rememberModalBottomSheetState()
 
     // Raw ignored tails do not make the user leave the meaningful bottom of the conversation.
     val atBottom by remember(listState, items, visibilityPolicy) {
@@ -846,25 +854,42 @@ fun ChatContent(
                         Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
                     }
                     DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
-                        DropdownMenuItem(
-                            modifier = Modifier.testTag("chat_refresh_history"),
-                            text = { Text(stringResource(R.string.chat_refresh_history)) },
-                            onClick = {
-                                overflowOpen = false
-                                onRefreshHistory()
-                            },
-                            enabled = historyResyncState !is HistoryResyncState.Running &&
-                                historyResyncState != HistoryResyncState.WaitingForCapability,
-                            leadingIcon = {
-                                if (historyResyncState is HistoryResyncState.Running ||
-                                    historyResyncState == HistoryResyncState.WaitingForCapability
-                                ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                                } else {
-                                    Icon(Icons.Outlined.Refresh, contentDescription = null)
-                                }
-                            },
-                        )
+                        val running = historyResyncState as? HistoryResyncState.Running
+                        val historyBusy = running != null ||
+                            historyResyncState == HistoryResyncState.WaitingForCapability
+                        if (historyBusy) {
+                            DropdownMenuItem(
+                                modifier = Modifier.testTag("chat_cancel_history_refresh"),
+                                text = {
+                                    Text(
+                                        if (running?.limit != null) {
+                                            stringResource(
+                                                R.string.chat_history_refreshing_progress,
+                                                running.fetched,
+                                                running.limit,
+                                            )
+                                        } else {
+                                            stringResource(R.string.chat_history_refreshing)
+                                        },
+                                    )
+                                },
+                                onClick = {
+                                    overflowOpen = false
+                                    onCancelHistoryRefresh()
+                                },
+                                leadingIcon = { CircularProgressIndicator(modifier = Modifier.size(24.dp)) },
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                modifier = Modifier.testTag("chat_refresh_history"),
+                                text = { Text(stringResource(R.string.chat_refresh_history)) },
+                                onClick = {
+                                    overflowOpen = false
+                                    historyRefreshSheetOpen = true
+                                },
+                                leadingIcon = { Icon(Icons.Outlined.Refresh, contentDescription = null) },
+                            )
+                        }
                     }
                 },
             )
@@ -1033,6 +1058,16 @@ fun ChatContent(
         onInsertUrl = { composerText = io.github.trevarj.motd.ui.components.insertAtCursor(composerText, it) },
         onReplaceDraft = { composerText = TextFieldValue(it, androidx.compose.ui.text.TextRange(it.length)) },
     )
+    if (historyRefreshSheetOpen) {
+        HistoryRefreshSheet(
+            sheetState = historyRefreshSheetState,
+            onDismiss = { historyRefreshSheetOpen = false },
+            onRange = {
+                historyRefreshSheetOpen = false
+                onRefreshHistory(it)
+            },
+        )
+    }
     if (longDraftPrompt) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = {
@@ -1098,6 +1133,57 @@ fun ChatContent(
                 hideThen { composerText = appendPrefill(composerText, "> ${target.text}\n") }
             },
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HistoryRefreshSheet(
+    sheetState: SheetState,
+    onDismiss: () -> Unit,
+    onRange: (HistoryRefreshRange) -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.testTag("chat_history_refresh_sheet"),
+    ) {
+        Column(Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
+            Text(
+                stringResource(R.string.chat_history_refresh_title),
+                style = MaterialTheme.typography.titleLarge,
+            )
+            Text(
+                stringResource(R.string.chat_history_refresh_description),
+                modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            HistoryRefreshOption(HistoryRefreshRange.MISSING, R.string.chat_history_range_missing, onRange)
+            HistoryRefreshOption(HistoryRefreshRange.HOURS_24, R.string.chat_history_range_24h, onRange)
+            HistoryRefreshOption(HistoryRefreshRange.DAYS_7, R.string.chat_history_range_7d, onRange)
+            HistoryRefreshOption(HistoryRefreshRange.DAYS_30, R.string.chat_history_range_30d, onRange)
+            HistoryRefreshOption(HistoryRefreshRange.ALL_AVAILABLE, R.string.chat_history_range_all, onRange)
+            androidx.compose.material3.TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryRefreshOption(
+    range: HistoryRefreshRange,
+    @androidx.annotation.StringRes label: Int,
+    onRange: (HistoryRefreshRange) -> Unit,
+) {
+    androidx.compose.material3.TextButton(
+        onClick = { onRange(range) },
+        modifier = Modifier.fillMaxWidth().testTag("chat_history_range_${range.name.lowercase()}"),
+    ) {
+        Text(stringResource(label))
     }
 }
 

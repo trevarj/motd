@@ -103,11 +103,13 @@ class HistoryResyncCoordinatorTest {
     private class FakeSource(
         var supported: Boolean = true,
         var msgidRefs: Boolean = true,
+        var pageLimit: Int = 100,
         val responder: suspend (ChatHistoryRequest) -> ChatHistoryResult,
     ) : HistoryResyncCoordinator.HistorySource {
         val requests = mutableListOf<ChatHistoryRequest>()
         override fun hasChatHistory() = supported
         override fun supportsMsgidReferences() = msgidRefs
+        override fun pageLimit() = pageLimit
         override suspend fun chathistory(request: ChatHistoryRequest): ChatHistoryResult {
             requests += request
             return responder(request)
@@ -252,6 +254,63 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun timeRangeRefreshUsesAfterFromTheSelectedCutoff() = runTest {
+        val now = System.currentTimeMillis()
+        val source = FakeSource { request ->
+            assertEquals(ChatHistoryRequest.Subcommand.AFTER, request.subcommand)
+            ChatHistoryResult(listOf(message("recent", now - 1_000)), emptyList())
+        }
+
+        val result = coordinator.resyncBuffer(
+            networkId,
+            bufferId,
+            "#chan",
+            source,
+            range = HistoryRefreshRange.HOURS_24,
+        )
+
+        assertEquals(HistoryResyncState.Updated(1), result)
+        assertTrue(source.requests.single().bound1!!.startsWith("timestamp="))
+        assertEquals("recent", rows().single().msgid)
+    }
+
+    @Test
+    fun allAvailableStartsNewestThenPagesBackwardWithinTheCap() = runTest {
+        var page = 0
+        val source = FakeSource(pageLimit = 2) { request ->
+            val response = when (page++) {
+                0 -> {
+                    assertEquals(ChatHistoryRequest.Subcommand.LATEST, request.subcommand)
+                    listOf(message("m5", 5), message("m4", 4))
+                }
+                1 -> {
+                    assertEquals(ChatHistoryRequest.Subcommand.BEFORE, request.subcommand)
+                    assertEquals("msgid=m4", request.bound1)
+                    listOf(message("m3", 3), message("m2", 2))
+                }
+                else -> {
+                    assertEquals(ChatHistoryRequest.Subcommand.BEFORE, request.subcommand)
+                    assertEquals("msgid=m2", request.bound1)
+                    listOf(message("m1", 1))
+                }
+            }
+            ChatHistoryResult(response, emptyList())
+        }
+
+        val result = coordinator.resyncBuffer(
+            networkId,
+            bufferId,
+            "#chan",
+            source,
+            range = HistoryRefreshRange.ALL_AVAILABLE,
+        )
+
+        assertEquals(HistoryResyncState.Updated(5), result)
+        assertEquals(listOf("m5", "m4", "m3", "m2", "m1"), rows().mapNotNull { it.msgid })
+        assertEquals(3, source.requests.size)
+    }
+
+    @Test
     fun unsupportedAndTimeoutAreExplicitRetryableResults() = runTest {
         val unsupported = FakeSource(supported = false) { ChatHistoryResult(emptyList(), emptyList()) }
         assertEquals(
@@ -278,7 +337,13 @@ class HistoryResyncCoordinatorTest {
             ChatHistoryResult(listOf(message("stale", 200)), emptyList())
         }
 
-        val result = coordinator.resyncBuffer(networkId, bufferId, "#chan", source) { current }
+        val result = coordinator.resyncBuffer(
+            networkId,
+            bufferId,
+            "#chan",
+            source,
+            isCurrent = { current },
+        )
 
         assertTrue(result is HistoryResyncState.Failed)
         assertTrue(rows().isEmpty())

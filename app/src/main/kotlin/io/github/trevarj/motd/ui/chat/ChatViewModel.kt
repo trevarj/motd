@@ -36,6 +36,7 @@ import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncCoordinator
+import io.github.trevarj.motd.service.HistoryRefreshRange
 import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.TypingTracker
@@ -385,7 +386,7 @@ class ChatViewModel @Inject constructor(
 
     fun consumeSnackbar() { _snackbar.value = null }
 
-    fun refreshHistory() {
+    fun refreshHistory(range: HistoryRefreshRange = HistoryRefreshRange.MISSING) {
         val currentBuffer = buffer.value ?: return
         val client = connectionManager.clientFor(currentBuffer.networkId)
         if (client == null || connState.value !is IrcClientState.Ready) {
@@ -397,9 +398,12 @@ class ChatViewModel @Inject constructor(
                 buffer = currentBuffer,
                 client = client,
                 isCurrent = { connectionManager.clientFor(currentBuffer.networkId) === client },
+                range = range,
             )
         }
     }
+
+    fun cancelHistoryRefresh() = historyResyncCoordinator.cancelBufferResync(bufferId)
 
     fun consumeHistoryResyncState() = historyResyncCoordinator.consumeState(bufferId)
 
