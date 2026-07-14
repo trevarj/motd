@@ -17,7 +17,13 @@ enum class NetworkRole { DIRECT, BOUNCER_ROOT, BOUNCER_CHILD }
  */
 enum class ObfsMode { NONE, SOCKS5, TOR, EMBEDDED_REALITY }
 enum class BufferType { CHANNEL, QUERY, SERVER }
-enum class MessageKind { PRIVMSG, NOTICE, ACTION, JOIN, PART, QUIT, KICK, NICK, MODE, TOPIC, ERROR, SERVER_INFO }
+enum class MessageKind {
+    PRIVMSG, NOTICE, ACTION, JOIN, PART, QUIT, KICK, NICK, MODE, TOPIC, ERROR, SERVER_INFO,
+    INVITE, NETSPLIT, NETJOIN,
+}
+
+/** Durable state for an invitation timeline event. Null for every non-invitation message. */
+enum class InviteState { PENDING, JOINING, JOINED, DISMISSED, FAILED, HISTORICAL }
 
 @Entity(tableName = "networks")
 data class NetworkEntity(
@@ -83,6 +89,9 @@ data class BufferEntity(
         // SQLite treats NULLs as distinct in a UNIQUE index, so the many still-pending / msgid-less
         // self rows coexist freely; only confirmed duplicates are rejected.
         Index(value = ["bufferId", "msgid"], unique = true),
+        // Typed events need a stable identity independent of their rendered text. NULL keeps
+        // ordinary chat rows outside this constraint; non-null keys deduplicate socket/push/history.
+        Index(value = ["bufferId", "eventKey"], unique = true),
         Index(value = ["bufferId", "serverTime", "id"])],
     foreignKeys = [ForeignKey(
         entity = BufferEntity::class, parentColumns = ["id"],
@@ -104,6 +113,9 @@ data class MessageEntity(
     val pendingLabel: String? = null,    // set while awaiting echo; null once confirmed
     val failed: Boolean = false,         // echo timeout -> retry UI
     val dedupKey: String,                // msgid ?: sha1(serverTime|sender|text); "pending:<label>" while pending
+    val eventKey: String? = null,        // stable identity for INVITE/NETSPLIT/NETJOIN
+    val eventPayload: String? = null,    // versioned, defensively decoded typed-event payload
+    val inviteState: InviteState? = null,
 )
 
 @Fts4(contentEntity = MessageEntity::class)

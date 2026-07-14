@@ -150,6 +150,21 @@ interface MessageDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(msgs: List<MessageEntity>): List<Long>
 
+    @Query("SELECT * FROM messages WHERE id = :id LIMIT 1")
+    suspend fun byId(id: Long): MessageEntity?
+
+    @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND eventKey = :eventKey LIMIT 1")
+    suspend fun byEventKey(bufferId: Long, eventKey: String): MessageEntity?
+
+    @Query(
+        """UPDATE messages SET inviteState = :toState
+           WHERE id = :id AND inviteState = :fromState""",
+    )
+    suspend fun compareAndSetInviteState(id: Long, fromState: InviteState, toState: InviteState): Int
+
+    @Query("UPDATE messages SET inviteState = :state WHERE id = :id")
+    suspend fun setInviteState(id: Long, state: InviteState)
+
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND pendingLabel = :label")
     suspend fun byPendingLabel(bufferId: Long, label: String): MessageEntity?
 

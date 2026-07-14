@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -87,6 +87,27 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         // An unreleased development build used schema version 3 for this column. MIGRATION_3_4
         // leaves it intact when upgrading that database, so this must be safe in both paths.
         db.addNetworkColumnsIfMissing("obfsLink" to "TEXT")
+    }
+}
+
+/**
+ * v5 -> v6: add versioned typed-event persistence for invitations and collapsed network batches.
+ * All columns are nullable so existing chat/history/FTS rows retain their exact semantics. The
+ * partial-in-practice UNIQUE index relies on SQLite's distinct NULL handling: ordinary messages
+ * remain unrestricted while a typed event key can occur only once per buffer.
+ *
+ * Downgrading a development database still follows DbModule's explicitly destructive dev-only
+ * policy; released databases only move forward through this additive migration.
+ */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE messages ADD COLUMN eventKey TEXT")
+        db.execSQL("ALTER TABLE messages ADD COLUMN eventPayload TEXT")
+        db.execSQL("ALTER TABLE messages ADD COLUMN inviteState TEXT")
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS index_messages_bufferId_eventKey " +
+                "ON messages(bufferId, eventKey)",
+        )
     }
 }
 
