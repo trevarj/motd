@@ -972,6 +972,58 @@ class EventProcessorTest {
     }
 
     @Test
+    fun networkBatch_insertFailureRollsBackEveryMembershipMutation() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.Names("#room", listOf(IrcEvent.Names.Member("Alice", "", null, null))),
+        )
+        db.openHelper.writableDatabase.execSQL(
+            """CREATE TRIGGER reject_network_batch BEFORE INSERT ON messages
+               WHEN NEW.kind = 'NETSPLIT'
+               BEGIN SELECT RAISE(ABORT, 'forced batch insert failure'); END""",
+        )
+
+        val result = runCatching {
+            processor.process(
+                networkId,
+                IrcEvent.NetworkBatch(
+                    IrcEvent.NetworkBatchKind.NETSPLIT,
+                    "a",
+                    "b",
+                    listOf(IrcEvent.Quit(ctx("rollback"), "Alice", "split")),
+                ),
+            )
+        }
+
+        assertTrue(result.isFailure)
+        val room = db.bufferDao().byName(networkId, "#room")!!
+        assertEquals(listOf("Alice"), db.memberDao().allNow(room.id).map { it.nick })
+        assertTrue(pagingList(room.id).none { it.kind == MessageKind.NETSPLIT })
+    }
+
+    @Test
+    fun networkBatch_withoutMsgidsUsesBucketedFallbackIdentity() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.Names("#room", listOf(IrcEvent.Names.Member("Alice", "", null, null))),
+        )
+        fun split(time: Long) = IrcEvent.NetworkBatch(
+            IrcEvent.NetworkBatchKind.NETSPLIT,
+            "a.example",
+            "b.example",
+            listOf(IrcEvent.Quit(ctx(msgid = null, time = time).copy(batchId = "split"), "Alice", "split")),
+            target = "#room",
+        )
+
+        processor.process(networkId, split(31_000))
+        processor.process(networkId, split(32_000))
+        processor.process(networkId, split(61_000))
+
+        val room = db.bufferDao().byName(networkId, "#room")!!
+        assertEquals(2, pagingList(room.id).count { it.kind == MessageKind.NETSPLIT })
+    }
+
+    @Test
     fun hundredUserSplit_createsOnePillAndNoPerNickQuitRows() = runTest {
         val nicks = (1..100).map { "Nick$it" }
         processor.process(
