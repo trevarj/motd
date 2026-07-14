@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import android.content.Context
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
@@ -670,6 +671,64 @@ class EventProcessorTest {
         processor.process(networkId, IrcEvent.Joined(ctx(msgid = "oj", time = 1001), "alice", "#chan", null, null, isSelf = false))
         val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
         assertEquals(2, pagingList(bufferId).count { it.kind == MessageKind.JOIN })
+    }
+
+    // --- invitations ------------------------------------------------------
+
+    @Test
+    fun selfInvite_createsUnjoinedChannelRow_andNotifiesOnce() = runTest {
+        val notified = mutableListOf<Triple<Long, Long, Long>>()
+        val recording = EventProcessor(db, TypingTrackerImpl(), object : MessageNotifier {
+            override suspend fun onIncoming(
+                networkId: Long,
+                bufferId: Long,
+                type: BufferType,
+                hasMention: Boolean,
+                message: IrcEvent.ChatMessage,
+            ) = Unit
+
+            override suspend fun onInvitation(networkId: Long, bufferId: Long, messageId: Long) {
+                notified += Triple(networkId, bufferId, messageId)
+            }
+        })
+        recording.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+        val invite = IrcEvent.Invited(ctx("invite-1"), "alice", "ME", "#Secret")
+
+        recording.process(networkId, invite)
+        recording.process(networkId, invite)
+
+        val buffer = db.bufferDao().byName(networkId, "#secret")!!
+        assertFalse(buffer.joined)
+        assertEquals(BufferType.CHANNEL, buffer.type)
+        val row = pagingList(buffer.id).single()
+        assertEquals(MessageKind.INVITE, row.kind)
+        assertEquals(InviteState.PENDING, row.inviteState)
+        assertEquals(InvitePayloadV1("alice", "ME", "#Secret"), InvitePayloadV1.decode(row.eventPayload))
+        assertEquals(1, notified.size)
+        assertEquals(row.id, notified.single().third)
+    }
+
+    @Test
+    fun thirdPartyInvite_routesToExistingChannel_withoutNotification() = runTest {
+        processor.process(networkId, IrcEvent.Joined(ctx(), "me", "#ops", null, null, isSelf = true))
+        processor.process(networkId, IrcEvent.Invited(ctx("invite-ops", 2_000), "oper", "bob", "#ops"))
+
+        val buffer = db.bufferDao().byName(networkId, "#ops")!!
+        val row = pagingList(buffer.id).first { it.kind == MessageKind.INVITE }
+        assertEquals(InviteState.HISTORICAL, row.inviteState)
+        assertEquals("oper invited bob to #ops", row.text)
+    }
+
+    @Test
+    fun historyInvite_isCompactAndNeverNotifies() = runTest {
+        val batch = IrcEvent.HistoryBatch(
+            "#old",
+            listOf(IrcEvent.Invited(ctx("history-invite"), "alice", "me", "#old")),
+        )
+        processor.process(networkId, batch)
+
+        val buffer = db.bufferDao().byName(networkId, "#old")!!
+        assertEquals(InviteState.HISTORICAL, pagingList(buffer.id).single().inviteState)
     }
 
     @Test

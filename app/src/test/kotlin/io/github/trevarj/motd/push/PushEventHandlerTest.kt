@@ -70,6 +70,17 @@ class PushEventHandlerTest {
     }
 
     @Test
+    fun mapToEvent_invite() {
+        val event = PushEventHandler.mapToEvent(
+            IrcMessage.parse("@msgid=i1;time=2020-01-01T00:00:00.000Z :alice!a@h INVITE me #secret"),
+        ) as IrcEvent.Invited
+        assertEquals("alice", event.by)
+        assertEquals("me", event.nick)
+        assertEquals("#secret", event.channel)
+        assertEquals("i1", event.ctx.msgid)
+    }
+
+    @Test
     fun mapToEvent_ratified_reply_wins_over_legacy_reply() {
         val msg = IrcMessage.parse(
             "@+reply=new;+draft/reply=old :alice!u@h PRIVMSG #chan :reply",

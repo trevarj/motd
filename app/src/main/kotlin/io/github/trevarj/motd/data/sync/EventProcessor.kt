@@ -3,6 +3,7 @@ package io.github.trevarj.motd.data.sync
 import androidx.room.withTransaction
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -118,12 +119,12 @@ class EventProcessor @Inject constructor(
             is IrcEvent.AccountChanged -> upsertUser(networkId, event.nick) { it.copy(account = event.account) }
             is IrcEvent.HostChanged -> upsertUser(networkId, event.nick) { it.copy(hostmask = "${event.newUser}@${event.newHost}") }
             is IrcEvent.RealnameChanged -> upsertUser(networkId, event.nick) { it.copy(realname = event.realname) }
+            is IrcEvent.Invited -> onInvited(networkId, event, notify)
             is IrcEvent.ReadMarker -> onReadMarker(networkId, event)
             is IrcEvent.BouncerNetworkState -> onBouncerNetworkState(networkId, event)
             is IrcEvent.Disconnected -> onDisconnected(networkId, event)
             is IrcEvent.ServerError -> onServerError(networkId, event)
             is IrcEvent.Raw -> onRaw(networkId, event)
-            is IrcEvent.Invited,
             is IrcEvent.CapsChanged,
             -> Unit // not persisted
         }
@@ -324,6 +325,72 @@ class EventProcessor @Inject constructor(
         db.withTransaction {
             for (ev in batch.events) processEvent(networkId, ev, notify = false)
         }
+    }
+
+    // -- invitations --------------------------------------------------------
+
+    private suspend fun onInvited(networkId: Long, e: IrcEvent.Invited, notify: Boolean) {
+        val st = stateFor(networkId)
+        val selfInvite = st.normalize(e.nick) == st.normalize(st.selfNick)
+        val validChannel = isChannel(e.channel, st)
+        val existingChannel = if (validChannel) {
+            bufferDao.byName(networkId, st.normalize(e.channel))
+        } else {
+            null
+        }
+        val bufferId = when {
+            selfInvite && validChannel -> ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
+            !selfInvite && existingChannel != null -> existingChannel.id
+            else -> ensureServerBuffer(networkId, st)
+        }
+        val historical = !notify || e.ctx.batchId != null
+        val actionable = selfInvite && validChannel && !historical
+        val state = when {
+            historical -> InviteState.HISTORICAL
+            actionable -> InviteState.PENDING
+            else -> InviteState.HISTORICAL
+        }
+        val payload = InvitePayloadV1(e.by, e.nick, e.channel)
+        val eventKey = invitationEventKey(networkId, bufferId, e, st)
+        val text = when {
+            selfInvite && validChannel -> "${e.by.ifBlank { "Someone" }} invited you to ${e.channel}"
+            validChannel -> "${e.by.ifBlank { "Someone" }} invited ${e.nick} to ${e.channel}"
+            else -> "Received an invalid invitation for ${e.channel.ifBlank { "an unknown channel" }}"
+        }
+        val row = MessageEntity(
+            bufferId = bufferId,
+            msgid = e.ctx.msgid,
+            serverTime = e.ctx.serverTime,
+            sender = e.by,
+            kind = MessageKind.INVITE,
+            text = text,
+            dedupKey = eventKey,
+            eventKey = eventKey,
+            eventPayload = payload.encode(),
+            inviteState = state,
+        )
+        val inserted = messageDao.insertAll(listOf(row)).single()
+        if (inserted <= 0L) return
+        traceMessageWrite("room_insert", row.copy(id = inserted), historical)
+        if (actionable) notifier.onInvitation(networkId, bufferId, inserted)
+    }
+
+    private fun invitationEventKey(
+        networkId: Long,
+        bufferId: Long,
+        e: IrcEvent.Invited,
+        st: NetworkState,
+    ): String {
+        e.ctx.msgid?.let { return "invite:msgid:$it" }
+        val bucket = e.ctx.serverTime / INVITE_DEDUP_WINDOW_MS
+        val identity = listOf(
+            networkId.toString(),
+            bufferId.toString(),
+            st.normalize(e.by),
+            st.normalize(e.nick),
+            st.normalize(e.channel),
+        ).joinToString("|")
+        return "invite:fallback:" + EchoDeduper.keyFor(null, bucket, identity, "INVITE")
     }
 
     // -- membership ----------------------------------------------------------
@@ -687,6 +754,7 @@ class EventProcessor @Inject constructor(
         // matched to a local row whose serverTime is within this many ms. Symmetric because the
         // local clock (send time) and the server clock (echo time) can differ in either direction.
         const val ECHO_MATCH_WINDOW_MS = 30_000L
+        const val INVITE_DEDUP_WINDOW_MS = 30_000L
 
         /**
          * Informational numerics persisted to the SERVER buffer as SERVER_INFO (plans/16 §5.6.3):
@@ -719,6 +787,9 @@ interface MessageNotifier {
 
     /** A local or synchronized marker advanced through [upToTime]. */
     suspend fun onRead(bufferId: Long, upToTime: Long) = Unit
+
+    /** A newly persisted, live, actionable invitation. */
+    suspend fun onInvitation(networkId: Long, bufferId: Long, messageId: Long) = Unit
 
     /** No-op notifier for tests / headless contexts. */
     object Noop : MessageNotifier {

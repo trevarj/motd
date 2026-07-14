@@ -15,7 +15,7 @@ import javax.inject.Inject
  * pushed message reaches Room by the same write path as a live message.
  *
  * The `:irc` [io.github.trevarj.motd.irc.client] event mapper is module-`internal`, so this
- * reimplements the small subset that soju webpush actually delivers: PRIVMSG/NOTICE/TAGMSG,
+ * reimplements the small subset that soju webpush actually delivers: PRIVMSG/NOTICE/TAGMSG/INVITE,
  * including CTCP ACTION and reaction mutations. Notification posting is delegated to [notifier] so
  * the mapping stays pure and unit-testable without an Android context.
  */
@@ -76,7 +76,19 @@ class PushEventHandler(
         fun mapToEvent(msg: IrcMessage): IrcEvent? = when (msg.command.uppercase()) {
             "PRIVMSG", "NOTICE" -> mapChat(msg)
             "TAGMSG" -> mapTagMessage(msg)
+            "INVITE" -> mapInvite(msg)
             else -> null
+        }
+
+        private fun mapInvite(msg: IrcMessage): IrcEvent? {
+            val target = msg.params.getOrNull(0) ?: return null
+            val channel = msg.params.getOrNull(1) ?: return null
+            return IrcEvent.Invited(
+                ctx = context(msg),
+                by = msg.source?.nick.orEmpty(),
+                nick = target,
+                channel = channel,
+            )
         }
 
         internal fun isRegistrationProbe(msg: IrcMessage): Boolean =
