@@ -179,6 +179,10 @@ private fun WhoisSummary(whois: WhoisInfo?) {
         }
         whois.awayMessage?.takeIf { it.isNotBlank() }?.let {
             Text(stringResource(R.string.whois_away, it), style = MaterialTheme.typography.bodySmall)
+        } ?: if (whois.away == true) {
+            Text(stringResource(R.string.nick_sheet_away), style = MaterialTheme.typography.bodySmall)
+        } else {
+            Unit
         }
     }
 }

@@ -1,11 +1,37 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.data.db.UserEntity
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class WhoisParserTest {
+    @Test fun cached_whox_fills_missing_whois_fields_without_overriding_newer_values() {
+        val cached = UserEntity(
+            networkId = 1,
+            nick = "alice",
+            username = "cached-user",
+            account = "cached-account",
+            away = true,
+            hostmask = "cached-user@cached.host",
+            realname = "Cached Real",
+        )
+        val merged = mergeUserDetails(
+            "Alice",
+            cached,
+            WhoisInfo(nick = "Alice", username = "fresh-user", host = "fresh.host"),
+        )!!
+        assertEquals("fresh-user", merged.username)
+        assertEquals("fresh.host", merged.host)
+        assertEquals("cached-account", merged.account)
+        assertEquals("Cached Real", merged.realname)
+        assertEquals(true, merged.away)
+
+        val cachedOnly = mergeUserDetails("Alice", cached, null)!!
+        assertEquals("cached-user", cachedOnly.username)
+        assertEquals("cached.host", cachedOnly.host)
+    }
     private fun numeric(code: String, vararg params: String) =
         IrcMessage(command = code, params = params.toList())
 

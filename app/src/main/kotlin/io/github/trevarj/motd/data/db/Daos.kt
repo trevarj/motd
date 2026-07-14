@@ -347,4 +347,7 @@ interface UserDao {
 
     @Query("SELECT * FROM users WHERE networkId = :nid AND nick = :nick")
     suspend fun byNick(nid: Long, nick: String): UserEntity?
+
+    @Query("SELECT * FROM users WHERE networkId = :nid AND nick = :nick")
+    fun observeByNick(nid: Long, nick: String): Flow<UserEntity?>
 }

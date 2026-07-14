@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.data.db.UserEntity
 import io.github.trevarj.motd.irc.proto.IrcMessage
 
 /**
@@ -18,10 +19,30 @@ data class WhoisInfo(
     val idleSecs: Long? = null,
     val signonEpochSecs: Long? = null,
     val awayMessage: String? = null,
+    val away: Boolean? = null,
 )
 
 /** Nick-sheet state: the target nick plus its WHOIS details once they land (plans/16 §5.8). */
-data class NickSheetState(val nick: String, val whois: WhoisInfo? = null)
+data class NickSheetState(
+    val nick: String,
+    val cached: UserEntity? = null,
+    val whois: WhoisInfo? = null,
+) {
+    val details: WhoisInfo? get() = mergeUserDetails(nick, cached, whois)
+}
+
+/** WHOIS is the fresher overlay; cached WHOX/NAMES data fills fields it did not return. */
+fun mergeUserDetails(nick: String, cached: UserEntity?, whois: WhoisInfo?): WhoisInfo? {
+    if (cached == null) return whois
+    val cachedHost = cached.hostmask?.substringAfter('@', missingDelimiterValue = "")?.ifBlank { null }
+    return (whois ?: WhoisInfo(nick)).copy(
+        username = whois?.username ?: cached.username,
+        host = whois?.host ?: cachedHost,
+        realname = whois?.realname ?: cached.realname,
+        account = whois?.account ?: cached.account,
+        away = whois?.away ?: cached.away,
+    )
+}
 
 /**
  * Fold WHOIS numerics from a labeled response into a [WhoisInfo]. Recognized numerics:
@@ -55,7 +76,7 @@ fun parseWhois(lines: List<IrcMessage>): WhoisInfo? {
                 realname = p.getOrNull(5),
             )
             "312" -> info = info.copy(server = p.getOrNull(2), serverInfo = p.getOrNull(3))
-            "301" -> info = info.copy(awayMessage = p.getOrNull(2))
+            "301" -> info = info.copy(awayMessage = p.getOrNull(2), away = true)
             "317" -> info = info.copy(
                 idleSecs = p.getOrNull(2)?.toLongOrNull(),
                 signonEpochSecs = p.getOrNull(3)?.toLongOrNull(),

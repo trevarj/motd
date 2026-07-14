@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
@@ -113,6 +114,7 @@ class ChatViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val visibilityReader: MessageVisibilityReader,
     private val historyResyncCoordinator: HistoryResyncCoordinator,
+    private val userDao: UserDao,
     contentPreviewPrefs: ContentPreviewPrefs,
     appearancePrefs: AppearancePrefs,
 ) : ViewModel() {
@@ -463,6 +465,7 @@ class ChatViewModel @Inject constructor(
 
     private val _nickSheet = MutableStateFlow<NickSheetState?>(null)
     val nickSheet: StateFlow<NickSheetState?> = _nickSheet.asStateFlow()
+    private var nickDetailsJob: Job? = null
 
     /**
      * Open the nick sheet for [nick]. With `labeled-response` we WHOIS via a labeled request, parse
@@ -476,7 +479,16 @@ class ChatViewModel @Inject constructor(
         ensureMembersObserved()
         _nickSheet.value = NickSheetState(nick = nick)
         val networkId = state.value.buffer?.networkId ?: return
-        val client = connectionManager.clientFor(networkId) ?: return
+        val client = connectionManager.clientFor(networkId)
+        val normalizedNick = client?.isupport?.normalize(nick) ?: normalizeNick(nick)
+        nickDetailsJob?.cancel()
+        nickDetailsJob = viewModelScope.launch {
+            userDao.observeByNick(networkId, normalizedNick).collect { cached ->
+                val current = _nickSheet.value
+                if (current?.nick == nick) _nickSheet.value = current.copy(cached = cached)
+            }
+        }
+        if (client == null) return
         val whoisMsg = IrcMessage(command = "WHOIS", params = listOf(nick))
         if (client.hasCap("labeled-response")) {
             viewModelScope.launch {
@@ -484,7 +496,7 @@ class ChatViewModel @Inject constructor(
                 val info = parseWhois(lines)
                 // Only fold in if the sheet is still open for this nick.
                 if (info != null && _nickSheet.value?.nick == nick) {
-                    _nickSheet.value = NickSheetState(nick = nick, whois = info)
+                    _nickSheet.value = _nickSheet.value?.copy(whois = info)
                 }
             }
         } else {
@@ -492,7 +504,11 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun dismissNickSheet() { _nickSheet.value = null }
+    fun dismissNickSheet() {
+        nickDetailsJob?.cancel()
+        nickDetailsJob = null
+        _nickSheet.value = null
+    }
 
     // --- moderation executors (plans/16 §5.8), CHANNEL buffers only ---
 

@@ -635,6 +635,7 @@
     <string name="whois_channels">Channels: %1$s</string>
     <string name="whois_idle">Idle: %1$s</string>
     <string name="whois_away">Away: %1$s</string>
+    <string name="nick_sheet_away">Away</string>
 
     <!-- Server buffer chat behavior (WP-V3, §5.6) -->
     <string name="chat_server_composer_hint">Send a command…</string>

@@ -233,7 +233,7 @@ fun ChatScreen(
             isFriend = normSelf in settings.friends,
             isFool = normSelf in settings.fools,
             canModerate = viewModel.canModerate(),
-            whois = sheet.whois,
+            whois = sheet.details,
             onDismiss = viewModel::dismissNickSheet,
             onMessage = { viewModel.dismissNickSheet(); viewModel.submit("/query ${sheet.nick}", onOpenBuffer) },
             onMention = {
