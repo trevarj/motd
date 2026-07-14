@@ -228,8 +228,21 @@ fun onboardingReducer(state: OnboardingState, action: OnboardingAction): Onboard
                 error = (action.state as? IrcClientState.Failed)?.reason ?: state.error,
             )
 
-        is OnboardingAction.BouncerListed ->
-            state.copy(bouncerNetworks = action.rows, bouncerListLoaded = true)
+        is OnboardingAction.BouncerListed -> {
+            // LISTNETWORKS and soju's passive notification extension update the same live
+            // snapshot. A late notification must not erase an import choice made from an earlier
+            // snapshot, including a just-added network that has not yet been echoed back.
+            val selectedNetIds = state.bouncerNetworks.asSequence()
+                .filter { it.selected }
+                .map { it.netId }
+                .toSet()
+            state.copy(
+                bouncerNetworks = action.rows.map { row ->
+                    row.copy(selected = row.selected || row.netId in selectedNetIds)
+                },
+                bouncerListLoaded = true,
+            )
+        }
 
         is OnboardingAction.ToggleBouncerNetwork ->
             state.copy(

@@ -72,11 +72,17 @@ class OnboardingViewModel @Inject constructor(
     // Tracks the in-flight connect-test coroutine (creates the network + collects its state) so a
     // new attempt or a Back cancels it — otherwise each attempt leaks a never-ending collector.
     private var connectTestJob: Job? = null
+    // soju delivers LISTNETWORKS as ordinary BOUNCER NETWORK notifications. Keep observing the
+    // client's live snapshot after the initial request: the reply can legitimately arrive after
+    // bouncerListNetworks() has returned its short empty snapshot.
+    private var bouncerNetworksJob: Job? = null
 
     private fun runConnectTest() {
         // Drop any network + collector from a prior attempt first, so reconnecting after a settings
         // change (e.g. TLS) rebuilds cleanly rather than piling up stale actors.
         connectTestJob?.cancel()
+        stopBouncerNetworkSync()
+        _state.value = _state.value.copy(bouncerNetworks = emptyList(), bouncerListLoaded = false)
         val prior = _state.value.networkId
         connectTestJob = viewModelScope.launch {
             if (prior != null) networkRepository.deleteNetwork(prior)
@@ -117,6 +123,7 @@ class OnboardingViewModel @Inject constructor(
     private fun cleanupConnectTest() {
         connectTestJob?.cancel()
         connectTestJob = null
+        stopBouncerNetworkSync()
         _state.value.networkId?.let { id -> viewModelScope.launch { networkRepository.deleteNetwork(id) } }
         _state.value = _state.value.copy(
             networkId = null,
@@ -133,17 +140,39 @@ class OnboardingViewModel @Inject constructor(
         runConnectTest()
     }
 
-    private fun loadBouncerNetworks(networkId: Long) = viewModelScope.launch {
-        val client = connectionManager.clientFor(networkId) ?: return@launch
-        val rows = runCatching { client.bouncerListNetworks() }.getOrDefault(emptyList())
-            .map { bn ->
-                BouncerNetworkRow(
-                    netId = bn.netId,
-                    name = bn.attrs["name"] ?: bn.attrs["host"] ?: bn.netId,
-                    selected = false,
-                )
+    private fun loadBouncerNetworks(networkId: Long) {
+        stopBouncerNetworkSync()
+        bouncerNetworksJob = viewModelScope.launch {
+            val client = connectionManager.clientFor(networkId) ?: return@launch
+            launch {
+                client.bouncerNetworks.collect { networks ->
+                    // A retry can replace the root while a late notification from the old
+                    // connection is in flight. Do not let that stale snapshot mutate the wizard.
+                    if (_state.value.networkId == networkId) {
+                        dispatch(
+                            OnboardingAction.BouncerListed(
+                                networks.map { (netId, attrs) ->
+                                    BouncerNetworkRow(
+                                        netId = netId,
+                                        name = attrs["name"] ?: attrs["host"] ?: netId,
+                                        selected = false,
+                                    )
+                                },
+                            ),
+                        )
+                    }
+                }
             }
-        dispatch(OnboardingAction.BouncerListed(rows))
+            // This sends LISTNETWORKS for bouncers that do not push an initial state. The
+            // collector above remains active after its short snapshot wait, so delayed ordinary
+            // BOUNCER NETWORK replies still populate the import list.
+            runCatching { client.bouncerListNetworks() }
+        }
+    }
+
+    private fun stopBouncerNetworkSync() {
+        bouncerNetworksJob?.cancel()
+        bouncerNetworksJob = null
     }
 
     /** Add a bouncer network via `bouncerAddNetwork`, then append it to the import list. */
@@ -161,6 +190,7 @@ class OnboardingViewModel @Inject constructor(
      */
     fun finish(onDone: () -> Unit) = viewModelScope.launch {
         val s = _state.value
+        stopBouncerNetworkSync()
         val rootId = s.networkId
         if (s.isZnc && rootId != null) bouncerKindPrefs.markZnc(rootId)
         if (s.isSoju && rootId != null) {

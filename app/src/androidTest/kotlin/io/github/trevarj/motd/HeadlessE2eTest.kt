@@ -80,7 +80,7 @@ abstract class HeadlessE2eDriver {
         waitForText("Trust this certificate?", timeoutMillis = 30_000)
         clickText("Trust")
         waitForText("Bouncer networks", timeoutMillis = 45_000)
-        waitForText("libera", timeoutMillis = 30_000)
+        waitForTextWithConnectionDiagnostics("libera", timeoutMillis = 30_000)
         clickTagPrefix("onboarding_bouncer_switch_")
         clickTag("onboarding_forward_button")
         waitForText("Finish")
