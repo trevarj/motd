@@ -58,6 +58,7 @@ class MotdNotifications @Inject constructor(
 
     // Per-buffer message history for MessagingStyle threading (notificationId = bufferId).
     private val history = HashMap<Long, NotificationCompat.MessagingStyle>()
+    private val historyKeys = HashMap<Long, LinkedHashSet<NotificationMessageKey>>()
     private val latestNotifiedTimes = java.util.concurrent.ConcurrentHashMap<Long, Long>()
 
     init { ensureChannels() }
@@ -130,6 +131,10 @@ class MotdNotifications @Inject constructor(
         val title = buffer?.displayName ?: message.target
         val person = Person.Builder().setName(message.source.nick).build()
         val style = synchronized(history) {
+            val key = NotificationMessageKey.from(message)
+            val keys = historyKeys.getOrPut(bufferId, ::linkedSetOf)
+            if (!keys.add(key)) return
+            if (keys.size > MAX_NOTIFICATION_MESSAGES) keys.remove(keys.first())
             history.getOrPut(bufferId) {
                 NotificationCompat.MessagingStyle(Person.Builder().setName("me").build())
                     .setConversationTitle(title)
@@ -210,7 +215,10 @@ class MotdNotifications @Inject constructor(
         }.getOrNull()
         val latest = listOfNotNull(latestNotifiedTimes[bufferId], activeLatest).maxOrNull() ?: return
         if (!readMarkerCoversNotification(upToTime, latest)) return
-        synchronized(history) { history.remove(bufferId) }
+        synchronized(history) {
+            history.remove(bufferId)
+            historyKeys.remove(bufferId)
+        }
         latestNotifiedTimes.remove(bufferId)
         manager.cancel(bufferId.toInt())
     }
@@ -279,6 +287,7 @@ class MotdNotifications @Inject constructor(
         const val CHANNEL_MESSAGES = "messages"
         const val CHANNEL_MENTIONS = "mentions"
         const val CHANNEL_INVITATIONS = "invitations"
+        private const val MAX_NOTIFICATION_MESSAGES = 25
 
         // Deep-link extras carried by a message notification's content intent (tap → open + jump).
         const val ACTION_OPEN_BUFFER = "io.github.trevarj.motd.OPEN_BUFFER"
@@ -290,6 +299,28 @@ class MotdNotifications @Inject constructor(
 
         internal fun invitationNotificationId(messageId: Long): Int =
             0x40000000 or (messageId xor (messageId ushr 32)).toInt().and(0x3fffffff)
+    }
+}
+
+/** Stable identity for one notification entry, independent of live/push delivery provenance. */
+private data class NotificationMessageKey(
+    val msgid: String?,
+    val serverTime: Long?,
+    val sender: String?,
+    val text: String?,
+) {
+    companion object {
+        fun from(message: IrcEvent.ChatMessage): NotificationMessageKey =
+            if (message.ctx.msgid != null) {
+                NotificationMessageKey(message.ctx.msgid, null, null, null)
+            } else {
+                NotificationMessageKey(
+                    msgid = null,
+                    serverTime = message.ctx.serverTime,
+                    sender = message.source.nick,
+                    text = message.text,
+                )
+            }
     }
 }
 
