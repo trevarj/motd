@@ -119,6 +119,8 @@ class EventProcessor @Inject constructor(
             is IrcEvent.AccountChanged -> upsertUser(networkId, event.nick) { it.copy(account = event.account) }
             is IrcEvent.HostChanged -> upsertUser(networkId, event.nick) { it.copy(hostmask = "${event.newUser}@${event.newHost}") }
             is IrcEvent.RealnameChanged -> upsertUser(networkId, event.nick) { it.copy(realname = event.realname) }
+            is IrcEvent.WhoxRow -> onWhoxRow(networkId, event)
+            is IrcEvent.WhoxComplete -> Unit
             is IrcEvent.Invited -> onInvited(networkId, event, notify)
             is IrcEvent.ReadMarker -> onReadMarker(networkId, event)
             is IrcEvent.BouncerNetworkState -> onBouncerNetworkState(networkId, event)
@@ -471,6 +473,18 @@ class EventProcessor @Inject constructor(
                     }
                 }
             }
+        }
+    }
+
+    private suspend fun onWhoxRow(networkId: Long, row: IrcEvent.WhoxRow) {
+        upsertUser(networkId, row.nick) { existing ->
+            existing.copy(
+                username = row.username,
+                hostmask = "${row.username}@${row.host}",
+                account = row.account,
+                away = 'G' in row.flags,
+                realname = row.realname.ifBlank { existing.realname },
+            )
         }
     }
 

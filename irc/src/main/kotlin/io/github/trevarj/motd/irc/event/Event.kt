@@ -64,6 +64,16 @@ sealed interface IrcEvent {
     data class AccountChanged(val nick: String, val account: String?) : IrcEvent
     data class HostChanged(val nick: String, val newUser: String, val newHost: String) : IrcEvent
     data class RealnameChanged(val nick: String, val realname: String) : IrcEvent
+    data class WhoxRow(
+        val token: Int,
+        val username: String,
+        val host: String,
+        val nick: String,
+        val account: String?,
+        val flags: String,
+        val realname: String,
+    ) : IrcEvent
+    data class WhoxComplete(val mask: String) : IrcEvent
 
     // -- channel state
     data class TopicChanged(val ctx: MessageContext, val channel: String, val topic: String, val setBy: String?) : IrcEvent

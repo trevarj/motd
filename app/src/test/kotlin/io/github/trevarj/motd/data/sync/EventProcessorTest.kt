@@ -699,6 +699,35 @@ class EventProcessorTest {
         assertEquals("new@cloak.example", changed.hostmask)
     }
 
+    @Test
+    fun whoxRow_enrichesUserWithoutChangingMembershipPrefixes() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.Names("#room", listOf(IrcEvent.Names.Member("Nick", "@+", null, null))),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.WhoxRow(
+                token = 12,
+                username = "~user",
+                host = "cloak.example",
+                nick = "NICK",
+                account = "account",
+                flags = "G@",
+                realname = "Real Name",
+            ),
+        )
+
+        val user = db.userDao().byNick(networkId, "nick")!!
+        assertEquals("~user", user.username)
+        assertEquals("~user@cloak.example", user.hostmask)
+        assertEquals("account", user.account)
+        assertTrue(user.away)
+        assertEquals("Real Name", user.realname)
+        val buffer = db.bufferDao().byName(networkId, "#room")!!
+        assertEquals("@+", db.memberDao().observe(buffer.id).first().single().prefixes)
+    }
+
     // --- invitations ------------------------------------------------------
 
     @Test

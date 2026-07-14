@@ -120,6 +120,8 @@ internal class EventMapper(
             // NAMES accumulation.
             "353" -> { accumulateNames(msg); null }
             "366" -> finishNames(msg)
+            "354" -> mapWhox(msg)
+            "315" -> IrcEvent.WhoxComplete(msg.params.getOrNull(1).orEmpty())
             else -> mapNumericOrRaw(msg)
         }
     }
@@ -259,6 +261,22 @@ internal class EventMapper(
         val members = namesBuffers.remove(key) ?: mutableListOf()
         val display = namesDisplay.remove(key) ?: channel
         return IrcEvent.Names(display, members)
+    }
+
+    private fun mapWhox(msg: IrcMessage): IrcEvent {
+        // WHO <mask> %tuhnafr,<token> yields:
+        // 354 <client> <token> <user> <host> <nick> <account> <flags> :<realname>
+        val token = msg.params.getOrNull(1)?.toIntOrNull()
+            ?.takeIf { it in 0..999 }
+            ?: return IrcEvent.Raw(msg)
+        val username = msg.params.getOrNull(2) ?: return IrcEvent.Raw(msg)
+        val host = msg.params.getOrNull(3) ?: return IrcEvent.Raw(msg)
+        val nick = msg.params.getOrNull(4) ?: return IrcEvent.Raw(msg)
+        val accountRaw = msg.params.getOrNull(5)
+        val flags = msg.params.getOrNull(6) ?: return IrcEvent.Raw(msg)
+        val realname = msg.params.getOrNull(7).orEmpty()
+        val account = accountRaw?.takeUnless { it == "0" || it == "*" }
+        return IrcEvent.WhoxRow(token, username, host, nick, account, flags, realname)
     }
 
     private fun mapNumericOrRaw(msg: IrcMessage): IrcEvent {

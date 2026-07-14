@@ -15,6 +15,7 @@ import io.github.trevarj.motd.irc.transport.TransportConfigurationException
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -35,6 +36,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.ConcurrentHashMap
 
 enum class SaslMechanism { NONE, PLAIN, EXTERNAL }
 
@@ -78,6 +81,8 @@ data class BouncerNetwork(val netId: String, val attrs: Map<String, String>) // 
 /** One RPL_LIST (322) row. */
 data class ChannelListing(val name: String, val userCount: Int, val topic: String)
 
+data class WhoxResult(val rows: List<IrcEvent.WhoxRow>, val completed: Boolean)
+
 /** One instance per physical socket. Restartable: start() after stop() reconnects fresh. */
 class IrcClient(
     val config: IrcClientConfig,
@@ -110,6 +115,9 @@ class IrcClient(
     private val batches = BatchAssembler()
     private val typingOutbox = TypingOutbox()
     private val eventMapper = EventMapper(selfNick = { selfNick.get() }, isupport = { _isupport.get() })
+    private val whoxRequests = ConcurrentHashMap<String, Deferred<WhoxResult>>()
+    private val activeWhoxTokens = ConcurrentHashMap.newKeySet<Int>()
+    private val nextWhoxToken = AtomicInteger(0)
 
     @Volatile private var transport: IrcTransport? = null
     @Volatile private var watchdog: PingWatchdog? = null
@@ -132,6 +140,7 @@ class IrcClient(
         runJob?.cancel()
         runJob = null
         labels.failAll(CancellationException("client stopped"))
+        cancelWhoxRequests("client stopped")
         val t = transport
         transport = null
         registered = false
@@ -216,7 +225,14 @@ class IrcClient(
         } finally {
             wd.stop()
             labels.failAll(CancellationException("connection closed"))
+            cancelWhoxRequests("connection closed")
         }
+    }
+
+    private fun cancelWhoxRequests(reason: String) {
+        whoxRequests.values.forEach { it.cancel(CancellationException(reason)) }
+        whoxRequests.clear()
+        activeWhoxTokens.clear()
     }
 
     private suspend fun applyRegAction(a: RegistrationStateMachine.Action, t: IrcTransport) {
@@ -484,6 +500,66 @@ class IrcClient(
         t.send(ReadMarkerCommands.get(target).serialize())
     }
 
+    /**
+     * Fetch one correlated WHOX snapshot. Equal normalized masks share one in-flight request;
+     * different masks may run concurrently. Timeout is reported as incomplete so callers cannot
+     * mistake it for an authoritative empty roster.
+     */
+    suspend fun whox(mask: String): WhoxResult {
+        if (_isupport.get()["WHOX"] == null) return WhoxResult(emptyList(), completed = false)
+        val normalized = _isupport.get().normalize(mask)
+        val candidate = scope.async(start = CoroutineStart.LAZY) { performWhox(mask, normalized) }
+        val existing = whoxRequests.putIfAbsent(normalized, candidate)
+        val request = existing ?: candidate.also { it.start() }
+        if (existing != null) candidate.cancel()
+        return try {
+            request.await()
+        } finally {
+            whoxRequests.remove(normalized, request)
+        }
+    }
+
+    private suspend fun performWhox(mask: String, normalizedMask: String): WhoxResult {
+        val token = allocateWhoxToken() ?: return WhoxResult(emptyList(), completed = false)
+        val t = transport ?: run {
+            activeWhoxTokens.remove(token)
+            return WhoxResult(emptyList(), completed = false)
+        }
+        val rows = ArrayList<IrcEvent.WhoxRow>()
+        val collector = scope.async(start = CoroutineStart.UNDISPATCHED) {
+            events.first { event ->
+                when (event) {
+                    is IrcEvent.WhoxRow -> {
+                        if (event.token == token) rows += event
+                        false
+                    }
+                    is IrcEvent.WhoxComplete ->
+                        _isupport.get().normalize(event.mask) == normalizedMask
+                    else -> false
+                }
+            }
+        }
+        return try {
+            t.send(WhoxCommands.request(mask, token).serialize())
+            val completed = withTimeoutOrNull(WHOX_TIMEOUT_MS) {
+                collector.await()
+                true
+            } == true
+            WhoxResult(rows.toList(), completed)
+        } finally {
+            collector.cancel()
+            activeWhoxTokens.remove(token)
+        }
+    }
+
+    private fun allocateWhoxToken(): Int? {
+        repeat(WHOX_TOKEN_COUNT) {
+            val token = nextWhoxToken.getAndUpdate { (it + 1) % WHOX_TOKEN_COUNT }
+            if (activeWhoxTokens.add(token)) return token
+        }
+        return null
+    }
+
     // -- soju bouncer-networks --
 
     suspend fun bouncerListNetworks(): List<BouncerNetwork> {
@@ -666,6 +742,8 @@ class IrcClient(
         const val LABEL_TIMEOUT_MS = 30_000L
         const val LIST_TIMEOUT_MS = 15_000L
         const val WEBPUSH_TIMEOUT_MS = 30_000L
+        const val WHOX_TIMEOUT_MS = 15_000L
+        const val WHOX_TOKEN_COUNT = 1_000
     }
 }
 
