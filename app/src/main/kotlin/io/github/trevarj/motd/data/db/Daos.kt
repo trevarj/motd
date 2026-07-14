@@ -184,6 +184,25 @@ interface MessageDao {
     )
     suspend fun markInvitesJoined(bufferId: Long): Int
 
+    @Query(
+        """UPDATE messages SET inviteState = 'FAILED', text = text || ' — Join failed: ' || :reason
+           WHERE id = :id AND kind = 'INVITE' AND inviteState = 'JOINING'""",
+    )
+    suspend fun failInvite(id: Long, reason: String): Int
+
+    @Query(
+        """UPDATE messages SET inviteState = 'FAILED', text = text || ' — Join failed: ' || :reason
+           WHERE bufferId = :bufferId AND kind = 'INVITE' AND inviteState = 'JOINING'""",
+    )
+    suspend fun failJoiningInvites(bufferId: Long, reason: String): Int
+
+    @Query(
+        """UPDATE messages SET inviteState = 'FAILED', text = text || ' — Join failed: ' || :reason
+           WHERE kind = 'INVITE' AND inviteState = 'JOINING'
+           AND bufferId IN (SELECT id FROM buffers WHERE networkId = :networkId)""",
+    )
+    suspend fun failJoiningInvitesForNetwork(networkId: Long, reason: String): Int
+
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND pendingLabel = :label")
     suspend fun byPendingLabel(bufferId: Long, label: String): MessageEntity?
 

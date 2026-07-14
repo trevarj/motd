@@ -539,6 +539,13 @@ class EventProcessor @Inject constructor(
     /** ServerError → SERVER buffer, kind ERROR. The event carries no ctx, so use the wall clock. */
     private suspend fun onServerError(networkId: Long, e: IrcEvent.ServerError) {
         val st = stateFor(networkId)
+        if (e.code in JOIN_ERROR_NUMERICS) {
+            val channel = e.params.firstOrNull { isChannel(it, st) }
+            val inviteBufferId = channel?.let { bufferDao.byName(networkId, st.normalize(it))?.id }
+            if (inviteBufferId != null) {
+                messageDao.failJoiningInvites(inviteBufferId, e.text.ifBlank { e.code })
+            }
+        }
         val bufferId = ensureServerBuffer(networkId, st)
         val text = "${e.code} ${e.text}".trim()
         insertSystem(bufferId, serverCtx(), MessageKind.ERROR, "", text)
@@ -579,6 +586,7 @@ class EventProcessor @Inject constructor(
 
     /** Disconnected marker → SERVER buffer for cheap in-history reconnect visibility. */
     private suspend fun onDisconnected(networkId: Long, e: IrcEvent.Disconnected) {
+        messageDao.failJoiningInvitesForNetwork(networkId, e.reason ?: "disconnected")
         val st = stateFor(networkId)
         val bufferId = ensureServerBuffer(networkId, st)
         val text = "disconnected" + (e.reason?.let { ": $it" } ?: "")
@@ -776,6 +784,10 @@ class EventProcessor @Inject constructor(
             "375", "372", "376",
             "305", "306", "301",
             "311", "312", "317", "318", "319", "330", "338",
+        )
+
+        val JOIN_ERROR_NUMERICS: Set<String> = setOf(
+            "403", "405", "471", "473", "474", "475", "476",
         )
     }
 }

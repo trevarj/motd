@@ -766,6 +766,48 @@ class EventProcessorTest {
     }
 
     @Test
+    fun joinRejection_marksOnlyMatchingJoiningInviteFailed_withReason() = runTest {
+        processor.process(networkId, IrcEvent.Invited(ctx("reject-a"), "alice", "me", "#locked"))
+        processor.process(networkId, IrcEvent.Invited(ctx("reject-b"), "bob", "me", "#other"))
+        val locked = db.bufferDao().byName(networkId, "#locked")!!
+        val other = db.bufferDao().byName(networkId, "#other")!!
+        val lockedRow = pagingList(locked.id).single()
+        val otherRow = pagingList(other.id).single()
+        db.messageDao().compareAndSetInviteState(lockedRow.id, InviteState.PENDING, InviteState.JOINING)
+        db.messageDao().compareAndSetInviteState(otherRow.id, InviteState.PENDING, InviteState.JOINING)
+
+        processor.process(
+            networkId,
+            IrcEvent.ServerError("473", listOf("me", "#LOCKED"), "Cannot join channel (+i)"),
+        )
+
+        val failed = db.messageDao().byId(lockedRow.id)!!
+        assertEquals(InviteState.FAILED, failed.inviteState)
+        assertTrue(failed.text.contains("Cannot join channel (+i)"))
+        assertEquals(InviteState.JOINING, db.messageDao().byId(otherRow.id)?.inviteState)
+    }
+
+    @Test
+    fun disconnect_marksAllJoiningInvitesOnNetworkFailed() = runTest {
+        processor.process(networkId, IrcEvent.Invited(ctx("disconnect-a"), "alice", "me", "#one"))
+        processor.process(networkId, IrcEvent.Invited(ctx("disconnect-b"), "bob", "me", "#two"))
+        val rows = listOf("#one", "#two").map { channel ->
+            pagingList(db.bufferDao().byName(networkId, channel)!!.id).single()
+        }
+        rows.forEach {
+            db.messageDao().compareAndSetInviteState(it.id, InviteState.PENDING, InviteState.JOINING)
+        }
+
+        processor.process(networkId, IrcEvent.Disconnected("network lost"))
+
+        rows.forEach {
+            val failed = db.messageDao().byId(it.id)!!
+            assertEquals(InviteState.FAILED, failed.inviteState)
+            assertTrue(failed.text.contains("network lost"))
+        }
+    }
+
+    @Test
     fun history_pushedThroughInOneBatch_isIdempotent() = runTest {
         val batch = IrcEvent.HistoryBatch("#chan", listOf(
             IrcEvent.ChatMessage(ctx(msgid = "h1"), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"), "#chan", "one", false, null),

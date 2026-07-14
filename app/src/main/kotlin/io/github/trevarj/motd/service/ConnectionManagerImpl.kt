@@ -778,14 +778,14 @@ class ConnectionManagerImpl @Inject constructor(
                     .first()
             }
             if (ready == null) {
-                messageDao.compareAndSetInviteState(messageId, InviteState.JOINING, InviteState.FAILED)
+                messageDao.failInvite(messageId, "connection timed out")
                 return
             }
             // Dismiss can race the connection wait. Recheck before the only wire write.
             if (messageDao.byId(messageId)?.inviteState != InviteState.JOINING) return
             val client = clientFor(buffer.networkId)
             if (client == null) {
-                messageDao.compareAndSetInviteState(messageId, InviteState.JOINING, InviteState.FAILED)
+                messageDao.failInvite(messageId, "connection unavailable")
                 return
             }
             client.send(
@@ -795,10 +795,10 @@ class ConnectionManagerImpl @Inject constructor(
                 ),
             )
         } catch (cancelled: CancellationException) {
-            messageDao.compareAndSetInviteState(messageId, InviteState.JOINING, InviteState.FAILED)
+            messageDao.failInvite(messageId, "join cancelled")
             throw cancelled
         } catch (_: Exception) {
-            messageDao.compareAndSetInviteState(messageId, InviteState.JOINING, InviteState.FAILED)
+            messageDao.failInvite(messageId, "send failed")
         }
     }
 
