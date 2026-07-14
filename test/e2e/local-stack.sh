@@ -117,6 +117,9 @@ ctl() { sojuctl -config "$CONF_SOJU" "$@"; }
 # adb: prefer a real executable on PATH (type -P ignores shell funcs/aliases so a
 # leaked `adb` alias can't false-positive), else the repo flake devshell.
 adb() {
+  # Socket-only CI checks have no device to reverse into. Avoid constructing the
+  # Android flake environment merely to receive the expected "no devices" error.
+  [ "${MOTD_SKIP_ADB_REVERSE:-0}" != "1" ] || return 1
   local bin; bin="$(type -P adb 2>/dev/null || true)"
   if [ -n "$bin" ]; then "$bin" "$@"; else nix develop "$REPO" -c adb "$@"; fi
 }

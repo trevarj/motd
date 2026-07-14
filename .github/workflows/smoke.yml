@@ -5,6 +5,41 @@ on:
   workflow_dispatch:
 
 jobs:
+  soju-vless-reality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      MOTD_STACK_DIR: ${{ runner.temp }}/motd-vless-reality
+      # This is a socket-level proof; no Android device is involved.
+      MOTD_SKIP_ADB_REVERSE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Nix tooling
+        uses: DeterminateSystems/nix-installer-action@v22
+
+      - name: Prove Soju history through VLESS + REALITY
+        run: |
+          ./test/e2e/local-stack.sh up
+          ./test/e2e/local-stack.sh history-check
+          ./test/e2e/local-stack.sh obfs-xray-up
+          ./test/e2e/local-stack.sh obfs-xray-validate
+          ./test/e2e/local-stack.sh obfs-xray-history-check
+          ./test/e2e/local-stack.sh obfs-xray-negative
+
+      - name: Upload proxy-stack diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soju-vless-reality-diagnostics
+          path: ${{ runner.temp }}/motd-vless-reality/**/*.log
+          if-no-files-found: ignore
+
+      - name: Tear down proxy stack
+        if: always()
+        run: |
+          ./test/e2e/local-stack.sh obfs-xray-down || true
+          ./test/e2e/local-stack.sh down || true
+
   fast-headless:
     runs-on: ubuntu-latest
     timeout-minutes: 45
