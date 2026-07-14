@@ -800,6 +800,7 @@ private fun isupportToMap(isupport: Isupport): Map<String, String> {
         "CHANTYPES",
         "PREFIX",
         "CHATHISTORY",
+        "MONITOR",
         "BOUNCER_NETID",
         "VAPID",
         "NETWORK",
