@@ -546,15 +546,12 @@ class ConnectionManagerImpl @Inject constructor(
             if (clientFor(networkId) !== client || client.state.value !is IrcClientState.Ready) return@withLock
             val desired = selection.selected.associateBy(client.isupport::normalize)
             val previous = if (fresh) emptyMap() else monitoredTargets[networkId].orEmpty()
+            val plan = monitorReconciliation(previous, desired, fresh)
             runCatching {
-                if (fresh) client.send(MonitorCommands.clear())
-                MonitorCommands.remove(
-                    previous.filterKeys { it !in desired }.values,
-                ).forEach { client.send(it) }
-                MonitorCommands.add(
-                    desired.filterKeys { it !in previous }.values,
-                ).forEach { client.send(it) }
-                if (fresh) client.send(MonitorCommands.status())
+                if (plan.clear) client.send(MonitorCommands.clear())
+                MonitorCommands.remove(plan.remove).forEach { client.send(it) }
+                MonitorCommands.add(plan.add).forEach { client.send(it) }
+                if (plan.status) client.send(MonitorCommands.status())
             }.onSuccess {
                 monitoredTargets[networkId] = desired
                 if (fresh) monitorInitialized += networkId
@@ -569,20 +566,15 @@ class ConnectionManagerImpl @Inject constructor(
         desired: List<String>,
         normalize: (String) -> String,
     ) {
-        val keys = desired.mapTo(HashSet()) { PresenceKey(networkId, normalize(it)) }
-        _presenceStates.update { current ->
-            current.filterKeys { it.networkId != networkId || it in keys } +
-                keys.associateWith { current[it] ?: PresenceState.UNKNOWN }
-        }
+        val keys = desired.mapTo(HashSet(), normalize)
+        _presenceStates.update { current -> presenceForDesired(current, networkId, keys) }
     }
 
     private fun setPresence(networkId: Long, nick: String, state: PresenceState) {
         val normalize = clientFor(networkId)?.isupport?.let { support -> support::normalize }
             ?: { value: String -> value.lowercase() }
         val key = PresenceKey(networkId, normalize(nick))
-        _presenceStates.update { current ->
-            if (key in current) current + (key to state) else current
-        }
+        _presenceStates.update { current -> presenceIfTracked(current, key, state) }
     }
 
     private fun updatePresence(networkId: Long, nicks: List<String>, state: PresenceState) {
@@ -603,20 +595,13 @@ class ConnectionManagerImpl @Inject constructor(
         val normalize = clientFor(networkId)?.isupport?.let { support -> support::normalize } ?: return
         val oldKey = PresenceKey(networkId, normalize(from))
         val newKey = PresenceKey(networkId, normalize(to))
-        _presenceStates.update { current ->
-            val state = current[oldKey] ?: return@update current
-            (current - oldKey) + (newKey to state)
-        }
+        _presenceStates.update { current -> rekeyPresenceState(current, oldKey, newKey) }
     }
 
     private fun invalidatePresence(networkId: Long) {
         monitoredTargets.remove(networkId)
         monitorInitialized.remove(networkId)
-        _presenceStates.update { current ->
-            current.mapValues { (key, state) ->
-                if (key.networkId == networkId && state != PresenceState.UNKNOWN) PresenceState.UNKNOWN else state
-            }
-        }
+        _presenceStates.update { current -> invalidatePresenceState(current, networkId) }
     }
 
     private fun fingerprint(row: NetworkEntity): String = networkFingerprint(
