@@ -3,8 +3,12 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 
 enum class DeliveryMode { PERSISTENT_SOCKET, UNIFIED_PUSH }
+enum class RosterLoadState { NOT_LOADED, LOADING, LOADED, FAILED }
+
+private val EMPTY_ROSTER_STATES: StateFlow<Map<Long, RosterLoadState>> = MutableStateFlow(emptyMap())
 
 /**
  * A pending TOFU cert-trust decision surfaced to the UI (plans/12). Published when a TLS handshake
@@ -26,6 +30,7 @@ data class CertPrompt(
 interface ConnectionManager {
     /** Connection state per network row id. */
     val connectionStates: StateFlow<Map<Long, IrcClientState>>
+    val rosterStates: StateFlow<Map<Long, RosterLoadState>> get() = EMPTY_ROSTER_STATES
 
     /** Live client for a connected network, null otherwise. */
     fun clientFor(networkId: Long): IrcClient?
@@ -55,6 +60,9 @@ interface ConnectionManager {
 
     /** Resolve a persisted invitation without joining. */
     suspend fun dismissInvite(messageId: Long) = Unit
+
+    /** Explicit lazy roster refresh; duplicate callers share the same in-flight request. */
+    suspend fun requestMembers(bufferId: Long, force: Boolean = false) = Unit
 
     /** Part the buffer's channel; [reason] (from `/part <reason>`) becomes the PART trailing param. */
     suspend fun partChannel(bufferId: Long, reason: String? = null)

@@ -60,6 +60,7 @@ sealed interface IrcEvent {
             val host: String?,
         )
     }
+    data class NamesStarted(val channel: String) : IrcEvent
     data class AwayChanged(val nick: String, val awayMessage: String?) : IrcEvent
     data class AccountChanged(val nick: String, val account: String?) : IrcEvent
     data class HostChanged(val nick: String, val newUser: String, val newHost: String) : IrcEvent

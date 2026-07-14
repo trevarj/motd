@@ -103,6 +103,9 @@ interface BufferDao {
     @Query("SELECT * FROM buffers WHERE networkId = :nid AND name = :normName")
     suspend fun byName(nid: Long, normName: String): BufferEntity?
 
+    @Query("SELECT id FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL'")
+    suspend fun channelIds(networkId: Long): List<Long>
+
     @Insert
     suspend fun insert(b: BufferEntity): Long
 
@@ -303,6 +306,9 @@ data class SearchHit(@Embedded val message: MessageEntity, val bufferDisplayName
 interface MemberDao {
     @Query("SELECT * FROM members WHERE bufferId = :bufferId")
     fun observe(bufferId: Long): Flow<List<MemberEntity>>
+
+    @Query("SELECT * FROM members WHERE bufferId = :bufferId")
+    suspend fun allNow(bufferId: Long): List<MemberEntity>
 
     @Query("DELETE FROM members WHERE bufferId = :bufferId")
     suspend fun clear(bufferId: Long)

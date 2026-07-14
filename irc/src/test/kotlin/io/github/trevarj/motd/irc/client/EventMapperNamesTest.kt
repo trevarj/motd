@@ -4,7 +4,6 @@ import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Isupport
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 class EventMapperNamesTest {
@@ -12,12 +11,17 @@ class EventMapperNamesTest {
         val isupport = Isupport().apply { update(listOf("PREFIX=(qaohv)~&@%+")) }
         val mapper = EventMapper({ "me" }, { isupport }, now = { 1L })
 
-        assertNull(
+        assertEquals(
+            IrcEvent.NamesStarted("#Room"),
             mapper.map(
                 IrcMessage.parse(
                     ":irc.example 353 me = #Room :~@Nick!~user@host.example +Plain Broken!user !bad@host",
                 ),
             ),
+        )
+        assertEquals(
+            null,
+            mapper.map(IrcMessage.parse(":irc.example 353 me = #Room :Another")),
         )
         val names = mapper.map(IrcMessage.parse(":irc.example 366 me #Room :End of NAMES")) as IrcEvent.Names
 
@@ -28,6 +32,7 @@ class EventMapperNamesTest {
         )
         assertEquals(IrcEvent.Names.Member("Plain", "+", null, null), names.members[1])
         assertEquals(IrcEvent.Names.Member("Broken", "", null, null), names.members[2])
-        assertEquals(3, names.members.size)
+        assertEquals(IrcEvent.Names.Member("Another", "", null, null), names.members[3])
+        assertEquals(4, names.members.size)
     }
 }

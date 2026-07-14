@@ -728,6 +728,67 @@ class EventProcessorTest {
         assertEquals("@+", db.memberDao().observe(buffer.id).first().single().prefixes)
     }
 
+    @Test
+    fun namesSnapshot_replaysJoinThatArrivesBeforeEndOfNames() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.Joined(ctx(), "me", "#room", null, null, isSelf = true),
+        )
+        processor.process(networkId, IrcEvent.NamesStarted("#room"))
+        processor.process(
+            networkId,
+            IrcEvent.Joined(ctx(time = 1001), "Alice", "#room", null, null, isSelf = false),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.Names("#room", listOf(IrcEvent.Names.Member("Bob", "", null, null))),
+        )
+
+        val buffer = db.bufferDao().byName(networkId, "#room")!!
+        assertEquals(setOf("Alice", "Bob"), db.memberDao().allNow(buffer.id).map { it.nick }.toSet())
+    }
+
+    @Test
+    fun namesSnapshot_replaysPrefixModeThatArrivesBeforeEndOfNames() = runTest {
+        processor.onRegistered(
+            networkId,
+            "me",
+            mapOf(
+                "CASEMAPPING" to "rfc1459",
+                "PREFIX" to "(qaohv)~&@%+",
+                "CHANMODES" to "beI,k,l,imnst",
+            ),
+        )
+        processor.process(networkId, IrcEvent.NamesStarted("#room"))
+        processor.process(
+            networkId,
+            IrcEvent.ModeChanged(ctx(), "#room", "+o", listOf("Nick")),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.Names("#room", listOf(IrcEvent.Names.Member("Nick", "", null, null))),
+        )
+
+        val buffer = db.bufferDao().byName(networkId, "#room")!!
+        assertEquals("@", db.memberDao().allNow(buffer.id).single().prefixes)
+    }
+
+    @Test
+    fun selfPart_clearsDurableRoster() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.Names("#room", listOf(IrcEvent.Names.Member("Nick", "@", null, null))),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.Parted(ctx(), "me", "#room", null, isSelf = true),
+        )
+
+        val buffer = db.bufferDao().byName(networkId, "#room")!!
+        assertTrue(db.memberDao().allNow(buffer.id).isEmpty())
+        assertFalse(buffer.joined)
+    }
+
     // --- invitations ------------------------------------------------------
 
     @Test

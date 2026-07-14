@@ -30,6 +30,7 @@ import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.irc.client.canSendClientTag
 import io.github.trevarj.motd.irc.client.canSendReactionTags
+import io.github.trevarj.motd.irc.client.preferredNoImplicitNames
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.transport.TransportFactory
@@ -41,6 +42,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
@@ -113,6 +115,10 @@ class ConnectionManagerImpl @Inject constructor(
 
     private val _states = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
     override val connectionStates: StateFlow<Map<Long, IrcClientState>> = _states.asStateFlow()
+
+    private val _rosterStates = MutableStateFlow<Map<Long, RosterLoadState>>(emptyMap())
+    override val rosterStates: StateFlow<Map<Long, RosterLoadState>> = _rosterStates.asStateFlow()
+    private val rosterRequests = java.util.concurrent.ConcurrentHashMap<Long, Deferred<Unit>>()
 
     private val stsStore = StsPolicyStore(settings)
     private val pendingEchoTimeouts = HashMap<String, Job>()
@@ -246,6 +252,9 @@ class ConnectionManagerImpl @Inject constructor(
         userIntents.clear()
         pushSuspendedIds.clear()
         _states.value = emptyMap()
+        rosterRequests.values.forEach { it.cancel() }
+        rosterRequests.clear()
+        _rosterStates.value = emptyMap()
     }
 
     override suspend fun connect(networkId: Long) {
@@ -276,6 +285,7 @@ class ConnectionManagerImpl @Inject constructor(
         actors.remove(networkId)?.stop()
         fingerprints.remove(networkId)
         _states.update { it - networkId }
+        invalidateRosters(networkId)
     }
 
     override suspend fun reconnectStale() {
@@ -373,6 +383,56 @@ class ConnectionManagerImpl @Inject constructor(
     private suspend fun handleConnectionEvent(networkId: Long, event: IrcEvent) {
         avatarCoordinator.onEvent(networkId, event)
         eventProcessor.process(networkId, event)
+        when (event) {
+            is IrcEvent.Joined -> if (event.isSelf) {
+                bufferForChannel(networkId, event.channel)?.let { buffer ->
+                    val ready = clientFor(networkId)?.state?.value as? IrcClientState.Ready
+                    setRosterState(
+                        buffer.id,
+                        if (ready != null && preferredNoImplicitNames(ready.caps) != null) {
+                            RosterLoadState.NOT_LOADED
+                        } else {
+                            RosterLoadState.LOADING
+                        },
+                    )
+                }
+            }
+            is IrcEvent.NamesStarted -> bufferForChannel(networkId, event.channel)?.let {
+                setRosterState(it.id, RosterLoadState.LOADING)
+            }
+            is IrcEvent.Names -> bufferForChannel(networkId, event.channel)?.let {
+                setRosterState(it.id, RosterLoadState.LOADED)
+            }
+            is IrcEvent.Parted -> if (event.isSelf) clearRoster(networkId, event.channel)
+            is IrcEvent.Kicked -> if (event.isSelf) clearRoster(networkId, event.channel)
+            is IrcEvent.Disconnected -> invalidateRosters(networkId)
+            else -> Unit
+        }
+    }
+
+    private suspend fun bufferForChannel(networkId: Long, channel: String) =
+        bufferDao.byName(
+            networkId,
+            clientFor(networkId)?.isupport?.normalize(channel) ?: normalize(networkId, channel),
+        )
+
+    private fun setRosterState(bufferId: Long, state: RosterLoadState) {
+        _rosterStates.update { it + (bufferId to state) }
+    }
+
+    private suspend fun clearRoster(networkId: Long, channel: String) {
+        bufferForChannel(networkId, channel)?.let { buffer ->
+            rosterRequests.remove(buffer.id)?.cancel()
+            _rosterStates.update { it - buffer.id }
+        }
+    }
+
+    private suspend fun invalidateRosters(networkId: Long) {
+        val ids = bufferDao.channelIds(networkId).toSet()
+        ids.forEach { rosterRequests.remove(it)?.cancel() }
+        _rosterStates.update { states ->
+            states + ids.associateWith { RosterLoadState.NOT_LOADED }
+        }
     }
 
     private fun fingerprint(row: NetworkEntity): String = networkFingerprint(
@@ -806,6 +866,62 @@ class ConnectionManagerImpl @Inject constructor(
         if (messageDao.dismissInvite(messageId) > 0) messageNotifier.onInvitationResolved(messageId)
     }
 
+    override suspend fun requestMembers(bufferId: Long, force: Boolean) {
+        val buffer = bufferDao.observeById(bufferId) ?: return
+        if (buffer.type != BufferType.CHANNEL || !buffer.joined) return
+        if (!force && rosterStates.value[bufferId] == RosterLoadState.LOADED) return
+        val client = clientFor(buffer.networkId) ?: run {
+            setRosterState(bufferId, RosterLoadState.FAILED)
+            return
+        }
+        if (client.state.value !is IrcClientState.Ready) {
+            setRosterState(bufferId, RosterLoadState.FAILED)
+            return
+        }
+
+        val candidate = scope.async(start = CoroutineStart.LAZY) {
+            setRosterState(bufferId, RosterLoadState.LOADING)
+            val completed = withTimeoutOrNull(ROSTER_REQUEST_TIMEOUT_MS) {
+                coroutineScope {
+                    val names = async(start = CoroutineStart.UNDISPATCHED) {
+                        client.events.filterIsInstance<IrcEvent.Names>().first {
+                            client.isupport.normalize(it.channel) == buffer.name
+                        }
+                    }
+                    val whox = async { client.whox(buffer.displayName) }
+                    try {
+                        client.send(
+                            io.github.trevarj.motd.irc.proto.IrcMessage(
+                                command = "NAMES",
+                                params = listOf(buffer.displayName),
+                            ),
+                        )
+                        names.await()
+                        whox.await()
+                    } finally {
+                        names.cancel()
+                        whox.cancel()
+                    }
+                }
+                true
+            } == true
+            if (!completed && clientFor(buffer.networkId) === client &&
+                rosterStates.value[bufferId] == RosterLoadState.LOADING
+            ) {
+                eventProcessor.cancelRosterSnapshot(buffer.networkId, bufferId)
+                setRosterState(bufferId, RosterLoadState.FAILED)
+            }
+        }
+        val existing = rosterRequests.putIfAbsent(bufferId, candidate)
+        val request = existing ?: candidate.also { it.start() }
+        if (existing != null) candidate.cancel()
+        try {
+            request.await()
+        } finally {
+            rosterRequests.remove(bufferId, request)
+        }
+    }
+
     override suspend fun partChannel(bufferId: Long, reason: String?) {
         val buffer = bufferDao.observeById(bufferId) ?: return
         // Append the reason as the PART trailing param when the user supplied one (/part <reason>).
@@ -960,6 +1076,7 @@ class ConnectionManagerImpl @Inject constructor(
         const val READ_MARKER_PERSIST_TIMEOUT_MS = 2_000L
         const val ECHO_TIMEOUT_MS = 30_000L
         const val INVITE_READY_TIMEOUT_MS = 30_000L
+        const val ROSTER_REQUEST_TIMEOUT_MS = 15_000L
         const val PUSH_BACKGROUND_GRACE_MS = 30_000L
         const val MAX_BYTES = 400
         // Stable, casemapping-invariant name for the per-network SERVER buffer.

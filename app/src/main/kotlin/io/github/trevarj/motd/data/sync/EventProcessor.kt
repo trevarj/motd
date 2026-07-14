@@ -46,11 +46,23 @@ class EventProcessor @Inject constructor(
     private val reactionMutations = RoomReactionMutationStore(db)
 
     private val states = ConcurrentHashMap<Long, NetworkState>()
+    private val rosterSnapshots = ConcurrentHashMap<RosterKey, MutableList<RosterDelta>>()
+
+    private data class RosterKey(val networkId: Long, val bufferId: Long)
+
+    private sealed interface RosterDelta {
+        data class Upsert(val nick: String) : RosterDelta
+        data class Remove(val nick: String) : RosterDelta
+        data class Rename(val from: String, val to: String) : RosterDelta
+        data class Prefix(val nick: String, val prefix: Char, val adding: Boolean) : RosterDelta
+    }
 
     /** Per-network state for self-nick tracking, mention regex and case normalization. */
     private class NetworkState(
         @Volatile var selfNick: String,
         @Volatile var caseMapping: String,
+        @Volatile var prefixModes: Map<Char, Char> = emptyMap(),
+        @Volatile var chanModes: List<Set<Char>> = emptyList(),
     ) {
         @Volatile var mentionRegex: Regex = buildMentionRegex(selfNick)
 
@@ -93,7 +105,12 @@ class EventProcessor @Inject constructor(
     /** Update cached self-nick + case mapping from a Registered/ISUPPORT snapshot. */
     fun onRegistered(networkId: Long, nick: String, isupport: Map<String, String>) {
         val cm = isupport["CASEMAPPING"] ?: "rfc1459"
-        states[networkId] = NetworkState(selfNick = nick, caseMapping = cm)
+        states[networkId] = NetworkState(
+            selfNick = nick,
+            caseMapping = cm,
+            prefixModes = parsePrefixModes(isupport["PREFIX"]),
+            chanModes = isupport["CHANMODES"]?.split(',')?.map(String::toSet).orEmpty(),
+        )
     }
 
     override suspend fun process(networkId: Long, event: IrcEvent) {
@@ -112,6 +129,7 @@ class EventProcessor @Inject constructor(
             is IrcEvent.Quit -> onQuit(networkId, event)
             is IrcEvent.Kicked -> onKicked(networkId, event)
             is IrcEvent.NickChanged -> onNickChanged(networkId, event)
+            is IrcEvent.NamesStarted -> onNamesStarted(networkId, event)
             is IrcEvent.Names -> onNames(networkId, event)
             is IrcEvent.TopicChanged -> onTopicChanged(networkId, event)
             is IrcEvent.ModeChanged -> onModeChanged(networkId, event)
@@ -402,6 +420,7 @@ class EventProcessor @Inject constructor(
         val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
         if (e.isSelf) markJoined(bufferId, true)
         memberDao.upsert(MemberEntity(bufferId, e.nick))
+        if (e.ctx.batchId == null) journal(networkId, bufferId, RosterDelta.Upsert(e.nick))
         upsertUser(networkId, e.nick) { it.copy(account = e.account ?: it.account, realname = e.realname ?: it.realname) }
         if (e.isSelf) {
             if (e.ctx.batchId == null) {
@@ -426,7 +445,13 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         val bufferId = bufferDao.byName(networkId, st.normalize(e.channel))?.id ?: return
         memberDao.remove(bufferId, e.nick)
-        if (e.isSelf) markJoined(bufferId, false)
+        if (e.isSelf) {
+            rosterSnapshots.remove(RosterKey(networkId, bufferId))
+            memberDao.clear(bufferId)
+            markJoined(bufferId, false)
+        } else if (e.ctx.batchId == null) {
+            journal(networkId, bufferId, RosterDelta.Remove(e.nick))
+        }
         insertSystem(bufferId, e.ctx, MessageKind.PART, e.nick, "${e.nick} left" + (e.reason?.let { " ($it)" } ?: ""))
     }
 
@@ -435,6 +460,7 @@ class EventProcessor @Inject constructor(
         val buffers = buffersOfNick(networkId, e.nick)
         for (bufferId in buffers) {
             memberDao.remove(bufferId, e.nick)
+            if (e.ctx.batchId == null) journal(networkId, bufferId, RosterDelta.Remove(e.nick))
             insertSystem(bufferId, e.ctx, MessageKind.QUIT, e.nick, "${e.nick} quit" + (e.reason?.let { " ($it)" } ?: ""))
         }
     }
@@ -443,7 +469,13 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         val bufferId = bufferDao.byName(networkId, st.normalize(e.channel))?.id ?: return
         memberDao.remove(bufferId, e.nick)
-        if (e.isSelf) markJoined(bufferId, false)
+        if (e.isSelf) {
+            rosterSnapshots.remove(RosterKey(networkId, bufferId))
+            memberDao.clear(bufferId)
+            markJoined(bufferId, false)
+        } else if (e.ctx.batchId == null) {
+            journal(networkId, bufferId, RosterDelta.Remove(e.nick))
+        }
         insertSystem(bufferId, e.ctx, MessageKind.KICK, e.by, "${e.nick} was kicked by ${e.by}" + (e.reason?.let { " ($it)" } ?: ""))
     }
 
@@ -455,15 +487,31 @@ class EventProcessor @Inject constructor(
         for (bufferId in buffers) {
             memberDao.remove(bufferId, e.from)
             memberDao.upsert(MemberEntity(bufferId, e.to))
+            if (e.ctx.batchId == null) {
+                journal(networkId, bufferId, RosterDelta.Rename(e.from, e.to))
+            }
             insertSystem(bufferId, e.ctx, MessageKind.NICK, e.from, "${e.from} is now known as ${e.to}")
         }
+    }
+
+    private suspend fun onNamesStarted(networkId: Long, e: IrcEvent.NamesStarted) {
+        val st = stateFor(networkId)
+        val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
+        rosterSnapshots.putIfAbsent(RosterKey(networkId, bufferId), mutableListOf())
     }
 
     private suspend fun onNames(networkId: Long, e: IrcEvent.Names) {
         val st = stateFor(networkId)
         val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
+        val deltas = rosterSnapshots.remove(RosterKey(networkId, bufferId)).orEmpty()
+        val members = replayRosterDeltas(
+            bufferId,
+            e.members.map { MemberEntity(bufferId, it.nick, it.prefixes) },
+            deltas,
+            st,
+        )
         db.withTransaction {
-            memberDao.replaceAll(bufferId, e.members.map { MemberEntity(bufferId, it.nick, it.prefixes) })
+            memberDao.replaceAll(bufferId, members)
             e.members.forEach { member ->
                 val username = member.username
                 val host = member.host
@@ -500,8 +548,96 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         if (!isChannel(e.target, st)) return
         val bufferId = bufferDao.byName(networkId, st.normalize(e.target))?.id ?: return
+        applyPrefixModes(networkId, bufferId, e, st)
         insertSystem(bufferId, e.ctx, MessageKind.MODE, "", "mode ${e.modes} ${e.args.joinToString(" ")}".trim())
     }
+
+    private fun journal(networkId: Long, bufferId: Long, delta: RosterDelta) {
+        rosterSnapshots[RosterKey(networkId, bufferId)]?.add(delta)
+    }
+
+    fun cancelRosterSnapshot(networkId: Long, bufferId: Long) {
+        rosterSnapshots.remove(RosterKey(networkId, bufferId))
+    }
+
+    private fun replayRosterDeltas(
+        bufferId: Long,
+        snapshot: List<MemberEntity>,
+        deltas: List<RosterDelta>,
+        st: NetworkState,
+    ): List<MemberEntity> {
+        val members = LinkedHashMap<String, MemberEntity>()
+        snapshot.forEach { members[st.normalize(it.nick)] = it }
+        deltas.forEach { delta ->
+            when (delta) {
+                is RosterDelta.Upsert -> members.putIfAbsent(
+                    st.normalize(delta.nick),
+                    MemberEntity(bufferId, delta.nick),
+                )
+                is RosterDelta.Remove -> members.remove(st.normalize(delta.nick))
+                is RosterDelta.Rename -> {
+                    val old = members.remove(st.normalize(delta.from))
+                    members[st.normalize(delta.to)] = (old ?: MemberEntity(bufferId, delta.to)).copy(
+                        nick = delta.to,
+                    )
+                }
+                is RosterDelta.Prefix -> {
+                    val key = st.normalize(delta.nick)
+                    val member = members[key] ?: return@forEach
+                    members[key] = member.copy(
+                        prefixes = updatePrefixes(member.prefixes, delta.prefix, delta.adding, st),
+                    )
+                }
+            }
+        }
+        return members.values.toList()
+    }
+
+    private suspend fun applyPrefixModes(
+        networkId: Long,
+        bufferId: Long,
+        event: IrcEvent.ModeChanged,
+        st: NetworkState,
+    ) {
+        var adding = true
+        var argIndex = 0
+        for (mode in event.modes) {
+            when (mode) {
+                '+' -> adding = true
+                '-' -> adding = false
+                else -> {
+                    val prefix = st.prefixModes[mode]
+                    val consumesArg = prefix != null || modeConsumesArgument(mode, adding, st.chanModes)
+                    val argument = if (consumesArg) event.args.getOrNull(argIndex++) else null
+                    if (prefix != null && argument != null) {
+                        val member = memberDao.allNow(bufferId).firstOrNull {
+                            st.normalize(it.nick) == st.normalize(argument)
+                        }
+                        if (member != null) {
+                            memberDao.upsert(
+                                member.copy(prefixes = updatePrefixes(member.prefixes, prefix, adding, st)),
+                            )
+                        }
+                        if (event.ctx.batchId == null) {
+                            journal(networkId, bufferId, RosterDelta.Prefix(argument, prefix, adding))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun updatePrefixes(current: String, prefix: Char, adding: Boolean, st: NetworkState): String {
+        val updated = if (adding) current.toSet() + prefix else current.toSet() - prefix
+        val order = st.prefixModes.values.toList()
+        return updated.sortedBy { order.indexOf(it).let { index -> if (index < 0) Int.MAX_VALUE else index } }
+            .joinToString("")
+    }
+
+    private fun modeConsumesArgument(mode: Char, adding: Boolean, chanModes: List<Set<Char>>): Boolean =
+        mode in chanModes.getOrNull(0).orEmpty() ||
+            mode in chanModes.getOrNull(1).orEmpty() ||
+            (adding && mode in chanModes.getOrNull(2).orEmpty())
 
     // -- sync ---------------------------------------------------------------
 
@@ -611,6 +747,7 @@ class EventProcessor @Inject constructor(
 
     /** Disconnected marker → SERVER buffer for cheap in-history reconnect visibility. */
     private suspend fun onDisconnected(networkId: Long, e: IrcEvent.Disconnected) {
+        rosterSnapshots.keys.removeAll { it.networkId == networkId }
         messageDao.failJoiningInvitesForNetwork(networkId, e.reason ?: "disconnected")
         val st = stateFor(networkId)
         val bufferId = ensureServerBuffer(networkId, st)
@@ -817,6 +954,16 @@ class EventProcessor @Inject constructor(
             "403", "405", "471", "473", "474", "475", "476",
         )
     }
+}
+
+private fun parsePrefixModes(value: String?): Map<Char, Char> {
+    val raw = value ?: return emptyMap()
+    val close = raw.indexOf(')')
+    if (!raw.startsWith('(') || close <= 1) return emptyMap()
+    val modes = raw.substring(1, close)
+    val prefixes = raw.substring(close + 1)
+    if (modes.length != prefixes.length) return emptyMap()
+    return modes.indices.associate { modes[it] to prefixes[it] }
 }
 
 /**

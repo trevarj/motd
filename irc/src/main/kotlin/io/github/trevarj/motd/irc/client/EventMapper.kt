@@ -118,7 +118,10 @@ internal class EventMapper(
             "BOUNCER" -> mapBouncer(msg)
             "ERROR" -> IrcEvent.ServerError("ERROR", msg.params, msg.params.lastOrNull().orEmpty())
             // NAMES accumulation.
-            "353" -> { accumulateNames(msg); null }
+            "353" -> if (accumulateNames(msg)) {
+                val channel = msg.params.getOrNull(2) ?: msg.params.getOrNull(1).orEmpty()
+                IrcEvent.NamesStarted(channel)
+            } else null
             "366" -> finishNames(msg)
             "354" -> mapWhox(msg)
             "315" -> IrcEvent.WhoxComplete(msg.params.getOrNull(1).orEmpty())
@@ -227,10 +230,11 @@ internal class EventMapper(
         return IrcEvent.Raw(msg)
     }
 
-    private fun accumulateNames(msg: IrcMessage) {
+    private fun accumulateNames(msg: IrcMessage): Boolean {
         // 353: <nick> <symbol> <channel> :<members>
-        val channel = msg.params.getOrNull(2) ?: msg.params.getOrNull(1) ?: return
+        val channel = msg.params.getOrNull(2) ?: msg.params.getOrNull(1) ?: return false
         val key = isupport().normalize(channel)
+        val started = key !in namesBuffers
         namesDisplay[key] = channel
         val members = namesBuffers.getOrPut(key) { mutableListOf() }
         val list = msg.params.lastOrNull().orEmpty().split(' ').filter { it.isNotEmpty() }
@@ -253,6 +257,7 @@ internal class EventMapper(
             val host = if (validUserhost) rest.substring(at + 1) else null
             members.add(IrcEvent.Names.Member(nick, prefixes.toString(), username, host))
         }
+        return started
     }
 
     private fun finishNames(msg: IrcMessage): IrcEvent {
