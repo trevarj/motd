@@ -145,3 +145,112 @@ internal class LabelCorrelator {
     private fun isErrorNumeric(command: String): Boolean =
         command.length == 3 && command.all { it.isDigit() } && command[0] == '4'
 }
+
+/**
+ * Correlates one CHATHISTORY response on servers such as soju that do not advertise
+ * `labeled-response`. CHATHISTORY replies are still wrapped in a batch, so the caller registers
+ * before writing and this collector consumes that exact response before the normal event path can
+ * mistake it for unsolicited playback.
+ *
+ * The owning [IrcClient] serializes unlabelled requests, because their batches carry no other
+ * request identity.
+ */
+internal class UnlabeledChatHistoryCorrelator {
+    private class Pending(
+        val request: ChatHistoryRequest,
+        val deferred: CompletableDeferred<List<IrcMessage>>,
+    ) {
+        var rootRef: String? = null
+        val refs = mutableSetOf<String>()
+        val buffered = mutableListOf<IrcMessage>()
+    }
+
+    private var pending: Pending? = null
+
+    @Synchronized
+    fun register(request: ChatHistoryRequest, deferred: CompletableDeferred<List<IrcMessage>>) {
+        check(pending == null) { "an unlabelled CHATHISTORY request is already pending" }
+        pending = Pending(request, deferred)
+    }
+
+    @Synchronized
+    fun clear(deferred: CompletableDeferred<List<IrcMessage>>) {
+        if (pending?.deferred === deferred) pending = null
+    }
+
+    @Synchronized
+    fun failAll(cause: Throwable) {
+        pending?.deferred?.completeExceptionally(cause)
+        pending = null
+    }
+
+    /** Returns true only for the registered request's batch or failure response. */
+    @Synchronized
+    fun route(msg: IrcMessage): Boolean {
+        val current = pending ?: return false
+        if (isHistoryFailure(msg)) {
+            finishFailure(current, msg)
+            return true
+        }
+
+        if (msg.command == "BATCH") {
+            val refToken = msg.params.firstOrNull().orEmpty()
+            when {
+                refToken.startsWith("+") -> {
+                    val ref = refToken.substring(1)
+                    if (current.rootRef == null) {
+                        if (!isExpectedHistoryBatch(current.request, msg)) return false
+                        current.rootRef = ref
+                        current.refs += ref
+                        return true
+                    }
+                    if (msg.tags["batch"]?.let(current.refs::contains) == true) {
+                        current.refs += ref
+                        return true
+                    }
+                }
+                refToken.startsWith("-") -> {
+                    val ref = refToken.substring(1)
+                    if (ref !in current.refs) return false
+                    current.refs -= ref
+                    if (ref == current.rootRef) {
+                        pending = null
+                        current.deferred.complete(current.buffered.toList())
+                    }
+                    return true
+                }
+            }
+        }
+
+        if (msg.tags["batch"]?.let(current.refs::contains) == true) {
+            current.buffered += msg
+            return true
+        }
+        return false
+    }
+
+    private fun isExpectedHistoryBatch(request: ChatHistoryRequest, msg: IrcMessage): Boolean {
+        val type = msg.params.getOrNull(1)?.lowercase().orEmpty()
+        if (!type.contains("chathistory")) return false
+        val targets = type.contains("chathistory-targets")
+        return (request.subcommand == ChatHistoryRequest.Subcommand.TARGETS) == targets
+    }
+
+    private fun isHistoryFailure(msg: IrcMessage): Boolean =
+        (msg.command == "FAIL" &&
+            msg.params.firstOrNull()?.equals("CHATHISTORY", ignoreCase = true) == true) ||
+            (msg.command.length == 3 && msg.command.all { it.isDigit() } && msg.command[0] == '4' &&
+                msg.params.any { it.equals("CHATHISTORY", ignoreCase = true) })
+
+    private fun finishFailure(current: Pending, msg: IrcMessage) {
+        pending = null
+        val code = if (msg.command == "FAIL") msg.params.getOrNull(1) ?: "FAIL" else msg.command
+        current.deferred.completeExceptionally(
+            IrcCommandException(
+                ircCommand = msg.params.firstOrNull() ?: "CHATHISTORY",
+                code = code,
+                text = msg.params.lastOrNull().orEmpty(),
+            ),
+        )
+    }
+}

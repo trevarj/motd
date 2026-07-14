@@ -69,9 +69,11 @@ class ChatHistoryRemoteMediatorTest {
         val before: ArrayDeque<List<IrcEvent>> = ArrayDeque(),
     ) : ChatHistoryRemoteMediator.HistorySource {
         val calls = mutableListOf<ChatHistoryRequest.Subcommand>()
+        val requests = mutableListOf<ChatHistoryRequest>()
         override suspend fun hasCap(cap: String) = hasChatHistory
         override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResult {
             calls += req.subcommand
+            requests += req
             return when (req.subcommand) {
                 ChatHistoryRequest.Subcommand.LATEST -> ChatHistoryResult(latest, emptyList())
                 ChatHistoryRequest.Subcommand.BEFORE -> ChatHistoryResult(before.removeFirstOrNull() ?: emptyList(), emptyList())
@@ -139,6 +141,7 @@ class ChatHistoryRemoteMediatorTest {
 
         assertTrue(result is RemoteMediator.MediatorResult.Success)
         assertEquals(listOf(ChatHistoryRequest.Subcommand.BEFORE), history.calls)
+        assertEquals("timestamp=1970-01-01T00:00:00.500Z", history.requests.single().bound1)
         assertEquals(2, rowCount())
     }
 

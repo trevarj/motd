@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicReference
@@ -113,6 +115,8 @@ class IrcClient(
     private val runtimeAdvertisedCaps = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private val labels = LabelCorrelator()
+    private val unlabeledChatHistory = UnlabeledChatHistoryCorrelator()
+    private val unlabeledChatHistoryLock = Mutex()
     private val batches = BatchAssembler()
     private val typingOutbox = TypingOutbox()
     private val eventMapper = EventMapper(selfNick = { selfNick.get() }, isupport = { _isupport.get() })
@@ -140,6 +144,7 @@ class IrcClient(
         runJob?.cancel()
         runJob = null
         labels.failAll(CancellationException("client stopped"))
+        unlabeledChatHistory.failAll(CancellationException("client stopped"))
         cancelWhoxRequests("client stopped")
         batches.reset()
         val t = transport
@@ -226,6 +231,7 @@ class IrcClient(
         } finally {
             wd.stop()
             labels.failAll(CancellationException("connection closed"))
+            unlabeledChatHistory.failAll(CancellationException("connection closed"))
             cancelWhoxRequests("connection closed")
             batches.reset()
         }
@@ -266,6 +272,8 @@ class IrcClient(
     private suspend fun dispatch(msg: IrcMessage, t: IrcTransport) {
         // Labeled responses are consumed by the correlator (incl. their batch contents).
         if (labels.route(msg)) return
+        // soju does not support labeled-response, but its CHATHISTORY replies remain batched.
+        if (unlabeledChatHistory.route(msg)) return
 
         // Runtime CAP NEW/DEL.
         if (msg.command == "CAP") {
@@ -525,7 +533,11 @@ class IrcClient(
             ChatHistoryRequest.Subcommand.TARGETS ->
                 ChatHistoryCommands.targets(req.bound1.orEmpty(), req.bound2.orEmpty(), limit)
         }
-        val response = sendLabeled(msg)
+        val response = if (hasCap("labeled-response")) {
+            sendLabeled(msg)
+        } else {
+            sendUnlabeledChatHistory(req, msg)
+        }
         return if (req.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
             ChatHistoryResult(events = emptyList(), targets = parseTargets(response))
         } else {
@@ -533,6 +545,23 @@ class IrcClient(
                 .filter { it.command != "BATCH" } // drop nested batch open/close markers
                 .mapNotNull { eventMapper.map(it, batchId = it.tags["batch"]) }
             ChatHistoryResult(events = events, targets = emptyList())
+        }
+    }
+
+    private suspend fun sendUnlabeledChatHistory(
+        request: ChatHistoryRequest,
+        message: IrcMessage,
+    ): List<IrcMessage> = unlabeledChatHistoryLock.withLock {
+        val t = transport ?: return emptyList()
+        val deferred = CompletableDeferred<List<IrcMessage>>()
+        unlabeledChatHistory.register(request, deferred)
+        try {
+            t.send(message.serialize())
+            withTimeout(LABEL_TIMEOUT_MS) { deferred.await() }
+        } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+            throw IrcTimeoutException("CHATHISTORY")
+        } finally {
+            unlabeledChatHistory.clear(deferred)
         }
     }
 

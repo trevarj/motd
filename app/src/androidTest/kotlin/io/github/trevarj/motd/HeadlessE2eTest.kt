@@ -3,6 +3,7 @@ package io.github.trevarj.motd
 import android.Manifest
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
@@ -115,6 +116,24 @@ abstract class HeadlessE2eDriver {
         }
     }
 
+    /** Keep a failed history assertion actionable by reporting the live bouncer capability state. */
+    protected fun waitForTextWithConnectionDiagnostics(text: String, timeoutMillis: Long = 15_000) {
+        try {
+            waitForText(text, timeoutMillis)
+        } catch (error: ComposeTimeoutException) {
+            val states = buildString {
+                compose.activityRule.scenario.onActivity { activity ->
+                    append(
+                        activity.connectionManager.connectionStates.value.entries.joinToString { (networkId, state) ->
+                            "$networkId=$state caps=${activity.connectionManager.clientFor(networkId)?.caps}"
+                        },
+                    )
+                }
+            }
+            throw AssertionError("Timed out waiting for '$text'. Connection states: $states", error)
+        }
+    }
+
     protected fun waitForDescription(description: String, timeoutMillis: Long = 15_000) {
         compose.waitUntil(timeoutMillis) {
             compose.onAllNodesWithContentDescription(
@@ -203,13 +222,15 @@ abstract class HeadlessE2eDriver {
 @FastHeadlessE2e
 class OnboardingHeadlessE2eTest : HeadlessE2eDriver() {
     @Test
-    fun connectsImportsNetworkAndShowsChatList() {
+    fun connectsImportsNetworkAndAutomaticallyBackfillsRetainedHistory() {
         waitForDescription("Open navigation drawer")
         waitForDescription("New conversation")
-        clickDescription("Open navigation drawer")
-        waitForText("NETWORKS")
-        waitForText("libera")
-        waitForText(nick)
+        // The retained channel must arrive via the automatic CHATHISTORY TARGETS/LATEST pass;
+        // do not create or join it manually before making this assertion.
+        waitForText(channel, timeoutMillis = 30_000)
+        clickText(channel)
+        waitForTag("chat_composer_field", timeoutMillis = 30_000)
+        waitForTextWithConnectionDiagnostics("hello, this is a seeded plain line", timeoutMillis = 30_000)
     }
 }
 

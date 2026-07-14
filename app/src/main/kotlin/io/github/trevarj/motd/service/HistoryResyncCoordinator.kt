@@ -12,6 +12,7 @@ import io.github.trevarj.motd.irc.client.ChatHistoryResult
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -156,7 +157,8 @@ class HistoryResyncCoordinator @Inject constructor(
         // message in one buffer can otherwise hide an older missed message in another. Advance a
         // dedicated cursor only after a whole network pass has completed.
         val now = System.currentTimeMillis()
-        val lower = (syncPrefs.lastSuccessfulSync(networkId) ?: Instant.EPOCH.toEpochMilli())
+        val previousSync = syncPrefs.lastSuccessfulSync(networkId)
+        val lower = (previousSync ?: Instant.EPOCH.toEpochMilli())
             .minus(TARGETS_FUZZ_MS)
             .coerceAtLeast(Instant.EPOCH.toEpochMilli())
         val upper = now + TARGETS_FUZZ_MS
@@ -168,8 +170,8 @@ class HistoryResyncCoordinator @Inject constructor(
                 ChatHistoryRequest(
                     subcommand = ChatHistoryRequest.Subcommand.TARGETS,
                     target = "*",
-                    bound1 = "timestamp=${Instant.ofEpochMilli(upper)}",
-                    bound2 = "timestamp=${Instant.ofEpochMilli(lower)}",
+                    bound1 = ChatHistorySelectors.timestamp(upper),
+                    bound2 = ChatHistorySelectors.timestamp(lower),
                     limit = source.pageLimit(),
                 ),
             ).targets.map { null to it.first }
@@ -188,7 +190,11 @@ class HistoryResyncCoordinator @Inject constructor(
                 .distinctBy { it.second.lowercase() },
             source = source,
             isCurrent = isCurrent,
-            includeRecentOverlap = false,
+            // A bouncer can deliver a live self-JOIN before this first pass. That row is newer
+            // than every retained line, so an AFTER-only request would permanently skip the
+            // initial backlog. Seed a fresh network with LATEST as well; a known target with no
+            // persisted chat row gets the same protection in syncTarget for pre-fix cursors.
+            includeRecentOverlap = previousSync == null,
         )
         if (result !is HistoryResyncState.Failed && result != HistoryResyncState.Unsupported) {
             syncPrefs.setLastSuccessfulSync(networkId, now)
@@ -378,9 +384,14 @@ class HistoryResyncCoordinator @Inject constructor(
         val before = knownBufferId?.let { messageCount(it) } ?: 0
         var bufferId = knownBufferId
         var boundary = bufferId?.let { latestBoundary(it) }
+        // A live self-JOIN/part/topic row is not evidence that its retained chat history was
+        // imported. In particular, older releases marked a network sync complete after using that
+        // row as an AFTER cursor, leaving an existing bouncer channel permanently empty. Bypass
+        // AFTER for a target with no stored chat content and seed it from LATEST instead.
+        val lacksStoredChat = bufferId?.let { !hasStoredChat(it) } ?: true
         var afterRejected = false
 
-        var pagingBoundary = boundary
+        var pagingBoundary = if (lacksStoredChat) null else boundary
         if (pagingBoundary != null) {
             try {
                 while (true) {
@@ -418,7 +429,7 @@ class HistoryResyncCoordinator @Inject constructor(
             }
         }
 
-        if (boundary == null || afterRejected || includeRecentOverlap) {
+        if (boundary == null || afterRejected || includeRecentOverlap || lacksStoredChat) {
             val latest = request(
                 source,
                 ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = pageLimit),
@@ -487,6 +498,15 @@ class HistoryResyncCoordinator @Inject constructor(
             .use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
     }
 
+    private suspend fun hasStoredChat(bufferId: Long): Boolean = withContext(Dispatchers.IO) {
+        db.query(
+            SimpleSQLiteQuery(
+                "SELECT 1 FROM messages WHERE bufferId = ? AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION') LIMIT 1",
+                arrayOf<Any>(bufferId),
+            ),
+        ).use { cursor -> cursor.moveToFirst() }
+    }
+
     private suspend fun bufferIdFor(networkId: Long, target: String): Long? = withContext(Dispatchers.IO) {
         db.query(
             SimpleSQLiteQuery(
@@ -498,7 +518,7 @@ class HistoryResyncCoordinator @Inject constructor(
 
     private fun Boundary.selector(msgidSupported: Boolean): String =
         if (msgidSupported && !msgid.isNullOrBlank()) "msgid=$msgid"
-        else "timestamp=${Instant.ofEpochMilli(serverTime)}"
+        else ChatHistorySelectors.timestamp(serverTime)
 
     private fun pageBoundary(events: List<IrcEvent>, newest: Boolean): Boundary? {
         val contexts = events.flatMap { it.historyContexts() }

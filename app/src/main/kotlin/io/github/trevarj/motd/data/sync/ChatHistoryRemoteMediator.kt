@@ -11,8 +11,8 @@ import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResult
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.service.ConnectionManager
-import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -95,7 +95,7 @@ class ChatHistoryRemoteMediator(
             val seeded = messageDao.oldestTime(bufferId) != null
             return MediatorResult.Success(endOfPaginationReached = !seeded)
         }
-        val bound = "timestamp=${Instant.ofEpochMilli(oldest)}"
+        val bound = ChatHistorySelectors.timestamp(oldest)
         val result = history.chathistory(
             ChatHistoryRequest(ChatHistoryRequest.Subcommand.BEFORE, target, bound1 = bound, limit = pageSize),
         )
