@@ -434,7 +434,11 @@ class ConnectionManagerImpl @Inject constructor(
                 setRosterState(it.id, RosterLoadState.LOADING)
             }
             is IrcEvent.Names -> bufferForChannel(networkId, event.channel)?.let {
-                setRosterState(it.id, RosterLoadState.LOADED)
+                // An explicit lazy refresh is complete only after its correlated WHOX has also
+                // finished. The NAMES snapshot itself has converged in EventProcessor, but
+                // exposing LOADED here would incorrectly turn a later WHOX timeout into an
+                // authoritative, supposedly enriched roster.
+                setRosterState(it.id, rosterStateAfterNames(rosterRequests[it.id] != null))
             }
             is IrcEvent.Parted -> if (event.isSelf) clearRoster(networkId, event.channel)
             is IrcEvent.Kicked -> if (event.isSelf) clearRoster(networkId, event.channel)
@@ -1093,11 +1097,11 @@ class ConnectionManagerImpl @Inject constructor(
                 }
                 true
             } == true
-            if (!completed && clientFor(buffer.networkId) === client &&
-                rosterStates.value[bufferId] == RosterLoadState.LOADING
-            ) {
-                eventProcessor.cancelRosterSnapshot(buffer.networkId, bufferId)
-                setRosterState(bufferId, RosterLoadState.FAILED)
+            if (clientFor(buffer.networkId) === client) {
+                if (!completed) {
+                    eventProcessor.cancelRosterSnapshot(buffer.networkId, bufferId)
+                }
+                setRosterState(bufferId, rosterStateAfterExplicitRefresh(completed))
             }
         }
         val existing = rosterRequests.putIfAbsent(bufferId, candidate)

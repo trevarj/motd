@@ -10,6 +10,12 @@ enum class RosterLoadState { NOT_LOADED, LOADING, LOADED, FAILED }
 enum class PresenceState { UNKNOWN, ONLINE, OFFLINE }
 data class PresenceKey(val networkId: Long, val normalizedNick: String)
 
+internal fun rosterStateAfterNames(explicitRefreshInFlight: Boolean): RosterLoadState =
+    if (explicitRefreshInFlight) RosterLoadState.LOADING else RosterLoadState.LOADED
+
+internal fun rosterStateAfterExplicitRefresh(completed: Boolean): RosterLoadState =
+    if (completed) RosterLoadState.LOADED else RosterLoadState.FAILED
+
 private val EMPTY_ROSTER_STATES: StateFlow<Map<Long, RosterLoadState>> = MutableStateFlow(emptyMap())
 private val EMPTY_PRESENCE_STATES: StateFlow<Map<PresenceKey, PresenceState>> = MutableStateFlow(emptyMap())
 
