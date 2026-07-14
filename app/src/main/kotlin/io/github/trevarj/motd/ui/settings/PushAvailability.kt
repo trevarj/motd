@@ -43,6 +43,7 @@ data class PushDistributor(val packageName: String, val label: String)
 enum class PushSetupStatus {
     CHOOSE_DISTRIBUTOR,
     REQUESTING_ENDPOINT,
+    WAITING_FOR_SERVER,
     VERIFYING,
     ACTIVE,
     PARTIAL_FALLBACK,

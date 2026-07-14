@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.push
 
 import android.content.Context
+import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -29,6 +30,7 @@ class PushDistributorController @Inject constructor(
     private val pushPrefs: PushPrefs,
     private val healthStore: PushHealthStore,
     private val connectionManager: ConnectionManager,
+    private val webPushRegistrar: Lazy<WebPushRegistrar>,
 ) {
     private val mutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -84,7 +86,20 @@ class PushDistributorController @Inject constructor(
         connectionManager.startAll()
         networkDao.allNow()
             .filter { it.autoConnect && it.role != NetworkRole.BOUNCER_ROOT }
-            .forEach { unifiedPush.registerApp(it.id.toString()) }
+            .forEach { network ->
+                val endpoint = pushPrefs.endpointFor(network.id)
+                if (endpoint == null) {
+                    healthStore.requestingEndpoint(network.id)
+                } else {
+                    // Existing distributor state does not imply that soju retained the server-side
+                    // registration. Re-arm it now when possible; the Ready watcher retries after
+                    // a late bouncer CAP ACK if this attempt is too early.
+                    healthStore.waitingForServer(network.id)
+                }
+                unifiedPush.registerApp(network.id.toString())
+                if (endpoint != null) webPushRegistrar.get().reRegisterIfNeeded(network.id)
+            }
+        connectionManager.evaluatePushMode()
     }
 
     private companion object {

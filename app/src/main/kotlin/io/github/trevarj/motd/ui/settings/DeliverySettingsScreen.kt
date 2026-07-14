@@ -228,6 +228,7 @@ private fun PushStatusCard(
         when (availability.setupStatus) {
             PushSetupStatus.CHOOSE_DISTRIBUTOR -> R.string.settings_delivery_push_status_choose
             PushSetupStatus.REQUESTING_ENDPOINT -> R.string.settings_delivery_push_status_endpoint
+            PushSetupStatus.WAITING_FOR_SERVER -> R.string.settings_delivery_push_status_server
             PushSetupStatus.VERIFYING -> R.string.settings_delivery_push_status_verifying
             PushSetupStatus.ACTIVE -> R.string.settings_delivery_push_status_active
             PushSetupStatus.PARTIAL_FALLBACK -> R.string.settings_delivery_push_status_partial

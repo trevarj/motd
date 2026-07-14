@@ -478,6 +478,20 @@ class ConnectionManagerImpl @Inject constructor(
             is IrcEvent.NickChanged -> rekeyPresence(networkId, event.from, event.to)
             is IrcEvent.CapsChanged -> {
                 if (event.removed.any { it in NO_IMPLICIT_NAMES_ALIASES }) invalidateRosters(networkId)
+                if (event.added.any { it.substringBefore('=') == WEBPUSH_CAP }) {
+                    // This also covers an endpoint callback racing a soju child's initial Ready
+                    // snapshot: re-arm precisely when the post-BIND CAP ACK makes WEBPUSH usable.
+                    val client = clientFor(networkId)
+                    if (client != null && settings.settings.first().deliveryMode == DeliveryMode.UNIFIED_PUSH &&
+                        pushPrefs.endpointFor(networkId) != null
+                    ) {
+                        scope.launch {
+                            if (clientFor(networkId) !== client) return@launch
+                            webPushRegistrar.get().reRegisterIfNeeded(networkId)
+                            if (clientFor(networkId) === client) evaluatePushMode()
+                        }
+                    }
+                }
                 if (
                     event.added.any { it.substringBefore('=') in io.github.trevarj.motd.irc.client.EXTENDED_MONITOR_ALIASES } ||
                     event.removed.any { it in io.github.trevarj.motd.irc.client.EXTENDED_MONITOR_ALIASES }
@@ -689,16 +703,6 @@ class ConnectionManagerImpl @Inject constructor(
         if (enrollmentResult == EnrollmentJoinResult.FAILED) {
             Log.w(TAG, "One-shot Libera #motd JOIN write failed for network ${row.id}")
         }
-        // In push mode, re-arm webpush on this network if we already hold its endpoint (the
-        // socket just reached Ready after a reconnect / quick foreground connect). Registration
-        // may wait on a public relay, so run it beside catch-up rather than delaying visible history.
-        if (settings.settings.first().deliveryMode == DeliveryMode.UNIFIED_PUSH) {
-            scope.launch {
-                if (!isCurrent()) return@launch
-                webPushRegistrar.get().reRegisterIfNeeded(row.id)
-                if (isCurrent()) evaluatePushMode()
-            }
-        }
         // A BOUNCER_ROOT reaching Ready means bound children can establish BOUNCER BIND again.
         // Only revive a wanted child that is absent, dead, or terminally disconnected/failed.
         // A child that is still Connecting/Registering owns its own transition to Ready; rebuilding
@@ -747,6 +751,32 @@ class ConnectionManagerImpl @Inject constructor(
                 // history rows arrive. If it appears later, its own watcher will still converge.
                 if (client.hasCap(READ_MARKER_CAP)) readMarkers.join()
                 if (isCurrent()) catchUpForConnection(row.id, client)
+            }
+            launch {
+                // A bouncer child publishes its post-BIND CAP ACK after the first Ready snapshot.
+                // Keep an endpoint in a non-protecting state until that exact connection can prove
+                // it has re-registered it, rather than turning an early snapshot into a permanent
+                // false "unsupported" fallback.
+                if (settings.settings.first().deliveryMode != DeliveryMode.UNIFIED_PUSH ||
+                    pushPrefs.endpointFor(row.id) == null
+                ) {
+                    return@launch
+                }
+                pushHealthStore.waitingForServer(row.id)
+                when {
+                    client.hasCap(WEBPUSH_CAP) -> Unit
+                    row.role == NetworkRole.BOUNCER_CHILD -> awaitCapabilityAvailable(client, WEBPUSH_CAP)
+                    else -> {
+                        pushHealthStore.capability(row.id, supported = false)
+                        if (isCurrent()) evaluatePushMode()
+                        return@launch
+                    }
+                }
+                if (!isCurrent() || settings.settings.first().deliveryMode != DeliveryMode.UNIFIED_PUSH) {
+                    return@launch
+                }
+                webPushRegistrar.get().reRegisterIfNeeded(row.id)
+                if (isCurrent()) evaluatePushMode()
             }
         }
     }

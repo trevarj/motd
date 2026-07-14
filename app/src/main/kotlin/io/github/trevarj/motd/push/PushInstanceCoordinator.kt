@@ -12,10 +12,13 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * THE UnifiedPush registration trigger (plans/11 §B.2). v1 never called `UnifiedPush.registerApp`;
@@ -35,6 +38,7 @@ class PushInstanceCoordinator @Inject constructor(
     private val healthStore: PushHealthStore = NoopPushHealthStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val endpointTimeouts = ConcurrentHashMap<Long, Job>()
 
     @Volatile private var started = false
 
@@ -73,6 +77,7 @@ class PushInstanceCoordinator @Inject constructor(
 
     suspend fun reconcile(mode: DeliveryMode, provider: PushProvider, connectable: Set<Long>) {
         if (mode != DeliveryMode.UNIFIED_PUSH) {
+            cancelEndpointTimeoutsExcept(emptySet())
             fcm.reconcile(emptySet())
             reconcileUnifiedPush(emptySet(), connectable)
             return
@@ -96,16 +101,54 @@ class PushInstanceCoordinator @Inject constructor(
             // Auto-select only an unambiguous single distributor. Settings presents a chooser when
             // several are installed instead of silently picking an arbitrary package.
             val installed = up.getDistributors()
-            if (installed.size != 1) return
+            if (installed.size != 1) {
+                cancelEndpointTimeoutsExcept(emptySet())
+                return
+            }
             up.saveDistributor(installed.single())
         }
-        for (id in desired) up.registerApp(id.toString())
+        cancelEndpointTimeoutsExcept(desired)
+        for (id in desired) {
+            if (pushPrefs.endpointFor(id) == null) {
+                armEndpointTimeout(id)
+            } else {
+                endpointTimeouts.remove(id)?.cancel()
+            }
+            up.registerApp(id.toString())
+        }
         for (id in (pushPrefs.endpoints().keys + connectable) - desired) {
             up.unregisterApp(id.toString())
         }
     }
 
-    private companion object { const val TAG = "PushCoordinator" }
+    /** Surface a distributor callback that never arrives instead of remaining "requesting" forever. */
+    private suspend fun armEndpointTimeout(networkId: Long) {
+        if (endpointTimeouts[networkId]?.isActive == true) return
+        healthStore.requestingEndpoint(networkId)
+        lateinit var timeout: Job
+        timeout = scope.launch {
+            try {
+                delay(ENDPOINT_TIMEOUT_MS)
+                if (pushPrefs.endpointFor(networkId) == null && networkDao.byId(networkId) != null) {
+                    healthStore.failed(networkId, "ENDPOINT_TIMEOUT")
+                }
+            } finally {
+                endpointTimeouts.remove(networkId, timeout)
+            }
+        }
+        endpointTimeouts.put(networkId, timeout)?.cancel()
+    }
+
+    private fun cancelEndpointTimeoutsExcept(keep: Set<Long>) {
+        endpointTimeouts.entries.forEach { (networkId, job) ->
+            if (networkId !in keep && endpointTimeouts.remove(networkId, job)) job.cancel()
+        }
+    }
+
+    private companion object {
+        const val TAG = "PushCoordinator"
+        const val ENDPOINT_TIMEOUT_MS = 45_000L
+    }
 }
 
 internal fun pushEligibleNetworkIds(networks: List<io.github.trevarj.motd.data.db.NetworkEntity>): Set<Long> =

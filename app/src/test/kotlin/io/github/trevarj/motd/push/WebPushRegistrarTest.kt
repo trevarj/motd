@@ -22,8 +22,21 @@ class WebPushRegistrarTest {
         private val values = MutableStateFlow<Map<Long, NetworkPushHealth>>(emptyMap())
         override val health: Flow<Map<Long, NetworkPushHealth>> = values
         override suspend fun snapshot() = values.value
+        override suspend fun requestingEndpoint(networkId: Long) {
+            values.value += networkId to NetworkPushHealth(
+                registrationState = PushRegistrationState.WAITING_FOR_ENDPOINT,
+            )
+        }
         override suspend fun endpointReceived(networkId: Long, endpoint: String) {
-            values.value += networkId to NetworkPushHealth(endpointFingerprint = fingerprintEndpoint(endpoint))
+            values.value += networkId to NetworkPushHealth(
+                endpointFingerprint = fingerprintEndpoint(endpoint),
+                registrationState = PushRegistrationState.WAITING_FOR_SERVER,
+            )
+        }
+        override suspend fun waitingForServer(networkId: Long) {
+            values.value += networkId to (values.value[networkId] ?: NetworkPushHealth()).copy(
+                registrationState = PushRegistrationState.WAITING_FOR_SERVER,
+            )
         }
         override suspend fun capability(networkId: Long, supported: Boolean) = Unit
         override suspend fun verifying(networkId: Long) = Unit
@@ -93,7 +106,8 @@ class WebPushRegistrarTest {
     @Test
     fun onNewEndpoint_persists_endpoint_keyed_by_network_and_keys() = runTest {
         val prefs = FakePushPrefs()
-        val registrar = WebPushRegistrar(prefs, FakeConnectionManager(), FakePushHealthStore())
+        val health = FakePushHealthStore()
+        val registrar = WebPushRegistrar(prefs, FakeConnectionManager(), health)
 
         val sent = registrar.onNewEndpoint(7L, "https://push.example/abc")
 
@@ -101,6 +115,10 @@ class WebPushRegistrarTest {
         assertEquals("https://push.example/abc", prefs.endpointFor(7L))
         assertNull("endpoint keyed by network id only", prefs.endpointFor(8L))
         assertNotNull(prefs.keys)
+        assertEquals(
+            PushRegistrationState.WAITING_FOR_SERVER,
+            health.snapshot()[7L]?.registrationState,
+        )
     }
 
     @Test

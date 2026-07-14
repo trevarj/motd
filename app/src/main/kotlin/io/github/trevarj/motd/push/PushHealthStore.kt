@@ -26,7 +26,13 @@ private val Context.pushHealthDataStore: DataStore<Preferences> by
     preferencesDataStore(name = "push_health")
 
 enum class PushCapability { UNKNOWN, SUPPORTED, UNSUPPORTED }
-enum class PushRegistrationState { WAITING_FOR_ENDPOINT, VERIFYING, ACTIVE, FALLBACK }
+enum class PushRegistrationState {
+    WAITING_FOR_ENDPOINT,
+    WAITING_FOR_SERVER,
+    VERIFYING,
+    ACTIVE,
+    FALLBACK,
+}
 
 /** Durable, redacted state used to decide whether a network may safely drop its IRC socket. */
 data class NetworkPushHealth(
@@ -47,7 +53,9 @@ data class NetworkPushHealth(
 interface PushHealthStore {
     val health: Flow<Map<Long, NetworkPushHealth>>
     suspend fun snapshot(): Map<Long, NetworkPushHealth>
+    suspend fun requestingEndpoint(networkId: Long)
     suspend fun endpointReceived(networkId: Long, endpoint: String)
+    suspend fun waitingForServer(networkId: Long)
     suspend fun capability(networkId: Long, supported: Boolean)
     suspend fun verifying(networkId: Long)
     suspend fun registered(networkId: Long)
@@ -62,7 +70,9 @@ interface PushHealthStore {
 internal object NoopPushHealthStore : PushHealthStore {
     override val health: Flow<Map<Long, NetworkPushHealth>> = kotlinx.coroutines.flow.flowOf(emptyMap())
     override suspend fun snapshot() = emptyMap<Long, NetworkPushHealth>()
+    override suspend fun requestingEndpoint(networkId: Long) = Unit
     override suspend fun endpointReceived(networkId: Long, endpoint: String) = Unit
+    override suspend fun waitingForServer(networkId: Long) = Unit
     override suspend fun capability(networkId: Long, supported: Boolean) = Unit
     override suspend fun verifying(networkId: Long) = Unit
     override suspend fun registered(networkId: Long) = Unit
@@ -86,13 +96,30 @@ class DataStorePushHealthStore @Inject constructor(
 
     override suspend fun snapshot(): Map<Long, NetworkPushHealth> = health.first()
 
+    override suspend fun requestingEndpoint(networkId: Long) = update(networkId) { old ->
+        old.copy(
+            registrationState = PushRegistrationState.WAITING_FOR_ENDPOINT,
+            errorCode = null,
+            errorAt = null,
+        )
+    }
+
     override suspend fun endpointReceived(networkId: Long, endpoint: String) = update(networkId) { old ->
         val fingerprint = fingerprintEndpoint(endpoint)
-        if (old.endpointFingerprint == fingerprint) {
-            old.copy(errorCode = null, errorAt = null)
-        } else {
-            NetworkPushHealth(endpointFingerprint = fingerprint)
-        }
+        old.copy(
+            endpointFingerprint = fingerprint,
+            registrationState = PushRegistrationState.WAITING_FOR_SERVER,
+            errorCode = null,
+            errorAt = null,
+        )
+    }
+
+    override suspend fun waitingForServer(networkId: Long) = update(networkId) { old ->
+        old.copy(
+            registrationState = PushRegistrationState.WAITING_FOR_SERVER,
+            errorCode = null,
+            errorAt = null,
+        )
     }
 
     override suspend fun capability(networkId: Long, supported: Boolean) = update(networkId) { old ->

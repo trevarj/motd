@@ -67,6 +67,24 @@ class PushInstanceCoordinatorTest {
         override suspend fun onTokenChanged(token: String) = Unit
     }
 
+    private class RecordingHealthStore : PushHealthStore {
+        override val health: Flow<Map<Long, NetworkPushHealth>> = MutableStateFlow(emptyMap())
+        val endpointRequests = mutableListOf<Long>()
+        override suspend fun snapshot() = emptyMap<Long, NetworkPushHealth>()
+        override suspend fun requestingEndpoint(networkId: Long) { endpointRequests += networkId }
+        override suspend fun endpointReceived(networkId: Long, endpoint: String) = Unit
+        override suspend fun waitingForServer(networkId: Long) = Unit
+        override suspend fun capability(networkId: Long, supported: Boolean) = Unit
+        override suspend fun verifying(networkId: Long) = Unit
+        override suspend fun registered(networkId: Long) = Unit
+        override suspend fun probeDelivered(networkId: Long) = Unit
+        override suspend fun messageDelivered(networkId: Long) = Unit
+        override suspend fun failed(networkId: Long, code: String) = Unit
+        override suspend fun warning(networkId: Long, code: String) = Unit
+        override suspend fun clear(networkId: Long) = Unit
+        override suspend fun retain(networkIds: Set<Long>) = Unit
+    }
+
     private class FakeSettingsRepository(mode: DeliveryMode) : SettingsRepository {
         override val settings = MutableStateFlow(Settings(ThemeMode.SYSTEM, true, mode))
         override suspend fun setThemeMode(m: ThemeMode) = Unit
@@ -110,7 +128,14 @@ class PushInstanceCoordinatorTest {
         up: UnifiedPushApi,
         prefs: PushPrefs = FakePushPrefs(),
         mode: DeliveryMode = DeliveryMode.PERSISTENT_SOCKET,
-    ) = PushInstanceCoordinator(FakeSettingsRepository(mode), FakeNetworkDao(emptyList()), prefs, up)
+        health: PushHealthStore = NoopPushHealthStore,
+    ) = PushInstanceCoordinator(
+        FakeSettingsRepository(mode),
+        FakeNetworkDao(emptyList()),
+        prefs,
+        up,
+        healthStore = health,
+    )
 
     @Test
     fun push_mode_registers_every_connectable_and_saves_distributor() = runTest {
@@ -128,6 +153,17 @@ class PushInstanceCoordinatorTest {
         coordinator(up).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(1L))
         assertTrue(up.saved.isEmpty())
         assertEquals(listOf("1"), up.registered)
+    }
+
+    @Test
+    fun missing_endpoint_is_recorded_while_waiting_for_distributor_callback() = runTest {
+        val up = FakeUnifiedPushApi(acked = "dist.a")
+        val health = RecordingHealthStore()
+
+        coordinator(up, health = health).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(7L))
+
+        assertEquals(listOf(7L), health.endpointRequests)
+        assertEquals(listOf("7"), up.registered)
     }
 
     @Test

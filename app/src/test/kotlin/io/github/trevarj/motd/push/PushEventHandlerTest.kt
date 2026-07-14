@@ -19,7 +19,9 @@ class PushEventHandlerTest {
         var deliveries = 0
         var warnings = 0
         override suspend fun snapshot() = emptyMap<Long, NetworkPushHealth>()
+        override suspend fun requestingEndpoint(networkId: Long) = Unit
         override suspend fun endpointReceived(networkId: Long, endpoint: String) = Unit
+        override suspend fun waitingForServer(networkId: Long) = Unit
         override suspend fun capability(networkId: Long, supported: Boolean) = Unit
         override suspend fun verifying(networkId: Long) = Unit
         override suspend fun registered(networkId: Long) = Unit

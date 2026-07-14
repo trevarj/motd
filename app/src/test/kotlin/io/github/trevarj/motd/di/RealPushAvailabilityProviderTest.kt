@@ -1,13 +1,19 @@
 package io.github.trevarj.motd.di
 
 import app.cash.turbine.test
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.push.NetworkPushHealth
+import io.github.trevarj.motd.push.PushRegistrationState
 import io.github.trevarj.motd.push.WebPushRegistrar
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.ui.settings.PushSetupStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -53,6 +59,17 @@ class RealPushAvailabilityProviderTest {
         states: MutableStateFlow<Map<Long, IrcClientState>>,
         hasDistributor: Boolean,
     ) = RealPushAvailabilityProvider(FakeConnectionManager(states)) { hasDistributor }
+
+    private fun network(id: Long) = NetworkEntity(
+        id = id,
+        name = "Network $id",
+        role = NetworkRole.DIRECT,
+        host = "irc.example.test",
+        port = 6697,
+        nick = "me",
+        username = "me",
+        realname = "Me",
+    )
 
     @Test
     fun cap_and_distributor_present_is_selectable_without_guidance() = runTest {
@@ -100,6 +117,26 @@ class RealPushAvailabilityProviderTest {
             assertFalse("stale/false before Ready", awaitItem().selectable)
             states.value = mapOf(1L to readyWithCap)
             assertTrue("enables once bouncer advertises webpush", awaitItem().selectable)
+        }
+    }
+
+    @Test
+    fun endpoint_received_waiting_for_bouncer_is_not_reported_as_endpoint_request() = runTest {
+        val states = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to readyWithCap))
+        val provider = RealPushAvailabilityProvider(
+            connectionManager = FakeConnectionManager(states),
+            hasDistributor = { true },
+            networks = flowOf(listOf(network(1L))),
+            health = flowOf(
+                mapOf(1L to NetworkPushHealth(
+                    endpointFingerprint = "redacted",
+                    registrationState = PushRegistrationState.WAITING_FOR_SERVER,
+                )),
+            ),
+        )
+
+        provider.availability().test {
+            assertEquals(PushSetupStatus.WAITING_FOR_SERVER, awaitItem().setupStatus)
         }
     }
 }

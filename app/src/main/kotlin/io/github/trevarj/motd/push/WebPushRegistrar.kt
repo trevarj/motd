@@ -2,6 +2,8 @@ package io.github.trevarj.motd.push
 
 import io.github.trevarj.motd.data.prefs.PushKeys
 import io.github.trevarj.motd.data.prefs.PushPrefs
+import io.github.trevarj.motd.data.db.NetworkDao
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.client.IrcCommandException
 import io.github.trevarj.motd.irc.client.IrcDisconnectedException
 import io.github.trevarj.motd.irc.client.IrcTimeoutException
@@ -12,9 +14,6 @@ import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.flow.filterIsInstance
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Per-network Web Push endpoint persistence and REGISTER/UNREGISTER orchestration against the
@@ -28,12 +27,12 @@ class WebPushRegistrar @Inject constructor(
     private val pushPrefs: PushPrefs,
     private val connectionManager: ConnectionManager,
     private val healthStore: PushHealthStore,
+    private val networkDao: NetworkDao? = null,
 ) {
     private val registrationLocks = ConcurrentHashMap<Long, Mutex>()
 
     companion object {
         const val WEBPUSH_CAP = "soju.im/webpush"
-        private const val CAP_SETTLE_TIMEOUT_MS = 15_000L
     }
 
     /** Load persisted key material, generating and persisting a fresh set on first use. */
@@ -62,6 +61,9 @@ class WebPushRegistrar @Inject constructor(
      */
     suspend fun reRegisterIfNeeded(networkId: Long): Boolean {
         val endpoint = pushPrefs.endpointFor(networkId) ?: return false
+        // A new IRC connection has not proved that its old WEBPUSH subscription is still armed.
+        // Keep the socket alive until this exact endpoint has been registered again.
+        healthStore.waitingForServer(networkId)
         val keys = loadOrCreateKeys()
         return registerOn(networkId, endpoint, keys)
     }
@@ -71,22 +73,26 @@ class WebPushRegistrar @Inject constructor(
         endpoint: String,
         keys: WebPushCrypto.KeyMaterial,
     ): Boolean = registrationLocks.getOrPut(networkId) { Mutex() }.withLock {
-        val client = connectionManager.clientFor(networkId) ?: return@withLock false
-        // A bound soju child can report Ready before its post-bind CAP ACK arrives. Give that
-        // mutation a short settling window; otherwise every foreground reconnect incorrectly
-        // downgrades a healthy subscription to "unsupported".
-        val supportsWebPush = client.hasCap(WEBPUSH_CAP) || withTimeoutOrNull(CAP_SETTLE_TIMEOUT_MS) {
-            client.state.filterIsInstance<IrcClientState.Ready>().first { ready ->
-                ready.caps.any { it == WEBPUSH_CAP || it.startsWith("$WEBPUSH_CAP=") }
-            }
-            true
-        } == true
-        if (!supportsWebPush) {
+        val client = connectionManager.clientFor(networkId)
+        if (client == null) {
+            healthStore.waitingForServer(networkId)
+            return@withLock false
+        }
+        if (!client.hasCap(WEBPUSH_CAP)) {
             if (connectionManager.clientFor(networkId) !== client) {
                 healthStore.failed(networkId, "NETWORK_DISCONNECTED")
                 return@withLock false
             }
-            healthStore.capability(networkId, supported = false)
+            // Soju bound children become Ready before their post-BIND CAP ACK. The manager holds
+            // a connection-scoped waiter and retries registration as soon as it arrives; never
+            // turn that temporary state into an unsupported/fallback verdict here.
+            if (networkDao?.byId(networkId)?.role == NetworkRole.BOUNCER_CHILD ||
+                client.state.value !is IrcClientState.Ready
+            ) {
+                healthStore.waitingForServer(networkId)
+            } else {
+                healthStore.capability(networkId, supported = false)
+            }
             return@withLock false
         }
         healthStore.verifying(networkId)

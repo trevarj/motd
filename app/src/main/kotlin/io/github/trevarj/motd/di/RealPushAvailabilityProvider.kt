@@ -110,6 +110,8 @@ class RealPushAvailabilityProvider(
             eligible.isEmpty() -> PushSetupStatus.NEEDS_ATTENTION
             eligible.any { health[it.id]?.registrationState == PushRegistrationState.VERIFYING } ->
                 PushSetupStatus.VERIFYING
+            eligible.any { health[it.id]?.registrationState == PushRegistrationState.WAITING_FOR_SERVER } ->
+                PushSetupStatus.WAITING_FOR_SERVER
             protected == eligible.size -> PushSetupStatus.ACTIVE
             protected > 0 -> PushSetupStatus.PARTIAL_FALLBACK
             error != null -> PushSetupStatus.NEEDS_ATTENTION
