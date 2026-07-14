@@ -37,7 +37,7 @@ data class IrcMessage(
             if (rest.startsWith(":")) {
                 val sp = rest.indexOf(' ')
                 if (sp < 0) throw IrcParseException("source without command", line)
-                source = parsePrefix(rest.substring(1, sp))
+                source = parseIrcPrefix(rest.substring(1, sp))
                 rest = rest.substring(sp + 1).trimStart(' ')
             }
 
@@ -57,24 +57,6 @@ data class IrcMessage(
             }
 
             return IrcMessage(tags = tags, source = source, command = command, params = params)
-        }
-
-        private fun parsePrefix(raw: String): Prefix {
-            // nick[!user][@host] | servername (stored in nick)
-            var s = raw
-            var host: String? = null
-            var user: String? = null
-            val at = s.indexOf('@')
-            if (at >= 0) {
-                host = s.substring(at + 1)
-                s = s.substring(0, at)
-            }
-            val bang = s.indexOf('!')
-            if (bang >= 0) {
-                user = s.substring(bang + 1)
-                s = s.substring(0, bang)
-            }
-            return Prefix(nick = s, user = user, host = host)
         }
 
         private fun parseParams(raw: String): List<String> {
@@ -233,6 +215,25 @@ data class IrcMessage(
 
         return sb.toString()
     }
+}
+
+/** Shared parser for source prefixes, NAMES userhosts, WHOX identities, and MONITOR hostmasks. */
+fun parseIrcPrefix(raw: String): Prefix? {
+    if (raw.isBlank() || raw.any { it == ' ' || it == ',' }) return null
+    var nickEnd = raw.length
+    val bang = raw.indexOf('!')
+    val at = raw.indexOf('@')
+    if (bang >= 0) nickEnd = minOf(nickEnd, bang)
+    if (at >= 0) nickEnd = minOf(nickEnd, at)
+    val nick = raw.substring(0, nickEnd)
+    if (nick.isEmpty()) return null
+    val validUserhost = bang == nickEnd && at > bang + 1 && at < raw.lastIndex
+    val validHostOnly = bang < 0 && at == nickEnd && at < raw.lastIndex
+    return Prefix(
+        nick = nick,
+        user = if (validUserhost) raw.substring(bang + 1, at) else null,
+        host = if (validUserhost || validHostOnly) raw.substring(at + 1) else null,
+    )
 }
 
 class IrcParseException(message: String, val line: String) : Exception(message)

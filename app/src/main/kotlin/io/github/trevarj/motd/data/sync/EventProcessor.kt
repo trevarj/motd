@@ -139,6 +139,12 @@ class EventProcessor @Inject constructor(
             is IrcEvent.RealnameChanged -> upsertUser(networkId, event.nick) { it.copy(realname = event.realname) }
             is IrcEvent.WhoxRow -> onWhoxRow(networkId, event)
             is IrcEvent.WhoxComplete -> Unit
+            is IrcEvent.MonitorOnline,
+            is IrcEvent.MonitorOffline,
+            is IrcEvent.MonitorList,
+            is IrcEvent.MonitorListEnd,
+            is IrcEvent.MonitorLimitExceeded,
+            -> Unit
             is IrcEvent.Invited -> onInvited(networkId, event, notify)
             is IrcEvent.ReadMarker -> onReadMarker(networkId, event)
             is IrcEvent.BouncerNetworkState -> onBouncerNetworkState(networkId, event)

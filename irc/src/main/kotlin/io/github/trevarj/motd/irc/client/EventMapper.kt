@@ -5,6 +5,7 @@ import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Isupport
 import io.github.trevarj.motd.irc.proto.Prefix
+import io.github.trevarj.motd.irc.proto.parseIrcPrefix
 import java.time.Instant
 import java.time.format.DateTimeParseException
 
@@ -125,6 +126,17 @@ internal class EventMapper(
             "366" -> finishNames(msg)
             "354" -> mapWhox(msg)
             "315" -> IrcEvent.WhoxComplete(msg.params.getOrNull(1).orEmpty())
+            "730" -> IrcEvent.MonitorOnline(
+                monitorTargets(msg).mapNotNull(::parseIrcPrefix),
+            )
+            "731" -> IrcEvent.MonitorOffline(monitorTargets(msg))
+            "732" -> IrcEvent.MonitorList(monitorTargets(msg))
+            "733" -> IrcEvent.MonitorListEnd
+            "734" -> IrcEvent.MonitorLimitExceeded(
+                limit = msg.params.getOrNull(1)?.toIntOrNull(),
+                targets = msg.params.getOrNull(2).orEmpty().split(',').filter(String::isNotBlank),
+                text = msg.params.lastOrNull().orEmpty(),
+            )
             else -> mapNumericOrRaw(msg)
         }
     }
@@ -246,16 +258,15 @@ internal class EventMapper(
                 prefixes.append(entry[i]); i++
             }
             val rest = entry.substring(i)
-            // userhost-in-names: nick!user@host
-            val bang = rest.indexOf('!')
-            val at = if (bang >= 0) rest.indexOf('@', bang + 1) else -1
-            if (bang == 0) continue
-            val nick = if (bang > 0) rest.substring(0, bang) else rest
-            if (nick.isEmpty()) continue
-            val validUserhost = bang > 0 && at > bang + 1 && at < rest.lastIndex
-            val username = if (validUserhost) rest.substring(bang + 1, at) else null
-            val host = if (validUserhost) rest.substring(at + 1) else null
-            members.add(IrcEvent.Names.Member(nick, prefixes.toString(), username, host))
+            val identity = parseIrcPrefix(rest) ?: continue
+            members.add(
+                IrcEvent.Names.Member(
+                    identity.nick,
+                    prefixes.toString(),
+                    identity.user,
+                    identity.host,
+                ),
+            )
         }
         return started
     }
@@ -292,6 +303,9 @@ internal class EventMapper(
         }
         return IrcEvent.Raw(msg)
     }
+
+    private fun monitorTargets(msg: IrcMessage): List<String> =
+        msg.params.drop(1).firstOrNull().orEmpty().split(',').filter(String::isNotBlank)
 
     /** Parse tag-escaped `k=v;k2=v2` attribute strings (bouncer / webpush). */
     private fun parseAttrs(raw: String): Map<String, String> = parseAttrString(raw)

@@ -29,6 +29,8 @@ internal object CapTiers {
         "no-implicit-names",
         "draft/no-implicit-names",
         "soju.im/no-implicit-names",
+        "extended-monitor",
+        "draft/extended-monitor",
         "sts",
     )
 
@@ -66,18 +68,20 @@ internal object CapNegotiator {
         val selectedNames = preferredNoImplicitNames(advertised)
         req.removeAll(NO_IMPLICIT_NAMES_ALIASES)
         if (selectedNames != null) req.add(selectedNames)
+        val selectedMonitor = preferredExtendedMonitor(advertised)
+        req.removeAll(EXTENDED_MONITOR_ALIASES)
+        if (selectedMonitor != null) req.add(selectedMonitor)
         return req
     }
 
     /** Preserve an already-selected no-implicit-names alias for this connection generation. */
     fun runtimeRequestSet(newCaps: Set<String>, ackedCaps: Set<String>, extraCaps: Set<String>): Set<String> {
         val ackedNames = ackedCaps.mapTo(HashSet()) { it.substringBefore('=') }
-        val selected = preferredNoImplicitNames(ackedNames)
-        val advertised = if (selected == null) {
-            newCaps + ackedNames
-        } else {
-            (newCaps - NO_IMPLICIT_NAMES_ALIASES.toSet()) + ackedNames
+        val heldAliases = buildSet {
+            if (preferredNoImplicitNames(ackedNames) != null) addAll(NO_IMPLICIT_NAMES_ALIASES)
+            if (preferredExtendedMonitor(ackedNames) != null) addAll(EXTENDED_MONITOR_ALIASES)
         }
+        val advertised = (newCaps - heldAliases) + ackedNames
         return requestSet(advertised, extraCaps) - ackedNames
     }
 
@@ -108,4 +112,11 @@ val NO_IMPLICIT_NAMES_ALIASES: List<String> = listOf(
 fun preferredNoImplicitNames(caps: Set<String>): String? {
     val names = caps.mapTo(HashSet()) { it.substringBefore('=') }
     return NO_IMPLICIT_NAMES_ALIASES.firstOrNull { it in names }
+}
+
+val EXTENDED_MONITOR_ALIASES: List<String> = listOf("extended-monitor", "draft/extended-monitor")
+
+fun preferredExtendedMonitor(caps: Set<String>): String? {
+    val names = caps.mapTo(HashSet()) { it.substringBefore('=') }
+    return EXTENDED_MONITOR_ALIASES.firstOrNull { it in names }
 }

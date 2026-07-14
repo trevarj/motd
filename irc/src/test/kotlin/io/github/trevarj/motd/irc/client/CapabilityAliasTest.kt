@@ -39,4 +39,19 @@ class CapabilityAliasTest {
             ),
         )
     }
+
+    @Test fun `extended monitor requests one stable preferred alias`() {
+        assertEquals(
+            setOf("extended-monitor"),
+            CapNegotiator.requestSet(EXTENDED_MONITOR_ALIASES.toSet(), emptySet()),
+        )
+        assertEquals(
+            emptySet<String>(),
+            CapNegotiator.runtimeRequestSet(
+                newCaps = setOf("extended-monitor"),
+                ackedCaps = setOf("draft/extended-monitor"),
+                extraCaps = emptySet(),
+            ),
+        )
+    }
 }

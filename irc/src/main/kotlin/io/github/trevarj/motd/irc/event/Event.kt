@@ -75,6 +75,11 @@ sealed interface IrcEvent {
         val realname: String,
     ) : IrcEvent
     data class WhoxComplete(val mask: String) : IrcEvent
+    data class MonitorOnline(val identities: List<io.github.trevarj.motd.irc.proto.Prefix>) : IrcEvent
+    data class MonitorOffline(val nicks: List<String>) : IrcEvent
+    data class MonitorList(val nicks: List<String>) : IrcEvent
+    data object MonitorListEnd : IrcEvent
+    data class MonitorLimitExceeded(val limit: Int?, val targets: List<String>, val text: String) : IrcEvent
 
     // -- channel state
     data class TopicChanged(val ctx: MessageContext, val channel: String, val topic: String, val setBy: String?) : IrcEvent
