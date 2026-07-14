@@ -9,7 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      MOTD_STACK_DIR: ${{ runner.temp }}/motd-vless-reality
       # This is a socket-level proof; no Android device is involved.
       MOTD_SKIP_ADB_REVERSE: "1"
     steps:
@@ -18,6 +17,8 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v22
 
       - name: Prove Soju history through VLESS + REALITY
+        env:
+          MOTD_STACK_DIR: ${{ runner.temp }}/motd-vless-reality
         run: |
           ./test/e2e/local-stack.sh up
           ./test/e2e/local-stack.sh history-check
@@ -36,6 +37,8 @@ jobs:
 
       - name: Tear down proxy stack
         if: always()
+        env:
+          MOTD_STACK_DIR: ${{ runner.temp }}/motd-vless-reality
         run: |
           ./test/e2e/local-stack.sh obfs-xray-down || true
           ./test/e2e/local-stack.sh down || true
