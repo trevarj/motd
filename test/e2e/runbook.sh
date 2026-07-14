@@ -779,9 +779,20 @@ phase_f() {
   tap_text "Add" || true
   if wait_for_text "Auto (no override)" 5; then
     ok "hue picker opened for 'foo'"
-    adb_shell input keyevent 4         # dismiss dialog
+    # Dismiss explicitly, then wait for the separate Compose dialog window to disappear. Sending
+    # BACK twice without this boundary can race recomposition and consume both events in the dialog,
+    # leaving the next density checks stranded on Nick colors.
+    tap_text "Cancel"
+    local _dialog_wait
+    for _dialog_wait in 1 2 3 4 5 6; do
+      dump || true
+      [ -z "$(bounds_of_text "Auto (no override)")" ] && break
+      sleep 1
+    done
   fi
   adb_shell input keyevent 4           # back to Appearance
+  wait_for_text "Appearance" 6 || true
+  assert_text "Appearance"
   assert_no_crash
 
   # 49. Message style Compact. This control lives below the font-size sliders.
