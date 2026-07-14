@@ -15,14 +15,19 @@ import io.github.trevarj.motd.irc.transport.TransportConfigurationException
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
@@ -563,13 +568,72 @@ class IrcClient(
     // -- soju webpush --
 
     suspend fun webpushRegister(endpoint: String, p256dh: ByteArray, auth: ByteArray) {
-        val t = transport ?: return
-        t.send(WebPushCommands.register(endpoint, p256dh, auth).serialize())
+        webpushCommand(
+            action = "REGISTER",
+            endpoint = endpoint,
+            message = WebPushCommands.register(endpoint, p256dh, auth),
+        )
     }
 
     suspend fun webpushUnregister(endpoint: String) {
-        val t = transport ?: return
-        t.send(WebPushCommands.unregister(endpoint).serialize())
+        webpushCommand(
+            action = "UNREGISTER",
+            endpoint = endpoint,
+            message = WebPushCommands.unregister(endpoint),
+        )
+    }
+
+    /**
+     * soju does not currently advertise labeled-response, so WEBPUSH has to correlate its raw
+     * command reply. Start collecting before writing: a local bouncer can acknowledge quickly
+     * enough for send-then-collect to miss the response on this replay-free event stream.
+     */
+    private suspend fun webpushCommand(action: String, endpoint: String, message: IrcMessage) {
+        val t = transport ?: throw IllegalStateException("IRC client is not connected")
+        coroutineScope {
+            val response = async(start = CoroutineStart.UNDISPATCHED) {
+                events.mapNotNull { event ->
+                    when (event) {
+                        is IrcEvent.Raw -> {
+                            val raw = event.message
+                            when {
+                                raw.command == "WEBPUSH" &&
+                                    raw.params.getOrNull(0) == action &&
+                                    raw.params.getOrNull(1) == endpoint -> WebPushResponse.Success
+                                raw.command == "FAIL" &&
+                                    raw.params.getOrNull(0) == "WEBPUSH" &&
+                                    raw.params.drop(1).any { it == action } -> WebPushResponse.Failure(
+                                        code = raw.params.getOrNull(1) ?: "FAIL",
+                                        text = raw.params.lastOrNull().orEmpty(),
+                                    )
+                                else -> null
+                            }
+                        }
+                        is IrcEvent.Disconnected -> WebPushResponse.Disconnected(event.reason)
+                        else -> null
+                    }
+                }.first()
+            }
+            try {
+                t.send(message.serialize())
+                when (val reply = withTimeout(WEBPUSH_TIMEOUT_MS) { response.await() }) {
+                    WebPushResponse.Success -> Unit
+                    is WebPushResponse.Failure -> throw IrcCommandException(
+                        ircCommand = "WEBPUSH $action",
+                        code = reply.code,
+                        text = reply.text,
+                    )
+                    is WebPushResponse.Disconnected -> throw IrcDisconnectedException(
+                        ircCommand = "WEBPUSH $action",
+                        reason = reply.reason,
+                    )
+                }
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                throw IrcTimeoutException("WEBPUSH $action")
+            } finally {
+                response.cancel()
+            }
+        }
     }
 
     /** Caps ACKed on this connection; empty until Ready. */
@@ -601,7 +665,14 @@ class IrcClient(
     private companion object {
         const val LABEL_TIMEOUT_MS = 30_000L
         const val LIST_TIMEOUT_MS = 15_000L
+        const val WEBPUSH_TIMEOUT_MS = 30_000L
     }
+}
+
+private sealed interface WebPushResponse {
+    data object Success : WebPushResponse
+    data class Failure(val code: String, val text: String) : WebPushResponse
+    data class Disconnected(val reason: String?) : WebPushResponse
 }
 
 /** Snapshot ISUPPORT into the plain map exposed on Ready/Registered. */

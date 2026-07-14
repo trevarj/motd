@@ -21,6 +21,8 @@
 #
 #   jpq       Emit JOIN/PART/QUIT activity without chat messages.
 #
+#   push      Send one uniquely-tagged channel highlight and one direct message.
+#
 #   all       register then seed (for standalone/local use without soju ordering).
 #
 # Talks plaintext IRC to ergo over TCP using busybox `nc`. Idempotent: re-running
@@ -37,6 +39,7 @@ ERGO_PORT="${ERGO_PORT:-6667}"
 TEST_CHANNEL="${TEST_CHANNEL:-##motdtest}"
 APP_NICK="${APP_NICK:-motdadb}"
 SEED_HOLD_SECONDS="${SEED_HOLD_SECONDS:-1}"
+PUSH_TOKEN="${PUSH_TOKEN:-motd-unifiedpush}"
 
 UP_ACCOUNT="${UP_ACCOUNT:-motd}"
 UP_PASS="${UP_PASS:-motdupstream}"
@@ -160,13 +163,33 @@ do_jpq() {
   } | feed_irc
 }
 
+do_push() {
+  case "$PUSH_TOKEN" in
+    *[!A-Za-z0-9._-]*) log "FATAL: PUSH_TOKEN contains unsafe IRC characters"; exit 2 ;;
+  esac
+  log "posting UnifiedPush fixtures tagged $PUSH_TOKEN"
+  {
+    printf 'NICK %s\r\n' "$SEED_NICK"
+    printf 'USER %s 0 * :motd UnifiedPush fixture\r\n' "$SEED_NICK"
+    printf 'NICKSERV IDENTIFY %s %s\r\n' "$SEED_NICK" "$SEED_PASS"
+    sleep 2
+    printf 'JOIN %s\r\n' "$TEST_CHANNEL"
+    sleep 1
+    printf 'PRIVMSG %s :%s: %s-mention\r\n' "$TEST_CHANNEL" "$APP_NICK" "$PUSH_TOKEN"
+    printf 'PRIVMSG %s :%s-dm\r\n' "$APP_NICK" "$PUSH_TOKEN"
+    sleep 1
+    printf 'QUIT :UnifiedPush fixture complete\r\n'
+  } | feed_irc
+}
+
 wait_for_ergo
 case "$MODE" in
   register) do_register ;;
   seed)     do_seed ;;
   burst)    do_burst ;;
   jpq)      do_jpq ;;
+  push)     do_push ;;
   all)      do_register; do_seed ;;
-  *) log "FATAL: unknown mode '$MODE' (want register|seed|burst|jpq|all)"; exit 2 ;;
+  *) log "FATAL: unknown mode '$MODE' (want register|seed|burst|jpq|push|all)"; exit 2 ;;
 esac
 log "done"

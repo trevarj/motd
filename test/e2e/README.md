@@ -80,6 +80,7 @@ The native stack provides deterministic inputs for the baseline matrix:
 ```sh
 ./test/e2e/local-stack.sh burst       # 12 numbered PRIVMSGs, then QUIT
 ./test/e2e/local-stack.sh jpq         # JOIN/PART/JOIN/QUIT, no chat text
+./test/e2e/local-stack.sh push TOKEN  # tagged highlight + DM for UnifiedPush checks
 ./test/e2e/local-stack.sh pause-soju  # delay socket processing without disconnecting
 ./test/e2e/local-stack.sh resume-soju
 ./test/e2e/local-stack.sh stop-soju   # force EOF; preserve config/database
@@ -217,6 +218,21 @@ failure log.
 | H | Inline image viewer | Conditional on a reachable seeded image |
 | I | Delete-chat cancellation, final crash sweep, clean reset | Expected green |
 | J | Soju control-center panels, admin discovery, safe console command | Expected green with local admin fixture |
+| K | ntfy discovery, soju WebPush ACK, background/cold/Doze delivery | Opt-in physical device with F-Droid ntfy |
+
+Phase K is intentionally excluded from the default A–I sweep because it needs an installed
+UnifiedPush distributor and network access to its HTTPS relay. With the native stack already up,
+run a clean debug-only proof using:
+
+```sh
+SERIAL=<device> \
+MOTD_APK=app/build/outputs/apk/foss/debug/app-foss-debug.apk \
+MOTD_SOJU_HOST=127.0.0.1 MOTD_SOJU_USER=motd MOTD_SOJU_PASS=motdtest \
+E2E_PHASES="a k" nix develop -c ./test/e2e/runbook.sh
+```
+
+The test uses public ntfy only for encrypted WebPush bodies. It never prints endpoint URLs or key
+material, never touches `io.github.trevarj.motd`, and always exits forced-idle mode during cleanup.
 
 The hermetic default is A–C. The scheduled/manual workflow may widen this to
 A–I. DM, mention, typing, member, and moderation checks need a live second

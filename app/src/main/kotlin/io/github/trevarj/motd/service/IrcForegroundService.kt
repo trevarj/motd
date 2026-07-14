@@ -35,7 +35,10 @@ class IrcForegroundService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         if (intent?.action == ACTION_STOP) {
-            stopSelf()
+            lifecycleScope.launch {
+                connectionManager.stopAll()
+                stopSelf()
+            }
             return START_NOT_STICKY
         }
         startAsForeground()
@@ -76,10 +79,9 @@ class IrcForegroundService : LifecycleService() {
         }
     }
 
-    override fun onDestroy() {
-        lifecycleScope.launch { connectionManager.stopAll() }
-        super.onDestroy()
-    }
+    // Service removal during a fully verified push hand-off must not disable the singleton
+    // connection subsystem. Explicit ACTION_STOP performs stopAll above; process death naturally
+    // tears down both service and manager together.
 
     companion object {
         const val STATUS_ID = 1

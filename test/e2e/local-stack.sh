@@ -15,6 +15,7 @@
 #   ./test/e2e/local-stack.sh seed      # re-post the seed messages into ##motdtest
 #   ./test/e2e/local-stack.sh burst     # post a numbered 12-message live burst
 #   ./test/e2e/local-stack.sh jpq       # emit JOIN/PART/QUIT-only activity
+#   ./test/e2e/local-stack.sh push TOKEN # emit one tagged highlight and direct message
 #   ./test/e2e/local-stack.sh pause-soju  # delay echo/MARKREAD processing via SIGSTOP
 #   ./test/e2e/local-stack.sh resume-soju # resume soju via SIGCONT
 #   ./test/e2e/local-stack.sh stop-soju   # deterministic EOF while preserving soju DB/config
@@ -33,6 +34,8 @@
 set -euo pipefail
 
 CMD="${1:-up}"
+PUSH_TOKEN="${2:-${PUSH_TOKEN:-motd-unifiedpush}}"
+export PUSH_TOKEN
 RUN="${MOTD_STACK_DIR:-/tmp/motd-stack}"
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 PROVISION="$REPO/test/e2e/hermetic/ergo/provision.sh"
@@ -689,6 +692,7 @@ case "$CMD" in
   seed) sh "$PROVISION" seed ;;
   burst) sh "$PROVISION" burst ;;
   jpq) sh "$PROVISION" jpq ;;
+  push) sh "$PROVISION" push ;;
   pause-soju) signal_soju STOP paused ;;
   resume-soju) signal_soju CONT resumed ;;
   stop-soju) stop_soju_for_reconnect ;;
@@ -702,5 +706,5 @@ case "$CMD" in
   obfs-xray-down) xray_obfs_down ;;
   obfs-xray-validate) xray_obfs_validate ;;
   obfs-xray-negative) xray_obfs_negative ;;
-  *) die "unknown command '$CMD' (want up|down|seed|burst|jpq|pause-soju|resume-soju|stop-soju|start-soju|status|control-check|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-negative)" ;;
+  *) die "unknown command '$CMD' (want up|down|seed|burst|jpq|push|pause-soju|resume-soju|stop-soju|start-soju|status|control-check|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-negative)" ;;
 esac

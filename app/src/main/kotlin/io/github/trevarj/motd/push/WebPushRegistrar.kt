@@ -2,8 +2,19 @@ package io.github.trevarj.motd.push
 
 import io.github.trevarj.motd.data.prefs.PushKeys
 import io.github.trevarj.motd.data.prefs.PushPrefs
+import io.github.trevarj.motd.irc.client.IrcCommandException
+import io.github.trevarj.motd.irc.client.IrcDisconnectedException
+import io.github.trevarj.motd.irc.client.IrcTimeoutException
+import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Per-network Web Push endpoint persistence and REGISTER/UNREGISTER orchestration against the
@@ -16,9 +27,13 @@ import javax.inject.Inject
 class WebPushRegistrar @Inject constructor(
     private val pushPrefs: PushPrefs,
     private val connectionManager: ConnectionManager,
+    private val healthStore: PushHealthStore,
 ) {
+    private val registrationLocks = ConcurrentHashMap<Long, Mutex>()
+
     companion object {
         const val WEBPUSH_CAP = "soju.im/webpush"
+        private const val CAP_SETTLE_TIMEOUT_MS = 15_000L
     }
 
     /** Load persisted key material, generating and persisting a fresh set on first use. */
@@ -36,6 +51,7 @@ class WebPushRegistrar @Inject constructor(
      */
     suspend fun onNewEndpoint(networkId: Long, endpoint: String): Boolean {
         pushPrefs.setEndpointFor(networkId, endpoint)
+        healthStore.endpointReceived(networkId, endpoint)
         val keys = loadOrCreateKeys()
         return registerOn(networkId, endpoint, keys)
     }
@@ -50,11 +66,43 @@ class WebPushRegistrar @Inject constructor(
         return registerOn(networkId, endpoint, keys)
     }
 
-    private suspend fun registerOn(networkId: Long, endpoint: String, keys: WebPushCrypto.KeyMaterial): Boolean {
-        val client = connectionManager.clientFor(networkId) ?: return false
-        if (!client.hasCap(WEBPUSH_CAP)) return false
-        client.webpushRegister(endpoint, keys.publicUncompressed, keys.auth)
-        return true
+    private suspend fun registerOn(
+        networkId: Long,
+        endpoint: String,
+        keys: WebPushCrypto.KeyMaterial,
+    ): Boolean = registrationLocks.getOrPut(networkId) { Mutex() }.withLock {
+        val client = connectionManager.clientFor(networkId) ?: return@withLock false
+        // A bound soju child can report Ready before its post-bind CAP ACK arrives. Give that
+        // mutation a short settling window; otherwise every foreground reconnect incorrectly
+        // downgrades a healthy subscription to "unsupported".
+        val supportsWebPush = client.hasCap(WEBPUSH_CAP) || withTimeoutOrNull(CAP_SETTLE_TIMEOUT_MS) {
+            client.state.filterIsInstance<IrcClientState.Ready>().first { ready ->
+                ready.caps.any { it == WEBPUSH_CAP || it.startsWith("$WEBPUSH_CAP=") }
+            }
+            true
+        } == true
+        if (!supportsWebPush) {
+            if (connectionManager.clientFor(networkId) !== client) {
+                healthStore.failed(networkId, "NETWORK_DISCONNECTED")
+                return@withLock false
+            }
+            healthStore.capability(networkId, supported = false)
+            return@withLock false
+        }
+        healthStore.verifying(networkId)
+        return@withLock try {
+            client.webpushRegister(endpoint, keys.publicUncompressed, keys.auth)
+            // An endpoint may have changed while the round trip was in flight. Never let an ACK
+            // for the old value arm the replacement endpoint.
+            if (pushPrefs.endpointFor(networkId) != endpoint) return@withLock false
+            healthStore.registered(networkId)
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            healthStore.failed(networkId, e.toHealthErrorCode())
+            false
+        }
     }
 
     /**
@@ -71,7 +119,15 @@ class WebPushRegistrar @Inject constructor(
             }
         }
         pushPrefs.setEndpointFor(networkId, null)
+        healthStore.clear(networkId)
     }
+}
+
+private fun Exception.toHealthErrorCode(): String = when (this) {
+    is IrcCommandException -> "SERVER_${code.uppercase().filter { it.isLetterOrDigit() || it == '_' }.take(40)}"
+    is IrcTimeoutException -> "SERVER_TIMEOUT"
+    is IrcDisconnectedException -> "NETWORK_DISCONNECTED"
+    else -> "REGISTER_FAILED"
 }
 
 private fun PushKeys.toKeyMaterial() = WebPushCrypto.KeyMaterial(

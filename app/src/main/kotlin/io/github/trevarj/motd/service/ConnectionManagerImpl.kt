@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.util.Log
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageKind
@@ -30,6 +31,8 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.push.WebPushRegistrar
+import io.github.trevarj.motd.push.PushHealthStore
+import io.github.trevarj.motd.push.pushSuspendedNetworkIds
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -44,6 +47,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 /**
  * Hilt @Singleton connection subsystem (plans/05). Outlives the foreground service — the service
@@ -65,6 +70,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val historyResyncCoordinator: HistoryResyncCoordinator,
     private val presetEnrollmentCoordinator: PresetEnrollmentCoordinator,
     private val avatarCoordinator: AvatarCoordinator,
+    private val pushHealthStore: PushHealthStore,
     // Lazy to break the WebPushRegistrar <-> ConnectionManager ctor cycle.
     private val webPushRegistrar: dagger.Lazy<WebPushRegistrar>,
 ) : ConnectionManager {
@@ -107,7 +113,12 @@ class ConnectionManagerImpl @Inject constructor(
     private val certFailures = java.util.concurrent.ConcurrentHashMap<Long, CertUntrustedException>()
 
     @Volatile private var started = false
+    @Volatile private var appForeground = false
+    @Volatile private var pushGraceElapsed = false
     private var reconcileJob: Job? = null
+    private var deliveryModeJob: Job? = null
+    private var backgroundGraceJob: Job? = null
+    private val pushSuspendedIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
     private var connectivityCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun clientFor(networkId: Long): IrcClient? =
@@ -129,9 +140,15 @@ class ConnectionManagerImpl @Inject constructor(
             }
         }
         // Delivery-mode reaction: UNIFIED_PUSH tears the sockets down once webpush is confirmed.
-        scope.launch {
-            settings.settings.collect { s ->
-                if (s.deliveryMode == DeliveryMode.UNIFIED_PUSH) maybeStopForPush()
+        deliveryModeJob = scope.launch {
+            settings.settings.map { it.deliveryMode }.distinctUntilChanged().collect { mode ->
+                if (mode == DeliveryMode.UNIFIED_PUSH) {
+                    if (!appForeground) schedulePushSuspension()
+                } else {
+                    backgroundGraceJob?.cancel()
+                    pushSuspendedIds.clear()
+                    reconcile(networkDao.observeAll().first())
+                }
             }
         }
     }
@@ -144,23 +161,69 @@ class ConnectionManagerImpl @Inject constructor(
      * limitation — plans/11 risk 6).
      */
     private suspend fun maybeStopForPush() {
-        val webpushClients = actors.keys.filter { id -> clientFor(id)?.hasCap(WEBPUSH_CAP) == true }
-        if (webpushClients.isEmpty()) return
-        val allArmed = webpushClients.all { id -> pushPrefs.endpointFor(id) != null }
-        if (!allArmed) return
-        for (actor in actors.values) actor.stop()
-        actors.clear(); fingerprints.clear()
-        generations.invalidateAll()
-        terminalConfigFingerprints.clear()
-        _states.value = emptyMap()
-        // Hoist the Intent to a local so lint doesn't read it as an implicit SAM instance.
-        val stopIntent = android.content.Intent(appContext, IrcForegroundService::class.java)
-        appContext.stopService(stopIntent)
+        if (appForeground || !pushGraceElapsed ||
+            settings.settings.first().deliveryMode != DeliveryMode.UNIFIED_PUSH
+        ) return
+        val all = networkDao.observeAll().first()
+        val wanted = wantedNetworkIds(all, userIntents, _states.value)
+        val endpoints = pushPrefs.endpoints()
+        val health = pushHealthStore.snapshot()
+        val suspend = pushSuspendedNetworkIds(all, wanted, endpoints, health)
+
+        pushSuspendedIds.clear()
+        pushSuspendedIds.addAll(suspend)
+        reconcile(all)
+
+        val needsSocket = wanted.any { it !in pushSuspendedIds }
+        if (needsSocket) {
+            startForegroundKeeper()
+        } else {
+            val stopIntent = android.content.Intent(appContext, IrcForegroundService::class.java)
+            appContext.stopService(stopIntent)
+        }
+    }
+
+    /** Process foreground: reconnect every wanted network and run the normal catch-up path. */
+    internal suspend fun onAppForegrounded() {
+        appForeground = true
+        pushGraceElapsed = false
+        backgroundGraceJob?.cancel()
+        pushSuspendedIds.clear()
+        startAll()
+        reconcile(networkDao.observeAll().first())
+        reconnectStale()
+    }
+
+    /** Process background: give active conversations 30 seconds before applying push suspension. */
+    internal fun onAppBackgrounded() {
+        appForeground = false
+        pushGraceElapsed = false
+        schedulePushSuspension()
+    }
+
+    private fun schedulePushSuspension() {
+        backgroundGraceJob?.cancel()
+        backgroundGraceJob = scope.launch {
+            delay(PUSH_BACKGROUND_GRACE_MS)
+            pushGraceElapsed = true
+            maybeStopForPush()
+        }
+    }
+
+    private fun startForegroundKeeper() {
+        runCatching {
+            ContextCompat.startForegroundService(
+                appContext,
+                android.content.Intent(appContext, IrcForegroundService::class.java),
+            )
+        }.onFailure { Log.w(TAG, "unable to start socket fallback service", it) }
     }
 
     override suspend fun stopAll() {
         started = false
         reconcileJob?.cancel(); reconcileJob = null
+        deliveryModeJob?.cancel(); deliveryModeJob = null
+        backgroundGraceJob?.cancel(); backgroundGraceJob = null
         unregisterConnectivityCallback()
         for (actor in actors.values) actor.stop()
         actors.clear(); fingerprints.clear()
@@ -169,6 +232,7 @@ class ConnectionManagerImpl @Inject constructor(
         localSocksProvider.stop()
         // Service teardown resets sticky user intent (in-memory only).
         userIntents.clear()
+        pushSuspendedIds.clear()
         _states.value = emptyMap()
     }
 
@@ -225,7 +289,7 @@ class ConnectionManagerImpl @Inject constructor(
     private fun reconcile(all: List<NetworkEntity>) {
         // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
         networksById = all.associateBy { it.id }
-        val wantedIds = wantedNetworkIds(all, userIntents, _states.value)
+        val wantedIds = wantedNetworkIds(all, userIntents, _states.value) - pushSuspendedIds
         // Remove actors whose network is no longer wanted (deleted, autoConnect off, user-disconnected).
         for (id in actors.keys.toList()) {
             if (id !in wantedIds) {
@@ -362,10 +426,14 @@ class ConnectionManagerImpl @Inject constructor(
             Log.w(TAG, "One-shot Libera #motd JOIN write failed for network ${row.id}")
         }
         // In push mode, re-arm webpush on this network if we already hold its endpoint (the
-        // socket just reached Ready after a reconnect / quick foreground connect).
+        // socket just reached Ready after a reconnect / quick foreground connect). Registration
+        // may wait on a public relay, so run it beside catch-up rather than delaying visible history.
         if (settings.settings.first().deliveryMode == DeliveryMode.UNIFIED_PUSH) {
-            if (!isCurrent()) return
-            webPushRegistrar.get().reRegisterIfNeeded(row.id)
+            scope.launch {
+                if (!isCurrent()) return@launch
+                webPushRegistrar.get().reRegisterIfNeeded(row.id)
+                if (isCurrent()) evaluatePushMode()
+            }
         }
         // A BOUNCER_ROOT reaching Ready means bound children can establish BOUNCER BIND again.
         // Only revive a wanted child that is absent, dead, or terminally disconnected/failed.
@@ -770,6 +838,7 @@ class ConnectionManagerImpl @Inject constructor(
         const val CHATHISTORY_CAP = "draft/chathistory"
         const val WEBPUSH_CAP = "soju.im/webpush"
         const val ECHO_TIMEOUT_MS = 30_000L
+        const val PUSH_BACKGROUND_GRACE_MS = 30_000L
         const val MAX_BYTES = 400
         // Stable, casemapping-invariant name for the per-network SERVER buffer.
         const val SERVER_BUFFER_NAME = "*"

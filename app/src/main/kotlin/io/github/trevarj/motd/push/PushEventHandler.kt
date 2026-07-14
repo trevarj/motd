@@ -23,6 +23,7 @@ class PushEventHandler(
     private val crypto: WebPushCryptoFacade,
     private val eventSink: IrcEventSink,
     private val notifier: PushNotifier,
+    private val healthStore: PushHealthStore = NoopPushHealthStore,
 ) {
     /**
      * Hilt entry point. The crypto facade defaults to the real JCA implementation and the
@@ -30,7 +31,12 @@ class PushEventHandler(
      * notifications. Only [IrcEventSink] (a WP1 contract) needs to come from the graph.
      */
     @Inject
-    constructor(eventSink: IrcEventSink) : this(WebPushCryptoFacade.Default, eventSink, NoopPushNotifier)
+    constructor(eventSink: IrcEventSink) : this(
+        WebPushCryptoFacade.Default,
+        eventSink,
+        NoopPushNotifier,
+        NoopPushHealthStore,
+    )
 
     /**
      * Decrypt a push body for [networkId], parse the single IRC line, map it, feed it to the
@@ -39,11 +45,26 @@ class PushEventHandler(
      */
     suspend fun handle(networkId: Long, body: ByteArray, keys: WebPushCrypto.KeyMaterial): IrcEvent? {
         val line = runCatching { String(crypto.decrypt(body, keys), Charsets.UTF_8) }
-            .getOrNull() ?: return null
+            .getOrElse {
+                healthStore.warning(networkId, "PAYLOAD_DECRYPT_FAILED")
+                return null
+            }
         val msg = runCatching { IrcMessage.parse(line) }
-            .getOrElse { if (it is IrcParseException) return null else throw it }
+            .getOrElse {
+                if (it is IrcParseException) {
+                    healthStore.warning(networkId, "PAYLOAD_INVALID")
+                    return null
+                } else {
+                    throw it
+                }
+            }
+        if (isRegistrationProbe(msg)) {
+            healthStore.probeDelivered(networkId)
+            return null
+        }
         val event = mapToEvent(msg) ?: return null
         eventSink.process(networkId, event)
+        healthStore.messageDelivered(networkId)
         if (event is IrcEvent.ChatMessage) notifier.notify(networkId, event)
         return event
     }
@@ -60,6 +81,11 @@ class PushEventHandler(
             "TAGMSG" -> mapTagMessage(msg)
             else -> null
         }
+
+        internal fun isRegistrationProbe(msg: IrcMessage): Boolean =
+            msg.command.equals("NOTE", ignoreCase = true) &&
+                msg.params.getOrNull(0).equals("WEBPUSH", ignoreCase = true) &&
+                msg.params.getOrNull(1).equals("REGISTERED", ignoreCase = true)
 
         private fun mapChat(msg: IrcMessage): IrcEvent? {
             val source = msg.source ?: return null

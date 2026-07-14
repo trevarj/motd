@@ -4,12 +4,32 @@ import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.service.IrcEventSink
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PushEventHandlerTest {
+
+    private class RecordingHealthStore : PushHealthStore {
+        override val health: Flow<Map<Long, NetworkPushHealth>> = MutableStateFlow(emptyMap())
+        var probes = 0
+        var deliveries = 0
+        var warnings = 0
+        override suspend fun snapshot() = emptyMap<Long, NetworkPushHealth>()
+        override suspend fun endpointReceived(networkId: Long, endpoint: String) = Unit
+        override suspend fun capability(networkId: Long, supported: Boolean) = Unit
+        override suspend fun verifying(networkId: Long) = Unit
+        override suspend fun registered(networkId: Long) = Unit
+        override suspend fun probeDelivered(networkId: Long) { probes++ }
+        override suspend fun messageDelivered(networkId: Long) { deliveries++ }
+        override suspend fun failed(networkId: Long, code: String) = Unit
+        override suspend fun warning(networkId: Long, code: String) { warnings++ }
+        override suspend fun clear(networkId: Long) = Unit
+        override suspend fun retain(networkIds: Set<Long>) = Unit
+    }
 
     private class RecordingSink : IrcEventSink {
         val events = mutableListOf<Pair<Long, IrcEvent>>()
@@ -139,5 +159,28 @@ class PushEventHandlerTest {
         val ev = handler.handle(1L, ByteArray(0), WebPushCrypto.generateKeyMaterial())
         assertNull(ev)
         assertTrue(sink.events.isEmpty())
+    }
+
+    @Test
+    fun registration_probe_updates_health_without_chat_or_notification() = runTest {
+        val receiver = WebPushCrypto.generateKeyMaterial()
+        val sender = WebPushCrypto.generateEcKeyPair()
+        val body = WebPushCrypto.encrypt(
+            plaintext = ":soju NOTE WEBPUSH REGISTERED".toByteArray(),
+            salt = ByteArray(16) { 3 },
+            recordSize = 4096,
+            receiverPublic = receiver.publicUncompressed,
+            receiverAuth = receiver.auth,
+            senderKeys = sender,
+        )
+        val sink = RecordingSink()
+        val notifier = RecordingNotifier()
+        val health = RecordingHealthStore()
+        val handler = PushEventHandler(WebPushCryptoFacade.Default, sink, notifier, health)
+
+        assertNull(handler.handle(7L, body, receiver))
+        assertEquals(1, health.probes)
+        assertTrue(sink.events.isEmpty())
+        assertTrue(notifier.notified.isEmpty())
     }
 }

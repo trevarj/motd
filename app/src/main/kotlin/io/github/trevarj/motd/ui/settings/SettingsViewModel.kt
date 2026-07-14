@@ -25,6 +25,7 @@ import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.avatar.AvatarController
 import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.service.DeliveryMode
+import io.github.trevarj.motd.push.PushDistributorController
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -61,6 +62,7 @@ class SettingsViewModel @Inject constructor(
     private val contentPreviewPrefs: ContentPreviewPrefs,
     private val avatarPrefs: AvatarPrefs,
     private val avatarController: AvatarController,
+    private val pushDistributorController: PushDistributorController,
 ) : ViewModel() {
 
     private val appearanceReplyAndPreviews = combine(
@@ -113,6 +115,14 @@ class SettingsViewModel @Inject constructor(
     fun setPushProvider(provider: PushProvider) = viewModelScope.launch {
         pushProviderPrefs.setProvider(provider)
         settingsRepository.setDeliveryMode(DeliveryMode.UNIFIED_PUSH)
+    }
+
+    fun selectPushDistributor(packageName: String) = viewModelScope.launch {
+        runCatching { pushDistributorController.select(packageName) }
+    }
+
+    fun retryPushSetup() = viewModelScope.launch {
+        runCatching { pushDistributorController.retry() }
     }
 
     // Round 4 (plans/13): appearance/chat/people settings.

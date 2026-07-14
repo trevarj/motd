@@ -7,6 +7,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -16,6 +17,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WebPushRegistrarTest {
+
+    private class FakePushHealthStore : PushHealthStore {
+        private val values = MutableStateFlow<Map<Long, NetworkPushHealth>>(emptyMap())
+        override val health: Flow<Map<Long, NetworkPushHealth>> = values
+        override suspend fun snapshot() = values.value
+        override suspend fun endpointReceived(networkId: Long, endpoint: String) {
+            values.value += networkId to NetworkPushHealth(endpointFingerprint = fingerprintEndpoint(endpoint))
+        }
+        override suspend fun capability(networkId: Long, supported: Boolean) = Unit
+        override suspend fun verifying(networkId: Long) = Unit
+        override suspend fun registered(networkId: Long) = Unit
+        override suspend fun probeDelivered(networkId: Long) = Unit
+        override suspend fun messageDelivered(networkId: Long) = Unit
+        override suspend fun failed(networkId: Long, code: String) = Unit
+        override suspend fun warning(networkId: Long, code: String) = Unit
+        override suspend fun clear(networkId: Long) { values.value -= networkId }
+        override suspend fun retain(networkIds: Set<Long>) { values.value = values.value.filterKeys { it in networkIds } }
+    }
 
     /** In-memory PushPrefs fake (per-network only). */
     private class FakePushPrefs : PushPrefs {
@@ -58,7 +77,7 @@ class WebPushRegistrarTest {
     @Test
     fun loadOrCreateKeys_generates_and_persists_once() = runTest {
         val prefs = FakePushPrefs()
-        val registrar = WebPushRegistrar(prefs, FakeConnectionManager())
+        val registrar = WebPushRegistrar(prefs, FakeConnectionManager(), FakePushHealthStore())
 
         val first = registrar.loadOrCreateKeys()
         assertNotNull("keys persisted after first load", prefs.keys)
@@ -74,7 +93,7 @@ class WebPushRegistrarTest {
     @Test
     fun onNewEndpoint_persists_endpoint_keyed_by_network_and_keys() = runTest {
         val prefs = FakePushPrefs()
-        val registrar = WebPushRegistrar(prefs, FakeConnectionManager())
+        val registrar = WebPushRegistrar(prefs, FakeConnectionManager(), FakePushHealthStore())
 
         val sent = registrar.onNewEndpoint(7L, "https://push.example/abc")
 
@@ -87,7 +106,7 @@ class WebPushRegistrarTest {
     @Test
     fun onUnregisteredNetwork_drops_only_that_network_and_keeps_keys() = runTest {
         val prefs = FakePushPrefs()
-        val registrar = WebPushRegistrar(prefs, FakeConnectionManager())
+        val registrar = WebPushRegistrar(prefs, FakeConnectionManager(), FakePushHealthStore())
         registrar.onNewEndpoint(1L, "https://push.example/one")
         registrar.onNewEndpoint(2L, "https://push.example/two")
         val keysBefore = prefs.keys
@@ -102,7 +121,7 @@ class WebPushRegistrarTest {
     @Test
     fun reRegisterIfNeeded_returns_false_when_no_endpoint() = runTest {
         val prefs = FakePushPrefs()
-        val registrar = WebPushRegistrar(prefs, FakeConnectionManager())
+        val registrar = WebPushRegistrar(prefs, FakeConnectionManager(), FakePushHealthStore())
         assertFalse(registrar.reRegisterIfNeeded(99L))
     }
 }

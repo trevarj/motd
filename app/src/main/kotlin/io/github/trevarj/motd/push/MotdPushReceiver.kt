@@ -7,13 +7,13 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import io.github.trevarj.motd.data.db.NetworkDao
-import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.PushProvider
 import io.github.trevarj.motd.data.prefs.PushProviderPrefs
-import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.service.ConnectionManager
-import io.github.trevarj.motd.service.DeliveryMode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import org.unifiedpush.android.connector.MessagingReceiver
@@ -36,17 +36,33 @@ import org.unifiedpush.android.connector.MessagingReceiver
  */
 class MotdPushReceiver : MessagingReceiver() {
 
+    /**
+     * Connector callbacks include a server acknowledgement round trip. Move the connector's
+     * synchronous dispatch off the main thread so a slow relay cannot freeze the application or
+     * trigger an input ANR while registration is in progress.
+     */
+    override fun onReceive(context: Context, intent: android.content.Intent) {
+        val pending = goAsync()
+        receiverScope.launch {
+            try {
+                super.onReceive(context, intent)
+            } finally {
+                pending.finish()
+            }
+        }
+    }
+
     @EntryPoint
     @InstallIn(SingletonComponent::class)
     interface PushEntryPoint {
         fun registrar(): WebPushRegistrar
         fun eventHandler(): PushEventHandler
         fun connectionManager(): ConnectionManager
-        fun settingsRepository(): SettingsRepository
-        fun pushPrefs(): PushPrefs
         fun networkDao(): NetworkDao
         fun unifiedPush(): UnifiedPushApi
         fun pushProviderPrefs(): PushProviderPrefs
+        fun pushHealthStore(): PushHealthStore
+        fun pushDistributorController(): PushDistributorController
     }
 
     private fun entry(context: Context): PushEntryPoint =
@@ -75,13 +91,15 @@ class MotdPushReceiver : MessagingReceiver() {
     }
 
     override fun onRegistrationFailed(context: Context, instance: String) {
-        // Conservative full revert: UnifiedPush delivery is unavailable, so return every network
-        // to persistent-socket mode and restart the subsystem so no network is left dark.
         val e = entry(context)
         runOnWakelock {
             if (e.pushProviderPrefs().provider.first() != PushProvider.UNIFIED_PUSH) return@runOnWakelock
-            e.settingsRepository().setDeliveryMode(DeliveryMode.PERSISTENT_SOCKET)
+            val networkId = resolveInstance(e, instance) ?: return@runOnWakelock
+            e.pushHealthStore().failed(networkId, "DISTRIBUTOR_REGISTRATION_FAILED")
+            // Preserve the user's UnifiedPush choice, but immediately restore this network's
+            // socket-backed fallback so a distributor problem never leaves it dark.
             e.connectionManager().startAll()
+            e.connectionManager().evaluatePushMode()
         }
     }
 
@@ -92,14 +110,12 @@ class MotdPushReceiver : MessagingReceiver() {
             val networkId = instance.toLongOrNull()
             if (networkId != null) {
                 e.registrar().onUnregisteredNetwork(networkId)
+                e.pushDistributorController().onUnregistered(networkId)
             } else {
                 Log.w(TAG, "onUnregistered for non-numeric instance '$instance'; ignoring")
             }
-            // Only revert delivery mode once no network holds a push endpoint anymore.
-            if (e.pushPrefs().endpoints().isEmpty()) {
-                e.settingsRepository().setDeliveryMode(DeliveryMode.PERSISTENT_SOCKET)
-                e.connectionManager().startAll()
-            }
+            e.connectionManager().startAll()
+            e.connectionManager().evaluatePushMode()
         }
     }
 
@@ -129,6 +145,7 @@ class MotdPushReceiver : MessagingReceiver() {
 
     private companion object {
         const val TAG = "MotdPushReceiver"
+        val receiverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 }
 

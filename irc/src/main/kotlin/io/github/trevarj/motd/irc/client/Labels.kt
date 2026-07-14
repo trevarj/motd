@@ -14,6 +14,10 @@ class IrcCommandException(
 /** Raised when a labeled command receives no completing response within the timeout. */
 class IrcTimeoutException(val label: String) : Exception("labeled response timed out: $label")
 
+/** Raised when a command awaiting an IRC response loses its connection. */
+class IrcDisconnectedException(val ircCommand: String, val reason: String?) :
+    Exception("$ircCommand disconnected${reason?.let { ": $it" }.orEmpty()}")
+
 /**
  * Correlates labeled requests with their responses (IRCv3 `labeled-response`).
  *

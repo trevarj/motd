@@ -2,6 +2,7 @@ package io.github.trevarj.motd.push
 
 import android.util.Log
 import io.github.trevarj.motd.data.db.NetworkDao
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.PushProvider
 import io.github.trevarj.motd.data.prefs.PushProviderPrefs
@@ -31,6 +32,7 @@ class PushInstanceCoordinator @Inject constructor(
     private val up: UnifiedPushApi,
     private val providerPrefs: PushProviderPrefs = DefaultPushProviderPrefs,
     private val fcm: FcmPushApi = NoopFcmPushApi,
+    private val healthStore: PushHealthStore = NoopPushHealthStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -43,9 +45,13 @@ class PushInstanceCoordinator @Inject constructor(
         fcm.start()
         scope.launch {
             combine(settingsRepository.settings, providerPrefs.provider, networkDao.observeAll()) { s, provider, nets ->
-                Triple(s.deliveryMode, provider, nets.filter { it.autoConnect }.map { it.id }.toSet())
-            }.distinctUntilChanged().collect { (mode, provider, ids) ->
-                runCatching { reconcile(mode, provider, ids) }
+                Triple(s.deliveryMode, provider, nets)
+            }.distinctUntilChanged().collect { (mode, provider, networks) ->
+                val ids = pushEligibleNetworkIds(networks)
+                runCatching {
+                    healthStore.retain(networks.map { it.id }.toSet())
+                    reconcile(mode, provider, ids)
+                }
                     .onFailure { Log.w(TAG, "push provider reconciliation failed", it) }
             }
         }
@@ -87,9 +93,11 @@ class PushInstanceCoordinator @Inject constructor(
 
     private suspend fun reconcileUnifiedPush(desired: Set<Long>, connectable: Set<Long>) {
         if (desired.isNotEmpty() && up.getAckDistributor() == null) {
-            // No installed distributor: nothing to register against — silent no-op until one exists.
-            val distributor = up.getDistributors().firstOrNull() ?: return
-            up.saveDistributor(distributor)
+            // Auto-select only an unambiguous single distributor. Settings presents a chooser when
+            // several are installed instead of silently picking an arbitrary package.
+            val installed = up.getDistributors()
+            if (installed.size != 1) return
+            up.saveDistributor(installed.single())
         }
         for (id in desired) up.registerApp(id.toString())
         for (id in (pushPrefs.endpoints().keys + connectable) - desired) {
@@ -99,6 +107,12 @@ class PushInstanceCoordinator @Inject constructor(
 
     private companion object { const val TAG = "PushCoordinator" }
 }
+
+internal fun pushEligibleNetworkIds(networks: List<io.github.trevarj.motd.data.db.NetworkEntity>): Set<Long> =
+    networks.asSequence()
+        .filter { it.autoConnect && it.role != NetworkRole.BOUNCER_ROOT }
+        .map { it.id }
+        .toSet()
 
 private object DefaultPushProviderPrefs : PushProviderPrefs {
     override val provider = kotlinx.coroutines.flow.flowOf(PushProvider.UNIFIED_PUSH)

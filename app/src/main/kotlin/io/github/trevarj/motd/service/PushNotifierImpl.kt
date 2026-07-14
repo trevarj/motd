@@ -27,7 +27,8 @@ class PushNotifierImpl @Inject constructor(
         // Plain suspend Room read: dispatches off the main thread (no runBlocking).
         val buffer = runCatching { db.bufferDao().byName(networkId, norm) }.getOrNull() ?: return
         val type = if (isChannel) BufferType.CHANNEL else BufferType.QUERY
-        // Under push we always notify (delivered while backgrounded); mention flag best-effort false.
-        notifications.onIncoming(networkId, buffer.id, type, hasMention = !isChannel, message = message)
+        // soju sends channel traffic through WebPush only for highlights. Direct messages belong
+        // to the normal Messages channel; channel highlights belong to Mentions.
+        notifications.onIncoming(networkId, buffer.id, type, hasMention = isChannel, message = message)
     }
 }

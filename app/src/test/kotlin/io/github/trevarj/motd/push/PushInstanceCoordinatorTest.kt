@@ -140,6 +140,15 @@ class PushInstanceCoordinatorTest {
     }
 
     @Test
+    fun multiple_distributors_wait_for_explicit_choice() = runTest {
+        val up = FakeUnifiedPushApi(installed = listOf("dist.a", "dist.b"), acked = null)
+        coordinator(up).reconcile(DeliveryMode.UNIFIED_PUSH, setOf(1L))
+
+        assertTrue(up.saved.isEmpty())
+        assertTrue(up.registered.isEmpty())
+    }
+
+    @Test
     fun socket_mode_unregisters_all_connectable_and_held_endpoints() = runTest {
         val up = FakeUnifiedPushApi()
         val prefs = FakePushPrefs(mutableMapOf(3L to "https://e/3"))

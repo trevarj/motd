@@ -36,6 +36,8 @@ import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.push.PushEventHandler
+import io.github.trevarj.motd.push.DataStorePushHealthStore
+import io.github.trevarj.motd.push.PushHealthStore
 import io.github.trevarj.motd.push.PushNotifier
 import io.github.trevarj.motd.push.UnifiedPushApi
 import io.github.trevarj.motd.push.UnifiedPushApiImpl
@@ -163,6 +165,9 @@ internal abstract class AppModule {
     @Binds @Singleton
     abstract fun unifiedPushApi(impl: UnifiedPushApiImpl): UnifiedPushApi
 
+    @Binds @Singleton
+    abstract fun pushHealthStore(impl: DataStorePushHealthStore): PushHealthStore
+
     companion object {
         /**
          * WP9's [PushEventHandler] `@Inject` constructor hardcodes a no-op notifier; provide it
@@ -170,8 +175,11 @@ internal abstract class AppModule {
          */
         @Provides
         @Singleton
-        fun pushEventHandler(sink: IrcEventSink, notifier: PushNotifier): PushEventHandler =
-            PushEventHandler(WebPushCryptoFacade.Default, sink, notifier)
+        fun pushEventHandler(
+            sink: IrcEventSink,
+            notifier: PushNotifier,
+            healthStore: PushHealthStore,
+        ): PushEventHandler = PushEventHandler(WebPushCryptoFacade.Default, sink, notifier, healthStore)
 
         /**
          * Real UnifiedPush availability check: an installed distributor AND a connected client
@@ -182,6 +190,15 @@ internal abstract class AppModule {
         fun pushAvailabilityProvider(
             @ApplicationContext context: Context,
             connectionManager: ConnectionManager,
-        ): PushAvailabilityProvider = RealPushAvailabilityProvider(context, connectionManager)
+            db: io.github.trevarj.motd.data.db.MotdDatabase,
+            healthStore: PushHealthStore,
+            unifiedPush: UnifiedPushApi,
+        ): PushAvailabilityProvider = RealPushAvailabilityProvider(
+            context,
+            connectionManager,
+            db.networkDao(),
+            healthStore,
+            unifiedPush,
+        )
     }
 }

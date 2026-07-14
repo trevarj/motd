@@ -91,8 +91,14 @@ require_env MOTD_SOJU_HOST MOTD_SOJU_USER MOTD_SOJU_PASS
 
 # --- teardown / summary trap ----------------------------------------------
 
+_device_idle_forced=false
+
 _final() {
   local rc=$?
+  if [ "$_device_idle_forced" = true ]; then
+    adb_shell dumpsys deviceidle unforce >/dev/null 2>&1 || true
+    adb_shell dumpsys battery reset >/dev/null 2>&1 || true
+  fi
   # Print the tally; preserve a non-zero rc if the run body already failed.
   if e2e_summary; then
     exit "$rc"
@@ -1002,6 +1008,143 @@ phase_j() {
 }
 
 # ==========================================================================
+# Phase K — opt-in physical-device UnifiedPush verification
+# ==========================================================================
+phase_k() {
+  echo ""
+  echo "${_C_CYA}########## Phase K: UnifiedPush + ntfy ##########${_C_RST}"
+
+  step "Enable UnifiedPush and wait for verified soju registration"
+  _settings_open=false
+  for _attempt in 1 2 3; do
+    tap_desc "Settings"
+    if wait_for_text "Settings" 6; then
+      _settings_open=true
+      break
+    fi
+  done
+  if [ "$_settings_open" != true ]; then
+    fail "Settings did not open after three taps"
+    return 1
+  fi
+  tap_text "Message delivery"
+  wait_for_text "Delivery method" 8 || true
+  assert_tag_present settings_unified_push_row
+  tap_tag settings_unified_push_row
+  sleep 2
+  dump || true
+  if [ -n "$(bounds_of_tag 'settings_push_distributor_io.heckel.ntfy')" ]; then
+    tap_tag settings_push_distributor_io.heckel.ntfy
+  fi
+  _push_ready=false
+  for _attempt in $(seq 1 60); do
+    dump || true
+    if [ -n "$(bounds_of_text 'UnifiedPush active')" ]; then
+      _push_ready=true
+      break
+    fi
+    sleep 1
+  done
+  if [ "$_push_ready" = true ]; then
+    ok "soju acknowledged the ntfy subscription"
+  else
+    screencap_step "unifiedpush_not_active"
+    fail "UnifiedPush did not reach Active within 60 seconds"
+  fi
+  assert_tag_present settings_push_status_card
+  assert_no_crash
+
+  step "Background past grace period and verify fully protected sockets sleep"
+  adb_shell input keyevent 3
+  sleep 35
+  if adb_shell dumpsys activity services "$MOTD_PKG" 2>/dev/null | grep -q 'IrcForegroundService'; then
+    fail "foreground socket service still active after fully verified push hand-off"
+  else
+    ok "foreground socket service stopped after push hand-off"
+  fi
+
+  step "Deliver a channel highlight and DM through public ntfy"
+  _token="motd-up-$(date +%s)"
+  "$E2E_DIR/local-stack.sh" push "$_token"
+  _found=false
+  for _attempt in $(seq 1 45); do
+    if adb_shell dumpsys notification --noredact 2>/dev/null | grep -Fq "$_token"; then
+      _found=true
+      break
+    fi
+    sleep 1
+  done
+  if [ "$_found" = true ]; then
+    ok "tagged UnifiedPush notification arrived"
+  else
+    fail "no tagged UnifiedPush notification arrived within 45 seconds"
+  fi
+  assert_no_crash
+
+  step "Open the pushed conversation and verify the stored message"
+  adb_shell cmd statusbar expand-notifications >/dev/null 2>&1 || true
+  sleep 2
+  dump || true
+  if [ -n "$(bounds_of_text "${_token}-dm")" ]; then
+    tap_text "${_token}-dm"
+    wait_for_text "${_token}-dm" 10 || true
+    assert_text "${_token}-dm"
+    step "Verify foreground reconnect, catch-up, and live send"
+    input_tag chat_composer_field "Foreground ${_token}"
+    redump
+    tap_desc "Send"
+    wait_for_text "Foreground ${_token}" 10 || true
+    assert_text "Foreground ${_token}"
+    reset_to_chatlist >/dev/null 2>&1 || true
+    wait_for_text "$MOTD_TEST_CHANNEL" 10 || true
+    tap_text "$MOTD_TEST_CHANNEL"
+    wait_for_text "${MOTD_NICK}: ${_token}-mention" 10 || true
+    assert_text "${MOTD_NICK}: ${_token}-mention"
+  else
+    note "notification shade did not expose exact MessagingStyle text; delivery was verified via dumpsys"
+    adb_shell input keyevent 4 >/dev/null 2>&1 || true
+  fi
+  assert_no_crash
+
+  step "Verify cold receiver delivery without force-stop"
+  adb_shell input keyevent 3
+  adb_shell am kill "$MOTD_PKG" >/dev/null 2>&1 || true
+  _cold="${_token}-cold"
+  "$E2E_DIR/local-stack.sh" push "$_cold"
+  _found=false
+  for _attempt in $(seq 1 45); do
+    if adb_shell dumpsys notification --noredact 2>/dev/null | grep -Fq "$_cold"; then
+      _found=true
+      break
+    fi
+    sleep 1
+  done
+  [ "$_found" = true ] && ok "cold UnifiedPush receiver delivered" || fail "cold receiver delivery timed out"
+
+  step "Verify delivery while the device is in forced idle"
+  if adb_shell dumpsys deviceidle force-idle >/dev/null 2>&1; then
+    _device_idle_forced=true
+  else
+    note "device does not permit forced idle"
+  fi
+  _doze="${_token}-doze"
+  "$E2E_DIR/local-stack.sh" push "$_doze"
+  _found=false
+  for _attempt in $(seq 1 60); do
+    if adb_shell dumpsys notification --noredact 2>/dev/null | grep -Fq "$_doze"; then
+      _found=true
+      break
+    fi
+    sleep 1
+  done
+  adb_shell dumpsys deviceidle unforce >/dev/null 2>&1 || true
+  adb_shell dumpsys battery reset >/dev/null 2>&1 || true
+  _device_idle_forced=false
+  [ "$_found" = true ] && ok "forced-idle UnifiedPush delivery arrived" || fail "forced-idle delivery timed out"
+  assert_no_crash
+}
+
+# ==========================================================================
 # Driver — phases toggled by env (default: all). E2E_PHASES="a c f" runs a subset.
 # ==========================================================================
 main() {
@@ -1042,6 +1185,7 @@ main() {
       h) phase_h ;;
       i) phase_i ;;
       j) phase_j ;;
+      k) phase_k ;;
       *) note "unknown phase '$p' skipped" ;;
     esac || fail "phase '$p' aborted early (see output above)"
   done

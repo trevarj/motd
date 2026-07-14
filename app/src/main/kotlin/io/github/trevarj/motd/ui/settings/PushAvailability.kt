@@ -22,12 +22,31 @@ data class PushAvailability(
     val bouncerWebpush: Boolean = false,
     val distributorInstalled: Boolean = false,
     val fcmAvailable: Boolean = false,
+    val distributors: List<PushDistributor> = emptyList(),
+    val selectedDistributor: String? = null,
+    val setupStatus: PushSetupStatus = PushSetupStatus.NEEDS_ATTENTION,
+    val protectedNetworks: Int = 0,
+    val eligibleNetworks: Int = 0,
+    val lastSuccessAt: Long? = null,
+    val errorCode: String? = null,
+    val notificationsGranted: Boolean = true,
 ) {
     /** Push may be selected once the bouncer advertises webpush, even if a distributor is missing. */
     val selectable: Boolean get() = bouncerWebpush
 
     /** True when push is selectable but no distributor is installed yet (show install guidance). */
     val needsDistributor: Boolean get() = bouncerWebpush && !distributorInstalled
+}
+
+data class PushDistributor(val packageName: String, val label: String)
+
+enum class PushSetupStatus {
+    CHOOSE_DISTRIBUTOR,
+    REQUESTING_ENDPOINT,
+    VERIFYING,
+    ACTIVE,
+    PARTIAL_FALLBACK,
+    NEEDS_ATTENTION,
 }
 
 /**
