@@ -45,6 +45,9 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity? =
         messageDao.byMsgid(bufferId, msgid)
 
+    override fun observeByMsgid(bufferId: Long, msgid: String): Flow<MessageEntity?> =
+        messageDao.observeByMsgid(bufferId, msgid)
+
     // Wait for the echo to promote a pending own row's msgid in place. observeMsgid emits the
     // current value immediately (null while pending) and again when the row updates, so first
     // non-null wins; withTimeoutOrNull bounds the wait so a lost echo can't hang the react forever.

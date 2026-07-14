@@ -29,6 +29,9 @@ private class FakeMessageRepository(rows: List<MessageEntity> = emptyList()) : M
     override suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity? =
         store.firstOrNull { it.bufferId == bufferId && it.msgid == msgid }
 
+    override fun observeByMsgid(bufferId: Long, msgid: String): Flow<MessageEntity?> =
+        flowOf(store.firstOrNull { it.bufferId == bufferId && it.msgid == msgid })
+
     override suspend fun awaitMsgid(id: Long, timeoutMs: Long): String? =
         store.firstOrNull { it.id == id }?.msgid
 

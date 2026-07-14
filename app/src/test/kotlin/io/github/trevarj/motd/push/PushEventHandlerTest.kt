@@ -104,6 +104,20 @@ class PushEventHandlerTest {
     }
 
     @Test
+    fun mapToEvent_accepts_reaction_compatibility_aliases() {
+        val react = PushEventHandler.mapToEvent(
+            IrcMessage.parse("@+react=👍;draft/reply=m1 :alice!u@h TAGMSG #chan"),
+        ) as IrcEvent.TagMessage
+        assertEquals("👍", react.reactEmoji)
+        assertEquals("m1", react.reactTargetMsgid)
+
+        val unreact = PushEventHandler.mapToEvent(
+            IrcMessage.parse("@+unreact=👍;draft/reply=m1 :alice!u@h TAGMSG #chan"),
+        )
+        assertTrue(unreact is IrcEvent.Raw)
+    }
+
+    @Test
     fun mapToEvent_ignores_non_chat_and_other_ctcp() {
         assertNull(PushEventHandler.mapToEvent(IrcMessage.parse("PING :x")))
         assertNull(PushEventHandler.mapToEvent(IrcMessage.parse(":a!a@h PRIVMSG #c :VERSION")))

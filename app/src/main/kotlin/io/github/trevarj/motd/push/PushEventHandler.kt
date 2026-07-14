@@ -2,8 +2,11 @@ package io.github.trevarj.motd.push
 
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
-import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.IrcParseException
+import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.irc.proto.reactionValue
+import io.github.trevarj.motd.irc.proto.replyReference
+import io.github.trevarj.motd.irc.proto.unreactionValue
 import io.github.trevarj.motd.service.IrcEventSink
 import java.time.Instant
 import java.time.format.DateTimeParseException
@@ -130,10 +133,10 @@ class PushEventHandler(
         }
 
         private fun mapTagMessage(msg: IrcMessage): IrcEvent? {
-            if (msg.tags["+draft/unreact"] != null) return IrcEvent.Raw(msg)
+            if (msg.unreactionValue() != null) return IrcEvent.Raw(msg)
             val source = msg.source ?: return null
             val target = msg.params.firstOrNull() ?: return null
-            val react = msg.tags["+draft/react"]
+            val react = msg.reactionValue()
             return IrcEvent.TagMessage(
                 ctx = context(msg),
                 source = source,
@@ -143,8 +146,6 @@ class PushEventHandler(
                 reactTargetMsgid = react?.let { msg.replyReference() },
             )
         }
-
-        private fun IrcMessage.replyReference(): String? = tags["+reply"] ?: tags["+draft/reply"]
 
         private fun context(msg: IrcMessage): MessageContext = MessageContext(
             msgid = msg.tags["msgid"],

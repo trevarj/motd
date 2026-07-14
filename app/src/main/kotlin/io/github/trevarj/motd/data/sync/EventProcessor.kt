@@ -16,6 +16,8 @@ import io.github.trevarj.motd.bouncer.redactBouncerServReply
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.proto.replyReference
+import io.github.trevarj.motd.irc.proto.unreactionValue
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.RoomReactionMutationStore
 import java.util.concurrent.ConcurrentHashMap
@@ -346,7 +348,9 @@ class EventProcessor @Inject constructor(
         val targetMsgid = e.reactTargetMsgid
         if (emoji != null && targetMsgid != null) {
             val bufferId = bufferDao.byName(networkId, st.normalize(bufferName))?.id ?: return
-            if (messageDao.byMsgid(bufferId, targetMsgid) == null) return
+            // Keep an orphan temporarily when the target's echo/history row is still in flight.
+            // Reaction queries are scoped to visible msgids, so it becomes visible atomically when
+            // the parent arrives and remains inert if the reference never resolves.
             reactionDao.upsert(
                 ReactionEntity(
                     bufferId = bufferId,
@@ -902,8 +906,8 @@ class EventProcessor @Inject constructor(
     /** `draft/unreact` stays Raw to preserve the frozen event contract; consume it here. */
     private suspend fun removeReaction(networkId: Long, message: io.github.trevarj.motd.irc.proto.IrcMessage): Boolean {
         if (message.command != "TAGMSG") return false
-        val emoji = message.tags["+draft/unreact"] ?: return false
-        val targetMsgid = message.tags["+reply"] ?: message.tags["+draft/reply"] ?: return true
+        val emoji = message.unreactionValue() ?: return false
+        val targetMsgid = message.replyReference() ?: return true
         val source = message.source?.nick ?: return true
         val target = message.params.firstOrNull() ?: return true
         val st = stateFor(networkId)
@@ -915,7 +919,6 @@ class EventProcessor @Inject constructor(
             target
         }
         val bufferId = bufferDao.byName(networkId, st.normalize(bufferName))?.id ?: return true
-        if (messageDao.byMsgid(bufferId, targetMsgid) == null) return true
         val previous = reactionMutations.findOwn(bufferId, targetMsgid, source, st::normalize)
         if (previous?.emoji == emoji) reactionMutations.remove(previous)
         return true

@@ -6,6 +6,9 @@ import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Isupport
 import io.github.trevarj.motd.irc.proto.Prefix
 import io.github.trevarj.motd.irc.proto.parseIrcPrefix
+import io.github.trevarj.motd.irc.proto.reactionValue
+import io.github.trevarj.motd.irc.proto.replyReference
+import io.github.trevarj.motd.irc.proto.unreactionValue
 import java.time.Instant
 import java.time.format.DateTimeParseException
 
@@ -189,8 +192,8 @@ internal class EventMapper(
     private fun mapTagMessage(msg: IrcMessage, ctx: MessageContext): IrcEvent {
         val source = msg.source ?: Prefix(nick = "")
         val target = msg.params.getOrNull(0).orEmpty()
-        val react = msg.tags["+draft/react"]
-        val unreact = msg.tags["+draft/unreact"]
+        val react = msg.reactionValue()
+        val unreact = msg.unreactionValue()
         // Preserve the frozen event contract: unreact travels as Raw and is removed by the app's
         // sole Room writer. Live and CHATHISTORY paths therefore share the same idempotent delete.
         if (unreact != null) return IrcEvent.Raw(msg)
@@ -204,8 +207,6 @@ internal class EventMapper(
             reactTargetMsgid = if (react != null) replyTag else null,
         )
     }
-
-    private fun IrcMessage.replyReference(): String? = tags["+reply"] ?: tags["+draft/reply"]
 
     private fun mapJoin(msg: IrcMessage, ctx: MessageContext): IrcEvent {
         val nick = msg.source?.nick ?: return IrcEvent.Raw(msg)

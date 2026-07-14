@@ -266,6 +266,35 @@ class EventProcessorTest {
     }
 
     @Test
+    fun reactionArrivingBeforeParent_isRetainedUntilParentBecomesVisible() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "seed"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "existing buffer",
+            isSelf = false, replyToMsgid = null,
+        ))
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+
+        processor.process(networkId, IrcEvent.TagMessage(
+            ctx = ctx(time = 5), source = Prefix("bob"), target = "#chan",
+            typing = null, reactEmoji = "👍", reactTargetMsgid = "late-parent",
+        ))
+        assertEquals(
+            1,
+            db.reactionDao().observeFor(buffer.id, listOf("late-parent")).first().size,
+        )
+
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "late-parent", time = 6), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "#chan", text = "parent",
+            isSelf = true, replyToMsgid = null,
+        ))
+
+        val reactions = db.reactionDao().observeFor(buffer.id, listOf("late-parent")).first()
+        assertEquals("👍", reactions.single().emoji)
+        assertEquals("bob", reactions.single().sender)
+    }
+
+    @Test
     fun ownReactionEcho_reconcilesOntoOptimisticRow_withoutDuplicating() = runTest {
         // Auto-create the buffer and seed the optimistic own-reaction row the way sendReact does
         // (upsert keyed by bufferId+targetMsgid+sender) before the server echo arrives.

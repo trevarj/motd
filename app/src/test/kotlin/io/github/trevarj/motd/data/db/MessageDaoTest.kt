@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.db
 
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -68,6 +69,30 @@ class MessageDaoTest {
             message(bufferId, "b", serverTime = 2, dedupKey = "pending:l2", msgid = null, isSelf = true, pendingLabel = "l2"),
         ))
         assertEquals(2, dao.pagingList(bufferId).size)
+    }
+
+    @Test
+    fun observeByMsgid_emitsWhenReplyTargetArrivesAfterSubscription() = runTest {
+        val dao = db.messageDao()
+        assertNull(dao.observeByMsgid(bufferId, "late-parent").first())
+
+        val target = async {
+            dao.observeByMsgid(bufferId, "late-parent").first { it != null }
+        }
+        dao.insertAll(
+            listOf(
+                message(
+                    bufferId,
+                    "parent body",
+                    serverTime = 1000,
+                    dedupKey = "late-parent",
+                    msgid = "late-parent",
+                    isSelf = true,
+                ),
+            ),
+        )
+
+        assertEquals("parent body", target.await()?.text)
     }
 
     @Test

@@ -337,6 +337,7 @@
     <string name="action_continue">Continue</string>
     <string name="action_more">More actions</string>
     <string name="chat_action_reply">Reply</string>
+    <string name="chat_reply_target_unavailable">Original message not available</string>
     <string name="chat_action_copy">Copy</string>
     <string name="chat_action_quote">Quote</string>
     <string name="chat_action_more_reactions">More reactions</string>

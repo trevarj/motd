@@ -515,12 +515,21 @@ private fun MessageRow(
 
     // A row asks Room for its reply target only while it is composed. This avoids timeline-wide
     // loaded-window scans during fast traversal; collection is lifecycle-cancelled off-screen.
-    val reply: ReplyPreviewData? = if (msg.replyToMsgid != null) {
+    val resolvedReply: ReplyPreviewData? = if (msg.replyToMsgid != null) {
         val replyFlow = remember(msg.replyToMsgid) { replyPreview(msg.replyToMsgid) }
         val resolved by replyFlow.collectAsStateWithLifecycle(initialValue = null)
         resolved
     } else {
         null
+    }
+    // A reply relationship remains visible even if its parent is not in local history yet. The
+    // reactive lookup above replaces this marker as soon as echo confirmation or history inserts
+    // the referenced msgid.
+    val reply = resolvedReply ?: msg.replyToMsgid?.let {
+        ReplyPreviewData(
+            sender = stringResource(R.string.chat_action_reply),
+            text = stringResource(R.string.chat_reply_target_unavailable),
+        )
     }
 
     // URL discovery is unnecessary for the overwhelming majority of IRC lines. For the rows that
