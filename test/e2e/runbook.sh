@@ -741,9 +741,15 @@ phase_f() {
   wait_for_text "Appearance" 6 || true
   assert_tag_present settings_theme_picker
   tap_tag settings_theme_picker
-  assert_tag_present settings_theme_sheet
-  input_tag settings_theme_search "AMOLED"
-  tap_tag settings_theme_amoled
+  # ModalBottomSheet is a separate Compose window. UIAutomator renders its visible text but does
+  # not consistently export testTags as resource ids (the same boundary as AlertDialog buttons),
+  # so use the sheet's exact localized labels here rather than leaving it open and cascading every
+  # later Settings check onto the wrong window.
+  wait_for_text "Search themes" 6 || true
+  assert_text "Search themes"
+  input_by_text_label "Search themes" "AMOLED"
+  wait_for_text "AMOLED (true black)" 6 || true
+  tap_text "AMOLED (true black)"
   screencap_step "amoled_background"   # color-only oracle
   ok "selected AMOLED (background asserted via screencap only)"
   assert_no_crash
