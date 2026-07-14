@@ -7,10 +7,13 @@ automation in `.github/workflows/release.yml` is authoritative.
 
 1. Inspect the branch, status, staged diff, and recent tags. Do not include
    unrelated work or assume uncommitted user changes should be released.
-2. Run the FOSS release-parity checks from [`testing.md`](testing.md).
-3. Confirm the requested semantic version and that the `v<semver>` tag does not
+2. Run the local FOSS release-parity unit/integration, lint, and build checks
+   from [`testing.md`](testing.md). Do not run local emulator E2E.
+3. Push the candidate commit and require the complete `CI` workflow—including
+   its `headless-core` E2E job and final `gate` job—to pass before tagging.
+4. Confirm the requested semantic version and that the `v<semver>` tag does not
    already exist locally or remotely.
-4. Confirm the four signing secrets exist in GitHub: `KEYSTORE_BASE64`,
+5. Confirm the four signing secrets exist in GitHub: `KEYSTORE_BASE64`,
    `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD`.
 
 The Google/FCM distribution is paused. Do not build, sign, attach, or publish a

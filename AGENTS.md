@@ -53,9 +53,10 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
   warnings are errors.
   When a change crosses modules or release behavior, run the full documented
   build rather than only the nearest unit test.
-- Device-sensitive UI, lifecycle, connection, and performance work requires an
-  appropriate emulator or physical-device check when one is available. Use the
-  local bouncer and E2E runbook rather than a live personal network.
+- Do not run emulator/device E2E as part of routine local development. Keep
+  local verification to unit/integration tests, lint, and builds; the required
+  CI gate owns headless E2E. Use a physical device only when the maintainer
+  explicitly requests hardware/OS validation.
 - Use `test/e2e/znc-stack.sh` for ZNC-specific SASL, two-client, reconnect-gap,
   and native-playback work. Its TLS endpoint is adb-reversed at
   `127.0.0.1:6698`; exact credentials, commands, and the observed degradation
