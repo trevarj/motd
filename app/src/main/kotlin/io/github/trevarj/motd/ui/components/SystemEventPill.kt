@@ -16,9 +16,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -46,6 +53,9 @@ fun SystemEventPill(
     // collapsed path to its bounded summary and build lines only if the user opens the pill.
     var lines by remember(contentKey) { mutableStateOf<List<String>?>(null) }
     val collapsible = lineCount > 1
+    val expansionState = stringResource(
+        if (expanded) R.string.system_event_expanded else R.string.system_event_collapsed,
+    )
     Row(
         modifier = modifier.fillMaxWidth().padding(vertical = LocalSpacing.current.systemPillVPad, horizontal = 12.dp),
         horizontalArrangement = Arrangement.Center,
@@ -55,6 +65,13 @@ fun SystemEventPill(
                 .background(
                     MaterialTheme.colorScheme.surfaceContainerHigh,
                     RoundedCornerShape(50),
+                )
+                .then(
+                    if (collapsible) Modifier.semantics {
+                        role = Role.Button
+                        contentDescription = summary
+                        stateDescription = expansionState
+                    } else Modifier,
                 )
                 .then(
                     if (collapsible) Modifier.clickable {

@@ -202,6 +202,8 @@
     <string name="network_settings_tap_configure">Tap to configure</string>
     <string name="network_settings_expand">Expand settings</string>
     <string name="network_settings_collapse">Collapse settings</string>
+    <string name="system_event_expanded">Expanded</string>
+    <string name="system_event_collapsed">Collapsed</string>
     <string name="network_settings_unsaved_title">Discard unsaved changes?</string>
     <string name="network_settings_unsaved_message">Your network edits have not been saved.</string>
     <string name="network_settings_keep_editing">Keep editing</string>
