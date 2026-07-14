@@ -230,12 +230,25 @@ internal class AutoFollowTracker(initialItemCount: Int) {
         return shouldFollow
     }
 
-    /** Ignore Paging growth whose newest meaningful identity did not change (JPQ/fool tails). */
+    /**
+     * Follow a newly inserted meaningful row by identity, not by the volatile Paging item count.
+     * Room invalidation may briefly publish an empty snapshot, and a bounded loaded window may
+     * replace one old row with one new row without changing its count. Neither transition should
+     * break live following. Auto-generated row ids are monotonic, so a lower identity (for example
+     * exposing an older row after deletion) is not mistaken for a live arrival.
+     */
     fun onTimelineChanged(newItemCount: Int, newNewestEffectiveId: Long?): Boolean {
-        val shouldFollow = following && itemCount > 0 && newItemCount > itemCount &&
-            newNewestEffectiveId != null && newNewestEffectiveId != newestEffectiveId
+        val previousNewestId = newestEffectiveId
+        val shouldFollow = following && previousNewestId != null &&
+            newNewestEffectiveId != null && newNewestEffectiveId > previousNewestId
         itemCount = newItemCount
-        newestEffectiveId = newNewestEffectiveId
+        // An empty invalidation snapshot is not a real timeline transition. Retain the last
+        // meaningful identity so the repopulated snapshot can still be classified as live/old.
+        if (newNewestEffectiveId != null &&
+            (previousNewestId == null || newNewestEffectiveId > previousNewestId)
+        ) {
+            newestEffectiveId = newNewestEffectiveId
+        }
         return shouldFollow
     }
 }

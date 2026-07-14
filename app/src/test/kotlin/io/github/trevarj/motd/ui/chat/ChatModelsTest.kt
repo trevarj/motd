@@ -6,8 +6,10 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -148,6 +150,84 @@ class ChatModelsTest {
 
         assertFalse(tracker.onTimelineChanged(newItemCount = 11, newNewestEffectiveId = 7))
         assertTrue(tracker.onTimelineChanged(newItemCount = 12, newNewestEffectiveId = 8))
+    }
+
+    @Test fun `paging invalidation cannot break following live arrivals`() {
+        val tracker = AutoFollowTracker(initialItemCount = 10)
+        tracker.reset(itemCount = 10, atBottom = true, newestEffectiveId = 10)
+
+        // Room invalidation can temporarily replace a populated Paging snapshot with an empty one.
+        assertFalse(tracker.onTimelineChanged(newItemCount = 0, newNewestEffectiveId = null))
+
+        assertTrue(tracker.onTimelineChanged(newItemCount = 11, newNewestEffectiveId = 11))
+        assertTrue(tracker.following)
+    }
+
+    @Test fun `page replacement follows a newer identity even when loaded count stays constant`() {
+        val tracker = AutoFollowTracker(initialItemCount = 50)
+        tracker.reset(itemCount = 50, atBottom = true, newestEffectiveId = 50)
+
+        assertTrue(tracker.onTimelineChanged(newItemCount = 50, newNewestEffectiveId = 51))
+    }
+
+    @Test fun `paging invalidation never overrides explicit user scroll intent`() {
+        val tracker = AutoFollowTracker(initialItemCount = 10)
+        tracker.reset(itemCount = 10, atBottom = true, newestEffectiveId = 10)
+        tracker.onScrollStateChanged(scrolling = true, programmatic = false, atBottom = false)
+
+        assertFalse(tracker.onTimelineChanged(newItemCount = 0, newNewestEffectiveId = null))
+        assertFalse(tracker.onTimelineChanged(newItemCount = 11, newNewestEffectiveId = 11))
+        assertFalse(tracker.following)
+    }
+
+    @Test fun `random paging and scroll interleavings preserve follow intent for every layout`() {
+        LayoutDensity.entries.forEachIndexed { layoutIndex, _ ->
+            val random = Random(0xA170 + layoutIndex)
+            val tracker = AutoFollowTracker(initialItemCount = 50)
+            var newestId = 100L
+            var count = 50
+            var expectedFollowing = true
+            tracker.reset(count, atBottom = true, newestEffectiveId = newestId)
+
+            repeat(1_000) {
+                when (random.nextInt(6)) {
+                    0 -> assertFalse(tracker.onTimelineChanged(0, null))
+                    1 -> {
+                        newestId++
+                        count = (count + random.nextInt(0, 2)).coerceAtLeast(1)
+                        assertEquals(
+                            expectedFollowing,
+                            tracker.onTimelineChanged(count, newestId),
+                        )
+                    }
+                    2 -> tracker.onScrollStateChanged(
+                        scrolling = random.nextBoolean(),
+                        programmatic = true,
+                        atBottom = random.nextBoolean(),
+                    )
+                    3 -> {
+                        tracker.onScrollStateChanged(
+                            scrolling = true,
+                            programmatic = false,
+                            atBottom = false,
+                        )
+                        expectedFollowing = false
+                    }
+                    4 -> {
+                        tracker.onScrollStateChanged(
+                            scrolling = false,
+                            programmatic = false,
+                            atBottom = true,
+                        )
+                        expectedFollowing = true
+                    }
+                    else -> assertFalse(
+                        tracker.onTimelineChanged(count, newestId - 1),
+                    )
+                }
+                assertEquals(expectedFollowing, tracker.following)
+            }
+        }
     }
 
     @Test fun `collapsed fool tail counts as effective bottom and cannot become saved anchor`() {
