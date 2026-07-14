@@ -997,46 +997,32 @@ class ConnectionManagerImpl @Inject constructor(
         if (buffer.type != BufferType.CHANNEL ||
             buffer.name != normalize(buffer.networkId, payload.channel)
         ) return
-        val claimed = when (initial.inviteState) {
-            InviteState.PENDING, InviteState.FAILED -> messageDao.compareAndSetInviteState(
-                messageId,
-                initial.inviteState,
-                InviteState.JOINING,
-            )
-            else -> 0
-        }
-        if (claimed == 0) return
-
-        try {
-            if (connectionStates.value[buffer.networkId] !is IrcClientState.Ready) connect(buffer.networkId)
-            val ready = withTimeoutOrNull(INVITE_READY_TIMEOUT_MS) {
-                connectionStates.map { it[buffer.networkId] }
-                    .filterIsInstance<IrcClientState.Ready>()
-                    .first()
-            }
-            if (ready == null) {
-                messageDao.failInvite(messageId, "connection timed out")
-                return
-            }
-            // Dismiss can race the connection wait. Recheck before the only wire write.
-            if (messageDao.byId(messageId)?.inviteState != InviteState.JOINING) return
-            val client = clientFor(buffer.networkId)
-            if (client == null) {
-                messageDao.failInvite(messageId, "connection unavailable")
-                return
-            }
-            client.send(
+        performInviteJoin(
+            initialState = initial.inviteState,
+            claim = { fromState ->
+                messageDao.compareAndSetInviteState(messageId, fromState, InviteState.JOINING) > 0
+            },
+            awaitReady = {
+                if (connectionStates.value[buffer.networkId] !is IrcClientState.Ready) connect(buffer.networkId)
+                withTimeoutOrNull(INVITE_READY_TIMEOUT_MS) {
+                    connectionStates.map { it[buffer.networkId] }
+                        .filterIsInstance<IrcClientState.Ready>()
+                        .first()
+                } != null
+            },
+            stillJoining = { messageDao.byId(messageId)?.inviteState == InviteState.JOINING },
+            sendJoin = {
+                val client = clientFor(buffer.networkId)
+                    ?: throw InviteJoinFailure("connection unavailable")
+                client.send(
                 io.github.trevarj.motd.irc.proto.IrcMessage(
                     command = "JOIN",
                     params = listOf(payload.channel),
                 ),
-            )
-        } catch (cancelled: CancellationException) {
-            messageDao.failInvite(messageId, "join cancelled")
-            throw cancelled
-        } catch (_: Exception) {
-            messageDao.failInvite(messageId, "send failed")
-        }
+                )
+            },
+            fail = { reason -> messageDao.failInvite(messageId, reason) },
+        )
     }
 
     override suspend fun dismissInvite(messageId: Long) {
