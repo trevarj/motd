@@ -18,6 +18,7 @@ from pathlib import Path
 SERVER = "solanum.ready.test"
 CHANNEL = "#ready"
 REMOTE = "readyfriend"
+SECOND_REMOTE = "splitfriend"
 CAPABILITIES = (
     "batch cap-notify extended-monitor invite-notify message-tags "
     "no-implicit-names server-time userhost-in-names"
@@ -128,11 +129,19 @@ class ReadyHandler(socketserver.StreamRequestHandler):
         self.send(f":{SERVER} BATCH +history chathistory {channel}")
         self.send(f"@batch=history :{SERVER} BATCH +split netsplit alpha.test beta.test")
         self.send(f"@batch=split;msgid=split-1 :{REMOTE}!fixture@ready.example QUIT :alpha.test beta.test")
+        self.send(
+            f"@batch=split;msgid=split-2 :{SECOND_REMOTE}!fixture@ready.example "
+            "QUIT :alpha.test beta.test"
+        )
         self.send(f"@batch=history :{SERVER} BATCH -split")
         self.send(f"@batch=history :{SERVER} BATCH +join netjoin alpha.test beta.test")
         self.send(
             f"@batch=join;msgid=join-1 :{REMOTE}!fixture@ready.example "
             f"JOIN {channel} readyaccount :Ready Fixture User"
+        )
+        self.send(
+            f"@batch=join;msgid=join-2 :{SECOND_REMOTE}!fixture@ready.example "
+            f"JOIN {channel} splitaccount :Split Fixture User"
         )
         self.send(f"@batch=history :{SERVER} BATCH -join")
         self.send(f":{SERVER} BATCH -history")
