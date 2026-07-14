@@ -96,9 +96,14 @@ class EventProcessor @Inject constructor(
     }
 
     override suspend fun process(networkId: Long, event: IrcEvent) {
+        processEvent(networkId, event, notify = true)
+    }
+
+    /** Persist one event while carrying whether its provenance permits user notifications. */
+    private suspend fun processEvent(networkId: Long, event: IrcEvent, notify: Boolean) {
         when (event) {
             is IrcEvent.Registered -> onRegistered(networkId, event.nick, event.isupport)
-            is IrcEvent.ChatMessage -> onChat(networkId, event)
+            is IrcEvent.ChatMessage -> onChat(networkId, event, notify)
             is IrcEvent.TagMessage -> onTag(networkId, event)
             is IrcEvent.HistoryBatch -> onHistoryBatch(networkId, event)
             is IrcEvent.Joined -> onJoined(networkId, event)
@@ -126,7 +131,7 @@ class EventProcessor @Inject constructor(
 
     // -- chat / tags ---------------------------------------------------------
 
-    private suspend fun onChat(networkId: Long, e: IrcEvent.ChatMessage) {
+    private suspend fun onChat(networkId: Long, e: IrcEvent.ChatMessage, notify: Boolean) {
         val st = stateFor(networkId)
         val isDm = !isChannel(e.target, st)
         // Server-sourced NOTICEs (empty source, or a source that looks like a host) go to the
@@ -276,7 +281,7 @@ class EventProcessor @Inject constructor(
             bufferDao.advanceReadMarker(bufferId, e.ctx.serverTime)
             return
         }
-        maybeNotify(networkId, bufferId, type, hasMention, e)
+        if (notify) maybeNotify(networkId, bufferId, type, hasMention, e)
     }
 
     private suspend fun onTag(networkId: Long, e: IrcEvent.TagMessage) {
@@ -313,9 +318,11 @@ class EventProcessor @Inject constructor(
     }
 
     private suspend fun onHistoryBatch(networkId: Long, batch: IrcEvent.HistoryBatch) {
-        // All events for one target, applied in a single Room transaction (idempotent by dedupKey).
+        // All events for one target are applied in a single Room transaction (idempotent by
+        // dedupKey). They are historical replay, never live arrivals: persist them without posting
+        // notifications even when a previously-missing row is a DM or mention.
         db.withTransaction {
-            for (ev in batch.events) process(networkId, ev)
+            for (ev in batch.events) processEvent(networkId, ev, notify = false)
         }
     }
 

@@ -96,8 +96,9 @@ enable/disable cleanup without adding Python dependencies beyond the Nix shell.
 `read-marker-check` connects two downstream clients to the same Soju network,
 sends a timestamped message, and verifies that `draft/read-marker` broadcasts
 between clients, never regresses after an older SET, and remains available after
-a downstream reconnect. MOTD reconciles its durable local marker with that
-server maximum whenever a read-marker-capable connection becomes ready.
+a downstream reconnect. The live response is required inside MOTD’s bounded
+five-second reconnect barrier: MOTD converges its durable local marker with the
+server maximum before CHATHISTORY replay can populate unread-count queries.
 
 Always pair `pause-soju` with `resume-soju`; both target the exact PID recorded
 by the fixture rather than matching processes by command line.
@@ -225,7 +226,7 @@ failure log.
 | H | Inline image viewer | Conditional on a reachable seeded image |
 | I | Delete-chat cancellation, final crash sweep, clean reset | Expected green |
 | J | Soju control-center panels, admin discovery, safe console command | Expected green with local admin fixture |
-| K | ntfy discovery, soju WebPush ACK, background/cold/Doze delivery | Opt-in physical device with F-Droid ntfy |
+| K | ntfy discovery, soju WebPush ACK, background/cold/Doze delivery, exactly-once notifications | Opt-in physical device with F-Droid ntfy |
 
 Phase K is intentionally excluded from the default A–I sweep because it needs an installed
 UnifiedPush distributor and network access to its HTTPS relay. With the native stack already up,

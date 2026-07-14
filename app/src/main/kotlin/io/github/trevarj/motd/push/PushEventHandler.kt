@@ -22,19 +22,17 @@ import javax.inject.Inject
 class PushEventHandler(
     private val crypto: WebPushCryptoFacade,
     private val eventSink: IrcEventSink,
-    private val notifier: PushNotifier,
     private val healthStore: PushHealthStore = NoopPushHealthStore,
 ) {
     /**
      * Hilt entry point. The crypto facade defaults to the real JCA implementation and the
-     * notifier to a no-op; WP10 can rebind a [PushNotifier] to post MessagingStyle
-     * notifications. Only [IrcEventSink] (a WP1 contract) needs to come from the graph.
+     * [IrcEventSink] owns both persistence and the normal notification decision, exactly as it does
+     * for live socket events. Keeping one owner prevents a pushed DM/highlight being notified twice.
      */
     @Inject
     constructor(eventSink: IrcEventSink) : this(
         WebPushCryptoFacade.Default,
         eventSink,
-        NoopPushNotifier,
         NoopPushHealthStore,
     )
 
@@ -65,7 +63,6 @@ class PushEventHandler(
         val event = mapToEvent(msg) ?: return null
         eventSink.process(networkId, event)
         healthStore.messageDelivered(networkId)
-        if (event is IrcEvent.ChatMessage) notifier.notify(networkId, event)
         return event
     }
 
@@ -166,20 +163,4 @@ fun interface WebPushCryptoFacade {
     companion object {
         val Default = WebPushCryptoFacade { body, keys -> WebPushCrypto.decrypt(body, keys) }
     }
-}
-
-/**
- * Posts a MessagingStyle notification for a pushed chat message (plans/05 rules). The concrete
- * NotificationManagerCompat implementation is wired in WP5/WP10; WP9 depends only on this seam
- * so the handler stays testable without an Android context.
- */
-fun interface PushNotifier {
-    // suspend so the buffer lookup + notification decision use plain suspend Room/DataStore reads
-    // (which dispatch off the main thread) instead of runBlocking. handle() is already suspend.
-    suspend fun notify(networkId: Long, message: IrcEvent.ChatMessage)
-}
-
-/** No-op notifier for contexts where notifications are not wanted (e.g. tests / not yet wired). */
-object NoopPushNotifier : PushNotifier {
-    override suspend fun notify(networkId: Long, message: IrcEvent.ChatMessage) = Unit
 }

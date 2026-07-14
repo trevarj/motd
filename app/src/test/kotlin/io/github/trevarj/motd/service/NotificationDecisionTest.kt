@@ -8,7 +8,7 @@ import org.junit.Test
  * Truth table for [shouldPostNotification] (plans/13 §2.6). The `(DM || mention)` gate is applied
  * upstream in EventProcessor, so every case here already qualifies as a DM or mention.
  *
- * Precedence: foreground > fool > friend > mute.
+ * Precedence: already-read > foreground > fool > friend > mute.
  */
 class NotificationDecisionTest {
 
@@ -42,6 +42,19 @@ class NotificationDecisionTest {
     @Test
     fun `normal un-muted message notifies`() {
         assertTrue(shouldPostNotification(foreground = false, muted = false, senderIsFriend = false, senderIsFool = false))
+    }
+
+    @Test
+    fun `message covered by durable marker is suppressed`() {
+        assertFalse(
+            shouldPostNotification(
+                foreground = false,
+                muted = false,
+                senderIsFriend = true,
+                senderIsFool = false,
+                alreadyRead = true,
+            ),
+        )
     }
 
     @Test

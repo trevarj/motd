@@ -36,8 +36,13 @@ import io.github.trevarj.motd.push.PushHealthStore
 import io.github.trevarj.motd.push.pushSuspendedNetworkIds
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -473,10 +478,12 @@ class ConnectionManagerImpl @Inject constructor(
             }
         }
         if (!isCurrent()) return
-        coroutineScope {
-            launch { catchUpForConnection(row.id, client) }
-            launch { reconcileReadMarkersForConnection(row, client, isCurrent) }
-        }
+        // Establish the server/local read boundary before replaying missing history. Otherwise
+        // CHATHISTORY rows can briefly appear unread while a newer cross-device marker is still in
+        // flight. The reconciliation is bounded, so a non-compliant server cannot stall catch-up.
+        reconcileReadMarkersForConnection(row, client, isCurrent)
+        if (!isCurrent()) return
+        catchUpForConnection(row.id, client)
     }
 
     // -- catch-up (plans/04) -------------------------------------------------
@@ -521,12 +528,37 @@ class ConnectionManagerImpl @Inject constructor(
         isCurrent: () -> Boolean,
     ) {
         if (row.role == NetworkRole.BOUNCER_ROOT || !awaitCapability(client, READ_MARKER_CAP)) return
-        for (request in readMarkerSyncRequests(readMarkerRepository.storedForNetwork(row.id))) {
-            if (!isCurrent()) return
-            runCatching {
-                request.timestamp?.let { client.markRead(request.target, it) }
-                    ?: client.fetchReadMarker(request.target)
-            }
+        val requests = readMarkerSyncRequests(readMarkerRepository.storedForNetwork(row.id))
+        coroutineScope {
+            requests.map { request ->
+                async {
+                    if (!isCurrent()) return@async
+                    val response = try {
+                        awaitReadMarkerResponse(
+                            events = client.events,
+                            target = request.target,
+                            normalize = client.isupport::normalize,
+                            timeoutMs = READ_MARKER_RESPONSE_TIMEOUT_MS,
+                        ) {
+                            request.timestamp?.let { client.markRead(request.target, it) }
+                                ?: client.fetchReadMarker(request.target)
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        null
+                    } ?: return@async
+                    val timestamp = response.timestamp ?: return@async
+                    // ConnectionActor's long-lived collector persists the same event through
+                    // EventProcessor. Wait until that durable max-only write is visible before
+                    // allowing CHATHISTORY to populate unread-count queries.
+                    withTimeoutOrNull(READ_MARKER_PERSIST_TIMEOUT_MS) {
+                        bufferDao.observe(request.bufferId).first { buffer ->
+                            buffer?.readMarkerTime?.let { it >= timestamp } == true
+                        }
+                    }
+                }
+            }.awaitAll()
         }
     }
 
@@ -869,6 +901,8 @@ class ConnectionManagerImpl @Inject constructor(
         const val READ_MARKER_CAP = "draft/read-marker"
         const val WEBPUSH_CAP = "soju.im/webpush"
         const val CAP_SETTLE_TIMEOUT_MS = 15_000L
+        const val READ_MARKER_RESPONSE_TIMEOUT_MS = 5_000L
+        const val READ_MARKER_PERSIST_TIMEOUT_MS = 2_000L
         const val ECHO_TIMEOUT_MS = 30_000L
         const val PUSH_BACKGROUND_GRACE_MS = 30_000L
         const val MAX_BYTES = 400
@@ -886,9 +920,31 @@ internal fun catchUpRetryDelayMs(attempt: Int): Long =
 
 /** Wire requests needed to converge local markers with a read-marker-capable server. */
 internal fun readMarkerSyncRequests(markers: List<BufferReadMarker>): List<ReadMarkerSyncRequest> =
-    markers.map { ReadMarkerSyncRequest(it.target, it.timestamp) }
+    markers.map { ReadMarkerSyncRequest(it.bufferId, it.target, it.timestamp) }
 
-internal data class ReadMarkerSyncRequest(val target: String, val timestamp: Long?)
+internal data class ReadMarkerSyncRequest(
+    val bufferId: Long,
+    val target: String,
+    val timestamp: Long?,
+)
+
+/** Subscribe before sending so even an immediate MARKREAD response cannot be missed. */
+internal suspend fun awaitReadMarkerResponse(
+    events: Flow<IrcEvent>,
+    target: String,
+    normalize: (String) -> String,
+    timeoutMs: Long,
+    request: suspend () -> Unit,
+): IrcEvent.ReadMarker? = coroutineScope {
+    val expected = normalize(target)
+    val response = async(start = CoroutineStart.UNDISPATCHED) {
+        withTimeoutOrNull(timeoutMs) {
+            events.filterIsInstance<IrcEvent.ReadMarker>().first { normalize(it.target) == expected }
+        }
+    }
+    request()
+    response.await()
+}
 
 /**
  * Pure wanted-set computation for [ConnectionManagerImpl.reconcile] (plans/16 §4), extracted for

@@ -683,4 +683,65 @@ class EventProcessorTest {
         val buffer = db.bufferDao().byName(networkId, "#chan")!!
         assertEquals(2, pagingList(buffer.id).size)
     }
+
+    @Test
+    fun historyBatch_persistsMentionsAndDms_withoutNotifications() = runTest {
+        val notifications = mutableListOf<String>()
+        val recording = EventProcessor(db, TypingTrackerImpl(), object : MessageNotifier {
+            override suspend fun onIncoming(
+                networkId: Long,
+                bufferId: Long,
+                type: BufferType,
+                hasMention: Boolean,
+                message: IrcEvent.ChatMessage,
+            ) {
+                notifications += message.text
+            }
+        })
+        recording.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+        recording.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "#chan",
+                listOf(
+                    IrcEvent.ChatMessage(
+                        ctx("history-mention", 1_000),
+                        IrcEvent.ChatKind.PRIVMSG,
+                        Prefix("alice"),
+                        "#chan",
+                        "hello me",
+                        false,
+                        null,
+                    ),
+                    IrcEvent.ChatMessage(
+                        ctx("history-dm", 1_001),
+                        IrcEvent.ChatKind.PRIVMSG,
+                        Prefix("bob"),
+                        "me",
+                        "old direct message",
+                        false,
+                        null,
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(pagingList(db.bufferDao().byName(networkId, "#chan")!!.id).isNotEmpty())
+        assertTrue(pagingList(db.bufferDao().byName(networkId, "bob")!!.id).isNotEmpty())
+        assertTrue(notifications.isEmpty())
+
+        recording.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx("live-dm", 1_002),
+                IrcEvent.ChatKind.PRIVMSG,
+                Prefix("bob"),
+                "me",
+                "live direct message",
+                false,
+                null,
+            ),
+        )
+        assertEquals(listOf("live direct message"), notifications)
+    }
 }

@@ -1197,6 +1197,19 @@ phase_k() {
   adb_shell dumpsys battery reset >/dev/null 2>&1 || true
   _device_idle_forced=false
   [ "$_found" = true ] && ok "forced-idle UnifiedPush delivery arrived" || fail "forced-idle delivery timed out"
+
+  step "Verify each cold-path DM appears exactly once"
+  _notification_dump="$(adb_shell dumpsys notification --noredact 2>/dev/null || true)"
+  for _payload in "${_cold}-dm" "${_doze}-dm"; do
+    _message_count="$(printf '%s\n' "$_notification_dump" \
+      | grep 'sender_person=' \
+      | grep -Fc "text=${_payload}," || true)"
+    if [ "$_message_count" -eq 1 ]; then
+      ok "notification contains ${_payload} exactly once"
+    else
+      fail "notification contains ${_payload} ${_message_count} times (expected exactly once)"
+    fi
+  done
   assert_no_crash
 }
 

@@ -37,7 +37,8 @@ fun shouldPostNotification(
     muted: Boolean,
     senderIsFriend: Boolean,
     senderIsFool: Boolean,
-): Boolean = !foreground && !senderIsFool && (!muted || senderIsFriend)
+    alreadyRead: Boolean = false,
+): Boolean = !alreadyRead && !foreground && !senderIsFool && (!muted || senderIsFriend)
 
 /**
  * MessagingStyle notifications (plans/05). Owns the notification channels and applies the final
@@ -118,6 +119,7 @@ class MotdNotifications @Inject constructor(
             muted = buffer?.muted == true,
             senderIsFriend = sender in settings.friends,
             senderIsFool = sender in settings.fools,
+            alreadyRead = buffer?.readMarkerTime?.let { message.ctx.serverTime <= it } == true,
         )
         if (!decision) return
 

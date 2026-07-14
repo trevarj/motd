@@ -138,11 +138,13 @@ def smoke(host: str, port: int, username: str, password: str, network: str, chan
             lambda line: is_marker(line, channel) and marker_value(line) == timestamp,
             "marker echo on first client",
             start=first_start,
+            seconds=5.0,
         )
         second_marker = second.wait_for(
             lambda line: is_marker(line, channel) and marker_value(line) == timestamp,
             "marker broadcast on second client",
             start=second_start,
+            seconds=5.0,
         )
 
         older = "1970-01-01T00:00:01.000Z"

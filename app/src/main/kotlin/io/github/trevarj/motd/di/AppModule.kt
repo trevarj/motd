@@ -38,7 +38,6 @@ import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.push.PushEventHandler
 import io.github.trevarj.motd.push.DataStorePushHealthStore
 import io.github.trevarj.motd.push.PushHealthStore
-import io.github.trevarj.motd.push.PushNotifier
 import io.github.trevarj.motd.push.UnifiedPushApi
 import io.github.trevarj.motd.push.UnifiedPushApiImpl
 import io.github.trevarj.motd.push.WebPushCryptoFacade
@@ -46,7 +45,6 @@ import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.MotdNotifications
-import io.github.trevarj.motd.service.PushNotifierImpl
 import io.github.trevarj.motd.service.ReadMarkerRepository
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import io.github.trevarj.motd.service.TypingTracker
@@ -165,9 +163,6 @@ internal abstract class AppModule {
     ): ReadMarkerSnapshotter
 
     // -- push (WP9 / WP-R2) --
-    @Binds @Singleton
-    abstract fun pushNotifier(impl: PushNotifierImpl): PushNotifier
-
     /** UnifiedPush static-connector seam → real impl (WP-R2). */
     @Binds @Singleton
     abstract fun unifiedPushApi(impl: UnifiedPushApiImpl): UnifiedPushApi
@@ -176,17 +171,13 @@ internal abstract class AppModule {
     abstract fun pushHealthStore(impl: DataStorePushHealthStore): PushHealthStore
 
     companion object {
-        /**
-         * WP9's [PushEventHandler] `@Inject` constructor hardcodes a no-op notifier; provide it
-         * explicitly with the real [PushNotifier] so pushed messages post notifications.
-         */
+        /** Provide the real crypto/health collaborators; EventProcessor owns notification policy. */
         @Provides
         @Singleton
         fun pushEventHandler(
             sink: IrcEventSink,
-            notifier: PushNotifier,
             healthStore: PushHealthStore,
-        ): PushEventHandler = PushEventHandler(WebPushCryptoFacade.Default, sink, notifier, healthStore)
+        ): PushEventHandler = PushEventHandler(WebPushCryptoFacade.Default, sink, healthStore)
 
         /**
          * Real UnifiedPush availability check: an installed distributor AND a connected client

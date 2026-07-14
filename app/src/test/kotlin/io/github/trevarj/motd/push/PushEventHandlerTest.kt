@@ -38,13 +38,6 @@ class PushEventHandlerTest {
         }
     }
 
-    private class RecordingNotifier : PushNotifier {
-        val notified = mutableListOf<Pair<Long, IrcEvent.ChatMessage>>()
-        override suspend fun notify(networkId: Long, message: IrcEvent.ChatMessage) {
-            notified.add(networkId to message)
-        }
-    }
-
     // --- pure mapper -------------------------------------------------------
 
     @Test
@@ -108,7 +101,7 @@ class PushEventHandlerTest {
     // --- full handle path (real crypto facade) -----------------------------
 
     @Test
-    fun handle_decrypts_maps_feeds_sink_and_notifies() = runTest {
+    fun handle_decrypts_maps_and_feeds_sink_exactlyOnce() = runTest {
         val receiver = WebPushCrypto.generateKeyMaterial()
         val sender = WebPushCrypto.generateEcKeyPair()
         val line = "@msgid=xyz :carol!c@h PRIVMSG #room :pushed message"
@@ -122,15 +115,13 @@ class PushEventHandlerTest {
         )
 
         val sink = RecordingSink()
-        val notifier = RecordingNotifier()
-        val handler = PushEventHandler(WebPushCryptoFacade.Default, sink, notifier)
+        val handler = PushEventHandler(WebPushCryptoFacade.Default, sink)
 
         val ev = handler.handle(networkId = 42L, body = body, keys = receiver)
 
         assertTrue(ev is IrcEvent.ChatMessage)
         assertEquals(1, sink.events.size)
         assertEquals(42L, sink.events[0].first)
-        assertEquals(1, notifier.notified.size)
         assertEquals("pushed message", (sink.events[0].second as IrcEvent.ChatMessage).text)
     }
 
@@ -140,7 +131,6 @@ class PushEventHandlerTest {
         val handler = PushEventHandler(
             crypto = { _, _ -> error("boom") },
             eventSink = sink,
-            notifier = NoopPushNotifier,
         )
         val ev = handler.handle(1L, ByteArray(50), WebPushCrypto.generateKeyMaterial())
         assertNull(ev)
@@ -154,7 +144,6 @@ class PushEventHandlerTest {
         val handler = PushEventHandler(
             crypto = { _, _ -> "   ".toByteArray() },
             eventSink = sink,
-            notifier = NoopPushNotifier,
         )
         val ev = handler.handle(1L, ByteArray(0), WebPushCrypto.generateKeyMaterial())
         assertNull(ev)
@@ -174,13 +163,11 @@ class PushEventHandlerTest {
             senderKeys = sender,
         )
         val sink = RecordingSink()
-        val notifier = RecordingNotifier()
         val health = RecordingHealthStore()
-        val handler = PushEventHandler(WebPushCryptoFacade.Default, sink, notifier, health)
+        val handler = PushEventHandler(WebPushCryptoFacade.Default, sink, health)
 
         assertNull(handler.handle(7L, body, receiver))
         assertEquals(1, health.probes)
         assertTrue(sink.events.isEmpty())
-        assertTrue(notifier.notified.isEmpty())
     }
 }

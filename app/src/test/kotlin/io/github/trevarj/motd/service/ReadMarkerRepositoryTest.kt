@@ -7,6 +7,8 @@ import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
+import io.github.trevarj.motd.irc.event.IrcEvent
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -89,10 +91,30 @@ class ReadMarkerRepositoryTest {
 
         assertEquals(
             listOf(
-                ReadMarkerSyncRequest("#motd", 123),
-                ReadMarkerSyncRequest("alice", null),
+                ReadMarkerSyncRequest(1, "#motd", 123),
+                ReadMarkerSyncRequest(2, "alice", null),
             ),
             requests,
         )
+    }
+
+    @Test
+    fun `marker waiter subscribes before request and selects matching target`() = runTest {
+        val events = MutableSharedFlow<IrcEvent>()
+        var requested = false
+
+        val response = awaitReadMarkerResponse(
+            events = events,
+            target = "#MOTD",
+            normalize = String::lowercase,
+            timeoutMs = 1_000,
+        ) {
+            requested = true
+            events.emit(IrcEvent.ReadMarker("#other", 50))
+            events.emit(IrcEvent.ReadMarker("#motd", 100))
+        }
+
+        assertEquals(true, requested)
+        assertEquals(IrcEvent.ReadMarker("#motd", 100), response)
     }
 }
