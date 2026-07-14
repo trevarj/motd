@@ -233,6 +233,9 @@ E2E_PHASES="a k" nix develop -c ./test/e2e/runbook.sh
 
 The test uses public ntfy only for encrypted WebPush bodies. It never prints endpoint URLs or key
 material, never touches `io.github.trevarj.motd`, and always exits forced-idle mode during cleanup.
+The runbook also snapshots all three global Android animation scales before disabling animations
+and restores the exact original values on every normal exit, failure, or interruption. If the
+snapshot cannot be completed, it leaves the device's animation settings unchanged.
 
 The hermetic default is A–C. The scheduled/manual workflow may widen this to
 A–I. DM, mention, typing, member, and moderation checks need a live second

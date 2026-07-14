@@ -92,9 +92,41 @@ require_env MOTD_SOJU_HOST MOTD_SOJU_USER MOTD_SOJU_PASS
 # --- teardown / summary trap ----------------------------------------------
 
 _device_idle_forced=false
+_animation_scales_captured=false
+_window_animation_scale=""
+_transition_animation_scale=""
+_animator_duration_scale=""
+
+_capture_animation_scales() {
+  _window_animation_scale="$(adb_shell settings get global window_animation_scale)" || return 1
+  _transition_animation_scale="$(adb_shell settings get global transition_animation_scale)" || return 1
+  _animator_duration_scale="$(adb_shell settings get global animator_duration_scale)" || return 1
+  _window_animation_scale="${_window_animation_scale//$'\r'/}"
+  _transition_animation_scale="${_transition_animation_scale//$'\r'/}"
+  _animator_duration_scale="${_animator_duration_scale//$'\r'/}"
+  _animation_scales_captured=true
+}
+
+_restore_animation_scale() {
+  local setting="$1" value="$2"
+  if [ -z "$value" ] || [ "$value" = "null" ]; then
+    adb_shell settings delete global "$setting" >/dev/null 2>&1 || true
+  else
+    adb_shell settings put global "$setting" "$value" >/dev/null 2>&1 || true
+  fi
+}
+
+_restore_animation_scales() {
+  [ "$_animation_scales_captured" = true ] || return 0
+  _restore_animation_scale window_animation_scale "$_window_animation_scale"
+  _restore_animation_scale transition_animation_scale "$_transition_animation_scale"
+  _restore_animation_scale animator_duration_scale "$_animator_duration_scale"
+  _animation_scales_captured=false
+}
 
 _final() {
   local rc=$?
+  _restore_animation_scales
   if [ "$_device_idle_forced" = true ]; then
     adb_shell dumpsys deviceidle unforce >/dev/null 2>&1 || true
     adb_shell dumpsys battery reset >/dev/null 2>&1 || true
@@ -1154,10 +1186,16 @@ main() {
 
   # Freeze animations so uiautomator can reach an idle state. Compose's blinking text cursor and
   # ripple/transition animations otherwise keep the window perpetually non-idle, and `uiautomator
-  # dump` fails with "could not get idle state" (cascades through later phases).
-  adb_shell settings put global window_animation_scale 0 >/dev/null 2>&1 || true
-  adb_shell settings put global transition_animation_scale 0 >/dev/null 2>&1 || true
-  adb_shell settings put global animator_duration_scale 0 >/dev/null 2>&1 || true
+  # dump` fails with "could not get idle state" (cascades through later phases). Only mutate the
+  # device after all three original values are captured; the EXIT trap restores exact custom
+  # values (or deletes an originally absent override) after success, failure, or interruption.
+  if _capture_animation_scales; then
+    adb_shell settings put global window_animation_scale 0 >/dev/null 2>&1 || true
+    adb_shell settings put global transition_animation_scale 0 >/dev/null 2>&1 || true
+    adb_shell settings put global animator_duration_scale 0 >/dev/null 2>&1 || true
+  else
+    note "could not capture animation scales; leaving device animation settings unchanged"
+  fi
 
   # Phases run in order. Phase 'a' owns the expensive setup (install + onboard + connect) and
   # leaves durable device state (networks, joined channel). Every later phase begins from the
