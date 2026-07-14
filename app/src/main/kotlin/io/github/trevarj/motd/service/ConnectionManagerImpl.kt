@@ -104,7 +104,10 @@ class ConnectionManagerImpl @Inject constructor(
     private val reactionMutations = RoomReactionMutationStore(db)
     private val recoveryReader = ConnectionRecoveryReader(db)
 
-    private val actors = HashMap<Long, ConnectionActor>()
+    // Actor reads come from connection-state, lifecycle, and connectivity callbacks while
+    // reconcile/connect coroutines add and remove entries. A plain HashMap can be observed while
+    // resizing or unlinking, which surfaced as an NPE in the monitor-state collector during E2E.
+    private val actors = java.util.concurrent.ConcurrentHashMap<Long, ConnectionActor>()
     private val generations = ConnectionGenerationGate()
     // Fingerprint of the config each actor was built from, so config changes trigger a restart.
     private val fingerprints = HashMap<Long, String>()
