@@ -4,6 +4,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
@@ -52,6 +54,8 @@ import io.github.trevarj.motd.data.prefs.FONT_SCALE_STEP_PERCENT
 import io.github.trevarj.motd.data.prefs.MAX_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.MIN_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
+import io.github.trevarj.motd.ui.components.IrcChannelBadge
+import io.github.trevarj.motd.ui.components.IrcSpriteAvatar
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Palette
@@ -370,19 +374,44 @@ internal val DARK_THEME_PRESETS = ColorThemePreset.entries.filter { it.isDark }.
 
 @Composable
 private fun AvatarStyleGroup(current: AvatarStyle, onSelect: (AvatarStyle) -> Unit) {
-    val options = listOf(
-        AvatarStyle.MONOGRAM to R.string.settings_avatar_monogram,
-        AvatarStyle.INITIALS to R.string.settings_avatar_initials,
+    val options: List<Triple<AvatarStyle, Int, Int?>> = listOf(
+        Triple(AvatarStyle.MONOGRAM, R.string.settings_avatar_monogram, null),
+        Triple(AvatarStyle.INITIALS, R.string.settings_avatar_initials, null),
+        Triple(
+            AvatarStyle.IRC_SPRITE,
+            R.string.settings_avatar_irc_sprite,
+            R.string.settings_avatar_irc_sprite_desc,
+        ),
     )
     Column(Modifier.selectableGroup()) {
-        options.forEach { (style, labelRes) ->
+        options.forEach { (style, labelRes, subtitleRes) ->
             RadioRow(
                 label = stringResource(labelRes),
+                subtitle = subtitleRes?.let { stringResource(it) },
                 selected = current == style,
                 enabled = true,
                 onClick = { onSelect(style) },
+                modifier = Modifier.testTag("settings_avatar_style_${style.name.lowercase()}"),
             )
+            if (style == AvatarStyle.IRC_SPRITE) IrcSpriteSampleStrip()
         }
+    }
+}
+
+/** A static, data-free sample shows both person sprites and contextual channel marks. */
+@Composable
+private fun IrcSpriteSampleStrip() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 52.dp, end = 16.dp, bottom = 10.dp)
+            .testTag("settings_avatar_sprite_preview"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        IrcSpriteAvatar(name = "rustacean", size = 30.dp)
+        IrcSpriteAvatar(name = "alice", size = 30.dp)
+        IrcChannelBadge(name = "#guix", size = 30.dp)
+        IrcChannelBadge(name = "#debian", size = 30.dp)
     }
 }
 

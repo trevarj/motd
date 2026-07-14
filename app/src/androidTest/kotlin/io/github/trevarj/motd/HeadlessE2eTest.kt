@@ -273,6 +273,8 @@ class SettingsAndBouncerHeadlessE2eTest : HeadlessE2eDriver() {
         openSettings()
         clickTag("settings_category_appearance")
         waitForText("Appearance")
+        assertTag("settings_avatar_sprite_preview")
+        clickTag("settings_avatar_style_irc_sprite")
         clickTag("settings_theme_picker")
         waitForTag("settings_theme_sheet")
         scrollToAndClickText("AMOLED (true black)")

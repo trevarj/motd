@@ -742,6 +742,8 @@
     <string name="settings_avatar_style">Avatar style</string>
     <string name="settings_avatar_monogram">Monogram</string>
     <string name="settings_avatar_initials">Initials</string>
+    <string name="settings_avatar_irc_sprite">IRC sprites</string>
+    <string name="settings_avatar_irc_sprite_desc">Deterministic operator sprites and matched Devicons channel marks.</string>
 
     <!-- Badge content-descriptions carry the real (uncapped) count for the e2e harness. The
          visible badge text caps at "99+" / "@". -->

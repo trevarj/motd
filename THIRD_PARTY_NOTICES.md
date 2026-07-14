@@ -41,6 +41,31 @@ the SIL Open Font License 1.1. The exact source pin and license are recorded in
 [`docs/assets/brand/`](docs/assets/brand/README.md). The font binary is not
 distributed; the SVG and Android assets contain converted glyph outlines.
 
+## Generated-avatar chest emblems
+
+The opt-in IRC sprite avatar renderer embeds compact Font Awesome Free 6.7.2
+SVG paths directly in Kotlin. It uses a small set of solid technical marks and
+the Rust, Python, Go, Git Alt, GitHub, Linux, Docker, and Android brand marks
+as background-free chest emblems; no Font Awesome font binary is distributed.
+The SVG icons are licensed under [CC BY 4.0](https://fontawesome.com/license/free).
+The exact source mapping, attribution, fallback policy, and non-endorsement
+note are in [`docs/assets/avatar-icons/README.md`](docs/assets/avatar-icons/README.md).
+
+## Generated channel marks: Devicons and Guix
+
+The opt-in IRC sprite channel renderer embeds a curated subset of monochrome
+SVG paths from [Devicons v1.1.0](https://github.com/vorillaz/devicons/tree/v1.1.0),
+copied from its `packages/core/export-files/font/` source directory. It does
+not distribute a Devicons font binary or load any icon from the network.
+Devicons is licensed under the [MIT License](https://github.com/vorillaz/devicons/blob/v1.1.0/LICENSE).
+The exact selected files, matcher policy, and source pin are listed in
+[`docs/assets/avatar-icons/README.md`](docs/assets/avatar-icons/README.md).
+
+Devicons does not currently provide a Guix mark. The `#guix` channel badge is
+a simplified monochrome derivative of the [Guix logo](https://commons.wikimedia.org/wiki/File:Guix_logo.svg),
+by Luis Felipe López Acevedo, from `guix-artwork.git`. That source and its
+derived path data are attributed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
 ## Google distribution: Firebase Cloud Messaging
 
 Only the `google` APK includes the Firebase Android SDK for Cloud Messaging. The Firebase Android

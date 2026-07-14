@@ -88,8 +88,10 @@ internal fun onColorFor(bg: Color): Color =
 
 /**
  * Circular nick avatar. [AvatarStyle.MONOGRAM] (default) is a quiet theme-tinted disc with a single
- * initial; [AvatarStyle.INITIALS] is the bolder solid nick-color chip with two initials. Both take
- * their identity color from [name] via the current LocalNickColors scheme.
+ * initial; [AvatarStyle.INITIALS] is the bolder solid nick-color chip with two initials; and
+ * [AvatarStyle.IRC_SPRITE] renders a deterministic IRC robot sprite for people and network rows.
+ * Project-named channels instead receive a matched Devicons mark, with a neutral IRC fallback.
+ * All styles take their identity color from [name] via the current LocalNickColors scheme.
  *
  * [isChannel] uses the name as-is (channels keep the leading `#`); queries fall back to their nick.
  */
@@ -109,10 +111,14 @@ fun Avatar(
         when (LocalAvatarStyle.current) {
             AvatarStyle.MONOGRAM -> MonogramAvatar(name, nick, size, isChannel, Modifier)
             AvatarStyle.INITIALS -> InitialsAvatar(name, nick, size, isChannel, Modifier)
+            AvatarStyle.IRC_SPRITE -> {
+                if (isChannel) IrcChannelBadge(name, size, Modifier)
+                else IrcSpriteAvatar(name, size, Modifier)
+            }
         }
         LocalRemoteAvatars.current.url(networkId, name, account, size.value.toInt())?.let { url ->
-            // The deterministic monogram stays underneath, so failed/cancelled loads fall back
-            // without erasing valid metadata or flashing an empty avatar.
+            // The deterministic local avatar stays underneath, so failed/cancelled loads fall
+            // back without erasing valid metadata or flashing an empty avatar.
             AsyncImage(
                 model = url,
                 contentDescription = null,

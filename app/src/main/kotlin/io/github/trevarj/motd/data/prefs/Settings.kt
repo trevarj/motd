@@ -19,8 +19,8 @@ enum class LayoutDensity { COMPACT, COMFORTABLE, TWO_LINE }
 enum class NickColorPalette { DEFAULT, VIVID, PASTEL }
 enum class FoolsMode { COLLAPSE, HIDE }
 
-/** Which visual style to use for nick avatars. */
-enum class AvatarStyle { MONOGRAM, INITIALS }
+/** Which visual style to use for nick avatars. IRC sprites are deliberately opt-in. */
+enum class AvatarStyle { MONOGRAM, INITIALS, IRC_SPRITE }
 
 /** Subtle IRC-themed chat background rendered behind the message list. NONE keeps the plain
  *  theme background (opt-in; default for existing users). */

@@ -53,9 +53,12 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.components.IrcNetworkBadge
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.UnreadBadge
+import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 // Static, theme-independent semaphore for the status dot (plans/16 §3.2). Ready green, in-flight
@@ -262,13 +265,25 @@ private fun DrawerNetworkItem(
             // State is color-only in the dot; expose it as a CD ("status:Ready") + tag so the
             // harness can read a per-network connection state from a text dump.
             val statusCd = "status:${statusName(row.state)}"
-            Box(
-                modifier = Modifier
-                    .testTag("drawer_status_dot_${row.networkId}")
-                    .semantics { contentDescription = statusCd }
-                    .size(10.dp)
-                    .background(statusColor(row.state), CircleShape),
-            )
+            if (LocalAvatarStyle.current == AvatarStyle.IRC_SPRITE) {
+                IrcNetworkBadge(
+                    name = row.name,
+                    networkId = row.networkId,
+                    status = statusColor(row.state),
+                    size = 32.dp,
+                    modifier = Modifier
+                        .testTag("drawer_status_dot_${row.networkId}")
+                        .semantics { contentDescription = statusCd },
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .testTag("drawer_status_dot_${row.networkId}")
+                        .semantics { contentDescription = statusCd }
+                        .size(10.dp)
+                        .background(statusColor(row.state), CircleShape),
+                )
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = row.name,
