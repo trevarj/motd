@@ -60,7 +60,7 @@ jobs:
   # four highest-value user journeys from one another.
   headless-core:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -77,22 +77,27 @@ jobs:
       - name: Start hermetic bouncer stack
         run: docker compose -f test/e2e/hermetic/docker-compose.yml up --build -d --wait
 
-      # This is the same AOSP managed-device task exercised by the dedicated
-      # fast-headless smoke workflow. It avoids the flaky direct emulator action
-      # while retaining Android Test Orchestrator isolation and the complete
-      # hermetic soju -> ergo user journeys.
       - name: Run fast headless journeys
-        run: |
-          ./gradlew headlessApi34FossE2eAndroidTest \
-            -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect \
-            -Pandroid.testInstrumentationRunnerArguments.annotation=io.github.trevarj.motd.FastHeadlessE2e \
-            -Pandroid.testInstrumentationRunnerArguments.sojuHost=10.0.2.2 \
-            -Pandroid.testInstrumentationRunnerArguments.sojuPort=6697 \
-            -Pandroid.testInstrumentationRunnerArguments.sojuUser=motd \
-            -Pandroid.testInstrumentationRunnerArguments.sojuPassword=motdtest \
-            -Pandroid.testInstrumentationRunnerArguments.nick=motdadb \
-            -Pandroid.testInstrumentationRunnerArguments.channel=##motdtest \
-            -Pandroid.testInstrumentationRunnerArguments.secondNick=motdadb2 \
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          # The emulator action tokenizes this value before invoking the shell,
+          # so shell line-continuation backslashes would reach Gradle literally.
+          script: >-
+            ./gradlew :app:connectedFossE2eAndroidTest
+            -Pandroid.testInstrumentationRunnerArguments.annotation=io.github.trevarj.motd.FastHeadlessE2e
+            -Pandroid.testInstrumentationRunnerArguments.sojuHost=10.0.2.2
+            -Pandroid.testInstrumentationRunnerArguments.sojuPort=6697
+            -Pandroid.testInstrumentationRunnerArguments.sojuUser=motd
+            -Pandroid.testInstrumentationRunnerArguments.sojuPassword=motdtest
+            -Pandroid.testInstrumentationRunnerArguments.nick=motdadb
+            -Pandroid.testInstrumentationRunnerArguments.channel=##motdtest
+            -Pandroid.testInstrumentationRunnerArguments.secondNick=motdadb2
             --stacktrace
 
       - name: Upload headless diagnostics
