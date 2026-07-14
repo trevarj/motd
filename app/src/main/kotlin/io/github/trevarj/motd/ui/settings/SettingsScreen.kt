@@ -255,7 +255,11 @@ internal fun SettingsNavigationRow(
  * " · via <root name>" for a BOUNCER_CHILD (root name resolved from [all]).
  */
 @Composable
-internal fun networkSupporting(network: NetworkEntity, all: List<NetworkEntity>): String {
+internal fun networkSupporting(
+    network: NetworkEntity,
+    all: List<NetworkEntity>,
+    zncNetworkIds: Set<Long> = emptySet(),
+): String {
     val base = "${network.host}:${network.port}"
     return when (network.role) {
         NetworkRole.BOUNCER_ROOT -> stringResource(R.string.settings_network_soju_suffix, base)
@@ -263,7 +267,11 @@ internal fun networkSupporting(network: NetworkEntity, all: List<NetworkEntity>)
             val rootName = all.firstOrNull { it.id == network.parentId }?.name
             if (rootName != null) stringResource(R.string.settings_network_via_suffix, base, rootName) else base
         }
-        NetworkRole.DIRECT -> base
+        NetworkRole.DIRECT -> if (network.id in zncNetworkIds) {
+            stringResource(R.string.settings_network_znc_suffix, base)
+        } else {
+            base
+        }
     }
 }
 

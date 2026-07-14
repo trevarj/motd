@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.ui.onboarding
 
+import io.github.trevarj.motd.bouncer.BouncerKind
+import io.github.trevarj.motd.bouncer.SojuLoginForm
+import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcClientState
 
@@ -21,7 +24,7 @@ enum class OnboardingStep {
 }
 
 /** Top-level path chosen on the CHOICE page. */
-enum class ConnectionChoice { SOJU, NETWORK }
+enum class ConnectionChoice { BOUNCER, NETWORK }
 
 /** Auth mechanism selected on the AUTH page. Mirrors SaslMechanism names for persistence. */
 enum class AuthMode { NONE, PLAIN, EXTERNAL }
@@ -94,8 +97,12 @@ data class BouncerNetworkRow(
 data class OnboardingState(
     val step: OnboardingStep = OnboardingStep.WELCOME,
     val choice: ConnectionChoice? = null,
+    val bouncerKind: BouncerKind = BouncerKind.SOJU,
     val server: ServerForm = ServerForm(),
+    /** Direct-network authentication draft; bouncer credentials are kept separately. */
     val auth: AuthForm = AuthForm(),
+    val sojuLogin: SojuLoginForm = SojuLoginForm(),
+    val zncLogin: ZncLoginForm = ZncLoginForm(),
     // Connect-test progress.
     val networkId: Long? = null,
     val connState: IrcClientState? = null,
@@ -104,11 +111,20 @@ data class OnboardingState(
     val bouncerListLoaded: Boolean = false,
     val error: String? = null,
 ) {
-    val isSoju: Boolean get() = choice == ConnectionChoice.SOJU
+    val isBouncer: Boolean get() = choice == ConnectionChoice.BOUNCER
+    val isSoju: Boolean get() = isBouncer && bouncerKind == BouncerKind.SOJU
+    val isZnc: Boolean get() = isBouncer && bouncerKind == BouncerKind.ZNC
 
     /** Network role implied by the choice (soju root vs. direct network). */
     val role: NetworkRole
         get() = if (isSoju) NetworkRole.BOUNCER_ROOT else NetworkRole.DIRECT
+
+    val activeAuth: AuthForm
+        get() = when {
+            isSoju -> sojuLogin.toAuthForm()
+            isZnc -> zncLogin.toAuthForm()
+            else -> auth
+        }
 
     /** True once the connect test reached a Ready state. */
     val isReady: Boolean get() = connState is IrcClientState.Ready
@@ -118,9 +134,13 @@ data class OnboardingState(
         get() = when (step) {
             OnboardingStep.WELCOME -> true
             OnboardingStep.CHOICE -> choice != null
-            // Both paths collect host/port/nick on SERVER; soju's SASL user/password gate AUTH.
+            // Every path collects host/port/nick; the active login form gates AUTH.
             OnboardingStep.SERVER -> server.isValid
-            OnboardingStep.AUTH -> auth.isValid
+            OnboardingStep.AUTH -> when {
+                isSoju -> sojuLogin.isValid
+                isZnc -> zncLogin.isValid
+                else -> auth.isValid
+            }
             OnboardingStep.CONNECT -> isReady
             OnboardingStep.FINISH -> true
         }
@@ -136,10 +156,13 @@ sealed interface OnboardingAction {
     data class GoTo(val step: OnboardingStep) : OnboardingAction
 
     data class ChooseConnection(val choice: ConnectionChoice) : OnboardingAction
+    data class ChooseBouncerKind(val kind: BouncerKind) : OnboardingAction
     data object ApplyLiberaPreset : OnboardingAction
 
     data class EditServer(val server: ServerForm) : OnboardingAction
     data class EditAuth(val auth: AuthForm) : OnboardingAction
+    data class EditSojuLogin(val login: SojuLoginForm) : OnboardingAction
+    data class EditZncLogin(val login: ZncLoginForm) : OnboardingAction
 
     // Connect-test lifecycle (folded back from ViewModel side effects).
     data class NetworkCreated(val networkId: Long) : OnboardingAction
@@ -173,17 +196,9 @@ fun onboardingReducer(state: OnboardingState, action: OnboardingAction): Onboard
 
         is OnboardingAction.GoTo -> state.copy(step = action.step)
 
-        is OnboardingAction.ChooseConnection ->
-            // soju logs in with SASL PLAIN (bouncer user + password); force the mode so the
-            // AUTH step only needs to collect the two fields and the entity persists as PLAIN.
-            state.copy(
-                choice = action.choice,
-                auth = if (action.choice == ConnectionChoice.SOJU) {
-                    state.auth.copy(mode = AuthMode.PLAIN)
-                } else {
-                    state.auth
-                },
-            )
+        is OnboardingAction.ChooseConnection -> state.copy(choice = action.choice)
+
+        is OnboardingAction.ChooseBouncerKind -> state.copy(bouncerKind = action.kind)
 
         is OnboardingAction.ApplyLiberaPreset ->
             state.copy(
@@ -198,12 +213,11 @@ fun onboardingReducer(state: OnboardingState, action: OnboardingAction): Onboard
 
         is OnboardingAction.EditServer -> state.copy(server = action.server)
 
-        is OnboardingAction.EditAuth ->
-            // soju is always SASL PLAIN: pin the mode so a residual NONE/EXTERNAL can't leak into
-            // the persisted saslMechanism even if the picker path is bypassed.
-            state.copy(
-                auth = if (state.isSoju) action.auth.copy(mode = AuthMode.PLAIN) else action.auth,
-            )
+        is OnboardingAction.EditAuth -> state.copy(auth = action.auth)
+
+        is OnboardingAction.EditSojuLogin -> state.copy(sojuLogin = action.login)
+
+        is OnboardingAction.EditZncLogin -> state.copy(zncLogin = action.login)
 
         is OnboardingAction.NetworkCreated -> state.copy(networkId = action.networkId)
 

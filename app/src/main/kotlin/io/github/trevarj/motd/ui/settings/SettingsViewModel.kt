@@ -10,6 +10,8 @@ import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
@@ -36,6 +38,7 @@ import javax.inject.Inject
 data class SettingsUiState(
     val settings: Settings = Settings(),
     val networks: List<NetworkEntity> = emptyList(),
+    val zncNetworkIds: Set<Long> = emptySet(),
     val pushAvailability: PushAvailability = PushAvailability(),
     val pushProvider: PushProvider = PushProvider.UNIFIED_PUSH,
     val appearance: AppearanceConfig = AppearanceConfig(),
@@ -51,6 +54,11 @@ private data class ChatUiPrefs(
     val avatars: AvatarConfig,
 )
 
+private data class NetworkPrefs(
+    val networks: List<NetworkEntity>,
+    val zncNetworkIds: Set<Long>,
+)
+
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
@@ -63,7 +71,14 @@ class SettingsViewModel @Inject constructor(
     private val avatarPrefs: AvatarPrefs,
     private val avatarController: AvatarController,
     private val pushDistributorController: PushDistributorController,
+    private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
 ) : ViewModel() {
+
+    private val networkPrefs = combine(
+        networkRepository.observeNetworks(),
+        bouncerKindPrefs.zncNetworkIds,
+        ::NetworkPrefs,
+    )
 
     private val appearanceReplyAndPreviews = combine(
         appearancePrefs.config,
@@ -76,17 +91,18 @@ class SettingsViewModel @Inject constructor(
     val state: StateFlow<SettingsUiState> =
         combine(
             settingsRepository.settings,
-            networkRepository.observeNetworks(),
+            networkPrefs,
             // Reactive: recomputes as connections reach Ready / distributors appear, so the push
             // toggle enables live once the soju bouncer advertises webpush.
             pushAvailability.availability(),
             pushProviderPrefs.provider,
             appearanceReplyAndPreviews,
-        ) { settings, networks, availability, provider, appearanceReplyPreviews ->
+        ) { settings, networkPrefs, availability, provider, appearanceReplyPreviews ->
             val (appearance, reply, contentPreviews, avatars) = appearanceReplyPreviews
             SettingsUiState(
                 settings = settings,
-                networks = networks,
+                networks = networkPrefs.networks,
+                zncNetworkIds = networkPrefs.zncNetworkIds,
                 pushAvailability = availability,
                 pushProvider = provider,
                 appearance = appearance,

@@ -40,10 +40,14 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.bouncer.BouncerKind
+import io.github.trevarj.motd.bouncer.SojuLoginForm
+import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.ConnectionChoice
 import io.github.trevarj.motd.ui.onboarding.ServerForm
+import io.github.trevarj.motd.ui.settings.BouncerLoginFields
 import io.github.trevarj.motd.ui.settings.NetworkForm
 import io.github.trevarj.motd.ui.settings.RadioRow
 import io.github.trevarj.motd.ui.settings.SettingsGroup
@@ -62,9 +66,12 @@ fun AddNetworkScreen(
         state = state,
         onBack = onBack,
         onSetKind = viewModel::setKind,
+        onSetBouncerKind = viewModel::setBouncerKind,
         onSelectPreset = viewModel::selectPreset,
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
+        onSojuLoginChange = viewModel::editSojuLogin,
+        onZncLoginChange = viewModel::editZncLogin,
         onSubmit = { viewModel.submit(onOpenBouncerNetworks, onBack) },
         onRetry = { viewModel.retry(onOpenBouncerNetworks, onBack) },
         onSaveAnyway = { viewModel.saveAnyway(onBack) },
@@ -81,9 +88,12 @@ fun AddNetworkContent(
     state: AddNetworkUiState,
     onBack: () -> Unit,
     onSetKind: (ConnectionChoice) -> Unit,
+    onSetBouncerKind: (BouncerKind) -> Unit,
     onSelectPreset: (NetworkPresetId) -> Unit,
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
+    onSojuLoginChange: (SojuLoginForm) -> Unit,
+    onZncLoginChange: (ZncLoginForm) -> Unit,
     onSubmit: () -> Unit,
     onRetry: () -> Unit,
     onSaveAnyway: () -> Unit,
@@ -120,19 +130,39 @@ fun AddNetworkContent(
             ) {
                 SettingsGroup(title = stringResource(R.string.add_network_type_section)) {
                     KindSelector(kind = state.kind, enabled = state.phase == AddNetworkPhase.FORM, onSetKind = onSetKind)
+                    if (state.isBouncer) {
+                        BouncerKindSelector(
+                            kind = state.bouncerKind,
+                            enabled = state.phase == AddNetworkPhase.FORM,
+                            onSetKind = onSetBouncerKind,
+                        )
+                    }
                 }
-                if (!state.isSoju && state.phase == AddNetworkPhase.FORM) {
+                if (!state.isBouncer && state.phase == AddNetworkPhase.FORM) {
                     NetworkPresetPicker(selected = state.presetId, onSelect = onSelectPreset)
                 }
                 SettingsGroup(title = stringResource(R.string.add_network_details_section)) {
-                    NetworkForm(
-                        server = state.server,
-                        auth = state.auth,
-                        onServerChange = onServerChange,
-                        onAuthChange = onAuthChange,
-                        soju = state.isSoju,
-                        modifier = Modifier.padding(vertical = 16.dp),
-                    )
+                    if (state.isBouncer) {
+                        Column(Modifier.padding(16.dp)) {
+                            BouncerLoginFields(
+                                kind = state.bouncerKind,
+                                server = state.server,
+                                sojuLogin = state.sojuLogin,
+                                zncLogin = state.zncLogin,
+                                onServerChange = onServerChange,
+                                onSojuLoginChange = onSojuLoginChange,
+                                onZncLoginChange = onZncLoginChange,
+                            )
+                        }
+                    } else {
+                        NetworkForm(
+                            server = state.server,
+                            auth = state.auth,
+                            onServerChange = onServerChange,
+                            onAuthChange = onAuthChange,
+                            modifier = Modifier.padding(vertical = 16.dp),
+                        )
+                    }
                 }
                 Button(
                     onClick = onSubmit,
@@ -222,7 +252,7 @@ private fun KindSelector(
 ) {
     val options = listOf(
         ConnectionChoice.NETWORK to R.string.add_network_kind_network,
-        ConnectionChoice.SOJU to R.string.add_network_kind_soju,
+        ConnectionChoice.BOUNCER to R.string.add_network_kind_bouncer,
     )
     SingleChoiceSegmentedButtonRow(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -233,9 +263,36 @@ private fun KindSelector(
                 onClick = { if (enabled) onSetKind(choice) },
                 enabled = enabled,
                 shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                modifier = Modifier.testTag("add_network_kind_${choice.name.lowercase()}"),
             ) {
                 Text(stringResource(labelRes))
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BouncerKindSelector(
+    kind: BouncerKind,
+    enabled: Boolean,
+    onSetKind: (BouncerKind) -> Unit,
+) {
+    val options = listOf(
+        BouncerKind.SOJU to R.string.bouncer_kind_soju,
+        BouncerKind.ZNC to R.string.bouncer_kind_znc,
+    )
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        options.forEachIndexed { index, (choice, labelRes) ->
+            SegmentedButton(
+                selected = kind == choice,
+                onClick = { if (enabled) onSetKind(choice) },
+                enabled = enabled,
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                modifier = Modifier.testTag("add_network_bouncer_${choice.name.lowercase()}"),
+            ) { Text(stringResource(labelRes)) }
         }
     }
 }
@@ -296,7 +353,8 @@ private fun AddNetworkFormPreview() {
             state = AddNetworkUiState(
                 server = ServerForm(host = "irc.libera.chat", port = "6697", nick = "me"),
             ),
-            onBack = {}, onSetKind = {}, onSelectPreset = {}, onServerChange = {}, onAuthChange = {},
+            onBack = {}, onSetKind = {}, onSetBouncerKind = {}, onSelectPreset = {},
+            onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {},
             onSubmit = {}, onRetry = {}, onSaveAnyway = {}, onEditForm = {}, onAbandon = {},
             onConfirmPlaintext = {}, onDismissPlaintext = {},
         )
@@ -313,7 +371,8 @@ private fun AddNetworkFailedPreview() {
                 phase = AddNetworkPhase.FAILED,
                 error = "SASL authentication failed",
             ),
-            onBack = {}, onSetKind = {}, onSelectPreset = {}, onServerChange = {}, onAuthChange = {},
+            onBack = {}, onSetKind = {}, onSetBouncerKind = {}, onSelectPreset = {},
+            onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {},
             onSubmit = {}, onRetry = {}, onSaveAnyway = {}, onEditForm = {}, onAbandon = {},
             onConfirmPlaintext = {}, onDismissPlaintext = {},
         )

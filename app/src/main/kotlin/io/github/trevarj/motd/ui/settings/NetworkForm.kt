@@ -37,6 +37,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.bouncer.BouncerKind
+import io.github.trevarj.motd.bouncer.SojuLoginForm
+import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
@@ -104,6 +107,100 @@ fun NetworkForm(
                 modifier = Modifier.padding(top = 8.dp),
             )
             AuthSection(auth = auth, onAuthChange = onAuthChange)
+        }
+    }
+}
+
+/** Endpoint, nick, and credentials for a supported bouncer login. */
+@Composable
+fun BouncerLoginFields(
+    kind: BouncerKind,
+    server: ServerForm,
+    sojuLogin: SojuLoginForm,
+    zncLogin: ZncLoginForm,
+    onServerChange: (ServerForm) -> Unit,
+    onSojuLoginChange: (SojuLoginForm) -> Unit,
+    onZncLoginChange: (ZncLoginForm) -> Unit,
+    showEndpoint: Boolean = true,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (showEndpoint) {
+            HostField(server, onServerChange)
+            PortField(server, onServerChange)
+            TlsRow(server, onServerChange)
+            NickField(server, onServerChange, imeAction = ImeAction.Next)
+        }
+        when (kind) {
+            BouncerKind.SOJU -> {
+                Text(
+                    stringResource(R.string.bouncer_soju_login_guidance),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = sojuLogin.username,
+                    onValueChange = { onSojuLoginChange(sojuLogin.copy(username = it)) },
+                    label = { Text(stringResource(R.string.bouncer_username)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth().testTag("bouncer_username_field"),
+                )
+                PasswordField(
+                    value = sojuLogin.password,
+                    onValueChange = { onSojuLoginChange(sojuLogin.copy(password = it)) },
+                    label = stringResource(R.string.bouncer_password),
+                    modifier = Modifier.testTag("bouncer_password_field"),
+                )
+            }
+            BouncerKind.ZNC -> {
+                Text(
+                    stringResource(R.string.bouncer_znc_login_guidance),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = zncLogin.username,
+                    onValueChange = { onZncLoginChange(zncLogin.copy(username = it)) },
+                    label = { Text(stringResource(R.string.bouncer_username)) },
+                    supportingText = if ('/' in zncLogin.username) {
+                        { Text(stringResource(R.string.bouncer_znc_no_slash)) }
+                    } else null,
+                    isError = '/' in zncLogin.username,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth().testTag("bouncer_username_field"),
+                )
+                OutlinedTextField(
+                    value = zncLogin.network,
+                    onValueChange = { onZncLoginChange(zncLogin.copy(network = it)) },
+                    label = { Text(stringResource(R.string.bouncer_znc_network)) },
+                    supportingText = if ('/' in zncLogin.network) {
+                        { Text(stringResource(R.string.bouncer_znc_no_slash)) }
+                    } else null,
+                    isError = '/' in zncLogin.network,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth().testTag("bouncer_znc_network_field"),
+                )
+                PasswordField(
+                    value = zncLogin.password,
+                    onValueChange = { onZncLoginChange(zncLogin.copy(password = it)) },
+                    label = stringResource(R.string.bouncer_password),
+                    modifier = Modifier.testTag("bouncer_password_field"),
+                )
+            }
         }
     }
 }

@@ -62,6 +62,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.bouncer.BouncerKind
+import io.github.trevarj.motd.bouncer.SojuLoginForm
+import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -93,6 +96,7 @@ fun NetworkSettingsScreen(
         onObfsLinkChange = viewModel::editObfsLink,
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
+        onZncLoginChange = viewModel::editZncLogin,
         onSave = { viewModel.save(onBack) },
         onCancelBouncerIdentityChange = viewModel::cancelBouncerIdentityChange,
         onKeepLocalMirrors = { viewModel.keepLocalMirrors(onBack) },
@@ -123,6 +127,7 @@ fun NetworkSettingsContent(
     onObfsLinkChange: (String) -> Unit = {},
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
+    onZncLoginChange: (ZncLoginForm) -> Unit = {},
     onSave: () -> Unit,
     onCancelBouncerIdentityChange: () -> Unit = {},
     onKeepLocalMirrors: () -> Unit = {},
@@ -209,13 +214,26 @@ fun NetworkSettingsContent(
                     }
                     SettingsGroup(title = stringResource(R.string.network_settings_identity_section)) {
                         Column(Modifier.padding(16.dp)) {
-                            NetworkIdentityFields(
-                                server = state.server,
-                                auth = state.auth,
-                                onServerChange = onServerChange,
-                                onAuthChange = onAuthChange,
-                                soju = state.entity?.role == NetworkRole.BOUNCER_ROOT,
-                            )
+                            if (state.isZnc) {
+                                BouncerLoginFields(
+                                    kind = BouncerKind.ZNC,
+                                    server = state.server,
+                                    sojuLogin = SojuLoginForm(),
+                                    zncLogin = state.zncLogin,
+                                    onServerChange = onServerChange,
+                                    onSojuLoginChange = {},
+                                    onZncLoginChange = onZncLoginChange,
+                                    showEndpoint = false,
+                                )
+                            } else {
+                                NetworkIdentityFields(
+                                    server = state.server,
+                                    auth = state.auth,
+                                    onServerChange = onServerChange,
+                                    onAuthChange = onAuthChange,
+                                    soju = state.entity?.role == NetworkRole.BOUNCER_ROOT,
+                                )
+                            }
                         }
                     }
                 }

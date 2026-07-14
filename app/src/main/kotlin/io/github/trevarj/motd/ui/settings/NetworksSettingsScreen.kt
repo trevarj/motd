@@ -34,6 +34,7 @@ fun NetworksSettingsScreen(
     val state by viewModel.state.collectAsState()
     NetworksSettingsContent(
         networks = state.networks,
+        zncNetworkIds = state.zncNetworkIds,
         onBack = onBack,
         onOpenNetwork = onOpenNetwork,
         onOpenAddNetwork = onOpenAddNetwork,
@@ -43,6 +44,7 @@ fun NetworksSettingsScreen(
 @Composable
 fun NetworksSettingsContent(
     networks: List<NetworkEntity>,
+    zncNetworkIds: Set<Long> = emptySet(),
     onBack: () -> Unit,
     onOpenNetwork: (Long) -> Unit,
     onOpenAddNetwork: () -> Unit,
@@ -55,25 +57,25 @@ fun NetworksSettingsContent(
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
             Text(stringResource(R.string.add_network_title))
         }
-        val organized = organizeNetworks(networks)
+        val organized = organizeNetworks(networks, zncNetworkIds)
         if (organized.bouncerRoots.isNotEmpty()) {
             SettingsGroup(title = stringResource(R.string.settings_bouncers_section)) {
                 organized.bouncerRoots.forEach { root ->
-                    NetworkRow(root, networks, onOpenNetwork)
+                    NetworkRow(root, networks, zncNetworkIds, onOpenNetwork)
                     organized.childrenByRoot[root.id].orEmpty().forEach { child ->
-                        NetworkRow(child, networks, onOpenNetwork, child = true)
+                        NetworkRow(child, networks, zncNetworkIds, onOpenNetwork, child = true)
                     }
                 }
             }
         }
         if (organized.direct.isNotEmpty()) {
             SettingsGroup(title = stringResource(R.string.settings_direct_networks_section)) {
-                organized.direct.forEach { NetworkRow(it, networks, onOpenNetwork) }
+                organized.direct.forEach { NetworkRow(it, networks, zncNetworkIds, onOpenNetwork) }
             }
         }
         if (organized.orphanChildren.isNotEmpty()) {
             SettingsGroup(title = stringResource(R.string.settings_managed_networks_section)) {
-                organized.orphanChildren.forEach { NetworkRow(it, networks, onOpenNetwork, child = true) }
+                organized.orphanChildren.forEach { NetworkRow(it, networks, zncNetworkIds, onOpenNetwork, child = true) }
             }
         }
     }
@@ -83,12 +85,13 @@ fun NetworksSettingsContent(
 private fun NetworkRow(
     network: NetworkEntity,
     all: List<NetworkEntity>,
+    zncNetworkIds: Set<Long>,
     onOpenNetwork: (Long) -> Unit,
     child: Boolean = false,
 ) {
     ListItem(
         headlineContent = { Text(network.name) },
-        supportingContent = { Text(networkSupporting(network, all)) },
+        supportingContent = { Text(networkSupporting(network, all, zncNetworkIds)) },
         colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         modifier = Modifier.clickable { onOpenNetwork(network.id) }
             .padding(start = if (child) 20.dp else 0.dp),
@@ -102,14 +105,16 @@ internal data class OrganizedNetworks(
     val orphanChildren: List<NetworkEntity>,
 )
 
-internal fun organizeNetworks(networks: List<NetworkEntity>): OrganizedNetworks {
+internal fun organizeNetworks(networks: List<NetworkEntity>, zncNetworkIds: Set<Long> = emptySet()): OrganizedNetworks {
     val byName = compareBy<NetworkEntity> { it.name.lowercase() }
-    val roots = networks.filter { it.role == NetworkRole.BOUNCER_ROOT }.sortedWith(byName)
-    val rootIds = roots.mapTo(mutableSetOf()) { it.id }
+    val sojuRoots = networks.filter { it.role == NetworkRole.BOUNCER_ROOT }
+    val roots = (sojuRoots + networks.filter { it.role == NetworkRole.DIRECT && it.id in zncNetworkIds })
+        .sortedWith(byName)
+    val rootIds = sojuRoots.mapTo(mutableSetOf()) { it.id }
     val children = networks.filter { it.role == NetworkRole.BOUNCER_CHILD }
     return OrganizedNetworks(
         bouncerRoots = roots,
-        direct = networks.filter { it.role == NetworkRole.DIRECT }.sortedWith(byName),
+        direct = networks.filter { it.role == NetworkRole.DIRECT && it.id !in zncNetworkIds }.sortedWith(byName),
         childrenByRoot = children.filter { it.parentId in rootIds }.groupBy { it.parentId!! }
             .mapValues { (_, rows) -> rows.sortedWith(byName) },
         orphanChildren = children.filter { it.parentId !in rootIds }.sortedWith(byName),

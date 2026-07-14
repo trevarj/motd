@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.ui.onboarding
 
+import io.github.trevarj.motd.bouncer.BouncerKind
+import io.github.trevarj.motd.bouncer.SojuLoginForm
+import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcClientState
 import org.junit.Assert.assertEquals
@@ -44,19 +47,20 @@ class OnboardingReducerTest {
     fun `soju choice yields bouncer root role`() {
         val s = onboardingReducer(
             OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.SOJU),
+            OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
         )
         assertTrue(s.isSoju)
         assertEquals(NetworkRole.BOUNCER_ROOT, s.role)
     }
 
     @Test
-    fun `soju choice forces SASL PLAIN auth mode`() {
+    fun `soju login maps to SASL PLAIN without mutating direct auth`() {
         val s = onboardingReducer(
             OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.SOJU),
+            OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
         )
-        assertEquals(AuthMode.PLAIN, s.auth.mode)
+        assertEquals(AuthMode.NONE, s.auth.mode)
+        assertEquals(AuthMode.PLAIN, s.activeAuth.mode)
     }
 
     @Test
@@ -64,32 +68,46 @@ class OnboardingReducerTest {
         // After choosing soju, mode is PLAIN so AUTH validity gates on both fields.
         val base = reduce(
             OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.SOJU),
+            OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
         ).copy(step = OnboardingStep.AUTH)
 
         assertFalse(base.canAdvance)
-        assertFalse(base.copy(auth = base.auth.copy(saslUser = "u")).canAdvance)
-        val complete = base.copy(auth = base.auth.copy(saslUser = "u", saslPassword = "p"))
+        assertFalse(base.copy(sojuLogin = SojuLoginForm(username = "u")).canAdvance)
+        val complete = base.copy(sojuLogin = SojuLoginForm("u", "p"))
         assertTrue(complete.canAdvance)
         assertEquals(OnboardingStep.CONNECT, onboardingReducer(complete, OnboardingAction.Next).step)
     }
 
     @Test
-    fun `soju EditAuth stays PLAIN even if a non-PLAIN mode is submitted`() {
+    fun `bouncer and direct credential drafts stay independent`() {
         val soju = reduce(
             OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.SOJU),
+            OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
         )
-        // A stray NONE/EXTERNAL edit must be coerced back to PLAIN on the soju path.
         val none = onboardingReducer(soju, OnboardingAction.EditAuth(AuthForm(mode = AuthMode.NONE)))
-        assertEquals(AuthMode.PLAIN, none.auth.mode)
+        assertEquals(AuthMode.NONE, none.auth.mode)
         val external = onboardingReducer(
             soju,
             OnboardingAction.EditAuth(AuthForm(mode = AuthMode.EXTERNAL, saslUser = "u", saslPassword = "p")),
         )
-        assertEquals(AuthMode.PLAIN, external.auth.mode)
+        assertEquals(AuthMode.EXTERNAL, external.auth.mode)
         assertEquals("u", external.auth.saslUser)
         assertEquals("p", external.auth.saslPassword)
+    }
+
+    @Test
+    fun `ZNC selection remains direct and requires separate login fields`() {
+        val base = reduce(
+            OnboardingState(step = OnboardingStep.CHOICE),
+            OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
+            OnboardingAction.ChooseBouncerKind(BouncerKind.ZNC),
+        ).copy(step = OnboardingStep.AUTH)
+        assertTrue(base.isZnc)
+        assertEquals(NetworkRole.DIRECT, base.role)
+        assertFalse(base.canAdvance)
+        val complete = base.copy(zncLogin = ZncLoginForm("motd", "libera", "pw"))
+        assertTrue(complete.canAdvance)
+        assertEquals("motd/libera", complete.activeAuth.saslUser)
     }
 
     @Test
@@ -166,7 +184,7 @@ class OnboardingReducerTest {
         // SASL username/password are gathered on AUTH.
         val soju = reduce(
             OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ChooseConnection(ConnectionChoice.SOJU),
+            OnboardingAction.ChooseConnection(ConnectionChoice.BOUNCER),
         ).copy(step = OnboardingStep.SERVER)
 
         assertFalse(soju.canAdvance) // blank host + nick

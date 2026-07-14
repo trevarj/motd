@@ -56,7 +56,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.bouncer.BouncerKind
+import io.github.trevarj.motd.bouncer.SojuLoginForm
+import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.settings.BouncerLoginFields
 import io.github.trevarj.motd.ui.settings.NetworkForm
 import io.github.trevarj.motd.ui.settings.PasswordField
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -73,9 +77,12 @@ fun OnboardingScreen(
         onNext = viewModel::next,
         onBack = viewModel::back,
         onChoose = viewModel::chooseConnection,
+        onChooseBouncerKind = viewModel::chooseBouncerKind,
         onLibera = viewModel::applyLiberaPreset,
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
+        onSojuLoginChange = viewModel::editSojuLogin,
+        onZncLoginChange = viewModel::editZncLogin,
         onRetry = viewModel::retryConnect,
         onToggleBouncer = viewModel::toggleBouncerNetwork,
         onAddBouncer = viewModel::addBouncerNetwork,
@@ -89,9 +96,12 @@ fun OnboardingContent(
     onNext: () -> Unit,
     onBack: () -> Unit,
     onChoose: (ConnectionChoice) -> Unit,
+    onChooseBouncerKind: (BouncerKind) -> Unit,
     onLibera: () -> Unit,
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
+    onSojuLoginChange: (SojuLoginForm) -> Unit,
+    onZncLoginChange: (ZncLoginForm) -> Unit,
     onRetry: () -> Unit,
     onToggleBouncer: (String) -> Unit,
     onAddBouncer: (String, String) -> Unit,
@@ -113,12 +123,11 @@ fun OnboardingContent(
         ) { page ->
             when (steps[page]) {
                 OnboardingStep.WELCOME -> WelcomePage()
-                OnboardingStep.CHOICE -> ChoicePage(state, onChoose, onLibera)
+                OnboardingStep.CHOICE -> ChoicePage(state, onChoose, onChooseBouncerKind, onLibera)
                 OnboardingStep.SERVER -> ServerPage(state, onServerChange, onAuthChange, authOnly = false)
                 OnboardingStep.AUTH ->
-                    // soju always uses SASL PLAIN: show only user/password, no mechanism picker.
-                    if (state.isSoju) {
-                        SojuAuthPage(state, onAuthChange)
+                    if (state.isBouncer) {
+                        BouncerAuthPage(state, onSojuLoginChange, onZncLoginChange)
                     } else {
                         // Direct path AUTH step: mechanism picker only (server fields live on step 3).
                         ServerPage(state, onServerChange, onAuthChange, authOnly = true)
@@ -206,6 +215,7 @@ private fun WelcomePage() {
 private fun ChoicePage(
     state: OnboardingState,
     onChoose: (ConnectionChoice) -> Unit,
+    onChooseBouncerKind: (BouncerKind) -> Unit,
     onLibera: () -> Unit,
 ) {
     Column(
@@ -218,12 +228,30 @@ private fun ChoicePage(
             fontWeight = FontWeight.Bold,
         )
         ChoiceCard(
-            title = stringResource(R.string.onboarding_choice_soju_title),
-            desc = stringResource(R.string.onboarding_choice_soju_desc),
-            selected = state.choice == ConnectionChoice.SOJU,
-            onClick = { onChoose(ConnectionChoice.SOJU) },
-            modifier = Modifier.testTag("onboarding_choice_soju"),
+            title = stringResource(R.string.onboarding_choice_bouncer_title),
+            desc = stringResource(R.string.onboarding_choice_bouncer_desc),
+            selected = state.choice == ConnectionChoice.BOUNCER,
+            onClick = { onChoose(ConnectionChoice.BOUNCER) },
+            modifier = Modifier.testTag("onboarding_choice_bouncer"),
         )
+        if (state.isBouncer) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ChoiceCard(
+                    title = stringResource(R.string.bouncer_kind_soju),
+                    desc = stringResource(R.string.bouncer_kind_soju_desc),
+                    selected = state.bouncerKind == BouncerKind.SOJU,
+                    onClick = { onChooseBouncerKind(BouncerKind.SOJU) },
+                    modifier = Modifier.weight(1f).testTag("onboarding_choice_soju"),
+                )
+                ChoiceCard(
+                    title = stringResource(R.string.bouncer_kind_znc),
+                    desc = stringResource(R.string.bouncer_kind_znc_desc),
+                    selected = state.bouncerKind == BouncerKind.ZNC,
+                    onClick = { onChooseBouncerKind(BouncerKind.ZNC) },
+                    modifier = Modifier.weight(1f).testTag("onboarding_choice_znc"),
+                )
+            }
+        }
         ChoiceCard(
             title = stringResource(R.string.onboarding_choice_network_title),
             desc = stringResource(R.string.onboarding_choice_network_desc),
@@ -304,8 +332,8 @@ private fun ServerPage(
             showAuth = authOnly,
             // Direct path shows the full identity (nick/username/realname); the soju root shows
             // only the nick here (its bouncer SASL user/password live on the AUTH step).
-            showIdentity = !state.isSoju,
-            showNick = state.isSoju,
+            showIdentity = !state.isBouncer,
+            showNick = state.isBouncer,
         )
     }
 }
@@ -315,9 +343,10 @@ private fun ServerPage(
  * No mechanism picker (NONE/EXTERNAL are meaningless for soju login).
  */
 @Composable
-private fun SojuAuthPage(
+private fun BouncerAuthPage(
     state: OnboardingState,
-    onAuthChange: (AuthForm) -> Unit,
+    onSojuLoginChange: (SojuLoginForm) -> Unit,
+    onZncLoginChange: (ZncLoginForm) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -328,24 +357,15 @@ private fun SojuAuthPage(
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
         )
-        OutlinedTextField(
-            value = state.auth.saslUser,
-            onValueChange = { onAuthChange(state.auth.copy(saslUser = it)) },
-            label = { Text(stringResource(R.string.onboarding_auth_soju_username)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.None,
-                autoCorrectEnabled = false,
-                imeAction = ImeAction.Next,
-            ),
-            modifier = Modifier.fillMaxWidth().testTag("onboarding_username_field"),
-        )
-        PasswordField(
-            value = state.auth.saslPassword,
-            onValueChange = { onAuthChange(state.auth.copy(saslPassword = it)) },
-            label = stringResource(R.string.onboarding_auth_soju_password),
-            modifier = Modifier.testTag("onboarding_password_field"),
-            imeAction = ImeAction.Done,
+        BouncerLoginFields(
+            kind = state.bouncerKind,
+            server = state.server,
+            sojuLogin = state.sojuLogin,
+            zncLogin = state.zncLogin,
+            onServerChange = {},
+            onSojuLoginChange = onSojuLoginChange,
+            onZncLoginChange = onZncLoginChange,
+            showEndpoint = false,
         )
     }
 }
@@ -531,8 +551,8 @@ private fun OnboardingChoicePreview() {
         Surface {
             OnboardingContent(
                 state = OnboardingState(step = OnboardingStep.CHOICE, choice = ConnectionChoice.NETWORK),
-                onNext = {}, onBack = {}, onChoose = {}, onLibera = {},
-                onServerChange = {}, onAuthChange = {}, onRetry = {},
+                onNext = {}, onBack = {}, onChoose = {}, onChooseBouncerKind = {}, onLibera = {},
+                onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
                 onToggleBouncer = {}, onAddBouncer = { _, _ -> }, onFinish = {},
             )
         }
@@ -547,7 +567,7 @@ private fun OnboardingConnectPreview() {
             OnboardingContent(
                 state = OnboardingState(
                     step = OnboardingStep.CONNECT,
-                    choice = ConnectionChoice.SOJU,
+                    choice = ConnectionChoice.BOUNCER,
                     connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
                     stateLog = listOf(IrcClientState.Connecting, IrcClientState.Registering),
                     bouncerListLoaded = true,
@@ -556,8 +576,8 @@ private fun OnboardingConnectPreview() {
                         BouncerNetworkRow("2", "OFTC", selected = false),
                     ),
                 ),
-                onNext = {}, onBack = {}, onChoose = {}, onLibera = {},
-                onServerChange = {}, onAuthChange = {}, onRetry = {},
+                onNext = {}, onBack = {}, onChoose = {}, onChooseBouncerKind = {}, onLibera = {},
+                onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
                 onToggleBouncer = {}, onAddBouncer = { _, _ -> }, onFinish = {},
             )
         }

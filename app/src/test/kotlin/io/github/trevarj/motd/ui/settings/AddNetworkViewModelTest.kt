@@ -1,5 +1,9 @@
 package io.github.trevarj.motd.ui.settings
 
+import io.github.trevarj.motd.bouncer.SojuLoginForm
+import io.github.trevarj.motd.bouncer.BouncerKind
+import io.github.trevarj.motd.bouncer.ZncLoginForm
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.repo.NetworkRepository
@@ -18,6 +22,7 @@ import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -64,6 +69,13 @@ class AddNetworkViewModelTest {
         }
     }
 
+    private class FakeBouncerKindPrefs : BouncerKindPrefs {
+        val ids = MutableStateFlow<Set<Long>>(emptySet())
+        override val zncNetworkIds: Flow<Set<Long>> = ids
+        override suspend fun markZnc(networkId: Long) { ids.value += networkId }
+        override suspend fun clear(networkId: Long) { ids.value -= networkId }
+    }
+
     /** ConnectionManager fake: drives connectionStates for a single network. */
     private class FakeConnectionManager : ConnectionManager {
         override val connectionStates = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
@@ -100,7 +112,8 @@ class AddNetworkViewModelTest {
         repo: NetworkRepository,
         cm: ConnectionManager,
         prefs: PresetEnrollmentPrefs = FakePresetEnrollmentPrefs(),
-    ) = AddNetworkViewModel(repo, cm, prefs)
+        bouncerPrefs: BouncerKindPrefs = FakeBouncerKindPrefs(),
+    ) = AddNetworkViewModel(repo, cm, prefs, bouncerPrefs)
 
     private fun AddNetworkViewModel.fillValidDirect() {
         editServer(ServerForm(host = "irc.libera.chat", port = "6697", nick = "me"))
@@ -108,36 +121,61 @@ class AddNetworkViewModelTest {
     }
 
     @Test
-    fun soju_kind_pins_sasl_plain() = runTest {
+    fun soju_kind_uses_separate_plain_login() = runTest {
         val vm = vm(FakeNetworkRepository(), FakeConnectionManager())
-        vm.setKind(ConnectionChoice.SOJU)
-        assertEquals(AuthMode.PLAIN, vm.state.value.auth.mode)
-        // Editing auth to NONE is re-pinned back to PLAIN for soju.
+        vm.setKind(ConnectionChoice.BOUNCER)
+        assertEquals(AuthMode.PLAIN, vm.state.value.activeAuth.mode)
         vm.editAuth(AuthForm(mode = AuthMode.NONE))
-        assertEquals(AuthMode.PLAIN, vm.state.value.auth.mode)
+        assertEquals(AuthMode.NONE, vm.state.value.auth.mode)
     }
 
     @Test
     fun valid_soju_config_is_submittable() = runTest {
         val vm = vm(FakeNetworkRepository(), FakeConnectionManager())
-        vm.setKind(ConnectionChoice.SOJU)
+        vm.setKind(ConnectionChoice.BOUNCER)
         // Fill the collapsed soju form: host/port/TLS + nick, then username/password (SASL PLAIN).
         vm.editServer(ServerForm(host = "soju.example", port = "6697", tls = true, nick = "trev"))
-        vm.editAuth(vm.state.value.auth.copy(saslUser = "motd/libera", saslPassword = "pw"))
+        vm.editSojuLogin(SojuLoginForm("motd", "pw"))
         assertTrue(vm.state.value.canSubmit)
+    }
+
+    @Test
+    fun ready_ZNC_is_direct_uses_combined_authcid_and_is_remembered() = runTest {
+        val repo = FakeNetworkRepository()
+        val cm = FakeConnectionManager()
+        val bouncerPrefs = FakeBouncerKindPrefs()
+        val vm = vm(repo, cm, bouncerPrefs = bouncerPrefs)
+        var done = false
+        vm.setKind(ConnectionChoice.BOUNCER)
+        vm.setBouncerKind(BouncerKind.ZNC)
+        vm.editServer(ServerForm(host = "znc.example", port = "6697", nick = "motd"))
+        vm.editZncLogin(ZncLoginForm("account", "libera", "pw"))
+
+        vm.submit(onOpenBouncerNetworks = { error("ZNC must not open soju manager") }, onDone = { done = true })
+        runCurrent()
+        val id = vm.state.value.networkId!!
+        val row = repo.networks.getValue(id)
+        assertEquals(NetworkRole.DIRECT, row.role)
+        assertEquals("account/libera", row.saslUser)
+        assertEquals("account", row.username)
+
+        cm.emit(id, IrcClientState.Ready("motd", emptySet(), emptyMap()))
+        runCurrent()
+        assertTrue(done)
+        assertTrue(id in bouncerPrefs.ids.value)
     }
 
     @Test
     fun soju_missing_password_or_nick_is_not_submittable() = runTest {
         val vm = vm(FakeNetworkRepository(), FakeConnectionManager())
-        vm.setKind(ConnectionChoice.SOJU)
+        vm.setKind(ConnectionChoice.BOUNCER)
         // Missing password.
         vm.editServer(ServerForm(host = "soju.example", port = "6697", nick = "trev"))
-        vm.editAuth(vm.state.value.auth.copy(saslUser = "motd/libera", saslPassword = ""))
+        vm.editSojuLogin(SojuLoginForm("motd", ""))
         assertFalse(vm.state.value.canSubmit)
         // Password present but nick missing.
         vm.editServer(ServerForm(host = "soju.example", port = "6697", nick = ""))
-        vm.editAuth(vm.state.value.auth.copy(saslUser = "motd/libera", saslPassword = "pw"))
+        vm.editSojuLogin(SojuLoginForm("motd", "pw"))
         assertFalse(vm.state.value.canSubmit)
     }
 
@@ -164,9 +202,9 @@ class AddNetworkViewModelTest {
         val cm = FakeConnectionManager()
         val vm = vm(repo, cm)
         var routedTo: Long? = null
-        vm.setKind(ConnectionChoice.SOJU)
+        vm.setKind(ConnectionChoice.BOUNCER)
         vm.editServer(ServerForm(host = "soju.example", port = "6697", nick = "me"))
-        vm.editAuth(AuthForm(mode = AuthMode.PLAIN, saslUser = "me", saslPassword = "pw"))
+        vm.editSojuLogin(SojuLoginForm("me", "pw"))
         vm.submit(onOpenBouncerNetworks = { routedTo = it }, onDone = {})
         runCurrent()
         val id = vm.state.value.networkId!!
@@ -304,9 +342,9 @@ class AddNetworkViewModelTest {
 
         val sojuPrefs = FakePresetEnrollmentPrefs()
         val sojuVm = vm(FakeNetworkRepository(), FakeConnectionManager(), sojuPrefs)
-        sojuVm.setKind(ConnectionChoice.SOJU)
+        sojuVm.setKind(ConnectionChoice.BOUNCER)
         sojuVm.editServer(ServerForm(host = "soju.example", port = "6697", nick = "trev"))
-        sojuVm.editAuth(AuthForm(AuthMode.PLAIN, "trev", "password"))
+        sojuVm.editSojuLogin(SojuLoginForm("trev", "password"))
         sojuVm.submit({}, {})
         runCurrent()
         assertTrue(sojuPrefs.eligible.isEmpty())

@@ -45,6 +45,18 @@ class SettingsUiModelsTest {
     }
 
     @Test
+    fun `ZNC direct rows appear with bouncers instead of direct networks`() {
+        val soju = network(1, "Soju", NetworkRole.BOUNCER_ROOT)
+        val znc = network(2, "ZNC Libera", NetworkRole.DIRECT)
+        val direct = network(3, "Libera", NetworkRole.DIRECT)
+
+        val organized = organizeNetworks(listOf(direct, znc, soju), zncNetworkIds = setOf(2))
+
+        assertEquals(listOf(soju, znc), organized.bouncerRoots)
+        assertEquals(listOf(direct), organized.direct)
+    }
+
+    @Test
     fun `network save requires a valid dirty form and includes auto connect`() {
         val entity = network(1, "Libera", NetworkRole.DIRECT).copy(
             nick = "me", username = "me", realname = "Me", autoConnect = true,

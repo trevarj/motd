@@ -37,8 +37,18 @@
     <string name="onboarding_back">Back</string>
     <string name="onboarding_finish">Finish</string>
     <string name="onboarding_choice_title">How do you connect?</string>
-    <string name="onboarding_choice_soju_title">I have a soju bouncer</string>
-    <string name="onboarding_choice_soju_desc">Multi-network sync, infinite history, and push over one account.</string>
+    <string name="onboarding_choice_bouncer_title">I have a bouncer</string>
+    <string name="onboarding_choice_bouncer_desc">Stay connected and catch up through soju or ZNC.</string>
+    <string name="bouncer_kind_soju">soju</string>
+    <string name="bouncer_kind_soju_desc">Multi-network sync and push</string>
+    <string name="bouncer_kind_znc">ZNC</string>
+    <string name="bouncer_kind_znc_desc">Connect to one ZNC network</string>
+    <string name="bouncer_username">Bouncer username</string>
+    <string name="bouncer_password">Bouncer password</string>
+    <string name="bouncer_znc_network">ZNC network</string>
+    <string name="bouncer_znc_no_slash">Do not include “/”; /motd combines the username and network for ZNC.</string>
+    <string name="bouncer_soju_login_guidance">Use your soju account credentials. You can add and manage upstream networks after connecting.</string>
+    <string name="bouncer_znc_login_guidance">Use the ZNC username, network identifier, and password shown in your ZNC configuration.</string>
     <string name="onboarding_choice_network_title">Connect to an IRC network</string>
     <string name="onboarding_choice_network_desc">Connect directly to a single IRC server.</string>
     <string name="onboarding_libera_preset">Use Libera.Chat</string>
@@ -61,7 +71,6 @@
     <string name="onboarding_auth_choose_cert">Choose certificate</string>
     <string name="onboarding_auth_cert_selected">Certificate: %1$s</string>
     <!-- soju bouncer auth: always SASL PLAIN, no picker (WP-S2) -->
-    <string name="onboarding_auth_soju_username">Username</string>
     <string name="onboarding_auth_soju_password">Password</string>
     <!-- Password field show/hide toggle -->
     <string name="password_show">Show password</string>
@@ -473,6 +482,7 @@
     <string name="network_settings_bouncer_networks">Bouncer networks</string>
     <string name="network_settings_bouncer_networks_desc">Manage networks bound to this soju account</string>
     <string name="settings_network_soju_suffix">%1$s · soju</string>
+    <string name="settings_network_znc_suffix">%1$s · ZNC</string>
     <string name="settings_network_via_suffix">%1$s · via %2$s</string>
     <string name="network_settings_managed_by">Managed by %1$s</string>
     <string name="network_settings_managed_by_desc">Transport and login come from the soju connection</string>
@@ -493,7 +503,7 @@
     <string name="add_network_plaintext_message">Your password and messages may be visible to the network. Continue only if this server does not support TLS.</string>
     <string name="add_network_plaintext_continue">Connect anyway</string>
     <string name="add_network_kind_network">IRC network</string>
-    <string name="add_network_kind_soju">soju bouncer</string>
+    <string name="add_network_kind_bouncer">Bouncer</string>
     <string name="add_network_connect_save">Connect &amp; save</string>
     <string name="add_network_testing">Testing connection…</string>
     <string name="add_network_edit">Edit</string>

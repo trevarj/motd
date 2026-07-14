@@ -84,6 +84,27 @@ class NetworkDedupTest {
     }
 
     @Test
+    fun `different ZNC network selectors on one endpoint stay distinct`() = runBlocking {
+        val dao = InMemoryNetworkDao()
+        val repo = NetworkRepositoryImpl(dao)
+        val seed = direct("znc.example.org").copy(saslMechanism = "PLAIN", saslUser = "motd/libera")
+        repo.addNetwork(seed)
+        repo.addNetwork(seed.copy(name = "oftc", saslUser = "motd/oftc"))
+        assertEquals(2, dao.rows.size)
+    }
+
+    @Test
+    fun `same ZNC selector deduplicates`() = runBlocking {
+        val dao = InMemoryNetworkDao()
+        val repo = NetworkRepositoryImpl(dao)
+        val seed = direct("znc.example.org").copy(saslMechanism = "PLAIN", saslUser = "motd/libera")
+        val first = repo.addNetwork(seed)
+        val second = repo.addNetwork(seed.copy(name = "renamed"))
+        assertEquals(first, second)
+        assertEquals(1, dao.rows.size)
+    }
+
+    @Test
     fun `different port is a distinct network`() = runBlocking {
         val dao = InMemoryNetworkDao()
         val repo = NetworkRepositoryImpl(dao)

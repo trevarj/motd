@@ -6,6 +6,10 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
+import io.github.trevarj.motd.bouncer.ZncLoginForm
+import io.github.trevarj.motd.bouncer.parseZncLogin
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.obfs.VlessLink
@@ -21,6 +25,7 @@ import io.github.trevarj.motd.avatar.validateAvatarUrl
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -40,6 +45,8 @@ data class NetworkSettingsUiState(
     val obfsLink: String = "",
     val server: ServerForm = ServerForm(),
     val auth: AuthForm = AuthForm(),
+    val isZnc: Boolean = false,
+    val zncLogin: ZncLoginForm = ZncLoginForm(),
     // Round 5 (plans/16 §5.3): live status + autoConnect editing.
     val connState: IrcClientState = IrcClientState.Disconnected,
     val autoConnect: Boolean = true,
@@ -64,9 +71,11 @@ data class NetworkSettingsUiState(
                 )) ||
             (obfsMode == ObfsMode.EMBEDDED_REALITY &&
                 obfsLink.trim().ifBlank { null } != current.obfsLink?.trim()?.ifBlank { null }) ||
-            server != current.toServerForm() || auth != current.toAuthForm() || autoConnect != current.autoConnect
+            server != current.toServerForm() ||
+            (if (isZnc) zncLogin != parseZncLogin(current.saslUser.orEmpty(), current.saslPassword.orEmpty())
+            else auth != current.toAuthForm()) || autoConnect != current.autoConnect
     }
-    val isValid: Boolean get() = server.isValid && auth.isValid && vlessLinkError == null
+    val isValid: Boolean get() = server.isValid && (if (isZnc) zncLogin.isValid else auth.isValid) && vlessLinkError == null
     val canSave: Boolean get() = isValid && hasUnsavedChanges
 }
 
@@ -105,6 +114,7 @@ class NetworkSettingsViewModel @Inject constructor(
     private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
     private val avatarPrefs: AvatarPrefs,
     private val avatarController: AvatarController,
+    private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(NetworkSettingsUiState())
@@ -118,6 +128,7 @@ class NetworkSettingsViewModel @Inject constructor(
         this.networkId = networkId
         viewModelScope.launch {
             val n = networkRepository.networkById(networkId)
+            val isZnc = networkId in bouncerKindPrefs.zncNetworkIds.first()
             val parentName = n?.parentId?.let { networkRepository.networkById(it)?.name }
             _state.update { current ->
                 current.copy(
@@ -131,6 +142,10 @@ class NetworkSettingsViewModel @Inject constructor(
                     obfsLink = n?.obfsLink.orEmpty(),
                     server = n?.toServerForm() ?: ServerForm(),
                     auth = n?.toAuthForm() ?: AuthForm(),
+                    isZnc = isZnc,
+                    zncLogin = n?.takeIf { isZnc }?.let {
+                        parseZncLogin(it.saslUser.orEmpty(), it.saslPassword.orEmpty())
+                    } ?: ZncLoginForm(),
                     autoConnect = n?.autoConnect ?: true,
                     parentName = parentName,
                 )
@@ -157,6 +172,7 @@ class NetworkSettingsViewModel @Inject constructor(
 
     fun editServer(server: ServerForm) { _state.value = _state.value.copy(server = server) }
     fun editAuth(auth: AuthForm) { _state.value = _state.value.copy(auth = auth) }
+    fun editZncLogin(login: ZncLoginForm) { _state.value = _state.value.copy(zncLogin = login) }
     fun editDisplayName(name: String) { _state.value = _state.value.copy(displayName = name) }
     fun editWsUrl(url: String) { _state.value = _state.value.copy(wsUrl = url) }
 
@@ -265,10 +281,17 @@ class NetworkSettingsViewModel @Inject constructor(
             onDone()
         }
 
-    private fun updatedNetwork(current: NetworkEntity): NetworkEntity =
-        buildNetworkEntity(
-            server = _state.value.server,
-            auth = _state.value.auth,
+    private fun updatedNetwork(current: NetworkEntity): NetworkEntity {
+        val state = _state.value
+        val server = if (state.isZnc) {
+            state.server.copy(username = state.zncLogin.username.trim(), realname = state.server.nick.trim())
+        } else {
+            state.server
+        }
+        val auth = if (state.isZnc) state.zncLogin.toAuthForm() else state.auth
+        return buildNetworkEntity(
+            server = server,
+            auth = auth,
             role = current.role,
             id = current.id,
             // A blank alias falls back to the existing name (never persist an empty display name).
@@ -284,6 +307,7 @@ class NetworkSettingsViewModel @Inject constructor(
             obfsLink = _state.value.obfsLink,
             // Persist the current autoConnect value alongside the form fields.
         ).copy(autoConnect = _state.value.autoConnect)
+    }
 
     fun delete(onDone: () -> Unit) = viewModelScope.launch {
         _state.value.entity?.let {

@@ -3,6 +3,8 @@ package io.github.trevarj.motd.data.repo
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 
@@ -12,6 +14,7 @@ import kotlinx.coroutines.flow.Flow
 // duplicate NetworkEntity (which would spawn a second actor + socket for the same server).
 class NetworkRepositoryImpl @Inject constructor(
     private val networkDao: NetworkDao,
+    private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
 ) : NetworkRepository {
     override fun observeNetworks(): Flow<List<NetworkEntity>> = networkDao.observeAll()
 
@@ -32,6 +35,7 @@ class NetworkRepositoryImpl @Inject constructor(
 
     override suspend fun deleteNetwork(id: Long) {
         networkDao.byId(id)?.let { networkDao.delete(it) }
+        bouncerKindPrefs.clear(id)
     }
 
     override suspend fun networkById(id: Long): NetworkEntity? = networkDao.byId(id)
@@ -53,8 +57,9 @@ internal fun normalizeHost(host: String): String =
  *   import loop and the notify-mirror racing to insert the same child.
  * - **BOUNCER_ROOT**: `(host, port, saslUser)` — one soju account (login) per host:port. Adding
  *   the same bouncer account twice reuses the existing root.
- * - **DIRECT**: `(host, port, nick)` — the same server with the same nick is the same connection;
- *   a different nick is intentionally a distinct network (two identities on one server).
+ * - **DIRECT**: `(host, port, nick, ZNC selector?)` — ordinary direct rows use the first three;
+ *   slash-bearing ZNC authcids add their selected upstream network so one endpoint can hold more
+ *   than one ZNC network.
  *
  * A `null` sub-key element is kept distinct (encoded as an empty segment) so under-specified rows
  * don't collapse onto each other.
@@ -63,6 +68,10 @@ internal fun networkIdentityKey(n: NetworkEntity): String = when (n.role) {
     NetworkRole.BOUNCER_CHILD -> "child|${n.parentId}|${n.bouncerNetId.orEmpty()}"
     NetworkRole.BOUNCER_ROOT ->
         "root|${normalizeHost(n.host)}|${n.port}|${n.saslUser.orEmpty()}"
-    NetworkRole.DIRECT ->
-        "direct|${normalizeHost(n.host)}|${n.port}|${n.nick}"
+    NetworkRole.DIRECT -> {
+        // A ZNC downstream identifies one upstream network in the SASL authcid. Keep that selector
+        // in the identity so two networks on the same bouncer may share an endpoint and nick.
+        val bouncerSelector = n.saslUser?.takeIf { '/' in it }.orEmpty()
+        "direct|${normalizeHost(n.host)}|${n.port}|${n.nick}|$bouncerSelector"
+    }
 }

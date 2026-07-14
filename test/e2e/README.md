@@ -108,7 +108,7 @@ network, seeds `##motdtest`, and installs the reverse. It fails if ports `6667`
 or `6697` are already occupied. Stop the owner by its exact PID; never use a
 broad `pkill -f` pattern for ergo or soju.
 
-Onboard the debug app with **I have a soju bouncer**:
+Onboard the debug app with **Bouncer → soju**:
 
 | Field | Value |
 | --- | --- |
@@ -143,9 +143,22 @@ reverse. It owns the base stack it starts and tears it down by recorded PID.
 ./test/e2e/znc-stack.sh down
 ```
 
-Connect the debug app to `127.0.0.1:6698` with TLS, username `motd/libera`, and
-password `motdtest`; trust the ephemeral certificate. Runtime state and logs
-remain under `/tmp/motd-znc-stack` (override with `MOTD_ZNC_STACK_DIR`).
+Connect the debug app with **Bouncer → ZNC** and trust the ephemeral certificate:
+
+| Field | Value |
+| --- | --- |
+| Host | `127.0.0.1` |
+| Port / TLS | `6698`, TLS enabled |
+| Nickname | `motdadb` |
+| Bouncer username | `motd` |
+| ZNC network | `libera` |
+| Bouncer password | `motdtest` |
+
+The app combines the separate username and network inputs into ZNC's
+`motd/libera` SASL authcid. Runtime state and logs remain under
+`/tmp/motd-znc-stack` (override with `MOTD_ZNC_STACK_DIR`). The focused E2E
+runner can exercise this branch with instrumentation arguments
+`bouncerKind=znc`, `sojuPort=6698`, and `zncNetwork=libera`.
 
 `probe` is a dependency-free socket test covering CAP negotiation, SASL PLAIN,
 two attached clients, channel/query routing, self echo, a fully detached gap,

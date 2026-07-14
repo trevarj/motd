@@ -11,7 +11,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import java.io.FileInputStream
 import java.util.ArrayDeque
 
-/** Focused release smoke: real onboarding, TLS TOFU, SASL, and soju network discovery. */
+/** Focused release smoke: real onboarding, TLS TOFU, SASL, and optional soju discovery. */
 class OnboardingConnectivitySmokeTest(
     private val instrumentation: Instrumentation,
     private val arguments: Bundle,
@@ -35,9 +35,12 @@ class OnboardingConnectivitySmokeTest(
         val user = arguments.getString("sojuUser") ?: "motd"
         val password = arguments.getString("sojuPassword") ?: "motdtest"
         val nick = arguments.getString("nick") ?: "motdadb"
+        val bouncerKind = arguments.getString("bouncerKind")?.lowercase() ?: "soju"
+        val zncNetwork = arguments.getString("zncNetwork") ?: "libera"
 
         enterConnectionChoice()
-        clickTag("onboarding_choice_soju")
+        clickTag("onboarding_choice_bouncer")
+        clickTag(if (bouncerKind == "znc") "onboarding_choice_znc" else "onboarding_choice_soju")
         clickTag("onboarding_forward_button")
 
         setText("network_host_field", host)
@@ -45,8 +48,9 @@ class OnboardingConnectivitySmokeTest(
         setText("network_nick_field", nick)
         clickTag("onboarding_forward_button")
 
-        setText("onboarding_username_field", user)
-        setText("onboarding_password_field", password)
+        setText("bouncer_username_field", user)
+        if (bouncerKind == "znc") setText("bouncer_znc_network_field", zncNetwork)
+        setText("bouncer_password_field", password)
         clickTag("onboarding_forward_button")
 
         findText("Trust this certificate?", 30_000)?.let {
@@ -56,11 +60,13 @@ class OnboardingConnectivitySmokeTest(
         waitFor(45_000, "connection ready") {
             findNode { it.text?.toString()?.startsWith("Connected as ") == true }
         }
-        requireNotNull(findText("Bouncer networks", 30_000)) {
-            "Connected to soju but bouncer network discovery did not load"
-        }
-        requireNotNull(findText("libera", 30_000)) {
-            "Hermetic soju did not expose the provisioned libera network"
+        if (bouncerKind != "znc") {
+            requireNotNull(findText("Bouncer networks", 30_000)) {
+                "Connected to soju but bouncer network discovery did not load"
+            }
+            requireNotNull(findText("libera", 30_000)) {
+                "Hermetic soju did not expose the provisioned libera network"
+            }
         }
     }
 
@@ -77,7 +83,7 @@ class OnboardingConnectivitySmokeTest(
         val deadline = SystemClock.uptimeMillis() + 15_000
         var nextAttemptAt = 0L
         while (SystemClock.uptimeMillis() < deadline) {
-            if (findTag("onboarding_choice_soju") != null) return
+            if (findTag("onboarding_choice_bouncer") != null) return
 
             val now = SystemClock.uptimeMillis()
             if (now >= nextAttemptAt) {

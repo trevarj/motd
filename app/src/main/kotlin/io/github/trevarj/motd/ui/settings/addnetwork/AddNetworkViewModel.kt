@@ -3,8 +3,13 @@ package io.github.trevarj.motd.ui.settings.addnetwork
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.bouncer.BouncerKind
+import io.github.trevarj.motd.bouncer.SojuLoginForm
+import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
@@ -26,19 +31,36 @@ enum class AddNetworkPhase { FORM, TESTING, FAILED }
 
 data class AddNetworkUiState(
     val kind: ConnectionChoice = ConnectionChoice.NETWORK,
+    val bouncerKind: BouncerKind = BouncerKind.SOJU,
     val server: ServerForm = ServerForm(),
     val auth: AuthForm = AuthForm(),
+    val sojuLogin: SojuLoginForm = SojuLoginForm(),
+    val zncLogin: ZncLoginForm = ZncLoginForm(),
     val phase: AddNetworkPhase = AddNetworkPhase.FORM,
     val networkId: Long? = null,          // created row during the connect test
+    val provisionalCreated: Boolean = false,
     val connState: IrcClientState? = null,
     val error: String? = null,
     val presetId: NetworkPresetId = NetworkPresetId.CUSTOM,
     val showPlaintextWarning: Boolean = false,
     val plaintextConfirmed: Boolean = false,
 ) {
-    val isSoju: Boolean get() = kind == ConnectionChoice.SOJU
+    val isBouncer: Boolean get() = kind == ConnectionChoice.BOUNCER
+    val isSoju: Boolean get() = isBouncer && bouncerKind == BouncerKind.SOJU
+    val isZnc: Boolean get() = isBouncer && bouncerKind == BouncerKind.ZNC
     val role: NetworkRole get() = if (isSoju) NetworkRole.BOUNCER_ROOT else NetworkRole.DIRECT
-    val canSubmit: Boolean get() = phase == AddNetworkPhase.FORM && server.isValid && auth.isValid
+    val activeAuth: AuthForm
+        get() = when {
+            isSoju -> sojuLogin.toAuthForm()
+            isZnc -> zncLogin.toAuthForm()
+            else -> auth
+        }
+    val canSubmit: Boolean
+        get() = phase == AddNetworkPhase.FORM && server.isValid && when {
+            isSoju -> sojuLogin.isValid
+            isZnc -> zncLogin.isValid
+            else -> auth.isValid
+        }
 }
 
 /**
@@ -51,6 +73,7 @@ class AddNetworkViewModel @Inject constructor(
     private val networkRepository: NetworkRepository,
     private val connectionManager: ConnectionManager,
     private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
+    private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(AddNetworkUiState())
@@ -61,16 +84,17 @@ class AddNetworkViewModel @Inject constructor(
     private var testJob: Job? = null
 
     fun setKind(kind: ConnectionChoice) {
-        // soju pins SASL PLAIN (same rule as OnboardingReducer): soju logs in with PLAIN.
-        val auth = if (kind == ConnectionChoice.SOJU) {
-            _state.value.auth.copy(mode = AuthMode.PLAIN)
-        } else {
-            _state.value.auth
-        }
         _state.value = _state.value.copy(
             kind = kind,
-            auth = auth,
             presetId = if (kind == ConnectionChoice.NETWORK) _state.value.presetId else NetworkPresetId.CUSTOM,
+            showPlaintextWarning = false,
+            plaintextConfirmed = false,
+        )
+    }
+
+    fun setBouncerKind(kind: BouncerKind) {
+        _state.value = _state.value.copy(
+            bouncerKind = kind,
             showPlaintextWarning = false,
             plaintextConfirmed = false,
         )
@@ -110,26 +134,38 @@ class AddNetworkViewModel @Inject constructor(
     }
 
     fun editAuth(auth: AuthForm) {
-        // Re-pin PLAIN for soju so a NONE/EXTERNAL choice can't sneak in on the root.
-        val pinned = if (_state.value.isSoju) auth.copy(mode = AuthMode.PLAIN) else auth
-        _state.value = _state.value.copy(auth = pinned)
+        _state.value = _state.value.copy(auth = auth)
     }
+
+    fun editSojuLogin(login: SojuLoginForm) { _state.value = _state.value.copy(sojuLogin = login) }
+    fun editZncLogin(login: ZncLoginForm) { _state.value = _state.value.copy(zncLogin = login) }
 
     /** Create the row, connect, and observe its live state. */
     fun submit(onOpenBouncerNetworks: (Long) -> Unit, onDone: () -> Unit) {
         if (!_state.value.canSubmit) return
-        if (!_state.value.isSoju && !_state.value.server.tls && !_state.value.plaintextConfirmed) {
+        if (!_state.value.server.tls && !_state.value.plaintextConfirmed) {
             _state.value = _state.value.copy(showPlaintextWarning = true)
             return
         }
         testJob?.cancel()
         testJob = viewModelScope.launch {
             val s = _state.value
+            val server = if (s.isZnc) {
+                s.server.copy(
+                    username = s.zncLogin.username.trim(),
+                    realname = s.server.nick.trim(),
+                )
+            } else {
+                s.server
+            }
             val entity = buildNetworkEntity(
-                server = s.server,
-                auth = s.auth,
+                server = server,
+                auth = s.activeAuth,
                 role = s.role,
-                name = networkPreset(s.presetId)?.displayName ?: s.server.host,
+                name = when {
+                    s.isZnc -> s.zncLogin.network.trim()
+                    else -> networkPreset(s.presetId)?.displayName ?: s.server.host
+                },
             )
             val existingNetworkIds = networkRepository.observeNetworks().first().mapTo(mutableSetOf()) { it.id }
             val networkId = networkRepository.addNetwork(entity)
@@ -139,17 +175,22 @@ class AddNetworkViewModel @Inject constructor(
             _state.value = _state.value.copy(
                 phase = AddNetworkPhase.TESTING,
                 networkId = networkId,
+                provisionalCreated = networkId !in existingNetworkIds,
                 connState = null,
                 error = null,
             )
             connectionManager.connect(networkId)
 
+            var completionHandled = false
             connectionManager.connectionStates.collect { states ->
                 val cs = states[networkId] ?: return@collect
                 _state.value = _state.value.copy(connState = cs)
                 when (cs) {
-                    is IrcClientState.Ready ->
+                    is IrcClientState.Ready -> if (!completionHandled) {
+                        completionHandled = true
+                        if (_state.value.isZnc) bouncerKindPrefs.markZnc(networkId)
                         if (_state.value.isSoju) onOpenBouncerNetworks(networkId) else onDone()
+                    }
                     is IrcClientState.Failed ->
                         _state.value = _state.value.copy(phase = AddNetworkPhase.FAILED, error = cs.reason)
                     else -> Unit
@@ -174,6 +215,7 @@ class AddNetworkViewModel @Inject constructor(
             _state.value = _state.value.copy(
                 phase = AddNetworkPhase.FORM,
                 networkId = null,
+                provisionalCreated = false,
                 connState = null,
                 error = null,
             )
@@ -184,8 +226,12 @@ class AddNetworkViewModel @Inject constructor(
     /** Keep the failed row so the user can fix it later in NetworkSettings (decision #4). */
     fun saveAnyway(onDone: () -> Unit) {
         testJob?.cancel()
-        // The row stays in the DB; leave the connect intent as-is (the user may fix and reconnect).
-        onDone()
+        viewModelScope.launch {
+            val state = _state.value
+            if (state.isZnc) state.networkId?.let { bouncerKindPrefs.markZnc(it) }
+            // The row stays in the DB; leave the connect intent as-is for later repair.
+            onDone()
+        }
     }
 
     /** Back to the form to edit fields; delete the half-created row first. */
@@ -195,6 +241,7 @@ class AddNetworkViewModel @Inject constructor(
             _state.value = _state.value.copy(
                 phase = AddNetworkPhase.FORM,
                 networkId = null,
+                provisionalCreated = false,
                 connState = null,
                 error = null,
             )
@@ -211,7 +258,7 @@ class AddNetworkViewModel @Inject constructor(
 
     private suspend fun deleteHalfCreated() {
         testJob?.cancel()
-        _state.value.networkId?.let { networkId ->
+        _state.value.networkId?.takeIf { _state.value.provisionalCreated }?.let { networkId ->
             presetEnrollmentPrefs.revokeLiberaEligibility(networkId)
             networkRepository.deleteNetwork(networkId)
         }

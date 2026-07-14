@@ -3,6 +3,11 @@ package io.github.trevarj.motd.ui.onboarding
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.bouncer.BouncerKind
+import io.github.trevarj.motd.bouncer.SojuLoginForm
+import io.github.trevarj.motd.bouncer.ZncLoginForm
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
@@ -22,6 +27,7 @@ import javax.inject.Inject
 class OnboardingViewModel @Inject constructor(
     private val networkRepository: NetworkRepository,
     private val connectionManager: ConnectionManager,
+    private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(OnboardingState())
@@ -53,9 +59,12 @@ class OnboardingViewModel @Inject constructor(
     }
 
     fun chooseConnection(choice: ConnectionChoice) = dispatch(OnboardingAction.ChooseConnection(choice))
+    fun chooseBouncerKind(kind: BouncerKind) = dispatch(OnboardingAction.ChooseBouncerKind(kind))
     fun applyLiberaPreset() = dispatch(OnboardingAction.ApplyLiberaPreset)
     fun editServer(server: ServerForm) = dispatch(OnboardingAction.EditServer(server))
     fun editAuth(auth: AuthForm) = dispatch(OnboardingAction.EditAuth(auth))
+    fun editSojuLogin(login: SojuLoginForm) = dispatch(OnboardingAction.EditSojuLogin(login))
+    fun editZncLogin(login: ZncLoginForm) = dispatch(OnboardingAction.EditZncLogin(login))
     fun toggleBouncerNetwork(netId: String) = dispatch(OnboardingAction.ToggleBouncerNetwork(netId))
 
     // -- side effects --------------------------------------------------------------------------
@@ -72,11 +81,19 @@ class OnboardingViewModel @Inject constructor(
         connectTestJob = viewModelScope.launch {
             if (prior != null) networkRepository.deleteNetwork(prior)
             val s = _state.value
+            val server = if (s.isZnc) {
+                s.server.copy(
+                    username = s.zncLogin.username.trim(),
+                    realname = s.server.nick.trim(),
+                )
+            } else {
+                s.server
+            }
             val entity = buildNetworkEntity(
-                server = s.server,
-                auth = s.auth,
+                server = server,
+                auth = s.activeAuth,
                 role = s.role,
-                name = s.server.host,
+                name = if (s.isZnc) s.zncLogin.network.trim() else s.server.host,
             )
             val networkId = networkRepository.addNetwork(entity)
             dispatch(OnboardingAction.NetworkCreated(networkId))
@@ -145,6 +162,7 @@ class OnboardingViewModel @Inject constructor(
     fun finish(onDone: () -> Unit) = viewModelScope.launch {
         val s = _state.value
         val rootId = s.networkId
+        if (s.isZnc && rootId != null) bouncerKindPrefs.markZnc(rootId)
         if (s.isSoju && rootId != null) {
             // The root's BOUNCER NETWORK handler may have already auto-created child rows from
             // soju's notifications; dedup against them by bouncerNetId so we never create a second
@@ -170,7 +188,7 @@ class OnboardingViewModel @Inject constructor(
     private fun childEntity(rootParentId: Long, row: BouncerNetworkRow, seed: OnboardingState) =
         buildNetworkEntity(
             server = seed.server,
-            auth = seed.auth,
+            auth = seed.sojuLogin.toAuthForm(),
             role = io.github.trevarj.motd.data.db.NetworkRole.BOUNCER_CHILD,
             name = row.name,
             parentId = rootParentId,

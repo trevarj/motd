@@ -186,6 +186,7 @@ phase_a() {
 
   # 3. Choose soju.
   step "Choose the soju bouncer path"
+  tap_tag onboarding_choice_bouncer
   tap_tag onboarding_choice_soju
   tap_tag onboarding_forward_button
   assert_text "Host"                     # SERVER page fields present
@@ -206,15 +207,15 @@ phase_a() {
   step "Advance to Authentication"
   tap_tag onboarding_forward_button
   assert_text "Authentication"
-  assert_text "Username"
-  assert_text "Password"
+  assert_text "Bouncer username"
+  assert_text "Bouncer password"
   assert_no_crash
 
   # 6. Auth creds.
   step "Fill soju SASL PLAIN credentials"
-  input_by_text_label "Username" "$MOTD_SOJU_USER"
+  input_by_text_label "Bouncer username" "$MOTD_SOJU_USER"
   redump
-  input_by_text_label "Password" "$MOTD_SOJU_PASS"
+  input_by_text_label "Bouncer password" "$MOTD_SOJU_PASS"
   redump
   assert_no_crash
 
