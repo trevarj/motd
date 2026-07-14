@@ -18,6 +18,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
@@ -134,6 +136,35 @@ abstract class HeadlessE2eDriver {
         }
     }
 
+    /**
+     * Retained messages can precede rows produced by other independently-cleared Orchestrator
+     * tests. A LazyColumn exposes only its current viewport to the semantics tree, so looking for
+     * an older retained line without scrolling would turn a successful backfill into a false
+     * negative. This proves that the imported line is reachable in the timeline.
+     */
+    protected fun scrollTimelineToTextWithConnectionDiagnostics(
+        text: String,
+        timeoutMillis: Long = 15_000,
+    ) {
+        repeat(MAX_HISTORY_SCROLLS) {
+            val textIsVisible = compose.onAllNodesWithText(
+                text,
+                substring = true,
+                ignoreCase = true,
+                useUnmergedTree = true,
+            ).fetchSemanticsNodes().isNotEmpty()
+            if (textIsVisible) {
+                return
+            }
+            compose.onNodeWithTag("chat_timeline", useUnmergedTree = true)
+                // MessageList is reverseLayout=true, so scrolling toward older (higher-index)
+                // rows uses the inverse gesture direction.
+                .performTouchInput { swipeDown() }
+            compose.waitForIdle()
+        }
+        waitForTextWithConnectionDiagnostics(text, timeoutMillis)
+    }
+
     protected fun waitForDescription(description: String, timeoutMillis: Long = 15_000) {
         compose.waitUntil(timeoutMillis) {
             compose.onAllNodesWithContentDescription(
@@ -216,6 +247,10 @@ abstract class HeadlessE2eDriver {
         prefix,
         System.nanoTime(),
     )
+
+    private companion object {
+        const val MAX_HISTORY_SCROLLS = 12
+    }
 }
 
 @RunWith(AndroidJUnit4::class)
@@ -230,7 +265,7 @@ class OnboardingHeadlessE2eTest : HeadlessE2eDriver() {
         waitForText(channel, timeoutMillis = 30_000)
         clickText(channel)
         waitForTag("chat_composer_field", timeoutMillis = 30_000)
-        waitForTextWithConnectionDiagnostics("hello, this is a seeded plain line", timeoutMillis = 30_000)
+        scrollTimelineToTextWithConnectionDiagnostics("hello, this is a seeded plain line", timeoutMillis = 30_000)
     }
 }
 
