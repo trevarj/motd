@@ -6,6 +6,9 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.InviteState
+import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -17,6 +20,7 @@ import io.github.trevarj.motd.irc.proto.Prefix
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -127,5 +131,47 @@ class MotdNotificationsFoolTest {
             .activeNotifications.single().notification
         val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted)
         assertEquals(listOf("only once"), style?.messages?.map { it.text.toString() })
+    }
+
+    @Test
+    fun invitationNotification_hasOpenJoinDismissAndSwipeContracts_thenCancelsOnResolution() = runTest {
+        val messageId = db.messageDao().insertAll(
+            listOf(
+                MessageEntity(
+                    bufferId = bufferId,
+                    msgid = "invite-notification",
+                    serverTime = 2_000,
+                    sender = "alice",
+                    kind = MessageKind.INVITE,
+                    text = "alice invited you",
+                    dedupKey = "invite-notification",
+                    eventKey = "invite:msgid:invite-notification",
+                    eventPayload = "invite-v1:YQ:Yg:Yw",
+                    inviteState = InviteState.PENDING,
+                ),
+            ),
+        ).single()
+
+        notifications.onInvitation(1, bufferId, messageId)
+
+        val posted = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+            .activeNotifications.single().notification
+        assertEquals(MotdNotifications.CHANNEL_INVITATIONS, posted.channelId)
+        assertEquals(MotdNotifications.ACTION_OPEN_BUFFER, shadowOf(posted.contentIntent).savedIntent.action)
+        assertEquals(
+            listOf("Join", "Dismiss"),
+            posted.actions.map { it.title.toString() },
+        )
+        val join = shadowOf(posted.actions[0].actionIntent).savedIntent
+        assertEquals(MotdNotifications.ACTION_ACCEPT_INVITE, join.action)
+        assertEquals(messageId, join.getLongExtra(MotdNotifications.EXTRA_INVITE_MESSAGE_ID, -1))
+        val dismiss = shadowOf(posted.actions[1].actionIntent).savedIntent
+        assertEquals(InviteReceiver.ACTION_DISMISS, dismiss.action)
+        assertEquals(messageId, dismiss.getLongExtra(InviteReceiver.EXTRA_MESSAGE_ID, -1))
+        assertNotNull(posted.deleteIntent)
+        assertEquals(InviteReceiver.ACTION_DISMISS, shadowOf(posted.deleteIntent).savedIntent.action)
+
+        notifications.onInvitationResolved(messageId)
+        assertEquals(0, postedCount())
     }
 }

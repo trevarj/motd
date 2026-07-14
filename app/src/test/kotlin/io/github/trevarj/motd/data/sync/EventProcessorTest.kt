@@ -1020,6 +1020,46 @@ class EventProcessorTest {
         )
         assertEquals(InviteState.JOINED, db.messageDao().byId(row.id)?.inviteState)
         assertEquals(listOf(row.id), resolved)
+
+        // A later socket replay or push delivery must not revive the resolved card.
+        recording.process(networkId, invite)
+        assertEquals(InviteState.JOINED, db.messageDao().byId(row.id)?.inviteState)
+        assertEquals(1, notified.size)
+    }
+
+    @Test
+    fun msgidlessInvite_fallbackDeduplicatesWithinBucket_andLaterInviteRemainsDistinct() = runTest {
+        val first = IrcEvent.Invited(ctx(msgid = null, time = 31_000), "alice", "me", "#fallback")
+        val duplicate = first.copy(ctx = first.ctx.copy(serverTime = 32_000))
+        val later = first.copy(ctx = first.ctx.copy(serverTime = 61_000))
+
+        processor.process(networkId, first)
+        processor.process(networkId, duplicate)
+        processor.process(networkId, later)
+
+        val buffer = db.bufferDao().byName(networkId, "#fallback")!!
+        assertEquals(2, pagingList(buffer.id).count { it.kind == MessageKind.INVITE })
+    }
+
+    @Test
+    fun invalidSelfInvite_isInformationalInServerBuffer_withoutActions() = runTest {
+        processor.process(networkId, IrcEvent.Invited(ctx("invalid-invite"), "alice", "me", "not a channel"))
+
+        val server = db.bufferDao().byName(networkId, "*")!!
+        val row = pagingList(server.id).single { it.kind == MessageKind.INVITE }
+        assertEquals(InviteState.HISTORICAL, row.inviteState)
+        assertTrue(row.text.contains("invalid invitation"))
+    }
+
+    @Test
+    fun inviteContributesPreviewAndActivity_butNeverUnread() = runTest {
+        processor.process(networkId, IrcEvent.Invited(ctx("preview-invite", 9_000), "alice", "me", "#preview"))
+
+        val row = db.bufferDao().observeChatList().first().single { it.displayName == "#preview" }
+        assertEquals("alice invited you to #preview", row.lastMessageText)
+        assertEquals(9_000L, row.lastMessageTime)
+        assertEquals(0, row.unreadCount)
+        assertEquals(0, row.mentionCount)
     }
 
     @Test
