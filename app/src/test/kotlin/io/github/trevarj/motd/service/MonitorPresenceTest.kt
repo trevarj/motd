@@ -3,10 +3,34 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MonitorPresenceTest {
+    @Test
+    fun `runtime ISUPPORT initializes monitor only when registration gained support`() {
+        assertTrue(
+            shouldInitializeMonitorFromRegistration(
+                isupport = mapOf("MONITOR" to "10"),
+                hasBaseline = false,
+            ),
+        )
+        assertFalse(
+            shouldInitializeMonitorFromRegistration(
+                isupport = emptyMap(),
+                hasBaseline = false,
+            ),
+        )
+        assertFalse(
+            shouldInitializeMonitorFromRegistration(
+                isupport = mapOf("MONITOR" to "10"),
+                hasBaseline = true,
+            ),
+        )
+    }
+
     @Test fun `friends win bounded slots before ordered query peers`() {
         val selection = selectMonitorTargets(
             friends = setOf("Zed", "alice"),

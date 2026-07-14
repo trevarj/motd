@@ -460,6 +460,22 @@ class ConnectionManagerImpl @Inject constructor(
                     setPresence(networkId, target, PresenceState.UNKNOWN)
                 }
             }
+            is IrcEvent.Registered -> {
+                // Registration reaches Ready on 001, while servers commonly advertise ISUPPORT
+                // later in 005. The client republishes Registered when that runtime snapshot
+                // changes; initialize MONITOR here if the first Ready-time pass saw it as absent.
+                if (shouldInitializeMonitorFromRegistration(event.isupport, monitoredTargets.containsKey(networkId))) {
+                    clientFor(networkId)?.let { client ->
+                        reconcileMonitor(
+                            networkId,
+                            client,
+                            settings.settings.first().friends,
+                            bufferDao.observeChatList().first(),
+                            fresh = true,
+                        )
+                    }
+                }
+            }
             is IrcEvent.NickChanged -> rekeyPresence(networkId, event.from, event.to)
             is IrcEvent.CapsChanged -> {
                 if (event.removed.any { it in NO_IMPLICIT_NAMES_ALIASES }) invalidateRosters(networkId)
