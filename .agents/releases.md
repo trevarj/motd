@@ -39,6 +39,9 @@ E2E runs manually/nightly. Neither currently gates a release because the hosted
 managed emulator can fail in System UI before MOTD starts. The release job still
 runs the FOSS release build, tests, and lint.
 
+The release description should contain a changelog of commits since
+the last version.
+
 ## Failure recovery
 
 - Inspect the failed job before changing code or secrets; distinguish runner,
