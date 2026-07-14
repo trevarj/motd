@@ -594,6 +594,109 @@ replies, and unreact remain under consideration. MOTD's reply/reaction support
 should therefore continue to obey `CLIENTTAGDENY` and visibly degrade rather
 than assuming direct Libera acceptance.
 
+## Ready implementation evidence
+
+Status on 2026-07-14: all six Ready implementations, focused JVM/Robolectric
+tests, release-parity build, direct/soju scripted checks, and ZNC degradation
+checks are complete. The final physical-device UI pass is still pending
+maintainer authorization to replace the installed debug package; therefore the
+executive table remains **Ready / included** and the combined goal is not yet
+marked Complete.
+
+### I1 evidence
+
+- `5096b0c`, `c520779`, and `0820b74` add durable typed invitations, push
+  convergence, actionable cards, notification actions, and retryable failures.
+  `0607fb9` makes the durable CAS -> bounded Ready wait -> state recheck ->
+  single wire write sequence independently testable.
+- `EventProcessorTest`, `PushEventHandlerTest`, `InviteJoinCoordinatorTest`, and
+  `MotdNotificationsFoolTest` cover socket/push parsing, msgid and 30-second
+  fallback dedup, replay after resolution, historical/third-party/invalid
+  placement, preview without unread, concurrent repeated actions,
+  timeout/retry without a delayed JOIN, dismiss races, JOIN
+  echo/rejection/disconnect, and real Android open/Join/Dismiss/swipe intents.
+- `./test/e2e/local-stack.sh invite-check` passed with a direct Ergo sender and
+  attached soju downstream client; the INVITE retained server-time and msgid.
+  The scripted direct fixture also passed a separate two-client invite.
+
+### U1 and U2 evidence
+
+- `ab7fa4f`, `38ac1a8`, and `e2b0ca8` retain multi-prefix userhost NAMES data,
+  add token-correlated WHOX snapshots, converge observable cached identity, and
+  merge it with one-off WHOIS UI state. `6e87c08` preserves safe fields from a
+  partial WHOX row without inventing away or realname state.
+- `EventMapperNamesTest`, `WhoxTest`, `EventProcessorTest`, and WHOIS merge tests
+  cover exact `%tuhnafr` serialization (no IP), placeholders, malformed and
+  partial rows, casemapped completion, concurrent/coalesced masks, timeout and
+  disconnect, Room convergence, CHGHOST precedence, token wrap/exhaustion, and
+  unchanged membership prefixes.
+- `./test/e2e/local-stack.sh ready-check` passed exact userhost NAMES and WHOX
+  behavior directly. The soju leg proves documented degradation: pinned soju
+  omits downstream `userhost-in-names` but preserves WHOX enrichment.
+
+### N1 evidence
+
+- `814f837`, `720cffe`, and `d66bc9` implement stable alias preference, explicit
+  single-flight NAMES+WHOX refresh, connection-scoped roster authority, stale
+  presentation/retry, parsed PREFIX/CHANMODES, and invalidation/clear rules.
+  `d55cecf` prevents NAMES from claiming `LOADED` before paired WHOX succeeds;
+  `952cf55` prevents NICK/QUIT races from resurrecting snapshot members while
+  retaining exactly-once system presentation.
+- Capability, roster-state, presentation, and `EventProcessorTest` coverage
+  includes every alias, unsupported behavior, forced/failed refresh semantics,
+  JOIN/PART/KICK/QUIT/NICK/MODE ordering, alternate PREFIX/CHANMODES, stale
+  counts, self-PART clearing, and retryable WHOX timeout.
+- The direct scripted fixture proves no implicit 353/366 after JOIN and a
+  complete explicit NAMES/WHOX response. The soju leg proves draft-alias
+  selection and its userhost degradation without losing membership.
+
+### P1 evidence
+
+- `c0cfdd1` and `bfdfedc` add typed 730-734 events, bounded UTF-8 command
+  chunking, desired-set selection, fresh C/+ /S and live +/- reconciliation,
+  connection-scoped presence, metadata WHOX, and accessible query/nick-sheet
+  indicators. `7ecba03` exposes and tests the reconciliation/presence reducers.
+- Protocol and app tests cover MONITOR support parsing, priority/limit policy,
+  hostmask and malformed numerics, tracked-only updates after rejection,
+  friend/query diffs, nick rekey, disconnect-to-unknown, diagnostic
+  aggregation, and absence of timeline/activity persistence.
+- The direct fixture passed online/offline/list snapshots and WHOX metadata.
+  The soju fixture passed extended-monitor forwarding while documenting its
+  numeric formatting differences. Root and unsupported paths issue no MONITOR
+  commands by construction and retain unknown presence.
+
+### B1 evidence
+
+- `65a9332` retains immutable nested batch trees, recursively degrades unknown
+  or malformed batches, atomically fans membership out to affected channels,
+  persists stable typed pills, and excludes them from JPQ visibility/activity,
+  unread, preview, search, and raw visibility paths. `8d04f19` adds localized
+  accessible expanded/collapsed state.
+- Batch assembler/mapper, DAO/visibility, payload, and `EventProcessorTest`
+  coverage includes nested CHATHISTORY, wire order, 100-user and multi-channel
+  fan-out, malformed all-or-nothing behavior, forced transaction rollback,
+  replay, missing-msgid bucket identities, disconnect reset, expansion content,
+  and ordinary JOIN/QUIT behavior.
+- The deterministic direct fixture passed nested Solanum-shaped netsplit and
+  netjoin batches. Pinned soju strips those wrappers but preserves msgid-bearing
+  QUIT/JOIN mutations; `ready-check` asserts that clean degradation explicitly.
+
+### Shared and compatibility evidence
+
+- `ae289d6` provides schema 6 and the additive 5-to-6 migration. The populated
+  migration test preserves messages, FTS search, buffer joined/pinned
+  visibility, and member prefixes while enforcing typed event identity. The
+  destructive development-only downgrade boundary remains documented beside
+  `MIGRATION_5_6` and `DbModule`.
+- The release-parity matrix from `.agents/testing.md`, plus debug assembly,
+  passed on 2026-07-14. After the later audit fixes, the affected focused tests
+  and FOSS lint also passed; the full matrix must be rerun once more for final
+  closeout.
+- `./test/e2e/znc-stack.sh probe` passed. The pinned ZNC advertises neither
+  MONITOR nor no-implicit-names and lacks `draft/chathistory`; connection,
+  messaging, two-client routing, reconnect-gap recovery, and timestamped native
+  playback remain intact.
+
 ## Completion and verification policy
 
 The Ready work is one implementation goal but should land in the documented
