@@ -26,6 +26,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.canSendReactionTags
@@ -63,7 +64,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
-import java.time.Instant
 import javax.inject.Inject
 
 private const val MAX_REPLY_PREVIEW_CACHE = 128
@@ -605,7 +605,7 @@ class ChatViewModel @Inject constructor(
                     ChatHistoryRequest(
                         subcommand = ChatHistoryRequest.Subcommand.AROUND,
                         target = name,
-                        bound1 = "timestamp=${Instant.ofEpochMilli(timeMs)}",
+                        bound1 = ChatHistorySelectors.timestamp(timeMs),
                         limit = limit,
                     ),
                 )

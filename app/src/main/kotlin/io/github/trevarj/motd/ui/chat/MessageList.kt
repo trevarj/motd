@@ -182,7 +182,10 @@ fun MessageList(
     LazyColumn(
         state = listState,
         reverseLayout = true,
-        modifier = modifier.fillMaxSize(),
+        // Retained rows can predate messages sent by earlier orchestrated journeys. Keep the
+        // timeline addressable so the real-stack acceptance test can scroll to an imported row
+        // instead of confusing an off-screen row with a missing one.
+        modifier = modifier.fillMaxSize().testTag("chat_timeline"),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
         // Stable keys stop paging invalidations (new message / echo confirm / page load) from

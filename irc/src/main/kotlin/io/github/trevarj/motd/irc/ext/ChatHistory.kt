@@ -1,6 +1,19 @@
 package io.github.trevarj.motd.irc.ext
 
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import java.time.Instant
+import java.time.format.DateTimeFormatterBuilder
+
+/**
+ * Renders an IRCv3 CHATHISTORY timestamp selector with the millisecond precision required by
+ * soju. [Instant.toString] drops a zero fractional part, which soju rejects for these bounds.
+ */
+object ChatHistorySelectors {
+    private val timestampFormatter = DateTimeFormatterBuilder().appendInstant(3).toFormatter()
+
+    fun timestamp(epochMillis: Long): String =
+        "timestamp=${timestampFormatter.format(Instant.ofEpochMilli(epochMillis))}"
+}
 
 /**
  * Builds `CHATHISTORY` request lines (plans/03). Pure string construction; the client sends the

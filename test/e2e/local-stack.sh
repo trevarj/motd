@@ -21,6 +21,7 @@
 #   ./test/e2e/local-stack.sh stop-soju   # deterministic EOF while preserving soju DB/config
 #   ./test/e2e/local-stack.sh start-soju  # restart the preserved soju instance
 #   ./test/e2e/local-stack.sh status    # show pids + soju network status
+#   ./test/e2e/local-stack.sh history-check # retained TARGETS + LATEST CHATHISTORY proof
 #   ./test/e2e/local-stack.sh control-check # BouncerServ admin/non-admin and mutation proof
 #   ./test/e2e/local-stack.sh read-marker-check # two-client marker broadcast/reconnect proof
 #   ./test/e2e/local-stack.sh invite-check # direct sender -> soju downstream INVITE proof
@@ -33,6 +34,7 @@
 #   ./test/e2e/local-stack.sh obfs-xray-up       # compatibility proof: Xray server + sing-box SOCKS client
 #   ./test/e2e/local-stack.sh obfs-xray-down     # stop the compatibility proof layer
 #   ./test/e2e/local-stack.sh obfs-xray-validate # socket-level proof through that layer
+#   ./test/e2e/local-stack.sh obfs-xray-history-check # retained history through that layer
 #   ./test/e2e/local-stack.sh obfs-xray-negative # reject a deliberately wrong REALITY public key
 #
 # All credentials below are ephemeral LOCAL test creds, NOT secrets.
@@ -90,7 +92,7 @@ die() { printf '\033[31m[local-stack] FATAL:\033[0m %s\n' "$*" >&2; exit 1; }
 # nix shell providing whatever the command needs but is missing from PATH.
 need_reexec=false
 case "$CMD" in
-  control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down)
+  control-check|history-check|read-marker-check|invite-check|ready-up|ready-check|ready-down)
     command -v soju >/dev/null 2>&1 && command -v ergo >/dev/null 2>&1 && \
       command -v python3 >/dev/null 2>&1 || need_reexec=true ;;
   obfs-*)
@@ -115,6 +117,9 @@ ctl() { sojuctl -config "$CONF_SOJU" "$@"; }
 # adb: prefer a real executable on PATH (type -P ignores shell funcs/aliases so a
 # leaked `adb` alias can't false-positive), else the repo flake devshell.
 adb() {
+  # Socket-only CI checks have no device to reverse into. Avoid constructing the
+  # Android flake environment merely to receive the expected "no devices" error.
+  [ "${MOTD_SKIP_ADB_REVERSE:-0}" != "1" ] || return 1
   local bin; bin="$(type -P adb 2>/dev/null || true)"
   if [ -n "$bin" ]; then "$bin" "$@"; else nix develop "$REPO" -c adb "$@"; fi
 }
@@ -316,6 +321,13 @@ control_check() {
   nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null || die "soju is not listening on 127.0.0.1:$SOJU_PORT"
   log "running BouncerServ admin/non-admin capability and mutation proof"
   python3 "$REPO/test/e2e/fixtures/bouncerserv-probe.py" --port "$SOJU_PORT"
+}
+
+history_check() {
+  [ -S "$ADMIN_SOCK" ] || die "soju admin socket not found; run '$0 up' first"
+  nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null || die "soju is not listening on 127.0.0.1:$SOJU_PORT"
+  log "proving retained TARGETS discovery and LATEST playback through Soju"
+  python3 "$REPO/test/e2e/fixtures/chathistory-probe.py" --port "$SOJU_PORT"
 }
 
 read_marker_check() {
@@ -600,6 +612,11 @@ PY
 #
 #   validator -> sing-box SOCKS -> VLESS+REALITY -> Xray -> 127.0.0.1:6697 (soju)
 
+xray_obfs_share_link() { # uuid pubkey shortid
+  printf 'vless://%s@127.0.0.1:%s?encryption=none&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=tcp#motd-local-xray-reality\n' \
+    "$1" "$XRAY_REALITY_PORT" "$HANDSHAKE_DOMAIN" "$2" "$3"
+}
+
 xray_obfs_stop_pids() {
   for p in xray singbox; do
     local f="$XRAY_OBFS_DIR/$p.pid"
@@ -663,14 +680,28 @@ EOF
   echo $! >"$XRAY_OBFS_DIR/singbox.pid"
   wait_port 127.0.0.1 "$XRAY_REALITY_PORT" "Xray REALITY server"
   wait_port 127.0.0.1 "$SINGBOX_SOCKS_PORT" "sing-box REALITY client"
+  log "adb reverse tcp:$XRAY_REALITY_PORT (device loopback -> host Xray REALITY ingress)"
+  adb reverse "tcp:$XRAY_REALITY_PORT" "tcp:$XRAY_REALITY_PORT" || log "adb reverse failed (no device?) — set it up manually"
   log "adb reverse tcp:$SINGBOX_SOCKS_PORT (device loopback -> host sing-box SOCKS)"
   adb reverse "tcp:$SINGBOX_SOCKS_PORT" "tcp:$SINGBOX_SOCKS_PORT" || log "adb reverse failed (no device?) — set it up manually"
-  log "cross-core layer up; prove it with '$0 obfs-xray-validate'"
+  cat >&2 <<EOF
+
+\033[32m[local-stack] OBFS XRAY UP\033[0m  logs: $XRAY_OBFS_DIR/{xray,singbox}.log
+
+For the arm64 app's Embedded REALITY mode, keep the bouncer endpoint as
+127.0.0.1:$SOJU_PORT and paste this local-only VLESS URI:
+  $(xray_obfs_share_link "$uuid" "$pub" "$sid")
+
+Socket checks:
+  $0 obfs-xray-validate
+  $0 obfs-xray-history-check
+EOF
 }
 
 xray_obfs_down() {
   log "stopping Xray-server/sing-box-client compatibility layer"
   xray_obfs_stop_pids
+  adb reverse --remove "tcp:$XRAY_REALITY_PORT" 2>/dev/null || true
   adb reverse --remove "tcp:$SINGBOX_SOCKS_PORT" 2>/dev/null || true
   log "obfs-xray-down (configs kept at $XRAY_OBFS_DIR)"
 }
@@ -707,6 +738,16 @@ if "CAP" not in banner: sys.exit(f"FAIL: no IRC CAP response through the tunnel 
 print(f"  IRC banner: {banner[:120]}")
 print("PASS: IRC/TLS reached soju through sing-box client + Xray REALITY server")
 PY
+}
+
+xray_obfs_history_check() {
+  [ -f "$XRAY_OBFS_DIR/reality.env" ] || die "compatibility layer not up — run '$0 obfs-xray-up' first"
+  nc -z 127.0.0.1 "$SINGBOX_SOCKS_PORT" 2>/dev/null || die "sing-box SOCKS proxy not listening on 127.0.0.1:$SINGBOX_SOCKS_PORT (run '$0 obfs-xray-up')"
+  log "proving retained CHATHISTORY through sing-box-client -> Xray REALITY tunnel"
+  python3 "$REPO/test/e2e/fixtures/chathistory-probe.py" \
+    --port "$SOJU_PORT" \
+    --socks-host 127.0.0.1 \
+    --socks-port "$SINGBOX_SOCKS_PORT"
 }
 
 # A positive cross-core tunnel is insufficient if a client accepts any REALITY key. Run a second,
@@ -775,6 +816,7 @@ case "$CMD" in
   start-soju) start_soju_for_reconnect ;;
   status) status ;;
   control-check) control_check ;;
+  history-check) history_check ;;
   read-marker-check) read_marker_check ;;
   invite-check) invite_check ;;
   ready-up) ready_up ;;
@@ -786,6 +828,7 @@ case "$CMD" in
   obfs-xray-up) xray_obfs_up ;;
   obfs-xray-down) xray_obfs_down ;;
   obfs-xray-validate) xray_obfs_validate ;;
+  obfs-xray-history-check) xray_obfs_history_check ;;
   obfs-xray-negative) xray_obfs_negative ;;
-  *) die "unknown command '$CMD' (want up|down|seed|burst|jpq|push|pause-soju|resume-soju|stop-soju|start-soju|status|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-negative)" ;;
+  *) die "unknown command '$CMD' (want up|down|seed|burst|jpq|push|pause-soju|resume-soju|stop-soju|start-soju|status|history-check|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-history-check|obfs-xray-negative)" ;;
 esac

@@ -98,6 +98,7 @@ so a USB device reaches it at `127.0.0.1:6697`.
 ./test/e2e/local-stack.sh up
 ./test/e2e/local-stack.sh status
 ./test/e2e/local-stack.sh seed
+./test/e2e/local-stack.sh history-check
 ./test/e2e/local-stack.sh control-check
 ./test/e2e/local-stack.sh read-marker-check
 ./test/e2e/local-stack.sh down
@@ -150,6 +151,12 @@ a downstream reconnect. The live response is required inside MOTD’s bounded
 five-second reconnect barrier: MOTD converges its durable local marker with the
 server maximum before CHATHISTORY replay can populate unread-count queries.
 
+`history-check` authenticates as the fixture bouncer user, requires
+`##motdtest` in a `CHATHISTORY TARGETS` response bounded from
+`1970-01-01T00:00:00.000Z`, then requires its seeded message from
+`CHATHISTORY LATEST`. It makes the first-sync discovery path and its required
+three-digit fractional timestamp visible without needing an Android device.
+
 Always pair `pause-soju` with `resume-soju`; both target the exact PID recorded
 by the fixture rather than matching processes by command line.
 
@@ -176,8 +183,14 @@ or clear only the debug package before switching accounts. The admin account
 must expose `user` and `server` command families; the non-admin account must not.
 
 The same script exposes `obfs-*` and `obfs-xray-*` commands for VLESS + REALITY
-compatibility and negative-path validation. Run the base stack first and see
-[`../../docs/obfuscation.md`](../../docs/obfuscation.md) for the product model.
+compatibility and negative-path validation. After `up`, use
+`obfs-xray-up`, `obfs-xray-validate`, and `obfs-xray-history-check` to prove
+the embedded-client-compatible sing-box → Xray path carries both the TLS IRC
+connection and retained history. `obfs-xray-up` reverses the local VLESS
+ingress and prints a local-only URI for an arm64 device's Embedded REALITY
+setting; leave the bouncer destination as `127.0.0.1:6697`. Run the base stack
+first and see [`../../docs/obfuscation.md`](../../docs/obfuscation.md) for the
+product model.
 
 ## Native ZNC fixture
 

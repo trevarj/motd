@@ -147,7 +147,17 @@ class HistoryResyncCoordinatorTest {
 
         coordinator.resyncBuffer(networkId, bufferId, "#chan", source)
 
-        assertEquals("timestamp=1970-01-01T00:00:01Z", source.requests.first().bound1)
+        assertEquals("timestamp=1970-01-01T00:00:01.000Z", source.requests.first().bound1)
+    }
+
+    @Test
+    fun timestampBoundaryRetainsMillisecondsWithExactlyThreeFractionalDigits() = runTest {
+        processor.process(networkId, message("seed", 1_234))
+        val source = FakeSource(msgidRefs = false) { ChatHistoryResult(emptyList(), emptyList()) }
+
+        coordinator.resyncBuffer(networkId, bufferId, "#chan", source)
+
+        assertEquals("timestamp=1970-01-01T00:00:01.234Z", source.requests.first().bound1)
     }
 
     @Test
@@ -247,10 +257,52 @@ class HistoryResyncCoordinatorTest {
 
         assertEquals(HistoryResyncState.Updated(1), result)
         val targets = source.requests.first { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS }
-        assertEquals("timestamp=1970-01-01T00:00:00Z", targets.bound2)
-        assertTrue(targets.bound1!!.startsWith("timestamp="))
+        assertEquals("timestamp=1970-01-01T00:00:00.000Z", targets.bound2)
+        assertTrue(targets.bound1!!.matches(Regex("timestamp=.*\\.\\d{3}Z")))
         assertTrue(db.bufferDao().byName(networkId, "#old") != null)
         assertTrue(syncPrefs.lastSuccessfulSync(networkId) != null)
+    }
+
+    @Test
+    fun networkSyncSeedsLatestWhenLiveJoinPrecedesRetainedHistoryEvenWithPriorCursor() = runTest {
+        // A soju child sends the live self-JOIN as it binds. Without an initial LATEST overlap,
+        // that new row becomes the AFTER cursor and hides every older retained channel message.
+        // Keep a prior cursor to cover an upgrade from the behavior that already marked this
+        // bouncer network successfully synced.
+        syncPrefs.setLastSuccessfulSync(networkId, 2_000)
+        processor.process(
+            networkId,
+            IrcEvent.Joined(
+                ctx = MessageContext(null, 1_000, null, null, null),
+                nick = "me",
+                channel = "#chan",
+                account = null,
+                realname = null,
+                isSelf = true,
+            ),
+        )
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    ChatHistoryResult(emptyList(), listOf("#chan" to 1_000L))
+                ChatHistoryRequest.Subcommand.AFTER -> ChatHistoryResult(emptyList(), emptyList())
+                ChatHistoryRequest.Subcommand.LATEST ->
+                    ChatHistoryResult(listOf(message("retained", 500)), emptyList())
+                else -> ChatHistoryResult(emptyList(), emptyList())
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+
+        assertEquals(HistoryResyncState.Updated(1), result)
+        assertEquals(
+            listOf(
+                ChatHistoryRequest.Subcommand.TARGETS,
+                ChatHistoryRequest.Subcommand.LATEST,
+            ),
+            source.requests.map { it.subcommand },
+        )
+        assertTrue(rows().any { it.msgid == "retained" })
     }
 
     @Test
