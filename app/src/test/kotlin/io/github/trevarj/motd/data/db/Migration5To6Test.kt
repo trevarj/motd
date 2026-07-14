@@ -34,6 +34,8 @@ class Migration5To6Test {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         db.execSQL(CREATE_MESSAGES_V5)
                         db.execSQL(CREATE_USERS_V5)
+                        db.execSQL(CREATE_BUFFERS_V5)
+                        db.execSQL(CREATE_MEMBERS_V5)
                         db.execSQL(CREATE_DEDUP_INDEX)
                         db.execSQL(CREATE_MSGID_INDEX)
                         db.execSQL(CREATE_TIME_INDEX)
@@ -45,6 +47,8 @@ class Migration5To6Test {
         )
         val db = helper!!.writableDatabase
         db.execSQL(INSERT_MESSAGE)
+        db.execSQL(INSERT_BUFFER)
+        db.execSQL(INSERT_MEMBER)
         db.execSQL("INSERT INTO messages_fts(docid, text, sender) VALUES (1, 'hello world', 'alice')")
 
         MIGRATION_5_6.migrate(db)
@@ -61,6 +65,17 @@ class Migration5To6Test {
         db.query("SELECT text FROM messages_fts WHERE messages_fts MATCH 'hello*'").use { cursor ->
             assertTrue(cursor.moveToFirst())
             assertEquals("hello world", cursor.getString(0))
+        }
+        db.query("SELECT name, joined, pinned FROM buffers WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("#room", cursor.getString(0))
+            assertEquals(1, cursor.getInt(1))
+            assertEquals(1, cursor.getInt(2))
+        }
+        db.query("SELECT nick, prefixes FROM members WHERE bufferId = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("alice", cursor.getString(0))
+            assertEquals("@", cursor.getString(1))
         }
 
         db.execSQL(insertTyped(2, "invite:1"))
@@ -107,6 +122,21 @@ class Migration5To6Test {
                 PRIMARY KEY(networkId, nick)
             )
         """
+        const val CREATE_BUFFERS_V5 = """
+            CREATE TABLE buffers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, networkId INTEGER NOT NULL,
+                name TEXT NOT NULL, displayName TEXT NOT NULL, type TEXT NOT NULL,
+                topic TEXT, topicSetBy TEXT, joined INTEGER NOT NULL, pinned INTEGER NOT NULL,
+                muted INTEGER NOT NULL, ordering INTEGER NOT NULL, readMarkerTime INTEGER,
+                oldestFetchedTime INTEGER, historyComplete INTEGER NOT NULL
+            )
+        """
+        const val CREATE_MEMBERS_V5 = """
+            CREATE TABLE members (
+                bufferId INTEGER NOT NULL, nick TEXT NOT NULL, prefixes TEXT NOT NULL,
+                PRIMARY KEY(bufferId, nick)
+            )
+        """
         const val CREATE_DEDUP_INDEX =
             "CREATE UNIQUE INDEX index_messages_bufferId_dedupKey ON messages(bufferId, dedupKey)"
         const val CREATE_MSGID_INDEX =
@@ -119,6 +149,15 @@ class Migration5To6Test {
             INSERT INTO messages
                 (id, bufferId, msgid, serverTime, sender, kind, text, isSelf, hasMention, failed, dedupKey)
             VALUES (1, 1, 'm1', 1000, 'alice', 'PRIVMSG', 'hello world', 0, 0, 0, 'm1')
+        """
+        const val INSERT_BUFFER = """
+            INSERT INTO buffers
+                (id, networkId, name, displayName, type, joined, pinned, muted, ordering,
+                 historyComplete)
+            VALUES (1, 1, '#room', '#Room', 'CHANNEL', 1, 1, 0, 0, 0)
+        """
+        const val INSERT_MEMBER = """
+            INSERT INTO members(bufferId, nick, prefixes) VALUES (1, 'alice', '@')
         """
     }
 }
