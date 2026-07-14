@@ -801,6 +801,36 @@ class EventProcessorTest {
     }
 
     @Test
+    fun namesSnapshot_replaysOrderedRemovalAndRenameRaces_withoutDuplicateTimelineRows() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.Joined(ctx(), "me", "#room", null, null, isSelf = true),
+        )
+        processor.process(networkId, IrcEvent.NamesStarted("#room"))
+        processor.process(networkId, IrcEvent.Kicked(ctx("kick"), "Bob", "#room", "op", null, false))
+        processor.process(networkId, IrcEvent.NickChanged(ctx("nick"), "Alice", "Alicia", false))
+        processor.process(networkId, IrcEvent.Quit(ctx("quit"), "Carol", "gone"))
+        processor.process(networkId, IrcEvent.Parted(ctx("part"), "Dave", "#room", null, false))
+        processor.process(
+            networkId,
+            IrcEvent.Names(
+                "#room",
+                listOf("Alice", "Bob", "Carol", "Dave", "Eve").map {
+                    IrcEvent.Names.Member(it, "", null, null)
+                },
+            ),
+        )
+
+        val buffer = db.bufferDao().byName(networkId, "#room")!!
+        assertEquals(setOf("Alicia", "Eve"), db.memberDao().allNow(buffer.id).map { it.nick }.toSet())
+        val rows = pagingList(buffer.id)
+        assertEquals(1, rows.count { it.kind == MessageKind.KICK })
+        assertEquals(1, rows.count { it.kind == MessageKind.NICK })
+        assertEquals(1, rows.count { it.kind == MessageKind.QUIT })
+        assertEquals(1, rows.count { it.kind == MessageKind.PART })
+    }
+
+    @Test
     fun selfPart_clearsDurableRoster() = runTest {
         processor.process(
             networkId,

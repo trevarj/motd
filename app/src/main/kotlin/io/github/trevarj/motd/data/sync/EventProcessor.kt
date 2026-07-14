@@ -54,8 +54,22 @@ class EventProcessor @Inject constructor(
         data class Upsert(val nick: String) : RosterDelta
         data class Remove(val nick: String) : RosterDelta
         data class Rename(val from: String, val to: String) : RosterDelta
+        data class DeferredQuit(val event: IrcEvent.Quit) : RosterDelta
+        data class DeferredNick(val event: IrcEvent.NickChanged) : RosterDelta
         data class Prefix(val nick: String, val prefix: Char, val adding: Boolean) : RosterDelta
     }
+
+    private data class DeferredRosterPresentation(
+        val ctx: MessageContext,
+        val kind: MessageKind,
+        val sender: String,
+        val text: String,
+    )
+
+    private data class RosterReplay(
+        val members: List<MemberEntity>,
+        val presentations: List<DeferredRosterPresentation>,
+    )
 
     /** Per-network state for self-nick tracking, mention regex and case normalization. */
     private class NetworkState(
@@ -547,6 +561,9 @@ class EventProcessor @Inject constructor(
             if (e.ctx.batchId == null) journal(networkId, bufferId, RosterDelta.Remove(e.nick))
             insertSystem(bufferId, e.ctx, MessageKind.QUIT, e.nick, "${e.nick} quit" + (e.reason?.let { " ($it)" } ?: ""))
         }
+        if (e.ctx.batchId == null) {
+            journalAcrossActiveSnapshots(networkId, buffers.toSet(), RosterDelta.DeferredQuit(e))
+        }
     }
 
     private suspend fun onKicked(networkId: Long, e: IrcEvent.Kicked) {
@@ -576,6 +593,9 @@ class EventProcessor @Inject constructor(
             }
             insertSystem(bufferId, e.ctx, MessageKind.NICK, e.from, "${e.from} is now known as ${e.to}")
         }
+        if (e.ctx.batchId == null) {
+            journalAcrossActiveSnapshots(networkId, buffers.toSet(), RosterDelta.DeferredNick(e))
+        }
     }
 
     private suspend fun onNamesStarted(networkId: Long, e: IrcEvent.NamesStarted) {
@@ -588,14 +608,14 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
         val deltas = rosterSnapshots.remove(RosterKey(networkId, bufferId)).orEmpty()
-        val members = replayRosterDeltas(
+        val replay = replayRosterDeltas(
             bufferId,
             e.members.map { MemberEntity(bufferId, it.nick, it.prefixes) },
             deltas,
             st,
         )
         db.withTransaction {
-            memberDao.replaceAll(bufferId, members)
+            memberDao.replaceAll(bufferId, replay.members)
             e.members.forEach { member ->
                 val username = member.username
                 val host = member.host
@@ -604,6 +624,15 @@ class EventProcessor @Inject constructor(
                         it.copy(username = username, hostmask = "$username@$host")
                     }
                 }
+            }
+            replay.presentations.forEach { presentation ->
+                insertSystem(
+                    bufferId,
+                    presentation.ctx,
+                    presentation.kind,
+                    presentation.sender,
+                    presentation.text,
+                )
             }
         }
     }
@@ -670,6 +699,16 @@ class EventProcessor @Inject constructor(
         rosterSnapshots[RosterKey(networkId, bufferId)]?.add(delta)
     }
 
+    private fun journalAcrossActiveSnapshots(
+        networkId: Long,
+        alreadyPresented: Set<Long>,
+        delta: RosterDelta,
+    ) {
+        rosterSnapshots.forEach { (key, journal) ->
+            if (key.networkId == networkId && key.bufferId !in alreadyPresented) journal.add(delta)
+        }
+    }
+
     fun cancelRosterSnapshot(networkId: Long, bufferId: Long) {
         rosterSnapshots.remove(RosterKey(networkId, bufferId))
     }
@@ -679,8 +718,9 @@ class EventProcessor @Inject constructor(
         snapshot: List<MemberEntity>,
         deltas: List<RosterDelta>,
         st: NetworkState,
-    ): List<MemberEntity> {
+    ): RosterReplay {
         val members = LinkedHashMap<String, MemberEntity>()
+        val presentations = mutableListOf<DeferredRosterPresentation>()
         snapshot.forEach { members[st.normalize(it.nick)] = it }
         deltas.forEach { delta ->
             when (delta) {
@@ -691,9 +731,31 @@ class EventProcessor @Inject constructor(
                 is RosterDelta.Remove -> members.remove(st.normalize(delta.nick))
                 is RosterDelta.Rename -> {
                     val old = members.remove(st.normalize(delta.from))
-                    members[st.normalize(delta.to)] = (old ?: MemberEntity(bufferId, delta.to)).copy(
-                        nick = delta.to,
-                    )
+                    if (old != null) members[st.normalize(delta.to)] = old.copy(nick = delta.to)
+                }
+                is RosterDelta.DeferredQuit -> {
+                    val event = delta.event
+                    if (members.remove(st.normalize(event.nick)) != null) {
+                        presentations += DeferredRosterPresentation(
+                            event.ctx,
+                            MessageKind.QUIT,
+                            event.nick,
+                            "${event.nick} quit" + (event.reason?.let { " ($it)" } ?: ""),
+                        )
+                    }
+                }
+                is RosterDelta.DeferredNick -> {
+                    val event = delta.event
+                    val old = members.remove(st.normalize(event.from))
+                    if (old != null) {
+                        members[st.normalize(event.to)] = old.copy(nick = event.to)
+                        presentations += DeferredRosterPresentation(
+                            event.ctx,
+                            MessageKind.NICK,
+                            event.from,
+                            "${event.from} is now known as ${event.to}",
+                        )
+                    }
                 }
                 is RosterDelta.Prefix -> {
                     val key = st.normalize(delta.nick)
@@ -704,7 +766,7 @@ class EventProcessor @Inject constructor(
                 }
             }
         }
-        return members.values.toList()
+        return RosterReplay(members.values.toList(), presentations)
     }
 
     private suspend fun applyPrefixModes(
