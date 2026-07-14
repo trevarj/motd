@@ -24,6 +24,19 @@ class WhoxTest {
             .onSuccess { error("out-of-range token accepted") }
     }
 
+    @Test fun `token pool wraps and reports exhaustion without collision`() {
+        val pool = WhoxTokenPool(size = 3)
+        assertEquals(listOf(0, 1, 2), listOf(pool.acquire(), pool.acquire(), pool.acquire()))
+        assertEquals(null, pool.acquire())
+
+        pool.release(1)
+        assertEquals(1, pool.acquire())
+        assertEquals(null, pool.acquire())
+
+        pool.clear()
+        assertEquals(2, pool.acquire())
+    }
+
     @Test fun `mapper parses canonical row placeholders and completion`() {
         val mapper = EventMapper({ "motd" }, { Isupport() }, now = { 1L })
         val row = mapper.map(

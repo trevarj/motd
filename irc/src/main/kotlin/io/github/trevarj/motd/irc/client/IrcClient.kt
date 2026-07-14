@@ -38,7 +38,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.ConcurrentHashMap
 
 enum class SaslMechanism { NONE, PLAIN, EXTERNAL }
@@ -118,8 +117,7 @@ class IrcClient(
     private val typingOutbox = TypingOutbox()
     private val eventMapper = EventMapper(selfNick = { selfNick.get() }, isupport = { _isupport.get() })
     private val whoxRequests = ConcurrentHashMap<String, Deferred<WhoxResult>>()
-    private val activeWhoxTokens = ConcurrentHashMap.newKeySet<Int>()
-    private val nextWhoxToken = AtomicInteger(0)
+    private val whoxTokens = WhoxTokenPool()
 
     @Volatile private var transport: IrcTransport? = null
     @Volatile private var watchdog: PingWatchdog? = null
@@ -236,7 +234,7 @@ class IrcClient(
     private fun cancelWhoxRequests(reason: String) {
         whoxRequests.values.forEach { it.cancel(CancellationException(reason)) }
         whoxRequests.clear()
-        activeWhoxTokens.clear()
+        whoxTokens.clear()
     }
 
     private suspend fun applyRegAction(a: RegistrationStateMachine.Action, t: IrcTransport) {
@@ -570,9 +568,9 @@ class IrcClient(
     }
 
     private suspend fun performWhox(mask: String, normalizedMask: String): WhoxResult {
-        val token = allocateWhoxToken() ?: return WhoxResult(emptyList(), completed = false)
+        val token = whoxTokens.acquire() ?: return WhoxResult(emptyList(), completed = false)
         val t = transport ?: run {
-            activeWhoxTokens.remove(token)
+            whoxTokens.release(token)
             return WhoxResult(emptyList(), completed = false)
         }
         val rows = ArrayList<IrcEvent.WhoxRow>()
@@ -598,16 +596,8 @@ class IrcClient(
             WhoxResult(rows.toList(), completed)
         } finally {
             collector.cancel()
-            activeWhoxTokens.remove(token)
+            whoxTokens.release(token)
         }
-    }
-
-    private fun allocateWhoxToken(): Int? {
-        repeat(WHOX_TOKEN_COUNT) {
-            val token = nextWhoxToken.getAndUpdate { (it + 1) % WHOX_TOKEN_COUNT }
-            if (activeWhoxTokens.add(token)) return token
-        }
-        return null
     }
 
     // -- soju bouncer-networks --
@@ -793,7 +783,6 @@ class IrcClient(
         const val LIST_TIMEOUT_MS = 15_000L
         const val WEBPUSH_TIMEOUT_MS = 30_000L
         const val WHOX_TIMEOUT_MS = 15_000L
-        const val WHOX_TOKEN_COUNT = 1_000
     }
 }
 
