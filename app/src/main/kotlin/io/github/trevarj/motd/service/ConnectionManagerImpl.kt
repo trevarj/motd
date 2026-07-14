@@ -732,25 +732,32 @@ class ConnectionManagerImpl @Inject constructor(
             }
         }
         if (!isCurrent()) return
-        // Establish the server/local read boundary before replaying missing history. Otherwise
-        // CHATHISTORY rows can briefly appear unread while a newer cross-device marker is still in
-        // flight. The reconciliation is bounded, so a non-compliant server cannot stall catch-up.
-        reconcileReadMarkersForConnection(row, client, isCurrent)
-        if (!isCurrent()) return
-        catchUpForConnection(row.id, client)
+        // A bound soju child becomes Ready before its post-bind feature CAP ACKs. Keep these
+        // feature waiters alive for the exact connection rather than treating an early snapshot as
+        // final. ConnectionActor cancels this scope as soon as Ready ends.
+        coroutineScope {
+            val readMarkers = async {
+                awaitCapabilityAvailable(client, READ_MARKER_CAP)
+                if (isCurrent()) reconcileReadMarkersForConnection(row, client, isCurrent)
+            }
+            launch {
+                awaitCapabilityAvailable(client, CHATHISTORY_CAP)
+                if (!isCurrent()) return@launch
+                // If read-marker was already negotiated, establish the durable max before
+                // history rows arrive. If it appears later, its own watcher will still converge.
+                if (client.hasCap(READ_MARKER_CAP)) readMarkers.join()
+                if (isCurrent()) catchUpForConnection(row.id, client)
+            }
+        }
     }
 
     // -- catch-up (plans/04) -------------------------------------------------
 
     /**
-     * Own reconnect catch-up for the lifetime of this exact client. soju child connections can
-     * report Ready before their post-bind feature CAP ACK arrives, so wait for CHATHISTORY rather
-     * than treating the early Ready snapshot as a permanent lack of support. Transient tunnel,
-     * timeout, and protocol failures retry idempotently; ConnectionActor cancels this coroutine as
-     * soon as the socket leaves Ready.
+     * Own reconnect catch-up for the lifetime of this exact client. Its caller already waited for
+     * CHATHISTORY to appear, so this only retries actual transport/server failures.
      */
     private suspend fun catchUpForConnection(networkId: Long, client: IrcClient) {
-        if (!awaitCapability(client, CHATHISTORY_CAP)) return
         var attempt = 0
         while (clientFor(networkId) === client) {
             val buffers = openBuffers(networkId)
@@ -781,7 +788,7 @@ class ConnectionManagerImpl @Inject constructor(
         client: IrcClient,
         isCurrent: () -> Boolean,
     ) {
-        if (row.role == NetworkRole.BOUNCER_ROOT || !awaitCapability(client, READ_MARKER_CAP)) return
+        if (row.role == NetworkRole.BOUNCER_ROOT || !client.hasCap(READ_MARKER_CAP)) return
         val requests = readMarkerSyncRequests(readMarkerRepository.storedForNetwork(row.id))
         coroutineScope {
             requests.map { request ->
@@ -816,13 +823,12 @@ class ConnectionManagerImpl @Inject constructor(
         }
     }
 
-    private suspend fun awaitCapability(client: IrcClient, capability: String): Boolean =
-        client.hasCap(capability) || withTimeoutOrNull(CAP_SETTLE_TIMEOUT_MS) {
-            client.state.filterIsInstance<IrcClientState.Ready>().first { ready ->
-                ready.caps.any { it == capability || it.startsWith("$capability=") }
-            }
-            true
-        } == true
+    private suspend fun awaitCapabilityAvailable(client: IrcClient, capability: String) {
+        if (client.hasCap(capability)) return
+        client.state.filterIsInstance<IrcClientState.Ready>().first { ready ->
+            ready.caps.any { it == capability || it.startsWith("$capability=") }
+        }
+    }
 
     private suspend fun openBuffers(networkId: Long): List<Pair<Long, String>> =
         kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -1249,7 +1255,6 @@ class ConnectionManagerImpl @Inject constructor(
         const val CHATHISTORY_CAP = "draft/chathistory"
         const val READ_MARKER_CAP = "draft/read-marker"
         const val WEBPUSH_CAP = "soju.im/webpush"
-        const val CAP_SETTLE_TIMEOUT_MS = 15_000L
         const val READ_MARKER_RESPONSE_TIMEOUT_MS = 5_000L
         const val READ_MARKER_PERSIST_TIMEOUT_MS = 2_000L
         const val ECHO_TIMEOUT_MS = 30_000L

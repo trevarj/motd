@@ -443,7 +443,10 @@ fun ChatContent(
             HistoryResyncState.UpToDate -> historyUpToDate
             HistoryResyncState.Unsupported -> historyUnsupported
             is HistoryResyncState.Failed -> result.reason.ifBlank { historyFailed }
-            HistoryResyncState.Idle, HistoryResyncState.Running -> return@LaunchedEffect
+            HistoryResyncState.Idle,
+            HistoryResyncState.WaitingForCapability,
+            HistoryResyncState.Running,
+            -> return@LaunchedEffect
         }
         snackbarHostState.showSnackbar(text)
         onHistoryResyncShown()
@@ -850,9 +853,12 @@ fun ChatContent(
                                 overflowOpen = false
                                 onRefreshHistory()
                             },
-                            enabled = historyResyncState !is HistoryResyncState.Running,
+                            enabled = historyResyncState !is HistoryResyncState.Running &&
+                                historyResyncState != HistoryResyncState.WaitingForCapability,
                             leadingIcon = {
-                                if (historyResyncState is HistoryResyncState.Running) {
+                                if (historyResyncState is HistoryResyncState.Running ||
+                                    historyResyncState == HistoryResyncState.WaitingForCapability
+                                ) {
                                     CircularProgressIndicator(modifier = Modifier.size(24.dp))
                                 } else {
                                     Icon(Icons.Outlined.Refresh, contentDescription = null)

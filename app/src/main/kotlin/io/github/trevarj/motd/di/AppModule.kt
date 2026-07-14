@@ -21,6 +21,8 @@ import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefsImpl
+import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
+import io.github.trevarj.motd.data.prefs.HistorySyncPrefsImpl
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.BufferRepositoryImpl
@@ -106,6 +108,9 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun presetEnrollmentPrefs(impl: PresetEnrollmentPrefsImpl): PresetEnrollmentPrefs
+
+    @Binds @Singleton
+    abstract fun historySyncPrefs(impl: HistorySyncPrefsImpl): HistorySyncPrefs
 
     @Binds @Singleton
     abstract fun replyPrefs(impl: ReplyPrefsImpl): ReplyPrefs

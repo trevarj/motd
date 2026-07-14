@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
@@ -39,6 +40,14 @@ class HistoryResyncCoordinatorTest {
     private lateinit var coordinator: HistoryResyncCoordinator
     private var networkId = 0L
     private var bufferId = 0L
+    private val syncPrefs = object : HistorySyncPrefs {
+        private val values = mutableMapOf<Long, Long>()
+        override suspend fun lastSuccessfulSync(networkId: Long): Long? = values[networkId]
+        override suspend fun setLastSuccessfulSync(networkId: Long, timestamp: Long) {
+            values[networkId] = timestamp
+        }
+        override suspend fun clear(networkId: Long) { values.remove(networkId) }
+    }
 
     @Before
     fun setUp() = runTest {
@@ -47,7 +56,7 @@ class HistoryResyncCoordinatorTest {
             .allowMainThreadQueries()
             .build()
         processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
-        coordinator = HistoryResyncCoordinator(db, processor)
+        coordinator = HistoryResyncCoordinator(db, processor, syncPrefs)
         networkId = db.networkDao().insert(
             NetworkEntity(
                 name = "libera",
@@ -216,6 +225,30 @@ class HistoryResyncCoordinatorTest {
         assertEquals(HistoryResyncState.Updated(1), result)
         assertTrue(db.bufferDao().byName(networkId, "#new") != null)
         assertTrue(source.requests.any { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
+    }
+
+    @Test
+    fun freshNetworkDiscoversRetainedTargetsFromEpochAndStoresCursor() = runTest {
+        db.bufferDao().deleteBuffer(bufferId)
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> ChatHistoryResult(emptyList(), listOf("#old" to 500L))
+                ChatHistoryRequest.Subcommand.LATEST -> ChatHistoryResult(
+                    if (request.target == "#old") listOf(message("retained", 500, "#old")) else emptyList(),
+                    emptyList(),
+                )
+                else -> ChatHistoryResult(emptyList(), emptyList())
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, emptyList(), source)
+
+        assertEquals(HistoryResyncState.Updated(1), result)
+        val targets = source.requests.first { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS }
+        assertEquals("timestamp=1970-01-01T00:00:00Z", targets.bound2)
+        assertTrue(targets.bound1!!.startsWith("timestamp="))
+        assertTrue(db.bufferDao().byName(networkId, "#old") != null)
+        assertTrue(syncPrefs.lastSuccessfulSync(networkId) != null)
     }
 
     @Test
