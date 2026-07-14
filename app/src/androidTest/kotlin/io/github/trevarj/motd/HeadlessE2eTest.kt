@@ -169,6 +169,16 @@ abstract class HeadlessE2eDriver {
         ).onFirst().performScrollTo().performClick()
     }
 
+    protected fun scrollToAndClickTag(tag: String) {
+        waitForTag(tag)
+        compose.onNodeWithTag(tag, useUnmergedTree = true).performScrollTo().performClick()
+    }
+
+    protected fun scrollToAndAssertTag(tag: String) {
+        waitForTag(tag)
+        compose.onNodeWithTag(tag, useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+    }
+
     protected fun assertTag(tag: String) {
         waitForTag(tag)
         compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
@@ -273,9 +283,9 @@ class SettingsAndBouncerHeadlessE2eTest : HeadlessE2eDriver() {
         openSettings()
         clickTag("settings_category_appearance")
         waitForText("Appearance")
-        assertTag("settings_avatar_sprite_preview")
-        clickTag("settings_avatar_style_irc_sprite")
-        clickTag("settings_theme_picker")
+        scrollToAndAssertTag("settings_avatar_sprite_preview")
+        scrollToAndClickTag("settings_avatar_style_irc_sprite")
+        scrollToAndClickTag("settings_theme_picker")
         waitForTag("settings_theme_sheet")
         scrollToAndClickText("AMOLED (true black)")
         returnToSettingsRoot()
