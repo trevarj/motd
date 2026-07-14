@@ -186,4 +186,51 @@ class ConnectionActorTest {
         assertTrue(setupCancelled)
         actor.stop()
     }
+
+    @Test
+    fun readySnapshotChangesArePublishedWithoutRestartingConnectionSetup() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val conn = FakeConnection()
+        val states = mutableListOf<IrcClientState>()
+        var setupCount = 0
+        val actor = ConnectionActor(
+            networkId = 1,
+            scope = scope,
+            connectionFactory = { conn },
+            onState = { _, state -> states += state },
+            onEvent = { _, _ -> },
+            onReady = {
+                setupCount++
+                awaitCancellation()
+            },
+            random = { 0.5 },
+        )
+        actor.start()
+        scope.testScheduler.runCurrent()
+
+        conn._state.value = IrcClientState.Ready("motd", setOf("batch"), emptyMap())
+        scope.testScheduler.runCurrent()
+        conn._state.value = IrcClientState.Ready(
+            "motd",
+            setOf("batch", "draft/chathistory"),
+            mapOf("CHATHISTORY" to "100"),
+        )
+        scope.testScheduler.runCurrent()
+
+        assertEquals(1, setupCount)
+        assertEquals(
+            listOf(setOf("batch"), setOf("batch", "draft/chathistory")),
+            states.filterIsInstance<IrcClientState.Ready>().map { it.caps },
+        )
+        actor.stop()
+    }
+
+    @Test
+    fun dozePushHandoffRequiresBackgroundIdleAndUnifiedPush() {
+        assertTrue(shouldApplyDozePushHandoff(false, true, DeliveryMode.UNIFIED_PUSH))
+        assertTrue(!shouldApplyDozePushHandoff(true, true, DeliveryMode.UNIFIED_PUSH))
+        assertTrue(!shouldApplyDozePushHandoff(false, false, DeliveryMode.UNIFIED_PUSH))
+        assertTrue(!shouldApplyDozePushHandoff(false, true, DeliveryMode.PERSISTENT_SOCKET))
+    }
 }

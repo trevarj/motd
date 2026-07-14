@@ -147,21 +147,31 @@ class ConnectionActor(
         var state = conn.state.first { it !is IrcClientState.Connecting }
         var stableJob: Job? = null
         var readyJob: Job? = null
+        var readyStarted = false
         try {
             while (true) {
                 when (state) {
                     is IrcClientState.Ready -> {
                         onState(networkId, state)
-                        // Connection-scoped setup may wait for capabilities and retry transient
-                        // operations such as CHATHISTORY. Run it alongside state observation so a
-                        // dead socket cancels that work immediately instead of leaving the actor
-                        // blocked in onReady for a series of request timeouts.
-                        readyJob = scope.launch { onReady(conn) }
-                        stableJob = scope.launch { delay(STABLE_RESET_MS); resetBackoff() }
-                        val next = conn.state.first { it !is IrcClientState.Ready }
-                        readyJob.cancel()
+                        if (!readyStarted) {
+                            readyStarted = true
+                            // Connection-scoped setup may wait for capabilities and retry transient
+                            // operations such as CHATHISTORY. Run it alongside state observation so a
+                            // dead socket cancels that work immediately instead of leaving the actor
+                            // blocked in onReady for a series of request timeouts.
+                            readyJob = scope.launch { onReady(conn) }
+                            stableJob = scope.launch { delay(STABLE_RESET_MS); resetBackoff() }
+                        }
+                        // Runtime CAP ACK/DEL and late 005 replies republish Ready with a new
+                        // snapshot. Surface those mutations without re-running one-time setup.
+                        val next = conn.state.first { it != state }
+                        if (next is IrcClientState.Ready) {
+                            state = next
+                            continue
+                        }
+                        readyJob?.cancel()
                         readyJob = null
-                        stableJob.cancel()
+                        stableJob?.cancel()
                         stableJob = null
                         onState(networkId, next)
                         return outcomeFor(next)

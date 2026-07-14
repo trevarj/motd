@@ -146,10 +146,9 @@ class ConnectionManagerImpl @Inject constructor(
 
     @Volatile private var started = false
     @Volatile private var appForeground = false
-    @Volatile private var pushGraceElapsed = false
+    @Volatile private var deviceIdle = false
     private var reconcileJob: Job? = null
     private var deliveryModeJob: Job? = null
-    private var backgroundGraceJob: Job? = null
     private var monitorDesiredJob: Job? = null
     private val pushSuspendedIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
     private var connectivityCallback: ConnectivityManager.NetworkCallback? = null
@@ -172,13 +171,13 @@ class ConnectionManagerImpl @Inject constructor(
                 reconcile(all)
             }
         }
-        // Delivery-mode reaction: UNIFIED_PUSH tears the sockets down once webpush is confirmed.
+        // Delivery-mode reaction: UNIFIED_PUSH tears verified sockets down only after Android
+        // enters Doze. Merely switching away from MOTD keeps active conversations connected.
         deliveryModeJob = scope.launch {
             settings.settings.map { it.deliveryMode }.distinctUntilChanged().collect { mode ->
                 if (mode == DeliveryMode.UNIFIED_PUSH) {
-                    if (!appForeground) schedulePushSuspension()
+                    if (!appForeground && deviceIdle) maybeStopForPush()
                 } else {
-                    backgroundGraceJob?.cancel()
                     pushSuspendedIds.clear()
                     reconcile(networkDao.observeAll().first())
                 }
@@ -206,8 +205,11 @@ class ConnectionManagerImpl @Inject constructor(
      * limitation — plans/11 risk 6).
      */
     private suspend fun maybeStopForPush() {
-        if (appForeground || !pushGraceElapsed ||
-            settings.settings.first().deliveryMode != DeliveryMode.UNIFIED_PUSH
+        if (!shouldApplyDozePushHandoff(
+                appForeground = appForeground,
+                deviceIdle = deviceIdle,
+                deliveryMode = settings.settings.first().deliveryMode,
+            )
         ) return
         val all = networkDao.observeAll().first()
         val wanted = wantedNetworkIds(all, userIntents, _states.value)
@@ -231,28 +233,26 @@ class ConnectionManagerImpl @Inject constructor(
     /** Process foreground: reconnect every wanted network and run the normal catch-up path. */
     internal suspend fun onAppForegrounded() {
         appForeground = true
-        pushGraceElapsed = false
-        backgroundGraceJob?.cancel()
         pushSuspendedIds.clear()
         startAll()
         reconcile(networkDao.observeAll().first())
         reconnectStale()
     }
 
-    /** Process background: give active conversations 30 seconds before applying push suspension. */
+    /** Process background: keep sockets until Android itself reports that the device entered Doze. */
     internal fun onAppBackgrounded() {
         appForeground = false
-        pushGraceElapsed = false
-        schedulePushSuspension()
+        if (deviceIdle) scope.launch { maybeStopForPush() }
     }
 
-    private fun schedulePushSuspension() {
-        backgroundGraceJob?.cancel()
-        backgroundGraceJob = scope.launch {
-            delay(PUSH_BACKGROUND_GRACE_MS)
-            pushGraceElapsed = true
-            maybeStopForPush()
-        }
+    /**
+     * Doze entry is the UnifiedPush hand-off boundary. Doze exit intentionally leaves a completed
+     * hand-off suspended until MOTD foregrounds; reconnecting sockets behind another foreground
+     * app would defeat the battery-saving mode without improving delivery.
+     */
+    internal fun onDeviceIdleModeChanged(idle: Boolean) {
+        deviceIdle = idle
+        if (idle && !appForeground) scope.launch { maybeStopForPush() }
     }
 
     private fun startForegroundKeeper() {
@@ -268,7 +268,6 @@ class ConnectionManagerImpl @Inject constructor(
         started = false
         reconcileJob?.cancel(); reconcileJob = null
         deliveryModeJob?.cancel(); deliveryModeJob = null
-        backgroundGraceJob?.cancel(); backgroundGraceJob = null
         monitorDesiredJob?.cancel(); monitorDesiredJob = null
         unregisterConnectivityCallback()
         for (actor in actors.values) actor.stop()
@@ -1256,7 +1255,6 @@ class ConnectionManagerImpl @Inject constructor(
         const val ECHO_TIMEOUT_MS = 30_000L
         const val INVITE_READY_TIMEOUT_MS = 30_000L
         const val ROSTER_REQUEST_TIMEOUT_MS = 15_000L
-        const val PUSH_BACKGROUND_GRACE_MS = 30_000L
         const val MAX_BYTES = 400
         // Stable, casemapping-invariant name for the per-network SERVER buffer.
         const val SERVER_BUFFER_NAME = "*"
@@ -1266,6 +1264,12 @@ class ConnectionManagerImpl @Inject constructor(
             deliveryPersistent && hasNetworks
     }
 }
+
+internal fun shouldApplyDozePushHandoff(
+    appForeground: Boolean,
+    deviceIdle: Boolean,
+    deliveryMode: DeliveryMode,
+): Boolean = !appForeground && deviceIdle && deliveryMode == DeliveryMode.UNIFIED_PUSH
 
 internal fun catchUpRetryDelayMs(attempt: Int): Long =
     (2_000L * (1L shl attempt.coerceIn(0, 4))).coerceAtMost(30_000L)
