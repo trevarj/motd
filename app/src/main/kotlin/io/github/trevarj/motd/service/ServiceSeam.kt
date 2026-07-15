@@ -107,6 +107,9 @@ interface ConnectionManager {
  *  its pending-send insert here; push (WP9) feeds decrypted lines through it. WP1 stub-binds. */
 interface IrcEventSink {
     suspend fun process(networkId: Long, event: io.github.trevarj.motd.irc.event.IrcEvent)
+
+    /** Persist a push-delivered event without treating it as live IRC session state. */
+    suspend fun processPush(networkId: Long, event: io.github.trevarj.motd.irc.event.IrcEvent)
 }
 
 /** In-memory typing state. Written by EventProcessor (WP5), read by ChatViewModel (WP7). */

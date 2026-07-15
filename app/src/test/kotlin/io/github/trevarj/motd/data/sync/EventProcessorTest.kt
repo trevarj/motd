@@ -1332,4 +1332,199 @@ class EventProcessorTest {
         )
         assertEquals(listOf("live direct message"), notifications)
     }
+
+    @Test
+    fun historyBatch_persistsTimeline_withoutMutatingCurrentSessionState() = runTest {
+        val notifications = mutableListOf<String>()
+        val reads = mutableListOf<Pair<Long, Long>>()
+        val inviteNotifications = mutableListOf<Long>()
+        val resolvedInvites = mutableListOf<Long>()
+        val typing = TypingTrackerImpl()
+        val recording = EventProcessor(db, typing, object : MessageNotifier {
+            override suspend fun onIncoming(
+                networkId: Long,
+                bufferId: Long,
+                type: BufferType,
+                hasMention: Boolean,
+                message: IrcEvent.ChatMessage,
+            ) {
+                notifications += message.text
+            }
+
+            override suspend fun onRead(bufferId: Long, upToTime: Long) {
+                reads += bufferId to upToTime
+            }
+
+            override suspend fun onInvitation(networkId: Long, bufferId: Long, messageId: Long) {
+                inviteNotifications += messageId
+            }
+
+            override suspend fun onInvitationResolved(messageId: Long) {
+                resolvedInvites += messageId
+            }
+        })
+        recording.onRegistered(
+            networkId,
+            "me",
+            mapOf(
+                "CASEMAPPING" to "rfc1459",
+                "PREFIX" to "(ov)@+",
+                "CHANMODES" to "beI,k,l,imnst",
+            ),
+        )
+        recording.process(networkId, IrcEvent.Joined(ctx("self-live", 10_000), "me", "#room", null, null, true))
+        recording.process(
+            networkId,
+            IrcEvent.Names(
+                "#room",
+                listOf(
+                    IrcEvent.Names.Member("me", "@", "self", "current.example"),
+                    IrcEvent.Names.Member("Alice", "+", "alice", "current.example"),
+                    IrcEvent.Names.Member("Bob", "", "bob", "current.example"),
+                ),
+            ),
+        )
+        recording.process(networkId, IrcEvent.TopicChanged(ctx("topic-live", 10_001), "#room", "current topic", "op"))
+        recording.process(networkId, IrcEvent.ReadMarker("#room", 10_002))
+        recording.process(networkId, IrcEvent.Invited(ctx("invite-live", 10_003), "oper", "me", "#room"))
+        recording.process(
+            networkId,
+            IrcEvent.ChatMessage(ctx("relation-parent", 10_004), IrcEvent.ChatKind.PRIVMSG, Prefix("me"), "#room", "parent", true, null),
+        )
+
+        val bufferBefore = db.bufferDao().byName(networkId, "#room")!!
+        val membersBefore = db.memberDao().allNow(bufferBefore.id).sortedBy { it.nick }
+        val aliceBefore = db.userDao().byNick(networkId, "alice")
+        val inviteBefore = pagingList(bufferBefore.id).single { it.msgid == "invite-live" }
+        assertEquals(
+            1,
+            db.messageDao().compareAndSetInviteState(inviteBefore.id, InviteState.PENDING, InviteState.JOINING),
+        )
+        db.networkDao().update(db.networkDao().byId(networkId)!!.copy(role = NetworkRole.BOUNCER_ROOT))
+        val networksBefore = db.networkDao().allNow()
+        reads.clear()
+        inviteNotifications.clear()
+
+        val history = IrcEvent.HistoryBatch(
+            "#room",
+            listOf(
+                IrcEvent.ChatMessage(ctx("history-chat", 1_000), IrcEvent.ChatKind.PRIVMSG, Prefix("Alice"), "#room", "old me mention", false, null),
+                IrcEvent.Joined(ctx("history-join", 1_001), "Eve", "#room", "old-account", "Old Eve", false),
+                IrcEvent.Parted(ctx("history-part", 1_002), "Alice", "#room", "old part", false),
+                IrcEvent.Kicked(ctx("history-kick", 1_003), "Bob", "#room", "old-op", "old kick", false),
+                IrcEvent.Quit(ctx("history-quit", 1_004), "Alice", "old quit"),
+                IrcEvent.NickChanged(ctx("history-nick", 1_005), "me", "old-me", true),
+                IrcEvent.ModeChanged(ctx("history-mode", 1_006), "#room", "-o", listOf("me")),
+                IrcEvent.TopicChanged(ctx("history-topic", 1_007), "#room", "old topic", "old-op"),
+                IrcEvent.AwayChanged("Alice", "old away"),
+                IrcEvent.AccountChanged("Alice", "old-account"),
+                IrcEvent.HostChanged("Alice", "old-user", "old.example"),
+                IrcEvent.RealnameChanged("Alice", "Old Alice"),
+                IrcEvent.TagMessage(ctx("history-typing", 1_007), Prefix("Mallory"), "#room", "active", null, null),
+                IrcEvent.TagMessage(ctx("history-react-bob", 1_007), Prefix("Bob"), "#room", null, "👍", "relation-parent"),
+                IrcEvent.TagMessage(ctx("history-react-alice", 1_007), Prefix("Alice"), "#room", null, "👍", "relation-parent"),
+                IrcEvent.Raw(IrcMessage.parse("@+draft/unreact=👍;+reply=relation-parent :Alice!u@h TAGMSG #room")),
+                IrcEvent.NamesStarted("#room"),
+                IrcEvent.Names("#room", listOf(IrcEvent.Names.Member("Mallory", "@", "mallory", "old.example"))),
+                IrcEvent.ReadMarker("#room", 20_000),
+                IrcEvent.BouncerNetworkState("old-net", mapOf("name" to "Old network")),
+                IrcEvent.Invited(ctx("history-invite", 1_008), "old-oper", "me", "#room"),
+                IrcEvent.Joined(ctx("history-self-join", 1_009), "me", "#room", null, null, true),
+                IrcEvent.Disconnected("old disconnect"),
+                IrcEvent.NetworkBatch(
+                    IrcEvent.NetworkBatchKind.NETSPLIT,
+                    "old-a.example",
+                    "old-b.example",
+                    listOf(IrcEvent.Quit(ctx("history-split", 1_010), "Bob", "split")),
+                    target = "#room",
+                ),
+            ),
+        )
+        recording.process(networkId, history)
+        recording.process(networkId, history)
+
+        assertEquals(bufferBefore, db.bufferDao().byName(networkId, "#room"))
+        assertEquals(membersBefore, db.memberDao().allNow(bufferBefore.id).sortedBy { it.nick })
+        assertEquals(aliceBefore, db.userDao().byNick(networkId, "alice"))
+        assertNull(db.userDao().byNick(networkId, "eve"))
+        assertNull(db.userDao().byNick(networkId, "mallory"))
+        assertEquals(networksBefore, db.networkDao().allNow())
+        assertEquals(InviteState.JOINING, db.messageDao().byId(inviteBefore.id)?.inviteState)
+        assertTrue(notifications.isEmpty())
+        assertTrue(reads.isEmpty())
+        assertTrue(inviteNotifications.isEmpty())
+        assertTrue(resolvedInvites.isEmpty())
+        assertTrue(typing.typingNicks(bufferBefore.id).value.isEmpty())
+        assertEquals(
+            listOf("Bob"),
+            db.reactionDao().observeFor(bufferBefore.id, listOf("relation-parent")).first().map { it.sender },
+        )
+
+        val rows = pagingList(bufferBefore.id)
+        listOf(
+            MessageKind.PRIVMSG,
+            MessageKind.JOIN,
+            MessageKind.PART,
+            MessageKind.KICK,
+            MessageKind.QUIT,
+            MessageKind.NICK,
+            MessageKind.MODE,
+            MessageKind.TOPIC,
+            MessageKind.INVITE,
+            MessageKind.NETSPLIT,
+        ).forEach { kind -> assertTrue("missing historical $kind row", rows.any { it.kind == kind }) }
+        assertEquals(1, rows.count { it.msgid == "history-chat" })
+        assertEquals(1, rows.count { it.msgid == "history-join" })
+        assertEquals(InviteState.HISTORICAL, rows.single { it.msgid == "history-invite" }.inviteState)
+
+        recording.process(
+            networkId,
+            IrcEvent.ChatMessage(ctx("post-history", 30_000), IrcEvent.ChatKind.PRIVMSG, Prefix("Alice"), "#room", "hello me", false, null),
+        )
+        assertEquals(listOf("hello me"), notifications)
+    }
+
+    @Test
+    fun push_persistsSupportedMessage_withoutMutatingSessionState() = runTest {
+        val notifications = mutableListOf<String>()
+        val recording = EventProcessor(db, TypingTrackerImpl(), object : MessageNotifier {
+            override suspend fun onIncoming(
+                networkId: Long,
+                bufferId: Long,
+                type: BufferType,
+                hasMention: Boolean,
+                message: IrcEvent.ChatMessage,
+            ) {
+                notifications += message.text
+            }
+        })
+        recording.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+        recording.process(networkId, IrcEvent.Joined(ctx("push-seed", 5_000), "me", "#push", null, null, true))
+        recording.process(networkId, IrcEvent.TopicChanged(ctx("push-topic-live", 5_001), "#push", "current", "op"))
+        recording.process(networkId, IrcEvent.ReadMarker("#push", 5_002))
+        val before = db.bufferDao().byName(networkId, "#push")!!
+        val membersBefore = db.memberDao().allNow(before.id)
+
+        recording.processPush(networkId, IrcEvent.Joined(ctx("push-join", 6_000), "Mallory", "#push", null, null, false))
+        recording.processPush(networkId, IrcEvent.TopicChanged(ctx("push-topic", 6_001), "#push", "pushed", "mallory"))
+        recording.processPush(networkId, IrcEvent.ReadMarker("#push", 6_002))
+        recording.processPush(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx("push-chat", 6_003),
+                IrcEvent.ChatKind.PRIVMSG,
+                Prefix("Alice"),
+                "#push",
+                "hello me",
+                false,
+                null,
+            ),
+        )
+
+        assertEquals(before, db.bufferDao().byName(networkId, "#push"))
+        assertEquals(membersBefore, db.memberDao().allNow(before.id))
+        assertEquals(listOf("hello me"), notifications)
+        assertEquals(1, pagingList(before.id).count { it.msgid == "push-chat" })
+        assertTrue(pagingList(before.id).none { it.msgid == "push-join" || it.msgid == "push-topic" })
+    }
 }

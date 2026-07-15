@@ -35,8 +35,13 @@ class PushEventHandlerTest {
 
     private class RecordingSink : IrcEventSink {
         val events = mutableListOf<Pair<Long, IrcEvent>>()
+        val pushEvents = mutableListOf<Pair<Long, IrcEvent>>()
         override suspend fun process(networkId: Long, event: IrcEvent) {
             events.add(networkId to event)
+        }
+
+        override suspend fun processPush(networkId: Long, event: IrcEvent) {
+            pushEvents.add(networkId to event)
         }
     }
 
@@ -147,9 +152,10 @@ class PushEventHandlerTest {
         val ev = handler.handle(networkId = 42L, body = body, keys = receiver)
 
         assertTrue(ev is IrcEvent.ChatMessage)
-        assertEquals(1, sink.events.size)
-        assertEquals(42L, sink.events[0].first)
-        assertEquals("pushed message", (sink.events[0].second as IrcEvent.ChatMessage).text)
+        assertTrue(sink.events.isEmpty())
+        assertEquals(1, sink.pushEvents.size)
+        assertEquals(42L, sink.pushEvents[0].first)
+        assertEquals("pushed message", (sink.pushEvents[0].second as IrcEvent.ChatMessage).text)
     }
 
     @Test
@@ -162,6 +168,7 @@ class PushEventHandlerTest {
         val ev = handler.handle(1L, ByteArray(50), WebPushCrypto.generateKeyMaterial())
         assertNull(ev)
         assertTrue(sink.events.isEmpty())
+        assertTrue(sink.pushEvents.isEmpty())
     }
 
     @Test
@@ -175,6 +182,7 @@ class PushEventHandlerTest {
         val ev = handler.handle(1L, ByteArray(0), WebPushCrypto.generateKeyMaterial())
         assertNull(ev)
         assertTrue(sink.events.isEmpty())
+        assertTrue(sink.pushEvents.isEmpty())
     }
 
     @Test
@@ -196,5 +204,6 @@ class PushEventHandlerTest {
         assertNull(handler.handle(7L, body, receiver))
         assertEquals(1, health.probes)
         assertTrue(sink.events.isEmpty())
+        assertTrue(sink.pushEvents.isEmpty())
     }
 }

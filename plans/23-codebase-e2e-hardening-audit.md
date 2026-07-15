@@ -38,7 +38,7 @@ record before security-sensitive implementation begins.
 
 ## C1. Historical replay must not mutate current IRC state
 
-- **Priority / size / status:** P0, L, Ready.
+- **Priority / size / status:** P0, L, Completed 2026-07-15.
 - **Depends on:** none. Land before C2 so provenance behavior is characterized
   independently of serialization.
 - **Evidence:** `EventProcessor.onHistoryBatch` routes events through the live
@@ -73,6 +73,23 @@ record before security-sensitive implementation begins.
   exposes no historical action.
 - Cover duplicate history batches and history arriving concurrently with a
   newer live event; C2 supplies deterministic ordering for the latter.
+
+### Completion evidence
+
+- `EventOrigin` now distinguishes live socket, history replay, and push
+  delivery. History persists eligible chat, relation/redaction, typed system,
+  invitation, and collapsed network-event rows through `EventProcessor`
+  without changing current buffer, roster, user, read-marker, invitation,
+  bouncer-network, or typing state.
+- Push delivery uses an explicit sink entry point, persists only the mapped
+  message/relation/invitation subset, retains notification behavior, and
+  ignores arbitrary session-state events.
+- Regression coverage snapshots current state, replays the complete stale
+  event mix twice, proves timeline idempotency and state equivalence, and
+  verifies that a later live mention still uses the current self nick.
+- Verified with `:app:testFossDebugUnitTest`, `:app:lintFossDebug`, and
+  `:app:assembleFossDebug`. Concurrent live/history ordering remains assigned
+  to C2 as specified above.
 
 ## C2. Serialize IRC persistence and make contested updates atomic
 
