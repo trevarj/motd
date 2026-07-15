@@ -358,8 +358,8 @@ fun MessageBubble(
                     Text(
                         text = sender,
                         color = nameColor,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
                         // Friend tint: a subtle theme-primary rounded background behind the name,
                         // layered under the nick color (plans/13 confirmed decision #4).
                         modifier = if (senderIsFriend) Modifier.friendNickTint() else Modifier,
@@ -544,8 +544,8 @@ private fun TwoLineMessageRow(
                 Text(
                     text = sender,
                     color = nameColor,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
                     modifier = (if (senderIsFriend) Modifier.friendNickTint() else Modifier)
                         .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it },
                 )

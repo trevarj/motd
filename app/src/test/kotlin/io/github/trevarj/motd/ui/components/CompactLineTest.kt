@@ -3,6 +3,8 @@ package io.github.trevarj.motd.ui.components
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.data.db.MessageKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -24,6 +26,15 @@ class CompactLineTest {
     fun privmsg_renders_nick_colon_text() {
         val line = buildCompactLine("alice", "hello world", MessageKind.PRIVMSG, nick, body, link, noTint)
         assertEquals("alice: hello world", line.text)
+    }
+
+    @Test
+    fun nick_is_smaller_and_bold() {
+        val line = buildCompactLine("alice", "hello", MessageKind.PRIVMSG, nick, body, link, noTint)
+        val style = line.spanStyles.first { it.start == 0 && it.end == "alice".length }.item
+
+        assertEquals(14.sp, style.fontSize)
+        assertEquals(FontWeight.Bold, style.fontWeight)
     }
 
     @Test

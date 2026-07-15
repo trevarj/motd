@@ -93,6 +93,7 @@ internal fun CompactMessageRow(
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
     val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val nickFontSize = MaterialTheme.typography.bodyMedium.fontSize
     // Friend highlight: a low-alpha primary background behind the nick, layered under the nick color.
     val friendTint = if (senderIsFriend) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Unspecified
     // Per-nick row wash: a faint tint of the sender's own nick color behind the whole row so runs of
@@ -110,11 +111,11 @@ internal fun CompactMessageRow(
     val mentionColor = rememberMentionColor(knownNicks, nickColors)
     val line = remember(
         sender, text, kind, nameColor, bodyColor, linkColor, senderIsFriend, showSender,
-        mentionColor, codeBackground, codeColor,
+        mentionColor, codeBackground, codeColor, nickFontSize,
     ) {
         buildCompactLine(
             sender, text, kind, nameColor, bodyColor, linkColor, friendTint, showSender,
-            mentionColor, codeBackground, codeColor,
+            mentionColor, codeBackground, codeColor, nickFontSize = nickFontSize,
         )
     }
 
@@ -206,10 +207,12 @@ internal fun buildCompactLine(
     mentionColor: (String) -> Color? = { null },
     codeBackground: Color = Color.Unspecified,
     codeColor: Color = Color.Unspecified,
+    nickFontSize: androidx.compose.ui.unit.TextUnit = 14.sp,
 ): AnnotatedString = buildAnnotatedString {
     val nickStyle = SpanStyle(
         color = nameColor,
-        fontWeight = FontWeight.SemiBold,
+        fontSize = nickFontSize,
+        fontWeight = FontWeight.Bold,
         background = friendTint,
     )
     // Continuation lines omit the sender prefix entirely; ACTION keeps the leading `* ` marker so an
