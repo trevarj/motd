@@ -2,7 +2,6 @@ package io.github.trevarj.motd.data.db
 
 import androidx.paging.PagingSource
 import androidx.room.Dao
-import androidx.room.Delete
 import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -35,9 +34,6 @@ interface NetworkDao {
 
     @Query("UPDATE networks SET host = :host, port = :port, nick = :nick WHERE id = :id")
     suspend fun updateBouncerConnection(id: Long, host: String, port: Int, nick: String)
-
-    @Delete
-    suspend fun delete(n: NetworkEntity)
 
     @Query("SELECT * FROM networks WHERE parentId = :rootId")
     suspend fun childrenOf(rootId: Long): List<NetworkEntity>

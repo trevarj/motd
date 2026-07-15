@@ -15,6 +15,11 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.room)
+}
+
+room {
+    schemaDirectory("$projectDir/schemas")
 }
 
 // The release/debug APKs ship the pinned arm64 native core. Hermetic UI tests exercise plain IRC
@@ -158,6 +163,9 @@ android {
                 }
             }
         }
+    }
+    sourceSets {
+        getByName("test").resources.srcDir("$projectDir/schemas")
     }
 
     lint {

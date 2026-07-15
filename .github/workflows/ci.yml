@@ -34,6 +34,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: App unit tests
         run: ./gradlew :app:testFossDebugUnitTest --stacktrace
+      - name: Verify checked-in Room schemas
+        run: |
+          git diff --exit-code -- app/schemas
+          test -z "$(git ls-files --others --exclude-standard -- app/schemas)"
       # Lint runs isolated with a single worker and no daemon to avoid the
       # flaky Gradle-worker classloader race that surfaces as
       # NoClassDefFoundError in ModifierDeclarationDetector. A bounded retry

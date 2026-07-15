@@ -20,7 +20,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
     ],
     version = 6,
-    exportSchema = false,
+    exportSchema = true,
 )
 @TypeConverters(Converters::class)
 abstract class MotdDatabase : RoomDatabase() {

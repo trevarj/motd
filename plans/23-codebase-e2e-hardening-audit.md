@@ -208,8 +208,8 @@ record before security-sensitive implementation begins.
 
 ## D1. Export Room schemas and audit relational integrity
 
-- **Priority / size / status:** P1, M, schema export Ready; relationship work is
-  an investigation mission.
+- **Priority / size / status:** P1, M, Completed 2026-07-15; relationship
+  constraints investigated and deliberately deferred.
 - **Depends on:** C2 column-specific update inventory should inform DAO tests.
 - **Evidence:** both Room databases disable schema export. Individual migration
   tests exist, but there is no checked-in schema history or generated-schema
@@ -232,6 +232,28 @@ record before security-sensitive implementation begins.
 
 Follow Room's schema and migration validation guidance:
 <https://developer.android.com/training/data-storage/room/migrating-db-versions>.
+
+### Completion evidence
+
+- Both databases export through the Room Gradle plugin. Application schemas
+  v1-v6 and avatar schema v1 are checked in under `app/schemas/`; CI rejects
+  modified or untracked generated schema files.
+- Application v1, v2, v3, and v5 were generated from their exact historical
+  revisions. No v4 database revision was committed, so v4 was reconstructed
+  from the explicit v3-to-v4 and v4-to-v5 entity delta. Provenance and the
+  relational decision are recorded in
+  [`25-room-schema-provenance-and-integrity.md`](25-room-schema-provenance-and-integrity.md).
+- A Robolectric test builds the real v1 database from the tracked schema JSON,
+  inserts representative related data, runs every migration through v6, and
+  has Room validate the final schema and preserved data.
+- The unused raw network delete DAO path was removed; buffer and network tree
+  deletion remain transactional and covered. Network repository creation now
+  serializes the identity read/insert boundary, with concurrent duplicate-add
+  coverage.
+- A v7 foreign-key/unique-index migration is deferred because existing orphan
+  and duplicate child repair can discard or ambiguously merge history. The
+  investigation records inventory SQL and the required non-destructive merge
+  decisions rather than silently selecting a repair policy.
 
 ## K1. Standardize coroutine and transport ownership
 
