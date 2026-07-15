@@ -30,7 +30,8 @@ class RegistrationStateMachineTest {
         val afterFirstBindCapChange = machine.onMessage(cap("DEL", "draft/message-redaction"))
         assertTrue(afterFirstBindCapChange.any { it is RegistrationStateMachine.Action.Complete })
         assertTrue(afterFirstBindCapChange.sentLines().isEmpty())
-        assertTrue(afterFirstBindCapChange.deferredLines().single().contains("draft/chathistory"))
+        assertTrue(afterFirstBindCapChange.deferredLines().contains("CAP REQ :draft/chathistory"))
+        assertTrue(afterFirstBindCapChange.deferredLines().all { it.substringAfter("CAP REQ :").contains(' ').not() })
     }
 
     @Test
@@ -80,7 +81,7 @@ class RegistrationStateMachineTest {
         val afterCapChange = machine.onMessage(cap("DEL", "extended-monitor"))
         assertTrue(afterCapChange.any { it is RegistrationStateMachine.Action.Complete })
         assertTrue(afterCapChange.sentLines().isEmpty())
-        assertTrue(afterCapChange.deferredLines().single().contains("server-time"))
+        assertTrue(afterCapChange.deferredLines().contains("CAP REQ :server-time"))
     }
 
     private fun cap(subcommand: String, caps: String) =
