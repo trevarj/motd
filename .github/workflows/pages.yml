@@ -25,7 +25,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: "$RUNNER_TEMP/motd-site"
+          path: "${{ runner.temp }}/motd-site"
 
   deploy:
     needs: build
