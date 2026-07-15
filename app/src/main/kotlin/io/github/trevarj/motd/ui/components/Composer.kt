@@ -157,14 +157,6 @@ fun Composer(
                 reply?.let { ReplyBar(it, onCancelReply) }
             }
 
-            AnimatedVisibility(
-                visible = visiblePanel == ComposerPanel.EMOJI,
-                enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
-            ) {
-                EmojiPickerPanel(onPick = { emoji -> onValueChange(insertAtCursor(value, emoji)) })
-            }
-
             Row(
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -257,6 +249,14 @@ fun Composer(
                         )
                     }
                 }
+            }
+
+            AnimatedVisibility(
+                visible = visiblePanel == ComposerPanel.EMOJI,
+                enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
+                exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
+            ) {
+                EmojiPickerPanel(onPick = { emoji -> onValueChange(insertAtCursor(value, emoji)) })
             }
         }
     }
