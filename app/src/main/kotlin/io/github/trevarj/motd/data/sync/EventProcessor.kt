@@ -999,7 +999,7 @@ class EventProcessor @Inject constructor(
         insertSystem(bufferId, serverCtx(), MessageKind.SERVER_INFO, "", text)
     }
 
-    /** `draft/unreact` stays Raw to preserve the frozen event contract; consume it here. */
+    /** Consume Raw `draft/unreact` at the sole reaction-persistence boundary. */
     private suspend fun removeReaction(networkId: Long, message: io.github.trevarj.motd.irc.proto.IrcMessage): Boolean {
         if (message.command != "TAGMSG") return false
         val emoji = message.unreactionValue() ?: return false

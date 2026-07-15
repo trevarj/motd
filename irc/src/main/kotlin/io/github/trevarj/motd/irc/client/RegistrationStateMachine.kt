@@ -134,8 +134,9 @@ internal class RegistrationStateMachine(
                 return fail("SASL required but server did not offer it", fatal = true)
             }
             phase = Phase.SASL
-            sasl = SaslAuthenticator(config.sasl, config.saslUser, config.saslPassword)
-            return listOf(Action.Send(sasl!!.begin()))
+            val authenticator = SaslAuthenticator(config.sasl, config.saslUser, config.saslPassword)
+            sasl = authenticator
+            return listOf(Action.Send(authenticator.begin()))
         }
         return afterSasl()
     }

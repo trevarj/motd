@@ -542,7 +542,7 @@ GitHub documents commit SHAs as the safest action reference:
 
 ## H1. Focused hygiene
 
-- **Priority / size / status:** P3, S, Ready.
+- **Priority / size / status:** P3, S, Completed 2026-07-15.
 - **Depends on:** none.
 - **Evidence:** `IrcClientTest.kt` contains a literal NUL in a SASL test string,
   causing Git and search tools to classify the source as binary. Some stale
@@ -556,6 +556,19 @@ GitHub documents commit SHAs as the safest action reference:
 2. Remove stale comments and avoidable assertions only while changing their
    surrounding subsystem.
 3. Do not create a broad formatting or cleanup-only change.
+
+### Completion evidence
+
+- The SASL PLAIN fixture now spells both separators as `\u0000`; ordinary
+  `rg` treats `IrcClientTest.kt` as text, and the exact base64 wire assertion
+  remains unchanged and passing.
+- The two labeled-response tests use one failure-reporting label extractor
+  instead of non-null assertions, and SASL startup retains its new
+  authenticator locally rather than asserting against a just-assigned field.
+- Stale "frozen event contract" comments beside `draft/unreact` now describe
+  the actual single-writer/reaction-mutation boundary. No unrelated formatting
+  or cleanup was included.
+- Verified with the complete `:irc:test` suite.
 
 ## Internal interfaces and compatibility
 
