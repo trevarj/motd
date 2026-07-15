@@ -324,12 +324,12 @@ class EventProcessor @Inject constructor(
             }
         }
 
-        // A bouncer can replay its durable msgid-bearing representation before delivering the
-        // original upstream line without msgid over the live socket. That is the reverse of the
-        // promotion case above: retain the durable row and discard only an unambiguous live
+        // A bouncer can replay a msgid-less representation after PUSH has already persisted its
+        // durable msgid-bearing copy. The same can happen when the live socket receives the
+        // upstream line after history. Retain the durable row and discard only an unambiguous
         // duplicate. Account/reply are enrichments rather than identity because optional tags can
-        // differ between history and live delivery. Msgid-less PUSH returned above without writing.
-        if (incomingMsgid == null && !e.isSelf && origin == EventOrigin.LIVE) {
+        // differ between deliveries. Msgid-less PUSH returned above without writing.
+        if (incomingMsgid == null && !e.isSelf && origin != EventOrigin.PUSH) {
             var candidates = messageDao.findDurableIncomingCandidates(
                 bufferId = bufferId,
                 sender = e.source.nick,
@@ -360,22 +360,24 @@ class EventProcessor @Inject constructor(
                     reconciled,
                     fromHistory = false,
                 )
-                // Keep the live notification decision while giving it the durable identity. If a
-                // transient push already notified, MotdNotifications aliases its fallback key.
-                maybeNotify(
-                    networkId,
-                    bufferId,
-                    type,
-                    reconciled.hasMention,
-                    e.copy(
-                        ctx = e.ctx.copy(
-                            msgid = reconciled.msgid,
-                            serverTime = reconciled.serverTime,
-                            account = reconciled.senderAccount,
+                // Preserve the live notification decision while giving it the durable identity.
+                // History never notifies; a transient push was already delivered above.
+                if (origin.notifies) {
+                    maybeNotify(
+                        networkId,
+                        bufferId,
+                        type,
+                        reconciled.hasMention,
+                        e.copy(
+                            ctx = e.ctx.copy(
+                                msgid = reconciled.msgid,
+                                serverTime = reconciled.serverTime,
+                                account = reconciled.senderAccount,
+                            ),
+                            replyToMsgid = reconciled.replyToMsgid,
                         ),
-                        replyToMsgid = reconciled.replyToMsgid,
-                    ),
-                )
+                    )
+                }
                 return
             }
         }

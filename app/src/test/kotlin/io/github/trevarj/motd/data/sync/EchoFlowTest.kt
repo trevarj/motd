@@ -154,6 +154,38 @@ class EchoFlowTest {
     }
 
     @Test
+    fun pushWithMsgid_thenHistoryWithoutMsgid_reusesDurableRow() = runTest {
+        val push = IrcEvent.ChatMessage(
+            ctx = MessageContext(
+                msgid = "push-history-a",
+                serverTime = 600_000,
+                account = null,
+                batchId = null,
+                label = null,
+            ),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#chan",
+            text = "me: notification then msgidless history",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.processPush(networkId, push)
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "#chan",
+                listOf(push.copy(ctx = push.ctx.copy(msgid = null, batchId = "history"))),
+            ),
+        )
+
+        assertEquals(1, rows().size)
+        assertEquals("push-history-a", rows().single().msgid)
+        assertEquals(1, notifier.incoming.size)
+    }
+
+    @Test
     fun historyWithMsgid_thenDelayedPushWithoutMsgid_keepsOnlyDurableRow() = runTest {
         val history = IrcEvent.ChatMessage(
             ctx = MessageContext(
