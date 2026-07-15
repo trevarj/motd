@@ -10,10 +10,8 @@ import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
-// These DAO interfaces are implemented in place by WP4, which fills in the missing @Query
-// strings / @Transaction bodies. Method names, parameters, and return types are frozen
-// (plans/10). Room does not process them until WP4 wires up MotdDatabase, so they compile
-// as plain annotated interfaces here.
+// Room is the authoritative boundary for fixed persistence queries. Prefer typed entity or
+// projection methods here; keep raw SQL at callers only when predicates are genuinely dynamic.
 
 @Dao
 interface NetworkDao {
@@ -136,6 +134,24 @@ interface BufferDao {
     @Query("SELECT id FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL'")
     suspend fun channelIds(networkId: Long): List<Long>
 
+    @Query("SELECT displayName FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND joined = 1 ORDER BY id")
+    suspend fun joinedChannelNames(networkId: Long): List<String>
+
+    @Query("SELECT id, name FROM buffers WHERE networkId = :networkId AND type != 'SERVER' ORDER BY id")
+    suspend fun openTargets(networkId: Long): List<BufferTargetRow>
+
+    @Query(
+        """SELECT id FROM buffers WHERE networkId = :networkId
+           AND (name = :target COLLATE NOCASE OR displayName = :target COLLATE NOCASE) LIMIT 1""",
+    )
+    suspend fun idForTarget(networkId: Long, target: String): Long?
+
+    @Query(
+        """SELECT id AS bufferId, name AS target, readMarkerTime AS timestamp
+           FROM buffers WHERE networkId = :networkId AND type != 'SERVER' ORDER BY id""",
+    )
+    suspend fun storedReadMarkers(networkId: Long): List<BufferReadMarkerRow>
+
     @Insert
     suspend fun insert(b: BufferEntity): Long
 
@@ -195,6 +211,10 @@ data class ChatListRow(
     val lastMessageText: String?, val lastMessageSender: String?, val lastMessageTime: Long?,
     val unreadCount: Int, val mentionCount: Int,
 )
+
+data class BufferTargetRow(val id: Long, val name: String)
+
+data class BufferReadMarkerRow(val bufferId: Long, val target: String, val timestamp: Long?)
 
 @Dao
 interface MessageDao {
@@ -274,6 +294,24 @@ interface MessageDao {
 
     @Query("SELECT MIN(serverTime) FROM messages WHERE bufferId = :bufferId")
     suspend fun oldestTime(bufferId: Long): Long?
+
+    @Query("SELECT msgid, serverTime FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, id DESC LIMIT 1")
+    suspend fun latestBoundary(bufferId: Long): MessageBoundaryRow?
+
+    @Query("SELECT COUNT(*) FROM messages WHERE bufferId = :bufferId")
+    suspend fun countForBuffer(bufferId: Long): Int
+
+    @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE bufferId = :bufferId AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION'))")
+    suspend fun hasStoredChat(bufferId: Long): Boolean
+
+    @Query(
+        """SELECT b.id AS bufferId, b.name AS target, MAX(m.serverTime) AS timestamp
+           FROM buffers b JOIN messages m ON m.bufferId = b.id
+           WHERE b.id IN (:bufferIds) AND b.type != 'SERVER' AND m.isSelf = 0
+             AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+           GROUP BY b.id, b.name""",
+    )
+    suspend fun latestIncomingMarkers(bufferIds: List<Long>): List<BufferReadMarkerRow>
 
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND msgid = :msgid LIMIT 1")
     suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
@@ -359,9 +397,26 @@ interface MessageDao {
         """
     )
     fun search(query: String, bufferId: Long?): Flow<List<SearchHit>>  // @Query over messages_fts MATCH
+
+    @Query(
+        """SELECT m.sender, m.text, m.serverTime, m.isSelf
+           FROM messages m JOIN buffers b ON b.id = m.bufferId
+           WHERE b.networkId = :networkId AND lower(b.name) = 'bouncerserv'
+           ORDER BY m.serverTime DESC, m.id DESC LIMIT 100""",
+    )
+    fun observeBouncerTranscript(networkId: Long): Flow<List<BouncerTranscriptRow>>
 }
 
 data class SearchHit(@Embedded val message: MessageEntity, val bufferDisplayName: String, val networkName: String)
+
+data class MessageBoundaryRow(val msgid: String?, val serverTime: Long)
+
+data class BouncerTranscriptRow(
+    val sender: String,
+    val text: String,
+    val serverTime: Long,
+    val isSelf: Boolean,
+)
 
 @Dao
 interface MemberDao {

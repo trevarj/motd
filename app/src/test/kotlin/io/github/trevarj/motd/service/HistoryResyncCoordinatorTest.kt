@@ -64,7 +64,6 @@ class HistoryResyncCoordinatorTest {
             processor,
             syncPrefs,
             CoroutineScope(SupervisorJob() + Dispatchers.Default),
-            Dispatchers.IO,
         )
         networkId = db.networkDao().insert(
             NetworkEntity(

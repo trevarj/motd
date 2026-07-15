@@ -23,7 +23,6 @@ import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.di.ApplicationScope
-import io.github.trevarj.motd.di.IoDispatcher
 import io.github.trevarj.motd.avatar.AvatarCoordinator
 import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.data.db.ObfsMode
@@ -50,7 +49,6 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
@@ -97,7 +95,6 @@ class ConnectionManagerImpl @Inject constructor(
     private val avatarCoordinator: AvatarCoordinator,
     private val pushHealthStore: PushHealthStore,
     @ApplicationScope private val scope: CoroutineScope,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     // Lazy to break the WebPushRegistrar <-> ConnectionManager ctor cycle.
     private val webPushRegistrar: dagger.Lazy<WebPushRegistrar>,
     private val bufferStore: BufferStore = BufferStore(db),
@@ -107,7 +104,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val bufferDao get() = db.bufferDao()
     private val messageDao get() = db.messageDao()
     private val reactionMutations = RoomReactionMutationStore(db)
-    private val recoveryReader = ConnectionRecoveryReader(db)
+    private val recoveryReader = ConnectionRecoveryReader(bufferDao)
     private val registry = ConnectionRegistry(
         scope = scope,
         actorFactory = ::createActor,
@@ -822,17 +819,7 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     private suspend fun openBuffers(networkId: Long): List<Pair<Long, String>> =
-        kotlinx.coroutines.withContext(ioDispatcher) {
-            val q = androidx.sqlite.db.SimpleSQLiteQuery(
-                "SELECT id, name FROM buffers WHERE networkId = ? AND type != 'SERVER'",
-                arrayOf<Any>(networkId),
-            )
-            db.query(q).use { c ->
-                val out = ArrayList<Pair<Long, String>>(c.count)
-                while (c.moveToNext()) out.add(c.getLong(0) to c.getString(1))
-                out
-            }
-        }
+        bufferDao.openTargets(networkId).map { it.id to it.name }
 
     private suspend fun normalize(networkId: Long, name: String): String {
         // Delegate normalization to the live client's isupport when available; else lowercase.

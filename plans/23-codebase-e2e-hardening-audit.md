@@ -373,7 +373,7 @@ References:
 
 ## A1. Use lifecycle-aware UI collection and typed Room queries
 
-- **Priority / size / status:** P2, M, Ready.
+- **Priority / size / status:** P2, M, Completed 2026-07-15.
 - **Depends on:** D1 for schema-backed query changes.
 - **Evidence:** most Compose consumers are lifecycle-aware, but a remaining
   group of screens uses plain `collectAsState`. Fixed SQL is also scattered
@@ -390,6 +390,22 @@ References:
    only for genuinely dynamic visibility predicates.
 4. Add lifecycle stop/resume tests and DAO equivalence tests before deleting
    the old readers.
+
+### Completion evidence
+
+- Screen and activity `Flow` collection is lifecycle-aware. `MainActivity`
+  combines its process-wide preferences into one state holder instead of
+  maintaining five independent subscriptions.
+- Fixed recovery, read-marker, history-boundary, open-buffer, target lookup,
+  latest-marker, count, and bouncer-transcript SQL now lives in typed Room DAO
+  methods and projections. The policy-driven message-visibility predicate is
+  the sole intentional dynamic raw query.
+- Robolectric coverage proves collection stops below `STARTED` and resumes
+  with the latest value. In-memory Room coverage compares typed projections
+  against seeded entities, including ordering, filtering, boundaries, and
+  transcript fields.
+- Verified with `:app:testFossDebugUnitTest`, `:app:lintFossDebug`, and
+  `:app:assembleFossDebug`.
 
 ## A2. Characterize performance before decomposing hotspots
 

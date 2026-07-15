@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -23,6 +22,7 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.prefs.Settings
@@ -33,6 +33,7 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.avatar.AvatarPrefs
+import io.github.trevarj.motd.avatar.AvatarRecord
 import io.github.trevarj.motd.avatar.AvatarStore
 import io.github.trevarj.motd.service.ConnectionManagerImpl
 import io.github.trevarj.motd.service.ConnectionManager
@@ -48,6 +49,9 @@ import io.github.trevarj.motd.ui.nav.NotificationTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import javax.inject.Inject
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
@@ -69,6 +73,22 @@ class MainActivity : ComponentActivity() {
     // updated by onNewIntent (warm start); the nav graph consumes it and clears it after routing.
     private var notificationTarget by mutableStateOf<NotificationTarget?>(null)
 
+    private val rootUiState by lazy {
+        combine(
+            settingsRepository.settings,
+            appearancePrefs.config,
+            avatarPrefs.config,
+            avatarStore.records,
+            contentPreviewPrefs.config,
+        ) { settings, appearance, avatarConfig, avatarRecords, contentPreviews ->
+            MainActivityUiState(settings, appearance, avatarConfig, avatarRecords, contentPreviews)
+        }.stateIn(
+            scope = lifecycleScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = MainActivityUiState(),
+        )
+    }
+
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         // Swap the launch/splash theme for the app theme before drawing Compose content.
@@ -82,11 +102,9 @@ class MainActivity : ComponentActivity() {
         acceptInvitationFrom(intent)
 
         setContent {
-            val settings by settingsRepository.settings.collectAsState(initial = Settings())
-            val appearance by appearancePrefs.config.collectAsState(initial = AppearanceConfig())
-            val avatarConfig by avatarPrefs.config.collectAsState(initial = AvatarConfig())
-            val avatarRecords by avatarStore.records.collectAsState(initial = emptyList())
-            val contentPreviews by contentPreviewPrefs.config.collectAsState(initial = ContentPreviewConfig())
+            val uiState by rootUiState.collectAsStateWithLifecycle()
+            val settings = uiState.settings
+            val appearance = uiState.appearance
             MotdTheme(
                 themePreset = appearance.theme,
                 dynamicColor = settings.dynamicColor,
@@ -99,8 +117,8 @@ class MainActivity : ComponentActivity() {
             ) {
                 CompositionLocalProvider(
                     LocalRemoteAvatars provides RemoteAvatarState(
-                        enabled = avatarConfig.showSharedAvatars && contentPreviews.showImages,
-                        records = avatarRecords,
+                        enabled = uiState.avatarConfig.showSharedAvatars && uiState.contentPreviews.showImages,
+                        records = uiState.avatarRecords,
                     ),
                 ) {
                     // Root Surface paints the themed background under every screen (incl.
@@ -184,10 +202,18 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+internal data class MainActivityUiState(
+    val settings: Settings = Settings(),
+    val appearance: AppearanceConfig = AppearanceConfig(),
+    val avatarConfig: AvatarConfig = AvatarConfig(),
+    val avatarRecords: List<AvatarRecord> = emptyList(),
+    val contentPreviews: ContentPreviewConfig = ContentPreviewConfig(),
+)
+
 /** Collects the ConnectionManager's cert prompts and shows the dialog for the first pending one. */
 @Composable
 private fun CertTrustDialogHost(viewModel: CertPromptViewModel = hiltViewModel()) {
-    val prompts by viewModel.certPrompts.collectAsState()
+    val prompts by viewModel.certPrompts.collectAsStateWithLifecycle()
     val prompt = prompts.firstOrNull() ?: return
     CertTrustDialog(
         prompt = prompt,
