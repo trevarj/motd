@@ -22,6 +22,8 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.ReplyConfig
+import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
@@ -117,6 +119,7 @@ class ChatViewModel @Inject constructor(
     private val scrollPositionStore: ChatScrollPositionStore,
     private val eventSink: IrcEventSink,
     private val settingsRepository: SettingsRepository,
+    private val replyPrefs: ReplyPrefs,
     private val visibilityReader: MessageVisibilityReader,
     private val historyResyncCoordinator: HistoryResyncCoordinator,
     private val userDao: UserDao,
@@ -131,6 +134,8 @@ class ChatViewModel @Inject constructor(
             SharingStarted.Eagerly,
             ContentPreviewConfig(showImages = false, showLinkPreviews = false),
         )
+    val replyConfig: StateFlow<ReplyConfig> = replyPrefs.config
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReplyConfig())
 
     private val route: ChatRoute = savedStateHandle.toRoute<ChatRoute>()
     val bufferId: Long = route.bufferId

@@ -161,6 +161,7 @@ fun ChatScreen(
         initialValue = io.github.trevarj.motd.data.prefs.AppearanceConfig(),
     )
     val contentPreviews by viewModel.contentPreviews.collectAsStateWithLifecycle()
+    val replyConfig by viewModel.replyConfig.collectAsStateWithLifecycle()
     // Round 5: nick sheet + raw-send snackbar (plans/16 §5.6/§5.8).
     val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
     val snackbarMessage by viewModel.snackbar.collectAsStateWithLifecycle()
@@ -178,6 +179,7 @@ fun ChatScreen(
         chatWallpaper = appearance.wallpaper,
         conversationFontScalePercent = appearance.conversationFontScalePercent,
         showComposerEmoji = settings.showComposerEmoji,
+        visibleReplyPrefix = replyConfig.visibleChannelPrefix,
         showImages = contentPreviews.showImages,
         showLinkPreviews = contentPreviews.showLinkPreviews,
         reactionChips = reactionChipsForMessage,
@@ -296,6 +298,7 @@ fun ChatContent(
     chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection = io.github.trevarj.motd.data.prefs.WallpaperSelection(),
     conversationFontScalePercent: Int = io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT,
     showComposerEmoji: Boolean = true,
+    visibleReplyPrefix: Boolean = false,
     showImages: Boolean = true,
     showLinkPreviews: Boolean = true,
     readMarkerSnapshot: Long? = null,
@@ -1129,7 +1132,14 @@ fun ChatContent(
             sheetState = sheetState,
             isServerBuffer = isServerBuffer,
             onDismiss = { sheetTarget = null },
-            onReply = { hideThen { onSetReply(target) } },
+            onReply = {
+                hideThen {
+                    onSetReply(target)
+                    if (visibleReplyPrefix && state.buffer?.type == BufferType.CHANNEL) {
+                        composerText = prependReplyPrefix(composerText, target.sender)
+                    }
+                }
+            },
             // Pass the whole target: the VM queues the react when target.msgid is still null (own
             // pending message) instead of silently dropping it.
             onReact = { emoji -> hideThen { onReact(target, emoji) } },
@@ -1229,6 +1239,21 @@ fun appendPrefill(value: TextFieldValue, prefill: String): TextFieldValue {
     val sep = if (current.isNotEmpty() && !current.last().isWhitespace()) " " else ""
     val text = current + sep + prefill
     return TextFieldValue(text = text, selection = androidx.compose.ui.text.TextRange(text.length))
+}
+
+/** Add the visible channel-reply prefix while preserving the current selection. */
+fun prependReplyPrefix(value: TextFieldValue, sender: String): TextFieldValue {
+    if (sender.isBlank()) return value
+    val prefix = "$sender: "
+    if (value.text.startsWith(prefix)) return value
+    val text = prefix + value.text
+    return value.copy(
+        text = text,
+        selection = androidx.compose.ui.text.TextRange(
+            value.selection.start + prefix.length,
+            value.selection.end + prefix.length,
+        ),
+    )
 }
 
 /**
