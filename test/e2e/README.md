@@ -14,6 +14,7 @@ setup and teardown deliberately clear application data.
 | --- | --- | --- |
 | Fast headless emulator | Default local feature validation; onboarding, chat, channel, settings, and bouncer journeys | `./test/e2e/headless.sh fast` |
 | Full headless emulator | Local A-I shell-runbook sweep | `./test/e2e/headless.sh full` |
+| Public screenshot showcase | Deterministic chat list, conversation, and attachment-sheet captures | `./test/e2e/headless.sh showcase` |
 | Native local stack + USB device | Manual feature work, physical-device checks, quick iteration | `./test/e2e/local-stack.sh` |
 | Native ZNC + Ergo stack | ZNC playback, reconnect, SASL, and capability degradation | `./test/e2e/znc-stack.sh` |
 | Host-driven A–I runbook | Broad UI interaction and crash sweep on a device or emulator | `./test/e2e/runbook.sh` |
@@ -87,6 +88,27 @@ fast. Manage their lifecycle explicitly:
 `down` preserves the AVD; `reset` deletes only the wrapper's isolated AVD,
 stack, and state directories. Failures save a screenshot, logcat, and local
 bouncer logs under `test/e2e/artifacts/headless/`.
+
+## Public screenshot showcase
+
+The showcase command provisions a separate local fixture with believable
+`#guix`, `#debian`, `#emacs`, and `#rust` channels, fictional nicks, and seeded
+messages. It drives the production Compose screens through the existing
+headless emulator, selects the dark Modus Vivendi preset, comfortable bubbles,
+and deterministic IRC sprites, then writes these tracked assets at the
+repository root:
+
+- `screenshots/chat-list.png` — the multi-channel chat list;
+- `screenshots/chat.png` — a seeded `#guix` conversation; and
+- `screenshots/file-uploader.png` — the in-app attachment source chooser.
+
+```sh
+nix develop -c ./test/e2e/headless.sh showcase
+```
+
+The optional `MOTD_SHOWCASE_SCREENSHOT_DIR` environment variable can point at
+another output directory. The workflow never touches a physical device or a
+release package; it uses only the wrapper's `.debug` APK and isolated emulator.
 
 ## Native local bouncer stack
 
@@ -337,6 +359,7 @@ failure log.
 | I | Delete-chat cancellation, final crash sweep, clean reset | Expected green |
 | J | Soju control-center panels, admin discovery, safe console command | Expected green with local admin fixture |
 | K | ntfy discovery, soju WebPush ACK, background/cold/Doze delivery, exactly-once notifications | Opt-in physical device with F-Droid ntfy |
+| S | Deterministic public screenshot showcase | Headless emulator via `headless.sh showcase` |
 
 Phase K is intentionally excluded from the default A–I sweep because it needs an installed
 UnifiedPush distributor and network access to its HTTPS relay. With the native stack already up,
@@ -364,8 +387,9 @@ false failure.
 
 Each step logs `ok`, `FAIL`, or a note, followed by a final check/failure count.
 The command exits non-zero on failures. XML dumps and diagnostic screenshots go
-to `test/e2e/artifacts/`, which is ignored. Screenshots are diagnostic or used
-for color-only checks; accessibility/semantic state is the preferred oracle.
+to `test/e2e/artifacts/`, which is ignored. The showcase phase is the explicit
+exception: its three named PNGs are public outputs, while ordinary runbook
+screenshots remain diagnostic or color-only checks.
 
 Common failure causes:
 

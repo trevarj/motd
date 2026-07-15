@@ -18,6 +18,30 @@ read state (`draft/read-marker`), several networks over one account
 (`soju.im/bouncer-networks`), and push (`soju.im/webpush` + UnifiedPush). On a
 plain network it falls back to local-only history and a persistent socket.
 
+## Screenshots
+
+The public [landing page](https://trevs.site/motd/) shows the same
+deterministic app captures kept in [`screenshots/`](screenshots/). Refresh all
+three frames with the isolated, headless fixture—no physical device or live
+IRC account is needed:
+
+```sh
+nix develop -c ./test/e2e/headless.sh showcase
+```
+
+<table>
+  <tr>
+    <td align="center"><strong>Chat list</strong></td>
+    <td align="center"><strong>Conversation</strong></td>
+    <td align="center"><strong>File uploader</strong></td>
+  </tr>
+  <tr>
+    <td><a href="screenshots/chat-list.png"><img src="screenshots/chat-list.png" alt="motd chat list with project channels" width="220"></a></td>
+    <td><a href="screenshots/chat.png"><img src="screenshots/chat.png" alt="motd conversation with comfortable message bubbles" width="220"></a></td>
+    <td><a href="screenshots/file-uploader.png"><img src="screenshots/file-uploader.png" alt="motd attachment source chooser" width="220"></a></td>
+  </tr>
+</table>
+
 ## Features
 
 | Feature | Description |

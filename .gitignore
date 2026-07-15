@@ -30,6 +30,7 @@ firebase/functions/node_modules/
 test/e2e/.env
 test/e2e/.env.live
 test/e2e/artifacts/
+_site/
 
 # agent worktrees
 .claude/worktrees/

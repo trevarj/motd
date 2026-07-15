@@ -31,7 +31,7 @@ die() { printf '\033[31m[headless-e2e] FATAL:\033[0m %s\n' "$*" >&2; exit 1; }
 
 needs_emulator_tools() {
   case "$CMD" in
-    up|fast|full|status|down|reset) return 0 ;;
+    up|fast|full|showcase|status|down|reset) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -103,6 +103,9 @@ configure_emulator() {
   # AOSP can surface benign SystemUI ANR dialogs while the host is packaging a large APK. They do
   # not represent the app under test and must not cover its semantics tree.
   adb_e shell settings put global hide_error_dialogs 1 >/dev/null
+  # Keep the system appearance stable; the showcase phase explicitly selects
+  # the dark Modus Vivendi app preset through the production settings screen.
+  adb_e shell cmd uimode night no >/dev/null 2>&1 || true
   adb_e shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
 }
 
@@ -114,6 +117,7 @@ ensure_stack() {
   fi
   log "starting isolated native soju/ergo stack"
   ANDROID_SERIAL="$SERIAL" MOTD_STACK_DIR="$STACK_DIR" \
+    MOTD_STACK_PROFILE="${MOTD_STACK_PROFILE:-default}" \
     MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" \
     "$E2E_DIR/local-stack.sh" up
 }
@@ -122,10 +126,19 @@ ensure_seed_member() {
   if [ -f "$SEED_PID_FILE" ] && kill -0 "$(<"$SEED_PID_FILE")" 2>/dev/null; then
     return
   fi
-  log "holding the deterministic second nick in ##motdtest"
-  setsid env ANDROID_SERIAL="$SERIAL" MOTD_STACK_DIR="$STACK_DIR" \
-    MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" \
-    SEED_HOLD_SECONDS=900 "$E2E_DIR/local-stack.sh" seed >"$SEED_LOG_FILE" 2>&1 &
+  if [ "${MOTD_STACK_PROFILE:-default}" = showcase ]; then
+    log "holding the deterministic showcase member in #guix and companion channels"
+    setsid env ANDROID_SERIAL="$SERIAL" MOTD_STACK_DIR="$STACK_DIR" \
+      MOTD_STACK_PROFILE=showcase MOTD_STACK_CHANNEL='#guix' \
+      MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" \
+      SEED_HOLD_SECONDS=900 "$E2E_DIR/local-stack.sh" showcase-hold >"$SEED_LOG_FILE" 2>&1 &
+  else
+    log "holding the deterministic second nick in ##motdtest"
+    setsid env ANDROID_SERIAL="$SERIAL" MOTD_STACK_DIR="$STACK_DIR" \
+      MOTD_STACK_PROFILE=default \
+      MOTD_ERGO_PORT="$ERGO_PORT" MOTD_SOJU_PORT="$SOJU_PORT" \
+      SEED_HOLD_SECONDS=900 "$E2E_DIR/local-stack.sh" seed >"$SEED_LOG_FILE" 2>&1 &
+  fi
   printf '%s\n' "$!" >"$SEED_PID_FILE"
 }
 
@@ -206,6 +219,29 @@ full() {
     nix develop "$REPO" -c "$E2E_DIR/runbook.sh"
 }
 
+showcase() {
+  export MOTD_STACK_PROFILE=showcase
+  export MOTD_STACK_CHANNEL='#guix'
+  local screenshot_dir="${MOTD_SHOWCASE_SCREENSHOT_DIR:-$REPO/screenshots}"
+
+  # The wrapper owns this emulator and stack, so reset only that isolated pair
+  # before producing tracked assets. The release installation is never touched.
+  down
+  up
+  build_test_apks
+  log "capturing public showcase screenshots into $screenshot_dir"
+  ANDROID_SERIAL="$SERIAL" SERIAL="$SERIAL" \
+    MOTD_PKG=io.github.trevarj.motd.debug \
+    MOTD_APK="$REPO/app/build/outputs/apk/foss/e2e/app-foss-e2e.apk" \
+    MOTD_SOJU_HOST=127.0.0.1 MOTD_SOJU_PORT="$SOJU_PORT" \
+    MOTD_SOJU_USER=motd MOTD_SOJU_PASS=motdtest \
+    MOTD_NICK=motdadb MOTD_TEST_CHANNEL='#guix' MOTD_SECOND_NICK=motdadb2 \
+    MOTD_STACK_PROFILE=showcase E2E_SCREENSHOT_DIR="$screenshot_dir" \
+    E2E_OUT_DIR="$STATE_DIR/showcase-artifacts" \
+    E2E_PHASES="${E2E_PHASES:-a s}" \
+    nix develop "$REPO" -c "$E2E_DIR/runbook.sh"
+}
+
 status() {
   if emulator_alive; then log "$SERIAL running (pid $(<"$PID_FILE"))"; else log "emulator stopped"; fi
   if stack_alive; then log "stack running at 127.0.0.1:$SOJU_PORT"; else log "stack stopped"; fi
@@ -243,8 +279,9 @@ case "$CMD" in
   up) up ;;
   fast) fast ;;
   full) full ;;
+  showcase) showcase ;;
   status) status ;;
   down) down ;;
   reset) reset ;;
-  *) die "usage: $0 {up|fast|full|status|down|reset}" ;;
+  *) die "usage: $0 {up|fast|full|showcase|status|down|reset}" ;;
 esac

@@ -1,7 +1,7 @@
 #!/bin/sh
 # test/e2e/hermetic/ergo/provision.sh — register accounts / seed history on ergo.
 #
-# Runs as a ONE-SHOT container, in one of two MODEs (arg 1, default "all"):
+# Runs as a ONE-SHOT container, in one of the MODEs below (arg 1, default "all"):
 #
 #   register  Register the ergo accounts + the seed channel. Runs BEFORE soju
 #             connects (so soju can identify to the upstream `motd` account and
@@ -25,6 +25,11 @@
 #
 #   all       register then seed (for standalone/local use without soju ordering).
 #
+# The optional MOTD_STACK_PROFILE=showcase profile provisions several believable
+# project channels (#guix, #debian, #emacs, #rust) with fictional nicks and
+# messages. It is used only by the local screenshot workflow; the default
+# ##motdtest fixture remains unchanged.
+#
 # Talks plaintext IRC to ergo over TCP using busybox `nc`. Idempotent: re-running
 # `register` is a no-op (ergo replies "already registered", ignored); re-running
 # `seed` appends the messages again.
@@ -40,6 +45,8 @@ TEST_CHANNEL="${TEST_CHANNEL:-##motdtest}"
 APP_NICK="${APP_NICK:-motdadb}"
 SEED_HOLD_SECONDS="${SEED_HOLD_SECONDS:-1}"
 PUSH_TOKEN="${PUSH_TOKEN:-motd-unifiedpush}"
+STACK_PROFILE="${MOTD_STACK_PROFILE:-default}"
+SHOWCASE_CHANNELS="${MOTD_SHOWCASE_CHANNELS:-#guix #debian #emacs #rust}"
 
 UP_ACCOUNT="${UP_ACCOUNT:-motd}"
 UP_PASS="${UP_PASS:-motdupstream}"
@@ -47,6 +54,24 @@ SEED_NICK="${SEED_NICK:-motdadb2}"
 SEED_PASS="${SEED_PASS:-motdadb2pass}"
 
 log() { printf '[ergo-provision:%s] %s\n' "$MODE" "$*" >&2; }
+
+fixture_channels() {
+  if [ "$STACK_PROFILE" = showcase ]; then
+    printf '%s\n' $SHOWCASE_CHANNELS
+  else
+    printf '%s\n' "$TEST_CHANNEL"
+  fi
+}
+
+fixture_topic() {
+  case "$1" in
+    '#guix') printf '%s' 'Reproducible builds, small systems, kind packaging.' ;;
+    '#debian') printf '%s' 'Stable ideas, carefully shipped.' ;;
+    '#emacs') printf '%s' 'The editor is the operating system.' ;;
+    '#rust') printf '%s' 'Fearless concurrency, one borrow at a time.' ;;
+    *) printf '%s' 'motd e2e seed channel — deterministic history' ;;
+  esac
+}
 
 # feed_irc: pipe CRLF IRC lines (generator on fd 0) into ergo over nc, holding
 # the connection open with a trailing sleep so ergo drains the burst before EOF.
@@ -107,11 +132,62 @@ do_register() {
     printf 'USER %s 0 * :motd e2e seeder\r\n' "$SEED_NICK"
     printf 'NICKSERV IDENTIFY %s %s\r\n' "$SEED_NICK" "$SEED_PASS"
     sleep 2
-    printf 'JOIN %s\r\n' "$TEST_CHANNEL"
-    sleep 1
-    printf 'CS REGISTER %s\r\n' "$TEST_CHANNEL"
-    printf 'TOPIC %s :motd e2e seed channel — deterministic history\r\n' "$TEST_CHANNEL"
+    for channel in $(fixture_channels); do
+      printf 'JOIN %s\r\n' "$channel"
+      sleep 1
+      printf 'CS REGISTER %s\r\n' "$channel"
+      printf 'TOPIC %s :%s\r\n' "$channel" "$(fixture_topic "$channel")"
+    done
     printf 'QUIT :channel ready\r\n'
+  } | feed_irc
+}
+
+do_showcase_seed() {
+  # Seed after soju is connected so its message-store observes live traffic.
+  log "seeding showcase channels: $SHOWCASE_CHANNELS"
+  {
+    printf 'NICK %s\r\n' "$SEED_NICK"
+    printf 'USER %s 0 * :motd showcase seeder\r\n' "$SEED_NICK"
+    printf 'NICKSERV IDENTIFY %s %s\r\n' "$SEED_NICK" "$SEED_PASS"
+    sleep 2
+    for channel in $(fixture_channels); do
+      printf 'JOIN %s\r\n' "$channel"
+      sleep 1
+    done
+    printf 'NICK alice\r\n'
+    printf 'PRIVMSG #guix :Welcome to #guix — tonight the package build is green.\r\n'
+    printf 'PRIVMSG #guix :Small systems, reproducible builds, and helpful neighbors.\r\n'
+    printf 'NICK bob\r\n'
+    printf 'PRIVMSG #guix :motdadb: the sprite avatars look great in this channel.\r\n'
+    printf 'NICK carol\r\n'
+    printf 'PRIVMSG #debian :A calm release day is a good release day.\r\n'
+    printf 'PRIVMSG #debian :The handbook notes are ready for a second pair of eyes.\r\n'
+    printf 'NICK dylan\r\n'
+    printf 'PRIVMSG #emacs :The minibuffer is a state machine with excellent manners.\r\n'
+    printf 'PRIVMSG #emacs :One more small refactor, then coffee.\r\n'
+    printf 'NICK rustacean\r\n'
+    printf 'PRIVMSG #rust :Borrow checker says hello from the afternoon build.\r\n'
+    printf 'PRIVMSG #rust :The async tests are green; ship it when the tea is ready.\r\n'
+    printf 'NICK motdadb2\r\n'
+    printf 'PRIVMSG #guix :See you around the next build.\r\n'
+    hold_connection
+    printf 'QUIT :showcase seed done\r\n'
+  } | feed_irc
+}
+
+do_showcase_hold() {
+  log "holding showcase member $SEED_NICK in fixture channels"
+  {
+    printf 'NICK %s\r\n' "$SEED_NICK"
+    printf 'USER %s 0 * :motd showcase member\r\n' "$SEED_NICK"
+    printf 'NICKSERV IDENTIFY %s %s\r\n' "$SEED_NICK" "$SEED_PASS"
+    sleep 2
+    for channel in $(fixture_channels); do
+      printf 'JOIN %s\r\n' "$channel"
+      sleep 1
+    done
+    hold_connection
+    printf 'QUIT :showcase hold done\r\n'
   } | feed_irc
 }
 
@@ -199,10 +275,15 @@ wait_for_ergo
 case "$MODE" in
   register) do_register ;;
   seed)     do_seed ;;
+  showcase) do_showcase_seed ;;
+  showcase-hold) do_showcase_hold ;;
   burst)    do_burst ;;
   jpq)      do_jpq ;;
   push)     do_push ;;
-  all)      do_register; do_seed ;;
-  *) log "FATAL: unknown mode '$MODE' (want register|seed|burst|jpq|push|all)"; exit 2 ;;
+  all)
+    do_register
+    if [ "$STACK_PROFILE" = showcase ]; then do_showcase_seed; else do_seed; fi
+    ;;
+  *) log "FATAL: unknown mode '$MODE' (want register|seed|showcase|showcase-hold|burst|jpq|push|all)"; exit 2 ;;
 esac
 log "done"

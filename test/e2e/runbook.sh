@@ -1221,7 +1221,79 @@ phase_k() {
 }
 
 # ==========================================================================
-# Driver — phases toggled by env (default: all). E2E_PHASES="a c f" runs a subset.
+# Phase S — deterministic public showcase screenshots
+# ==========================================================================
+phase_s() {
+  echo ""
+  echo "${_C_CYA}########## Phase S: showcase screenshots ##########${_C_RST}"
+
+  step "Pin the showcase appearance"
+  # Select a named app preset instead of relying on the emulator's system mode.
+  # This keeps the public frames dark and stable across host images.
+  tap_desc "Settings"
+  wait_for_text "Settings" 8 || true
+  tap_tag settings_category_appearance
+  wait_for_text "Appearance" 8 || true
+  tap_tag settings_theme_picker
+  wait_for_text "Search themes" 6 || true
+  # Keep the query shorter than the result label so tap_text cannot match the
+  # focused search field itself when UIAutomator returns exact text matches.
+  input_by_text_label "Search themes" "Modus"
+  wait_for_text "Modus Vivendi" 6 || true
+  tap_text "Modus Vivendi"
+  # The sheet is a separate Compose window. Do not start scrolling the
+  # underlying Appearance page until its close affordance has disappeared.
+  local _theme_wait
+  for _theme_wait in 1 2 3 4 5 6; do
+    dump || true
+    [ -z "$(bounds_of_desc "Close sheet")" ] && break
+    sleep 1
+  done
+  wait_for_text "Appearance" 6 || true
+  scroll_forward_to_tag settings_density_comfortable 10 || true
+  tap_tag settings_density_comfortable
+  scroll_forward_to_tag settings_avatar_style_irc_sprite 10 || true
+  tap_tag settings_avatar_style_irc_sprite
+  ok "selected Modus Vivendi, comfortable bubbles, and IRC sprite avatars"
+  adb_shell input keyevent 4             # Settings root
+  adb_shell input keyevent 4             # chat list
+  wait_for_desc "New conversation" 8 || true
+  assert_no_crash
+
+  step "Capture the multi-channel chat list"
+  for _showcase_channel in '#guix' '#debian' '#emacs' '#rust'; do
+    wait_for_text "$_showcase_channel" 20 || true
+    assert_text "$_showcase_channel"
+  done
+  capture_named_screenshot "chat-list"
+  assert_no_crash
+
+  step "Capture a seeded conversation"
+  tap_text '#guix'
+  wait_for_text "See you around the next build." 15 || true
+  # Chat bubbles expose the full message as one semantics node, while the
+  # sender remains its own node. Assert exact nodes that survive line wrapping.
+  assert_text "alice"
+  assert_text "See you around the next build."
+  capture_named_screenshot "chat"
+  assert_no_crash
+
+  step "Capture the attachment source chooser"
+  input_tag chat_composer_field "A small note for the next build"
+  tap_tag chat_composer_attachment
+  wait_for_text "Share something" 8 || true
+  assert_text "Share something"
+  assert_text "Photo"
+  assert_text "File"
+  assert_text "Current draft"
+  assert_text "Text paste"
+  capture_named_screenshot "file-uploader"
+  assert_no_crash
+}
+
+# ==========================================================================
+# Driver — phases toggled by env (default: all). E2E_PHASES="a c f" runs a subset;
+# the public capture workflow uses E2E_PHASES="a s".
 # ==========================================================================
 main() {
   ensure_device
@@ -1268,6 +1340,7 @@ main() {
       i) phase_i ;;
       j) phase_j ;;
       k) phase_k ;;
+      s) phase_s ;;
       *) note "unknown phase '$p' skipped" ;;
     esac || fail "phase '$p' aborted early (see output above)"
   done
