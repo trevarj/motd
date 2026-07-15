@@ -86,4 +86,38 @@ class EchoFlowTest {
         assertEquals(true, row.failed)
         assertEquals(label, row.pendingLabel)
     }
+
+    @Test
+    fun echoConfirmation_convergesAfterTimeoutInEitherOrder() = runTest {
+        suspend fun echo(label: String, msgid: String, text: String) {
+            processor.process(
+                networkId,
+                IrcEvent.ChatMessage(
+                    ctx = MessageContext(msgid, 700, null, null, label),
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    source = Prefix("me"),
+                    target = "#chan",
+                    text = text,
+                    isSelf = true,
+                    replyToMsgid = null,
+                ),
+            )
+        }
+
+        processor.insertPending(bufferId, "timeout-first", "me", "one", null, MessageKind.PRIVMSG)
+        processor.failIfStillPending(bufferId, "timeout-first")
+        echo("timeout-first", "confirmed-one", "one")
+
+        processor.insertPending(bufferId, "echo-first", "me", "two", null, MessageKind.PRIVMSG)
+        echo("echo-first", "confirmed-two", "two")
+        processor.failIfStillPending(bufferId, "echo-first")
+
+        val confirmed = rows().filter { it.msgid in setOf("confirmed-one", "confirmed-two") }
+        assertEquals(2, confirmed.size)
+        assertEquals(setOf("one", "two"), confirmed.map { it.text }.toSet())
+        confirmed.forEach {
+            assertNull(it.pendingLabel)
+            assertEquals(false, it.failed)
+        }
+    }
 }

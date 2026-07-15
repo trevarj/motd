@@ -45,6 +45,9 @@ class NetworkDedupTest {
         override fun observeAll(): Flow<List<NetworkEntity>> = flowOf(rows.values.toList())
         override suspend fun connectable(): List<NetworkEntity> = rows.values.filter { it.autoConnect }
         override suspend fun update(n: NetworkEntity) { rows[n.id] = n }
+        override suspend fun updateBouncerConnection(id: Long, host: String, port: Int, nick: String) {
+            rows[id]?.let { rows[id] = it.copy(host = host, port = port, nick = nick) }
+        }
         override suspend fun delete(n: NetworkEntity) { rows.remove(n.id) }
     }
 

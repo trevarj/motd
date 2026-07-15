@@ -93,7 +93,7 @@ record before security-sensitive implementation begins.
 
 ## C2. Serialize IRC persistence and make contested updates atomic
 
-- **Priority / size / status:** P0, L, Ready.
+- **Priority / size / status:** P0, L, Completed 2026-07-15.
 - **Depends on:** C1 provenance contract.
 - **Evidence:** live socket delivery, history resync, paging/search history,
   and push delivery can enter the singleton `EventProcessor` concurrently.
@@ -129,6 +129,26 @@ record before security-sensitive implementation begins.
 - Interleave pin, mute, read, topic, joined, and history-bound writes; every
   independently owned field retains its last valid update.
 - Preserve cross-network concurrency and verify sequencer cleanup.
+
+### Completion evidence
+
+- All live, history, push, registration, pending-send, timeout, and roster
+  cancellation entry points now share one race-safe per-network sequencer.
+  History stays on the lock-owned private path, different networks remain
+  concurrent, and deletion reconciliation plus manager shutdown retire cached
+  sequencers and processor state.
+- `BufferStore.getOrCreate` uses insert-ignore plus reread inside a Room
+  transaction and is shared by event persistence and connection-driven query
+  and server buffer creation.
+- Independently owned buffer fields and bouncer connection fields use targeted
+  DAO updates. Pending timeout is a conditional SQL update and cannot revert a
+  row whose echo already cleared its pending label.
+- Regression tests cover concurrent live/history/push first contact, concurrent
+  buffer creation, cross-network progress, eviction during active work,
+  independent buffer-field updates, and echo/timeout convergence in both
+  orders.
+- Verified with `:app:testFossDebugUnitTest`, `:app:lintFossDebug`, and
+  `:app:assembleFossDebug`.
 
 ## C3. Give connection lifecycle and actor ownership one serializer
 

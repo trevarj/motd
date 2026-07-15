@@ -33,6 +33,9 @@ interface NetworkDao {
     @Update
     suspend fun update(n: NetworkEntity)
 
+    @Query("UPDATE networks SET host = :host, port = :port, nick = :nick WHERE id = :id")
+    suspend fun updateBouncerConnection(id: Long, host: String, port: Int, nick: String)
+
     @Delete
     suspend fun delete(n: NetworkEntity)
 
@@ -140,8 +143,29 @@ interface BufferDao {
     @Insert
     suspend fun insert(b: BufferEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnore(b: BufferEntity): Long
+
     @Update
     suspend fun update(b: BufferEntity)
+
+    @Query("UPDATE buffers SET pinned = :pinned WHERE id = :id")
+    suspend fun setPinned(id: Long, pinned: Boolean)
+
+    @Query("UPDATE buffers SET muted = :muted WHERE id = :id")
+    suspend fun setMuted(id: Long, muted: Boolean)
+
+    @Query("UPDATE buffers SET topic = :topic, topicSetBy = :setBy WHERE id = :id")
+    suspend fun setTopic(id: Long, topic: String, setBy: String?)
+
+    @Query("UPDATE buffers SET joined = :joined WHERE id = :id")
+    suspend fun setJoined(id: Long, joined: Boolean)
+
+    @Query("UPDATE buffers SET historyComplete = 1 WHERE id = :id")
+    suspend fun markHistoryComplete(id: Long)
+
+    @Query("UPDATE buffers SET oldestFetchedTime = :oldestFetchedTime WHERE id = :id")
+    suspend fun setOldestFetchedTime(id: Long, oldestFetchedTime: Long?)
 
     @Query("UPDATE buffers SET readMarkerTime = :ts WHERE id = :id AND (readMarkerTime IS NULL OR readMarkerTime < :ts)")
     suspend fun advanceReadMarker(id: Long, ts: Long)
@@ -239,6 +263,12 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND pendingLabel = :label")
     suspend fun byPendingLabel(bufferId: Long, label: String): MessageEntity?
+
+    @Query(
+        """UPDATE messages SET failed = 1
+           WHERE bufferId = :bufferId AND pendingLabel = :label AND msgid IS NULL""",
+    )
+    suspend fun failIfStillPending(bufferId: Long, label: String): Int
 
     @Update
     suspend fun update(m: MessageEntity)

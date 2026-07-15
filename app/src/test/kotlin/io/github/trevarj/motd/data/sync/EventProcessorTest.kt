@@ -14,6 +14,9 @@ import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -1526,5 +1529,49 @@ class EventProcessorTest {
         assertEquals(listOf("hello me"), notifications)
         assertEquals(1, pagingList(before.id).count { it.msgid == "push-chat" })
         assertTrue(pagingList(before.id).none { it.msgid == "push-join" || it.msgid == "push-topic" })
+    }
+
+    @Test
+    fun concurrentLiveHistoryAndPushFirstContact_convergesOnOneLogicalMessage() = runTest {
+        val start = CompletableDeferred<Unit>()
+        val message = IrcEvent.ChatMessage(
+            ctx("concurrent-message", 50_000),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("Alice"),
+            "#concurrent",
+            "one logical message",
+            false,
+            null,
+        )
+        listOf(
+            async { start.await(); processor.process(networkId, message) },
+            async {
+                start.await()
+                processor.process(networkId, IrcEvent.HistoryBatch("#concurrent", listOf(message)))
+            },
+            async { start.await(); processor.processPush(networkId, message) },
+        ).also { jobs ->
+            start.complete(Unit)
+            jobs.awaitAll()
+        }
+
+        val buffer = db.bufferDao().byName(networkId, "#concurrent")!!
+        assertEquals(1, pagingList(buffer.id).count { it.msgid == "concurrent-message" })
+        assertEquals(1, db.bufferDao().observeChatList().first().count { it.bufferId == buffer.id })
+    }
+
+    @Test
+    fun networkEvictionAndShutdown_releaseProcessorSequencers() = runTest {
+        assertEquals(1, processor.sequencerSize())
+        processor.evictNetwork(networkId)
+        assertEquals(0, processor.sequencerSize())
+
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(ctx("after-evict"), IrcEvent.ChatKind.PRIVMSG, Prefix("Alice"), "#room", "hi", false, null),
+        )
+        assertEquals(1, processor.sequencerSize())
+        processor.shutdown()
+        assertEquals(0, processor.sequencerSize())
     }
 }

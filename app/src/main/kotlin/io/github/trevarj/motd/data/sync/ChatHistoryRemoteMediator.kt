@@ -105,13 +105,12 @@ class ChatHistoryRemoteMediator(
         if (result.events.isNotEmpty()) {
             processor.process(networkId, IrcEvent.HistoryBatch(target, result.events))
         }
-        val buffer = bufferDao.observeById(bufferId)
         if (result.events.isEmpty()) {
-            buffer?.let { bufferDao.update(it.copy(historyComplete = true)) }
+            bufferDao.markHistoryComplete(bufferId)
             return MediatorResult.Success(endOfPaginationReached = true)
         }
         val newOldest = messageDao.oldestTime(bufferId)
-        buffer?.let { bufferDao.update(it.copy(oldestFetchedTime = newOldest)) }
+        bufferDao.setOldestFetchedTime(bufferId, newOldest)
         return MediatorResult.Success(endOfPaginationReached = false)
     }
 

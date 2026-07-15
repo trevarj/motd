@@ -18,6 +18,7 @@ import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
+import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.MessageNotifier
@@ -95,6 +96,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val pushHealthStore: PushHealthStore,
     // Lazy to break the WebPushRegistrar <-> ConnectionManager ctor cycle.
     private val webPushRegistrar: dagger.Lazy<WebPushRegistrar>,
+    private val bufferStore: BufferStore = BufferStore(db),
 ) : ConnectionManager {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -289,6 +291,7 @@ class ConnectionManagerImpl @Inject constructor(
         monitorInitialized.clear()
         monitorLocks.clear()
         _presenceStates.value = emptyMap()
+        eventProcessor.shutdown()
     }
 
     override suspend fun connect(networkId: Long) {
@@ -343,7 +346,8 @@ class ConnectionManagerImpl @Inject constructor(
 
     /** Add/remove/restart actors so the live set matches the wanted set derived from [all] rows
      *  and the sticky user-intent map (plans/16 §4). */
-    private fun reconcile(all: List<NetworkEntity>) {
+    private suspend fun reconcile(all: List<NetworkEntity>) {
+        val deletedIds = networksById.keys - all.mapTo(mutableSetOf()) { it.id }
         // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
         networksById = all.associateBy { it.id }
         val wantedIds = wantedNetworkIds(all, userIntents, _states.value) - pushSuspendedIds
@@ -357,6 +361,7 @@ class ConnectionManagerImpl @Inject constructor(
                 _states.update { it - id }
             }
         }
+        deletedIds.forEach { eventProcessor.evictNetwork(it) }
         for (row in all) if (row.id in wantedIds) ensureActor(row)
     }
 
@@ -1150,28 +1155,17 @@ class ConnectionManagerImpl @Inject constructor(
 
     override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long {
         val norm = normalize(networkId, nick)
-        bufferDao.byName(networkId, norm)?.let { return it.id }
-        return bufferDao.insert(
-            io.github.trevarj.motd.data.db.BufferEntity(
-                networkId = networkId,
-                name = norm,
-                displayName = nick,
-                type = BufferType.QUERY,
-            ),
-        )
+        return bufferStore.getOrCreate(networkId, norm, nick, BufferType.QUERY).id
     }
 
     override suspend fun ensureServerBuffer(networkId: Long): Long {
         // "*" is stable under both casemapping normalizers, so no normalize() needed.
-        bufferDao.byName(networkId, SERVER_BUFFER_NAME)?.let { return it.id }
-        return bufferDao.insert(
-            io.github.trevarj.motd.data.db.BufferEntity(
-                networkId = networkId,
-                name = SERVER_BUFFER_NAME,
-                displayName = networkDao.byId(networkId)?.name ?: "Server",
-                type = BufferType.SERVER,
-            ),
-        )
+        return bufferStore.getOrCreate(
+            networkId,
+            SERVER_BUFFER_NAME,
+            networkDao.byId(networkId)?.name ?: "Server",
+            BufferType.SERVER,
+        ).id
     }
 
     override suspend fun markRead(bufferId: Long, upToTime: Long) {

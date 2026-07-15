@@ -113,6 +113,7 @@ class PushInstanceCoordinatorTest {
         override suspend fun byId(id: Long): NetworkEntity? = flow.value.firstOrNull { it.id == id }
         override suspend fun insert(n: NetworkEntity): Long = 0
         override suspend fun update(n: NetworkEntity) = Unit
+        override suspend fun updateBouncerConnection(id: Long, host: String, port: Int, nick: String) = Unit
         override suspend fun delete(n: NetworkEntity) = Unit
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = emptyList()
         override suspend fun localTreeIds(id: Long): List<Long> = flow.value

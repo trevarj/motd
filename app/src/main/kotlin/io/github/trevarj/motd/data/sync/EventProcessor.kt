@@ -43,6 +43,7 @@ class EventProcessor @Inject constructor(
     private val db: MotdDatabase,
     private val typing: TypingTrackerImpl,
     private val notifier: MessageNotifier,
+    private val bufferStore: BufferStore = BufferStore(db),
 ) : IrcEventSink {
 
     private val networkDao get() = db.networkDao()
@@ -52,6 +53,7 @@ class EventProcessor @Inject constructor(
     private val reactionDao get() = db.reactionDao()
     private val userDao get() = db.userDao()
     private val reactionMutations = RoomReactionMutationStore(db)
+    private val sequencer = NetworkEventSequencer()
 
     private val states = ConcurrentHashMap<Long, NetworkState>()
     private val rosterSnapshots = ConcurrentHashMap<RosterKey, MutableList<RosterDelta>>()
@@ -124,8 +126,12 @@ class EventProcessor @Inject constructor(
             NetworkState(selfNick = n?.nick ?: "", caseMapping = "rfc1459")
         }
 
-    /** Update cached self-nick + case mapping from a Registered/ISUPPORT snapshot. */
-    fun onRegistered(networkId: Long, nick: String, isupport: Map<String, String>) {
+    /** Test/setup seam; production registration enters through [process]. */
+    internal suspend fun onRegistered(networkId: Long, nick: String, isupport: Map<String, String>) {
+        sequencer.withNetwork(networkId) { applyRegistered(networkId, nick, isupport) }
+    }
+
+    private fun applyRegistered(networkId: Long, nick: String, isupport: Map<String, String>) {
         val cm = isupport["CASEMAPPING"] ?: "rfc1459"
         states[networkId] = NetworkState(
             selfNick = nick,
@@ -136,11 +142,15 @@ class EventProcessor @Inject constructor(
     }
 
     override suspend fun process(networkId: Long, event: IrcEvent) {
-        processEvent(networkId, event, EventOrigin.LIVE)
+        sequencer.withNetwork(networkId) {
+            processEvent(networkId, event, EventOrigin.LIVE)
+        }
     }
 
     override suspend fun processPush(networkId: Long, event: IrcEvent) {
-        processEvent(networkId, event, EventOrigin.PUSH)
+        sequencer.withNetwork(networkId) {
+            processEvent(networkId, event, EventOrigin.PUSH)
+        }
     }
 
     /** Persist one event according to its provenance and, for history, its enclosing target. */
@@ -154,7 +164,9 @@ class EventProcessor @Inject constructor(
             event !is IrcEvent.TagMessage && event !is IrcEvent.Invited && event !is IrcEvent.Raw
         ) return
         when (event) {
-            is IrcEvent.Registered -> if (origin == EventOrigin.LIVE) onRegistered(networkId, event.nick, event.isupport)
+            is IrcEvent.Registered -> if (origin == EventOrigin.LIVE) {
+                applyRegistered(networkId, event.nick, event.isupport)
+            }
             is IrcEvent.ChatMessage -> onChat(networkId, event, origin)
             is IrcEvent.TagMessage -> onTag(networkId, event, origin)
             is IrcEvent.HistoryBatch -> onHistoryBatch(networkId, event)
@@ -762,7 +774,7 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         val buffer = bufferDao.byName(networkId, st.normalize(e.channel))
             ?: ensureBufferEntity(networkId, e.channel, BufferType.CHANNEL, st)
-        bufferDao.update(buffer.copy(topic = e.topic, topicSetBy = e.setBy))
+        bufferDao.setTopic(buffer.id, e.topic, e.setBy)
         insertSystem(buffer.id, e.ctx, MessageKind.TOPIC, e.setBy ?: "", "topic: ${e.topic}")
     }
 
@@ -801,8 +813,10 @@ class EventProcessor @Inject constructor(
         }
     }
 
-    fun cancelRosterSnapshot(networkId: Long, bufferId: Long) {
-        rosterSnapshots.remove(RosterKey(networkId, bufferId))
+    suspend fun cancelRosterSnapshot(networkId: Long, bufferId: Long) {
+        sequencer.withNetwork(networkId) {
+            rosterSnapshots.remove(RosterKey(networkId, bufferId))
+        }
     }
 
     private fun replayRosterDeltas(
@@ -955,11 +969,12 @@ class EventProcessor @Inject constructor(
             // send a partial NETWORK notification; absent attrs mean "unchanged", not "use the
             // root defaults". Replacing child host/port/nick with root values changes its
             // connection fingerprint and restarts an otherwise healthy bound actor.
-            networkDao.update(existing.copy(
-                host = e.attrs["host"] ?: existing.host,
-                port = e.attrs["port"]?.toIntOrNull() ?: existing.port,
-                nick = e.attrs["nickname"] ?: existing.nick,
-            ))
+            networkDao.updateBouncerConnection(
+                existing.id,
+                e.attrs["host"] ?: existing.host,
+                e.attrs["port"]?.toIntOrNull() ?: existing.port,
+                e.attrs["nickname"] ?: existing.nick,
+            )
         }
     }
 
@@ -1031,13 +1046,7 @@ class EventProcessor @Inject constructor(
     private suspend fun ensureServerBuffer(networkId: Long, st: NetworkState): Long {
         bufferDao.byName(networkId, "*")?.let { return it.id }
         val displayName = networkDao.byId(networkId)?.name ?: "Server"
-        val entity = BufferEntity(
-            networkId = networkId,
-            name = "*",
-            displayName = displayName,
-            type = BufferType.SERVER,
-        )
-        return bufferDao.insert(entity)
+        return bufferStore.getOrCreate(networkId, "*", displayName, BufferType.SERVER).id
     }
 
     // -- pending-send insert path (delegated by ConnectionManagerImpl.sendMessage) --
@@ -1047,32 +1056,57 @@ class EventProcessor @Inject constructor(
      * The echo (labeled ChatMessage) later updates it in place; a 30s timeout marks it failed.
      */
     suspend fun insertPending(bufferId: Long, label: String, sender: String, text: String, replyToMsgid: String?, kind: MessageKind): Long {
-        val now = System.currentTimeMillis()
-        val row = MessageEntity(
-            bufferId = bufferId,
-            msgid = null,
-            serverTime = now,
-            sender = sender,
-            kind = kind,
-            text = text,
-            isSelf = true,
-            hasMention = false,
-            replyToMsgid = replyToMsgid,
-            pendingLabel = label,
-            dedupKey = EchoDeduper.pendingKey(label),
-        )
-        val inserted = messageDao.insertAll(listOf(row)).single()
-        if (inserted > 0L) traceMessageWrite("room_pending_insert", row.copy(id = inserted), fromHistory = false)
-        return inserted
+        val networkId = requireNotNull(bufferDao.observeById(bufferId)?.networkId) { "missing buffer $bufferId" }
+        return sequencer.withNetwork(networkId) {
+            val now = System.currentTimeMillis()
+            val row = MessageEntity(
+                bufferId = bufferId,
+                msgid = null,
+                serverTime = now,
+                sender = sender,
+                kind = kind,
+                text = text,
+                isSelf = true,
+                hasMention = false,
+                replyToMsgid = replyToMsgid,
+                pendingLabel = label,
+                dedupKey = EchoDeduper.pendingKey(label),
+            )
+            val inserted = messageDao.insertAll(listOf(row)).single()
+            if (inserted > 0L) {
+                traceMessageWrite("room_pending_insert", row.copy(id = inserted), fromHistory = false)
+            }
+            inserted
+        }
     }
 
     /** Mark a pending row failed if it is still pending after the echo timeout. */
     suspend fun failIfStillPending(bufferId: Long, label: String) {
-        val pending = messageDao.byPendingLabel(bufferId, label) ?: return
-        val failed = pending.copy(failed = true)
-        messageDao.update(failed)
-        traceMessageWrite("room_pending_failed", failed, fromHistory = false)
+        val networkId = bufferDao.observeById(bufferId)?.networkId ?: return
+        sequencer.withNetwork(networkId) {
+            if (messageDao.failIfStillPending(bufferId, label) > 0) {
+                messageDao.byPendingLabel(bufferId, label)?.let { failed ->
+                    traceMessageWrite("room_pending_failed", failed, fromHistory = false)
+                }
+            }
+        }
     }
+
+    suspend fun evictNetwork(networkId: Long) {
+        sequencer.withNetwork(networkId) {
+            states.remove(networkId)
+            rosterSnapshots.keys.removeAll { it.networkId == networkId }
+        }
+        sequencer.evict(networkId)
+    }
+
+    suspend fun shutdown() {
+        sequencer.clear()
+        states.clear()
+        rosterSnapshots.clear()
+    }
+
+    internal fun sequencerSize(): Int = sequencer.size()
 
     // -- helpers ------------------------------------------------------------
 
@@ -1092,14 +1126,7 @@ class EventProcessor @Inject constructor(
     private suspend fun ensureBufferEntity(networkId: Long, name: String, type: BufferType, st: NetworkState): BufferEntity {
         val norm = st.normalize(name)
         bufferDao.byName(networkId, norm)?.let { return it }
-        val entity = BufferEntity(
-            networkId = networkId,
-            name = norm,
-            displayName = name,
-            type = type,
-        )
-        val id = bufferDao.insert(entity)
-        return entity.copy(id = id)
+        return bufferStore.getOrCreate(networkId, norm, name, type)
     }
 
     private suspend fun historicalTargetBuffer(networkId: Long, target: String?): Long? {
@@ -1111,7 +1138,7 @@ class EventProcessor @Inject constructor(
 
     private suspend fun markJoined(bufferId: Long, joined: Boolean) {
         val b = bufferDao.observeById(bufferId) ?: return
-        if (b.joined != joined) bufferDao.update(b.copy(joined = joined))
+        if (b.joined != joined) bufferDao.setJoined(bufferId, joined)
     }
 
     private suspend fun insertSystem(
