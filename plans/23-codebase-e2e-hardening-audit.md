@@ -459,8 +459,7 @@ References:
 
 ## O1. Harden CI permissions and dependency maintenance
 
-- **Priority / size / status:** P2, S, Completed 2026-07-15; post-push CI
-  confirmation remains part of the final branch gate.
+- **Priority / size / status:** P2, S, Completed 2026-07-15.
 - **Depends on:** none.
 - **Evidence:** most workflows rely on implicit permissions, third-party actions
   use mutable major tags, and Gradle/Actions updates have no configured bot.
@@ -488,12 +487,12 @@ GitHub documents commit SHAs as the safest action reference:
   upload-artifact, and the release publisher move to their Node 24 release
   lines; emulator-runner and nix-installer retain their existing major behavior
   while becoming immutable.
-- Recent successful CI (`29403146878`), nightly E2E (`29394353204`), release
+- Earlier successful CI (`29403146878`), nightly E2E (`29394353204`), release
   (`29403720919`), and smoke (`29372235175`) logs all reported the Node 20
-  action-runtime deprecation. The upgraded action metadata declares `node24`;
-  post-push CI will supply runtime confirmation. Separate Gradle 9 and Android
-  Java-API deprecation messages are build-source maintenance, not deprecated
-  action runtimes.
+  action-runtime deprecation. The upgraded action metadata declares `node24`,
+  and post-push CI run `29406064899` completed without a deprecated Node action
+  runtime warning. Separate Gradle 9 and Android Java-API deprecation messages
+  are build-source maintenance, not deprecated action runtimes.
 - Dependabot now proposes weekly grouped Gradle and GitHub Actions updates.
   `actionlint` and YAML syntax validation pass locally.
 
@@ -604,6 +603,9 @@ The final local release-parity command passed `:irc:build`, debug and release
 app unit tests, FOSS debug lint, and FOSS release assembly. E2E shell syntax,
 `actionlint`, Dependabot/workflow YAML syntax, diff checks, and tracked Room
 schema cleanliness also passed. Docker was unavailable for the final repeated
-Compose validation, so the required pushed CI validation and `headless-core`
-journey remain the authoritative final evidence; the isolated native Soju
-history stack and Compose configuration had already passed during T1.
+local Compose validation, so pushed CI run `29406064899` is the authoritative
+proof: `irc`, `app`, `headless-core`, and the aggregate `gate` all passed. Its
+app job validated the E2E shell and Docker Compose configuration, while
+`headless-core` passed the four required journeys against the hermetic bouncer
+stack. The isolated native Soju history stack and Compose configuration had
+also passed during T1.

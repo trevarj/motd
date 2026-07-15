@@ -1,6 +1,6 @@
 # Room schema provenance and relational-integrity decision
 
-Date: 2026-07-15  
+Date: 2026-07-15
 Audit mission: D1 from `plans/23-codebase-e2e-hardening-audit.md`
 
 ## Schema provenance
