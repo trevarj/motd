@@ -19,6 +19,8 @@ export E2E_LIB_DIR
 
 # Output/artifacts dir for dumps and screenshots. Overridable via env.
 : "${E2E_OUT_DIR:=${E2E_LIB_DIR}/artifacts}"
+# Stable, tracked showcase screenshots are separate from diagnostic artifacts.
+: "${E2E_SCREENSHOT_DIR:=${E2E_LIB_DIR}/../../screenshots}"
 
 # The device serial to pin to. If unset and exactly one device is attached we
 # auto-select it; if multiple are attached the caller MUST set SERIAL.
@@ -602,6 +604,24 @@ screencap_step() {
   # exec-out streams raw PNG bytes without the historical CRLF mangling.
   adb_ exec-out screencap -p >"$f" 2>/dev/null || true
   echo "${_C_CYA}  screencap -> $f${_C_RST}" >&2
+}
+
+# capture_named_screenshot <name> — save one of the public showcase frames under
+# a stable filename. Unlike screencap_step, these captures are intentional
+# output consumed by README.md and the GitHub Pages site.
+capture_named_screenshot() {
+  local name="$1"
+  case "$name" in
+    chat-list|chat|file-uploader) ;;
+    *) fail "unknown showcase screenshot '$name'"; return 1 ;;
+  esac
+  mkdir -p "$E2E_SCREENSHOT_DIR"
+  local f="${E2E_SCREENSHOT_DIR}/${name}.png"
+  if ! adb_ exec-out screencap -p >"$f" 2>/dev/null || [ ! -s "$f" ]; then
+    fail "could not capture showcase screenshot '$name'"
+    return 1
+  fi
+  echo "${_C_CYA}  showcase screenshot -> $f${_C_RST}" >&2
 }
 
 # --- logging / step accounting --------------------------------------------

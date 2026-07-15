@@ -12,7 +12,9 @@
 # Usage:
 #   ./test/e2e/local-stack.sh up        # fresh stack (wipes prior state) + adb reverse + seed
 #   ./test/e2e/local-stack.sh down      # stop ergo/soju, drop the adb reverse
-#   ./test/e2e/local-stack.sh seed      # re-post the seed messages into ##motdtest
+#   ./test/e2e/local-stack.sh seed      # re-post the seed messages into the active fixture channel
+#   MOTD_STACK_PROFILE=showcase ./test/e2e/local-stack.sh up
+#                                      # multi-channel screenshot fixture
 #   ./test/e2e/local-stack.sh burst     # post a numbered 12-message live burst
 #   ./test/e2e/local-stack.sh jpq       # emit JOIN/PART/QUIT-only activity
 #   ./test/e2e/local-stack.sh push TOKEN # emit one tagged highlight and direct message
@@ -46,6 +48,12 @@ export PUSH_TOKEN
 RUN="${MOTD_STACK_DIR:-/tmp/motd-stack}"
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 PROVISION="$REPO/test/e2e/hermetic/ergo/provision.sh"
+STACK_PROFILE="${MOTD_STACK_PROFILE:-default}"
+case "$STACK_PROFILE" in
+  default|showcase) ;;
+  *) printf '\033[31m[local-stack] FATAL:\033[0m unknown MOTD_STACK_PROFILE '\''%s'\'' (want default|showcase)\n' "$STACK_PROFILE" >&2; exit 1 ;;
+esac
+export MOTD_STACK_PROFILE="$STACK_PROFILE"
 
 # Endpoints + creds (mirror the hermetic stack so onboarding is identical).
 ERGO_PORT="${MOTD_ERGO_PORT:-6667}"
@@ -53,7 +61,13 @@ SOJU_PORT="${MOTD_SOJU_PORT:-6697}"
 export ERGO_HOST=127.0.0.1
 export ERGO_PORT
 export SOJU_PORT
-export TEST_CHANNEL='##motdtest'
+if [ "$STACK_PROFILE" = showcase ]; then
+  export MOTD_SHOWCASE_CHANNELS='#guix #debian #emacs #rust'
+  export TEST_CHANNEL="${MOTD_STACK_CHANNEL:-#guix}"
+else
+  export MOTD_SHOWCASE_CHANNELS=''
+  export TEST_CHANNEL="${MOTD_STACK_CHANNEL:-##motdtest}"
+fi
 export APP_NICK=motdadb
 export UP_ACCOUNT=motd
 export UP_PASS=motdupstream
@@ -231,7 +245,7 @@ up() {
   echo $! >"$RUN/ergo.pid"
   wait_port 127.0.0.1 "$ERGO_PORT" ergo
 
-  log "ergo: register accounts + create $TEST_CHANNEL"
+  log "ergo: register accounts + create fixture channels (profile=$STACK_PROFILE)"
   sh "$PROVISION" register
 
   log "soju: self-signed TLS cert (SAN localhost,127.0.0.1,10.0.2.2)"
@@ -254,24 +268,36 @@ up() {
   ctl user create -username "$SOJU_NONADMIN_USER" -password "$SOJU_NONADMIN_PASS" \
     -realname "motd local non-admin" 2>/dev/null \
     || log "user $SOJU_NONADMIN_USER already exists (ok)"
-  ctl user run "$SOJU_USER" network create \
-    -addr "irc+insecure://127.0.0.1:$ERGO_PORT" \
-    -name "$NETWORK_NAME" \
-    -nick "$APP_NICK" \
-    -username "$UP_ACCOUNT" \
-    -connect-command "PRIVMSG NickServ :IDENTIFY ${UP_ACCOUNT} ${UP_PASS}" \
-    -connect-command "JOIN ${TEST_CHANNEL}" \
-    -enabled=true 2>/dev/null \
+  local -a network_args=(
+    -addr "irc+insecure://127.0.0.1:$ERGO_PORT"
+    -name "$NETWORK_NAME"
+    -nick "$APP_NICK"
+    -username "$UP_ACCOUNT"
+    -connect-command "PRIVMSG NickServ :IDENTIFY ${UP_ACCOUNT} ${UP_PASS}"
+    -enabled=true
+  )
+  if [ "$STACK_PROFILE" = showcase ]; then
+    for channel in $MOTD_SHOWCASE_CHANNELS; do
+      network_args+=(-connect-command "JOIN ${channel}")
+    done
+  else
+    network_args+=(-connect-command "JOIN ${TEST_CHANNEL}")
+  fi
+  ctl user run "$SOJU_USER" network create "${network_args[@]}" 2>/dev/null \
     || log "network $NETWORK_NAME already exists (ok)"
 
-  log "soju: waiting for upstream network to connect + join $TEST_CHANNEL"
+  log "soju: waiting for upstream network to connect + join fixture channels"
   i=0
   until ctl user run "$SOJU_USER" network status 2>/dev/null | grep -q '\[connected\]'; do
     i=$((i + 1)); [ "$i" -gt 40 ] && die "soju upstream never connected (see $RUN/soju.log)"; sleep 1
   done
 
-  log "seeding history into $TEST_CHANNEL"
-  sh "$PROVISION" seed
+  log "seeding history for profile $STACK_PROFILE"
+  if [ "$STACK_PROFILE" = showcase ]; then
+    sh "$PROVISION" showcase
+  else
+    sh "$PROVISION" seed
+  fi
 
   log "adb reverse tcp:$SOJU_PORT (device 127.0.0.1:$SOJU_PORT -> host soju)"
   adb reverse "tcp:$SOJU_PORT" "tcp:$SOJU_PORT" || log "adb reverse failed (no device?) — set it up manually"
@@ -291,9 +317,19 @@ BouncerServ non-admin capability check (separate app profile/device):
   Username: $SOJU_NONADMIN_USER
   Password: $SOJU_NONADMIN_PASS
 
-Re-seed:  ./test/e2e/local-stack.sh seed
+  Re-seed:  ./test/e2e/local-stack.sh seed
 Tear down: ./test/e2e/local-stack.sh down
 EOF
+}
+
+showcase_seed() {
+  [ "$STACK_PROFILE" = showcase ] || die "showcase seed requires MOTD_STACK_PROFILE=showcase"
+  sh "$PROVISION" showcase
+}
+
+showcase_hold() {
+  [ "$STACK_PROFILE" = showcase ] || die "showcase hold requires MOTD_STACK_PROFILE=showcase"
+  sh "$PROVISION" showcase-hold
 }
 
 down() {
@@ -805,7 +841,11 @@ PY
 case "$CMD" in
   up) up ;;
   down) down ;;
-  seed) sh "$PROVISION" seed ;;
+  seed)
+    if [ "$STACK_PROFILE" = showcase ]; then showcase_seed; else sh "$PROVISION" seed; fi
+    ;;
+  showcase) showcase_seed ;;
+  showcase-hold) showcase_hold ;;
   burst) sh "$PROVISION" burst ;;
   jpq) sh "$PROVISION" jpq ;;
   push) sh "$PROVISION" push ;;
@@ -829,5 +869,5 @@ case "$CMD" in
   obfs-xray-validate) xray_obfs_validate ;;
   obfs-xray-history-check) xray_obfs_history_check ;;
   obfs-xray-negative) xray_obfs_negative ;;
-  *) die "unknown command '$CMD' (want up|down|seed|burst|jpq|push|pause-soju|resume-soju|stop-soju|start-soju|status|history-check|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-history-check|obfs-xray-negative)" ;;
+  *) die "unknown command '$CMD' (want up|down|seed|showcase|showcase-hold|burst|jpq|push|pause-soju|resume-soju|stop-soju|start-soju|status|history-check|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-history-check|obfs-xray-negative)" ;;
 esac
