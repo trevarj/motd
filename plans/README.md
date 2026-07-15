@@ -15,3 +15,9 @@ For active work, use this authority order:
 In particular, the original work-package ownership, frozen-contract rules,
 dependency snippets, CI definitions, and E2E selector lists have been superseded.
 Use Git history when the full text of a retired operational plan is needed.
+
+## Current audit roadmaps
+
+- [`23-codebase-e2e-hardening-audit.md`](23-codebase-e2e-hardening-audit.md) —
+  prioritized correctness, consolidation, Android/Kotlin, and E2E-harness
+  missions reviewed against `v0.7.1`.
