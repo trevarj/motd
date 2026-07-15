@@ -418,7 +418,8 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     private fun stopForegroundKeeper() {
-        appContext.stopService(android.content.Intent(appContext, IrcForegroundService::class.java))
+        val stopIntent = android.content.Intent(appContext, IrcForegroundService::class.java)
+        appContext.stopService(stopIntent)
     }
 
     override suspend fun stopAll() {
