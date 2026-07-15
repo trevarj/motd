@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.db.UserEntity
 import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.bouncer.redactBouncerServReply
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.replyReference
@@ -38,6 +39,7 @@ class EventProcessor @Inject constructor(
     private val typing: TypingTrackerImpl,
     private val notifier: MessageNotifier,
     private val bufferStore: BufferStore = BufferStore(db),
+    private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) : IrcEventSink {
 
     private val networkDao get() = db.networkDao()
@@ -154,7 +156,19 @@ class EventProcessor @Inject constructor(
         origin: EventOrigin,
         historyTarget: String? = null,
     ) {
-        if (!origin.accepts(event)) return
+        diagnostics.record("event_processor", "event_received") {
+            mapOf(
+                "network_id" to networkId,
+                "origin" to origin.name,
+                "type" to event::class.simpleName,
+            )
+        }
+        if (!origin.accepts(event)) {
+            diagnostics.record("event_processor", "event_ignored") {
+                mapOf("network_id" to networkId, "origin" to origin.name, "type" to event::class.simpleName)
+            }
+            return
+        }
         when (event) {
             is IrcEvent.Registered -> if (origin.mutatesSessionState) {
                 applyRegistered(networkId, event.nick, event.isupport)
@@ -250,6 +264,14 @@ class EventProcessor @Inject constructor(
         val hasMention = !e.isSelf && !isRootServiceReply &&
             (replyMentionsSelf || st.mentionRegex.containsMatchIn(storedText))
 
+        traceMessageDecision("message_classified", networkId, bufferId, e, origin) {
+            mapOf(
+                "buffer_type" to type.name,
+                "mention" to hasMention,
+                "root_service" to isRootServiceReply,
+            )
+        }
+
         // Soju delays WebPush while its normal produce path synchronously appends the upstream line
         // to the configured message store. A msgid-less push is therefore transient delivery input,
         // not a second durable message identity: create the buffer so the notification deep link
@@ -257,6 +279,7 @@ class EventProcessor @Inject constructor(
         // mandatory reconnect CHATHISTORY pass insert the canonical msgid row.
         // Msgid-less LIVE lines remain legitimate IRC messages and continue through persistence.
         if (origin == EventOrigin.PUSH && e.ctx.msgid == null) {
+            traceMessageDecision("push_transient", networkId, bufferId, e, origin)
             maybeNotify(
                 networkId,
                 bufferId,
@@ -358,7 +381,10 @@ class EventProcessor @Inject constructor(
             // CHATHISTORY replay of an already-confirmed row) is a no-op. Checked first with the
             // plain suspend DAO so the raw-query heuristic below never runs inside the history
             // transaction for the common replay case (transaction-thread safe).
-            if (incomingMsgid != null && messageDao.byMsgid(bufferId, incomingMsgid) != null) return
+            if (incomingMsgid != null && messageDao.byMsgid(bufferId, incomingMsgid) != null) {
+                traceMessageDecision("room_existing_msgid", networkId, bufferId, e, origin)
+                return
+            }
             // (a) Labeled echo of a pending self-send: update the pending row in place.
             val label = e.ctx.label
             if (label != null) {
@@ -437,7 +463,10 @@ class EventProcessor @Inject constructor(
         }
 
         val inserted = messageDao.insertAll(listOf(row)).single()
-        if (inserted <= 0L) return // dedup no-op
+        if (inserted <= 0L) {
+            traceMessageDecision("room_insert_ignored", networkId, bufferId, e, origin)
+            return // dedup no-op
+        }
         traceMessageWrite("room_insert", row.copy(id = inserted), e.ctx.batchId != null)
         if (isRootServiceReply && origin == EventOrigin.LIVE) {
             bufferDao.advanceReadMarker(bufferId, e.ctx.serverTime)
@@ -485,8 +514,22 @@ class EventProcessor @Inject constructor(
         // All events for one target are applied in a single Room transaction (idempotent by
         // dedupKey). They are historical replay, never live arrivals: persist them without posting
         // notifications even when a previously-missing row is a DM or mention.
+        diagnostics.record("history", "batch_started") {
+            mapOf(
+                "network_id" to networkId,
+                "target_fp" to diagnostics.fingerprint(batch.target),
+                "events" to batch.events.size,
+            )
+        }
         db.withTransaction {
             for (ev in batch.events) processEvent(networkId, ev, EventOrigin.HISTORY, batch.target)
+        }
+        diagnostics.record("history", "batch_finished") {
+            mapOf(
+                "network_id" to networkId,
+                "target_fp" to diagnostics.fingerprint(batch.target),
+                "events" to batch.events.size,
+            )
         }
     }
 
@@ -1248,6 +1291,46 @@ class EventProcessor @Inject constructor(
         AutoFollowTrace.record(event, row.bufferId) {
             "row=${row.id} kind=${row.kind.name} self=${row.isSelf} history=$fromHistory " +
                 "server_time=${row.serverTime} pending=${row.pendingLabel != null} failed=${row.failed}"
+        }
+        diagnostics.record("room", event) {
+            mapOf(
+                "buffer_id" to row.bufferId,
+                "row_id" to row.id,
+                "msgid_fp" to diagnostics.fingerprint(row.msgid),
+                "dedup_fp" to diagnostics.fingerprint(row.dedupKey),
+                "sender_fp" to diagnostics.fingerprint(row.sender),
+                "body_fp" to diagnostics.fingerprint(row.text),
+                "kind" to row.kind.name,
+                "self" to row.isSelf,
+                "history" to fromHistory,
+                "server_time" to row.serverTime,
+                "pending" to (row.pendingLabel != null),
+                "failed" to row.failed,
+            )
+        }
+    }
+
+    private fun traceMessageDecision(
+        event: String,
+        networkId: Long,
+        bufferId: Long,
+        message: IrcEvent.ChatMessage,
+        origin: EventOrigin,
+        extra: () -> Map<String, Any?> = { emptyMap() },
+    ) {
+        diagnostics.record("messages", event) {
+            mapOf(
+                "network_id" to networkId,
+                "buffer_id" to bufferId,
+                "origin" to origin.name,
+                "msgid_fp" to diagnostics.fingerprint(message.ctx.msgid),
+                "sender_fp" to diagnostics.fingerprint(message.source.nick),
+                "body_fp" to diagnostics.fingerprint(message.text),
+                "kind" to message.kind.name,
+                "self" to message.isSelf,
+                "server_time" to message.ctx.serverTime,
+                "batch" to (message.ctx.batchId != null),
+            ) + extra()
         }
     }
 

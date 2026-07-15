@@ -882,7 +882,11 @@ phase_f() {
   step "About screen"
   scroll_forward_to_tag settings_category_about 6 || true
   tap_tag settings_category_about
-  wait_for_text "GitHub" 6 || true
+  wait_for_text "Diagnostic logging" 6 || true
+  assert_text "Diagnostic logging"
+  assert_tag_present about_diagnostic_logging_switch
+  assert_tag_present about_export_diagnostics
+  scroll_forward_to_tag about_github 4 || true
   assert_text "License"
   assert_text "GitHub"
   # Back out to chat list.

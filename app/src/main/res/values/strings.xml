@@ -282,6 +282,12 @@
     <string name="about_license_gpl">GNU GPL v3 or later</string>
     <string name="about_blurb">A modern IRCv3 client for Android, built for direct networks and soju bouncers.</string>
     <string name="about_legal_notice">Free software with no warranty. You may share and modify it under the GNU GPL v3 or later.</string>
+    <string name="about_diagnostic_logging">Diagnostic logging</string>
+    <string name="about_diagnostic_logging_summary">Records bounded technical traces for connections, sync, push, and message handling. Message contents, credentials, and personal identifiers are excluded. Turning it on starts a fresh log.</string>
+    <string name="about_export_diagnostics">Export diagnostic log</string>
+    <string name="about_export_diagnostics_summary">Save the captured trace as a text file to share when reporting a problem.</string>
+    <string name="about_export_diagnostics_success">Diagnostic log saved.</string>
+    <string name="about_export_diagnostics_failure">Could not save the diagnostic log.</string>
 
     <!-- Chat components (WP7 review, plans/15 #25) -->
     <string name="chat_typing_one">%1$s is typing…</string>

@@ -16,6 +16,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.irc.event.IrcEvent
@@ -52,6 +53,7 @@ class MotdNotifications @Inject constructor(
     private val db: MotdDatabase,
     private val foregroundBufferTracker: ForegroundBufferTracker,
     private val settingsRepository: SettingsRepository,
+    private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) : MessageNotifier {
 
     private val manager = NotificationManagerCompat.from(context)
@@ -118,13 +120,28 @@ class MotdNotifications @Inject constructor(
 
         // Round 4 (plans/13 §2.3/§2.4/§2.6): fools are fully silenced; friends bypass the
         // muted-buffer suppression. Foreground suppression still applies to everyone.
-        val decision = shouldPostNotification(
-            foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId,
-            muted = buffer?.muted == true,
-            senderIsFriend = sender in settings.friends,
-            senderIsFool = sender in settings.fools,
-            alreadyRead = buffer?.readMarkerTime?.let { message.ctx.serverTime <= it } == true,
-        )
+        val foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId
+        val muted = buffer?.muted == true
+        val senderIsFriend = sender in settings.friends
+        val senderIsFool = sender in settings.fools
+        val alreadyRead = buffer?.readMarkerTime?.let { message.ctx.serverTime <= it } == true
+        val decision = shouldPostNotification(foreground, muted, senderIsFriend, senderIsFool, alreadyRead)
+        diagnostics.record("notifications", "message_evaluated") {
+            mapOf(
+                "network_id" to networkId,
+                "buffer_id" to bufferId,
+                "msgid_fp" to diagnostics.fingerprint(message.ctx.msgid),
+                "sender_fp" to diagnostics.fingerprint(message.source.nick),
+                "body_fp" to diagnostics.fingerprint(message.text),
+                "foreground" to foreground,
+                "muted" to muted,
+                "friend" to senderIsFriend,
+                "fool" to senderIsFool,
+                "already_read" to alreadyRead,
+                "post" to decision,
+                "mention" to hasMention,
+            )
+        }
         if (!decision) return
 
         val channel = if (hasMention) CHANNEL_MENTIONS else CHANNEL_MESSAGES
@@ -139,6 +156,14 @@ class MotdNotifications @Inject constructor(
                 // Room row. Upgrade that fallback notification identity when reconnect supplies
                 // the durable representation so the body is not added a second time.
                 keys[existingIndex] = keys[existingIndex].withDurableIdentityFrom(key)
+                diagnostics.record("notifications", "message_deduplicated") {
+                    mapOf(
+                        "buffer_id" to bufferId,
+                        "msgid_fp" to diagnostics.fingerprint(message.ctx.msgid),
+                        "body_fp" to diagnostics.fingerprint(message.text),
+                        "existing_index" to existingIndex,
+                    )
+                }
                 return
             }
             keys += key
@@ -209,6 +234,14 @@ class MotdNotifications @Inject constructor(
         if (canPost) {
             manager.notify(bufferId.toInt(), notification)
         }
+        diagnostics.record("notifications", "message_post_finished") {
+            mapOf(
+                "buffer_id" to bufferId,
+                "msgid_fp" to diagnostics.fingerprint(message.ctx.msgid),
+                "body_fp" to diagnostics.fingerprint(message.text),
+                "permission" to canPost,
+            )
+        }
     }
 
     override suspend fun onRead(bufferId: Long, upToTime: Long) {
@@ -229,6 +262,9 @@ class MotdNotifications @Inject constructor(
         }
         latestNotifiedTimes.remove(bufferId)
         manager.cancel(bufferId.toInt())
+        diagnostics.record("notifications", "message_notification_cleared") {
+            mapOf("buffer_id" to bufferId, "up_to_time" to upToTime)
+        }
     }
 
     override suspend fun onInvitation(networkId: Long, bufferId: Long, messageId: Long) {

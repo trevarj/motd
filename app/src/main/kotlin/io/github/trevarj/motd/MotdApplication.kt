@@ -2,6 +2,7 @@ package io.github.trevarj.motd
 
 import android.app.Application
 import dagger.hilt.android.HiltAndroidApp
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.push.PushInstanceCoordinator
 import io.github.trevarj.motd.push.PushLifecycleCoordinator
 import javax.inject.Inject
@@ -14,8 +15,13 @@ class MotdApplication : Application() {
 
     @Inject lateinit var pushLifecycleCoordinator: PushLifecycleCoordinator
 
+    @Inject lateinit var diagnosticLogger: DiagnosticLogger
+
     override fun onCreate() {
         super.onCreate()
+        diagnosticLogger.record("app", "process_started") {
+            mapOf("cold_start" to true)
+        }
         pushInstanceCoordinator.start()
         pushLifecycleCoordinator.start()
     }

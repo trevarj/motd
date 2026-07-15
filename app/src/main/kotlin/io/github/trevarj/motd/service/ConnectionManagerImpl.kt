@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
@@ -94,6 +95,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val presetEnrollmentCoordinator: PresetEnrollmentCoordinator,
     private val avatarCoordinator: AvatarCoordinator,
     private val pushHealthStore: PushHealthStore,
+    private val diagnostics: DiagnosticLogger,
     @ApplicationScope private val scope: CoroutineScope,
     // Lazy to break the WebPushRegistrar <-> ConnectionManager ctor cycle.
     private val webPushRegistrar: dagger.Lazy<WebPushRegistrar>,
@@ -324,6 +326,14 @@ class ConnectionManagerImpl @Inject constructor(
         // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
         networksById = all.associateBy { it.id }
         val wantedIds = wantedNetworkIds(all, userIntents, registry.snapshot.value.states) - pushSuspendedIds
+        diagnostics.record("connections", "reconcile") {
+            mapOf(
+                "configured" to all.size,
+                "wanted" to wantedIds.size,
+                "deleted" to deletedIds.size,
+                "push_suspended" to pushSuspendedIds.size,
+            )
+        }
         registry.reconcile(
             rows = all.map { it to fingerprint(it) },
             wantedIds = wantedIds,
@@ -339,6 +349,23 @@ class ConnectionManagerImpl @Inject constructor(
             scope = scope,
             connectionFactory = { buildConnection(row) },
             onState = { id, state ->
+                diagnostics.record("connections", "state_changed") {
+                    buildMap {
+                        put("network_id", id)
+                        put("state", state::class.simpleName)
+                        when (state) {
+                            is IrcClientState.Ready -> {
+                                put("caps", state.caps.sorted().joinToString(","))
+                                put("isupport_keys", state.isupport.keys.sorted().joinToString(","))
+                            }
+                            is IrcClientState.Failed -> {
+                                put("fatal", state.fatal)
+                                put("error_fp", diagnostics.fingerprint(state.reason))
+                            }
+                            else -> Unit
+                        }
+                    }
+                }
                 registry.actorState(id, generation, fp, state)
             },
             onEvent = { id, event ->
@@ -760,12 +787,28 @@ class ConnectionManagerImpl @Inject constructor(
                 isCurrent = { clientFor(networkId) === client },
             )) {
                 is HistoryResyncState.Failed -> {
+                    diagnostics.record("history", "catch_up_failed") {
+                        mapOf(
+                            "network_id" to networkId,
+                            "attempt" to attempt,
+                            "error_fp" to diagnostics.fingerprint(result.reason),
+                        )
+                    }
                     if (clientFor(networkId) !== client) return
                     val retryMs = catchUpRetryDelayMs(attempt++)
                     Log.w(TAG, "CHATHISTORY catch-up failed for network $networkId; retrying in ${retryMs}ms: ${result.reason}")
                     delay(retryMs)
                 }
-                else -> return
+                else -> {
+                    diagnostics.record("history", "catch_up_finished") {
+                        mapOf(
+                            "network_id" to networkId,
+                            "attempts" to attempt,
+                            "result" to result::class.simpleName,
+                        )
+                    }
+                    return
+                }
             }
         }
     }

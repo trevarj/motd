@@ -12,6 +12,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.service.ConnectionManagerImpl
 import io.github.trevarj.motd.di.ApplicationScope
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +23,7 @@ import kotlinx.coroutines.launch
 class PushLifecycleCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
     private val connectionManager: ConnectionManagerImpl,
+    private val diagnostics: DiagnosticLogger,
     @ApplicationScope private val scope: CoroutineScope,
 ) : DefaultLifecycleObserver {
     @Volatile private var started = false
@@ -30,7 +32,9 @@ class PushLifecycleCoordinator @Inject constructor(
     private val idleReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED) return
-            connectionManager.onDeviceIdleModeChanged(powerManager?.isDeviceIdleMode == true)
+            val idle = powerManager?.isDeviceIdleMode == true
+            diagnostics.record("lifecycle", "device_idle_changed") { mapOf("idle" to idle) }
+            connectionManager.onDeviceIdleModeChanged(idle)
         }
     }
 
@@ -48,10 +52,12 @@ class PushLifecycleCoordinator @Inject constructor(
     }
 
     override fun onStart(owner: LifecycleOwner) {
+        diagnostics.record("lifecycle", "app_foregrounded")
         scope.launch { connectionManager.onAppForegrounded() }
     }
 
     override fun onStop(owner: LifecycleOwner) {
+        diagnostics.record("lifecycle", "app_backgrounded")
         connectionManager.onAppBackgrounded()
     }
 }

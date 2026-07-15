@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.prefs.NoopHistorySyncPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.di.ApplicationScope
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResult
 import io.github.trevarj.motd.irc.client.IrcClient
@@ -65,6 +66,7 @@ class HistoryResyncCoordinator @Inject constructor(
     private val processor: EventProcessor,
     private val syncPrefs: HistorySyncPrefs = NoopHistorySyncPrefs,
     @ApplicationScope private val scope: CoroutineScope,
+    private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) {
     internal interface HistorySource {
         fun hasChatHistory(): Boolean
@@ -96,6 +98,13 @@ class HistoryResyncCoordinator @Inject constructor(
         isCurrent: () -> Boolean,
         range: HistoryRefreshRange = HistoryRefreshRange.MISSING,
     ): HistoryResyncState {
+        diagnostics.record("history", "buffer_sync_requested") {
+            mapOf(
+                "network_id" to buffer.networkId,
+                "buffer_id" to buffer.id,
+                "range" to range.name,
+            )
+        }
         val source = ClientHistorySource(client)
         if (!source.hasChatHistory()) {
             states.update { it + (buffer.id to HistoryResyncState.WaitingForCapability) }
@@ -149,6 +158,9 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         isCurrent: () -> Boolean = { true },
     ): HistoryResyncState = coalesced(RequestKey(networkId, null)) {
+        diagnostics.record("history", "network_sync_started") {
+            mapOf("network_id" to networkId, "open_buffers" to openBuffers.size)
+        }
         if (!source.hasChatHistory()) return@coalesced HistoryResyncState.Unsupported
         // A room row's newest message is not a reliable reconnect cursor: a newer push-delivered
         // message in one buffer can otherwise hide an older missed message in another. Advance a
@@ -200,6 +212,13 @@ class HistoryResyncCoordinator @Inject constructor(
         )
         if (result !is HistoryResyncState.Failed && result != HistoryResyncState.Unsupported) {
             syncPrefs.setLastSuccessfulSync(networkId, now)
+        }
+        diagnostics.record("history", "network_sync_finished") {
+            mapOf(
+                "network_id" to networkId,
+                "targets" to (openBuffers.size + discovered.size),
+                "result" to result::class.simpleName,
+            )
         }
         result
     }

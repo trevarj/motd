@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.push
 
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.IrcParseException
@@ -27,6 +28,7 @@ class PushEventHandler(
     private val crypto: WebPushCryptoFacade,
     private val eventSink: IrcEventSink,
     private val healthStore: PushHealthStore = NoopPushHealthStore,
+    private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) {
     /**
      * Hilt entry point. The crypto facade defaults to the real JCA implementation and the
@@ -34,10 +36,11 @@ class PushEventHandler(
      * prevents a pushed DM/highlight being notified twice.
      */
     @Inject
-    constructor(eventSink: IrcEventSink) : this(
+    constructor(eventSink: IrcEventSink, diagnostics: DiagnosticLogger) : this(
         WebPushCryptoFacade.Default,
         eventSink,
         NoopPushHealthStore,
+        diagnostics,
     )
 
     /**
@@ -46,14 +49,19 @@ class PushEventHandler(
      * not map to a chat event (or fails to decrypt/parse — swallowed so a bad push is inert).
      */
     suspend fun handle(networkId: Long, body: ByteArray, keys: WebPushCrypto.KeyMaterial): IrcEvent? {
+        diagnostics.record("push", "payload_received") {
+            mapOf("network_id" to networkId, "bytes" to body.size)
+        }
         val line = runCatching { String(crypto.decrypt(body, keys), Charsets.UTF_8) }
             .getOrElse {
+                diagnostics.record("push", "decrypt_failed") { mapOf("network_id" to networkId) }
                 healthStore.warning(networkId, "PAYLOAD_DECRYPT_FAILED")
                 return null
             }
         val msg = runCatching { IrcMessage.parse(line) }
             .getOrElse {
                 if (it is IrcParseException) {
+                    diagnostics.record("push", "parse_failed") { mapOf("network_id" to networkId) }
                     healthStore.warning(networkId, "PAYLOAD_INVALID")
                     return null
                 } else {
@@ -61,11 +69,21 @@ class PushEventHandler(
                 }
             }
         if (isRegistrationProbe(msg)) {
+            diagnostics.record("push", "registration_probe") { mapOf("network_id" to networkId) }
             healthStore.probeDelivered(networkId)
             return null
         }
-        val event = mapToEvent(msg) ?: return null
+        val event = mapToEvent(msg)
+        if (event == null) {
+            diagnostics.record("push", "payload_ignored") {
+                mapOf("network_id" to networkId, "command" to msg.command.uppercase())
+            }
+            return null
+        }
         eventSink.processPush(networkId, event)
+        diagnostics.record("push", "event_delivered") {
+            mapOf("network_id" to networkId, "type" to event::class.simpleName)
+        }
         healthStore.messageDelivered(networkId)
         return event
     }

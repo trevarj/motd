@@ -39,6 +39,8 @@ import io.github.trevarj.motd.data.sync.ChatHistoryMediatorFactoryImpl
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.diagnostics.FileDiagnosticLogger
 import io.github.trevarj.motd.push.PushEventHandler
 import io.github.trevarj.motd.push.DataStorePushHealthStore
 import io.github.trevarj.motd.push.PushHealthStore
@@ -163,6 +165,9 @@ internal abstract class AppModule {
     @Binds @Singleton
     abstract fun messageNotifier(impl: MotdNotifications): MessageNotifier
 
+    @Binds @Singleton
+    abstract fun diagnosticLogger(impl: FileDiagnosticLogger): DiagnosticLogger
+
     // -- service (WP5 / WP1 trivial) --
     @Binds @Singleton
     abstract fun foregroundBufferTracker(impl: ForegroundBufferTrackerImpl): ForegroundBufferTracker
@@ -187,7 +192,13 @@ internal abstract class AppModule {
         fun pushEventHandler(
             sink: IrcEventSink,
             healthStore: PushHealthStore,
-        ): PushEventHandler = PushEventHandler(WebPushCryptoFacade.Default, sink, healthStore)
+            diagnosticLogger: DiagnosticLogger,
+        ): PushEventHandler = PushEventHandler(
+            WebPushCryptoFacade.Default,
+            sink,
+            healthStore,
+            diagnosticLogger,
+        )
 
         /**
          * Real UnifiedPush availability check: an installed distributor AND a connected client

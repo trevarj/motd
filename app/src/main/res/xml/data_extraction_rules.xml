@@ -5,13 +5,17 @@
     <cloud-backup>
         <exclude domain="database" path="." />
         <exclude domain="file" path="datastore/" />
+        <exclude domain="file" path="diagnostics/" />
         <exclude domain="device_database" path="." />
         <exclude domain="device_file" path="datastore/" />
+        <exclude domain="device_file" path="diagnostics/" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="database" path="." />
         <exclude domain="file" path="datastore/" />
+        <exclude domain="file" path="diagnostics/" />
         <exclude domain="device_database" path="." />
         <exclude domain="device_file" path="datastore/" />
+        <exclude domain="device_file" path="diagnostics/" />
     </device-transfer>
 </data-extraction-rules>
