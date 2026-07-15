@@ -459,7 +459,8 @@ References:
 
 ## O1. Harden CI permissions and dependency maintenance
 
-- **Priority / size / status:** P2, S, Ready.
+- **Priority / size / status:** P2, S, Completed 2026-07-15; post-push CI
+  confirmation remains part of the final branch gate.
 - **Depends on:** none.
 - **Evidence:** most workflows rely on implicit permissions, third-party actions
   use mutable major tags, and Gradle/Actions updates have no configured bot.
@@ -476,6 +477,25 @@ References:
 
 GitHub documents commit SHAs as the safest action reference:
 <https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows>.
+
+### Completion evidence
+
+- CI, nightly E2E, and reusable smoke workflows explicitly grant only
+  `contents: read`; release retains its required `contents: write` and no
+  broader permission. Job names and gating behavior are unchanged.
+- Every action reference is pinned to a verified 40-character upstream commit
+  with a readable release comment. Checkout, setup-java, setup-gradle,
+  upload-artifact, and the release publisher move to their Node 24 release
+  lines; emulator-runner and nix-installer retain their existing major behavior
+  while becoming immutable.
+- Recent successful CI (`29403146878`), nightly E2E (`29394353204`), release
+  (`29403720919`), and smoke (`29372235175`) logs all reported the Node 20
+  action-runtime deprecation. The upgraded action metadata declares `node24`;
+  post-push CI will supply runtime confirmation. Separate Gradle 9 and Android
+  Java-API deprecation messages are build-source maintenance, not deprecated
+  action runtimes.
+- Dependabot now proposes weekly grouped Gradle and GitHub Actions updates.
+  `actionlint` and YAML syntax validation pass locally.
 
 ## S1. Threat-model stored credentials and remote previews
 
