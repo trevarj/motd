@@ -1,8 +1,11 @@
 package io.github.trevarj.motd.service
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 
 /**
@@ -22,7 +25,7 @@ internal class BackgroundConnectionRetention(
     private var expiryJob: Job? = null
 
     val isRetaining: Boolean
-        get() = synchronized(lock) { expiryJob?.isActive == true }
+        get() = synchronized(lock) { expiryJob != null }
 
     val graceElapsed: Boolean
         get() = synchronized(lock) {
@@ -30,17 +33,23 @@ internal class BackgroundConnectionRetention(
         }
 
     fun onBackgrounded(onElapsed: suspend () -> Unit) {
-        val remainingMs = synchronized(lock) {
+        val job = synchronized(lock) {
             val startedAt = backgroundSinceMs ?: nowMs().also { backgroundSinceMs = it }
-            if (expiryJob?.isActive == true) return
-            (graceMs - (nowMs() - startedAt)).coerceAtLeast(0L)
+            if (expiryJob != null) return
+            val remainingMs = (graceMs - (nowMs() - startedAt)).coerceAtLeast(0L)
+            scope.launch(start = CoroutineStart.LAZY) {
+                delay(remainingMs)
+                val runningJob = currentCoroutineContext().job
+                try {
+                    onElapsed()
+                } finally {
+                    synchronized(lock) {
+                        if (expiryJob === runningJob) expiryJob = null
+                    }
+                }
+            }.also { expiryJob = it }
         }
-        val job = scope.launch {
-            delay(remainingMs)
-            synchronized(lock) { expiryJob = null }
-            onElapsed()
-        }
-        synchronized(lock) { expiryJob = job }
+        job.start()
     }
 
     fun cancel() {

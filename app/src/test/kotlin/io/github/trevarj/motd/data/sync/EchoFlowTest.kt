@@ -270,6 +270,30 @@ class EchoFlowTest {
     }
 
     @Test
+    fun msgidlessHistoryDoesNotMergeIdenticalMessageOneSecondAfterDurableRow() = runTest {
+        val durable = IrcEvent.ChatMessage(
+            ctx = MessageContext("durable-first", 700_000, null, "history", null),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#chan",
+            text = "same",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(durable)))
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "#chan",
+                listOf(durable.copy(ctx = durable.ctx.copy(msgid = null, serverTime = 701_000))),
+            ),
+        )
+
+        assertEquals(2, rows().size)
+        assertEquals(setOf(700_000L, 701_000L), rows().map { it.serverTime }.toSet())
+    }
+
+    @Test
     fun liveWithoutMsgid_doesNotMergeAmbiguousRepeatedMessages() = runTest {
         fun durable(msgid: String, serverTime: Long) = IrcEvent.ChatMessage(
             ctx = MessageContext(msgid, serverTime, null, null, null),

@@ -3,10 +3,16 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -64,6 +70,29 @@ class BackgroundConnectionRetentionTest {
         advanceTimeBy(1L)
         runCurrent()
         assertTrue(elapsedCount == 1)
+    }
+
+    @Test
+    fun concurrentBackgroundSignalsCreateOneExpiryCallback() = runTest {
+        val elapsedCount = AtomicInteger()
+        val retention = BackgroundConnectionRetention(
+            scope = this,
+            graceMs = 300_000L,
+            nowMs = { testScheduler.currentTime },
+        )
+
+        coroutineScope {
+            List(64) {
+                async(Dispatchers.Default) {
+                    retention.onBackgrounded { elapsedCount.incrementAndGet() }
+                }
+            }.awaitAll()
+        }
+        advanceTimeBy(300_000L)
+        runCurrent()
+
+        assertEquals(1, elapsedCount.get())
+        assertFalse(retention.isRetaining)
     }
 
     @Test

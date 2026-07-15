@@ -330,21 +330,25 @@ class EventProcessor @Inject constructor(
         // duplicate. Account/reply are enrichments rather than identity because optional tags can
         // differ between deliveries. Msgid-less PUSH returned above without writing.
         if (incomingMsgid == null && !e.isSelf && origin != EventOrigin.PUSH) {
+            // A live delivery can be timestamped slightly differently from its durable push/history
+            // representation, but HISTORY is itself the durable timeline. Fuzzy matching there can
+            // collapse two legitimate identical messages sent seconds apart.
+            val matchWindowMs = if (origin == EventOrigin.HISTORY) 0L else INCOMING_DELIVERY_MATCH_WINDOW_MS
             var candidates = messageDao.findDurableIncomingCandidates(
                 bufferId = bufferId,
                 sender = e.source.nick,
                 kind = row.kind,
                 text = storedText,
-                lo = e.ctx.serverTime - INCOMING_DELIVERY_MATCH_WINDOW_MS,
-                hi = e.ctx.serverTime + INCOMING_DELIVERY_MATCH_WINDOW_MS,
+                lo = e.ctx.serverTime - matchWindowMs,
+                hi = e.ctx.serverTime + matchWindowMs,
             )
             if (candidates.isEmpty()) {
                 candidates = messageDao.findDurableIncomingCandidatesByText(
                     bufferId = bufferId,
                     kind = row.kind,
                     text = storedText,
-                    lo = e.ctx.serverTime - INCOMING_DELIVERY_MATCH_WINDOW_MS,
-                    hi = e.ctx.serverTime + INCOMING_DELIVERY_MATCH_WINDOW_MS,
+                    lo = e.ctx.serverTime - matchWindowMs,
+                    hi = e.ctx.serverTime + matchWindowMs,
                 ).filter { st.normalize(it.sender) == identitySender }.take(2)
             }
             if (candidates.size == 1) {

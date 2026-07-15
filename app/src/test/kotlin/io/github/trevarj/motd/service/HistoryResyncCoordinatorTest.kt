@@ -279,6 +279,33 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun missingRefreshGreedilyRepairsSparseGapAcrossNewestPage() = runTest {
+        processor.process(networkId, message("m1", 1))
+        processor.process(networkId, message("m202", 202))
+        val source = FakeSource(pageLimit = 100) { request ->
+            val events = when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.AFTER -> emptyList()
+                ChatHistoryRequest.Subcommand.LATEST -> (103L..202L).map { message("m$it", it) }
+                ChatHistoryRequest.Subcommand.BEFORE -> when (request.bound1) {
+                    "msgid=m103" -> (3L..102L).map { message("m$it", it) }
+                    "msgid=m3" -> (1L..2L).map { message("m$it", it) }
+                    else -> emptyList()
+                }
+                else -> emptyList()
+            }
+            ChatHistoryResult(events, emptyList())
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(200),
+            coordinator.resyncBuffer(networkId, bufferId, "#chan", source),
+        )
+        val msgids = rows().mapNotNull { it.msgid }.toSet()
+        assertTrue((2L..102L).all { "m$it" in msgids })
+        assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BEFORE })
+    }
+
+    @Test
     fun automaticNetworkResyncDiscoversTargetsAndCreatesMissingBuffer() = runTest {
         processor.process(networkId, message("seed", 100))
         val source = FakeSource { request ->

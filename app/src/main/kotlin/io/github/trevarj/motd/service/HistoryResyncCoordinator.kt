@@ -306,6 +306,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     source,
                     isCurrent,
                     includeRecentOverlap = true,
+                    healSparseGaps = true,
                 )
                 HistoryRefreshRange.HOURS_24,
                 HistoryRefreshRange.DAYS_7,
@@ -455,6 +456,7 @@ class HistoryResyncCoordinator @Inject constructor(
         isCurrent: () -> Boolean,
         includeRecentOverlap: Boolean,
         reconnectBoundary: Boundary? = null,
+        healSparseGaps: Boolean = false,
     ): Int {
         val pageLimit = source.pageLimit()
         val before = knownBufferId?.let { messageCount(it) } ?: 0
@@ -465,6 +467,7 @@ class HistoryResyncCoordinator @Inject constructor(
         // row as an AFTER cursor, leaving an existing bouncer channel permanently empty. Bypass
         // AFTER for a target with no stored chat content and seed it from LATEST instead.
         val lacksStoredChat = bufferId?.let { !hasStoredChat(it) } ?: true
+        val knownOldestTime = if (lacksStoredChat) null else bufferId?.let { db.messageDao().oldestTime(it) }
         var afterRejected = false
 
         var pagingBoundary = when {
@@ -509,17 +512,72 @@ class HistoryResyncCoordinator @Inject constructor(
             }
         }
 
+        var latestPage: ChatHistoryResult? = null
         if (boundary == null || afterRejected || includeRecentOverlap || lacksStoredChat) {
             val latest = request(
                 source,
                 ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = pageLimit),
             )
+            latestPage = latest
             if (!isCurrent()) throw StaleConnectionException()
             if (latest.events.isNotEmpty()) {
                 processor.process(networkId, IrcEvent.HistoryBatch(target, latest.events))
                 if (!isCurrent()) throw StaleConnectionException()
                 bufferId = bufferId ?: bufferIdFor(networkId, target)
             }
+        }
+
+        // A newest-page overlap catches small holes but cannot repair a sparse timeline whose
+        // newest and oldest rows survived while more than one server page vanished locally. Only
+        // explicit/visible-buffer MISSING reconciliation performs this bounded backward walk;
+        // normal reconnect sync keeps its existing request pattern. Stop at overlap, a short page,
+        // or strict request/message caps so an unusual server cannot trigger unbounded traffic.
+        val overlap = latestPage
+        var backwardBoundary = overlap?.events?.let { pageBoundary(it, newest = false) }
+        var previousPageSize = overlap?.events?.size ?: 0
+        var backfillPages = 0
+        var backfillMessages = 0
+        while (
+            healSparseGaps &&
+            backwardBoundary != null &&
+            previousPageSize >= pageLimit &&
+            backfillPages < MISSING_BACKFILL_PAGE_LIMIT &&
+            backfillMessages < MISSING_BACKFILL_MESSAGE_LIMIT
+        ) {
+            if (!isCurrent()) throw StaleConnectionException()
+            val currentBoundary = backwardBoundary ?: break
+            val requestLimit = minOf(pageLimit, MISSING_BACKFILL_MESSAGE_LIMIT - backfillMessages)
+            val countBeforePage = bufferId?.let { messageCount(it) } ?: 0
+            val page = request(
+                source,
+                ChatHistoryRequest(
+                    ChatHistoryRequest.Subcommand.BEFORE,
+                    target,
+                    bound1 = currentBoundary.selector(source.supportsMsgidReferences()),
+                    limit = requestLimit,
+                ),
+            )
+            if (!isCurrent()) throw StaleConnectionException()
+            if (page.events.isEmpty()) break
+            processor.process(networkId, IrcEvent.HistoryBatch(target, page.events))
+            if (!isCurrent()) throw StaleConnectionException()
+            bufferId = bufferId ?: bufferIdFor(networkId, target)
+            val countAfterPage = bufferId?.let { messageCount(it) } ?: countBeforePage
+            val inserted = (countAfterPage - countBeforePage).coerceAtLeast(0)
+            val next = pageBoundary(page.events, newest = false)
+            val reachedKnownBoundary = knownOldestTime != null &&
+                page.events.flatMap { it.historyContexts() }.any { it.serverTime <= knownOldestTime }
+            backfillPages++
+            backfillMessages += page.events.size
+            previousPageSize = page.events.size
+            if (
+                inserted == 0 ||
+                reachedKnownBoundary ||
+                page.events.size < requestLimit ||
+                next == null ||
+                next == currentBoundary
+            ) break
+            backwardBoundary = next
         }
 
         val after = bufferId?.let { messageCount(it) } ?: before
@@ -663,6 +721,8 @@ class HistoryResyncCoordinator @Inject constructor(
         const val TARGETS_FUZZ_MS = 10_000L
         const val CAPABILITY_WAIT_TIMEOUT_MS = 30_000L
         const val ALL_HISTORY_LIMIT = 5_000
+        const val MISSING_BACKFILL_PAGE_LIMIT = 5
+        const val MISSING_BACKFILL_MESSAGE_LIMIT = 500
         const val HOURS_24_MS = 24L * 60 * 60 * 1_000
         const val DAYS_7_MS = 7L * 24 * 60 * 60 * 1_000
         const val DAYS_30_MS = 30L * 24 * 60 * 60 * 1_000
