@@ -275,6 +275,28 @@ class EventProcessor @Inject constructor(
             }
         }
 
+        // Push/history can persist the durable msgid-bearing representation before a reconnect
+        // delivers the same line live without draft/msgid. That is the reverse of the promotion
+        // case above: retain the durable row and discard only an unambiguous live duplicate. Match
+        // every stable message field inside a tight timestamp window, and refuse to merge when two
+        // legitimate repeated messages are possible.
+        if (incomingMsgid == null && !e.isSelf && origin == EventOrigin.LIVE) {
+            val candidates = messageDao.findDurableIncomingCandidates(
+                bufferId = bufferId,
+                sender = e.source.nick,
+                senderAccount = e.ctx.account,
+                kind = row.kind,
+                text = storedText,
+                replyToMsgid = e.replyToMsgid,
+                lo = e.ctx.serverTime - INCOMING_DELIVERY_MATCH_WINDOW_MS,
+                hi = e.ctx.serverTime + INCOMING_DELIVERY_MATCH_WINDOW_MS,
+            )
+            if (candidates.size == 1) {
+                traceMessageWrite("room_live_duplicate", candidates.single(), fromHistory = false)
+                return
+            }
+        }
+
         // Own message dedup (plans/03 echo degradation, plans/04 echo flow). A self-send surfaces
         // as exactly ONE row across all three server-capability scenarios:
         //  (a) echo-message + labeled-response: labeled echo updates the pending row in place;
@@ -1233,6 +1255,7 @@ class EventProcessor @Inject constructor(
         // matched to a local row whose serverTime is within this many ms. Symmetric because the
         // local clock (send time) and the server clock (echo time) can differ in either direction.
         const val ECHO_MATCH_WINDOW_MS = 30_000L
+        const val INCOMING_DELIVERY_MATCH_WINDOW_MS = 2_000L
         const val INVITE_DEDUP_WINDOW_MS = 30_000L
         const val NETWORK_BATCH_DEDUP_WINDOW_MS = 30_000L
 

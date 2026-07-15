@@ -107,6 +107,82 @@ class EchoFlowTest {
     }
 
     @Test
+    fun pushWithMsgid_thenLiveWithoutMsgid_reusesDurableRow() = runTest {
+        val push = IrcEvent.ChatMessage(
+            ctx = MessageContext(
+                msgid = "push-a",
+                serverTime = 600_000,
+                account = null,
+                batchId = null,
+                label = null,
+            ),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#chan",
+            text = "notification then reconnect",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.processPush(networkId, push)
+
+        processor.process(
+            networkId,
+            push.copy(
+                ctx = push.ctx.copy(msgid = null, serverTime = 600_750),
+            ),
+        )
+
+        assertEquals(1, rows().size)
+        assertEquals("push-a", rows().single().msgid)
+        assertEquals(600_000, rows().single().serverTime)
+    }
+
+    @Test
+    fun liveWithoutMsgid_doesNotMergeAmbiguousRepeatedMessages() = runTest {
+        fun durable(msgid: String, serverTime: Long) = IrcEvent.ChatMessage(
+            ctx = MessageContext(msgid, serverTime, null, null, null),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#chan",
+            text = "same",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.processPush(networkId, durable("push-a", 600_000))
+        processor.processPush(networkId, durable("push-b", 601_000))
+
+        processor.process(
+            networkId,
+            durable("unused", 600_750).copy(
+                ctx = MessageContext(null, 600_750, null, null, null),
+            ),
+        )
+
+        assertEquals(3, rows().size)
+        assertEquals(1, rows().count { it.msgid == null })
+    }
+
+    @Test
+    fun liveWithoutMsgid_doesNotMergeSameTextOutsideDeliveryWindow() = runTest {
+        val push = IrcEvent.ChatMessage(
+            ctx = MessageContext("push-a", 600_000, null, null, null),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#chan",
+            text = "same",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.processPush(networkId, push)
+        processor.process(
+            networkId,
+            push.copy(ctx = MessageContext(null, 603_000, null, null, null)),
+        )
+
+        assertEquals(2, rows().size)
+    }
+
+    @Test
     fun historyMsgidPromotion_doesNotMergeSameTextAtDifferentTimes() = runTest {
         processor.process(
             networkId,
