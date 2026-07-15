@@ -3,8 +3,10 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.channels.Channel
@@ -16,6 +18,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
 
 /**
@@ -27,6 +30,12 @@ interface ManagedConnection {
     val events: Flow<IrcEvent>
     fun start()
     fun stop()
+
+    /**
+     * Send an immediate watchdog-style liveness probe. Implementations that do not expose a
+     * transport-level probe retain the historical no-op/healthy behavior.
+     */
+    suspend fun probeLiveness(graceMs: Long): Boolean = true
 }
 
 /** Adapter wrapping a real [IrcClient]. */
@@ -37,6 +46,7 @@ class IrcClientConnection(
     override val state: StateFlow<IrcClientState> get() = client.state
     override val events: SharedFlow<IrcEvent> get() = client.events
     override fun start() = client.start()
+    override suspend fun probeLiveness(graceMs: Long): Boolean = client.probeLiveness(graceMs)
     override fun stop() {
         client.stop()
         onStop()
@@ -60,6 +70,8 @@ internal interface ConnectionLifecycleActor {
     suspend fun stopAndJoin()
     fun onNetworkAvailable()
     fun onNetworkLost()
+    /** Request one immediate probe when the current connection is Ready. Requests are conflated. */
+    fun probe() = Unit
 }
 
 class ConnectionActor(
@@ -86,6 +98,8 @@ class ConnectionActor(
 
     private var job: Job? = null
     private val retryNow = Channel<Unit>(Channel.CONFLATED)
+    private val probeNow = Channel<Unit>(Channel.CONFLATED)
+    private val probeRequested = AtomicBoolean(false)
 
     /**
      * True while the reconnect loop coroutine is still running. Goes false once the loop returns —
@@ -105,6 +119,7 @@ class ConnectionActor(
     override fun stop() {
         job?.cancel()
         job = null
+        clearProbeRequests()
         connection?.stop()
         connection = null
     }
@@ -113,6 +128,7 @@ class ConnectionActor(
         val running = job
         job = null
         running?.cancelAndJoin()
+        clearProbeRequests()
         connection?.stop()
         connection = null
     }
@@ -122,6 +138,17 @@ class ConnectionActor(
 
     /** Network lost: fast-fail the current connect attempt so backoff starts promptly. */
     override fun onNetworkLost() { connection?.stop() }
+
+    /**
+     * Queue one foreground liveness check. The request is consumed by the actor's connection loop,
+     * so cancellation/replacement of this actor also cancels the probe and cannot touch the next
+     * actor's connection.
+     */
+    override fun probe() {
+        if (job?.isActive != true) return
+        if (!probeRequested.compareAndSet(false, true)) return
+        if (!probeNow.trySend(Unit).isSuccess) probeRequested.set(false)
+    }
 
     private suspend fun loop() {
         var attempt = 0
@@ -153,6 +180,7 @@ class ConnectionActor(
 
             when (outcome) {
                 Outcome.Fatal -> return
+                Outcome.RetryImmediately -> Unit
                 Outcome.Retry -> {
                     // A disconnected/non-fatal Failed snapshot describes the socket that just
                     // ended. Publish the current operation (retrying) during backoff so the UI
@@ -166,7 +194,7 @@ class ConnectionActor(
         }
     }
 
-    private enum class Outcome { Fatal, Retry }
+    private enum class Outcome { Fatal, Retry, RetryImmediately }
 
     /**
      * Wait for the connection to terminate. On Ready, runs [onReady] and arms a stability timer
@@ -195,17 +223,67 @@ class ConnectionActor(
                         }
                         // Runtime CAP ACK/DEL and late 005 replies republish Ready with a new
                         // snapshot. Surface those mutations without re-running one-time setup.
-                        val next = conn.state.first { it != state }
-                        if (next is IrcClientState.Ready) {
-                            state = next
-                            continue
+                        when (val update = awaitReadyUpdate(conn, state, connectionScope)) {
+                            is ReadyUpdate.Probe -> {
+                                when (val probe = awaitProbeOrState(conn, state, connectionScope)) {
+                                    is ProbeUpdate.Completed -> {
+                                        // A replacement/stop cancels this actor scope. Do not let an
+                                        // old probe tear down a newly-created connection.
+                                        if (!probe.live) {
+                                            val terminal = conn.state.value
+                                            conn.stop()
+                                            if (terminal is IrcClientState.Failed && terminal.fatal) {
+                                                onState(networkId, terminal)
+                                                return Outcome.Fatal
+                                            }
+                                            // The failed foreground probe is authoritative for this
+                                            // exact socket. Redial immediately instead of adding the
+                                            // normal retry backoff to the user's resume latency.
+                                            onState(networkId, IrcClientState.Disconnected)
+                                            return Outcome.RetryImmediately
+                                        }
+                                        probeRequested.set(false)
+                                    }
+                                    is ProbeUpdate.StateChanged -> {
+                                        probeRequested.set(false)
+                                        val next = probe.state
+                                        if (next is IrcClientState.Ready) {
+                                            state = next
+                                            continue
+                                        }
+                                        readyJob?.cancel()
+                                        readyJob = null
+                                        stableJob?.cancel()
+                                        stableJob = null
+                                        onState(networkId, next)
+                                        return if (next is IrcClientState.Failed && next.fatal) {
+                                            Outcome.Fatal
+                                        } else {
+                                            Outcome.RetryImmediately
+                                        }
+                                    }
+                                }
+                                continue
+                            }
+                            is ReadyUpdate.StateChanged -> {
+                                val next = update.state
+                                if (next is IrcClientState.Ready) {
+                                    state = next
+                                    continue
+                                }
+                                // A pending probe belongs to the connection that just left Ready.
+                                // Drop it before the next retry so a later actor is never probed by
+                                // an old foreground event.
+                                probeRequested.set(false)
+                                while (probeNow.tryReceive().isSuccess) { }
+                                readyJob?.cancel()
+                                readyJob = null
+                                stableJob?.cancel()
+                                stableJob = null
+                                onState(networkId, next)
+                                return outcomeFor(next)
+                            }
                         }
-                        readyJob?.cancel()
-                        readyJob = null
-                        stableJob?.cancel()
-                        stableJob = null
-                        onState(networkId, next)
-                        return outcomeFor(next)
                     }
                     is IrcClientState.Failed -> {
                         onState(networkId, state)
@@ -228,6 +306,65 @@ class ConnectionActor(
 
     private fun outcomeFor(state: IrcClientState): Outcome =
         if (state is IrcClientState.Failed && state.fatal) Outcome.Fatal else Outcome.Retry
+
+    private fun clearProbeRequests() {
+        probeRequested.set(false)
+        while (probeNow.tryReceive().isSuccess) { }
+    }
+
+    private sealed interface ReadyUpdate {
+        data object Probe : ReadyUpdate
+        data class StateChanged(val state: IrcClientState) : ReadyUpdate
+    }
+
+    private sealed interface ProbeUpdate {
+        data class Completed(val live: Boolean) : ProbeUpdate
+        data class StateChanged(val state: IrcClientState) : ProbeUpdate
+    }
+
+    /** Wait for either a state transition or one conflated foreground probe request. */
+    private suspend fun awaitReadyUpdate(
+        conn: ManagedConnection,
+        state: IrcClientState,
+        connectionScope: CoroutineScope,
+    ): ReadyUpdate {
+        val stateWaiter = connectionScope.async { conn.state.first { it != state } }
+        return try {
+            select {
+                probeNow.onReceive { ReadyUpdate.Probe }
+                stateWaiter.onAwait { ReadyUpdate.StateChanged(it) }
+            }
+        } finally {
+            stateWaiter.cancel()
+        }
+    }
+
+    /** Run a probe without masking an EOF/state transition during its grace period. */
+    private suspend fun awaitProbeOrState(
+        conn: ManagedConnection,
+        state: IrcClientState,
+        connectionScope: CoroutineScope,
+    ): ProbeUpdate {
+        val probe = connectionScope.async {
+            try {
+                conn.probeLiveness(FOREGROUND_PROBE_GRACE_MS)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                false
+            }
+        }
+        val stateWaiter = connectionScope.async { conn.state.first { it != state } }
+        return try {
+            select {
+                probe.onAwait { ProbeUpdate.Completed(it) }
+                stateWaiter.onAwait { ProbeUpdate.StateChanged(it) }
+            }
+        } finally {
+            probe.cancel()
+            stateWaiter.cancel()
+        }
+    }
 
     /** Wait for the backoff delay, waking early when the network becomes available. */
     private suspend fun waitBeforeRetry(delayMs: Long) {
@@ -255,6 +392,7 @@ class ConnectionActor(
         const val BASE_MS = 2_000L
         const val CAP_MS = 90_000L
         const val STABLE_RESET_MS = 5 * 60 * 1000L
+        const val FOREGROUND_PROBE_GRACE_MS = 5_000L
         const val JITTER_LOW = 0.7
         const val JITTER_HIGH = 1.3
         private const val MAX_SHIFT = 30

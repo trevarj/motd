@@ -398,12 +398,14 @@ class ConnectionManagerImpl @Inject constructor(
         // MotdApplication). Re-runs the self-healing reconcile against the current DB snapshot so any
         // actor that died/parked in the background (Doze/network drop) is dropped and rebuilt. Then
         // wake surviving non-ready actors so foregrounding does not wait out an old exponential
-        // backoff after a proxy or bouncer has returned. The actor wake-up is conflated and merely
-        // interrupts its current/next retry delay; Ready and manually disconnected networks are
-        // untouched. No-op until started.
+        // backoff after a proxy or bouncer has returned, and probe Ready actors in place. The
+        // actor wake-up/probe requests are conflated and merely interrupt retry or validate the
+        // current socket; a healthy Ready connection is never unconditionally rebuilt. No-op until
+        // started.
         if (!registry.snapshot.value.started) return
         reconcile(networkDao.observeAll().first())
         registry.wakeNonReady()
+        registry.probeReady()
     }
 
     /** Add/remove/restart actors so the live set matches the wanted set derived from [all] rows

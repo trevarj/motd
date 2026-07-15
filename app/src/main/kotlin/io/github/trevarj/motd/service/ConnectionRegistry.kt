@@ -2,6 +2,7 @@ package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.irc.event.IrcClientState
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -72,6 +73,7 @@ internal class ConnectionRegistry(
         data object NetworkAvailable : Command
         data object NetworkLost : Command
         data object WakeNonReady : Command
+        data object ProbeReady : Command
         data class ArmEchoTimeout(
             val key: String,
             val timeoutMs: Long,
@@ -102,6 +104,7 @@ internal class ConnectionRegistry(
     private val callbackJobs = HashMap<Long, CallbackJob>()
     private val echoTokens = AtomicLong()
     private val callbackTokens = AtomicLong()
+    private val probeReadyPending = AtomicBoolean(false)
     private var started = false
 
     private val _snapshot = MutableStateFlow(ConnectionRegistrySnapshot())
@@ -165,6 +168,12 @@ internal class ConnectionRegistry(
         commands.trySend(Command.WakeNonReady)
     }
 
+    /** Queue one liveness probe for every currently Ready actor; repeated requests are conflated. */
+    fun probeReady() {
+        if (!probeReadyPending.compareAndSet(false, true)) return
+        if (!commands.trySend(Command.ProbeReady).isSuccess) probeReadyPending.set(false)
+    }
+
     fun isCurrent(networkId: Long, generation: Long): Boolean =
         generations.isCurrent(networkId, generation)
 
@@ -189,6 +198,7 @@ internal class ConnectionRegistry(
             }
             is Command.Stop -> {
                 started = false
+                probeReadyPending.set(false)
                 val cleanupJobs = observerJobs.toList() + pendingEchoJobs.values.map { it.second }
                 cleanupJobs.forEach(Job::cancel)
                 observerJobs.clear()
@@ -295,6 +305,17 @@ internal class ConnectionRegistry(
             Command.WakeNonReady -> actors.forEach { (networkId, registered) ->
                 if (registered.actor.isAlive && states[networkId] !is IrcClientState.Ready) {
                     registered.actor.onNetworkAvailable()
+                }
+            }
+            Command.ProbeReady -> {
+                try {
+                    actors.forEach { (networkId, registered) ->
+                        if (registered.actor.isAlive && states[networkId] is IrcClientState.Ready) {
+                            registered.actor.probe()
+                        }
+                    }
+                } finally {
+                    probeReadyPending.set(false)
                 }
             }
             is Command.ArmEchoTimeout -> {

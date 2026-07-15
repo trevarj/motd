@@ -3,6 +3,7 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -29,8 +30,17 @@ class ConnectionActorTest {
         override val events: SharedFlow<IrcEvent> = _events
         var startCount = 0
         var stopped = false
+        var probeResult = true
+        var probeCount = 0
+        var probeAwait: CompletableDeferred<Boolean>? = null
         override fun start() { startCount++; stopped = false; _state.value = IrcClientState.Registering }
-        override fun stop() { stopped = true }
+        override fun stop() { stopped = true; _state.value = IrcClientState.Disconnected }
+        var lastProbeGraceMs: Long? = null
+        override suspend fun probeLiveness(graceMs: Long): Boolean {
+            probeCount++
+            lastProbeGraceMs = graceMs
+            return probeAwait?.await() ?: probeResult
+        }
     }
 
     @Test
@@ -223,6 +233,100 @@ class ConnectionActorTest {
             listOf(setOf("batch"), setOf("batch", "draft/chathistory")),
             states.filterIsInstance<IrcClientState.Ready>().map { it.caps },
         )
+        actor.stop()
+    }
+
+    @Test
+    fun foregroundProbe_isConflated_andHealthyReadyConnectionIsPreserved() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val conn = FakeConnection()
+        val actor = ConnectionActor(
+            networkId = 1,
+            scope = scope,
+            connectionFactory = { conn },
+            onState = { _, _ -> },
+            onEvent = { _, _ -> },
+            onReady = {},
+        )
+        actor.start()
+        scope.testScheduler.runCurrent()
+        conn._state.value = IrcClientState.Ready("motd", emptySet(), emptyMap())
+        scope.testScheduler.runCurrent()
+
+        actor.probe()
+        actor.probe()
+        scope.testScheduler.runCurrent()
+
+        assertEquals(1, conn.probeCount)
+        assertEquals(ConnectionActor.FOREGROUND_PROBE_GRACE_MS, conn.lastProbeGraceMs)
+        assertTrue(conn._state.value is IrcClientState.Ready)
+        assertTrue(!conn.stopped)
+        actor.stop()
+    }
+
+    @Test
+    fun foregroundProbe_timeoutStopsConnection_andRetries() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val conns = ArrayDeque<FakeConnection>()
+        val actor = ConnectionActor(
+            networkId = 1,
+            scope = scope,
+            connectionFactory = {
+                FakeConnection().also {
+                    if (conns.isNotEmpty()) it.probeResult = true
+                    conns.addLast(it)
+                }
+            },
+            onState = { _, _ -> },
+            onEvent = { _, _ -> },
+            onReady = {},
+            random = { 0.5 },
+        )
+        actor.start()
+        scope.testScheduler.runCurrent()
+        val first = conns.first()
+        first._state.value = IrcClientState.Ready("motd", emptySet(), emptyMap())
+        scope.testScheduler.runCurrent()
+
+        first.probeResult = false
+        actor.probe()
+        scope.testScheduler.runCurrent()
+
+        assertTrue(first.stopped)
+        // A failed foreground probe bypasses normal backoff and redials immediately.
+        scope.testScheduler.runCurrent()
+        assertTrue(conns.size >= 2)
+        actor.stop()
+    }
+
+    @Test
+    fun foregroundProbe_doesNotMaskConnectionFailureDuringGrace() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val conn = FakeConnection()
+        val states = mutableListOf<IrcClientState>()
+        val actor = ConnectionActor(
+            networkId = 1,
+            scope = scope,
+            connectionFactory = { conn },
+            onState = { _, state -> states += state },
+            onEvent = { _, _ -> },
+            onReady = {},
+        )
+        actor.start()
+        scope.testScheduler.runCurrent()
+        conn._state.value = IrcClientState.Ready("motd", emptySet(), emptyMap())
+        scope.testScheduler.runCurrent()
+
+        conn.probeAwait = CompletableDeferred()
+        actor.probe()
+        scope.testScheduler.runCurrent()
+        conn._state.value = IrcClientState.Disconnected
+        scope.testScheduler.runCurrent()
+
+        assertTrue(states.any { it is IrcClientState.Disconnected })
         actor.stop()
     }
 

@@ -54,8 +54,10 @@ interface ConnectionManager {
     /**
      * Re-drive the wanted set and revive any actor that died/parked in the background (Doze/network
      * drop leaves it terminally Failed with a completed job). Canonical app-foreground reconnect,
-     * invoked from ProcessLifecycleOwner's onStart. No-op unless the subsystem is started; leaves
-     * healthy/connecting/retrying/cert-parked actors untouched, so it never storms reconnects.
+     * invoked from ProcessLifecycleOwner's onStart. Ready actors receive one watchdog-style
+     * liveness probe and are only restarted when the probe times out; healthy/connecting/retrying/
+     * cert-parked actors otherwise remain untouched. Requests are conflated, so repeated lifecycle
+     * callbacks cannot storm reconnects.
      */
     suspend fun reconnectStale()
 

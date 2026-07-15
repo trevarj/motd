@@ -158,6 +158,16 @@ class IrcClient(
         }
     }
 
+    /**
+     * Probe a registered connection immediately using the watchdog's normal PING/grace
+     * semantics. A response (or any other inbound line) keeps the Ready socket in place; a timeout
+     * transitions it to Disconnected through the watchdog callback so the owning actor can retry.
+     */
+    suspend fun probeLiveness(graceMs: Long): Boolean {
+        if (_state.value !is IrcClientState.Ready) return false
+        return watchdog?.probe(graceMs) == true
+    }
+
     private suspend fun run() {
         // proxy is null here; the app's per-network AppTransportFactory captures its own proxy.
         val t = factory.create(config.host, config.port, config.tls, config.wsUrl, null)

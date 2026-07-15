@@ -24,6 +24,7 @@ class ConnectionRegistryTest {
         override var isAlive = false
         var starts = 0
         var stops = 0
+        var probes = 0
 
         override fun start() {
             starts++
@@ -38,6 +39,7 @@ class ConnectionRegistryTest {
         override suspend fun stopAndJoin() = stop()
         override fun onNetworkAvailable() = Unit
         override fun onNetworkLost() = Unit
+        override fun probe() { probes++ }
     }
 
     private fun network(id: Long = 1, host: String = "irc.example") = NetworkEntity(
@@ -161,6 +163,27 @@ class ConnectionRegistryTest {
         registry.disconnect(1)
         assertFalse(callback.await())
         assertFalse(registry.runIfCurrent(1, generation) { error("late callback ran") })
+    }
+
+    @Test
+    fun foregroundProbe_targetsReadyActors_andConflatesRepeatedRequests() = runTest {
+        val created = mutableListOf<FakeActor>()
+        val registry = ConnectionRegistry(
+            backgroundScope,
+            actorFactory = { _, _ -> FakeActor().also(created::add) },
+            isConfigurationFailure = { false },
+        )
+        registry.beginStart()
+        registry.reconcile(listOf(network() to "fp"), setOf(1), emptySet())
+        val generation = registry.snapshot.value.actors.getValue(1).generation
+        registry.actorState(1, generation, "fp", IrcClientState.Ready("me", emptySet(), emptyMap()))
+        runCurrent()
+
+        registry.probeReady()
+        registry.probeReady()
+        runCurrent()
+
+        assertEquals(1, created.single().probes)
     }
 
     @Test

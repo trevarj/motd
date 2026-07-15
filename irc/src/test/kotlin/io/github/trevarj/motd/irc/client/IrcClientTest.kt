@@ -504,6 +504,39 @@ class IrcClientTest {
         assertEquals(IrcClientState.Disconnected, client.state.value)
     }
 
+    @Test
+    fun `immediate liveness probe response preserves Ready connection`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+        val probe = clientScope().async { client.probeLiveness(5_000) }
+        runCurrent()
+
+        assertTrue(ft.sent.last().startsWith("PING motd-"))
+        ft.feed(":srv PONG motd-foreground")
+        runCurrent()
+        advanceTimeBy(5_001)
+        runCurrent()
+
+        assertTrue(probe.await())
+        assertTrue(client.state.value is IrcClientState.Ready)
+        assertFalse(ft.closed)
+    }
+
+    @Test
+    fun `immediate liveness probe timeout disconnects for actor recovery`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+        val probe = clientScope().async { client.probeLiveness(5_000) }
+        runCurrent()
+
+        advanceTimeBy(5_001)
+        runCurrent()
+
+        assertFalse(probe.await())
+        assertEquals(IrcClientState.Disconnected, client.state.value)
+        assertTrue(ft.closed)
+    }
+
     // -- LIST / listChannels (plans/16 §5.7) --
 
     @Test
