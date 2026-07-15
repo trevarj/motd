@@ -963,7 +963,15 @@ fun ChatContent(
                         reactionChips = reactionChips,
                         replyPreview = replyPreview,
                         onLongPress = { sheetTarget = it },
-                        onReply = onSetReply,
+                        onReply = { target ->
+                            onSetReply(target)
+                            composerText = composerTextForReply(
+                                value = composerText,
+                                sender = target.sender,
+                                bufferType = state.buffer?.type,
+                                visibleReplyPrefix = visibleReplyPrefix,
+                            )
+                        },
                         onReact = onReact,
                         onImageClick = onOpenImage,
                         onRetry = onRetry,
@@ -1162,9 +1170,12 @@ fun ChatContent(
             onReply = {
                 hideThen {
                     onSetReply(target)
-                    if (visibleReplyPrefix && state.buffer?.type == BufferType.CHANNEL) {
-                        composerText = prependReplyPrefix(composerText, target.sender)
-                    }
+                    composerText = composerTextForReply(
+                        value = composerText,
+                        sender = target.sender,
+                        bufferType = state.buffer?.type,
+                        visibleReplyPrefix = visibleReplyPrefix,
+                    )
                 }
             },
             // Pass the whole target: the VM queues the react when target.msgid is still null (own
@@ -1297,6 +1308,18 @@ fun prependReplyPrefix(value: TextFieldValue, sender: String): TextFieldValue {
             value.selection.end + prefix.length,
         ),
     )
+}
+
+/** Apply the configured visible prefix consistently for every reply gesture. */
+internal fun composerTextForReply(
+    value: TextFieldValue,
+    sender: String,
+    bufferType: BufferType?,
+    visibleReplyPrefix: Boolean,
+): TextFieldValue = if (visibleReplyPrefix && bufferType == BufferType.CHANNEL) {
+    prependReplyPrefix(value, sender)
+} else {
+    value
 }
 
 /**
