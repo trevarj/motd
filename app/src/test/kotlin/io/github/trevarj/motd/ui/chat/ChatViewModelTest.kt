@@ -39,12 +39,17 @@ import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.irc.client.IrcClient
+import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncCoordinator
+import io.github.trevarj.motd.service.HistoryResyncController
+import io.github.trevarj.motd.service.HistoryRefreshRange
+import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
@@ -53,6 +58,8 @@ import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -182,14 +189,72 @@ class ChatViewModelTest {
         assertTrue(manager.sentLines.isEmpty())
     }
 
-    private fun viewModel(buffer: BufferEntity, manager: FakeConnectionManager): ChatViewModel {
-        val settings = FakeSettingsRepository()
-        val eventSink: IrcEventSink = processor
-        val history = HistoryResyncCoordinator(
+    @Test
+    fun `visible ready chat reconciles once despite duplicate resume callbacks`() = runTest {
+        val history = FakeHistoryResyncController()
+        val manager = FakeConnectionManager(network.id, client = testClient())
+        val vm = viewModel(channel, manager, history)
+        vm.state.first { it.buffer != null }
+
+        vm.onResume()
+        vm.onResume()
+        advanceUntilIdle()
+
+        assertEquals(listOf(channel.id), history.reconciledBuffers)
+        assertEquals(HistoryResyncState.Idle, vm.historyResyncState.value)
+    }
+
+    @Test
+    fun `returning to a chat and a new ready transition each reconcile`() = runTest {
+        val history = FakeHistoryResyncController()
+        val client = testClient()
+        val manager = FakeConnectionManager(network.id, client = client)
+        val vm = viewModel(query, manager, history)
+        vm.state.first { it.buffer != null }
+
+        vm.onResume()
+        advanceUntilIdle()
+        vm.onPause()
+        vm.onResume()
+        advanceUntilIdle()
+        manager.connectionStates.value = mapOf(network.id to IrcClientState.Disconnected)
+        advanceUntilIdle()
+        manager.connectionStates.value = mapOf(network.id to IrcClientState.Ready("me", emptySet(), emptyMap()))
+        advanceUntilIdle()
+
+        assertEquals(listOf(query.id, query.id, query.id), history.reconciledBuffers)
+    }
+
+    @Test
+    fun `server buffer never performs automatic history reconciliation`() = runTest {
+        val server = BufferEntity(
+            networkId = network.id,
+            name = "*",
+            displayName = "test",
+            type = BufferType.SERVER,
+        ).let { it.copy(id = db.bufferDao().insert(it)) }
+        val history = FakeHistoryResyncController()
+        val manager = FakeConnectionManager(network.id, client = testClient())
+        val vm = viewModel(server, manager, history)
+        vm.state.first { it.buffer != null }
+
+        vm.onResume()
+        advanceUntilIdle()
+
+        assertTrue(history.reconciledBuffers.isEmpty())
+    }
+
+    private fun viewModel(
+        buffer: BufferEntity,
+        manager: FakeConnectionManager,
+        history: HistoryResyncController = HistoryResyncCoordinator(
             db = db,
             processor = processor,
-            scope = kotlinx.coroutines.CoroutineScope(Dispatchers.Unconfined),
-        )
+            scope = CoroutineScope(Dispatchers.Unconfined),
+        ),
+    ): ChatViewModel {
+        val settings = FakeSettingsRepository()
+        val eventSink: IrcEventSink = processor
         return ChatViewModel(
             savedStateHandle = SavedStateHandle(mapOf("bufferId" to buffer.id)),
             messageRepository = FakeMessageRepository(),
@@ -213,6 +278,12 @@ class ChatViewModelTest {
         )
     }
 
+    private fun testClient() = IrcClient(
+        config = IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
+        factory = TransportFactory { _, _, _, _, _ -> error("transport is not used") },
+        scope = CoroutineScope(SupervisorJob() + dispatcher),
+    )
+
     private fun message(
         bufferId: Long,
         text: String,
@@ -233,6 +304,7 @@ class ChatViewModelTest {
     private class FakeConnectionManager(
         networkId: Long,
         state: IrcClientState = IrcClientState.Ready("me", emptySet(), emptyMap()),
+        private val client: IrcClient? = null,
     ) : ConnectionManager {
         override val connectionStates = MutableStateFlow(mapOf(networkId to state))
         override val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> =
@@ -243,7 +315,7 @@ class ChatViewModelTest {
         val typing = mutableListOf<Pair<Long, String>>()
         val sentLines = mutableListOf<String>()
 
-        override fun clientFor(networkId: Long): IrcClient? = null
+        override fun clientFor(networkId: Long): IrcClient? = client
         override suspend fun startAll() = Unit
         override suspend fun stopAll() = Unit
         override suspend fun connect(networkId: Long) = Unit
@@ -265,6 +337,31 @@ class ChatViewModelTest {
         override suspend fun requestMembers(bufferId: Long, force: Boolean) = Unit
         override suspend fun acceptInvite(messageId: Long) = Unit
         override suspend fun dismissInvite(messageId: Long) = Unit
+    }
+
+    private class FakeHistoryResyncController : HistoryResyncController {
+        private val states = MutableStateFlow<HistoryResyncState>(HistoryResyncState.Idle)
+        val reconciledBuffers = mutableListOf<Long>()
+
+        override fun state(bufferId: Long): Flow<HistoryResyncState> = states
+        override fun consumeState(bufferId: Long) { states.value = HistoryResyncState.Idle }
+        override fun cancelBufferResync(bufferId: Long) = Unit
+        override suspend fun resyncBuffer(
+            buffer: BufferEntity,
+            client: IrcClient,
+            isCurrent: () -> Boolean,
+            range: HistoryRefreshRange,
+        ): HistoryResyncState = HistoryResyncState.UpToDate
+
+        override suspend fun reconcileBuffer(
+            buffer: BufferEntity,
+            client: IrcClient,
+            isCurrent: () -> Boolean,
+        ): HistoryResyncState {
+            check(isCurrent())
+            reconciledBuffers += buffer.id
+            return HistoryResyncState.UpToDate
+        }
     }
 
     private class FakeBufferRepository(private val current: BufferEntity) : BufferRepository {

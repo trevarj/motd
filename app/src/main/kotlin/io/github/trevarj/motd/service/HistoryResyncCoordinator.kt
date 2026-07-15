@@ -54,6 +54,26 @@ sealed interface HistoryResyncState {
     data class Failed(val reason: String) : HistoryResyncState
 }
 
+/** Chat-facing boundary for manual and lifecycle-driven history reconciliation. */
+interface HistoryResyncController {
+    fun state(bufferId: Long): Flow<HistoryResyncState>
+    fun consumeState(bufferId: Long)
+    fun cancelBufferResync(bufferId: Long)
+
+    suspend fun resyncBuffer(
+        buffer: BufferEntity,
+        client: IrcClient,
+        isCurrent: () -> Boolean,
+        range: HistoryRefreshRange = HistoryRefreshRange.MISSING,
+    ): HistoryResyncState
+
+    suspend fun reconcileBuffer(
+        buffer: BufferEntity,
+        client: IrcClient,
+        isCurrent: () -> Boolean,
+    ): HistoryResyncState
+}
+
 /**
  * The sole reconnect/manual tail-revalidation entry point. Work is single-flight per request and
  * serialized per network so a foreground reconnect and a user refresh cannot race CHATHISTORY
@@ -67,7 +87,7 @@ class HistoryResyncCoordinator @Inject constructor(
     private val syncPrefs: HistorySyncPrefs = NoopHistorySyncPrefs,
     @ApplicationScope private val scope: CoroutineScope,
     private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
-) {
+) : HistoryResyncController {
     internal interface HistorySource {
         fun hasChatHistory(): Boolean
         fun supportsMsgidReferences(): Boolean
@@ -84,19 +104,43 @@ class HistoryResyncCoordinator @Inject constructor(
     private val states = MutableStateFlow<Map<Long, HistoryResyncState>>(emptyMap())
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
 
-    fun state(bufferId: Long): Flow<HistoryResyncState> = states
+    override fun state(bufferId: Long): Flow<HistoryResyncState> = states
         .map { it[bufferId] ?: HistoryResyncState.Idle }
         .distinctUntilChanged()
 
-    fun consumeState(bufferId: Long) {
+    override fun consumeState(bufferId: Long) {
         states.update { it - bufferId }
     }
 
-    suspend fun resyncBuffer(
+    override suspend fun resyncBuffer(
         buffer: BufferEntity,
         client: IrcClient,
         isCurrent: () -> Boolean,
-        range: HistoryRefreshRange = HistoryRefreshRange.MISSING,
+        range: HistoryRefreshRange,
+    ): HistoryResyncState = resyncBuffer(buffer, client, isCurrent, range, publishState = true)
+
+    /**
+     * Reconcile a visible chat without exposing manual-refresh progress or result snackbars. The
+     * request still shares the exact same per-buffer single flight as [resyncBuffer].
+     */
+    override suspend fun reconcileBuffer(
+        buffer: BufferEntity,
+        client: IrcClient,
+        isCurrent: () -> Boolean,
+    ): HistoryResyncState = resyncBuffer(
+        buffer,
+        client,
+        isCurrent,
+        HistoryRefreshRange.MISSING,
+        publishState = false,
+    )
+
+    private suspend fun resyncBuffer(
+        buffer: BufferEntity,
+        client: IrcClient,
+        isCurrent: () -> Boolean,
+        range: HistoryRefreshRange,
+        publishState: Boolean,
     ): HistoryResyncState {
         diagnostics.record("history", "buffer_sync_requested") {
             mapOf(
@@ -107,22 +151,28 @@ class HistoryResyncCoordinator @Inject constructor(
         }
         val source = ClientHistorySource(client)
         if (!source.hasChatHistory()) {
-            states.update { it + (buffer.id to HistoryResyncState.WaitingForCapability) }
+            if (publishState) {
+                states.update { it + (buffer.id to HistoryResyncState.WaitingForCapability) }
+            }
             when (awaitBouncerCapability(buffer.networkId, client, isCurrent)) {
                 CapabilityAvailability.AVAILABLE -> Unit
                 CapabilityAvailability.UNSUPPORTED -> {
-                    states.update { it + (buffer.id to HistoryResyncState.Unsupported) }
+                    if (publishState) {
+                        states.update { it + (buffer.id to HistoryResyncState.Unsupported) }
+                    }
                     return HistoryResyncState.Unsupported
                 }
                 CapabilityAvailability.PENDING -> {
                     val failed = HistoryResyncState.Failed("History support is still negotiating; try again")
-                    states.update { it + (buffer.id to failed) }
+                    if (publishState) states.update { it + (buffer.id to failed) }
                     return failed
                 }
             }
         }
-        states.update { it + (buffer.id to HistoryResyncState.Running(limit = range.messageLimit)) }
-        return coalesced(RequestKey(buffer.networkId, buffer.id)) {
+        if (publishState) {
+            states.update { it + (buffer.id to HistoryResyncState.Running(limit = range.messageLimit)) }
+        }
+        val result = coalesced(RequestKey(buffer.networkId, buffer.id)) {
             syncBufferRange(
                 networkId = buffer.networkId,
                 bufferId = buffer.id,
@@ -130,12 +180,14 @@ class HistoryResyncCoordinator @Inject constructor(
                 source = source,
                 isCurrent = isCurrent,
                 range = range,
-            ).also { result -> states.update { it + (buffer.id to result) } }
+            )
         }
+        if (publishState) states.update { it + (buffer.id to result) }
+        return result
     }
 
     /** Cancel the active user-requested refresh for [bufferId], if one exists. */
-    fun cancelBufferResync(bufferId: Long) {
+    override fun cancelBufferResync(bufferId: Long) {
         scope.launch {
             val request = activeGuard.withLock {
                 active.entries.firstOrNull { it.key.bufferId == bufferId }?.value

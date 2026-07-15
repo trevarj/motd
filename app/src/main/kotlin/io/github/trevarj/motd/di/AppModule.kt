@@ -49,6 +49,8 @@ import io.github.trevarj.motd.push.UnifiedPushApiImpl
 import io.github.trevarj.motd.push.WebPushCryptoFacade
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
+import io.github.trevarj.motd.service.HistoryResyncController
+import io.github.trevarj.motd.service.HistoryResyncCoordinator
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.MotdNotifications
 import io.github.trevarj.motd.service.ReadMarkerRepository
@@ -113,6 +115,9 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun historySyncPrefs(impl: HistorySyncPrefsImpl): HistorySyncPrefs
+
+    @Binds @Singleton
+    abstract fun historyResyncController(impl: HistoryResyncCoordinator): HistoryResyncController
 
     @Binds @Singleton
     abstract fun replyPrefs(impl: ReplyPrefsImpl): ReplyPrefs

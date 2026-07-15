@@ -31,6 +31,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
+import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.ConnectionManager
@@ -38,7 +39,7 @@ import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ForegroundBufferTracker
-import io.github.trevarj.motd.service.HistoryResyncCoordinator
+import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistoryRefreshRange
 import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.IrcEventSink
@@ -51,12 +52,14 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -121,7 +124,7 @@ class ChatViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val replyPrefs: ReplyPrefs,
     private val visibilityReader: MessageVisibilityReader,
-    private val historyResyncCoordinator: HistoryResyncCoordinator,
+    private val historyResyncCoordinator: HistoryResyncController,
     private val userDao: UserDao,
     contentPreviewPrefs: ContentPreviewPrefs,
     appearancePrefs: AppearancePrefs,
@@ -182,6 +185,45 @@ class ChatViewModel @Inject constructor(
             buffer?.let { states[it.networkId] } ?: IrcClientState.Disconnected
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), IrcClientState.Disconnected)
+
+    private var nextVisibleSession = 0L
+    private val visibleSession = MutableStateFlow<Long?>(null)
+
+    private data class AutomaticHistoryTrigger(
+        val visibleSession: Long,
+        val buffer: BufferEntity,
+        val client: IrcClient,
+    )
+
+    init {
+        viewModelScope.launch {
+            combine(buffer, connState, visibleSession) { currentBuffer, connection, session ->
+                val eligible = currentBuffer?.takeIf { it.type != BufferType.SERVER }
+                val client = eligible?.let { connectionManager.clientFor(it.networkId) }
+                if (session != null && eligible != null && connection is IrcClientState.Ready && client != null) {
+                    AutomaticHistoryTrigger(session, eligible, client)
+                } else {
+                    null
+                }
+            }
+                // Keep the null transition: it rearms the same client after a real disconnect.
+                .distinctUntilChanged { old, new ->
+                    old?.visibleSession == new?.visibleSession &&
+                        old?.buffer?.id == new?.buffer?.id &&
+                        old?.client === new?.client
+                }
+                .filterNotNull()
+                .collectLatest { trigger ->
+                    historyResyncCoordinator.reconcileBuffer(
+                        buffer = trigger.buffer,
+                        client = trigger.client,
+                        isCurrent = {
+                            connectionManager.clientFor(trigger.buffer.networkId) === trigger.client
+                        },
+                    )
+                }
+        }
+    }
 
     val historyResyncState: StateFlow<HistoryResyncState> = historyResyncCoordinator.state(bufferId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryResyncState.Idle)
@@ -300,11 +342,13 @@ class ChatViewModel @Inject constructor(
     fun onResume() {
         AutoFollowTrace.record("chat_resume", bufferId)
         foregroundBufferTracker.set(bufferId)
+        if (visibleSession.value == null) visibleSession.value = ++nextVisibleSession
     }
 
     fun onPause() {
         AutoFollowTrace.record("chat_pause", bufferId)
         foregroundBufferTracker.set(null)
+        visibleSession.value = null
     }
 
     /**
