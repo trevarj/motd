@@ -1,10 +1,12 @@
 package io.github.trevarj.motd
 
 import android.Manifest
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasAnyDescendant
@@ -20,11 +22,14 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.swipeDown
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import java.util.Locale
+import kotlinx.coroutines.launch
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -109,6 +114,13 @@ abstract class HeadlessE2eDriver {
         compose.waitUntil(timeoutMillis) {
             compose.onAllNodesWithTag(tag, useUnmergedTree = true)
                 .fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    protected fun waitForTagToDisappear(tag: String, timeoutMillis: Long = 15_000) {
+        compose.waitUntil(timeoutMillis) {
+            compose.onAllNodesWithTag(tag, useUnmergedTree = true)
+                .fetchSemanticsNodes().isEmpty()
         }
     }
 
@@ -211,6 +223,36 @@ abstract class HeadlessE2eDriver {
     protected fun replaceTag(tag: String, text: String) {
         waitForTag(tag)
         compose.onNodeWithTag(tag, useUnmergedTree = true).performTextReplacement(text)
+    }
+
+    protected fun longClickMessageContaining(text: String) {
+        val messageTag = SemanticsMatcher("message row containing $text") { node ->
+            node.config.contains(SemanticsProperties.TestTag) &&
+                node.config[SemanticsProperties.TestTag].startsWith("chat_message_")
+        }
+        val row = messageTag.and(hasAnyDescendant(hasText(text, substring = true, ignoreCase = true)))
+        compose.waitUntil(15_000) {
+            compose.onAllNodes(row, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onAllNodes(row, useUnmergedTree = true).onFirst().performTouchInput { longClick() }
+    }
+
+    protected fun assertComposerText(text: String) {
+        waitForTag("chat_composer_field")
+        compose.onNodeWithTag("chat_composer_field", useUnmergedTree = true).assertTextEquals(text)
+    }
+
+    protected fun reconnectActiveNetwork() {
+        compose.activityRule.scenario.onActivity { activity ->
+            val manager = activity.connectionManager
+            val networkId = manager.connectionStates.value.keys.firstOrNull { manager.clientFor(it) != null }
+                ?: manager.connectionStates.value.keys.firstOrNull()
+                ?: error("no connected network available for reconnect test")
+            activity.lifecycleScope.launch {
+                manager.disconnect(networkId)
+                manager.connect(networkId)
+            }
+        }
     }
 
     protected fun scrollToAndClickText(text: String) {
@@ -339,6 +381,71 @@ class ChatHeadlessE2eTest : HeadlessE2eDriver() {
                 .and(hasSetTextAction()),
         ).onFirst().performTextReplacement(message)
         waitForText(message, timeoutMillis = 20_000)
+    }
+
+    @Test
+    fun repliesReactsAndRestoresIndependentChannelAndQueryDrafts() {
+        openOrJoinChannel()
+        val parent = uniqueMessage("reply-parent")
+        replaceTag("chat_composer_field", parent)
+        clickTag("chat_composer_send")
+        waitForText(parent, timeoutMillis = 20_000)
+
+        longClickMessageContaining(parent)
+        waitForTag("message_action_sheet")
+        clickText("Reply")
+        replaceTag("chat_composer_field", "reply-$parent")
+        clickTag("chat_composer_send")
+        waitForText("reply-$parent", timeoutMillis = 20_000)
+
+        longClickMessageContaining(parent)
+        waitForTag("message_action_sheet")
+        clickText("👍")
+        waitForTag("chat_reaction_chip_👍", timeoutMillis = 20_000)
+        clickTag("chat_reaction_chip_👍")
+        waitForTagToDisappear("chat_reaction_chip_👍", timeoutMillis = 20_000)
+
+        replaceTag("chat_composer_field", "channel draft")
+        back()
+        clickDescription("New conversation")
+        waitForTag("new_conversation_sheet")
+        clickTag("new_conversation_message_tab")
+        replaceTag("new_conversation_input", secondNick)
+        clickTag("new_conversation_submit")
+        waitForTag("chat_composer_field")
+        replaceTag("chat_composer_field", "query draft")
+        back()
+
+        waitForText(channel)
+        clickText(channel)
+        assertComposerText("channel draft")
+        back()
+
+        waitForText(secondNick)
+        clickText(secondNick)
+        assertComposerText("query draft")
+    }
+
+    @Test
+    fun reconnectKeepsExistingMessageUniqueAndAllowsNewSend() {
+        openOrJoinChannel()
+        val before = uniqueMessage("before-reconnect")
+        replaceTag("chat_composer_field", before)
+        clickTag("chat_composer_send")
+        waitForTextWithConnectionDiagnostics(before, timeoutMillis = 20_000)
+
+        reconnectActiveNetwork()
+        waitForTextWithConnectionDiagnostics(before, timeoutMillis = 30_000)
+
+        val after = uniqueMessage("after-reconnect")
+        replaceTag("chat_composer_field", after)
+        clickTag("chat_composer_send")
+        waitForTextWithConnectionDiagnostics(after, timeoutMillis = 30_000)
+        assertEquals(
+            1,
+            compose.onAllNodesWithText(before, substring = true, useUnmergedTree = true)
+                .fetchSemanticsNodes().size,
+        )
     }
 }
 

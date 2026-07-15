@@ -340,6 +340,21 @@ interface MessageDao {
         hi: Long,
     ): List<MessageEntity>
 
+    /** Casefold fallback for servers that change nick casing between live and history delivery. */
+    @Query(
+        """SELECT * FROM messages WHERE bufferId = :bufferId AND isSelf = 0 AND msgid IS NOT NULL
+          AND kind = :kind AND text = :text
+          AND serverTime BETWEEN :lo AND :hi
+          ORDER BY serverTime DESC, id DESC LIMIT 8""",
+    )
+    suspend fun findDurableIncomingCandidatesByText(
+        bufferId: Long,
+        kind: MessageKind,
+        text: String,
+        lo: Long,
+        hi: Long,
+    ): List<MessageEntity>
+
     /** Observe a reply target so a late echo promotion or history insert updates its preview. */
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND msgid = :msgid LIMIT 1")
     fun observeByMsgid(bufferId: Long, msgid: String): Flow<MessageEntity?>

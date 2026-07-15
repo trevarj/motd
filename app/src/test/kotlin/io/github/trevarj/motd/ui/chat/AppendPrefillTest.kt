@@ -28,4 +28,17 @@ class AppendPrefillTest {
         assertEquals(out.text.length, out.selection.start)
         assertEquals(out.text.length, out.selection.end)
     }
+
+    @Test
+    fun restoring_a_draft_merges_one_shot_mention_and_places_cursor_at_end() {
+        val restored = restoreComposerDraft("unfinished", "alice: ")
+
+        assertEquals("unfinished alice: ", restored.text)
+        assertEquals(restored.text.length, restored.selection.end)
+    }
+
+    @Test
+    fun restoring_without_a_draft_still_applies_prefill() {
+        assertEquals("alice: ", restoreComposerDraft(null, "alice: ").text)
+    }
 }

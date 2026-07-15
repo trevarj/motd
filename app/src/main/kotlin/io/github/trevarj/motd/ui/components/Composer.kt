@@ -158,7 +158,9 @@ fun Composer(
             }
 
             Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .testTag("chat_composer_input_row")
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
@@ -378,7 +380,10 @@ private fun EmojiPickerPanel(onPick: (String) -> Unit) {
     val pager = rememberPagerState(pageCount = { pages.size })
     val scope = rememberCoroutineScope()
     Surface(
-        modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp).fillMaxWidth(),
+        modifier = Modifier
+            .testTag("chat_composer_emoji_picker")
+            .padding(start = 8.dp, end = 8.dp, top = 8.dp)
+            .fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {

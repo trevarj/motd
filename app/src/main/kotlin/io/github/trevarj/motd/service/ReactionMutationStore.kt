@@ -76,6 +76,10 @@ internal suspend fun mutateReaction(
         store.remove(previous)
         ReactionMutationKind.REMOVE
     } else {
+        // Reactions are uniquely keyed by their raw sender spelling for compatibility with the
+        // existing Room schema, while IRC nick matching is casefolded. Remove a prior case-variant
+        // row before replacing its emoji so a server-side nick-case change cannot leave two rows.
+        previous?.let { store.remove(it) }
         store.upsert(reaction)
         ReactionMutationKind.ADD
     }

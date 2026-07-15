@@ -90,6 +90,62 @@ class EventProcessorTest {
     }
 
     @Test
+    fun rfc1459EquivalentChannelTargets_shareOneBuffer() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "case-channel-1"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#Room", text = "first",
+            isSelf = false, replyToMsgid = null,
+        ))
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "case-channel-2", time = 1001), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#room", text = "second",
+            isSelf = false, replyToMsgid = null,
+        ))
+
+        val buffers = db.bufferDao().observeChatList().first().filter { it.displayName.contains("Room", ignoreCase = true) }
+        assertEquals(1, buffers.size)
+        assertEquals(2, pagingList(buffers.single().bufferId).size)
+    }
+
+    @Test
+    fun liveAndHistoryRepresentations_withNickCaseChange_reconcileToOneRow() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "durable", time = 2000), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("ALICE"), target = "#chan", text = "same line",
+            isSelf = false, replyToMsgid = null,
+        ))
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(time = 2001), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "same line",
+            isSelf = false, replyToMsgid = null,
+        ))
+
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        val rows = pagingList(buffer.id)
+        assertEquals(1, rows.size)
+        assertEquals("durable", rows.single().msgid)
+    }
+
+    @Test
+    fun msgidPromotion_withNickCaseChange_reusesTheMsgidlessRow() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(time = 3000), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("ALICE"), target = "#chan", text = "same line",
+            isSelf = false, replyToMsgid = null,
+        ))
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "promoted", time = 3000), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "same line",
+            isSelf = false, replyToMsgid = null,
+        ))
+
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        val rows = pagingList(buffer.id)
+        assertEquals(1, rows.size)
+        assertEquals("promoted", rows.single().msgid)
+    }
+
+    @Test
     fun mentionFlag_setWhenOwnNickAppears_wordBoundary() = runTest {
         processor.process(networkId, IrcEvent.ChatMessage(
             ctx = ctx(msgid = "m3"), kind = IrcEvent.ChatKind.PRIVMSG,
@@ -248,7 +304,7 @@ class EventProcessorTest {
             typing = null, reactEmoji = "👍", reactTargetMsgid = "m1",
         ))
         val unreact = IrcEvent.Raw(
-            IrcMessage.parse("@+draft/unreact=👍;+reply=m1 :bob!u@h TAGMSG #chan"),
+            IrcMessage.parse("@+draft/unreact=👍;+reply=m1 :BOB!u@h TAGMSG #chan"),
         )
 
         processor.process(networkId, unreact)
@@ -312,16 +368,16 @@ class EventProcessorTest {
                 bufferId = buffer.id, targetMsgid = "m1", sender = "me", emoji = "👍", serverTime = 5,
             ),
         )
-        // Server echoes our own react back as a TAGMSG; onTag upserts by the same unique key, so the
-        // optimistic row is reconciled rather than duplicated.
+        // Server echoes our own react back with different nick casing; IRC casefolding must still
+        // reconcile it with the optimistic row rather than creating a duplicate.
         processor.process(networkId, IrcEvent.TagMessage(
-            ctx = ctx(time = 9), source = Prefix("me"), target = "#chan",
+            ctx = ctx(time = 9), source = Prefix("Me"), target = "#chan",
             typing = null, reactEmoji = "👍", reactTargetMsgid = "m1",
         ))
 
         val reactions = db.reactionDao().observeFor(buffer.id, listOf("m1")).first()
         assertEquals(1, reactions.size)
-        assertEquals("me", reactions.single().sender)
+        assertEquals("Me", reactions.single().sender)
         assertEquals(9, reactions.single().serverTime)
     }
 

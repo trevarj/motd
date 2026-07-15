@@ -72,6 +72,93 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+internal data class OutgoingMessageChunk(
+    val wireText: String,
+    val displayText: String,
+    val kind: MessageKind,
+)
+
+/**
+ * Convert composer text into safe, independently sendable IRC payloads.
+ *
+ * Physical newlines are always message boundaries. ACTION payloads are split on their display
+ * text before the CTCP wrapper is added, so every chunk remains a valid ACTION and every stored
+ * row contains only the visible action text. BouncerServ rejects unsafe multi-command input and
+ * stores a redacted transcript for the commands it does accept.
+ */
+internal fun prepareOutgoingMessageChunks(
+    text: String,
+    isBouncerServ: Boolean,
+    maxBytes: Int = ConnectionManagerImpl.MAX_BYTES,
+): List<OutgoingMessageChunk> {
+    if (isBouncerServ && ('\r' in text || '\n' in text || text.toByteArray(Charsets.UTF_8).size > maxBytes)) {
+        return emptyList()
+    }
+    val lines = text.split(Regex("\\r\\n|\\r|\\n")).filter { it.isNotEmpty() }
+    if (lines.isEmpty()) return emptyList()
+
+    val isAction = text.startsWith("/me ")
+    return lines.flatMapIndexed { lineIndex, line ->
+        val lineIsAction = isAction && lineIndex == 0
+        if (lineIsAction) {
+            val displayText = line.removePrefix("/me ")
+            splitUtf8(displayText, maxBytes - ACTION_OVERHEAD_BYTES).map { chunk ->
+                OutgoingMessageChunk(
+                    wireText = "\u0001ACTION $chunk\u0001",
+                    displayText = chunk,
+                    kind = MessageKind.ACTION,
+                )
+            }
+        } else {
+            splitUtf8(line, maxBytes).map { chunk ->
+                OutgoingMessageChunk(
+                    wireText = chunk,
+                    displayText = if (isBouncerServ) redactBouncerServCommand(chunk) else chunk,
+                    kind = MessageKind.PRIVMSG,
+                )
+            }
+        }
+    }
+}
+
+/** Split [text] into chunks of at most [maxBytes] UTF-8 bytes without splitting code points. */
+internal fun splitUtf8(text: String, maxBytes: Int): List<String> {
+    require(maxBytes > 0) { "maxBytes must be positive" }
+    if (text.toByteArray(Charsets.UTF_8).size <= maxBytes) return listOf(text)
+
+    val out = ArrayList<String>()
+    var remaining = text
+    while (remaining.isNotEmpty()) {
+        var end = 0
+        var bytes = 0
+        var lastSpace = -1
+        while (end < remaining.length) {
+            val codePoint = remaining.codePointAt(end)
+            val codePointLength = Character.charCount(codePoint)
+            val codePointBytes = String(Character.toChars(codePoint))
+                .toByteArray(Charsets.UTF_8)
+                .size
+            if (bytes + codePointBytes > maxBytes) break
+            if (codePoint == ' '.code) lastSpace = end
+            bytes += codePointBytes
+            end += codePointLength
+        }
+        require(end > 0) { "maxBytes is smaller than one UTF-8 code point" }
+        if (end == remaining.length) {
+            out += remaining
+            break
+        }
+
+        val split = if (lastSpace > 0) lastSpace else end
+        val chunk = remaining.substring(0, split).trimEnd()
+        if (chunk.isNotEmpty()) out += chunk
+        remaining = remaining.substring(split).trimStart()
+    }
+    return out
+}
+
+private const val ACTION_OVERHEAD_BYTES = 9 // SOH + "ACTION " + SOH
+
 /**
  * Hilt @Singleton connection subsystem (plans/05). Outlives the foreground service — the service
  * is merely its keeper. Spawns one [ConnectionActor] per connectable network row (BOUNCER_ROOT
@@ -895,57 +982,33 @@ class ConnectionManagerImpl @Inject constructor(
         )
         val outgoingText = delivery.text
 
-        // BouncerServ interprets one PRIVMSG as one shell command. Never turn a newline or an
-        // oversized command into multiple independently executable service commands.
-        if (isBouncerServ && ('\r' in outgoingText || '\n' in outgoingText || outgoingText.toByteArray().size > MAX_BYTES)) {
-            return
-        }
-
-        // /me → CTCP ACTION wrapped in \x01. Only the FIRST physical line of a multiline
-        // paste can carry the /me action; the rest are plain PRIVMSGs.
-        val isAction = outgoingText.startsWith("/me ")
-
-        // A composer can contain embedded newlines (multiline paste); each physical line must be
-        // its own IRC message or the server would parse the tail as a raw command (line injection).
-        // Split on CR/LF first, then apply the >400-byte UTF-8 word-boundary split per line.
-        val lines = outgoingText.split(Regex("\r\n|\r|\n")).filter { it.isNotEmpty() }
-        if (lines.isEmpty()) return
-
-        for ((lineIndex, line) in lines.withIndex()) {
-            val lineIsAction = isAction && lineIndex == 0
-            val displayLine = if (lineIsAction) line.removePrefix("/me ") else line
-            val body = if (lineIsAction) "ACTION $displayLine" else line
-            val kind = if (lineIsAction) MessageKind.ACTION else MessageKind.PRIVMSG
-
-            // Split >400-byte UTF-8 payloads on word boundaries; each chunk gets its own row.
-            val chunks = splitUtf8(body, MAX_BYTES)
-            for (chunk in chunks) {
-                // Stored display text = wire chunk minus the CTCP ACTION \x01 wrapper.
-                val rawDisplayChunk = if (lineIsAction) {
-                    chunk.removePrefix("ACTION ").removeSuffix("")
-                } else {
-                    chunk
+        for (chunk in prepareOutgoingMessageChunks(outgoingText, isBouncerServ)) {
+            val displayChunk = chunk.displayText
+            // Persist the pending row in beforeSend — BEFORE the PRIVMSG hits the wire — so a
+            // fast labeled echo can't be processed ahead of the insert and duplicate the send.
+            val label = client.sendMessage(target, chunk.wireText, delivery.wireReplyToMsgid) { lbl ->
+                if (lbl.isNotEmpty()) {
+                    eventProcessor.insertPending(
+                        bufferId,
+                        lbl,
+                        buffer_meNick(client),
+                        displayChunk,
+                        replyToMsgid,
+                        chunk.kind,
+                    )
                 }
-                val displayChunk = if (isBouncerServ) redactBouncerServCommand(rawDisplayChunk) else rawDisplayChunk
-                // Persist the pending row in beforeSend — BEFORE the PRIVMSG hits the wire — so a
-                // fast labeled echo can't be processed ahead of the insert and duplicate the send.
-                val label = client.sendMessage(target, chunk, delivery.wireReplyToMsgid) { lbl ->
-                    if (lbl.isNotEmpty()) {
-                        eventProcessor.insertPending(bufferId, lbl, buffer_meNick(client), displayChunk, replyToMsgid, kind)
-                    }
-                }
-                if (label.isEmpty()) {
-                    // No labeled-response: the pending row could never be confirmed (its echo
-                    // cannot be correlated). If echo-message is also absent nothing surfaces at
-                    // all, so insert an already-confirmed self row now (plans/03 echo degradation,
-                    // plans/04 echo flow) with the sha1(serverTime|sender|text) dedup key. When
-                    // echo-message IS present the returning self ChatMessage carries the same key
-                    // -> INSERT IGNORE no-ops, so we stay at one row either way.
-                    insertConfirmedSelf(buffer.networkId, target, displayChunk, replyToMsgid, kind)
-                    continue
-                }
-                armEchoTimeout(bufferId, label)
             }
+            if (label.isEmpty()) {
+                // No labeled-response: the pending row could never be confirmed (its echo
+                // cannot be correlated). If echo-message is also absent nothing surfaces at
+                // all, so insert an already-confirmed self row now (plans/03 echo degradation,
+                // plans/04 echo flow) with the sha1(serverTime|sender|text) dedup key. When
+                // echo-message IS present the returning self ChatMessage carries the same key
+                // -> INSERT IGNORE no-ops, so we stay at one row either way.
+                insertConfirmedSelf(buffer.networkId, target, displayChunk, replyToMsgid, chunk.kind)
+                continue
+            }
+            armEchoTimeout(bufferId, label)
         }
     }
 
@@ -1004,9 +1067,9 @@ class ConnectionManagerImpl @Inject constructor(
         val buffer = bufferDao.observeById(bufferId) ?: return
         val client = clientFor(buffer.networkId) ?: return
         val ready = client.state.value as? IrcClientState.Ready ?: return
-        val sender = ready.nick
         val normalize: (String) -> String = client.isupport::normalize
-        val previous = reactionMutations.findOwn(bufferId, msgid, sender, normalize)
+        val sender = ready.nick
+        val previous = reactionMutations.findOwn(bufferId, msgid, ready.nick, normalize)
         val removing = previous?.emoji == emoji
         // Recheck at the mutation boundary so a stale sheet cannot create local-only state after a
         // capability or CLIENTTAGDENY change.
@@ -1233,27 +1296,6 @@ class ConnectionManagerImpl @Inject constructor(
         } finally {
             if (registered) runCatching { cm.unregisterNetworkCallback(callback) }
         }
-    }
-
-    // -- utils --------------------------------------------------------------
-
-    /** Split [text] into chunks of at most [maxBytes] UTF-8 bytes, preferring word boundaries. */
-    internal fun splitUtf8(text: String, maxBytes: Int): List<String> {
-        if (text.toByteArray(Charsets.UTF_8).size <= maxBytes) return listOf(text)
-        val out = ArrayList<String>()
-        var remaining = text
-        while (remaining.toByteArray(Charsets.UTF_8).size > maxBytes) {
-            var cut = remaining.length
-            // Shrink until the prefix fits.
-            while (remaining.substring(0, cut).toByteArray(Charsets.UTF_8).size > maxBytes) cut--
-            // Prefer the last space within the fitting prefix.
-            val space = remaining.lastIndexOf(' ', cut - 1)
-            val split = if (space > 0) space else cut
-            out.add(remaining.substring(0, split).trimEnd())
-            remaining = remaining.substring(split).trimStart()
-        }
-        if (remaining.isNotEmpty()) out.add(remaining)
-        return out
     }
 
     companion object {

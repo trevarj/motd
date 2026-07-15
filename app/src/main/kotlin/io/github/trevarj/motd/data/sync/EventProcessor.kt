@@ -24,6 +24,7 @@ import io.github.trevarj.motd.service.RoomReactionMutationStore
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.first
 
 /**
  * The sole IRC→Room writer (plans/04 mapping table). Implements [IrcEventSink]: every per-network
@@ -263,6 +264,7 @@ class EventProcessor @Inject constructor(
         }
         val hasMention = !e.isSelf && !isRootServiceReply &&
             (replyMentionsSelf || st.mentionRegex.containsMatchIn(storedText))
+        val identitySender = st.normalize(e.source.nick)
 
         traceMessageDecision("message_classified", networkId, bufferId, e, origin) {
             mapOf(
@@ -301,7 +303,7 @@ class EventProcessor @Inject constructor(
             isSelf = e.isSelf,
             hasMention = hasMention,
             replyToMsgid = e.replyToMsgid,
-            dedupKey = EchoDeduper.keyFor(e.ctx, e.source.nick, storedText),
+            dedupKey = EchoDeduper.keyFor(e.ctx, identitySender, storedText),
         )
 
         // Some bouncers omit draft/msgid on the live delivery but attach it when replaying the
@@ -312,7 +314,7 @@ class EventProcessor @Inject constructor(
         // genuinely repeated messages distinct.
         val incomingMsgid = e.ctx.msgid
         if (incomingMsgid != null && messageDao.byMsgid(bufferId, incomingMsgid) == null) {
-            val fallbackKey = EchoDeduper.keyFor(null, e.ctx.serverTime, e.source.nick, storedText)
+            val fallbackKey = EchoDeduper.keyFor(null, e.ctx.serverTime, identitySender, storedText)
             val fingerprintMatch = messageDao.byDedupKey(bufferId, fallbackKey)
             if (fingerprintMatch != null && fingerprintMatch.msgid == null) {
                 val promoted = fingerprintMatch.copy(msgid = incomingMsgid, dedupKey = incomingMsgid)
@@ -328,7 +330,7 @@ class EventProcessor @Inject constructor(
         // duplicate. Account/reply are enrichments rather than identity because optional tags can
         // differ between history and live delivery. Msgid-less PUSH returned above without writing.
         if (incomingMsgid == null && !e.isSelf && origin == EventOrigin.LIVE) {
-            val candidates = messageDao.findDurableIncomingCandidates(
+            var candidates = messageDao.findDurableIncomingCandidates(
                 bufferId = bufferId,
                 sender = e.source.nick,
                 kind = row.kind,
@@ -336,6 +338,15 @@ class EventProcessor @Inject constructor(
                 lo = e.ctx.serverTime - INCOMING_DELIVERY_MATCH_WINDOW_MS,
                 hi = e.ctx.serverTime + INCOMING_DELIVERY_MATCH_WINDOW_MS,
             )
+            if (candidates.isEmpty()) {
+                candidates = messageDao.findDurableIncomingCandidatesByText(
+                    bufferId = bufferId,
+                    kind = row.kind,
+                    text = storedText,
+                    lo = e.ctx.serverTime - INCOMING_DELIVERY_MATCH_WINDOW_MS,
+                    hi = e.ctx.serverTime + INCOMING_DELIVERY_MATCH_WINDOW_MS,
+                ).filter { st.normalize(it.sender) == identitySender }.take(2)
+            }
             if (candidates.size == 1) {
                 val durable = candidates.single()
                 val reconciled = durable.copy(
@@ -393,7 +404,7 @@ class EventProcessor @Inject constructor(
                     val confirmed = pending.copy(
                         msgid = e.ctx.msgid,
                         serverTime = e.ctx.serverTime,
-                        dedupKey = EchoDeduper.keyFor(e.ctx, e.source.nick, storedText),
+                        dedupKey = EchoDeduper.keyFor(e.ctx, identitySender, storedText),
                         pendingLabel = null,
                         failed = false,
                     )
@@ -498,6 +509,13 @@ class EventProcessor @Inject constructor(
             // Keep an orphan temporarily when the target's echo/history row is still in flight.
             // Reaction queries are scoped to visible msgids, so it becomes visible atomically when
             // the parent arrives and remains inert if the reference never resolves.
+            // Room's uniqueness constraint retains the historical raw-sender key for compatibility,
+            // so remove any IRC-casefolded equivalent before inserting the display spelling from
+            // this event. This reconciles optimistic "me" with an echo such as "Me" without
+            // throwing away the casing users see in the timeline.
+            reactionDao.observeForBuffer(bufferId).first()
+                .filter { it.targetMsgid == targetMsgid && st.normalize(it.sender) == st.normalize(e.source.nick) }
+                .forEach { reactionMutations.remove(it) }
             reactionDao.upsert(
                 ReactionEntity(
                     bufferId = bufferId,
@@ -1146,8 +1164,9 @@ class EventProcessor @Inject constructor(
             target
         }
         val bufferId = bufferDao.byName(networkId, st.normalize(bufferName))?.id ?: return true
-        val previous = reactionMutations.findOwn(bufferId, targetMsgid, source, st::normalize)
-        if (previous?.emoji == emoji) reactionMutations.remove(previous)
+        reactionDao.observeForBuffer(bufferId).first()
+            .filter { it.targetMsgid == targetMsgid && it.emoji == emoji && st.normalize(it.sender) == st.normalize(source) }
+            .forEach { reactionMutations.remove(it) }
         return true
     }
 

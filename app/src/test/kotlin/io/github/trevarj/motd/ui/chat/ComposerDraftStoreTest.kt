@@ -44,6 +44,15 @@ class ComposerDraftStoreTest {
         assertNull(store.loadDraft(2L))
     }
 
+    @Test fun drafts_are_independent_across_channel_and_query_buffers() {
+        val store = ComposerDraftStore()
+        store.saveDraft(10L, "channel draft")
+        store.saveDraft(11L, "query draft")
+
+        assertEquals("channel draft", store.loadDraft(10L))
+        assertEquals("query draft", store.loadDraft(11L))
+    }
+
     @Test fun blank_draft_is_removed_and_clear_is_idempotent() {
         val store = ComposerDraftStore()
         store.saveDraft(1L, "hello")

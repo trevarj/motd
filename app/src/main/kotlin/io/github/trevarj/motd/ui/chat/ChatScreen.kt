@@ -417,10 +417,7 @@ fun ChatContent(
     // existing draft when a user selects a nick from ChannelInfo and returns to the chat.
     LaunchedEffect(traceBufferId) {
         if (traceBufferId == null) return@LaunchedEffect
-        loadDraft()?.let { saved ->
-            composerText = TextFieldValue(saved, TextRange(saved.length))
-        }
-        consumePrefill()?.let { composerText = appendPrefill(composerText, it) }
+        composerText = restoreComposerDraft(loadDraft(), consumePrefill())
         draftLoaded = true
     }
     LaunchedEffect(traceBufferId, composerText.text, draftLoaded) {
@@ -1276,6 +1273,13 @@ fun appendPrefill(value: TextFieldValue, prefill: String): TextFieldValue {
     val sep = if (current.isNotEmpty() && !current.last().isWhitespace()) " " else ""
     val text = current + sep + prefill
     return TextFieldValue(text = text, selection = androidx.compose.ui.text.TextRange(text.length))
+}
+
+/** Restore a buffer draft, then merge a one-shot mention prefill without losing the cursor. */
+internal fun restoreComposerDraft(draft: String?, prefill: String?): TextFieldValue {
+    val saved = draft.orEmpty()
+    val value = TextFieldValue(saved, TextRange(saved.length))
+    return prefill?.let { appendPrefill(value, it) } ?: value
 }
 
 /** Add the visible channel-reply prefix while preserving the current selection. */
