@@ -233,6 +233,10 @@ class ConnectionManagerImpl @Inject constructor(
     @Volatile private var appForeground = false
     @Volatile private var deviceIdle = false
     private val pushSuspendedIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+    private val backgroundRetention = BackgroundConnectionRetention(
+        scope = scope,
+        graceMs = EMBEDDED_REALITY_BACKGROUND_GRACE_MS,
+    )
 
     override fun clientFor(networkId: Long): IrcClient? =
         (registry.snapshot.value.actors[networkId]?.connection as? IrcClientConnection)?.client
@@ -256,8 +260,15 @@ class ConnectionManagerImpl @Inject constructor(
             val deliveryModeJob = scope.launch {
                 settings.settings.map { it.deliveryMode }.distinctUntilChanged().collect { mode ->
                     if (mode == DeliveryMode.UNIFIED_PUSH) {
-                        if (!appForeground && deviceIdle) maybeStopForPush()
+                        val all = networkDao.observeAll().first()
+                        if (appForeground && hasWantedEmbeddedReality(all)) {
+                            startForegroundKeeper()
+                        } else if (!appForeground) {
+                            beginEmbeddedRealityBackgroundRetention(all)
+                            if (deviceIdle) maybeStopForPush()
+                        }
                     } else {
+                        backgroundRetention.cancel()
                         pushSuspendedIds.clear()
                         reconcile(networkDao.observeAll().first())
                     }
@@ -298,6 +309,7 @@ class ConnectionManagerImpl @Inject constructor(
                 deliveryMode = settings.settings.first().deliveryMode,
             )
         ) return
+        if (backgroundRetention.isRetaining) return
         val all = networkDao.observeAll().first()
         val wanted = wantedNetworkIds(all, userIntents, connectionStates.value)
         val endpoints = pushPrefs.endpoints()
@@ -312,8 +324,7 @@ class ConnectionManagerImpl @Inject constructor(
         if (needsSocket) {
             startForegroundKeeper()
         } else {
-            val stopIntent = android.content.Intent(appContext, IrcForegroundService::class.java)
-            appContext.stopService(stopIntent)
+            stopForegroundKeeper()
         }
     }
 
@@ -324,16 +335,30 @@ class ConnectionManagerImpl @Inject constructor(
      */
     internal suspend fun onAppForegrounded() {
         appForeground = true
+        backgroundRetention.cancel()
         pushSuspendedIds.clear()
         startAll()
-        reconcile(networkDao.observeAll().first())
+        val all = networkDao.observeAll().first()
+        reconcile(all)
+        if (settings.settings.first().deliveryMode == DeliveryMode.UNIFIED_PUSH &&
+            hasWantedEmbeddedReality(all)
+        ) {
+            // Start while the app is visibly foreground. Android 12+ may reject a foreground-
+            // service launch after onStop; pre-arming the thin keeper makes the subsequent grace
+            // a real retention guarantee instead of relying on an unprotected process timer.
+            startForegroundKeeper()
+        }
         reconnectStale()
     }
 
-    /** Process background: keep sockets until Android itself reports that the device entered Doze. */
+    /** Process background: retain embedded REALITY through a short app switch, even in Doze. */
     internal fun onAppBackgrounded() {
         appForeground = false
-        if (deviceIdle) scope.launch { maybeStopForPush() }
+        scope.launch {
+            val all = networkDao.observeAll().first()
+            beginEmbeddedRealityBackgroundRetention(all)
+            if (deviceIdle) maybeStopForPush()
+        }
     }
 
     /**
@@ -346,6 +371,43 @@ class ConnectionManagerImpl @Inject constructor(
         if (idle && !appForeground) scope.launch { maybeStopForPush() }
     }
 
+    private suspend fun beginEmbeddedRealityBackgroundRetention(all: List<NetworkEntity>) {
+        if (appForeground || settings.settings.first().deliveryMode != DeliveryMode.UNIFIED_PUSH ||
+            !hasWantedEmbeddedReality(all) || backgroundRetention.graceElapsed
+        ) return
+        startForegroundKeeper()
+        backgroundRetention.onBackgrounded {
+            if (appForeground) return@onBackgrounded
+            if (deviceIdle) {
+                maybeStopForPush()
+            } else {
+                releaseKeeperWhenPushCanOwnEverything()
+            }
+        }
+    }
+
+    private fun hasWantedEmbeddedReality(all: List<NetworkEntity>): Boolean =
+        wantedNetworkIds(all, userIntents, connectionStates.value).any { networkId ->
+            wantedNetworkUsesEmbeddedReality(networkId, all)
+        }
+
+    /**
+     * The grace keeper is no longer needed once every wanted network has healthy push delivery.
+     * Outside Doze we leave actors alone, preserving the existing keep-until-Doze semantics.
+     */
+    private suspend fun releaseKeeperWhenPushCanOwnEverything() {
+        if (appForeground || settings.settings.first().deliveryMode != DeliveryMode.UNIFIED_PUSH) return
+        val all = networkDao.observeAll().first()
+        val wanted = wantedNetworkIds(all, userIntents, connectionStates.value)
+        val pushOwned = pushSuspendedNetworkIds(
+            all,
+            wanted,
+            pushPrefs.endpoints(),
+            pushHealthStore.snapshot(),
+        )
+        if (wanted.all { it in pushOwned }) stopForegroundKeeper()
+    }
+
     private fun startForegroundKeeper() {
         runCatching {
             ContextCompat.startForegroundService(
@@ -355,7 +417,12 @@ class ConnectionManagerImpl @Inject constructor(
         }.onFailure { Log.w(TAG, "unable to start socket fallback service", it) }
     }
 
+    private fun stopForegroundKeeper() {
+        appContext.stopService(android.content.Intent(appContext, IrcForegroundService::class.java))
+    }
+
     override suspend fun stopAll() {
+        backgroundRetention.cancel()
         registry.stop()
         localSocksProvider.stop()
         // Service teardown resets sticky user intent (in-memory only).
@@ -1311,6 +1378,7 @@ class ConnectionManagerImpl @Inject constructor(
         const val ECHO_TIMEOUT_MS = 30_000L
         const val INVITE_READY_TIMEOUT_MS = 30_000L
         const val ROSTER_REQUEST_TIMEOUT_MS = 15_000L
+        const val EMBEDDED_REALITY_BACKGROUND_GRACE_MS = 5 * 60 * 1000L
         const val MAX_BYTES = 400
         // Stable, casemapping-invariant name for the per-network SERVER buffer.
         const val SERVER_BUFFER_NAME = "*"
@@ -1326,6 +1394,20 @@ internal fun shouldApplyDozePushHandoff(
     deviceIdle: Boolean,
     deliveryMode: DeliveryMode,
 ): Boolean = !appForeground && deviceIdle && deliveryMode == DeliveryMode.UNIFIED_PUSH
+
+internal fun wantedNetworkUsesEmbeddedReality(
+    networkId: Long,
+    all: List<NetworkEntity>,
+): Boolean {
+    val byId = all.associateBy { it.id }
+    val row = byId[networkId] ?: return false
+    val endpoint = if (row.role == NetworkRole.BOUNCER_CHILD) {
+        row.parentId?.let(byId::get) ?: row
+    } else {
+        row
+    }
+    return endpoint.obfsMode == ObfsMode.EMBEDDED_REALITY
+}
 
 internal fun catchUpRetryDelayMs(attempt: Int): Long =
     (2_000L * (1L shl attempt.coerceIn(0, 4))).coerceAtMost(30_000L)
