@@ -46,6 +46,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTag as semanticsTestTag
 import androidx.compose.ui.unit.dp
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
@@ -632,11 +635,24 @@ private fun MessageRow(
     val preview = (previewState as? PreviewState.Done)?.preview?.withImageGate(showImages)
     val previewLoading = linkUrl != null && previewState is PreviewState.Loading
     val formattedTime = remember(msg.serverTime, formatTime) { formatTime(msg.serverTime) }
+    // Ordinary rows stay on the hot scrolling path without even resolving the accessibility
+    // string; mention state is immutable for a stored row and only the sparse highlighted rows
+    // need it.
+    val mentionDescription = if (msg.hasMention && !msg.isSelf) {
+        stringResource(R.string.chat_message_mentions_you)
+    } else {
+        null
+    }
 
     onCollapseFool?.let { FoolCollapseChip(sender = msg.sender, onCollapse = it) }
 
     SwipeToReplyContainer(
-        modifier = Modifier.testTag(messageTag(msg)),
+        // Keep the stable automation id and mention state on one semantics node. SwipeToReply adds
+        // its custom action downstream without changing this message-level accessibility state.
+        modifier = Modifier.semantics {
+            semanticsTestTag = messageTag(msg)
+            mentionDescription?.let { stateDescription = it }
+        },
         onReply = { onReply(msg) },
     ) { rowModifier ->
         MessageBubble(
@@ -652,6 +668,7 @@ private fun MessageRow(
             isSelf = msg.isSelf,
             kind = msg.kind,
             showSender = showsSender(msg, older),
+            hasMention = msg.hasMention,
             senderIsFriend = senderIsFriend,
             failed = msg.failed,
             // Subtle "sending…" state before the 30s failure flip (plans/15 #21).

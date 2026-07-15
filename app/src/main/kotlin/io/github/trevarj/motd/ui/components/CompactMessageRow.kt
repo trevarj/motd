@@ -65,6 +65,7 @@ internal fun CompactMessageRow(
     kind: MessageKind,
     nickColors: NickColorScheme,
     modifier: Modifier = Modifier,
+    hasMention: Boolean = false,
     // Group continuation flag: false = omit the `nick:` prefix so the line reads as a continued run.
     showSender: Boolean = true,
     senderIsFriend: Boolean = false,
@@ -96,7 +97,11 @@ internal fun CompactMessageRow(
     val friendTint = if (senderIsFriend) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Unspecified
     // Per-nick row wash: a faint tint of the sender's own nick color behind the whole row so runs of
     // messages are visually trackable by speaker (stable per nick — no fragile list-wide parity).
-    val rowTint = nameColor.copy(alpha = COMPACT_ROW_TINT_ALPHA)
+    val rowTint = if (hasMention) {
+        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+    } else {
+        nameColor.copy(alpha = COMPACT_ROW_TINT_ALPHA)
+    }
 
     // The `nick: text` (or `* nick text`) content is a single flowing AnnotatedString so it wraps as
     // one paragraph like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
@@ -250,8 +255,9 @@ private fun CompactMessageRowPreview() {
     MotdTheme(layoutDensity = io.github.trevarj.motd.data.prefs.LayoutDensity.COMPACT) {
         Column {
             MessageBubble(
-                sender = "alice", text = "hey, welcome to the channel!",
+                sender = "alice", text = "me: welcome to the channel!",
                 timeMs = 0L, isSelf = false, kind = MessageKind.PRIVMSG, showSender = true,
+                hasMention = true,
                 senderIsFriend = true,
                 reactions = listOf(ReactionChip("👍", 2, mine = false)),
             )

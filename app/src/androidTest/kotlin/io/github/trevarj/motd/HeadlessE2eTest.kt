@@ -7,6 +7,7 @@ import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -234,6 +235,34 @@ abstract class HeadlessE2eDriver {
         compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
     }
 
+    /** Assert the accessibility state on the concrete message row containing [text]. */
+    protected fun assertMentionHighlight(text: String, highlighted: Boolean) {
+        val messageTag = SemanticsMatcher("message row") { node ->
+            node.config.contains(SemanticsProperties.TestTag) &&
+                node.config[SemanticsProperties.TestTag].startsWith("chat_message_")
+        }
+        val row = messageTag.and(
+            hasAnyDescendant(hasText(text, substring = true, ignoreCase = true)),
+        )
+        compose.waitUntil(15_000) {
+            compose.onAllNodes(row, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        val mentionsYou = SemanticsMatcher.expectValue(
+            SemanticsProperties.StateDescription,
+            "Mentions you",
+        )
+        val matches = compose.onAllNodes(
+            row.and(mentionsYou),
+            useUnmergedTree = true,
+        ).fetchSemanticsNodes()
+        if (highlighted && matches.isEmpty()) {
+            throw AssertionError("Expected '$text' to expose the Mentions you state")
+        }
+        if (!highlighted && matches.isNotEmpty()) {
+            throw AssertionError("Expected '$text' not to expose the Mentions you state")
+        }
+    }
+
     protected fun back() {
         compose.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
     }
@@ -275,7 +304,10 @@ class OnboardingHeadlessE2eTest : HeadlessE2eDriver() {
         waitForText(channel, timeoutMillis = 30_000)
         clickText(channel)
         waitForTag("chat_composer_field", timeoutMillis = 30_000)
+        scrollTimelineToTextWithConnectionDiagnostics("$nick: welcome", timeoutMillis = 30_000)
+        assertMentionHighlight("$nick: welcome", highlighted = true)
         scrollTimelineToTextWithConnectionDiagnostics("hello, this is a seeded plain line", timeoutMillis = 30_000)
+        assertMentionHighlight("hello, this is a seeded plain line", highlighted = false)
     }
 }
 

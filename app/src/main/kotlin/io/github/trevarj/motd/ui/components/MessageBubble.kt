@@ -36,6 +36,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -73,6 +78,26 @@ import java.text.DateFormat as JavaDateFormat
 /** Alpha for the per-nick row background wash in TWO_LINE density: matches the COMPACT band so runs
  *  of a nick's messages are trackable, faint enough to stay readable in light and dark themes. */
 private const val TWO_LINE_ROW_TINT_ALPHA = 0.10f
+internal const val MENTION_ROW_TINT_ALPHA = 0.55f
+
+/** Persistent, non-animated mention marker shared by every message density. */
+private fun Modifier.mentionHighlight(accent: Color): Modifier = drawWithContent {
+    drawContent()
+    val railWidth = 3.dp.toPx()
+    val inset = 2.dp.toPx()
+    val railHeight = (size.height - inset * 2).coerceAtLeast(0f)
+    val railX = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Ltr) {
+        0f
+    } else {
+        size.width - railWidth
+    }
+    drawRoundRect(
+        color = accent,
+        topLeft = Offset(railX, inset),
+        size = Size(railWidth, railHeight),
+        cornerRadius = CornerRadius(railWidth / 2f, railWidth / 2f),
+    )
+}
 
 /**
  * One chat bubble. Handles the four rendered kinds (PRIVMSG bubble, NOTICE labelled bubble, ACTION
@@ -93,6 +118,7 @@ fun MessageBubble(
     kind: MessageKind,
     showSender: Boolean,
     modifier: Modifier = Modifier,
+    hasMention: Boolean = false,
     networkId: Long? = null,
     senderAccount: String? = null,
     formattedTime: String? = null,
@@ -127,6 +153,14 @@ fun MessageBubble(
     val nickColors = LocalNickColors.current
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
     val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
+    // EventProcessor never marks self messages as mentions. Keep the UI defensive so a malformed
+    // or legacy row cannot style an own message as an incoming highlight.
+    val mentionHighlighted = hasMention && !isSelf
+    val renderedModifier = if (mentionHighlighted) {
+        modifier.mentionHighlight(accent = MaterialTheme.colorScheme.secondary)
+    } else {
+        modifier
+    }
 
     // COMPACT density = classic single-line IRC rendering (`nick: text`). Delegate the whole row to
     // the inline renderer; bubbles/avatars/alignment are the COMFORTABLE/TWO_LINE paradigm only.
@@ -138,7 +172,8 @@ fun MessageBubble(
             isSelf = isSelf,
             kind = kind,
             nickColors = nickColors,
-            modifier = modifier,
+            modifier = renderedModifier,
+            hasMention = mentionHighlighted,
             senderIsFriend = senderIsFriend,
             failed = failed,
             pending = pending,
@@ -171,7 +206,8 @@ fun MessageBubble(
             kind = kind,
             nickColors = nickColors,
             spacing = spacing,
-            modifier = modifier,
+            modifier = renderedModifier,
+            hasMention = mentionHighlighted,
             senderIsFriend = senderIsFriend,
             failed = failed,
             pending = pending,
@@ -216,8 +252,15 @@ fun MessageBubble(
             }
         }
         Column(
-            modifier = modifier
+            modifier = renderedModifier
                 .fillMaxWidth()
+                .background(
+                    if (mentionHighlighted) {
+                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+                    } else {
+                        Color.Transparent
+                    },
+                )
                 .combinedClickable(
                     // No ripple is drawn, so a MutableInteractionSource would only allocate per row.
                     interactionSource = null,
@@ -253,10 +296,16 @@ fun MessageBubble(
     val containerWidthPx = LocalWindowInfo.current.containerSize.width
     val density = LocalDensity.current
     val maxWidth = with(density) { (containerWidthPx * 0.78f).toDp() }
-    val bubbleColor = if (isSelf) MaterialTheme.colorScheme.primaryContainer
-    else MaterialTheme.colorScheme.surfaceContainerHigh
-    val textColor = if (isSelf) MaterialTheme.colorScheme.onPrimaryContainer
-    else MaterialTheme.colorScheme.onSurface
+    val bubbleColor = when {
+        mentionHighlighted -> MaterialTheme.colorScheme.secondaryContainer
+        isSelf -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val textColor = when {
+        mentionHighlighted -> MaterialTheme.colorScheme.onSecondaryContainer
+        isSelf -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
+    }
     // Tighten the inner (grouped) top corner: 4dp when this bubble continues a group.
     val topCorner = if (showSender) spacing.bubbleCorner else 4.dp
     val shape = if (isSelf) {
@@ -266,7 +315,7 @@ fun MessageBubble(
     }
 
     Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = spacing.bubbleRowVPad),
+        modifier = renderedModifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = spacing.bubbleRowVPad),
         horizontalArrangement = if (isSelf) Arrangement.End else Arrangement.Start,
     ) {
         // Left avatar column for others, only on a group's first bubble.
@@ -432,6 +481,7 @@ private fun TwoLineMessageRow(
     spacing: io.github.trevarj.motd.ui.theme.MotdSpacing,
     showSender: Boolean,
     modifier: Modifier = Modifier,
+    hasMention: Boolean = false,
     senderIsFriend: Boolean = false,
     failed: Boolean = false,
     pending: Boolean = false,
@@ -455,7 +505,11 @@ private fun TwoLineMessageRow(
     val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
     // Per-nick row wash (same treatment as COMPACT): a faint tint of the sender's own nick color
     // behind the whole row so runs of a nick's messages are trackable by speaker.
-    val rowTint = nameColor.copy(alpha = TWO_LINE_ROW_TINT_ALPHA)
+    val rowTint = if (hasMention) {
+        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+    } else {
+        nameColor.copy(alpha = TWO_LINE_ROW_TINT_ALPHA)
+    }
 
     Column(
         modifier = modifier
@@ -929,9 +983,10 @@ private fun MessageBubbleOthersPreview() {
     MotdTheme {
         Column {
             MessageBubble(
-                sender = "alice", text = "hey, welcome to the channel!",
+                sender = "alice", text = "me: welcome to the channel!",
                 timeMs = System.currentTimeMillis(), isSelf = false,
                 kind = MessageKind.PRIVMSG, showSender = true,
+                hasMention = true,
                 reactions = listOf(ReactionChip("👍", 2, mine = false)),
             )
             MessageBubble(
@@ -991,6 +1046,7 @@ private fun MessageBubbleTwoLinePreview() {
                     isSelf = false,
                     kind = MessageKind.PRIVMSG,
                     showSender = true,
+                    hasMention = true,
                     reply = ReplyPreviewData("bob", "Earlier message"),
                     imageUrl = "https://example.com/image.png",
                     linkPreview = LinkPreview(
