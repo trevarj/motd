@@ -409,7 +409,8 @@ References:
 
 ## A2. Characterize performance before decomposing hotspots
 
-- **Priority / size / status:** P2, L, investigation first.
+- **Priority / size / status:** P2, L, Completed 2026-07-15; runtime benchmark
+  execution remains authorization-gated.
 - **Depends on:** C1-C3 characterization tests.
 - **Evidence:** connection management, event persistence, chat route, message
   rendering, chat state, IRC client, message list, and history coordination are
@@ -437,6 +438,24 @@ References:
 - Compose performance: <https://developer.android.com/develop/ui/compose/performance>
 - Baseline profiles:
   <https://developer.android.com/topic/performance/baselineprofiles/create-baselineprofile>
+
+### Completion evidence
+
+- The release build has an opt-in Compose compiler report path. Current metrics,
+  hotspot ownership, characterization coverage, refactor triggers, and exact
+  Macrobenchmark/baseline-profile scenarios are recorded in
+  [`26-performance-characterization-and-benchmark-mission.md`](26-performance-characterization-and-benchmark-mission.md).
+- The provenance permissions and push allowlist are now a pure policy outside
+  `EventProcessor`, with focused tests. C1-C3's processor sequencer,
+  `BufferStore`, registry, and dedicated history/read-marker collaborators
+  remain the tested decomposition boundaries.
+- Release compiler output found the chat route, content, list, row, bubble, and
+  composer entry points restartable and skippable. With no runtime regression
+  evidence and no authorized physical-device run, broader manager/UI splitting
+  and stability wrappers are deliberately deferred.
+- `:app:compileFossReleaseKotlin -PmotdComposeMetrics=true --rerun-tasks`
+  generated the recorded report. The provenance policy test passes; the full
+  app suite is included in the final release-parity verification.
 
 ## O1. Harden CI permissions and dependency maintenance
 

@@ -22,6 +22,15 @@ room {
     schemaDirectory("$projectDir/schemas")
 }
 
+// Opt in for release-only characterization without slowing routine builds or checking generated
+// reports into source control: ./gradlew :app:compileFossReleaseKotlin -PmotdComposeMetrics=true
+if (providers.gradleProperty("motdComposeMetrics").map(String::toBoolean).getOrElse(false)) {
+    composeCompiler {
+        reportsDestination.set(layout.buildDirectory.dir("compose_compiler"))
+        metricsDestination.set(layout.buildDirectory.dir("compose_compiler"))
+    }
+}
+
 // The release/debug APKs ship the pinned arm64 native core. Hermetic UI tests exercise plain IRC
 // on an x86_64 emulator, so derive an AAR that retains the generated Java API but omits JNI. This
 // keeps the E2E build installable without pretending that embedded obfuscation supports x86_64.

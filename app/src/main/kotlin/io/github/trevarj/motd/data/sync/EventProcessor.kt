@@ -24,12 +24,6 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
-internal enum class EventOrigin(val notifies: Boolean) {
-    LIVE(notifies = true),
-    HISTORY(notifies = false),
-    PUSH(notifies = true),
-}
-
 /**
  * The sole IRC→Room writer (plans/04 mapping table). Implements [IrcEventSink]: every per-network
  * collector, the catch-up path, the RemoteMediator, the pending-send insert, and the push path
@@ -160,11 +154,9 @@ class EventProcessor @Inject constructor(
         origin: EventOrigin,
         historyTarget: String? = null,
     ) {
-        if (origin == EventOrigin.PUSH && event !is IrcEvent.ChatMessage &&
-            event !is IrcEvent.TagMessage && event !is IrcEvent.Invited && event !is IrcEvent.Raw
-        ) return
+        if (!origin.accepts(event)) return
         when (event) {
-            is IrcEvent.Registered -> if (origin == EventOrigin.LIVE) {
+            is IrcEvent.Registered -> if (origin.mutatesSessionState) {
                 applyRegistered(networkId, event.nick, event.isupport)
             }
             is IrcEvent.ChatMessage -> onChat(networkId, event, origin)
@@ -176,8 +168,8 @@ class EventProcessor @Inject constructor(
             is IrcEvent.Quit -> if (origin == EventOrigin.LIVE) onQuit(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalQuit(networkId, event, historyTarget)
             is IrcEvent.Kicked -> if (origin == EventOrigin.LIVE) onKicked(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalKicked(networkId, event)
             is IrcEvent.NickChanged -> if (origin == EventOrigin.LIVE) onNickChanged(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalNickChanged(networkId, event, historyTarget)
-            is IrcEvent.NamesStarted -> if (origin == EventOrigin.LIVE) onNamesStarted(networkId, event)
-            is IrcEvent.Names -> if (origin == EventOrigin.LIVE) onNames(networkId, event)
+            is IrcEvent.NamesStarted -> if (origin.mutatesSessionState) onNamesStarted(networkId, event)
+            is IrcEvent.Names -> if (origin.mutatesSessionState) onNames(networkId, event)
             is IrcEvent.TopicChanged -> when (origin) {
                 EventOrigin.LIVE -> onTopicChanged(networkId, event)
                 EventOrigin.HISTORY -> onHistoricalTopicChanged(networkId, event)
@@ -188,23 +180,23 @@ class EventProcessor @Inject constructor(
                 EventOrigin.HISTORY -> onHistoricalModeChanged(networkId, event)
                 EventOrigin.PUSH -> Unit
             }
-            is IrcEvent.AwayChanged -> if (origin == EventOrigin.LIVE) upsertUser(networkId, event.nick) { it.copy(away = event.awayMessage != null) }
-            is IrcEvent.AccountChanged -> if (origin == EventOrigin.LIVE) upsertUser(networkId, event.nick) { it.copy(account = event.account) }
-            is IrcEvent.HostChanged -> if (origin == EventOrigin.LIVE) upsertUser(networkId, event.nick) { it.copy(hostmask = "${event.newUser}@${event.newHost}") }
-            is IrcEvent.RealnameChanged -> if (origin == EventOrigin.LIVE) upsertUser(networkId, event.nick) { it.copy(realname = event.realname) }
-            is IrcEvent.WhoxRow -> if (origin == EventOrigin.LIVE) onWhoxRow(networkId, event)
+            is IrcEvent.AwayChanged -> if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(away = event.awayMessage != null) }
+            is IrcEvent.AccountChanged -> if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(account = event.account) }
+            is IrcEvent.HostChanged -> if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(hostmask = "${event.newUser}@${event.newHost}") }
+            is IrcEvent.RealnameChanged -> if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(realname = event.realname) }
+            is IrcEvent.WhoxRow -> if (origin.mutatesSessionState) onWhoxRow(networkId, event)
             is IrcEvent.WhoxComplete -> Unit
-            is IrcEvent.MonitorOnline -> if (origin == EventOrigin.LIVE) onMonitorOnline(networkId, event)
+            is IrcEvent.MonitorOnline -> if (origin.mutatesSessionState) onMonitorOnline(networkId, event)
             is IrcEvent.MonitorOffline,
             is IrcEvent.MonitorList,
             is IrcEvent.MonitorListEnd,
             -> Unit
-            is IrcEvent.MonitorLimitExceeded -> if (origin == EventOrigin.LIVE) onMonitorLimitExceeded(networkId, event)
+            is IrcEvent.MonitorLimitExceeded -> if (origin.mutatesSessionState) onMonitorLimitExceeded(networkId, event)
             is IrcEvent.Invited -> onInvited(networkId, event, origin)
-            is IrcEvent.ReadMarker -> if (origin == EventOrigin.LIVE) onReadMarker(networkId, event)
-            is IrcEvent.BouncerNetworkState -> if (origin == EventOrigin.LIVE) onBouncerNetworkState(networkId, event)
-            is IrcEvent.Disconnected -> if (origin == EventOrigin.LIVE) onDisconnected(networkId, event)
-            is IrcEvent.ServerError -> if (origin == EventOrigin.LIVE) onServerError(networkId, event)
+            is IrcEvent.ReadMarker -> if (origin.mutatesSessionState) onReadMarker(networkId, event)
+            is IrcEvent.BouncerNetworkState -> if (origin.mutatesSessionState) onBouncerNetworkState(networkId, event)
+            is IrcEvent.Disconnected -> if (origin.mutatesSessionState) onDisconnected(networkId, event)
+            is IrcEvent.ServerError -> if (origin.mutatesSessionState) onServerError(networkId, event)
             is IrcEvent.Raw -> onRaw(networkId, event, origin)
             is IrcEvent.CapsChanged,
             -> Unit // not persisted
