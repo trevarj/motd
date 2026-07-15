@@ -298,11 +298,49 @@ class HistoryResyncCoordinatorTest {
         assertEquals(
             listOf(
                 ChatHistoryRequest.Subcommand.TARGETS,
+                ChatHistoryRequest.Subcommand.AFTER,
                 ChatHistoryRequest.Subcommand.LATEST,
             ),
             source.requests.map { it.subcommand },
         )
         assertTrue(rows().any { it.msgid == "retained" })
+    }
+
+    @Test
+    fun reconnectUsesLastCompletedSyncSoEarlyLiveMessageCannotHideGapOrDuplicate() = runTest {
+        val base = 1_700_000_000_000L
+        processor.process(networkId, message("seed", base + 100))
+        syncPrefs.setLastSuccessfulSync(networkId, base + 150)
+
+        // A live line can beat the reconnect catch-up coroutine into Room.
+        processor.process(networkId, message("live", base + 300))
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    ChatHistoryResult(emptyList(), listOf("#chan" to (base + 300)))
+                ChatHistoryRequest.Subcommand.AFTER -> ChatHistoryResult(
+                    events = if (request.bound1?.startsWith("timestamp=") == true) {
+                        // Soju may overlap the already-delivered live line. Room must insert only
+                        // the missed line and retain one copy of the live line by msgid.
+                        listOf(message("missed", base + 200), message("live", base + 300))
+                    } else {
+                        emptyList()
+                    },
+                    targets = emptyList(),
+                )
+                else -> ChatHistoryResult(emptyList(), emptyList())
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+
+        assertEquals(HistoryResyncState.Updated(1), result)
+        assertEquals(listOf("live", "missed", "seed"), rows().mapNotNull { it.msgid })
+        assertEquals(1, rows().count { it.msgid == "live" })
+        assertTrue(
+            source.requests.first { it.subcommand == ChatHistoryRequest.Subcommand.AFTER }
+                .bound1.orEmpty().startsWith("timestamp="),
+        )
     }
 
     @Test

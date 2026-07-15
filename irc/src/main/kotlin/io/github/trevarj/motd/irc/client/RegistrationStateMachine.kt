@@ -181,8 +181,8 @@ internal class RegistrationStateMachine(
             Action.SetNick(nick),
             Action.Complete(nick, acked.toSet(), isupport),
         )
-        for (batch in CapNegotiator.batches(postWelcomeCapReqs.toSet())) {
-            actions.add(Action.Send("CAP REQ :$batch"))
+        for (cap in postWelcomeCapReqs.distinct().sorted()) {
+            actions.add(Action.Send("CAP REQ :$cap"))
         }
         return actions
     }
@@ -201,8 +201,11 @@ internal class RegistrationStateMachine(
             Action.SetNick(nick),
             Action.Complete(nick, acked.toSet(), isupport),
         )
-        for (batch in CapNegotiator.batches(postWelcomeCapReqs.toSet())) {
-            actions.add(Action.SendDeferred("CAP REQ :$batch", FALLBACK_FEATURE_CAP_DELAY_MS))
+        // Soju can remove capabilities while BOUNCER BIND selects the upstream network. Request
+        // each deferred capability separately so one stale capability can be NAKed without also
+        // rejecting essential capabilities such as draft/chathistory.
+        for (cap in postWelcomeCapReqs.distinct().sorted()) {
+            actions.add(Action.SendDeferred("CAP REQ :$cap", FALLBACK_FEATURE_CAP_DELAY_MS))
         }
         return actions
     }

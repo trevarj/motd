@@ -190,6 +190,11 @@ class HistoryResyncCoordinator @Inject constructor(
                 .distinctBy { it.second.lowercase() },
             source = source,
             isCurrent = isCurrent,
+            // Use the last completed whole-network pass, not Room's newest row, as the reconnect
+            // cursor. A live line can arrive before catch-up starts and would otherwise hide older
+            // lines missed while the socket was down. Replaying the overlap is safe because
+            // EventProcessor writes through the messages dedup key.
+            reconnectBoundary = previousSync?.let { Boundary(msgid = null, serverTime = lower) },
             // A bouncer can deliver a live self-JOIN before this first pass. That row is newer
             // than every retained line, so an AFTER-only request would permanently skip the
             // initial backlog. Seed a fresh network with LATEST as well; a known target with no
@@ -343,6 +348,7 @@ class HistoryResyncCoordinator @Inject constructor(
         targets: List<Pair<Long?, String>>,
         source: HistorySource,
         isCurrent: () -> Boolean,
+        reconnectBoundary: Boundary?,
         includeRecentOverlap: Boolean,
     ): HistoryResyncState {
         if (!source.hasChatHistory()) return HistoryResyncState.Unsupported
@@ -358,6 +364,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     source,
                     isCurrent,
                     includeRecentOverlap,
+                    reconnectBoundary,
                 )
             }
             if (inserted > 0) HistoryResyncState.Updated(inserted) else HistoryResyncState.UpToDate
@@ -379,11 +386,12 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         isCurrent: () -> Boolean,
         includeRecentOverlap: Boolean,
+        reconnectBoundary: Boundary? = null,
     ): Int {
         val pageLimit = source.pageLimit()
         val before = knownBufferId?.let { messageCount(it) } ?: 0
         var bufferId = knownBufferId
-        var boundary = bufferId?.let { latestBoundary(it) }
+        var boundary = reconnectBoundary ?: bufferId?.let { latestBoundary(it) }
         // A live self-JOIN/part/topic row is not evidence that its retained chat history was
         // imported. In particular, older releases marked a network sync complete after using that
         // row as an AFTER cursor, leaving an existing bouncer channel permanently empty. Bypass
@@ -391,7 +399,11 @@ class HistoryResyncCoordinator @Inject constructor(
         val lacksStoredChat = bufferId?.let { !hasStoredChat(it) } ?: true
         var afterRejected = false
 
-        var pagingBoundary = if (lacksStoredChat) null else boundary
+        var pagingBoundary = when {
+            reconnectBoundary != null -> reconnectBoundary
+            lacksStoredChat -> null
+            else -> boundary
+        }
         if (pagingBoundary != null) {
             try {
                 while (true) {
