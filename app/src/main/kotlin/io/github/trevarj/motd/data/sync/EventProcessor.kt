@@ -227,6 +227,24 @@ class EventProcessor @Inject constructor(
             dedupKey = EchoDeduper.keyFor(e.ctx, e.source.nick, storedText),
         )
 
+        // Some bouncers omit draft/msgid on the live delivery but attach it when replaying the
+        // same line through CHATHISTORY. Those two representations otherwise derive different
+        // dedup keys (fallback fingerprint versus msgid), producing a duplicate exactly at the
+        // reconnect boundary. Promote the already-stored fingerprint row to the durable msgid
+        // before the normal insert path. The exact serverTime/sender/text fingerprint keeps
+        // genuinely repeated messages distinct.
+        val incomingMsgid = e.ctx.msgid
+        if (incomingMsgid != null && messageDao.byMsgid(bufferId, incomingMsgid) == null) {
+            val fallbackKey = EchoDeduper.keyFor(null, e.ctx.serverTime, e.source.nick, storedText)
+            val fingerprintMatch = messageDao.byDedupKey(bufferId, fallbackKey)
+            if (fingerprintMatch != null && fingerprintMatch.msgid == null) {
+                val promoted = fingerprintMatch.copy(msgid = incomingMsgid, dedupKey = incomingMsgid)
+                messageDao.update(promoted)
+                traceMessageWrite("room_msgid_promote", promoted, e.ctx.batchId != null)
+                return
+            }
+        }
+
         // Own message dedup (plans/03 echo degradation, plans/04 echo flow). A self-send surfaces
         // as exactly ONE row across all three server-capability scenarios:
         //  (a) echo-message + labeled-response: labeled echo updates the pending row in place;
@@ -239,7 +257,6 @@ class EventProcessor @Inject constructor(
             // CHATHISTORY replay of an already-confirmed row) is a no-op. Checked first with the
             // plain suspend DAO so the raw-query heuristic below never runs inside the history
             // transaction for the common replay case (transaction-thread safe).
-            val incomingMsgid = e.ctx.msgid
             if (incomingMsgid != null && messageDao.byMsgid(bufferId, incomingMsgid) != null) return
             // (a) Labeled echo of a pending self-send: update the pending row in place.
             val label = e.ctx.label

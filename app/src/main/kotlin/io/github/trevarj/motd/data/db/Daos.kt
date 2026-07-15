@@ -252,6 +252,9 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND msgid = :msgid LIMIT 1")
     suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
 
+    @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND dedupKey = :dedupKey LIMIT 1")
+    suspend fun byDedupKey(bufferId: Long, dedupKey: String): MessageEntity?
+
     /** Observe a reply target so a late echo promotion or history insert updates its preview. */
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND msgid = :msgid LIMIT 1")
     fun observeByMsgid(bufferId: Long, msgid: String): Flow<MessageEntity?>

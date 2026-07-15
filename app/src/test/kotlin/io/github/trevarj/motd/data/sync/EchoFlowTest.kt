@@ -78,6 +78,70 @@ class EchoFlowTest {
     }
 
     @Test
+    fun liveWithoutMsgid_thenHistoryWithMsgid_promotesBoundaryRow() = runTest {
+        val live = IrcEvent.ChatMessage(
+            ctx = MessageContext(msgid = null, serverTime = 600, account = null, batchId = null, label = null),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#chan",
+            text = "A",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.process(networkId, live)
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "#chan",
+                listOf(
+                    live.copy(
+                        ctx = live.ctx.copy(msgid = "history-a", batchId = "history"),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(1, rows().size)
+        assertEquals("history-a", rows().single().msgid)
+    }
+
+    @Test
+    fun historyMsgidPromotion_doesNotMergeSameTextAtDifferentTimes() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx = MessageContext(null, 600, null, null, null),
+                kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix("alice"),
+                target = "#chan",
+                text = "same",
+                isSelf = false,
+                replyToMsgid = null,
+            ),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "#chan",
+                listOf(
+                    IrcEvent.ChatMessage(
+                        ctx = MessageContext("history-later", 601, null, "history", null),
+                        kind = IrcEvent.ChatKind.PRIVMSG,
+                        source = Prefix("alice"),
+                        target = "#chan",
+                        text = "same",
+                        isSelf = false,
+                        replyToMsgid = null,
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(2, rows().size)
+    }
+
+    @Test
     fun echoTimeout_marksPendingRowFailed() = runTest {
         val label = "lbl-timeout"
         processor.insertPending(bufferId, label, "me", "no echo", null, MessageKind.PRIVMSG)
