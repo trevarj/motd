@@ -87,9 +87,9 @@ internal fun onColorFor(bg: Color): Color =
     if (bg.luminance() < 0.5f) Color.White else Color.Black
 
 /**
- * Circular nick avatar. [AvatarStyle.MONOGRAM] (default) is a quiet theme-tinted disc with a single
+ * Circular nick avatar. [AvatarStyle.MONOGRAM] is a quiet theme-tinted disc with a single
  * initial; [AvatarStyle.INITIALS] is the bolder solid nick-color chip with two initials; and
- * [AvatarStyle.IRC_SPRITE] renders a deterministic IRC robot sprite for people and network rows.
+ * [AvatarStyle.IRC_SPRITE] (default) renders deterministic IRC robot sprites for people.
  * Project-named channels instead receive a matched Devicons mark, with a neutral IRC fallback.
  * All styles take their identity color from [name] via the current LocalNickColors scheme.
  *

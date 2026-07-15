@@ -19,8 +19,12 @@ enum class LayoutDensity { COMPACT, COMFORTABLE, TWO_LINE }
 enum class NickColorPalette { DEFAULT, VIVID, PASTEL }
 enum class FoolsMode { COLLAPSE, HIDE }
 
-/** Which visual style to use for nick avatars. IRC sprites are deliberately opt-in. */
+/** Which visual style to use for nick avatars. IRC sprites are the default for new users. */
 enum class AvatarStyle { MONOGRAM, INITIALS, IRC_SPRITE }
+
+/** Decode a saved choice while defaulting installations without one to IRC sprites. */
+internal fun avatarStyleFromPreference(saved: String?): AvatarStyle =
+    saved?.let { runCatching { AvatarStyle.valueOf(it) }.getOrNull() } ?: AvatarStyle.IRC_SPRITE
 
 /** Subtle IRC-themed chat background rendered behind the message list. NONE keeps the plain
  *  theme background (opt-in; default for existing users). */
@@ -48,8 +52,8 @@ data class Settings(
     val fools: Set<String> = emptySet(),
     val foolsMode: FoolsMode = FoolsMode.COLLAPSE,
     val showJoinPartQuit: Boolean = true,
-    /** Avatar rendering style; defaults to the tonal monogram disc. */
-    val avatarStyle: AvatarStyle = AvatarStyle.MONOGRAM,
+    /** Avatar rendering style; explicit saved choices override the IRC-sprite default. */
+    val avatarStyle: AvatarStyle = AvatarStyle.IRC_SPRITE,
     /** Opt-in patterned chat background; NONE preserves the existing plain theme background. */
     val chatWallpaper: ChatWallpaper = ChatWallpaper.NONE,
     /** Show the emoji (Mood) button in the composer; users who never use it can hide it. */

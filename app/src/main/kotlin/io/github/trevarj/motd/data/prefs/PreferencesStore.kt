@@ -112,8 +112,7 @@ class DataStoreSettingsRepository @Inject constructor(
             foolsMode = prefs[PrefKeys.FOOLS_MODE]?.let { runCatching { FoolsMode.valueOf(it) }.getOrNull() }
                 ?: FoolsMode.COLLAPSE,
             showJoinPartQuit = prefs[PrefKeys.SHOW_JOIN_PART_QUIT]?.toBooleanStrictOrNull() ?: true,
-            avatarStyle = prefs[PrefKeys.AVATAR_STYLE]?.let { runCatching { AvatarStyle.valueOf(it) }.getOrNull() }
-                ?: AvatarStyle.MONOGRAM,
+            avatarStyle = avatarStyleFromPreference(prefs[PrefKeys.AVATAR_STYLE]),
             chatWallpaper = prefs[PrefKeys.CHAT_WALLPAPER]?.let { runCatching { ChatWallpaper.valueOf(it) }.getOrNull() }
                 ?: ChatWallpaper.NONE,
             showComposerEmoji = prefs[PrefKeys.SHOW_COMPOSER_EMOJI]?.toBooleanStrictOrNull() ?: true,

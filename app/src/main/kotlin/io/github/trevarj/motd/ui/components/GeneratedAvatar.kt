@@ -29,6 +29,10 @@ import kotlin.math.max
 /** A person and a network have distinct deterministic sprite seeds. */
 internal enum class GeneratedAvatarSubject { USER, NETWORK }
 
+/** Network rows use an unmistakable topology mark instead of another person-shaped sprite. */
+internal fun prominentAvatarGlyph(subject: GeneratedAvatarSubject): FontAwesomeGlyph? =
+    if (subject == GeneratedAvatarSubject.NETWORK) FontAwesomeGlyph.NETWORK else null
+
 internal enum class AvatarDetail { MINI, STANDARD, FULL;
     companion object {
         fun forSize(size: Dp): AvatarDetail = when {
@@ -211,7 +215,7 @@ internal fun IrcSpriteAvatar(
     )
 }
 
-/** Deterministic robot avatar for a server-drawer row; [status] remains visible as an outer ring. */
+/** Deterministic network badge for a server-drawer row; [status] remains visible as an outer ring. */
 @Composable
 internal fun IrcNetworkBadge(
     name: String,
@@ -261,7 +265,12 @@ private fun GeneratedAvatar(
         drawRect(palette.base)
         val sceneScale = canvasSize.minDimension / GRID
         withTransform({ scale(sceneScale, sceneScale, pivot = Offset.Zero) }) {
-            drawUserSprite(traits, detail, palette)
+            val prominentGlyph = prominentAvatarGlyph(subject)
+            if (prominentGlyph == null) {
+                drawUserSprite(traits, detail, palette)
+            } else {
+                drawProminentGlyph(prominentGlyph, palette)
+            }
         }
         val ring = statusRing ?: palette.primary.copy(alpha = 0.52f)
         val ringWidth = if (subject == GeneratedAvatarSubject.NETWORK) {
@@ -319,6 +328,21 @@ private fun DrawScope.drawUserSprite(
         drawAccessory(traits.accessory, colors)
         drawExpression(traits.expression, colors)
         drawChestEmblem(traits, colors)
+    }
+}
+
+/** Fill the badge with a large topology glyph that remains legible at the drawer's 32dp size. */
+private fun DrawScope.drawProminentGlyph(glyph: FontAwesomeGlyph, colors: SpritePalette) {
+    drawCircle(colors.shade, radius = 8.5f, center = p(12f, 12f))
+    val maxSize = 12f
+    val scale = maxSize / max(glyph.viewBoxWidth, glyph.viewBoxHeight)
+    val width = glyph.viewBoxWidth * scale
+    val height = glyph.viewBoxHeight * scale
+    withTransform({
+        translate(12f - width / 2f, 12f - height / 2f)
+        scale(scale, scale)
+    }) {
+        drawPath(glyph.path, colors.ink.copy(alpha = 0.92f))
     }
 }
 

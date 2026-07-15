@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.components
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.avatarStyleFromPreference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -60,8 +61,16 @@ class GeneratedAvatarTraitsTest {
         assertEquals(AvatarDetail.FULL, AvatarDetail.forSize(32f.dp))
     }
 
-    @Test fun sprite_style_stays_opt_in_for_existing_installations() {
-        assertEquals(AvatarStyle.MONOGRAM, Settings().avatarStyle)
-        assertEquals(AvatarStyle.IRC_SPRITE, AvatarStyle.valueOf("IRC_SPRITE"))
+    @Test fun sprite_style_is_default_without_overwriting_saved_choices() {
+        assertEquals(AvatarStyle.IRC_SPRITE, Settings().avatarStyle)
+        assertEquals(AvatarStyle.IRC_SPRITE, avatarStyleFromPreference(null))
+        assertEquals(AvatarStyle.IRC_SPRITE, avatarStyleFromPreference("unknown"))
+        assertEquals(AvatarStyle.MONOGRAM, avatarStyleFromPreference("MONOGRAM"))
+        assertEquals(AvatarStyle.INITIALS, avatarStyleFromPreference("INITIALS"))
+    }
+
+    @Test fun network_badges_use_a_prominent_network_symbol() {
+        assertNull(prominentAvatarGlyph(GeneratedAvatarSubject.USER))
+        assertEquals(FontAwesomeGlyph.NETWORK, prominentAvatarGlyph(GeneratedAvatarSubject.NETWORK))
     }
 }

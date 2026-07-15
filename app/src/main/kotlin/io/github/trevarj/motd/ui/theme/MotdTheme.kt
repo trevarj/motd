@@ -93,11 +93,11 @@ fun ConversationTypography(
 }
 
 /**
- * CompositionLocal carrying the active avatar rendering style. Defaults to MONOGRAM so previews
+ * CompositionLocal carrying the active avatar rendering style. Defaults to IRC_SPRITE so previews
  * and un-provided contexts use the default without needing explicit provision.
  */
 val LocalAvatarStyle: ProvidableCompositionLocal<AvatarStyle> =
-    staticCompositionLocalOf { AvatarStyle.MONOGRAM }
+    staticCompositionLocalOf { AvatarStyle.IRC_SPRITE }
 
 /**
  * Return the fixed ColorScheme for terminal-palette ThemeModes, or null for the modes that use
@@ -142,7 +142,7 @@ fun MotdTheme(
     nickColorsEnabled: Boolean = true,
     nickColorPalette: NickColorPalette = NickColorPalette.DEFAULT,
     nickColorOverrides: Map<String, Int> = emptyMap(),
-    avatarStyle: AvatarStyle = AvatarStyle.MONOGRAM,
+    avatarStyle: AvatarStyle = AvatarStyle.IRC_SPRITE,
     uiFontScalePercent: Int = DEFAULT_FONT_SCALE_PERCENT,
     content: @Composable () -> Unit,
 ) {
