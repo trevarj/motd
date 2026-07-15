@@ -499,7 +499,8 @@ GitHub documents commit SHAs as the safest action reference:
 
 ## S1. Threat-model stored credentials and remote previews
 
-- **Priority / size / status:** P2, M, investigation mission.
+- **Priority / size / status:** P2, M, Investigation completed 2026-07-15;
+  implementation blocked on four explicit product decisions.
 - **Depends on:** none; implementation is blocked on the decision record.
 - **Evidence:** SASL credentials and VLESS configuration are stored with Room
   state; WebPush private/auth/management material is stored in preferences.
@@ -520,6 +521,24 @@ GitHub documents commit SHAs as the safest action reference:
 4. Treat intranet-link support and default-on versus opt-in previews as an
    explicit product decision. Produce the decision and migration proposal
    before changing storage or preview behavior.
+
+### Investigation evidence and decision gate
+
+- [`27-credential-and-remote-preview-threat-model.md`](27-credential-and-remote-preview-threat-model.md)
+  inventories Room, DataStore, backup, automatic link/image/avatar loading, and
+  recovery boundaries; defines attacker capabilities and protected assets; and
+  distinguishes offline extraction from a live process/OS compromise.
+- The record specifies a direct AES-GCM Android Keystore envelope, compatible
+  plaintext-to-versioned-ciphertext migration, key-loss behavior that preserves
+  history, and the fields that do and do not merit wrapping.
+- It also specifies one URL/redirect policy covering schemes, authority and
+  embedded credentials, redirect limits/revalidation, cookies/auth/referrer,
+  private/loopback address families, DNS rebinding limitations, and existing
+  resource bounds.
+- Credential recovery, automatic intranet access, fresh-install preview
+  consent, and cleartext preview behavior remain explicit maintainer product
+  decisions. Per this mission's ordering constraint, no security-sensitive
+  storage or preview behavior changed before those decisions.
 
 ## H1. Focused hygiene
 
