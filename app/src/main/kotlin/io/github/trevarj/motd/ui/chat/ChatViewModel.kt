@@ -489,10 +489,11 @@ class ChatViewModel @Inject constructor(
     private var nickDetailsJob: Job? = null
 
     /**
-     * Open the nick sheet for [nick]. With `labeled-response` we WHOIS via a labeled request, parse
-     * the numerics, and fold the details in when they land (30s label timeout, guarded); otherwise
-     * a plain WHOIS is sent and the numerics surface in the server buffer (§5.6.3) while the sheet
-     * shows "Details in server messages". Actions render immediately regardless.
+     * Open the nick sheet for [nick]. WHOX is requested when available so query peers can populate
+     * the same cached identity path as channel members. With `labeled-response` we also WHOIS via a
+     * labeled request, parse the richer numerics, and fold the details in when they land (30s label
+     * timeout, guarded); otherwise a plain WHOIS is sent and its numerics surface in the server
+     * buffer (§5.6.3). Actions render immediately regardless.
      */
     fun openNickSheet(nick: String) {
         // Moderation visibility depends on our prefixes in the channel roster. Load it on this
@@ -510,6 +511,11 @@ class ChatViewModel @Inject constructor(
             }
         }
         if (client == null) return
+        if (client.isupport["WHOX"] != null) {
+            // WhoxRow events still flow through EventProcessor while the correlated request waits,
+            // so UserEntity and this sheet's userDao collector converge through the normal path.
+            viewModelScope.launch { runCatching { client.whox(nick) } }
+        }
         val whoisMsg = IrcMessage(command = "WHOIS", params = listOf(nick))
         if (client.hasCap("labeled-response")) {
             viewModelScope.launch {

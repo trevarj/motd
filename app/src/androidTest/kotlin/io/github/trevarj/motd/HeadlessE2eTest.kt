@@ -346,7 +346,7 @@ class ChatHeadlessE2eTest : HeadlessE2eDriver() {
 @FastHeadlessE2e
 class ChannelHeadlessE2eTest : HeadlessE2eDriver() {
     @Test
-    fun opensChannelInfoMemberAndLeaveConfirmation() {
+    fun opensChannelInfoMemberPmDetailsAndLeaveConfirmation() {
         openOrJoinChannel()
         clickText(channel)
         waitForText("Channel info")
@@ -360,6 +360,12 @@ class ChannelHeadlessE2eTest : HeadlessE2eDriver() {
         clickTag("channelinfo_member_$secondNick")
         waitForTag("nick_sheet")
         waitForText("Message")
+        clickText("Message")
+        waitForTag("chat_title")
+        clickTag("chat_title")
+        waitForTag("nick_sheet")
+        waitForText("Add to friends")
+        waitForText("Add to fools")
     }
 }
 

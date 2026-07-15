@@ -168,6 +168,7 @@ fun ChatScreen(
     val snackbarMessage by viewModel.snackbar.collectAsStateWithLifecycle()
     val historyResyncState by viewModel.historyResyncState.collectAsStateWithLifecycle()
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
+    val titleTarget = chatTitleTarget(state.buffer?.type)
 
     ChatContent(
         state = state,
@@ -192,8 +193,15 @@ fun ChatScreen(
         rawNewestTime = rawNewestTime,
         onMarkRead = viewModel::markRead,
         onBack = onBack,
-        // SERVER buffers have no ChannelInfo (no members/topic); tapping the title is inert.
-        onOpenChannelInfo = if (isServerBuffer) ({}) else onOpenChannelInfo,
+        // Channel titles open Channel Info; query titles describe the other user. SERVER buffers
+        // have neither channel nor peer details, so their title remains inert.
+        onOpenChannelInfo = { id ->
+            when (titleTarget) {
+                ChatTitleTarget.CHANNEL_INFO -> onOpenChannelInfo(id)
+                ChatTitleTarget.NICK_DETAILS -> state.buffer?.displayName?.let(viewModel::openNickSheet)
+                ChatTitleTarget.NONE -> Unit
+            }
+        },
         onOpenSearch = onOpenSearch,
         onOpenImage = onOpenImage,
         nickNormalizer = nickNormalizer,
@@ -816,9 +824,11 @@ fun ChatContent(
             TopAppBar(
                 title = {
                     Row(
-                        modifier = Modifier.clickable(enabled = buffer != null) {
-                            buffer?.let { onOpenChannelInfo(it.id) }
-                        },
+                        modifier = Modifier
+                            .clickable(enabled = buffer != null) {
+                                buffer?.let { onOpenChannelInfo(it.id) }
+                            }
+                            .testTag("chat_title"),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Avatar(
@@ -1181,6 +1191,15 @@ fun ChatContent(
             },
         )
     }
+}
+
+internal enum class ChatTitleTarget { CHANNEL_INFO, NICK_DETAILS, NONE }
+
+/** The title bar destination is a property of the buffer, not its display-name prefix. */
+internal fun chatTitleTarget(type: BufferType?): ChatTitleTarget = when (type) {
+    BufferType.CHANNEL -> ChatTitleTarget.CHANNEL_INFO
+    BufferType.QUERY -> ChatTitleTarget.NICK_DETAILS
+    BufferType.SERVER, null -> ChatTitleTarget.NONE
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
