@@ -152,7 +152,7 @@ record before security-sensitive implementation begins.
 
 ## C3. Give connection lifecycle and actor ownership one serializer
 
-- **Priority / size / status:** P0, L, Ready.
+- **Priority / size / status:** P0, L, Completed 2026-07-15.
 - **Depends on:** none; may proceed alongside C1-C2 but should land before K1.
 - **Evidence:** `ConnectionManagerImpl` owns startup, reconciliation, actor
   creation, configuration fingerprints, pending echoes, foreground state, and
@@ -184,6 +184,27 @@ record before security-sensitive implementation begins.
   bouncer-child reconnect, terminal configuration changes, and stale callbacks.
 - Shutdown leaves no actor, fingerprint, observer, or pending echo job; late
   callbacks cannot resurrect state.
+
+### Completion evidence
+
+- `ConnectionRegistry` is now the single command-loop owner of startup state,
+  actors, fingerprints, terminal fingerprints, generations, observer jobs,
+  actor callback jobs, and pending echo timeouts. `ConnectionManagerImpl`
+  remains the facade and consumes immutable registry snapshots.
+- Start, stop, reconcile, connect, disconnect, connectivity changes, actor
+  state/connection/termination callbacks, connection events, readiness work,
+  certificate callbacks, and echo timeouts now cross the registry boundary.
+- Actor attempts parent their event collector, readiness setup, stability
+  timer, and retry timer to the actor job; registry shutdown awaits actor and
+  observer cleanup, while startup failure rolls the registry back for retry.
+- Virtual-time tests cover concurrent startup/reconcile, unique actor creation,
+  configuration replacement and terminal parking, stale callbacks, reconcile
+  versus disconnect ordering, disconnect and shutdown during callbacks,
+  complete owned-resource cleanup, echo-timeout cancellation, and actor-owned
+  child-job cleanup. Existing child-reconnect and shared-certificate endpoint
+  tests retain the bouncer-root/child behavior.
+- Verified with `:app:testFossDebugUnitTest`, `:app:lintFossDebug`, and
+  `:app:assembleFossDebug`.
 
 ## D1. Export Room schemas and audit relational integrity
 

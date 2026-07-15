@@ -49,6 +49,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
@@ -105,17 +106,11 @@ class ConnectionManagerImpl @Inject constructor(
     private val messageDao get() = db.messageDao()
     private val reactionMutations = RoomReactionMutationStore(db)
     private val recoveryReader = ConnectionRecoveryReader(db)
-
-    // Actor reads come from connection-state, lifecycle, and connectivity callbacks while
-    // reconcile/connect coroutines add and remove entries. A plain HashMap can be observed while
-    // resizing or unlinking, which surfaced as an NPE in the monitor-state collector during E2E.
-    private val actors = java.util.concurrent.ConcurrentHashMap<Long, ConnectionActor>()
-    private val generations = ConnectionGenerationGate()
-    // Fingerprint of the config each actor was built from, so config changes trigger a restart.
-    private val fingerprints = HashMap<Long, String>()
-    // Fatal configuration failures are intentionally parked. Reconcile/foreground events must not
-    // recreate them until the effective network configuration changes.
-    private val terminalConfigFingerprints = HashMap<Long, String>()
+    private val registry = ConnectionRegistry(
+        scope = scope,
+        actorFactory = ::createActor,
+        isConfigurationFailure = ::isConfigurationFailure,
+    )
 
     // Latest full network set, kept so buildClient can resolve a BOUNCER_CHILD's root row (its
     // bouncer endpoint + account SASL) without a suspend DB read. Updated on every reconcile.
@@ -126,8 +121,7 @@ class ConnectionManagerImpl @Inject constructor(
     // manual disconnect/connect is not undone by the next DB write. Reset by stopAll (not persisted).
     private val userIntents = java.util.concurrent.ConcurrentHashMap<Long, Boolean>()
 
-    private val _states = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
-    override val connectionStates: StateFlow<Map<Long, IrcClientState>> = _states.asStateFlow()
+    override val connectionStates: StateFlow<Map<Long, IrcClientState>> = registry.connectionStates
 
     private val _rosterStates = MutableStateFlow<Map<Long, RosterLoadState>>(emptyMap())
     override val rosterStates: StateFlow<Map<Long, RosterLoadState>> = _rosterStates.asStateFlow()
@@ -140,7 +134,6 @@ class ConnectionManagerImpl @Inject constructor(
     private val monitorLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
 
     private val stsStore = StsPolicyStore(settings)
-    private val pendingEchoTimeouts = HashMap<String, Job>()
 
     private val _certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
     override val certPrompts: StateFlow<List<CertPrompt>> = _certPrompts.asStateFlow()
@@ -149,56 +142,57 @@ class ConnectionManagerImpl @Inject constructor(
     // by the actor to park in "awaiting trust" instead of backoff-looping.
     private val certFailures = java.util.concurrent.ConcurrentHashMap<Long, CertUntrustedException>()
 
-    @Volatile private var started = false
     @Volatile private var appForeground = false
     @Volatile private var deviceIdle = false
-    private var reconcileJob: Job? = null
-    private var deliveryModeJob: Job? = null
-    private var monitorDesiredJob: Job? = null
     private val pushSuspendedIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
-    private var connectivityCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun clientFor(networkId: Long): IrcClient? =
-        (actors[networkId]?.connection as? IrcClientConnection)?.client
+        (registry.snapshot.value.actors[networkId]?.connection as? IrcClientConnection)?.client
 
     // -- lifecycle ----------------------------------------------------------
 
     override suspend fun startAll() {
-        if (started) return
-        started = true
-        registerConnectivityCallback()
-        // Seed actors from the current full set (reconcile applies autoConnect + sticky intent),
-        // then keep reconciling on every DB change. The collector no longer pre-filters: reconcile
-        // owns the wanted-set computation so manual connect/disconnect intents survive DB writes.
-        reconcile(networkDao.observeAll().first())
-        reconcileJob = scope.launch {
-            networkDao.observeAll().collect { all ->
-                reconcile(all)
-            }
-        }
-        // Delivery-mode reaction: UNIFIED_PUSH tears verified sockets down only after Android
-        // enters Doze. Merely switching away from MOTD keeps active conversations connected.
-        deliveryModeJob = scope.launch {
-            settings.settings.map { it.deliveryMode }.distinctUntilChanged().collect { mode ->
-                if (mode == DeliveryMode.UNIFIED_PUSH) {
-                    if (!appForeground && deviceIdle) maybeStopForPush()
-                } else {
-                    pushSuspendedIds.clear()
-                    reconcile(networkDao.observeAll().first())
+        if (!registry.beginStart()) return
+        try {
+            // Seed actors from the current full set (reconcile applies autoConnect + sticky intent),
+            // then keep reconciling on every DB change. The collector no longer pre-filters: reconcile
+            // owns the wanted-set computation so manual connect/disconnect intents survive DB writes.
+            reconcile(networkDao.observeAll().first())
+            val reconcileJob = scope.launch {
+                networkDao.observeAll().collect { all ->
+                    reconcile(all)
                 }
             }
-        }
-        monitorDesiredJob = scope.launch {
-            combine(settings.settings, bufferDao.observeChatList()) { currentSettings, rows ->
-                currentSettings.friends to rows
-            }.collect { (friends, rows) ->
-                actors.keys.toList().forEach { networkId ->
-                    val client = clientFor(networkId) ?: return@forEach
-                    if (client.state.value is IrcClientState.Ready && networkId in monitorInitialized) {
-                        reconcileMonitor(networkId, client, friends, rows, fresh = false)
+            // Delivery-mode reaction: UNIFIED_PUSH tears verified sockets down only after Android
+            // enters Doze. Merely switching away from MOTD keeps active conversations connected.
+            val deliveryModeJob = scope.launch {
+                settings.settings.map { it.deliveryMode }.distinctUntilChanged().collect { mode ->
+                    if (mode == DeliveryMode.UNIFIED_PUSH) {
+                        if (!appForeground && deviceIdle) maybeStopForPush()
+                    } else {
+                        pushSuspendedIds.clear()
+                        reconcile(networkDao.observeAll().first())
                     }
                 }
             }
+            val monitorDesiredJob = scope.launch {
+                combine(settings.settings, bufferDao.observeChatList()) { currentSettings, rows ->
+                    currentSettings.friends to rows
+                }.collect { (friends, rows) ->
+                    registry.snapshot.value.actors.keys.forEach { networkId ->
+                        val client = clientFor(networkId) ?: return@forEach
+                        if (client.state.value is IrcClientState.Ready && networkId in monitorInitialized) {
+                            reconcileMonitor(networkId, client, friends, rows, fresh = false)
+                        }
+                    }
+                }
+            }
+            registry.attachObservers(
+                listOf(connectivityObserverJob(), reconcileJob, deliveryModeJob, monitorDesiredJob),
+            )
+        } catch (failure: Throwable) {
+            registry.stop()
+            throw failure
         }
     }
 
@@ -217,7 +211,7 @@ class ConnectionManagerImpl @Inject constructor(
             )
         ) return
         val all = networkDao.observeAll().first()
-        val wanted = wantedNetworkIds(all, userIntents, _states.value)
+        val wanted = wantedNetworkIds(all, userIntents, connectionStates.value)
         val endpoints = pushPrefs.endpoints()
         val health = pushHealthStore.snapshot()
         val suspend = pushSuspendedNetworkIds(all, wanted, endpoints, health)
@@ -270,20 +264,11 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     override suspend fun stopAll() {
-        started = false
-        reconcileJob?.cancel(); reconcileJob = null
-        deliveryModeJob?.cancel(); deliveryModeJob = null
-        monitorDesiredJob?.cancel(); monitorDesiredJob = null
-        unregisterConnectivityCallback()
-        for (actor in actors.values) actor.stop()
-        actors.clear(); fingerprints.clear()
-        generations.invalidateAll()
-        terminalConfigFingerprints.clear()
+        registry.stop()
         localSocksProvider.stop()
         // Service teardown resets sticky user intent (in-memory only).
         userIntents.clear()
         pushSuspendedIds.clear()
-        _states.value = emptyMap()
         rosterRequests.values.forEach { it.cancel() }
         rosterRequests.clear()
         _rosterStates.value = emptyMap()
@@ -305,23 +290,13 @@ class ConnectionManagerImpl @Inject constructor(
         }
         // Record the sticky intent BEFORE touching actors so a concurrent reconcile honors it.
         userIntents[networkId] = true
-        // Force-rebuild: a parked fatal-Failed actor sits in `actors` with a completed job and an
-        // unchanged fingerprint, so plain ensureActor would no-op. Drop it first to actually reconnect.
-        val currentFp = fingerprint(row)
-        if (terminalConfigFingerprints[networkId] == currentFp) return
-        generations.invalidate(networkId)
-        actors.remove(networkId)?.stop()
-        fingerprints.remove(networkId)
-        ensureActor(row)
+        registry.connect(row, fingerprint(row))
     }
 
     override suspend fun disconnect(networkId: Long) {
         // Record intent before removal so the next reconcile does not re-create the actor.
         userIntents[networkId] = false
-        generations.invalidate(networkId)
-        actors.remove(networkId)?.stop()
-        fingerprints.remove(networkId)
-        _states.update { it - networkId }
+        registry.disconnect(networkId)
         invalidateRosters(networkId)
         invalidatePresence(networkId)
     }
@@ -334,14 +309,9 @@ class ConnectionManagerImpl @Inject constructor(
         // backoff after a proxy or bouncer has returned. The actor wake-up is conflated and merely
         // interrupts its current/next retry delay; Ready and manually disconnected networks are
         // untouched. No-op until started.
-        if (!started) return
+        if (!registry.snapshot.value.started) return
         reconcile(networkDao.observeAll().first())
-        val states = _states.value
-        actors.forEach { (networkId, actor) ->
-            if (actor.isAlive && states[networkId] !is IrcClientState.Ready) {
-                actor.onNetworkAvailable()
-            }
-        }
+        registry.wakeNonReady()
     }
 
     /** Add/remove/restart actors so the live set matches the wanted set derived from [all] rows
@@ -350,74 +320,49 @@ class ConnectionManagerImpl @Inject constructor(
         val deletedIds = networksById.keys - all.mapTo(mutableSetOf()) { it.id }
         // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
         networksById = all.associateBy { it.id }
-        val wantedIds = wantedNetworkIds(all, userIntents, _states.value) - pushSuspendedIds
-        // Remove actors whose network is no longer wanted (deleted, autoConnect off, user-disconnected).
-        for (id in actors.keys.toList()) {
-            if (id !in wantedIds) {
-                generations.invalidate(id)
-                actors.remove(id)?.stop()
-                fingerprints.remove(id)
-                terminalConfigFingerprints.remove(id)
-                _states.update { it - id }
-            }
-        }
+        val wantedIds = wantedNetworkIds(all, userIntents, registry.snapshot.value.states) - pushSuspendedIds
+        registry.reconcile(
+            rows = all.map { it to fingerprint(it) },
+            wantedIds = wantedIds,
+            awaitingCertTrust = _certPrompts.value.mapTo(mutableSetOf()) { it.networkId },
+        )
         deletedIds.forEach { eventProcessor.evictNetwork(it) }
-        for (row in all) if (row.id in wantedIds) ensureActor(row)
     }
 
-    private fun ensureActor(row: NetworkEntity) {
+    private fun createActor(row: NetworkEntity, generation: Long): ConnectionLifecycleActor {
         val fp = fingerprint(row)
-        val existing = actors[row.id]
-        if (terminalConfigFingerprints[row.id] == fp) return
-        terminalConfigFingerprints.remove(row.id)
-        // A live actor whose fingerprint is unchanged is left alone (healthy / connecting /
-        // actively retrying / parked awaiting cert trust). Only rebuild on a config change OR when
-        // the existing actor is stale — its reconnect loop finished (fatal Failed / cert park with a
-        // completed job) so it can never recover on its own. Force-rebuilding a stale actor here is
-        // what makes a plain reconcile() self-healing after a background outage (#43): the actor no
-        // longer no-ops purely on unchanged fingerprint. See [shouldRebuildActor].
-        if (existing != null &&
-            !shouldRebuildActor(
-                fingerprintChanged = fingerprints[row.id] != fp,
-                actorAlive = existing.isAlive,
-                lastState = _states.value[row.id],
-                awaitingCertTrust = _certPrompts.value.any { it.networkId == row.id },
-            )
-        ) {
-            return
-        }
-        val generation = generations.begin(row.id)
-        existing?.stop()
-        val actor = ConnectionActor(
+        return ConnectionActor(
             networkId = row.id,
             scope = scope,
             connectionFactory = { buildConnection(row) },
             onState = { id, state ->
-                if (generations.isCurrent(id, generation)) {
-                    if (state is IrcClientState.Failed && state.fatal && isConfigurationFailure(state.reason)) {
-                        terminalConfigFingerprints[id] = fp
-                    }
-                    _states.update { it + (id to state) }
-                }
+                registry.actorState(id, generation, fp, state)
             },
             onEvent = { id, event ->
-                if (generations.isCurrent(id, generation)) handleConnectionEvent(id, event)
+                registry.runIfCurrent(id, generation) { handleConnectionEvent(id, event) }
             },
+            onConnectionChanged = { id, connection ->
+                registry.actorConnection(id, generation, connection)
+            },
+            onStopped = { id -> registry.actorStopped(id, generation) },
             onReady = { conn ->
-                onReady(row, (conn as IrcClientConnection).client) {
-                    generations.isCurrent(row.id, generation)
+                registry.runIfCurrent(row.id, generation) {
+                    onReady(row, (conn as IrcClientConnection).client) {
+                        registry.isCurrent(row.id, generation)
+                    }
                 }
             },
             pendingCertFailure = {
-                if (generations.isCurrent(row.id, generation)) certFailures.remove(row.id) else null
+                var failure: CertUntrustedException? = null
+                registry.runIfCurrent(row.id, generation) {
+                    failure = certFailures.remove(row.id)
+                }
+                failure
             },
             onCertUntrusted = { id, ex ->
-                if (generations.isCurrent(id, generation)) publishCertPrompt(id, ex)
+                registry.runIfCurrent(id, generation) { publishCertPrompt(id, ex) }
             },
         )
-        actors[row.id] = actor
-        fingerprints[row.id] = fp
-        actor.start()
     }
 
     private suspend fun handleConnectionEvent(networkId: Long, event: IrcEvent) {
@@ -717,13 +662,14 @@ class ConnectionManagerImpl @Inject constructor(
         // it here races registration. Rebuilding a healthy Ready child causes needless bouncer
         // churn and can interrupt the foreground channel.
         if (row.role == NetworkRole.BOUNCER_ROOT) {
-            val actorAlive = actors.mapValues { (_, actor) -> actor.isAlive }
+            val snapshot = registry.snapshot.value
+            val actorAlive = snapshot.actors.mapValues { (_, registered) -> registered.isAlive }
             for (childId in childrenNeedingReconnect(
                 rootId = row.id,
                 all = networksById.values.toList(),
                 userIntents = userIntents,
                 actorAlive = actorAlive,
-                states = _states.value,
+                states = snapshot.states,
             )) {
                 if (!isCurrent()) return
                 connect(childId)
@@ -1003,11 +949,8 @@ class ConnectionManagerImpl @Inject constructor(
 
     private fun armEchoTimeout(bufferId: Long, label: String) {
         val key = "$bufferId:$label"
-        pendingEchoTimeouts[key]?.cancel()
-        pendingEchoTimeouts[key] = scope.launch {
-            kotlinx.coroutines.delay(ECHO_TIMEOUT_MS)
+        registry.armEchoTimeout(key, ECHO_TIMEOUT_MS) {
             eventProcessor.failIfStillPending(bufferId, label)
-            pendingEchoTimeouts.remove(key)
         }
     }
 
@@ -1221,12 +1164,6 @@ class ConnectionManagerImpl @Inject constructor(
         for (id in affected) {
             _certPrompts.value = _certPrompts.value.filterNot { it.networkId == id }
             certFailures.remove(id)
-            // Rebuild each parked actor fresh so it picks up the new pin and reconnects. connect()
-            // already force-drops the stale actor, but drop here too so a concurrent reconcile can't
-            // re-observe the parked (completed-job) actor between removal and the connect() call.
-            generations.invalidate(id)
-            actors.remove(id)?.stop()
-            fingerprints.remove(id)
             connect(id)
         }
     }
@@ -1239,20 +1176,22 @@ class ConnectionManagerImpl @Inject constructor(
 
     // -- connectivity callback ----------------------------------------------
 
-    private fun registerConnectivityCallback() {
-        val cm = appContext.getSystemService(ConnectivityManager::class.java) ?: return
-        val cb = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) { for (a in actors.values) a.onNetworkAvailable() }
-            override fun onLost(network: Network) { for (a in actors.values) a.onNetworkLost() }
+    private fun connectivityObserverJob(): Job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        val cm = appContext.getSystemService(ConnectivityManager::class.java) ?: return@launch
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                registry.networkAvailable()
+            }
+            override fun onLost(network: Network) {
+                registry.networkLost()
+            }
         }
-        connectivityCallback = cb
-        runCatching { cm.registerDefaultNetworkCallback(cb) }
-    }
-
-    private fun unregisterConnectivityCallback() {
-        val cm = appContext.getSystemService(ConnectivityManager::class.java) ?: return
-        connectivityCallback?.let { runCatching { cm.unregisterNetworkCallback(it) } }
-        connectivityCallback = null
+        val registered = runCatching { cm.registerDefaultNetworkCallback(callback) }.isSuccess
+        try {
+            awaitCancellation()
+        } finally {
+            if (registered) runCatching { cm.unregisterNetworkCallback(callback) }
+        }
     }
 
     // -- utils --------------------------------------------------------------

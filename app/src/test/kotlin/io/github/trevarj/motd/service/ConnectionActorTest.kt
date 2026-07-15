@@ -227,6 +227,38 @@ class ConnectionActorTest {
     }
 
     @Test
+    fun stopAndJoin_awaitsConnectionOwnedSetupAndCollectorCleanup() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val conn = FakeConnection()
+        var setupCancelled = false
+        val actor = ConnectionActor(
+            networkId = 1,
+            scope = scope,
+            connectionFactory = { conn },
+            onState = { _, _ -> },
+            onEvent = { _, _ -> awaitCancellation() },
+            onReady = {
+                try {
+                    awaitCancellation()
+                } finally {
+                    setupCancelled = true
+                }
+            },
+        )
+        actor.start()
+        scope.testScheduler.runCurrent()
+        conn._state.value = IrcClientState.Ready("motd", emptySet(), emptyMap())
+        scope.testScheduler.runCurrent()
+
+        actor.stopAndJoin()
+
+        assertTrue(setupCancelled)
+        assertTrue(conn.stopped)
+        assertTrue(!actor.isAlive)
+    }
+
+    @Test
     fun dozePushHandoffRequiresBackgroundIdleAndUnifiedPush() {
         assertTrue(shouldApplyDozePushHandoff(false, true, DeliveryMode.UNIFIED_PUSH))
         assertTrue(!shouldApplyDozePushHandoff(true, true, DeliveryMode.UNIFIED_PUSH))

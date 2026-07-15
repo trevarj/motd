@@ -5,6 +5,8 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -50,6 +52,16 @@ class IrcClientConnection(
  *
  * All time/randomness is injected so the loop is deterministic under virtual time in tests.
  */
+internal interface ConnectionLifecycleActor {
+    val connection: ManagedConnection?
+    val isAlive: Boolean
+    fun start()
+    fun stop()
+    suspend fun stopAndJoin()
+    fun onNetworkAvailable()
+    fun onNetworkLost()
+}
+
 class ConnectionActor(
     val networkId: Long,
     private val scope: CoroutineScope,
@@ -57,17 +69,19 @@ class ConnectionActor(
     private val onState: (Long, IrcClientState) -> Unit,
     private val onEvent: suspend (Long, IrcEvent) -> Unit,
     private val onReady: suspend (ManagedConnection) -> Unit,
+    private val onConnectionChanged: (Long, ManagedConnection?) -> Unit = { _, _ -> },
+    private val onStopped: (Long) -> Unit = {},
     private val random: () -> Double = { Random.nextDouble() },
     /**
      * Returns the pending TOFU cert failure for this network, if the last connect attempt failed on
      * an untrusted/changed leaf cert. When present, the actor parks in a quiescent "awaiting trust"
      * state instead of backoff-looping (which would spam prompts). Cleared by the manager.
      */
-    private val pendingCertFailure: () -> CertUntrustedException? = { null },
+    private val pendingCertFailure: suspend () -> CertUntrustedException? = { null },
     /** Publishes a cert prompt for this network when a cert failure parks the actor. */
     private val onCertUntrusted: suspend (Long, CertUntrustedException) -> Unit = { _, _ -> },
-) {
-    @Volatile var connection: ManagedConnection? = null
+) : ConnectionLifecycleActor {
+    @Volatile override var connection: ManagedConnection? = null
         private set
 
     private var job: Job? = null
@@ -79,39 +93,55 @@ class ConnectionActor(
      * liveness signal: an actor sitting in [ConnectionManagerImpl]'s actor map with a dead job
      * cannot recover on its own, so a self-healing reconcile must drop and rebuild it.
      */
-    val isAlive: Boolean get() = job?.isActive == true
+    override val isAlive: Boolean get() = job?.isActive == true
 
-    fun start() {
+    override fun start() {
         if (job?.isActive == true) return
-        job = scope.launch { loop() }
+        job = scope.launch { loop() }.also { running ->
+            running.invokeOnCompletion { onStopped(networkId) }
+        }
     }
 
-    fun stop() {
+    override fun stop() {
         job?.cancel()
         job = null
         connection?.stop()
         connection = null
     }
 
+    override suspend fun stopAndJoin() {
+        val running = job
+        job = null
+        running?.cancelAndJoin()
+        connection?.stop()
+        connection = null
+    }
+
     /** Network available again: skip the remaining backoff delay and retry immediately. */
-    fun onNetworkAvailable() { retryNow.trySend(Unit) }
+    override fun onNetworkAvailable() { retryNow.trySend(Unit) }
 
     /** Network lost: fast-fail the current connect attempt so backoff starts promptly. */
-    fun onNetworkLost() { connection?.stop() }
+    override fun onNetworkLost() { connection?.stop() }
 
     private suspend fun loop() {
         var attempt = 0
-        while (scope.isActive) {
+        while (currentCoroutineContext().isActive) {
             val conn = connectionFactory()
             connection = conn
+            onConnectionChanged(networkId, conn)
             onState(networkId, IrcClientState.Connecting)
             conn.start()
 
-            val collector = scope.launch { conn.events.collect { onEvent(networkId, it) } }
-            val outcome = runConnection(conn) { attempt = 0 }
-            collector.cancel()
-            conn.stop()
-            connection = null
+            val attemptScope = CoroutineScope(currentCoroutineContext())
+            val collector = attemptScope.launch { conn.events.collect { onEvent(networkId, it) } }
+            val outcome = try {
+                runConnection(conn) { attempt = 0 }
+            } finally {
+                collector.cancelAndJoin()
+                conn.stop()
+                connection = null
+                onConnectionChanged(networkId, null)
+            }
 
             // TOFU: a cert failure parks the actor (awaiting user trust) rather than backoff-looping.
             val certFailure = pendingCertFailure()
@@ -144,6 +174,7 @@ class ConnectionActor(
      * Failed, Retry otherwise.
      */
     private suspend fun runConnection(conn: ManagedConnection, resetBackoff: () -> Unit): Outcome {
+        val connectionScope = CoroutineScope(currentCoroutineContext())
         var state = conn.state.first { it !is IrcClientState.Connecting }
         var stableJob: Job? = null
         var readyJob: Job? = null
@@ -159,8 +190,8 @@ class ConnectionActor(
                             // operations such as CHATHISTORY. Run it alongside state observation so a
                             // dead socket cancels that work immediately instead of leaving the actor
                             // blocked in onReady for a series of request timeouts.
-                            readyJob = scope.launch { onReady(conn) }
-                            stableJob = scope.launch { delay(STABLE_RESET_MS); resetBackoff() }
+                            readyJob = connectionScope.launch { onReady(conn) }
+                            stableJob = connectionScope.launch { delay(STABLE_RESET_MS); resetBackoff() }
                         }
                         // Runtime CAP ACK/DEL and late 005 replies republish Ready with a new
                         // snapshot. Surface those mutations without re-running one-time setup.
@@ -190,8 +221,8 @@ class ConnectionActor(
                 }
             }
         } finally {
-            readyJob?.cancel()
-            stableJob?.cancel()
+            readyJob?.cancelAndJoin()
+            stableJob?.cancelAndJoin()
         }
     }
 
@@ -201,14 +232,14 @@ class ConnectionActor(
     /** Wait for the backoff delay, waking early when the network becomes available. */
     private suspend fun waitBeforeRetry(delayMs: Long) {
         while (retryNow.tryReceive().isSuccess) { /* drain stale signals */ }
-        val timer = scope.launch { delay(delayMs) }
+        val timer = CoroutineScope(currentCoroutineContext()).launch { delay(delayMs) }
         try {
             select {
                 retryNow.onReceive { }
                 timer.onJoin { }
             }
         } finally {
-            timer.cancel()
+            timer.cancelAndJoin()
         }
     }
 
