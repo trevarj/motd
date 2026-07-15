@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f7f8fc">
-    <meta name="description" content="motd is a calm, modern IRC client for Android, built for bouncers and real conversations.">
-    <title>motd — IRC, with room to breathe</title>
+    <meta name="theme-color" content="#0b0d12">
+    <meta name="description" content="motd is an open-source IRC client for Android with soju support, chat history, and file uploads.">
+    <title>motd — IRC for Android</title>
     <link rel="icon" href="assets/brand/motd-symbol.svg" type="image/svg+xml">
     <link rel="stylesheet" href="styles.css">
   </head>
@@ -16,7 +16,7 @@
         <span>motd</span>
       </a>
       <nav class="site-nav" aria-label="Primary navigation">
-        <a href="#experience">Experience</a>
+        <a href="#features">Features</a>
         <a href="#screenshots">Screenshots</a>
         <a class="nav-release" href="https://github.com/trevarj/motd/releases/latest" rel="noopener">Latest release <span aria-hidden="true">↗</span></a>
       </nav>
@@ -25,80 +25,72 @@
     <main id="top">
       <section class="hero section-shell">
         <div class="hero-copy">
-          <p class="eyebrow"><span class="eyebrow-dot"></span> A quieter IRC client for Android</p>
-          <h1>IRC that feels <em>effortless.</em></h1>
-          <p class="hero-lede">motd brings the ease of a modern messenger to the protocol you already trust — with bouncer-native history, a thoughtful composer, and a little more breathing room.</p>
+          <p class="eyebrow">Open-source IRC client for Android</p>
+          <h1>IRC for <em>Android.</em></h1>
+          <p class="hero-lede">Connect to soju bouncers or plain IRC networks. Browse history, chat, and share files from one app.</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="https://github.com/trevarj/motd/releases/latest" rel="noopener">Get the latest release <span aria-hidden="true">↗</span></a>
-            <a class="button button-quiet" href="#screenshots">See it in motion <span aria-hidden="true">↓</span></a>
+            <a class="button button-primary" href="https://github.com/trevarj/motd/releases/latest" rel="noopener">Latest release <span aria-hidden="true">↗</span></a>
+            <a class="button button-quiet" href="#screenshots">View screenshots <span aria-hidden="true">↓</span></a>
           </div>
-          <p class="hero-meta">Open source · Android 8+ · made for soju and plain IRC</p>
+          <p class="hero-meta">Android 8+ · IRCv3 · soju support</p>
         </div>
 
         <div class="hero-visual" aria-label="motd conversation preview">
-          <div class="glow glow-one"></div>
-          <div class="glow glow-two"></div>
           <div class="device device-hero">
-            <div class="device-topbar"><span class="device-time">9:41</span><span class="device-island"></span><span class="device-status">● ▮</span></div>
             <img src="screenshots/chat.png" alt="A motd conversation in the #guix channel">
           </div>
-          <div class="floating-card floating-card-bouncer"><span class="status-orb"></span><span><strong>soju</strong><small>connected quietly</small></span><span class="card-check">✓</span></div>
-          <div class="floating-card floating-card-sprite"><span class="mini-sprite">✦</span><span><strong>IRC sprites</strong><small>context, at a glance</small></span></div>
         </div>
       </section>
 
-      <section class="trust-strip section-shell" aria-label="motd highlights">
-        <span>IRCv3 at the core</span><i></i><span>History that follows you</span><i></i><span>Designed for everyday use</span>
+      <section class="spec-strip section-shell" aria-label="motd compatibility">
+        <span>IRCv3</span><i></i><span>soju bouncers</span><i></i><span>Plain IRC</span><i></i><span>Android 8+</span>
       </section>
 
-      <section class="feature-section section-shell" id="experience">
+      <section class="feature-section section-shell" id="features">
         <div class="section-intro">
-          <p class="eyebrow">A familiar rhythm</p>
-          <h2>Everything you need.<br><em>Nothing in the way.</em></h2>
-          <p>Built around the simple pleasure of opening a conversation and knowing exactly where you are.</p>
+          <p class="eyebrow">Features</p>
+          <h2>Chat, history, and uploads.</h2>
+          <p>Core workflows for IRC on Android.</p>
         </div>
         <div class="feature-grid">
           <article class="feature-card feature-bouncer">
             <div class="feature-icon icon-signal" aria-hidden="true"><span></span><span></span><span></span></div>
-            <p class="feature-kicker">01 · Bouncer-native</p>
-            <h3>Pick up where you left off.</h3>
-            <p>Stay close to your networks, scrollback, and read state through a soju bouncer. Your conversations feel continuous, even when your day is not.</p>
-            <div class="feature-lines" aria-hidden="true"><span></span><span></span><span></span></div>
+            <p class="feature-kicker">Bouncers</p>
+            <h3>One account, multiple networks.</h3>
+            <p>Use soju networks, synchronized history, read markers, and push delivery.</p>
           </article>
           <article class="feature-card feature-upload">
             <div class="feature-icon icon-paperclip" aria-hidden="true">↗</div>
-            <p class="feature-kicker">02 · Easy uploads</p>
-            <h3>Share without breaking flow.</h3>
-            <p>Tap the paperclip, choose a photo, file, draft, or text, and keep the resulting link in your composer until you are ready.</p>
-            <div class="upload-pill"><span>paperclip</span><span>→</span><strong>link in draft</strong></div>
+            <p class="feature-kicker">Uploads</p>
+            <h3>Keep the result in the draft.</h3>
+            <p>Choose a photo, file, draft, or text paste. The result stays in the composer until you send it.</p>
           </article>
           <article class="feature-card feature-design">
             <div class="feature-icon icon-spark" aria-hidden="true">✦</div>
-            <p class="feature-kicker">03 · Modern by default</p>
-            <h3>Soft edges. Clear signals.</h3>
-            <p>Material 3 surfaces, expressive themes, comfortable bubbles, and deterministic IRC sprites give the old protocol a fresh home.</p>
-            <div class="design-dots" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+            <p class="feature-kicker">Interface</p>
+            <h3>Focused Android UI.</h3>
+            <p>Material 3, dark theme, configurable message layouts, nick colors, and chat wallpapers.</p>
           </article>
         </div>
       </section>
 
       <section class="showcase-section section-shell" id="screenshots">
         <div class="section-intro section-intro-wide">
-          <p class="eyebrow">A small tour</p>
-          <h2>Made for the moments<br><em>between messages.</em></h2>
-          <p>Three ordinary workflows, given the attention they deserve.</p>
+          <p class="eyebrow">Screenshots</p>
+          <h2>Common workflows.</h2>
+          <p>Chat list, conversation, and attachment chooser.</p>
         </div>
         <div class="showcase-grid">
           <figure class="screenshot-card screenshot-card-tall">
-            <div class="screenshot-copy"><p class="feature-kicker">Chat list</p><h3>Your whole world, organized.</h3><p>Channels, people, and networks settle into one calm view.</p></div>
+            <div class="screenshot-copy"><p class="feature-kicker">Chat list</p><h3>Channels and networks.</h3><p>Switch between conversations from one list.</p></div>
             <div class="device device-gallery"><img src="screenshots/chat-list.png" alt="motd chat list showing Guix, Debian, Emacs, and Rust channels"></div>
           </figure>
           <figure class="screenshot-card screenshot-card-chat">
-            <div class="screenshot-copy"><p class="feature-kicker">Conversation</p><h3>Talk like you mean it.</h3><p>Readable bubbles, useful context, no clutter.</p></div>
+            <div class="screenshot-copy"><p class="feature-kicker">Conversation</p><h3>Readable message history.</h3><p>Comfortable bubbles, replies, and composer controls.</p></div>
             <div class="device device-gallery"><img src="screenshots/chat.png" alt="motd chat conversation with comfortable message bubbles"></div>
           </figure>
           <figure class="screenshot-card screenshot-card-upload">
-            <div class="screenshot-copy"><p class="feature-kicker">File uploader</p><h3>Share in a second.</h3><p>The right source is always one tap away.</p></div>
+            <div class="screenshot-copy"><p class="feature-kicker">File chooser</p><h3>Four upload sources.</h3><p>Photo, file, current draft, or text paste.</p></div>
             <div class="device device-gallery"><img src="screenshots/file-uploader.png" alt="motd attachment source chooser with photo, file, draft, and text options"></div>
           </figure>
         </div>
@@ -107,17 +99,17 @@
       <section class="closing-section section-shell">
         <div class="closing-panel">
           <img src="assets/brand/motd-symbol.svg" alt="" width="54" height="54">
-          <p class="eyebrow">A better place for your MOTD</p>
-          <h2>Come for the protocol.<br><em>Stay for the calm.</em></h2>
-          <p>Free software, familiar networks, and an interface that gets out of your way.</p>
-          <a class="button button-primary" href="https://github.com/trevarj/motd/releases/latest" rel="noopener">Download the latest release <span aria-hidden="true">↗</span></a>
+          <p class="eyebrow">Download</p>
+          <h2>Get motd.</h2>
+          <p>Open-source IRC client for Android.</p>
+          <a class="button button-primary" href="https://github.com/trevarj/motd/releases/latest" rel="noopener">Latest release <span aria-hidden="true">↗</span></a>
         </div>
       </section>
     </main>
 
     <footer class="site-footer section-shell">
       <div class="footer-brand"><img src="assets/brand/motd-symbol.svg" alt="" width="24" height="24"><span>motd</span></div>
-      <p>Open-source IRC for Android.</p>
+      <p>Open-source Android IRC client.</p>
       <div class="footer-links"><a href="https://github.com/trevarj/motd" rel="noopener">GitHub</a><a href="https://github.com/trevarj/motd/releases/latest" rel="noopener">Releases</a><a href="#top">Back to top ↑</a></div>
     </footer>
   </body>
