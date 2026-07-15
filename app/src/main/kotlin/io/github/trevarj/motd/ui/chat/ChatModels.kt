@@ -274,6 +274,10 @@ internal data class TimelineChange(
     val liveEntryId: Long?,
 )
 
+/** An older animation completion must not consume a newer live-entry identity. */
+internal fun consumeLiveEntryId(current: Long?, consumed: Long): Long? =
+    current.takeUnless { it == consumed }
+
 fun newestEffectiveMessageId(
     itemCount: Int,
     peek: (Int) -> MessageEntity?,

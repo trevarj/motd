@@ -36,9 +36,9 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
  * screen composable; WP7/WP8 fill in their own screen bodies behind these signatures.
  */
 // Material shared-axis X feel: forward pushes the new screen in from the right and the old one out
-// to the left; back reverses it. 300ms tween is the standard container-transform duration. These are
-// set at the NavHost level so every composable<Route> inherits them; the pop transitions are also
-// what the Android 13+ predictive-back scrim animates.
+// to the left; back reverses it. The shared navigation duration is set at the NavHost level so every
+// composable<Route> inherits it; the pop transitions are also what the Android 13+ predictive-back
+// scrim animates.
 @Composable
 fun MotdNavGraph(
     navController: NavHostController = rememberNavController(),

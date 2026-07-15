@@ -1,12 +1,5 @@
 package io.github.trevarj.motd.ui.theme
 
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
@@ -52,10 +45,6 @@ object MotdMotion {
         dampingRatio = Spring.DampingRatioNoBouncy,
         stiffness = SoftSpringStiffness,
     )
-    val softOffsetSpring: FiniteAnimationSpec<IntOffset> = spring(
-        dampingRatio = Spring.DampingRatioNoBouncy,
-        stiffness = SoftSpringStiffness,
-    )
     val rowPlacement: FiniteAnimationSpec<IntOffset> = spring(
         dampingRatio = Spring.DampingRatioNoBouncy,
         stiffness = SoftSpringStiffness,
@@ -64,15 +53,4 @@ object MotdMotion {
         dampingRatio = Spring.DampingRatioNoBouncy,
         stiffness = SoftSpringStiffness,
     )
-
-    fun messageEnter(): EnterTransition =
-        fadeIn(animationSpec = fadeIn) +
-            scaleIn(initialScale = 0.96f, animationSpec = softSpring) +
-            slideInVertically(
-                initialOffsetY = { it / 12 },
-                animationSpec = softOffsetSpring,
-            )
-
-    fun messageExit(): ExitTransition =
-        fadeOut(animationSpec = fadeOut) + scaleOut(targetScale = 0.98f, animationSpec = softSpring)
 }

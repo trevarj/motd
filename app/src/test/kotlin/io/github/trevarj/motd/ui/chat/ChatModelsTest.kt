@@ -167,6 +167,11 @@ class ChatModelsTest {
         assertNull(tracker.onTimelineChangedWithEntry(13, 9).liveEntryId)
     }
 
+    @Test fun `stale live entry completion preserves a newer pending entry`() {
+        assertEquals(9L, consumeLiveEntryId(current = 9L, consumed = 8L))
+        assertNull(consumeLiveEntryId(current = 9L, consumed = 9L))
+    }
+
     @Test fun `paging invalidation cannot break following live arrivals`() {
         val tracker = AutoFollowTracker(initialItemCount = 10)
         tracker.reset(itemCount = 10, atBottom = true, newestEffectiveId = 10)

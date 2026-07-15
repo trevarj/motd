@@ -1,10 +1,13 @@
 package io.github.trevarj.motd.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -34,14 +37,29 @@ fun ConnectionBanner(
     modifier: Modifier = Modifier,
 ) {
     val status = bannerStatus(states, networkName)
-    AnimatedVisibility(
-        visible = status != null,
-        enter = fadeIn(MotdMotion.fadeIn) + expandVertically(),
-        exit = fadeOut(MotdMotion.fadeOut) + shrinkVertically(),
+    AnimatedContent(
+        targetState = status,
+        transitionSpec = {
+            val contentTransform = when {
+                initialState == null ->
+                    (fadeIn(MotdMotion.fadeIn) +
+                        expandVertically(animationSpec = MotdMotion.contentSize)) togetherWith
+                        ExitTransition.None
+                targetState == null ->
+                    EnterTransition.None togetherWith
+                        (fadeOut(MotdMotion.fadeOut) +
+                            shrinkVertically(animationSpec = MotdMotion.contentSize))
+                else -> fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
+            }
+            // expand/shrink already own the null <-> content size change. Disable
+            // AnimatedContent's default SizeTransform so the same height is not animated twice.
+            contentTransform.using(null)
+        },
         modifier = modifier,
-    ) {
-        // status is stable within a composition frame; remembered snapshot avoids null flicker.
-        val current = status ?: return@AnimatedVisibility
+        label = "connection_banner",
+    ) { current ->
+        // AnimatedContent retains this non-null snapshot while it runs the exit transition.
+        if (current == null) return@AnimatedContent
         Row(
             modifier = Modifier
                 .fillMaxWidth()

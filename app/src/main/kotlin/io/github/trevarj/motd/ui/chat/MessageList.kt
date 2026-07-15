@@ -215,16 +215,20 @@ fun MessageList(
             val newer = if (index - 1 >= 0) items.peek(index - 1) else null
 
             if (msg.kind == MessageKind.INVITE) {
-                InvitationCard(
-                    message = msg,
-                    onJoin = { onAcceptInvite(msg.id) },
-                    onDismiss = { onDismissInvite(msg.id) },
-                )
+                LiveTimelineEntry(liveEntryId, msg.id, onLiveEntryConsumed) {
+                    InvitationCard(
+                        message = msg,
+                        onJoin = { onAcceptInvite(msg.id) },
+                        onDismiss = { onDismissInvite(msg.id) },
+                    )
+                }
                 return@items
             }
 
             if (msg.kind == MessageKind.NETSPLIT || msg.kind == MessageKind.NETJOIN) {
-                NetworkBatchPill(msg)
+                LiveTimelineEntry(liveEntryId, msg.id, onLiveEntryConsumed) {
+                    NetworkBatchPill(msg)
+                }
                 return@items
             }
 
@@ -233,7 +237,14 @@ fun MessageList(
             // whose just-newer neighbor is not a system event.
             if (isSystemKind(msg.kind)) {
                 if (!isSystemRunChunkHead(index, newer?.let { isSystemKind(it.kind) } == true)) return@items
-                SystemEventRun(items = items, index = index, newest = msg, readMarkerTime = readMarkerTime)
+                LiveTimelineEntry(liveEntryId, msg.id, onLiveEntryConsumed) {
+                    SystemEventRun(
+                        items = items,
+                        index = index,
+                        newest = msg,
+                        readMarkerTime = readMarkerTime,
+                    )
+                }
                 return@items
             }
 
@@ -242,12 +253,14 @@ fun MessageList(
             // here; system-kind rows are handled above and never fool-treated.
             val isFool = foolsMode == FoolsMode.COLLAPSE && isFoolSender(msg.sender, msg.isSelf, fools)
             if (isFool && !foolExpanded(msg.id)) {
-                FoolPlaceholderRow(
-                    msg = msg,
-                    older = older,
-                    readMarkerTime = readMarkerTime,
-                    onExpand = { onToggleFool(msg.id) },
-                )
+                LiveTimelineEntry(liveEntryId, msg.id, onLiveEntryConsumed) {
+                    FoolPlaceholderRow(
+                        msg = msg,
+                        older = older,
+                        readMarkerTime = readMarkerTime,
+                        onExpand = { onToggleFool(msg.id) },
+                    )
+                }
                 return@items
             }
 
@@ -300,15 +313,7 @@ fun MessageList(
                     )
                 }
             }
-            if (liveEntryId == msg.id) {
-                LiveMessageEntry(
-                    messageId = msg.id,
-                    onConsumed = onLiveEntryConsumed,
-                    content = rowContent,
-                )
-            } else {
-                rowContent()
-            }
+            LiveTimelineEntry(liveEntryId, msg.id, onLiveEntryConsumed, rowContent)
         }
 
         // Append spinner / end-of-history / error affordances (plans/15 #27). This item sits at the
@@ -316,6 +321,21 @@ fun MessageList(
         item(key = "append-state", contentType = "loadstate") {
             LoadStateFooter(items.loadState.append)
         }
+    }
+}
+
+/** Applies the one-shot entrance uniformly to every kind of rendered, meaningful timeline row. */
+@Composable
+private fun LiveTimelineEntry(
+    liveEntryId: Long?,
+    messageId: Long,
+    onConsumed: (Long) -> Unit,
+    content: @Composable () -> Unit,
+) {
+    if (liveEntryId == messageId) {
+        LiveMessageEntry(messageId = messageId, onConsumed = onConsumed, content = content)
+    } else {
+        content()
     }
 }
 

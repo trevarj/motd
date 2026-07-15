@@ -50,6 +50,7 @@ import coil.request.ImageRequest
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -80,6 +81,7 @@ fun ImageViewerScreen(
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
+    var transformAnimationJob by remember { mutableStateOf<Job?>(null) }
     // Container size in px; used to clamp pan to the scaled bounds.
     var boxSize by remember { mutableStateOf(IntSize.Zero) }
 
@@ -119,6 +121,10 @@ fun ImageViewerScreen(
                 )
                 .pointerInput(Unit) {
                     detectTransformGestures { centroid, pan, zoom, _ ->
+                        // A direct gesture takes ownership of transform state immediately. Without
+                        // cancelling the double-tap animation, both paths can write scale/offsets.
+                        transformAnimationJob?.cancel()
+                        transformAnimationJob = null
                         val newScale = (scale * zoom).coerceIn(1f, MAX_SCALE)
                         if (newScale > 1f) {
                             // Anchor the zoom on the gesture centroid relative to the box center.
@@ -158,7 +164,8 @@ fun ImageViewerScreen(
                             val maxTargetY = ((targetScale - 1f) * boxSize.height / 2f).coerceAtLeast(0f)
                             val clampedTargetOffsetX = targetOffsetX.coerceIn(-maxTargetX, maxTargetX)
                             val clampedTargetOffsetY = targetOffsetY.coerceIn(-maxTargetY, maxTargetY)
-                            scope.launch {
+                            transformAnimationJob?.cancel()
+                            transformAnimationJob = scope.launch {
                                 coroutineScope {
                                     launch {
                                         animate(

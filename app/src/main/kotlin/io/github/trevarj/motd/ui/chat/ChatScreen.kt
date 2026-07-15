@@ -954,7 +954,9 @@ fun ChatContent(
                         items = items,
                         listState = listState,
                         liveEntryId = liveEntryId,
-                        onLiveEntryConsumed = { id -> if (liveEntryId == id) liveEntryId = null },
+                        onLiveEntryConsumed = { id ->
+                            liveEntryId = consumeLiveEntryId(liveEntryId, id)
+                        },
                         networkId = state.buffer?.networkId,
                         // Frozen read-marker so the "— New messages —" divider stays put (plans/15 #2).
                         readMarkerTime = readMarkerSnapshot,

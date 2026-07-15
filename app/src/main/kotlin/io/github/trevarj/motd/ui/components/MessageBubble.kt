@@ -681,8 +681,11 @@ internal fun messageStatus(isSelf: Boolean, pending: Boolean, failed: Boolean): 
 /** Renders the single leading status glyph (clock / error / sent-check) for the timestamp row. */
 @Composable
 internal fun MessageStatusIcon(isSelf: Boolean, pending: Boolean, failed: Boolean) {
+    val status = messageStatus(isSelf, pending, failed)
+    if (status == MsgStatus.NONE) return
+
     AnimatedContent(
-        targetState = messageStatus(isSelf, pending, failed),
+        targetState = status,
         transitionSpec = {
             (fadeIn(MotdMotion.microFadeIn) + scaleIn(initialScale = 0.85f, animationSpec = MotdMotion.softSpring))
                 .togetherWith(
@@ -696,7 +699,7 @@ internal fun MessageStatusIcon(isSelf: Boolean, pending: Boolean, failed: Boolea
             MsgStatus.FAILED -> FailedIcon()
             MsgStatus.PENDING -> PendingIcon()
             MsgStatus.SENT -> SentIcon()
-            MsgStatus.NONE -> {}
+            MsgStatus.NONE -> Unit
         }
     }
 }

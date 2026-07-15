@@ -1,7 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -72,7 +72,6 @@ fun SystemEventPill(
                     MaterialTheme.colorScheme.surfaceContainerHigh,
                     RoundedCornerShape(50),
                 )
-                .animateContentSize(animationSpec = MotdMotion.contentSize)
                 .then(
                     if (collapsible) Modifier.semantics {
                         role = Role.Button
@@ -92,7 +91,13 @@ fun SystemEventPill(
             AnimatedContent(
                 targetState = expanded && collapsible,
                 transitionSpec = {
-                    fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
+                    (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut))
+                        .using(
+                            SizeTransform(
+                                clip = false,
+                                sizeAnimationSpec = { _, _ -> MotdMotion.contentSize },
+                            ),
+                        )
                 },
                 label = "system_event_content",
             ) { showLines ->
