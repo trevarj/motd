@@ -68,6 +68,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -206,6 +207,9 @@ fun ChatScreen(
         onDismissInvite = viewModel::dismissInvite,
         loadPreview = viewModel::linkPreview,
         consumePrefill = viewModel::consumePrefill,
+        loadDraft = viewModel::loadDraft,
+        onDraftChanged = viewModel::saveDraft,
+        onDraftCleared = viewModel::clearDraft,
         mentionPrefill = mentionRequest,
         jumpTarget = jumpTarget,
         initialTarget = initialTarget,
@@ -310,6 +314,9 @@ fun ChatContent(
     onAcceptInvite: (Long) -> Unit = {},
     onDismissInvite: (Long) -> Unit = {},
     consumePrefill: () -> String? = { null },
+    loadDraft: () -> String? = { null },
+    onDraftChanged: (String) -> Unit = {},
+    onDraftCleared: () -> Unit = {},
     // Immediate nick-sheet mention request. The nonce permits mentioning the same nick repeatedly.
     mentionPrefill: Pair<Long, String>? = null,
     jumpTarget: ChatJumpResolver.Result.Target? = null,
@@ -396,11 +403,20 @@ fun ChatContent(
     // live arrival. Consume it without auto-follow so an unread target remains on screen.
     var suppressNextAutoFollow by remember { mutableStateOf(!entryPositionInitiallySettled) }
 
-    // Consume any mention prefill queued by ChannelInfo. Runs once per composition entry; the
-    // store is already emptied by consume() and the text survives via rememberSaveable, so a
-    // config change cannot double-prefill.
-    LaunchedEffect(Unit) {
+    var draftLoaded by remember(traceBufferId) { mutableStateOf(false) }
+
+    // Restore the per-buffer draft before consuming a one-shot mention prefill. This preserves an
+    // existing draft when a user selects a nick from ChannelInfo and returns to the chat.
+    LaunchedEffect(traceBufferId) {
+        if (traceBufferId == null) return@LaunchedEffect
+        loadDraft()?.let { saved ->
+            composerText = TextFieldValue(saved, TextRange(saved.length))
+        }
         consumePrefill()?.let { composerText = appendPrefill(composerText, it) }
+        draftLoaded = true
+    }
+    LaunchedEffect(traceBufferId, composerText.text, draftLoaded) {
+        if (traceBufferId != null && draftLoaded) onDraftChanged(composerText.text)
     }
     LaunchedEffect(mentionPrefill) {
         mentionPrefill?.second?.let { composerText = appendPrefill(composerText, it) }
@@ -1037,6 +1053,7 @@ fun ChatContent(
                                 }
                                 onSubmit(text)
                                 composerText = TextFieldValue("")
+                                onDraftCleared()
                                 scope.launch {
                                     scrollToNewest(animate = true, reason = "composer_send_action")
                                 }
@@ -1110,6 +1127,7 @@ fun ChatContent(
                     longDraftPrompt = false
                     onSubmit(composerText.text)
                     composerText = TextFieldValue("")
+                    onDraftCleared()
                     scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
                 }) { Text("Send as messages") }
                 androidx.compose.material3.TextButton(onClick = {

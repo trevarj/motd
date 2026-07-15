@@ -33,4 +33,26 @@ class ComposerDraftStoreTest {
         assertNull(store.consume(1L))
         assertNull(store.consume(2L))
     }
+
+    @Test fun drafts_are_saved_and_loaded_without_consuming() {
+        val store = ComposerDraftStore()
+
+        store.saveDraft(1L, "hello")
+
+        assertEquals("hello", store.loadDraft(1L))
+        assertEquals("hello", store.loadDraft(1L))
+        assertNull(store.loadDraft(2L))
+    }
+
+    @Test fun blank_draft_is_removed_and_clear_is_idempotent() {
+        val store = ComposerDraftStore()
+        store.saveDraft(1L, "hello")
+
+        store.saveDraft(1L, "   ")
+        assertNull(store.loadDraft(1L))
+        store.saveDraft(1L, "again")
+        store.clearDraft(1L)
+        store.clearDraft(1L)
+        assertNull(store.loadDraft(1L))
+    }
 }

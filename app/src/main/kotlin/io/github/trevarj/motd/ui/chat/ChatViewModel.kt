@@ -589,6 +589,12 @@ class ChatViewModel @Inject constructor(
     /** Consume-once composer prefill queued by ChannelInfo before popping back; null when none. */
     fun consumePrefill(): String? = draftStore.consume(bufferId)
 
+    fun loadDraft(): String? = draftStore.loadDraft(bufferId)
+
+    fun saveDraft(text: String) = draftStore.saveDraft(bufferId, text)
+
+    fun clearDraft() = draftStore.clearDraft(bufferId)
+
     // --- search deep-jump (plans/11 §C) ---
 
     private val jumpMsgid: String? = route.jumpToMsgid
