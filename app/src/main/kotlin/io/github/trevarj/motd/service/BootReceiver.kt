@@ -12,11 +12,10 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.push.PushHealthStore
 import io.github.trevarj.motd.push.socketFallbackNetworkIds
+import io.github.trevarj.motd.di.ApplicationScope
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 
 /**
  * Starts the foreground service on BOOT_COMPLETED when delivery mode is PERSISTENT_SOCKET and at
@@ -30,29 +29,23 @@ class BootReceiver : BroadcastReceiver() {
     @Inject lateinit var db: MotdDatabase
     @Inject lateinit var pushPrefs: PushPrefs
     @Inject lateinit var pushHealthStore: PushHealthStore
+    @Inject @ApplicationScope lateinit var applicationScope: CoroutineScope
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
-        val pending = goAsync()
-        CoroutineScope(Dispatchers.Default).launch {
-            try {
-                val mode = settings.settings.first().deliveryMode
-                val networks = db.networkDao().connectable()
-                val shouldRun = if (mode == DeliveryMode.PERSISTENT_SOCKET) {
-                    networks.isNotEmpty()
-                } else {
-                    socketFallbackNetworkIds(
-                        networks,
-                        pushPrefs.endpoints(),
-                        pushHealthStore.snapshot(),
-                    ).isNotEmpty()
-                }
-                if (shouldRun) {
-                    startService(context)
-                }
-            } finally {
-                pending.finish()
+        launchAsync(applicationScope, TAG) {
+            val mode = settings.settings.first().deliveryMode
+            val networks = db.networkDao().connectable()
+            val shouldRun = if (mode == DeliveryMode.PERSISTENT_SOCKET) {
+                networks.isNotEmpty()
+            } else {
+                socketFallbackNetworkIds(
+                    networks,
+                    pushPrefs.endpoints(),
+                    pushHealthStore.snapshot(),
+                ).isNotEmpty()
             }
+            if (shouldRun) startService(context)
         }
     }
 
@@ -67,5 +60,9 @@ class BootReceiver : BroadcastReceiver() {
                 throw e
             }
         }
+    }
+
+    private companion object {
+        const val TAG = "BootReceiver"
     }
 }

@@ -65,7 +65,7 @@ internal interface ConnectionLifecycleActor {
 class ConnectionActor(
     val networkId: Long,
     private val scope: CoroutineScope,
-    private val connectionFactory: () -> ManagedConnection,
+    private val connectionFactory: suspend () -> ManagedConnection,
     private val onState: (Long, IrcClientState) -> Unit,
     private val onEvent: suspend (Long, IrcEvent) -> Unit,
     private val onReady: suspend (ManagedConnection) -> Unit,

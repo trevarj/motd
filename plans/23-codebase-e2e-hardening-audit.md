@@ -257,7 +257,7 @@ Follow Room's schema and migration validation guidance:
 
 ## K1. Standardize coroutine and transport ownership
 
-- **Priority / size / status:** P1, L, Ready after C3.
+- **Priority / size / status:** P1, L, Completed 2026-07-15.
 - **Depends on:** C3 lifecycle ownership.
 - **Evidence:** multiple singletons create hardcoded scopes, several components
   hardcode dispatchers and wall-clock access, broadcast receivers repeat
@@ -282,6 +282,27 @@ Follow Room's schema and migration validation guidance:
 Use Android's coroutine ownership and dispatcher-injection guidance:
 <https://developer.android.com/kotlin/coroutines/coroutines-best-practices>.
 Verification uses virtual time for cancellation, restart, timeout, and shutdown.
+
+### Completion evidence
+
+- Hilt now provides qualified process scope, default/IO dispatchers, and a
+  testable clock. Process-lifetime coordinators share that supervised scope;
+  blocking preview work uses the injected IO dispatcher, and owned delayed or
+  timeout jobs remain tracked by their coordinator.
+- `ConnectionActor` accepts a suspending connection factory. Each attempt reads
+  the current STS and leaf-pin policy before constructing `AppTransportFactory`,
+  whose synchronous `TransportFactory` entry point now consumes only an
+  immutable prepared snapshot. No app transport path uses `runBlocking`.
+- Boot, invite-dismiss, direct-reply, and mark-read receivers share a bounded
+  helper with one timeout/failure policy, cancellation propagation, and exactly
+  one `PendingResult.finish()`. Virtual-time tests cover success, failure,
+  timeout, and parent cancellation.
+- The UnifiedPush connector callback bridge remains separate and documented;
+  its library-owned completion and store-settle behavior was not mechanically
+  changed.
+- Focused transport/receiver/actor tests and the complete
+  `:app:testFossDebugUnitTest` suite pass. `:app:lintFossDebug` and
+  `:app:assembleFossDebug` also pass.
 
 ## T1. Consolidate the existing E2E infrastructure
 

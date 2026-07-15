@@ -7,6 +7,8 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.prefs.NoopHistorySyncPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.di.ApplicationScope
+import io.github.trevarj.motd.di.IoDispatcher
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResult
 import io.github.trevarj.motd.irc.client.IrcClient
@@ -19,9 +21,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
@@ -67,6 +68,8 @@ class HistoryResyncCoordinator @Inject constructor(
     private val db: MotdDatabase,
     private val processor: EventProcessor,
     private val syncPrefs: HistorySyncPrefs = NoopHistorySyncPrefs,
+    @ApplicationScope private val scope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
     internal interface HistorySource {
         fun hasChatHistory(): Boolean
@@ -78,7 +81,6 @@ class HistoryResyncCoordinator @Inject constructor(
     private data class RequestKey(val networkId: Long, val bufferId: Long?)
     private data class Boundary(val msgid: String?, val serverTime: Long)
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val activeGuard = Mutex()
     private val active = HashMap<RequestKey, Deferred<HistoryResyncState>>()
     private val networkLocks = ConcurrentHashMap<Long, Mutex>()
@@ -490,7 +492,7 @@ class HistoryResyncCoordinator @Inject constructor(
     private suspend fun request(source: HistorySource, request: ChatHistoryRequest): ChatHistoryResult =
         withTimeout(requestTimeoutMs) { source.chathistory(request) }
 
-    private suspend fun latestBoundary(bufferId: Long): Boundary? = withContext(Dispatchers.IO) {
+    private suspend fun latestBoundary(bufferId: Long): Boundary? = withContext(ioDispatcher) {
         db.query(
             SimpleSQLiteQuery(
                 "SELECT msgid, serverTime FROM messages WHERE bufferId = ? " +
@@ -505,12 +507,12 @@ class HistoryResyncCoordinator @Inject constructor(
         }
     }
 
-    private suspend fun messageCount(bufferId: Long): Int = withContext(Dispatchers.IO) {
+    private suspend fun messageCount(bufferId: Long): Int = withContext(ioDispatcher) {
         db.query(SimpleSQLiteQuery("SELECT COUNT(*) FROM messages WHERE bufferId = ?", arrayOf<Any>(bufferId)))
             .use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
     }
 
-    private suspend fun hasStoredChat(bufferId: Long): Boolean = withContext(Dispatchers.IO) {
+    private suspend fun hasStoredChat(bufferId: Long): Boolean = withContext(ioDispatcher) {
         db.query(
             SimpleSQLiteQuery(
                 "SELECT 1 FROM messages WHERE bufferId = ? AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION') LIMIT 1",
@@ -519,7 +521,7 @@ class HistoryResyncCoordinator @Inject constructor(
         ).use { cursor -> cursor.moveToFirst() }
     }
 
-    private suspend fun bufferIdFor(networkId: Long, target: String): Long? = withContext(Dispatchers.IO) {
+    private suspend fun bufferIdFor(networkId: Long, target: String): Long? = withContext(ioDispatcher) {
         db.query(
             SimpleSQLiteQuery(
                 "SELECT id FROM buffers WHERE networkId = ? AND (name = ? COLLATE NOCASE OR displayName = ? COLLATE NOCASE) LIMIT 1",

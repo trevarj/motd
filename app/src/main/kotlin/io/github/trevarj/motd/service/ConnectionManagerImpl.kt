@@ -22,6 +22,8 @@ import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.MessageNotifier
+import io.github.trevarj.motd.di.ApplicationScope
+import io.github.trevarj.motd.di.IoDispatcher
 import io.github.trevarj.motd.avatar.AvatarCoordinator
 import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.data.db.ObfsMode
@@ -48,6 +50,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
@@ -55,9 +58,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -95,12 +96,13 @@ class ConnectionManagerImpl @Inject constructor(
     private val presetEnrollmentCoordinator: PresetEnrollmentCoordinator,
     private val avatarCoordinator: AvatarCoordinator,
     private val pushHealthStore: PushHealthStore,
+    @ApplicationScope private val scope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     // Lazy to break the WebPushRegistrar <-> ConnectionManager ctor cycle.
     private val webPushRegistrar: dagger.Lazy<WebPushRegistrar>,
     private val bufferStore: BufferStore = BufferStore(db),
 ) : ConnectionManager {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val networkDao get() = db.networkDao()
     private val bufferDao get() = db.bufferDao()
     private val messageDao get() = db.messageDao()
@@ -591,7 +593,7 @@ class ConnectionManagerImpl @Inject constructor(
         if (row.role == NetworkRole.BOUNCER_CHILD) row.parentId?.let { networksById[it] } else null,
     )
 
-    private fun buildConnection(row: NetworkEntity): IrcClientConnection {
+    private suspend fun buildConnection(row: NetworkEntity): IrcClientConnection {
         // A BOUNCER_CHILD is a *bound connection to the bouncer*, not a direct socket to the
         // upstream network. Its own host/port/tls/SASL may carry the upstream server's details
         // (soju's BOUNCER NETWORK attrs report the upstream host), so connecting on them would
@@ -607,14 +609,19 @@ class ConnectionManagerImpl @Inject constructor(
         // Obfuscation/proxy follows the transport endpoint too: a bound child tunnels through the
         // bouncer root's socket, so it inherits the root's proxy (plans/20 Phase 1).
         val endpoint = root ?: row
-        // Resolve EMBEDDED_REALITY before inspecting legacy proxyHost/proxyPort. Those columns are
-        // deliberately null for a VLESS-configured row; validating them first would park a valid
-        // embedded configuration as "SOCKS5 proxy host is required".
+        val security = prepareTransportSecurity(
+            host = config.host,
+            port = config.port,
+            wsUrl = config.wsUrl,
+            policyFor = stsStore::policyFor,
+            pinnedFor = certStore::pinnedFor,
+        )
+        // Resolve EMBEDDED_REALITY only after suspending policy reads complete, so a failed read
+        // cannot leak a newly acquired local proxy lease.
         val proxyResolution = resolveTransportProxy(endpoint, localSocksProvider, ownerKey = row.id.toString())
         val factory = AppTransportFactory(
             appContext = appContext,
-            stsStore = stsStore,
-            certStore = certStore,
+            security = security,
             // TLS/cert trust follows the transport endpoint: the bouncer's for a bound child.
             clientCertAlias = endpoint.clientCertAlias,
             // Stash the failure keyed by network so the actor can park on it; unwrap defensively.
@@ -815,7 +822,7 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     private suspend fun openBuffers(networkId: Long): List<Pair<Long, String>> =
-        kotlinx.coroutines.withContext(Dispatchers.IO) {
+        kotlinx.coroutines.withContext(ioDispatcher) {
             val q = androidx.sqlite.db.SimpleSQLiteQuery(
                 "SELECT id, name FROM buffers WHERE networkId = ? AND type != 'SERVER'",
                 arrayOf<Any>(networkId),
