@@ -23,11 +23,12 @@ import androidx.compose.ui.unit.IntSize
  * preference and does not add continuous decorative animations to the chat timeline.
  */
 object MotdMotion {
-    const val MicroDurationMs = 120
-    const val StandardDurationMs = 180
-    const val NavigationDurationMs = 300
+    const val MicroDurationMs = 140
+    const val StandardDurationMs = 210
+    const val NavigationDurationMs = 340
 
     private val StandardEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+    private const val SoftSpringStiffness = 340f
 
     val fadeIn: FiniteAnimationSpec<Float> = tween(
         durationMillis = StandardDurationMs,
@@ -49,19 +50,19 @@ object MotdMotion {
     /** A calm spring: responsive and soft, without a playful bounce. */
     val softSpring: FiniteAnimationSpec<Float> = spring(
         dampingRatio = Spring.DampingRatioNoBouncy,
-        stiffness = Spring.StiffnessMediumLow,
+        stiffness = SoftSpringStiffness,
     )
     val softOffsetSpring: FiniteAnimationSpec<IntOffset> = spring(
         dampingRatio = Spring.DampingRatioNoBouncy,
-        stiffness = Spring.StiffnessMediumLow,
+        stiffness = SoftSpringStiffness,
     )
     val rowPlacement: FiniteAnimationSpec<IntOffset> = spring(
         dampingRatio = Spring.DampingRatioNoBouncy,
-        stiffness = Spring.StiffnessMediumLow,
+        stiffness = SoftSpringStiffness,
     )
     val contentSize: FiniteAnimationSpec<IntSize> = spring(
         dampingRatio = Spring.DampingRatioNoBouncy,
-        stiffness = Spring.StiffnessMediumLow,
+        stiffness = SoftSpringStiffness,
     )
 
     fun messageEnter(): EnterTransition =
