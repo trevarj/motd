@@ -33,6 +33,8 @@ _E2E_DUMP=""
 # Running counters and step context.
 _E2E_CHECKS=0
 _E2E_FAILURES=0
+_E2E_SKIPS=0
+_E2E_DIAGNOSTIC_FAILURES=0
 _E2E_STEP=0
 _E2E_STEP_DESC=""
 
@@ -205,6 +207,34 @@ bounds_of_tag_prefix() {
     | sed -E 's/^bounds="(.*)"$/\1/'
 }
 
+# bounds_of_tag_prefix_containing_text <prefix> <text> — select a runtime-id-suffixed tagged row
+# by the exact visible text geometrically contained inside it. Text disambiguates rows; interaction
+# still targets the stable tagged container rather than a copy-sensitive child node.
+bounds_of_tag_prefix_containing_text() {
+  local prefix="$1" text="$2" text_bounds text_x text_y esc node bounds coords x1 y1 x2 y2
+  _e2e_have_dump || return 1
+  text_bounds="$(bounds_of_text "$text")"
+  [ -n "$text_bounds" ] || return 1
+  read -r text_x text_y <<EOF
+$(_e2e_center "$text_bounds")
+EOF
+  # shellcheck disable=SC2016
+  esc="$(printf '%s' "$prefix" | sed 's/[][\.*^$(){}?+|/]/\\&/g')"
+  while IFS= read -r node; do
+    bounds="$(printf '%s\n' "$node" | grep -oE 'bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' | sed -E 's/^bounds="(.*)"$/\1/')"
+    coords="$(printf '%s\n' "$bounds" | tr -cd '0-9,[]' | sed -E 's/^\[([0-9]+),([0-9]+)\]\[([0-9]+),([0-9]+)\]$/\1 \2 \3 \4/')"
+    read -r x1 y1 x2 y2 <<EOF
+$coords
+EOF
+    if [ "$text_x" -ge "$x1" ] && [ "$text_x" -le "$x2" ] && \
+       [ "$text_y" -ge "$y1" ] && [ "$text_y" -le "$y2" ]; then
+      printf '%s\n' "$bounds"
+      return 0
+    fi
+  done < <(grep -oE "<node[^>]* resource-id=\"[^\"]*${esc}[^\"]*\"[^>]*>" "$_E2E_DUMP" 2>/dev/null)
+  return 1
+}
+
 # _e2e_center <bounds> — given "[x1,y1][x2,y2]" print "cx cy" (integer centre).
 _e2e_center() {
   printf '%s' "$1" | sed -E 's/\[([0-9]+),([0-9]+)\]\[([0-9]+),([0-9]+)\]/\1 \2 \3 \4/' \
@@ -244,6 +274,19 @@ tap_tag() { _e2e_tap_bounds_fn bounds_of_tag "$1" "tag"; }
 # tap_tag_prefix "<testTag-prefix>" — tap the first runtime-id-suffixed stable tag.
 tap_tag_prefix() { _e2e_tap_bounds_fn bounds_of_tag_prefix "$1" "tag prefix"; }
 
+tap_tag_prefix_containing_text() {
+  local bounds xy
+  dump || { fail "dump failed while looking for tag prefix '$1'"; return 1; }
+  bounds="$(bounds_of_tag_prefix_containing_text "$1" "$2")"
+  [ -n "$bounds" ] || { fail "tag prefix '$1' containing text '$2' not found"; return 1; }
+  xy="$(_e2e_center "$bounds")"
+  # shellcheck disable=SC2086 # xy is a deliberate "cx cy" word split.
+  adb_shell input tap $xy
+  ok "tapped tag prefix '$1' containing '$2'"
+  sleep 0.5
+  dump || true
+}
+
 # _e2e_long_press_fn <bounds-fn> <selector> <label> — long-press (500ms) the
 # centre of a matched node via `input swipe x y x y 600` (same start/end point).
 _e2e_long_press_fn() {
@@ -267,6 +310,19 @@ EOF
 long_press_text() { _e2e_long_press_fn bounds_of_text "$1" "text"; }
 long_press_tag() { _e2e_long_press_fn bounds_of_tag "$1" "tag"; }
 long_press_tag_prefix() { _e2e_long_press_fn bounds_of_tag_prefix "$1" "tag prefix"; }
+
+long_press_tag_prefix_containing_text() {
+  local bounds xy
+  dump || { fail "dump failed while looking for tag prefix '$1'"; return 1; }
+  bounds="$(bounds_of_tag_prefix_containing_text "$1" "$2")"
+  [ -n "$bounds" ] || { fail "tag prefix '$1' containing text '$2' not found"; return 1; }
+  xy="$(_e2e_center "$bounds")"
+  # shellcheck disable=SC2086 # each xy expands to the same deliberate x/y pair.
+  adb_shell input swipe $xy $xy 650
+  ok "long-pressed tag prefix '$1' containing '$2'"
+  sleep 0.5
+  dump || true
+}
 
 # --- text input ------------------------------------------------------------
 
@@ -579,6 +635,12 @@ fail() {
 # note "<msg>" — informational log line, not a check.
 note() { echo "  ${_C_YEL}..${_C_RST}  $1"; }
 
+# skip "<reason>" — record an explicit unmet conditional precondition.
+skip() {
+  _E2E_SKIPS=$(( _E2E_SKIPS + 1 ))
+  echo "  ${_C_YEL}SKIP${_C_RST} $1"
+}
+
 # e2e_summary — print the final tally and return non-zero if anything failed.
 # Call once at the end of the run (runbook.sh traps EXIT to invoke it).
 e2e_summary() {
@@ -586,6 +648,13 @@ e2e_summary() {
   echo "${_C_CYA}=================== E2E summary ===================${_C_RST}"
   echo "  checks:   ${_E2E_CHECKS}"
   echo "  failures: ${_E2E_FAILURES}"
+  echo "  skips:    ${_E2E_SKIPS}"
+  echo "  diagnostic findings: ${_E2E_DIAGNOSTIC_FAILURES}"
+  mkdir -p "$E2E_OUT_DIR"
+  printf '{"suite":"runbook","checks":%s,"failures":%s,"skips":%s,"diagnosticFindings":%s,"result":"%s"}\n' \
+    "$_E2E_CHECKS" "$_E2E_FAILURES" "$_E2E_SKIPS" "$_E2E_DIAGNOSTIC_FAILURES" \
+    "$([ "$_E2E_FAILURES" -eq 0 ] && printf pass || printf fail)" \
+    >"$E2E_OUT_DIR/summary.json"
   if [ "$_E2E_FAILURES" -eq 0 ]; then
     echo "  ${_C_GRN}RESULT: PASS${_C_RST}"
     return 0

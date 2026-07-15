@@ -51,13 +51,9 @@ jobs:
 
       # --- Stand up the hermetic bouncer stack ------------------------------
       - name: Start hermetic bouncer stack
-        run: |
-          # `up --wait` blocks until every service is healthy AND the one-shot
-          # ergo-provision / ergo-seed containers have completed successfully
-          # (their depends_on chain gates soju + the seed on the right order).
-          docker compose -f test/e2e/hermetic/docker-compose.yml up --build -d --wait
+        run: ./test/e2e/hermetic-stack.sh up
       - name: Dump stack logs (provisioning + seed)
-        run: docker compose -f test/e2e/hermetic/docker-compose.yml logs --no-color
+        run: ./test/e2e/hermetic-stack.sh logs
 
       # --- CI env for the runbook (runbook.sh sources test/e2e/.env) --------
       - name: Install CI env
@@ -88,6 +84,9 @@ jobs:
             ./test/e2e/runbook.sh
 
       # --- Artifacts on failure ---------------------------------------------
+      - name: Capture stack diagnostics
+        if: failure()
+        run: ./test/e2e/hermetic-stack.sh capture test/e2e/artifacts
       - name: Upload e2e artifacts
         if: failure()
         uses: actions/upload-artifact@v4
@@ -95,9 +94,6 @@ jobs:
           name: e2e-artifacts
           path: test/e2e/artifacts/**
           if-no-files-found: ignore
-      - name: Dump stack logs on failure
-        if: failure()
-        run: docker compose -f test/e2e/hermetic/docker-compose.yml logs --no-color || true
       - name: Tear down stack
         if: always()
-        run: docker compose -f test/e2e/hermetic/docker-compose.yml down -v || true
+        run: ./test/e2e/hermetic-stack.sh down || true

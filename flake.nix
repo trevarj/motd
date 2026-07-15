@@ -67,6 +67,23 @@
           LANG = "C.UTF-8";
           LC_ALL = "C.UTF-8";
         };
+        # Lockfile-backed native fixture shell. Keep registry lookups out of E2E scripts so Soju,
+        # Ergo, ZNC, and both REALITY implementations are reproducible from flake.lock.
+        devShells.e2e-stack = pkgs.mkShell {
+          packages = with pkgs; [
+            ergochat
+            soju
+            netcat-openbsd
+            openssl
+            python3
+            sing-box
+            xray
+            znc
+          ];
+          MOTD_E2E_STACK_SHELL = "1";
+          LANG = "C.UTF-8";
+          LC_ALL = "C.UTF-8";
+        };
         devShells.libbox = libboxPkgs.mkShell {
           # Deliberately omit the NDK: Nix's Android SDK composition fetches a
           # 690 MiB archive before the shell can start. build-libbox.sh accepts

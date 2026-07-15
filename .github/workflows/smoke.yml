@@ -60,21 +60,14 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Start hermetic soju and ergo
-        run: docker compose -f test/e2e/hermetic/docker-compose.yml up --build -d --wait
+        run: ./test/e2e/hermetic-stack.sh up
 
       - name: Run isolated Kotlin headless journeys
-        run: |
-          ./gradlew headlessApi34FossE2eAndroidTest \
-            -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect \
-            -Pandroid.testInstrumentationRunnerArguments.annotation=io.github.trevarj.motd.FastHeadlessE2e \
-            -Pandroid.testInstrumentationRunnerArguments.sojuHost=10.0.2.2 \
-            -Pandroid.testInstrumentationRunnerArguments.sojuPort=6697 \
-            -Pandroid.testInstrumentationRunnerArguments.sojuUser=motd \
-            -Pandroid.testInstrumentationRunnerArguments.sojuPassword=motdtest \
-            -Pandroid.testInstrumentationRunnerArguments.nick=motdadb \
-            -Pandroid.testInstrumentationRunnerArguments.channel=##motdtest \
-            -Pandroid.testInstrumentationRunnerArguments.secondNick=motdadb2 \
-            --stacktrace
+        run: ./test/e2e/fast-suite.sh managed
+
+      - name: Capture bouncer diagnostics
+        if: failure()
+        run: ./test/e2e/hermetic-stack.sh capture test/e2e/artifacts/fast-suite
 
       - name: Upload smoke reports
         if: failure()
@@ -84,12 +77,9 @@ jobs:
           path: |
             app/build/reports/androidTests/**
             app/build/outputs/androidTest-results/**
+            test/e2e/artifacts/fast-suite/**
           if-no-files-found: ignore
-
-      - name: Dump bouncer logs on failure
-        if: failure()
-        run: docker compose -f test/e2e/hermetic/docker-compose.yml logs --no-color || true
 
       - name: Tear down hermetic stack
         if: always()
-        run: docker compose -f test/e2e/hermetic/docker-compose.yml down -v || true
+        run: ./test/e2e/hermetic-stack.sh down || true

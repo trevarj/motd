@@ -306,7 +306,7 @@ Verification uses virtual time for cancellation, restart, timeout, and shutdown.
 
 ## T1. Consolidate the existing E2E infrastructure
 
-- **Priority / size / status:** P1, M, Ready.
+- **Priority / size / status:** P1, M, Completed 2026-07-15.
 - **Depends on:** current `headless-core` green baseline.
 - **Coverage constraint:** preserve the four required Compose journeys, the
   nightly/manual A-I runbook, managed-device smoke, and VLESS socket check. Add
@@ -335,6 +335,34 @@ Verification uses virtual time for cancellation, restart, timeout, and shutdown.
    stack versions, and service logs on failure.
 7. Add fast shell-syntax and Docker Compose configuration validation to
    ordinary CI. Preserve the `headless-core` job name and gating semantics.
+
+### Completion evidence
+
+- `fast-suite.sh` and `fast-suite.env` now own the annotation filter and all
+  non-secret fixture arguments for local direct instrumentation, connected CI,
+  and Gradle managed devices. Direct runs query the installed instrumentation
+  package and discover annotated classes instead of maintaining four names.
+- `harness.sh` and `hermetic-stack.sh` centralize stack readiness, lifecycle,
+  device capture, service logs, status, and image/version evidence. Required
+  `headless-core`, managed-device smoke, and exhaustive workflows use these
+  helpers while retaining their existing coverage and gating roles.
+- The flake exposes a lockfile-backed `e2e-stack` shell containing Ergo, Soju,
+  ZNC, Python, OpenSSL, netcat, sing-box, and Xray. Native Soju and ZNC scripts
+  re-enter it instead of an unpinned `nix shell nixpkgs#...` environment.
+- The shell runbook targets dynamic drawer/chat/message rows through their
+  stable tag prefixes, with visible text used only to disambiguate the tagged
+  container. Required, conditional, and diagnostic phases are explicit;
+  conditional skips have reasons and diagnostic findings cannot change an
+  earlier required result.
+- Both fast and exhaustive paths emit JSON summaries. Failure handling captures
+  app logcat, a screenshot, instrumentation or Gradle reports, stack service
+  logs, status, and pinned image/version identifiers before artifact upload.
+- Ordinary CI runs `test/e2e/validate.sh` for Bash syntax and Docker Compose
+  configuration while preserving the `headless-core` job and gate dependency.
+  Local syntax/summary checks and Nix flake evaluation passed. The realized
+  pinned shell contained every declared binary, and an isolated native
+  Soju/Ergo `up` plus `history-check` returned `CHATHISTORY_SMOKE_OK`. Device
+  and emulator E2E remain delegated to CI as required by repository policy.
 
 References:
 

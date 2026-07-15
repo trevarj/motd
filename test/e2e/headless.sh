@@ -24,6 +24,9 @@ SEED_LOG_FILE="$STATE_DIR/seed.log"
 ARTIFACTS="$E2E_DIR/artifacts/headless"
 SYSTEM_IMAGE="system-images;android-34;default;x86_64"
 
+# shellcheck source=test/e2e/harness.sh
+. "$E2E_DIR/harness.sh"
+
 export ANDROID_AVD_HOME="$AVD_HOME"
 
 log() { printf '\033[36m[headless-e2e]\033[0m %s\n' "$*" >&2; }
@@ -136,58 +139,17 @@ up() {
   ensure_seed_member
 }
 
-build_test_apks() {
-  log "building x86_64 app and instrumentation APKs"
-  nix develop "$REPO" -c ./gradlew \
-    :app:assembleFossE2e :app:assembleFossE2eAndroidTest \
-    --stacktrace --no-daemon --max-workers=1
-}
-
-capture_failure() {
-  mkdir -p "$ARTIFACTS"
-  adb_e exec-out screencap -p >"$ARTIFACTS/failure.png" 2>/dev/null || true
-  adb_e logcat -d -v threadtime >"$ARTIFACTS/logcat.txt" 2>/dev/null || true
-  cp "$STATE_DIR"/*.instrumentation.txt "$ARTIFACTS/" 2>/dev/null || true
-  cp "$STACK_DIR/soju.log" "$ARTIFACTS/soju.log" 2>/dev/null || true
-  cp "$STACK_DIR/ergo.log" "$ARTIFACTS/ergo.log" 2>/dev/null || true
-}
-
 fast() {
   up
-  build_test_apks
-  local app_apk test_apk test_class result_file
-  app_apk="$REPO/app/build/outputs/apk/foss/e2e/app-foss-e2e.apk"
-  test_apk="$REPO/app/build/outputs/apk/androidTest/foss/e2e/app-foss-e2e-androidTest.apk"
-
-  log "installing only on $SERIAL"
-  adb_e install -r -g "$app_apk" >/dev/null
-  adb_e install -r "$test_apk" >/dev/null
-  adb_e logcat -c
-
-  log "running isolated fast journeys"
-  for test_class in \
-    io.github.trevarj.motd.OnboardingHeadlessE2eTest \
-    io.github.trevarj.motd.ChatHeadlessE2eTest \
-    io.github.trevarj.motd.ChannelHeadlessE2eTest \
-    io.github.trevarj.motd.SettingsAndBouncerHeadlessE2eTest; do
-    log "journey ${test_class##*.}"
-    # Separate instrumentation invocations give each journey a fresh process. Clearing only the
-    # dedicated debug target keeps the test package installed and cannot touch a release app.
-    adb_e shell pm clear io.github.trevarj.motd.debug >/dev/null
-    result_file="$STATE_DIR/${test_class##*.}.instrumentation.txt"
-    if adb_e shell am instrument -w -r \
-      -e class "$test_class" \
-      -e sojuHost 127.0.0.1 -e sojuPort "$SOJU_PORT" \
-      -e sojuUser motd -e sojuPassword motdtest -e nick motdadb \
-      -e secondNick motdadb2 \
-      io.github.trevarj.motd.debug.test/androidx.test.runner.AndroidJUnitRunner \
-      | tee "$result_file" && grep -Eq '^OK \([1-9][0-9]* tests?\)$' "$result_file"; then
-      :
-    else
-      capture_failure
-      die "${test_class##*.} failed; see $ARTIFACTS"
-    fi
-  done
+  log "discovering and running isolated fast journeys only on $SERIAL"
+  if SERIAL="$SERIAL" FAST_E2E_OUT_DIR="$ARTIFACTS" \
+    FAST_E2E_SOJU_HOST=127.0.0.1 FAST_E2E_SOJU_PORT="$SOJU_PORT" \
+    nix develop "$REPO" -c "$E2E_DIR/fast-suite.sh" direct; then
+    :
+  else
+    e2e_capture_native_stack_artifacts "$ARTIFACTS" "$STACK_DIR"
+    die "fast suite failed; see $ARTIFACTS"
+  fi
   log "PASS; emulator and stack remain running for the next iteration"
 }
 

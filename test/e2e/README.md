@@ -57,8 +57,10 @@ The lifecycle wrapper owns a dedicated AVD, emulator serial, native soju/ergo
 stack, adb reverse, and temporary state. Every adb command includes that serial,
 so an attached phone is never installed to, cleared, reversed, or reconfigured.
 Each journey gets a fresh instrumentation process and cleared debug-app data;
-CI and managed-device runs enforce the same boundary with Android Test
-Orchestrator. The four journeys cover:
+the launcher discovers every `@FastHeadlessE2e` class from the installed test
+package instead of maintaining a class list. CI and managed-device runs use the
+same fixture configuration and enforce isolation with Android Test Orchestrator.
+The four journeys cover:
 
 - onboarding, self-signed fixture trust, soju login, and network import;
 - channel join, send, emoji and command completion, and message search;
@@ -85,14 +87,17 @@ fast. Manage their lifecycle explicitly:
 
 `full` runs the existing A-I uiautomator sweep on the same isolated emulator.
 `down` preserves the AVD; `reset` deletes only the wrapper's isolated AVD,
-stack, and state directories. Failures save a screenshot, logcat, and local
-bouncer logs under `test/e2e/artifacts/headless/`.
+stack, and state directories. Failures save a JSON summary, screenshot, logcat,
+instrumentation output, stack versions, and local bouncer logs under
+`test/e2e/artifacts/headless/`.
 
 ## Native local bouncer stack
 
 The native stack runs ephemeral ergo and soju instances under
 `/tmp/motd-stack`, publishes TLS soju on host port `6697`, and uses `adb reverse`
 so a USB device reaches it at `127.0.0.1:6697`.
+Missing fixture binaries cause the script to re-enter the lockfile-backed
+`nix develop .#e2e-stack` shell; it never resolves an unpinned registry shell.
 
 ```sh
 ./test/e2e/local-stack.sh up
@@ -326,17 +331,17 @@ failure log.
 
 | Phase | Coverage | Hermetic status |
 | --- | --- | --- |
-| A | Clean install, onboarding, TLS trust, bouncer import | Expected green |
-| B | Chat list, server drawer, connection state and scoping | Expected green |
-| C | Join, send, history, autocomplete, actions, reactions, reply, search | Expected green |
-| D | Channel info, topic, mute/pin, members, leave dialog | Best effort; live member state matters |
-| E | Channel browser and LIST search | Best effort |
-| F | Settings, themes, message presentation, delivery, networks, about | Best effort |
-| G | Compact and comfortable rendering | Best effort |
-| H | Inline image viewer | Conditional on a reachable seeded image |
-| I | Delete-chat cancellation, final crash sweep, clean reset | Expected green |
-| J | Soju control-center panels, admin discovery, safe console command | Expected green with local admin fixture |
-| K | ntfy discovery, soju WebPush ACK, background/cold/Doze delivery, exactly-once notifications | Opt-in physical device with F-Droid ntfy |
+| A | Clean install, onboarding, TLS trust, bouncer import | Required |
+| B | Chat list, server drawer, connection state and scoping | Required |
+| C | Join, send, history, autocomplete, actions, reactions, reply, search | Required |
+| D | Channel info, topic, mute/pin, members, leave dialog | Diagnostic; live member state varies |
+| E | Channel browser and LIST search | Diagnostic |
+| F | Settings, themes, message presentation, delivery, networks, about | Diagnostic |
+| G | Compact and comfortable rendering | Diagnostic |
+| H | Inline image viewer | Conditional; skipped without a reachable seeded image |
+| I | Delete-chat cancellation, final crash sweep, clean reset | Required |
+| J | Soju control-center panels, admin discovery, safe console command | Required with the local admin fixture |
+| K | ntfy discovery, soju WebPush ACK, background/cold/Doze delivery, exactly-once notifications | Conditional; skipped without F-Droid ntfy |
 
 Phase K is intentionally excluded from the default A–I sweep because it needs an installed
 UnifiedPush distributor and network access to its HTTPS relay. With the native stack already up,
@@ -362,8 +367,9 @@ false failure.
 
 ### Results and diagnostics
 
-Each step logs `ok`, `FAIL`, or a note, followed by a final check/failure count.
-The command exits non-zero on failures. XML dumps and diagnostic screenshots go
+Each step logs `ok`, `FAIL`, `SKIP`, or a diagnostic note, followed by a final
+check/failure/skip count. The command writes `summary.json` and exits non-zero
+on failures. XML dumps, failure logcat, and diagnostic screenshots go
 to `test/e2e/artifacts/`, which is ignored. Screenshots are diagnostic or used
 for color-only checks; accessibility/semantic state is the preferred oracle.
 
@@ -385,11 +391,11 @@ The hermetic stack is ergo → soju with self-signed TLS and deterministic
 CHATHISTORY, exposed to Android emulators at `10.0.2.2:6697`.
 
 ```sh
-docker compose -f test/e2e/hermetic/docker-compose.yml up --build -d --wait
+./test/e2e/hermetic-stack.sh up
 cp test/e2e/.env.ci test/e2e/.env
 nix develop -c ./gradlew :app:assembleFossE2e
 nix develop -c ./test/e2e/runbook.sh
-docker compose -f test/e2e/hermetic/docker-compose.yml down -v
+./test/e2e/hermetic-stack.sh down
 ```
 
 Running this manually requires an already-booted x86_64 emulator. CI supplies
