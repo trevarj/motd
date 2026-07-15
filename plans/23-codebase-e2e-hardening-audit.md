@@ -593,3 +593,17 @@ Use the existing CI `headless-core` suite for E2E proof. Local device/emulator
 E2E, a new Soju/VLESS matrix, device installation, merge, tag, and release are
 not implicit parts of this roadmap. Physical performance proof requires a new
 explicit authorization.
+
+## Implementation closeout
+
+All code-ready missions completed on 2026-07-15. S1's investigation is
+complete and its four product choices remain the only intentional decision
+gate; no security behavior was guessed across that boundary.
+
+The final local release-parity command passed `:irc:build`, debug and release
+app unit tests, FOSS debug lint, and FOSS release assembly. E2E shell syntax,
+`actionlint`, Dependabot/workflow YAML syntax, diff checks, and tracked Room
+schema cleanliness also passed. Docker was unavailable for the final repeated
+Compose validation, so the required pushed CI validation and `headless-core`
+journey remain the authoritative final evidence; the isolated native Soju
+history stack and Compose configuration had already passed during T1.
