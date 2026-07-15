@@ -7,14 +7,13 @@ import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.di.ApplicationScope
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -31,9 +30,9 @@ class PushDistributorController @Inject constructor(
     private val healthStore: PushHealthStore,
     private val connectionManager: ConnectionManager,
     private val webPushRegistrar: Lazy<WebPushRegistrar>,
+    @ApplicationScope private val scope: CoroutineScope,
 ) {
     private val mutex = Mutex()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pendingUnregistrations =
         java.util.concurrent.ConcurrentHashMap<Long, CompletableDeferred<Unit>>()
 

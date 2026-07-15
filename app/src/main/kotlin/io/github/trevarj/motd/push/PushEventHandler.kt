@@ -64,7 +64,7 @@ class PushEventHandler(
             return null
         }
         val event = mapToEvent(msg) ?: return null
-        eventSink.process(networkId, event)
+        eventSink.processPush(networkId, event)
         healthStore.messageDelivered(networkId)
         return event
     }

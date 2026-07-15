@@ -11,21 +11,19 @@ import io.github.trevarj.motd.bouncer.BouncerServResult
 import io.github.trevarj.motd.bouncer.ChannelCommandFields
 import io.github.trevarj.motd.bouncer.NetworkCommandFields
 import io.github.trevarj.motd.bouncer.UserCommandFields
-import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import javax.inject.Inject
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 data class BouncerNetworksUiState(
     val root: NetworkEntity? = null,
@@ -53,7 +51,7 @@ class BouncerNetworksViewModel @Inject constructor(
     private val networkRepository: NetworkRepository,
     private val connectionManager: ConnectionManager,
     private val bouncerServ: BouncerServClient,
-    private val database: MotdDatabase,
+    private val messageDao: MessageDao,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(BouncerNetworksUiState())
@@ -71,8 +69,15 @@ class BouncerNetworksViewModel @Inject constructor(
             _state.update { current -> current.copy(root = root) }
         }
         viewModelScope.launch {
-            database.invalidationTracker.createFlow("messages", "buffers", emitInitialState = true)
-                .collectLatest { loadTranscript() }
+            messageDao.observeBouncerTranscript(rootNetworkId).collectLatest { rows ->
+                _state.update { current ->
+                    current.copy(
+                        transcript = rows.asReversed().map { row ->
+                            BouncerTranscriptEntry(row.sender, row.text, row.serverTime, row.isSelf)
+                        },
+                    )
+                }
+            }
         }
         viewModelScope.launch {
             connectionManager.connectionStates.collect { states ->
@@ -294,37 +299,6 @@ class BouncerNetworksViewModel @Inject constructor(
         )
     }
 
-    private suspend fun loadTranscript() {
-        if (rootNetworkId == 0L) return
-        val entries = withContext(Dispatchers.IO) {
-            val db = database.openHelper.readableDatabase
-            db.query(
-                """
-                SELECT m.sender, m.text, m.serverTime, m.isSelf
-                FROM messages m
-                JOIN buffers b ON b.id = m.bufferId
-                WHERE b.networkId = ? AND lower(b.name) = 'bouncerserv'
-                ORDER BY m.serverTime DESC, m.id DESC
-                LIMIT 100
-                """.trimIndent(),
-                arrayOf(rootNetworkId),
-            ).use { cursor ->
-                buildList {
-                    while (cursor.moveToNext()) {
-                        add(
-                            BouncerTranscriptEntry(
-                                sender = cursor.getString(0),
-                                text = cursor.getString(1),
-                                serverTime = cursor.getLong(2),
-                                isSelf = cursor.getInt(3) != 0,
-                            ),
-                        )
-                    }
-                }.asReversed()
-            }
-        }
-        _state.value = _state.value.copy(transcript = entries)
-    }
 }
 
 private fun BouncerServResult.indicatesCapabilityDrift(): Boolean {

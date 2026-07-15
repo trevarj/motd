@@ -7,6 +7,8 @@ import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 // Thin pass-through over NetworkDao. Delete treats a bouncer root and its local child mirrors as
 // one local tree; a missing row is a no-op. addNetwork additionally dedups against existing rows
@@ -16,6 +18,8 @@ class NetworkRepositoryImpl @Inject constructor(
     private val networkDao: NetworkDao,
     private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
 ) : NetworkRepository {
+    private val addMutex = Mutex()
+
     override fun observeNetworks(): Flow<List<NetworkEntity>> = networkDao.observeAll()
 
     /**
@@ -25,10 +29,10 @@ class NetworkRepositoryImpl @Inject constructor(
      * network, soju child import) is covered transparently and callers keep the "returns the row
      * id" contract — they just get the pre-existing id on a duplicate.
      */
-    override suspend fun addNetwork(n: NetworkEntity): Long {
+    override suspend fun addNetwork(n: NetworkEntity): Long = addMutex.withLock {
         val key = networkIdentityKey(n)
         networkDao.allNow().firstOrNull { networkIdentityKey(it) == key }?.let { return it.id }
-        return networkDao.insert(n)
+        networkDao.insert(n)
     }
 
     override suspend fun updateNetwork(n: NetworkEntity) = networkDao.update(n)

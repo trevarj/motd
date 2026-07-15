@@ -25,6 +25,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -56,7 +59,12 @@ class HistoryResyncCoordinatorTest {
             .allowMainThreadQueries()
             .build()
         processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
-        coordinator = HistoryResyncCoordinator(db, processor, syncPrefs)
+        coordinator = HistoryResyncCoordinator(
+            db,
+            processor,
+            syncPrefs,
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        )
         networkId = db.networkDao().insert(
             NetworkEntity(
                 name = "libera",

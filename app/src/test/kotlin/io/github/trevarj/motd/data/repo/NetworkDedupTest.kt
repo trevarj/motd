@@ -4,9 +4,13 @@ import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -28,7 +32,10 @@ class NetworkDedupTest {
             return id
         }
 
-        override suspend fun allNow(): List<NetworkEntity> = rows.values.toList()
+        override suspend fun allNow(): List<NetworkEntity> {
+            yield()
+            return rows.values.toList()
+        }
         override suspend fun byId(id: Long): NetworkEntity? = rows[id]
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> =
             rows.values.filter { it.parentId == rootId }
@@ -45,7 +52,9 @@ class NetworkDedupTest {
         override fun observeAll(): Flow<List<NetworkEntity>> = flowOf(rows.values.toList())
         override suspend fun connectable(): List<NetworkEntity> = rows.values.filter { it.autoConnect }
         override suspend fun update(n: NetworkEntity) { rows[n.id] = n }
-        override suspend fun delete(n: NetworkEntity) { rows.remove(n.id) }
+        override suspend fun updateBouncerConnection(id: Long, host: String, port: Int, nick: String) {
+            rows[id]?.let { rows[id] = it.copy(host = host, port = port, nick = nick) }
+        }
     }
 
     private class RecordingBouncerKinds : BouncerKindPrefs {
@@ -78,6 +87,17 @@ class NetworkDedupTest {
         val first = repo.addNetwork(direct("irc.libera.chat"))
         val second = repo.addNetwork(direct("irc.libera.chat"))
         assertEquals(first, second)
+        assertEquals(1, dao.rows.size)
+    }
+
+    @Test
+    fun `concurrent equivalent adds serialize to one network row`() = runTest {
+        val dao = InMemoryNetworkDao()
+        val repo = NetworkRepositoryImpl(dao)
+
+        val ids = List(20) { async { repo.addNetwork(direct("irc.libera.chat")) } }.awaitAll()
+
+        assertEquals(1, ids.toSet().size)
         assertEquals(1, dao.rows.size)
     }
 

@@ -15,6 +15,20 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.room)
+}
+
+room {
+    schemaDirectory("$projectDir/schemas")
+}
+
+// Opt in for release-only characterization without slowing routine builds or checking generated
+// reports into source control: ./gradlew :app:compileFossReleaseKotlin -PmotdComposeMetrics=true
+if (providers.gradleProperty("motdComposeMetrics").map(String::toBoolean).getOrElse(false)) {
+    composeCompiler {
+        reportsDestination.set(layout.buildDirectory.dir("compose_compiler"))
+        metricsDestination.set(layout.buildDirectory.dir("compose_compiler"))
+    }
 }
 
 // The release/debug APKs ship the pinned arm64 native core. Hermetic UI tests exercise plain IRC
@@ -158,6 +172,9 @@ android {
                 }
             }
         }
+    }
+    sourceSets {
+        getByName("test").resources.srcDir("$projectDir/schemas")
     }
 
     lint {

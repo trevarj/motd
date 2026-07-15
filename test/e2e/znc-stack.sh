@@ -18,9 +18,9 @@ die() { printf '\033[31m[znc-stack] FATAL:\033[0m %s\n' "$*" >&2; exit 1; }
 
 for binary in znc nc openssl python3; do
   if ! command -v "$binary" >/dev/null 2>&1; then
-    log "fetching ZNC fixture binaries via nix shell…"
-    exec nix shell nixpkgs#znc nixpkgs#netcat-openbsd nixpkgs#openssl nixpkgs#python3 \
-      -c "$0" "$CMD"
+    [ "${MOTD_E2E_STACK_SHELL:-}" != 1 ] || die "$binary is missing from the e2e-stack shell"
+    log "entering the lockfile-backed e2e-stack shell…"
+    exec nix develop "$REPO#e2e-stack" -c "$0" "$CMD"
   fi
 done
 

@@ -40,16 +40,7 @@ class MessageVisibilityReader @Inject constructor(
         awaitClose { db.invalidationTracker.removeObserver(observer) }
     }.map { latestRawTime(bufferId) }.distinctUntilChanged()
 
-    suspend fun latestRawTime(bufferId: Long): Long? = withContext(Dispatchers.IO) {
-        db.query(
-            SimpleSQLiteQuery(
-                "SELECT MAX(serverTime) FROM messages WHERE bufferId = ?",
-                arrayOf<Any>(bufferId),
-            ),
-        ).use { cursor ->
-            if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
-        }
-    }
+    suspend fun latestRawTime(bufferId: Long): Long? = db.messageDao().newestTime(bufferId)
 
     suspend fun countTimelineNewer(
         bufferId: Long,

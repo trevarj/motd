@@ -131,6 +131,11 @@ _final() {
     adb_shell dumpsys deviceidle unforce >/dev/null 2>&1 || true
     adb_shell dumpsys battery reset >/dev/null 2>&1 || true
   fi
+  if [ "$rc" -ne 0 ] || [ "$_E2E_FAILURES" -ne 0 ]; then
+    mkdir -p "$E2E_OUT_DIR"
+    adb_ exec-out screencap -p >"$E2E_OUT_DIR/failure.png" 2>/dev/null || true
+    adb_ logcat -d -v threadtime >"$E2E_OUT_DIR/logcat.txt" 2>/dev/null || true
+  fi
   # Print the tally; preserve a non-zero rc if the run body already failed.
   if e2e_summary; then
     exit "$rc"
@@ -331,7 +336,7 @@ phase_b() {
 
   # 14. Scope to network.
   step "Scope list to libera"
-  tap_text "libera"                      # TODO tag: drawer_network_row_<id>
+  tap_tag_prefix_containing_text drawer_network_row_ "libera"
   assert_text "libera"                   # ScopeChip / title
   assert_no_crash
 
@@ -344,7 +349,7 @@ phase_b() {
   # 16. Server messages buffer.
   step "Open the SERVER buffer via drawer long-press"
   tap_desc "Open navigation drawer"
-  long_press_text "libera"
+  long_press_tag_prefix_containing_text drawer_network_row_ "libera"
   if wait_for_text "Server messages" 5; then
     tap_text "Server messages"
     assert_text "Send a command…"        # SERVER composer placeholder
@@ -377,23 +382,16 @@ phase_c() {
 
   # 18. Join seed channel.
   step "Join seed channel ${MOTD_TEST_CHANNEL}"
-  tap_text "Join channel"
-  # The join field placeholder differs by build; try common labels.
-  if [ -n "$(bounds_of_text "#channel")" ]; then
-    input_by_text_label "#channel" "$MOTD_TEST_CHANNEL"
-  elif [ -n "$(bounds_of_text "Channel")" ]; then
-    input_by_text_label "Channel" "$MOTD_TEST_CHANNEL"
-  else
-    note "join field label unknown; TODO stable tag for join field"
-  fi
-  tap_text "Join" || true
+  tap_tag new_conversation_join_tab
+  input_tag new_conversation_input "$MOTD_TEST_CHANNEL"
+  tap_tag new_conversation_submit
   wait_for_text "$MOTD_TEST_CHANNEL" 15 || true
   assert_text "$MOTD_TEST_CHANNEL"
   assert_no_crash
 
   # 19. Open channel.
   step "Open ${MOTD_TEST_CHANNEL} chat"
-  tap_text "$MOTD_TEST_CHANNEL"          # TODO tag: chatlist_row_<bufferId>
+  tap_tag_prefix_containing_text chatlist_row_ "$MOTD_TEST_CHANNEL"
   assert_text "$MOTD_TEST_CHANNEL"
   assert_text "Message"                  # composer placeholder
   assert_no_crash
@@ -455,7 +453,8 @@ phase_c() {
 
   # 24. Reaction add.
   step "Add a reaction"
-  scroll_to_text "Hello from e2e" || true; long_press_text "Hello from e2e"       # TODO tag: chat_message_<msgid>
+  scroll_to_text "Hello from e2e" || true
+  long_press_tag_prefix_containing_text chat_message_ "Hello from e2e"
   if wait_for_text "👍" 5; then
     tap_text "👍"
     ok "reaction quick-row present; tapped 👍"
@@ -466,7 +465,8 @@ phase_c() {
 
   # 25. More reactions.
   step "More reactions grid"
-  scroll_to_text "Hello from e2e" || true; long_press_text "Hello from e2e"
+  scroll_to_text "Hello from e2e" || true
+  long_press_tag_prefix_containing_text chat_message_ "Hello from e2e"
   if wait_for_text "More reactions" 5 || [ -n "$(bounds_of_desc "More reactions")" ]; then
     # ModalBottomSheet is a separate Compose window; its explicit content description is exported
     # reliably to uiautomator even when the parallel testTag is not.
@@ -480,7 +480,8 @@ phase_c() {
 
   # 26. Reply.
   step "Reply bar"
-  scroll_to_text "Hello from e2e" || true; long_press_text "Hello from e2e"
+  scroll_to_text "Hello from e2e" || true
+  long_press_tag_prefix_containing_text chat_message_ "Hello from e2e"
   if wait_for_text "Reply" 5; then
     tap_text "Reply"
     if [ -n "$(bounds_of_text "Replying to $MOTD_NICK")" ] || wait_for_text "Replying to" 4; then
@@ -494,7 +495,8 @@ phase_c() {
 
   # 27. Copy / Quote.
   step "Copy action (no crash)"
-  scroll_to_text "Hello from e2e" || true; long_press_text "Hello from e2e"
+  scroll_to_text "Hello from e2e" || true
+  long_press_tag_prefix_containing_text chat_message_ "Hello from e2e"
   if wait_for_text "Copy" 5; then
     tap_text "Copy"                      # clipboard is not asserted through UI
     ok "Copy tapped"
@@ -545,7 +547,7 @@ phase_d() {
   # 30. Open channel info by tapping the title.
   step "Open channel info"
   # Reopen the channel to guarantee we're in the chat.
-  tap_text "$MOTD_TEST_CHANNEL" || true
+  tap_tag_prefix_containing_text chatlist_row_ "$MOTD_TEST_CHANNEL"
   redump
   tap_text "$MOTD_TEST_CHANNEL"          # title area
   if wait_for_text "Channel info" 6; then
@@ -941,7 +943,7 @@ phase_h() {
     assert_desc_present "Full-screen image"
     tap_desc "Back" || true
   else
-    note "no inline image present; seed a reachable image URL to exercise"
+    skip "phase H requires a reachable seeded inline image"
   fi
   adb_shell input keyevent 4 || true
   assert_no_crash
@@ -972,10 +974,10 @@ EOF
       assert_text "Delete chat?"
       tap_text "Cancel"                  # do NOT delete; preserve for re-runs
     else
-      note "swipe did not arm the delete dialog"
+      fail "swipe did not arm the delete dialog"
     fi
   else
-    note "seed channel row not present for swipe test"
+    fail "seed channel row not present for swipe test"
   fi
   assert_no_crash
 
@@ -1076,6 +1078,11 @@ phase_j() {
 phase_k() {
   echo ""
   echo "${_C_CYA}########## Phase K: UnifiedPush + ntfy ##########${_C_RST}"
+
+  if ! adb_shell pm path io.heckel.ntfy >/dev/null 2>&1; then
+    skip "phase K requires the F-Droid ntfy UnifiedPush distributor"
+    return 0
+  fi
 
   step "Enable UnifiedPush and wait for verified soju registration"
   _settings_open=false
@@ -1318,16 +1325,32 @@ main() {
   # chat-list anchor via reset_to_chatlist, so a subset run — e.g. E2E_PHASES="c" — picks up
   # where a prior full run left off without repeating onboarding (rapid dev cycle).
   local phases="${E2E_PHASES:-a b c d e f g h i}"
-  local p
+  local p phase_class phase_rc failures_before findings
   for p in $phases; do
+    case "$p" in
+      a|b|c|i|j|s) phase_class=required ;;
+      d|e|f|g) phase_class=diagnostic ;;
+      h|k) phase_class=conditional ;;
+      *) fail "unknown phase '$p'"; continue ;;
+    esac
+    note "phase $p classification: $phase_class"
     if [ "$p" != "a" ]; then
       if ! reset_to_chatlist; then
-        fail "phase '$p': app is not at the chat list (run E2E_PHASES=\"a\" first to set up state)"
+        if [ "$phase_class" = diagnostic ]; then
+          _E2E_DIAGNOSTIC_FAILURES=$(( _E2E_DIAGNOSTIC_FAILURES + 1 ))
+          note "phase '$p' unavailable: app is not at the chat list"
+        elif [ "$phase_class" = conditional ]; then
+          skip "phase '$p' requires chat state from phase A"
+        else
+          fail "phase '$p': app is not at the chat list (run E2E_PHASES=\"a\" first to set up state)"
+        fi
         continue
       fi
     fi
-    # Contain a hard early-abort (set -e) to the current phase via `|| fail`, so a glitch in one
-    # phase records a failure but still lets the remaining phases run (comprehensive coverage).
+    # Contain a hard early-abort to the current phase so later coverage still runs. Diagnostic
+    # findings are reported separately and cannot erase or add to an earlier required failure.
+    failures_before="$_E2E_FAILURES"
+    phase_rc=0
     case "$p" in
       a) phase_a ;;
       b) phase_b ;;
@@ -1341,8 +1364,17 @@ main() {
       j) phase_j ;;
       k) phase_k ;;
       s) phase_s ;;
-      *) note "unknown phase '$p' skipped" ;;
-    esac || fail "phase '$p' aborted early (see output above)"
+      *) return 2 ;;
+    esac || phase_rc=$?
+    if [ "$phase_class" = diagnostic ]; then
+      findings=$(( _E2E_FAILURES - failures_before ))
+      [ "$phase_rc" -eq 0 ] || findings=$(( findings + 1 ))
+      _E2E_DIAGNOSTIC_FAILURES=$(( _E2E_DIAGNOSTIC_FAILURES + findings ))
+      _E2E_FAILURES="$failures_before"
+      [ "$findings" -eq 0 ] || note "phase '$p' recorded $findings diagnostic finding(s)"
+    elif [ "$phase_rc" -ne 0 ]; then
+      fail "phase '$p' aborted early (see output above)"
+    fi
   done
 }
 

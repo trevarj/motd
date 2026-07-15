@@ -33,13 +33,11 @@ class BufferRepositoryImpl @Inject constructor(
         memberDao.observe(bufferId)
 
     override suspend fun setPinned(id: Long, pinned: Boolean) {
-        val current = bufferDao.observeById(id) ?: return
-        bufferDao.update(current.copy(pinned = pinned))
+        bufferDao.setPinned(id, pinned)
     }
 
     override suspend fun setMuted(id: Long, muted: Boolean) {
-        val current = bufferDao.observeById(id) ?: return
-        bufferDao.update(current.copy(muted = muted))
+        bufferDao.setMuted(id, muted)
     }
 
     // Drop the buffer row (messages cascade via FK) plus its members/reactions in one transaction.

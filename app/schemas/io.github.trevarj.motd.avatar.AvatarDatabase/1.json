@@ -1,0 +1,66 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "ffe699557a0bfbc84171b81717c48e8f",
+    "entities": [
+      {
+        "tableName": "remote_avatars",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`networkId` INTEGER NOT NULL, `scopedIdentity` TEXT NOT NULL, `identity` TEXT NOT NULL, `nick` TEXT NOT NULL, `account` TEXT, `url` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`scopedIdentity`))",
+        "fields": [
+          {
+            "fieldPath": "networkId",
+            "columnName": "networkId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scopedIdentity",
+            "columnName": "scopedIdentity",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "identity",
+            "columnName": "identity",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nick",
+            "columnName": "nick",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "account",
+            "columnName": "account",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "url",
+            "columnName": "url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "scopedIdentity"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ffe699557a0bfbc84171b81717c48e8f')"
+    ]
+  }
+}

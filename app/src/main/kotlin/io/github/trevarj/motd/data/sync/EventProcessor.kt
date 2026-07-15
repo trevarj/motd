@@ -37,6 +37,7 @@ class EventProcessor @Inject constructor(
     private val db: MotdDatabase,
     private val typing: TypingTrackerImpl,
     private val notifier: MessageNotifier,
+    private val bufferStore: BufferStore = BufferStore(db),
 ) : IrcEventSink {
 
     private val networkDao get() = db.networkDao()
@@ -46,6 +47,7 @@ class EventProcessor @Inject constructor(
     private val reactionDao get() = db.reactionDao()
     private val userDao get() = db.userDao()
     private val reactionMutations = RoomReactionMutationStore(db)
+    private val sequencer = NetworkEventSequencer()
 
     private val states = ConcurrentHashMap<Long, NetworkState>()
     private val rosterSnapshots = ConcurrentHashMap<RosterKey, MutableList<RosterDelta>>()
@@ -118,8 +120,12 @@ class EventProcessor @Inject constructor(
             NetworkState(selfNick = n?.nick ?: "", caseMapping = "rfc1459")
         }
 
-    /** Update cached self-nick + case mapping from a Registered/ISUPPORT snapshot. */
-    fun onRegistered(networkId: Long, nick: String, isupport: Map<String, String>) {
+    /** Test/setup seam; production registration enters through [process]. */
+    internal suspend fun onRegistered(networkId: Long, nick: String, isupport: Map<String, String>) {
+        sequencer.withNetwork(networkId) { applyRegistered(networkId, nick, isupport) }
+    }
+
+    private fun applyRegistered(networkId: Long, nick: String, isupport: Map<String, String>) {
         val cm = isupport["CASEMAPPING"] ?: "rfc1459"
         states[networkId] = NetworkState(
             selfNick = nick,
@@ -130,44 +136,68 @@ class EventProcessor @Inject constructor(
     }
 
     override suspend fun process(networkId: Long, event: IrcEvent) {
-        processEvent(networkId, event, notify = true)
+        sequencer.withNetwork(networkId) {
+            processEvent(networkId, event, EventOrigin.LIVE)
+        }
     }
 
-    /** Persist one event while carrying whether its provenance permits user notifications. */
-    private suspend fun processEvent(networkId: Long, event: IrcEvent, notify: Boolean) {
+    override suspend fun processPush(networkId: Long, event: IrcEvent) {
+        sequencer.withNetwork(networkId) {
+            processEvent(networkId, event, EventOrigin.PUSH)
+        }
+    }
+
+    /** Persist one event according to its provenance and, for history, its enclosing target. */
+    private suspend fun processEvent(
+        networkId: Long,
+        event: IrcEvent,
+        origin: EventOrigin,
+        historyTarget: String? = null,
+    ) {
+        if (!origin.accepts(event)) return
         when (event) {
-            is IrcEvent.Registered -> onRegistered(networkId, event.nick, event.isupport)
-            is IrcEvent.ChatMessage -> onChat(networkId, event, notify)
-            is IrcEvent.TagMessage -> onTag(networkId, event)
+            is IrcEvent.Registered -> if (origin.mutatesSessionState) {
+                applyRegistered(networkId, event.nick, event.isupport)
+            }
+            is IrcEvent.ChatMessage -> onChat(networkId, event, origin)
+            is IrcEvent.TagMessage -> onTag(networkId, event, origin)
             is IrcEvent.HistoryBatch -> onHistoryBatch(networkId, event)
-            is IrcEvent.NetworkBatch -> onNetworkBatch(networkId, event, live = notify)
-            is IrcEvent.Joined -> onJoined(networkId, event)
-            is IrcEvent.Parted -> onParted(networkId, event)
-            is IrcEvent.Quit -> onQuit(networkId, event)
-            is IrcEvent.Kicked -> onKicked(networkId, event)
-            is IrcEvent.NickChanged -> onNickChanged(networkId, event)
-            is IrcEvent.NamesStarted -> onNamesStarted(networkId, event)
-            is IrcEvent.Names -> onNames(networkId, event)
-            is IrcEvent.TopicChanged -> onTopicChanged(networkId, event)
-            is IrcEvent.ModeChanged -> onModeChanged(networkId, event)
-            is IrcEvent.AwayChanged -> upsertUser(networkId, event.nick) { it.copy(away = event.awayMessage != null) }
-            is IrcEvent.AccountChanged -> upsertUser(networkId, event.nick) { it.copy(account = event.account) }
-            is IrcEvent.HostChanged -> upsertUser(networkId, event.nick) { it.copy(hostmask = "${event.newUser}@${event.newHost}") }
-            is IrcEvent.RealnameChanged -> upsertUser(networkId, event.nick) { it.copy(realname = event.realname) }
-            is IrcEvent.WhoxRow -> onWhoxRow(networkId, event)
+            is IrcEvent.NetworkBatch -> onNetworkBatch(networkId, event, origin, historyTarget)
+            is IrcEvent.Joined -> if (origin == EventOrigin.LIVE) onJoined(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalJoined(networkId, event)
+            is IrcEvent.Parted -> if (origin == EventOrigin.LIVE) onParted(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalParted(networkId, event)
+            is IrcEvent.Quit -> if (origin == EventOrigin.LIVE) onQuit(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalQuit(networkId, event, historyTarget)
+            is IrcEvent.Kicked -> if (origin == EventOrigin.LIVE) onKicked(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalKicked(networkId, event)
+            is IrcEvent.NickChanged -> if (origin == EventOrigin.LIVE) onNickChanged(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalNickChanged(networkId, event, historyTarget)
+            is IrcEvent.NamesStarted -> if (origin.mutatesSessionState) onNamesStarted(networkId, event)
+            is IrcEvent.Names -> if (origin.mutatesSessionState) onNames(networkId, event)
+            is IrcEvent.TopicChanged -> when (origin) {
+                EventOrigin.LIVE -> onTopicChanged(networkId, event)
+                EventOrigin.HISTORY -> onHistoricalTopicChanged(networkId, event)
+                EventOrigin.PUSH -> Unit
+            }
+            is IrcEvent.ModeChanged -> when (origin) {
+                EventOrigin.LIVE -> onModeChanged(networkId, event)
+                EventOrigin.HISTORY -> onHistoricalModeChanged(networkId, event)
+                EventOrigin.PUSH -> Unit
+            }
+            is IrcEvent.AwayChanged -> if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(away = event.awayMessage != null) }
+            is IrcEvent.AccountChanged -> if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(account = event.account) }
+            is IrcEvent.HostChanged -> if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(hostmask = "${event.newUser}@${event.newHost}") }
+            is IrcEvent.RealnameChanged -> if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(realname = event.realname) }
+            is IrcEvent.WhoxRow -> if (origin.mutatesSessionState) onWhoxRow(networkId, event)
             is IrcEvent.WhoxComplete -> Unit
-            is IrcEvent.MonitorOnline -> onMonitorOnline(networkId, event)
+            is IrcEvent.MonitorOnline -> if (origin.mutatesSessionState) onMonitorOnline(networkId, event)
             is IrcEvent.MonitorOffline,
             is IrcEvent.MonitorList,
             is IrcEvent.MonitorListEnd,
             -> Unit
-            is IrcEvent.MonitorLimitExceeded -> onMonitorLimitExceeded(networkId, event)
-            is IrcEvent.Invited -> onInvited(networkId, event, notify)
-            is IrcEvent.ReadMarker -> onReadMarker(networkId, event)
-            is IrcEvent.BouncerNetworkState -> onBouncerNetworkState(networkId, event)
-            is IrcEvent.Disconnected -> onDisconnected(networkId, event)
-            is IrcEvent.ServerError -> onServerError(networkId, event)
-            is IrcEvent.Raw -> onRaw(networkId, event)
+            is IrcEvent.MonitorLimitExceeded -> if (origin.mutatesSessionState) onMonitorLimitExceeded(networkId, event)
+            is IrcEvent.Invited -> onInvited(networkId, event, origin)
+            is IrcEvent.ReadMarker -> if (origin.mutatesSessionState) onReadMarker(networkId, event)
+            is IrcEvent.BouncerNetworkState -> if (origin.mutatesSessionState) onBouncerNetworkState(networkId, event)
+            is IrcEvent.Disconnected -> if (origin.mutatesSessionState) onDisconnected(networkId, event)
+            is IrcEvent.ServerError -> if (origin.mutatesSessionState) onServerError(networkId, event)
+            is IrcEvent.Raw -> onRaw(networkId, event, origin)
             is IrcEvent.CapsChanged,
             -> Unit // not persisted
         }
@@ -175,7 +205,7 @@ class EventProcessor @Inject constructor(
 
     // -- chat / tags ---------------------------------------------------------
 
-    private suspend fun onChat(networkId: Long, e: IrcEvent.ChatMessage, notify: Boolean) {
+    private suspend fun onChat(networkId: Long, e: IrcEvent.ChatMessage, origin: EventOrigin) {
         val st = stateFor(networkId)
         val isDm = !isChannel(e.target, st)
         // Server-sourced NOTICEs (empty source, or a source that looks like a host) go to the
@@ -338,14 +368,14 @@ class EventProcessor @Inject constructor(
         val inserted = messageDao.insertAll(listOf(row)).single()
         if (inserted <= 0L) return // dedup no-op
         traceMessageWrite("room_insert", row.copy(id = inserted), e.ctx.batchId != null)
-        if (isRootServiceReply) {
+        if (isRootServiceReply && origin == EventOrigin.LIVE) {
             bufferDao.advanceReadMarker(bufferId, e.ctx.serverTime)
             return
         }
-        if (notify) maybeNotify(networkId, bufferId, type, hasMention, e)
+        if (origin.notifies) maybeNotify(networkId, bufferId, type, hasMention, e)
     }
 
-    private suspend fun onTag(networkId: Long, e: IrcEvent.TagMessage) {
+    private suspend fun onTag(networkId: Long, e: IrcEvent.TagMessage, origin: EventOrigin) {
         val st = stateFor(networkId)
         val isDm = !isChannel(e.target, st)
         val sourceIsSelf = st.normalize(e.source.nick) == st.normalize(st.selfNick)
@@ -356,7 +386,7 @@ class EventProcessor @Inject constructor(
         }
         val type = if (isDm) BufferType.QUERY else BufferType.CHANNEL
         // typing: routed to tracker, never persisted.
-        e.typing?.let { typingState ->
+        if (origin == EventOrigin.LIVE) e.typing?.let { typingState ->
             val bufferId = ensureBuffer(networkId, bufferName, type, st)
             typing.onTyping(bufferId, e.source.nick, typingState)
         }
@@ -385,14 +415,34 @@ class EventProcessor @Inject constructor(
         // dedupKey). They are historical replay, never live arrivals: persist them without posting
         // notifications even when a previously-missing row is a DM or mention.
         db.withTransaction {
-            for (ev in batch.events) processEvent(networkId, ev, notify = false)
+            for (ev in batch.events) processEvent(networkId, ev, EventOrigin.HISTORY, batch.target)
         }
     }
 
-    private suspend fun onNetworkBatch(networkId: Long, batch: IrcEvent.NetworkBatch, live: Boolean) {
+    private suspend fun onNetworkBatch(
+        networkId: Long,
+        batch: IrcEvent.NetworkBatch,
+        origin: EventOrigin,
+        historyTarget: String?,
+    ) {
         if (batch.events.isEmpty()) return
         if (batch.kind == IrcEvent.NetworkBatchKind.NETSPLIT && batch.events.any { it !is IrcEvent.Quit }) return
         if (batch.kind == IrcEvent.NetworkBatchKind.NETJOIN && batch.events.any { it !is IrcEvent.Joined }) return
+        if (origin == EventOrigin.HISTORY) {
+            val target = batch.target ?: historyTarget ?: return
+            val st = stateFor(networkId)
+            val bufferId = ensureBuffer(networkId, target, BufferType.CHANNEL, st)
+            val children = batch.events.map { child ->
+                when (child) {
+                    is IrcEvent.Quit -> child.nick to child.ctx
+                    is IrcEvent.Joined -> child.nick to child.ctx
+                    else -> error("validated network batch child")
+                }
+            }
+            insertNetworkBatch(bufferId, batch, children, st)
+            return
+        }
+        if (origin != EventOrigin.LIVE) return
         val st = stateFor(networkId)
         val affected = LinkedHashMap<Long, MutableList<Pair<String, MessageContext>>>()
         db.withTransaction {
@@ -404,7 +454,7 @@ class EventProcessor @Inject constructor(
                     }
                     (buffersOfNick(networkId, quit.nick) + listOfNotNull(targetBufferId)).distinct().forEach { bufferId ->
                         memberDao.remove(bufferId, quit.nick)
-                        if (live) journal(networkId, bufferId, RosterDelta.Remove(quit.nick))
+                        journal(networkId, bufferId, RosterDelta.Remove(quit.nick))
                         affected.getOrPut(bufferId) { mutableListOf() } += quit.nick to quit.ctx
                     }
                 }
@@ -413,7 +463,7 @@ class EventProcessor @Inject constructor(
                     val buffer = bufferDao.byName(networkId, st.normalize(join.channel))
                         ?: return@forEach
                     memberDao.upsert(MemberEntity(buffer.id, join.nick))
-                    if (live) journal(networkId, buffer.id, RosterDelta.Upsert(join.nick))
+                    journal(networkId, buffer.id, RosterDelta.Upsert(join.nick))
                     upsertUser(networkId, join.nick) {
                         it.copy(
                             account = join.account ?: it.account,
@@ -468,7 +518,7 @@ class EventProcessor @Inject constructor(
 
     // -- invitations --------------------------------------------------------
 
-    private suspend fun onInvited(networkId: Long, e: IrcEvent.Invited, notify: Boolean) {
+    private suspend fun onInvited(networkId: Long, e: IrcEvent.Invited, origin: EventOrigin) {
         val st = stateFor(networkId)
         val selfInvite = st.normalize(e.nick) == st.normalize(st.selfNick)
         val validChannel = isChannel(e.channel, st)
@@ -482,7 +532,7 @@ class EventProcessor @Inject constructor(
             !selfInvite && existingChannel != null -> existingChannel.id
             else -> ensureServerBuffer(networkId, st)
         }
-        val historical = !notify || e.ctx.batchId != null
+        val historical = origin == EventOrigin.HISTORY || e.ctx.batchId != null
         val actionable = selfInvite && validChannel && !historical
         val state = when {
             historical -> InviteState.HISTORICAL
@@ -560,6 +610,13 @@ class EventProcessor @Inject constructor(
         }
     }
 
+    private suspend fun onHistoricalJoined(networkId: Long, e: IrcEvent.Joined) {
+        val st = stateFor(networkId)
+        val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
+        val dedupKey = if (e.isSelf) "selfjoin:$bufferId" else null
+        insertSystem(bufferId, e.ctx, MessageKind.JOIN, e.nick, "${e.nick} joined", dedupKey)
+    }
+
     private suspend fun onParted(networkId: Long, e: IrcEvent.Parted) {
         val st = stateFor(networkId)
         val bufferId = bufferDao.byName(networkId, st.normalize(e.channel))?.id ?: return
@@ -571,6 +628,12 @@ class EventProcessor @Inject constructor(
         } else if (e.ctx.batchId == null) {
             journal(networkId, bufferId, RosterDelta.Remove(e.nick))
         }
+        insertSystem(bufferId, e.ctx, MessageKind.PART, e.nick, "${e.nick} left" + (e.reason?.let { " ($it)" } ?: ""))
+    }
+
+    private suspend fun onHistoricalParted(networkId: Long, e: IrcEvent.Parted) {
+        val st = stateFor(networkId)
+        val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
         insertSystem(bufferId, e.ctx, MessageKind.PART, e.nick, "${e.nick} left" + (e.reason?.let { " ($it)" } ?: ""))
     }
 
@@ -587,6 +650,11 @@ class EventProcessor @Inject constructor(
         }
     }
 
+    private suspend fun onHistoricalQuit(networkId: Long, e: IrcEvent.Quit, target: String?) {
+        val bufferId = historicalTargetBuffer(networkId, target) ?: return
+        insertSystem(bufferId, e.ctx, MessageKind.QUIT, e.nick, "${e.nick} quit" + (e.reason?.let { " ($it)" } ?: ""))
+    }
+
     private suspend fun onKicked(networkId: Long, e: IrcEvent.Kicked) {
         val st = stateFor(networkId)
         val bufferId = bufferDao.byName(networkId, st.normalize(e.channel))?.id ?: return
@@ -598,6 +666,12 @@ class EventProcessor @Inject constructor(
         } else if (e.ctx.batchId == null) {
             journal(networkId, bufferId, RosterDelta.Remove(e.nick))
         }
+        insertSystem(bufferId, e.ctx, MessageKind.KICK, e.by, "${e.nick} was kicked by ${e.by}" + (e.reason?.let { " ($it)" } ?: ""))
+    }
+
+    private suspend fun onHistoricalKicked(networkId: Long, e: IrcEvent.Kicked) {
+        val st = stateFor(networkId)
+        val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
         insertSystem(bufferId, e.ctx, MessageKind.KICK, e.by, "${e.nick} was kicked by ${e.by}" + (e.reason?.let { " ($it)" } ?: ""))
     }
 
@@ -617,6 +691,11 @@ class EventProcessor @Inject constructor(
         if (e.ctx.batchId == null) {
             journalAcrossActiveSnapshots(networkId, buffers.toSet(), RosterDelta.DeferredNick(e))
         }
+    }
+
+    private suspend fun onHistoricalNickChanged(networkId: Long, e: IrcEvent.NickChanged, target: String?) {
+        val bufferId = historicalTargetBuffer(networkId, target) ?: return
+        insertSystem(bufferId, e.ctx, MessageKind.NICK, e.from, "${e.from} is now known as ${e.to}")
     }
 
     private suspend fun onNamesStarted(networkId: Long, e: IrcEvent.NamesStarted) {
@@ -704,8 +783,14 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         val buffer = bufferDao.byName(networkId, st.normalize(e.channel))
             ?: ensureBufferEntity(networkId, e.channel, BufferType.CHANNEL, st)
-        bufferDao.update(buffer.copy(topic = e.topic, topicSetBy = e.setBy))
+        bufferDao.setTopic(buffer.id, e.topic, e.setBy)
         insertSystem(buffer.id, e.ctx, MessageKind.TOPIC, e.setBy ?: "", "topic: ${e.topic}")
+    }
+
+    private suspend fun onHistoricalTopicChanged(networkId: Long, e: IrcEvent.TopicChanged) {
+        val st = stateFor(networkId)
+        val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
+        insertSystem(bufferId, e.ctx, MessageKind.TOPIC, e.setBy ?: "", "topic: ${e.topic}")
     }
 
     private suspend fun onModeChanged(networkId: Long, e: IrcEvent.ModeChanged) {
@@ -713,6 +798,13 @@ class EventProcessor @Inject constructor(
         if (!isChannel(e.target, st)) return
         val bufferId = bufferDao.byName(networkId, st.normalize(e.target))?.id ?: return
         applyPrefixModes(networkId, bufferId, e, st)
+        insertSystem(bufferId, e.ctx, MessageKind.MODE, "", "mode ${e.modes} ${e.args.joinToString(" ")}".trim())
+    }
+
+    private suspend fun onHistoricalModeChanged(networkId: Long, e: IrcEvent.ModeChanged) {
+        val st = stateFor(networkId)
+        if (!isChannel(e.target, st)) return
+        val bufferId = ensureBuffer(networkId, e.target, BufferType.CHANNEL, st)
         insertSystem(bufferId, e.ctx, MessageKind.MODE, "", "mode ${e.modes} ${e.args.joinToString(" ")}".trim())
     }
 
@@ -730,8 +822,10 @@ class EventProcessor @Inject constructor(
         }
     }
 
-    fun cancelRosterSnapshot(networkId: Long, bufferId: Long) {
-        rosterSnapshots.remove(RosterKey(networkId, bufferId))
+    suspend fun cancelRosterSnapshot(networkId: Long, bufferId: Long) {
+        sequencer.withNetwork(networkId) {
+            rosterSnapshots.remove(RosterKey(networkId, bufferId))
+        }
     }
 
     private fun replayRosterDeltas(
@@ -884,11 +978,12 @@ class EventProcessor @Inject constructor(
             // send a partial NETWORK notification; absent attrs mean "unchanged", not "use the
             // root defaults". Replacing child host/port/nick with root values changes its
             // connection fingerprint and restarts an otherwise healthy bound actor.
-            networkDao.update(existing.copy(
-                host = e.attrs["host"] ?: existing.host,
-                port = e.attrs["port"]?.toIntOrNull() ?: existing.port,
-                nick = e.attrs["nickname"] ?: existing.nick,
-            ))
+            networkDao.updateBouncerConnection(
+                existing.id,
+                e.attrs["host"] ?: existing.host,
+                e.attrs["port"]?.toIntOrNull() ?: existing.port,
+                e.attrs["nickname"] ?: existing.nick,
+            )
         }
     }
 
@@ -910,8 +1005,9 @@ class EventProcessor @Inject constructor(
     }
 
     /** Whitelisted informational numerics → SERVER buffer, kind SERVER_INFO (our nick dropped). */
-    private suspend fun onRaw(networkId: Long, e: IrcEvent.Raw) {
+    private suspend fun onRaw(networkId: Long, e: IrcEvent.Raw, origin: EventOrigin) {
         if (removeReaction(networkId, e.message)) return
+        if (origin != EventOrigin.LIVE) return
         if (e.message.command !in SERVER_INFO_NUMERICS) return
         val st = stateFor(networkId)
         val bufferId = ensureServerBuffer(networkId, st)
@@ -920,7 +1016,7 @@ class EventProcessor @Inject constructor(
         insertSystem(bufferId, serverCtx(), MessageKind.SERVER_INFO, "", text)
     }
 
-    /** `draft/unreact` stays Raw to preserve the frozen event contract; consume it here. */
+    /** Consume Raw `draft/unreact` at the sole reaction-persistence boundary. */
     private suspend fun removeReaction(networkId: Long, message: io.github.trevarj.motd.irc.proto.IrcMessage): Boolean {
         if (message.command != "TAGMSG") return false
         val emoji = message.unreactionValue() ?: return false
@@ -959,13 +1055,7 @@ class EventProcessor @Inject constructor(
     private suspend fun ensureServerBuffer(networkId: Long, st: NetworkState): Long {
         bufferDao.byName(networkId, "*")?.let { return it.id }
         val displayName = networkDao.byId(networkId)?.name ?: "Server"
-        val entity = BufferEntity(
-            networkId = networkId,
-            name = "*",
-            displayName = displayName,
-            type = BufferType.SERVER,
-        )
-        return bufferDao.insert(entity)
+        return bufferStore.getOrCreate(networkId, "*", displayName, BufferType.SERVER).id
     }
 
     // -- pending-send insert path (delegated by ConnectionManagerImpl.sendMessage) --
@@ -975,32 +1065,57 @@ class EventProcessor @Inject constructor(
      * The echo (labeled ChatMessage) later updates it in place; a 30s timeout marks it failed.
      */
     suspend fun insertPending(bufferId: Long, label: String, sender: String, text: String, replyToMsgid: String?, kind: MessageKind): Long {
-        val now = System.currentTimeMillis()
-        val row = MessageEntity(
-            bufferId = bufferId,
-            msgid = null,
-            serverTime = now,
-            sender = sender,
-            kind = kind,
-            text = text,
-            isSelf = true,
-            hasMention = false,
-            replyToMsgid = replyToMsgid,
-            pendingLabel = label,
-            dedupKey = EchoDeduper.pendingKey(label),
-        )
-        val inserted = messageDao.insertAll(listOf(row)).single()
-        if (inserted > 0L) traceMessageWrite("room_pending_insert", row.copy(id = inserted), fromHistory = false)
-        return inserted
+        val networkId = requireNotNull(bufferDao.observeById(bufferId)?.networkId) { "missing buffer $bufferId" }
+        return sequencer.withNetwork(networkId) {
+            val now = System.currentTimeMillis()
+            val row = MessageEntity(
+                bufferId = bufferId,
+                msgid = null,
+                serverTime = now,
+                sender = sender,
+                kind = kind,
+                text = text,
+                isSelf = true,
+                hasMention = false,
+                replyToMsgid = replyToMsgid,
+                pendingLabel = label,
+                dedupKey = EchoDeduper.pendingKey(label),
+            )
+            val inserted = messageDao.insertAll(listOf(row)).single()
+            if (inserted > 0L) {
+                traceMessageWrite("room_pending_insert", row.copy(id = inserted), fromHistory = false)
+            }
+            inserted
+        }
     }
 
     /** Mark a pending row failed if it is still pending after the echo timeout. */
     suspend fun failIfStillPending(bufferId: Long, label: String) {
-        val pending = messageDao.byPendingLabel(bufferId, label) ?: return
-        val failed = pending.copy(failed = true)
-        messageDao.update(failed)
-        traceMessageWrite("room_pending_failed", failed, fromHistory = false)
+        val networkId = bufferDao.observeById(bufferId)?.networkId ?: return
+        sequencer.withNetwork(networkId) {
+            if (messageDao.failIfStillPending(bufferId, label) > 0) {
+                messageDao.byPendingLabel(bufferId, label)?.let { failed ->
+                    traceMessageWrite("room_pending_failed", failed, fromHistory = false)
+                }
+            }
+        }
     }
+
+    suspend fun evictNetwork(networkId: Long) {
+        sequencer.withNetwork(networkId) {
+            states.remove(networkId)
+            rosterSnapshots.keys.removeAll { it.networkId == networkId }
+        }
+        sequencer.evict(networkId)
+    }
+
+    suspend fun shutdown() {
+        sequencer.clear()
+        states.clear()
+        rosterSnapshots.clear()
+    }
+
+    internal fun sequencerSize(): Int = sequencer.size()
 
     // -- helpers ------------------------------------------------------------
 
@@ -1020,19 +1135,19 @@ class EventProcessor @Inject constructor(
     private suspend fun ensureBufferEntity(networkId: Long, name: String, type: BufferType, st: NetworkState): BufferEntity {
         val norm = st.normalize(name)
         bufferDao.byName(networkId, norm)?.let { return it }
-        val entity = BufferEntity(
-            networkId = networkId,
-            name = norm,
-            displayName = name,
-            type = type,
-        )
-        val id = bufferDao.insert(entity)
-        return entity.copy(id = id)
+        return bufferStore.getOrCreate(networkId, norm, name, type)
+    }
+
+    private suspend fun historicalTargetBuffer(networkId: Long, target: String?): Long? {
+        if (target == null) return null
+        val st = stateFor(networkId)
+        val type = if (isChannel(target, st)) BufferType.CHANNEL else BufferType.QUERY
+        return ensureBuffer(networkId, target, type, st)
     }
 
     private suspend fun markJoined(bufferId: Long, joined: Boolean) {
         val b = bufferDao.observeById(bufferId) ?: return
-        if (b.joined != joined) bufferDao.update(b.copy(joined = joined))
+        if (b.joined != joined) bufferDao.setJoined(bufferId, joined)
     }
 
     private suspend fun insertSystem(

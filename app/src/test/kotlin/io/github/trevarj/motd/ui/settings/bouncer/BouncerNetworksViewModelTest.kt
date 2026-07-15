@@ -77,7 +77,7 @@ class BouncerNetworksViewModelTest {
             networkRepository = repository,
             connectionManager = connections,
             bouncerServ = FakeBouncerServClient,
-            database = database,
+            messageDao = database.messageDao(),
         )
 
         viewModel.init(root.id)

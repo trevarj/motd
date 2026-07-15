@@ -18,12 +18,16 @@ import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.service.DeliveryMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PushInstanceCoordinatorTest {
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Records every UnifiedPush call in order; distributor state is configurable. */
     private class FakeUnifiedPushApi(
@@ -113,7 +117,7 @@ class PushInstanceCoordinatorTest {
         override suspend fun byId(id: Long): NetworkEntity? = flow.value.firstOrNull { it.id == id }
         override suspend fun insert(n: NetworkEntity): Long = 0
         override suspend fun update(n: NetworkEntity) = Unit
-        override suspend fun delete(n: NetworkEntity) = Unit
+        override suspend fun updateBouncerConnection(id: Long, host: String, port: Int, nick: String) = Unit
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = emptyList()
         override suspend fun localTreeIds(id: Long): List<Long> = flow.value
             .filter { it.id == id || it.parentId == id }
@@ -142,6 +146,7 @@ class PushInstanceCoordinatorTest {
         prefs,
         up,
         healthStore = health,
+        scope = applicationScope,
     )
 
     @Test
@@ -225,6 +230,7 @@ class PushInstanceCoordinatorTest {
             up,
             FakeProviderPrefs(PushProvider.FCM),
             fcm,
+            scope = applicationScope,
         )
 
         coordinator.reconcile(DeliveryMode.UNIFIED_PUSH, PushProvider.FCM, setOf(1L, 2L))
@@ -245,6 +251,7 @@ class PushInstanceCoordinatorTest {
             up,
             FakeProviderPrefs(PushProvider.FCM),
             fcm,
+            scope = applicationScope,
         )
 
         coordinator.reconcile(DeliveryMode.PERSISTENT_SOCKET, PushProvider.FCM, setOf(1L))
@@ -259,7 +266,7 @@ class PushInstanceCoordinatorTest {
         val up = FakeUnifiedPushApi(acked = "dist.a")
         val settings = FakeSettingsRepository(DeliveryMode.UNIFIED_PUSH)
         val dao = FakeNetworkDao(listOf(net(1L), net(2L, autoConnect = false)))
-        val coordinator = PushInstanceCoordinator(settings, dao, FakePushPrefs(), up)
+        val coordinator = PushInstanceCoordinator(settings, dao, FakePushPrefs(), up, scope = applicationScope)
 
         coordinator.start()
         coordinator.start() // idempotent: second call must not double-collect

@@ -2,6 +2,8 @@ package io.github.trevarj.motd.data.repo
 
 import android.util.LruCache
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.di.ApplicationScope
+import io.github.trevarj.motd.di.IoDispatcher
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -10,9 +12,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -26,10 +27,11 @@ import kotlin.coroutines.resumeWithException
 @Singleton
 class LinkPreviewRepositoryImpl @Inject constructor(
     private val contentPreviewPrefs: ContentPreviewPrefs,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : LinkPreviewRepository {
     // LruCache does not permit null values, so wrap results in an Optional-ish holder.
     private val cache = LruCache<String, Holder>(CACHE_SIZE)
-    private val fetchScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override suspend fun preview(url: String): LinkPreview? {
         // Gate before even consulting cached metadata: disabled means neither network nor render.
@@ -56,9 +58,9 @@ class LinkPreviewRepositoryImpl @Inject constructor(
             // immediately, close asynchronously because disconnect itself may block, and bound
             // any reluctant worker by the existing five-second socket timeout.
             worker.get()?.cancel()
-            connection.get()?.let { conn -> fetchScope.launch { conn.disconnect() } }
+            connection.get()?.let { conn -> applicationScope.launch(ioDispatcher) { conn.disconnect() } }
         }
-        val job = fetchScope.launch {
+        val job = applicationScope.launch(ioDispatcher) {
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = TIMEOUT_MS
@@ -86,7 +88,7 @@ class LinkPreviewRepositoryImpl @Inject constructor(
         worker.set(job)
         if (!continuation.isActive) {
             job.cancel()
-            connection.get()?.let { conn -> fetchScope.launch { conn.disconnect() } }
+            connection.get()?.let { conn -> applicationScope.launch(ioDispatcher) { conn.disconnect() } }
         }
     }
 

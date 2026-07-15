@@ -3,13 +3,11 @@ package io.github.trevarj.motd.service
 import android.content.Context
 import android.security.KeyChain
 import io.github.trevarj.motd.data.db.ObfsMode
-import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.irc.transport.IrcTransport
 import io.github.trevarj.motd.irc.transport.OkioLineTransport
 import io.github.trevarj.motd.irc.transport.TransportConfigurationException
 import io.github.trevarj.motd.irc.transport.TransportFactory
-import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -78,15 +76,15 @@ class StsPolicyStore(private val prefs: DataStoreSettingsRepository) {
  * a per-connection [PinningTrustManager] for TOFU leaf pinning (plans/12). It also rewrites
  * (port, tls) to satisfy any live STS policy before connecting.
  *
- * The pin is looked up (via [runBlocking], mirroring the STS lookup) at create() time. A pinned
+ * Certificate and STS policy reads are resolved suspendingly before this synchronous transport
+ * boundary is created. A pinned
  * host skips hostname verification (`verifyHostname = false`) because the exact-leaf pin is a
  * stronger guarantee and enables bare-IP / self-signed bouncer certs. Unpinned hosts keep full
  * CA + hostname validation, so Libera etc. stay prompt-free.
  */
 class AppTransportFactory(
     private val appContext: Context,
-    private val stsStore: StsPolicyStore,
-    private val certStore: CertTrustStore,
+    private val security: PreparedTransportSecurity,
     private val clientCertAlias: String?,
     /** Called from the handshake when an untrusted/changed leaf cert is hit; lets the connection
      *  layer publish a TOFU prompt even though IrcClient flattens the failure into a state string. */
@@ -121,12 +119,12 @@ class AppTransportFactory(
         if (!wsUrl.isNullOrBlank()) return createWs(wsUrl)
 
         // STS enforcement: a live policy forces TLS on the pinned port.
-        val policy = runBlocking { stsStore.policyFor(host) }
+        val policy = security.stsPolicy
         val effTls = tls || policy != null
         val effPort = policy?.port ?: port
         if (!effTls) return OkioLineTransport(host, effPort, tls = false, proxy = effProxy)
 
-        val pinned = runBlocking { certStore.pinnedFor(host, effPort) }
+        val pinned = security.tcpPin
         val trustManager = PinningTrustManager(host, effPort, pinned, onCertUntrusted)
         val sslContext = buildTlsContext(clientCertAlias, trustManager)
         // Pinned leaf → skip hostname verification (bare-IP certs); unpinned → enforce it. The proxy
@@ -143,16 +141,11 @@ class AppTransportFactory(
      */
     private fun createWs(wsUrl: String): IrcTransport {
         // OkHttp's HttpUrl parses ws/wss and fills the default port (443 for wss, 80 for ws).
-        val httpUrl = wsUrl.replaceFirst("wss://", "https://")
-            .replaceFirst("ws+insecure://", "http://")
-            .replaceFirst("ws://", "http://")
-            .toHttpUrlOrNull()
-        val wsHost = httpUrl?.host ?: hostOf(wsUrl)
-        val wsPort = httpUrl?.port ?: (if (wsUrl.startsWith("wss://")) 443 else 80)
+        val (wsHost, wsPort) = wsEndpoint(wsUrl)
         val secure = wsUrl.startsWith("wss://")
         if (!secure) return WsLineTransport(url = wsUrl)
 
-        val pinned = runBlocking { certStore.pinnedFor(wsHost, wsPort) }
+        val pinned = security.wsPin
         val trustManager = PinningTrustManager(wsHost, wsPort, pinned, onCertUntrusted)
         val sslContext = buildTlsContext(clientCertAlias, trustManager)
         // Pinned leaf → skip hostname verification (bare-IP/self-signed bouncer certs), mirroring the
@@ -168,10 +161,6 @@ class AppTransportFactory(
         )
     }
 
-    /** Bare-bones host extraction fallback if HttpUrl parsing fails (e.g. an odd scheme). */
-    private fun hostOf(wsUrl: String): String =
-        wsUrl.substringAfter("://").substringBefore('/').substringBefore(':')
-
     /** SSLContext with the optional KeyChain client-cert KeyManager + the pinning trust manager. */
     private fun buildTlsContext(alias: String?, trustManager: TrustManager): SSLContext {
         val keyManagers: Array<KeyManager>? = alias?.let {
@@ -180,6 +169,43 @@ class AppTransportFactory(
         }
         return SSLContext.getInstance("TLS").apply { init(keyManagers, arrayOf(trustManager), null) }
     }
+}
+
+/** Immutable policy snapshot prepared before entering [TransportFactory]'s synchronous API. */
+data class PreparedTransportSecurity(
+    val stsPolicy: StsPolicy?,
+    val tcpPin: String?,
+    val wsPin: String?,
+)
+
+suspend fun prepareTransportSecurity(
+    host: String,
+    port: Int,
+    wsUrl: String?,
+    policyFor: suspend (String) -> StsPolicy?,
+    pinnedFor: suspend (String, Int) -> String?,
+): PreparedTransportSecurity {
+    if (!wsUrl.isNullOrBlank()) {
+        val wsPin = wsUrl.takeIf { it.startsWith("wss://") }?.let { secureUrl ->
+            val (wsHost, wsPort) = wsEndpoint(secureUrl)
+            pinnedFor(wsHost, wsPort)
+        }
+        return PreparedTransportSecurity(stsPolicy = null, tcpPin = null, wsPin = wsPin)
+    }
+    val policy = policyFor(host)
+    val tcpPin = pinnedFor(host, policy?.port ?: port)
+    return PreparedTransportSecurity(policy, tcpPin, wsPin = null)
+}
+
+/** OkHttp-backed endpoint parsing plus a defensive fallback for unusual persisted URLs. */
+internal fun wsEndpoint(wsUrl: String): Pair<String, Int> {
+    val httpUrl = wsUrl.replaceFirst("wss://", "https://")
+        .replaceFirst("ws+insecure://", "http://")
+        .replaceFirst("ws://", "http://")
+        .toHttpUrlOrNull()
+    val host = httpUrl?.host ?: wsUrl.substringAfter("://").substringBefore('/').substringBefore(':')
+    val port = httpUrl?.port ?: if (wsUrl.startsWith("wss://")) 443 else 80
+    return host to port
 }
 
 /** Orbot's default local SOCKS5 endpoint, used by the TOR obfs shortcut (plans/19 §3.4). */

@@ -55,6 +55,10 @@ and release checks because it avoids a known Android lint worker race.
   maintainer explicitly asks for device validation.
 - The manually runnable `.github/workflows/smoke.yml` exercises the same suite
   with Gradle's managed-device path.
+- `test/e2e/fast-suite.sh` is the canonical fast-suite launcher and fixture
+  argument source for local direct instrumentation, connected CI, and the
+  managed-device smoke workflow. Do not duplicate its annotation or fixture
+  arguments in workflow YAML.
 - Use `test/e2e/runbook.sh` for multi-screen interaction and crash sweeps. The
   local headless `full` command runs its A-I phases on the isolated emulator;
   the hermetic Docker stack is used by the scheduled/manual CI workflow.

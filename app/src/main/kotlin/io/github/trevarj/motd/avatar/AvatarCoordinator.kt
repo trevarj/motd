@@ -5,11 +5,10 @@ import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.di.ApplicationScope
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -29,8 +28,8 @@ class AvatarCoordinator @Inject constructor(
     private val store: AvatarStore,
     private val userDao: UserDao,
     private val connections: Lazy<ConnectionManager>,
+    @ApplicationScope private val scope: CoroutineScope,
 ) : AvatarController {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val delayedSyncs = java.util.concurrent.ConcurrentHashMap<String, Job>()
 
     suspend fun onReady(networkId: Long, client: IrcClient) {

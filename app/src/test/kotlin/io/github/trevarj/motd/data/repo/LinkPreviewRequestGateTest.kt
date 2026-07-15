@@ -3,11 +3,13 @@ package io.github.trevarj.motd.data.repo
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -39,7 +41,7 @@ class LinkPreviewRequestGateTest {
 
     @Test
     fun disabled_gate_skips_network_and_cached_metadata() = runTest {
-        val repository = LinkPreviewRepositoryImpl(prefs)
+        val repository = LinkPreviewRepositoryImpl(prefs, this, StandardTestDispatcher(testScheduler))
         val url = server.url("/article").toString()
         prefs.setShowLinkPreviews(false)
 
@@ -62,7 +64,7 @@ class LinkPreviewRequestGateTest {
 
     @Test
     fun cancellation_interrupts_an_active_http_request() = runBlocking {
-        val repository = LinkPreviewRepositoryImpl(prefs)
+        val repository = LinkPreviewRepositoryImpl(prefs, this, Dispatchers.IO)
         server.enqueue(
             MockResponse()
                 .setHeader("Content-Type", "text/html")

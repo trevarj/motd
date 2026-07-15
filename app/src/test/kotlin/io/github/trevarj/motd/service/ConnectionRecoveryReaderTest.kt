@@ -22,7 +22,7 @@ class ConnectionRecoveryReaderTest {
     @Before
     fun setUp() = runTest {
         db = inMemoryDb()
-        reader = ConnectionRecoveryReader(db)
+        reader = ConnectionRecoveryReader(db.bufferDao())
         networkId = db.networkDao().insert(network())
     }
 

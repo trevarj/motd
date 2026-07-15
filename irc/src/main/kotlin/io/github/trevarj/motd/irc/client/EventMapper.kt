@@ -194,8 +194,8 @@ internal class EventMapper(
         val target = msg.params.getOrNull(0).orEmpty()
         val react = msg.reactionValue()
         val unreact = msg.unreactionValue()
-        // Preserve the frozen event contract: unreact travels as Raw and is removed by the app's
-        // sole Room writer. Live and CHATHISTORY paths therefore share the same idempotent delete.
+        // Unreact travels as Raw so the app's sole Room writer owns the idempotent delete for both
+        // live and CHATHISTORY paths without adding a second reaction-mutation boundary here.
         if (unreact != null) return IrcEvent.Raw(msg)
         val replyTag = msg.replyReference()
         return IrcEvent.TagMessage(

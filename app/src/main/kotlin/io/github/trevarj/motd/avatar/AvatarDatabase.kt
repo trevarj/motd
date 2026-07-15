@@ -49,7 +49,7 @@ interface AvatarDao {
     suspend fun clearAll()
 }
 
-@Database(entities = [AvatarRecordEntity::class], version = 1, exportSchema = false)
+@Database(entities = [AvatarRecordEntity::class], version = 1, exportSchema = true)
 abstract class AvatarDatabase : RoomDatabase() {
     abstract fun avatarDao(): AvatarDao
 }

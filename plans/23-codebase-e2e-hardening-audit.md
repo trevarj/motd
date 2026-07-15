@@ -38,7 +38,7 @@ record before security-sensitive implementation begins.
 
 ## C1. Historical replay must not mutate current IRC state
 
-- **Priority / size / status:** P0, L, Ready.
+- **Priority / size / status:** P0, L, Completed 2026-07-15.
 - **Depends on:** none. Land before C2 so provenance behavior is characterized
   independently of serialization.
 - **Evidence:** `EventProcessor.onHistoryBatch` routes events through the live
@@ -74,9 +74,26 @@ record before security-sensitive implementation begins.
 - Cover duplicate history batches and history arriving concurrently with a
   newer live event; C2 supplies deterministic ordering for the latter.
 
+### Completion evidence
+
+- `EventOrigin` now distinguishes live socket, history replay, and push
+  delivery. History persists eligible chat, relation/redaction, typed system,
+  invitation, and collapsed network-event rows through `EventProcessor`
+  without changing current buffer, roster, user, read-marker, invitation,
+  bouncer-network, or typing state.
+- Push delivery uses an explicit sink entry point, persists only the mapped
+  message/relation/invitation subset, retains notification behavior, and
+  ignores arbitrary session-state events.
+- Regression coverage snapshots current state, replays the complete stale
+  event mix twice, proves timeline idempotency and state equivalence, and
+  verifies that a later live mention still uses the current self nick.
+- Verified with `:app:testFossDebugUnitTest`, `:app:lintFossDebug`, and
+  `:app:assembleFossDebug`. Concurrent live/history ordering remains assigned
+  to C2 as specified above.
+
 ## C2. Serialize IRC persistence and make contested updates atomic
 
-- **Priority / size / status:** P0, L, Ready.
+- **Priority / size / status:** P0, L, Completed 2026-07-15.
 - **Depends on:** C1 provenance contract.
 - **Evidence:** live socket delivery, history resync, paging/search history,
   and push delivery can enter the singleton `EventProcessor` concurrently.
@@ -113,9 +130,29 @@ record before security-sensitive implementation begins.
   independently owned field retains its last valid update.
 - Preserve cross-network concurrency and verify sequencer cleanup.
 
+### Completion evidence
+
+- All live, history, push, registration, pending-send, timeout, and roster
+  cancellation entry points now share one race-safe per-network sequencer.
+  History stays on the lock-owned private path, different networks remain
+  concurrent, and deletion reconciliation plus manager shutdown retire cached
+  sequencers and processor state.
+- `BufferStore.getOrCreate` uses insert-ignore plus reread inside a Room
+  transaction and is shared by event persistence and connection-driven query
+  and server buffer creation.
+- Independently owned buffer fields and bouncer connection fields use targeted
+  DAO updates. Pending timeout is a conditional SQL update and cannot revert a
+  row whose echo already cleared its pending label.
+- Regression tests cover concurrent live/history/push first contact, concurrent
+  buffer creation, cross-network progress, eviction during active work,
+  independent buffer-field updates, and echo/timeout convergence in both
+  orders.
+- Verified with `:app:testFossDebugUnitTest`, `:app:lintFossDebug`, and
+  `:app:assembleFossDebug`.
+
 ## C3. Give connection lifecycle and actor ownership one serializer
 
-- **Priority / size / status:** P0, L, Ready.
+- **Priority / size / status:** P0, L, Completed 2026-07-15.
 - **Depends on:** none; may proceed alongside C1-C2 but should land before K1.
 - **Evidence:** `ConnectionManagerImpl` owns startup, reconciliation, actor
   creation, configuration fingerprints, pending echoes, foreground state, and
@@ -148,10 +185,31 @@ record before security-sensitive implementation begins.
 - Shutdown leaves no actor, fingerprint, observer, or pending echo job; late
   callbacks cannot resurrect state.
 
+### Completion evidence
+
+- `ConnectionRegistry` is now the single command-loop owner of startup state,
+  actors, fingerprints, terminal fingerprints, generations, observer jobs,
+  actor callback jobs, and pending echo timeouts. `ConnectionManagerImpl`
+  remains the facade and consumes immutable registry snapshots.
+- Start, stop, reconcile, connect, disconnect, connectivity changes, actor
+  state/connection/termination callbacks, connection events, readiness work,
+  certificate callbacks, and echo timeouts now cross the registry boundary.
+- Actor attempts parent their event collector, readiness setup, stability
+  timer, and retry timer to the actor job; registry shutdown awaits actor and
+  observer cleanup, while startup failure rolls the registry back for retry.
+- Virtual-time tests cover concurrent startup/reconcile, unique actor creation,
+  configuration replacement and terminal parking, stale callbacks, reconcile
+  versus disconnect ordering, disconnect and shutdown during callbacks,
+  complete owned-resource cleanup, echo-timeout cancellation, and actor-owned
+  child-job cleanup. Existing child-reconnect and shared-certificate endpoint
+  tests retain the bouncer-root/child behavior.
+- Verified with `:app:testFossDebugUnitTest`, `:app:lintFossDebug`, and
+  `:app:assembleFossDebug`.
+
 ## D1. Export Room schemas and audit relational integrity
 
-- **Priority / size / status:** P1, M, schema export Ready; relationship work is
-  an investigation mission.
+- **Priority / size / status:** P1, M, Completed 2026-07-15; relationship
+  constraints investigated and deliberately deferred.
 - **Depends on:** C2 column-specific update inventory should inform DAO tests.
 - **Evidence:** both Room databases disable schema export. Individual migration
   tests exist, but there is no checked-in schema history or generated-schema
@@ -175,9 +233,31 @@ record before security-sensitive implementation begins.
 Follow Room's schema and migration validation guidance:
 <https://developer.android.com/training/data-storage/room/migrating-db-versions>.
 
+### Completion evidence
+
+- Both databases export through the Room Gradle plugin. Application schemas
+  v1-v6 and avatar schema v1 are checked in under `app/schemas/`; CI rejects
+  modified or untracked generated schema files.
+- Application v1, v2, v3, and v5 were generated from their exact historical
+  revisions. No v4 database revision was committed, so v4 was reconstructed
+  from the explicit v3-to-v4 and v4-to-v5 entity delta. Provenance and the
+  relational decision are recorded in
+  [`25-room-schema-provenance-and-integrity.md`](25-room-schema-provenance-and-integrity.md).
+- A Robolectric test builds the real v1 database from the tracked schema JSON,
+  inserts representative related data, runs every migration through v6, and
+  has Room validate the final schema and preserved data.
+- The unused raw network delete DAO path was removed; buffer and network tree
+  deletion remain transactional and covered. Network repository creation now
+  serializes the identity read/insert boundary, with concurrent duplicate-add
+  coverage.
+- A v7 foreign-key/unique-index migration is deferred because existing orphan
+  and duplicate child repair can discard or ambiguously merge history. The
+  investigation records inventory SQL and the required non-destructive merge
+  decisions rather than silently selecting a repair policy.
+
 ## K1. Standardize coroutine and transport ownership
 
-- **Priority / size / status:** P1, L, Ready after C3.
+- **Priority / size / status:** P1, L, Completed 2026-07-15.
 - **Depends on:** C3 lifecycle ownership.
 - **Evidence:** multiple singletons create hardcoded scopes, several components
   hardcode dispatchers and wall-clock access, broadcast receivers repeat
@@ -203,9 +283,30 @@ Use Android's coroutine ownership and dispatcher-injection guidance:
 <https://developer.android.com/kotlin/coroutines/coroutines-best-practices>.
 Verification uses virtual time for cancellation, restart, timeout, and shutdown.
 
+### Completion evidence
+
+- Hilt now provides qualified process scope, default/IO dispatchers, and a
+  testable clock. Process-lifetime coordinators share that supervised scope;
+  blocking preview work uses the injected IO dispatcher, and owned delayed or
+  timeout jobs remain tracked by their coordinator.
+- `ConnectionActor` accepts a suspending connection factory. Each attempt reads
+  the current STS and leaf-pin policy before constructing `AppTransportFactory`,
+  whose synchronous `TransportFactory` entry point now consumes only an
+  immutable prepared snapshot. No app transport path uses `runBlocking`.
+- Boot, invite-dismiss, direct-reply, and mark-read receivers share a bounded
+  helper with one timeout/failure policy, cancellation propagation, and exactly
+  one `PendingResult.finish()`. Virtual-time tests cover success, failure,
+  timeout, and parent cancellation.
+- The UnifiedPush connector callback bridge remains separate and documented;
+  its library-owned completion and store-settle behavior was not mechanically
+  changed.
+- Focused transport/receiver/actor tests and the complete
+  `:app:testFossDebugUnitTest` suite pass. `:app:lintFossDebug` and
+  `:app:assembleFossDebug` also pass.
+
 ## T1. Consolidate the existing E2E infrastructure
 
-- **Priority / size / status:** P1, M, Ready.
+- **Priority / size / status:** P1, M, Completed 2026-07-15.
 - **Depends on:** current `headless-core` green baseline.
 - **Coverage constraint:** preserve the four required Compose journeys, the
   nightly/manual A-I runbook, managed-device smoke, and VLESS socket check. Add
@@ -235,6 +336,34 @@ Verification uses virtual time for cancellation, restart, timeout, and shutdown.
 7. Add fast shell-syntax and Docker Compose configuration validation to
    ordinary CI. Preserve the `headless-core` job name and gating semantics.
 
+### Completion evidence
+
+- `fast-suite.sh` and `fast-suite.env` now own the annotation filter and all
+  non-secret fixture arguments for local direct instrumentation, connected CI,
+  and Gradle managed devices. Direct runs query the installed instrumentation
+  package and discover annotated classes instead of maintaining four names.
+- `harness.sh` and `hermetic-stack.sh` centralize stack readiness, lifecycle,
+  device capture, service logs, status, and image/version evidence. Required
+  `headless-core`, managed-device smoke, and exhaustive workflows use these
+  helpers while retaining their existing coverage and gating roles.
+- The flake exposes a lockfile-backed `e2e-stack` shell containing Ergo, Soju,
+  ZNC, Python, OpenSSL, netcat, sing-box, and Xray. Native Soju and ZNC scripts
+  re-enter it instead of an unpinned `nix shell nixpkgs#...` environment.
+- The shell runbook targets dynamic drawer/chat/message rows through their
+  stable tag prefixes, with visible text used only to disambiguate the tagged
+  container. Required, conditional, and diagnostic phases are explicit;
+  conditional skips have reasons and diagnostic findings cannot change an
+  earlier required result.
+- Both fast and exhaustive paths emit JSON summaries. Failure handling captures
+  app logcat, a screenshot, instrumentation or Gradle reports, stack service
+  logs, status, and pinned image/version identifiers before artifact upload.
+- Ordinary CI runs `test/e2e/validate.sh` for Bash syntax and Docker Compose
+  configuration while preserving the `headless-core` job and gate dependency.
+  Local syntax/summary checks and Nix flake evaluation passed. The realized
+  pinned shell contained every declared binary, and an isolated native
+  Soju/Ergo `up` plus `history-check` returned `CHATHISTORY_SMOKE_OK`. Device
+  and emulator E2E remain delegated to CI as required by repository policy.
+
 References:
 
 - Gradle managed devices:
@@ -244,7 +373,7 @@ References:
 
 ## A1. Use lifecycle-aware UI collection and typed Room queries
 
-- **Priority / size / status:** P2, M, Ready.
+- **Priority / size / status:** P2, M, Completed 2026-07-15.
 - **Depends on:** D1 for schema-backed query changes.
 - **Evidence:** most Compose consumers are lifecycle-aware, but a remaining
   group of screens uses plain `collectAsState`. Fixed SQL is also scattered
@@ -262,9 +391,26 @@ References:
 4. Add lifecycle stop/resume tests and DAO equivalence tests before deleting
    the old readers.
 
+### Completion evidence
+
+- Screen and activity `Flow` collection is lifecycle-aware. `MainActivity`
+  combines its process-wide preferences into one state holder instead of
+  maintaining five independent subscriptions.
+- Fixed recovery, read-marker, history-boundary, open-buffer, target lookup,
+  latest-marker, count, and bouncer-transcript SQL now lives in typed Room DAO
+  methods and projections. The policy-driven message-visibility predicate is
+  the sole intentional dynamic raw query.
+- Robolectric coverage proves collection stops below `STARTED` and resumes
+  with the latest value. In-memory Room coverage compares typed projections
+  against seeded entities, including ordering, filtering, boundaries, and
+  transcript fields.
+- Verified with `:app:testFossDebugUnitTest`, `:app:lintFossDebug`, and
+  `:app:assembleFossDebug`.
+
 ## A2. Characterize performance before decomposing hotspots
 
-- **Priority / size / status:** P2, L, investigation first.
+- **Priority / size / status:** P2, L, Completed 2026-07-15; runtime benchmark
+  execution remains authorization-gated.
 - **Depends on:** C1-C3 characterization tests.
 - **Evidence:** connection management, event persistence, chat route, message
   rendering, chat state, IRC client, message list, and history coordination are
@@ -293,9 +439,27 @@ References:
 - Baseline profiles:
   <https://developer.android.com/topic/performance/baselineprofiles/create-baselineprofile>
 
+### Completion evidence
+
+- The release build has an opt-in Compose compiler report path. Current metrics,
+  hotspot ownership, characterization coverage, refactor triggers, and exact
+  Macrobenchmark/baseline-profile scenarios are recorded in
+  [`26-performance-characterization-and-benchmark-mission.md`](26-performance-characterization-and-benchmark-mission.md).
+- The provenance permissions and push allowlist are now a pure policy outside
+  `EventProcessor`, with focused tests. C1-C3's processor sequencer,
+  `BufferStore`, registry, and dedicated history/read-marker collaborators
+  remain the tested decomposition boundaries.
+- Release compiler output found the chat route, content, list, row, bubble, and
+  composer entry points restartable and skippable. With no runtime regression
+  evidence and no authorized physical-device run, broader manager/UI splitting
+  and stability wrappers are deliberately deferred.
+- `:app:compileFossReleaseKotlin -PmotdComposeMetrics=true --rerun-tasks`
+  generated the recorded report. The provenance policy test passes; the full
+  app suite is included in the final release-parity verification.
+
 ## O1. Harden CI permissions and dependency maintenance
 
-- **Priority / size / status:** P2, S, Ready.
+- **Priority / size / status:** P2, S, Completed 2026-07-15.
 - **Depends on:** none.
 - **Evidence:** most workflows rely on implicit permissions, third-party actions
   use mutable major tags, and Gradle/Actions updates have no configured bot.
@@ -313,9 +477,29 @@ References:
 GitHub documents commit SHAs as the safest action reference:
 <https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows>.
 
+### Completion evidence
+
+- CI, nightly E2E, and reusable smoke workflows explicitly grant only
+  `contents: read`; release retains its required `contents: write` and no
+  broader permission. Job names and gating behavior are unchanged.
+- Every action reference is pinned to a verified 40-character upstream commit
+  with a readable release comment. Checkout, setup-java, setup-gradle,
+  upload-artifact, and the release publisher move to their Node 24 release
+  lines; emulator-runner and nix-installer retain their existing major behavior
+  while becoming immutable.
+- Earlier successful CI (`29403146878`), nightly E2E (`29394353204`), release
+  (`29403720919`), and smoke (`29372235175`) logs all reported the Node 20
+  action-runtime deprecation. The upgraded action metadata declares `node24`,
+  and post-push CI run `29406064899` completed without a deprecated Node action
+  runtime warning. Separate Gradle 9 and Android Java-API deprecation messages
+  are build-source maintenance, not deprecated action runtimes.
+- Dependabot now proposes weekly grouped Gradle and GitHub Actions updates.
+  `actionlint` and YAML syntax validation pass locally.
+
 ## S1. Threat-model stored credentials and remote previews
 
-- **Priority / size / status:** P2, M, investigation mission.
+- **Priority / size / status:** P2, M, Investigation completed 2026-07-15;
+  implementation blocked on four explicit product decisions.
 - **Depends on:** none; implementation is blocked on the decision record.
 - **Evidence:** SASL credentials and VLESS configuration are stored with Room
   state; WebPush private/auth/management material is stored in preferences.
@@ -337,9 +521,27 @@ GitHub documents commit SHAs as the safest action reference:
    explicit product decision. Produce the decision and migration proposal
    before changing storage or preview behavior.
 
+### Investigation evidence and decision gate
+
+- [`27-credential-and-remote-preview-threat-model.md`](27-credential-and-remote-preview-threat-model.md)
+  inventories Room, DataStore, backup, automatic link/image/avatar loading, and
+  recovery boundaries; defines attacker capabilities and protected assets; and
+  distinguishes offline extraction from a live process/OS compromise.
+- The record specifies a direct AES-GCM Android Keystore envelope, compatible
+  plaintext-to-versioned-ciphertext migration, key-loss behavior that preserves
+  history, and the fields that do and do not merit wrapping.
+- It also specifies one URL/redirect policy covering schemes, authority and
+  embedded credentials, redirect limits/revalidation, cookies/auth/referrer,
+  private/loopback address families, DNS rebinding limitations, and existing
+  resource bounds.
+- Credential recovery, automatic intranet access, fresh-install preview
+  consent, and cleartext preview behavior remain explicit maintainer product
+  decisions. Per this mission's ordering constraint, no security-sensitive
+  storage or preview behavior changed before those decisions.
+
 ## H1. Focused hygiene
 
-- **Priority / size / status:** P3, S, Ready.
+- **Priority / size / status:** P3, S, Completed 2026-07-15.
 - **Depends on:** none.
 - **Evidence:** `IrcClientTest.kt` contains a literal NUL in a SASL test string,
   causing Git and search tools to classify the source as binary. Some stale
@@ -353,6 +555,19 @@ GitHub documents commit SHAs as the safest action reference:
 2. Remove stale comments and avoidable assertions only while changing their
    surrounding subsystem.
 3. Do not create a broad formatting or cleanup-only change.
+
+### Completion evidence
+
+- The SASL PLAIN fixture now spells both separators as `\u0000`; ordinary
+  `rg` treats `IrcClientTest.kt` as text, and the exact base64 wire assertion
+  remains unchanged and passing.
+- The two labeled-response tests use one failure-reporting label extractor
+  instead of non-null assertions, and SASL startup retains its new
+  authenticator locally rather than asserting against a just-assigned field.
+- Stale "frozen event contract" comments beside `draft/unreact` now describe
+  the actual single-writer/reaction-mutation boundary. No unrelated formatting
+  or cleanup was included.
+- Verified with the complete `:irc:test` suite.
 
 ## Internal interfaces and compatibility
 
@@ -377,3 +592,20 @@ Use the existing CI `headless-core` suite for E2E proof. Local device/emulator
 E2E, a new Soju/VLESS matrix, device installation, merge, tag, and release are
 not implicit parts of this roadmap. Physical performance proof requires a new
 explicit authorization.
+
+## Implementation closeout
+
+All code-ready missions completed on 2026-07-15. S1's investigation is
+complete and its four product choices remain the only intentional decision
+gate; no security behavior was guessed across that boundary.
+
+The final local release-parity command passed `:irc:build`, debug and release
+app unit tests, FOSS debug lint, and FOSS release assembly. E2E shell syntax,
+`actionlint`, Dependabot/workflow YAML syntax, diff checks, and tracked Room
+schema cleanliness also passed. Docker was unavailable for the final repeated
+local Compose validation, so pushed CI run `29406064899` is the authoritative
+proof: `irc`, `app`, `headless-core`, and the aggregate `gate` all passed. Its
+app job validated the E2E shell and Docker Compose configuration, while
+`headless-core` passed the four required journeys against the hermetic bouncer
+stack. The isolated native Soju history stack and Compose configuration had
+also passed during T1.

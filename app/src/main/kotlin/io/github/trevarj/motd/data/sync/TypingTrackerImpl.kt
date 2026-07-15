@@ -1,6 +1,8 @@
 package io.github.trevarj.motd.data.sync
 
 import io.github.trevarj.motd.service.TypingTracker
+import io.github.trevarj.motd.di.AppClock
+import io.github.trevarj.motd.di.ApplicationScope
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -25,15 +27,21 @@ import kotlinx.coroutines.launch
  * re-emits, so the indicator clears on its own.
  */
 @Singleton
-class TypingTrackerImpl @Inject constructor() : TypingTracker {
+class TypingTrackerImpl @Inject constructor(
+    @ApplicationScope private val scope: CoroutineScope,
+    private val clock: AppClock,
+) : TypingTracker {
+    /** Convenience for small JVM tests; production always receives process-owned dependencies. */
+    constructor() : this(
+        CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        AppClock(System::currentTimeMillis),
+    )
     private data class Entry(val nick: String, val expiresAt: Long)
 
     private val flows = HashMap<Long, MutableStateFlow<List<String>>>()
     private val entries = HashMap<Long, MutableList<Entry>>()
     private val lock = Any()
 
-    // Own scope so expiry sweeps outlive any single caller; sweeps are cheap and short-lived.
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     // At most one pending sweep per buffer (the soonest expiry); replaced when a new one is sooner.
     private val sweeps = HashMap<Long, Job>()
 
@@ -41,7 +49,7 @@ class TypingTrackerImpl @Inject constructor() : TypingTracker {
         synchronized(lock) { flowFor(bufferId).asStateFlow() }
 
     /** Apply a typing state ("active" | "paused" | "done") for [nick] in [bufferId]. */
-    fun onTyping(bufferId: Long, nick: String, state: String, now: Long = System.currentTimeMillis()) {
+    fun onTyping(bufferId: Long, nick: String, state: String, now: Long = clock.nowMillis()) {
         synchronized(lock) {
             val list = entries.getOrPut(bufferId) { mutableListOf() }
             list.removeAll { it.nick == nick || it.expiresAt <= now }
@@ -68,7 +76,7 @@ class TypingTrackerImpl @Inject constructor() : TypingTracker {
     private fun sweep(bufferId: Long) {
         synchronized(lock) {
             val list = entries[bufferId] ?: return
-            val now = System.currentTimeMillis()
+            val now = clock.nowMillis()
             val before = list.size
             list.removeAll { it.expiresAt <= now }
             if (list.size != before) flowFor(bufferId).value = list.map { it.nick }

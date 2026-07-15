@@ -117,10 +117,9 @@ case "$CMD" in
     command -v soju >/dev/null 2>&1 && command -v ergo >/dev/null 2>&1 || need_reexec=true ;;
 esac
 if [ "$need_reexec" = true ]; then
-  log "fetching stack binaries via nix shell…"
-  exec nix shell nixpkgs#ergochat nixpkgs#soju nixpkgs#netcat-openbsd nixpkgs#openssl \
-    nixpkgs#sing-box nixpkgs#xray nixpkgs#python3 \
-    -c "$0" "$CMD"
+  [ "${MOTD_E2E_STACK_SHELL:-}" != 1 ] || die "required command is missing from the e2e-stack shell"
+  log "entering the lockfile-backed e2e-stack shell…"
+  exec nix develop "$REPO#e2e-stack" -c "$0" "$CMD"
 fi
 
 CONF_ERGO="$RUN/ircd.yaml"

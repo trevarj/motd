@@ -8,12 +8,11 @@ import io.github.trevarj.motd.data.prefs.PushProvider
 import io.github.trevarj.motd.data.prefs.PushProviderPrefs
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.service.DeliveryMode
+import io.github.trevarj.motd.di.ApplicationScope
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -36,8 +35,8 @@ class PushInstanceCoordinator @Inject constructor(
     private val providerPrefs: PushProviderPrefs = DefaultPushProviderPrefs,
     private val fcm: FcmPushApi = NoopFcmPushApi,
     private val healthStore: PushHealthStore = NoopPushHealthStore,
+    @ApplicationScope private val scope: CoroutineScope,
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val endpointTimeouts = ConcurrentHashMap<Long, Job>()
 
     @Volatile private var started = false

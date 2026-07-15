@@ -11,11 +11,10 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.service.ConnectionManagerImpl
+import io.github.trevarj.motd.di.ApplicationScope
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /** Owns the foreground catch-up/background push hand-off for the process lifetime. */
@@ -23,8 +22,8 @@ import kotlinx.coroutines.launch
 class PushLifecycleCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
     private val connectionManager: ConnectionManagerImpl,
+    @ApplicationScope private val scope: CoroutineScope,
 ) : DefaultLifecycleObserver {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var started = false
     private val powerManager: PowerManager?
         get() = context.getSystemService(PowerManager::class.java)
