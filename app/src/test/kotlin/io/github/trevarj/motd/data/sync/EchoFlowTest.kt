@@ -23,15 +23,31 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class EchoFlowTest {
+    private class RecordingNotifier : MessageNotifier {
+        val incoming = mutableListOf<IrcEvent.ChatMessage>()
+
+        override suspend fun onIncoming(
+            networkId: Long,
+            bufferId: Long,
+            type: BufferType,
+            hasMention: Boolean,
+            message: IrcEvent.ChatMessage,
+        ) {
+            incoming += message
+        }
+    }
+
     private lateinit var db: MotdDatabase
     private lateinit var processor: EventProcessor
+    private lateinit var notifier: RecordingNotifier
     private var networkId = 0L
     private var bufferId = 0L
 
     @Before fun setUp() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java).allowMainThreadQueries().build()
-        processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
+        notifier = RecordingNotifier()
+        processor = EventProcessor(db, TypingTrackerImpl(), notifier)
         networkId = db.networkDao().insert(
             NetworkEntity(name = "libera", role = NetworkRole.DIRECT, host = "h", port = 6697, nick = "me", username = "me", realname = "Me"),
         )
@@ -135,6 +151,90 @@ class EchoFlowTest {
         assertEquals(1, rows().size)
         assertEquals("push-a", rows().single().msgid)
         assertEquals(600_000, rows().single().serverTime)
+    }
+
+    @Test
+    fun historyWithMsgid_thenDelayedPushWithoutMsgid_keepsOnlyDurableRow() = runTest {
+        val history = IrcEvent.ChatMessage(
+            ctx = MessageContext(
+                msgid = "soju-history-a",
+                serverTime = 600_000,
+                account = "alice",
+                batchId = "history",
+                label = null,
+            ),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#chan",
+            text = "me: delayed notification",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(history)))
+        val durableId = rows().single().id
+
+        // Soju can deliver its stored, msgid-bearing CHATHISTORY representation before the
+        // delayed WebPush payload. A msgid-less push is notification-only and must not touch Room.
+        processor.processPush(
+            networkId,
+            history.copy(
+                ctx = history.ctx.copy(msgid = null, batchId = null),
+            ),
+        )
+
+        assertEquals(1, rows().size)
+        assertEquals(durableId, rows().single().id)
+        assertEquals("soju-history-a", rows().single().msgid)
+        assertEquals(1, notifier.incoming.size)
+        assertNull(notifier.incoming.single().ctx.msgid)
+        assertEquals(600_000, notifier.incoming.single().ctx.serverTime)
+    }
+
+    @Test
+    fun msgidlessLiveDelivery_stillPersists() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx = MessageContext(null, 650_000, null, null, null),
+                kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix("alice"),
+                target = "#chan",
+                text = "ordinary live IRC line",
+                isSelf = false,
+                replyToMsgid = null,
+            ),
+        )
+
+        val row = rows().single()
+        assertNull(row.msgid)
+        assertEquals("ordinary live IRC line", row.text)
+    }
+
+    @Test
+    fun historyWithMsgid_thenLiveWithoutMsgid_reusesRowAcrossOptionalTagDifferences() = runTest {
+        val history = IrcEvent.ChatMessage(
+            ctx = MessageContext("soju-history-b", 700_000, "alice", "history", null),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#chan",
+            text = "same transport delivery",
+            isSelf = false,
+            replyToMsgid = "parent-msgid",
+        )
+        processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(history)))
+
+        processor.process(
+            networkId,
+            history.copy(
+                ctx = history.ctx.copy(msgid = null, account = null, batchId = null),
+                replyToMsgid = null,
+            ),
+        )
+
+        val row = rows().single()
+        assertEquals("soju-history-b", row.msgid)
+        assertEquals("alice", row.senderAccount)
+        assertEquals("parent-msgid", row.replyToMsgid)
     }
 
     @Test

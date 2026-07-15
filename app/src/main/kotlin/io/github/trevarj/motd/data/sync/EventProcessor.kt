@@ -213,6 +213,12 @@ class EventProcessor @Inject constructor(
         // Channel NOTICEs are unaffected; NickServ/ChanServ (no dot) keep their query buffers.
         if (isDm && e.kind == IrcEvent.ChatKind.NOTICE && isServerSource(e.source.nick)) {
             val serverBufferId = ensureServerBuffer(networkId, st)
+            if (origin == EventOrigin.PUSH && e.ctx.msgid == null) {
+                // Preserve the universal transient-push rule even for the early server-NOTICE
+                // routing path. SERVER notification policy intentionally suppresses the alert.
+                maybeNotify(networkId, serverBufferId, BufferType.SERVER, false, e)
+                return
+            }
             insertSystem(serverBufferId, e.ctx, MessageKind.NOTICE, e.source.nick, e.text)
             return
         }
@@ -243,6 +249,24 @@ class EventProcessor @Inject constructor(
         }
         val hasMention = !e.isSelf && !isRootServiceReply &&
             (replyMentionsSelf || st.mentionRegex.containsMatchIn(storedText))
+
+        // Soju delays WebPush while its normal produce path synchronously appends the upstream line
+        // to the configured message store. A msgid-less push is therefore transient delivery input,
+        // not a second durable message identity: create the buffer so the notification deep link
+        // and ConnectionManager's open-target catch-up include it, notify immediately, and let the
+        // mandatory reconnect CHATHISTORY pass insert the canonical msgid row.
+        // Msgid-less LIVE lines remain legitimate IRC messages and continue through persistence.
+        if (origin == EventOrigin.PUSH && e.ctx.msgid == null) {
+            maybeNotify(
+                networkId,
+                bufferId,
+                type,
+                hasMention,
+                e.copy(text = storedText),
+            )
+            return
+        }
+
         val row = MessageEntity(
             bufferId = bufferId,
             msgid = e.ctx.msgid,
@@ -275,24 +299,49 @@ class EventProcessor @Inject constructor(
             }
         }
 
-        // Push/history can persist the durable msgid-bearing representation before a reconnect
-        // delivers the same line live without draft/msgid. That is the reverse of the promotion
-        // case above: retain the durable row and discard only an unambiguous live duplicate. Match
-        // every stable message field inside a tight timestamp window, and refuse to merge when two
-        // legitimate repeated messages are possible.
+        // A bouncer can replay its durable msgid-bearing representation before delivering the
+        // original upstream line without msgid over the live socket. That is the reverse of the
+        // promotion case above: retain the durable row and discard only an unambiguous live
+        // duplicate. Account/reply are enrichments rather than identity because optional tags can
+        // differ between history and live delivery. Msgid-less PUSH returned above without writing.
         if (incomingMsgid == null && !e.isSelf && origin == EventOrigin.LIVE) {
             val candidates = messageDao.findDurableIncomingCandidates(
                 bufferId = bufferId,
                 sender = e.source.nick,
-                senderAccount = e.ctx.account,
                 kind = row.kind,
                 text = storedText,
-                replyToMsgid = e.replyToMsgid,
                 lo = e.ctx.serverTime - INCOMING_DELIVERY_MATCH_WINDOW_MS,
                 hi = e.ctx.serverTime + INCOMING_DELIVERY_MATCH_WINDOW_MS,
             )
             if (candidates.size == 1) {
-                traceMessageWrite("room_live_duplicate", candidates.single(), fromHistory = false)
+                val durable = candidates.single()
+                val reconciled = durable.copy(
+                    senderAccount = durable.senderAccount ?: row.senderAccount,
+                    replyToMsgid = durable.replyToMsgid ?: row.replyToMsgid,
+                    hasMention = durable.hasMention || row.hasMention,
+                )
+                if (reconciled != durable) messageDao.update(reconciled)
+                traceMessageWrite(
+                    "room_incoming_duplicate",
+                    reconciled,
+                    fromHistory = false,
+                )
+                // Keep the live notification decision while giving it the durable identity. If a
+                // transient push already notified, MotdNotifications aliases its fallback key.
+                maybeNotify(
+                    networkId,
+                    bufferId,
+                    type,
+                    reconciled.hasMention,
+                    e.copy(
+                        ctx = e.ctx.copy(
+                            msgid = reconciled.msgid,
+                            serverTime = reconciled.serverTime,
+                            account = reconciled.senderAccount,
+                        ),
+                        replyToMsgid = reconciled.replyToMsgid,
+                    ),
+                )
                 return
             }
         }

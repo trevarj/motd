@@ -135,7 +135,7 @@ class MotdPushReceiver : MessagingReceiver() {
 
     /**
      * Run [block] to completion inside the connector's wakelock window. The suspend work is
-     * short (decrypt + a Room write, or a few labeled REGISTER round-trips) so blocking the
+     * short (decrypt + event dispatch, or a few labeled REGISTER round-trips) so blocking the
      * receiver thread here is acceptable and keeps the callback correct without a bound scope.
      */
     private inline fun runOnWakelock(crossinline block: suspend () -> Unit) {

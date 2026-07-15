@@ -170,6 +170,21 @@ _e2e_bounds_from_attr() {
     | sed -E 's/^bounds="(.*)"$/\1/'
 }
 
+# _e2e_node_count_from_attr <attr> <value> — number of nodes carrying an exact
+# attribute value in the current dump. This complements bounds lookup for
+# exactly-once assertions where returning only the first node would hide a
+# duplicated Compose row.
+_e2e_node_count_from_attr() {
+  local attr="$1" value="$2"
+  _e2e_have_dump || return 1
+  local esc
+  # shellcheck disable=SC2016 # single quotes are intentional: literal sed script
+  esc="$(printf '%s' "$value" | sed 's/[][\.*^$(){}?+|/]/\\&/g')"
+  { grep -oE "<node[^>]* ${attr}=\"${esc}\"[^>]*>" "$_E2E_DUMP" 2>/dev/null || true; } \
+    | wc -l \
+    | tr -d ' '
+}
+
 # bounds_of_text "<text>" — bounds of the first node whose text= matches exactly.
 bounds_of_text() { _e2e_bounds_from_attr "text" "$1"; }
 
@@ -405,6 +420,21 @@ assert_text() {
   else
     screencap_step "missing_$(_e2e_slug "$t")"
     fail "expected text absent: '${t}'"
+  fi
+}
+
+# assert_text_exactly_once "<text>" — catches duplicate visible rows that a
+# first-match presence assertion cannot distinguish.
+assert_text_exactly_once() {
+  local t="$1"
+  dump || { fail "dump failed asserting exactly-once text '${t}'"; return 1; }
+  local count
+  count="$(_e2e_node_count_from_attr "text" "$t")"
+  if [ "$count" -eq 1 ]; then
+    ok "present exactly once: text '${t}'"
+  else
+    screencap_step "text_count_$(_e2e_slug "$t")"
+    fail "expected text exactly once: '${t}' (found ${count})"
   fi
 }
 

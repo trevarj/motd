@@ -228,7 +228,11 @@ class ConnectionManagerImpl @Inject constructor(
         }
     }
 
-    /** Process foreground: reconnect every wanted network and run the normal catch-up path. */
+    /**
+     * Process foreground: reconnect every wanted network and run the normal catch-up path. A
+     * transient msgid-less push creates its buffer before notifying, so [openBuffers] includes a
+     * new DM/channel target when the post-notification reconnect requests CHATHISTORY.
+     */
     internal suspend fun onAppForegrounded() {
         appForeground = true
         pushSuspendedIds.clear()

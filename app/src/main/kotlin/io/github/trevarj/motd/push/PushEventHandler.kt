@@ -14,8 +14,9 @@ import javax.inject.Inject
 
 /**
  * Turns a decrypted Web Push payload (exactly one IRC line, no CRLF) into an [IrcEvent] and
- * feeds it through the [IrcEventSink] contract (EventProcessor implements it in WP5), so a
- * pushed message reaches Room by the same write path as a live message.
+ * feeds it through the [IrcEventSink] contract (EventProcessor implements it in WP5). The sink
+ * persists durable msgid-bearing input, while a msgid-less chat push is notification-only and
+ * waits for Soju CHATHISTORY to populate Room after reconnect.
  *
  * The `:irc` [io.github.trevarj.motd.irc.client] event mapper is module-`internal`, so this
  * reimplements the small subset that soju webpush actually delivers: PRIVMSG/NOTICE/TAGMSG/INVITE,
@@ -29,8 +30,8 @@ class PushEventHandler(
 ) {
     /**
      * Hilt entry point. The crypto facade defaults to the real JCA implementation and the
-     * [IrcEventSink] owns both persistence and the normal notification decision, exactly as it does
-     * for live socket events. Keeping one owner prevents a pushed DM/highlight being notified twice.
+     * [IrcEventSink] owns the durability decision and normal notification policy. Keeping one owner
+     * prevents a pushed DM/highlight being notified twice.
      */
     @Inject
     constructor(eventSink: IrcEventSink) : this(

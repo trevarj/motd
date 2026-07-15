@@ -58,7 +58,7 @@ class MotdNotifications @Inject constructor(
 
     // Per-buffer message history for MessagingStyle threading (notificationId = bufferId).
     private val history = HashMap<Long, NotificationCompat.MessagingStyle>()
-    private val historyKeys = HashMap<Long, LinkedHashSet<NotificationMessageKey>>()
+    private val historyKeys = HashMap<Long, MutableList<NotificationMessageKey>>()
     private val latestNotifiedTimes = java.util.concurrent.ConcurrentHashMap<Long, Long>()
 
     init { ensureChannels() }
@@ -132,9 +132,17 @@ class MotdNotifications @Inject constructor(
         val person = Person.Builder().setName(message.source.nick).build()
         val style = synchronized(history) {
             val key = NotificationMessageKey.from(message)
-            val keys = historyKeys.getOrPut(bufferId, ::linkedSetOf)
-            if (!keys.add(key)) return
-            if (keys.size > MAX_NOTIFICATION_MESSAGES) keys.remove(keys.first())
+            val keys = historyKeys.getOrPut(bufferId, ::mutableListOf)
+            val existingIndex = keys.indexOfFirst { it.matches(key) }
+            if (existingIndex >= 0) {
+                // A transient msgid-less push can notify before CHATHISTORY inserts the canonical
+                // Room row. Upgrade that fallback notification identity when reconnect supplies
+                // the durable representation so the body is not added a second time.
+                keys[existingIndex] = keys[existingIndex].withDurableIdentityFrom(key)
+                return
+            }
+            keys += key
+            if (keys.size > MAX_NOTIFICATION_MESSAGES) keys.removeAt(0)
             history.getOrPut(bufferId) {
                 NotificationCompat.MessagingStyle(Person.Builder().setName("me").build())
                     .setConversationTitle(title)
@@ -305,22 +313,34 @@ class MotdNotifications @Inject constructor(
 /** Stable identity for one notification entry, independent of live/push delivery provenance. */
 private data class NotificationMessageKey(
     val msgid: String?,
-    val serverTime: Long?,
-    val sender: String?,
-    val text: String?,
+    val serverTime: Long,
+    val sender: String,
+    val text: String,
 ) {
+    /**
+     * Prefer durable identity when both deliveries carry it. When either side is the original
+     * msgid-less transport line, use the stable fingerprint so a later identity promotion aliases
+     * the already-notified body. Two different non-null msgids remain distinct even if a sender
+     * sends identical text in the same millisecond.
+     */
+    fun matches(other: NotificationMessageKey): Boolean =
+        if (msgid != null && other.msgid != null) {
+            msgid == other.msgid
+        } else {
+            serverTime == other.serverTime && sender == other.sender && text == other.text
+        }
+
+    fun withDurableIdentityFrom(other: NotificationMessageKey): NotificationMessageKey =
+        if (msgid == null && other.msgid != null) copy(msgid = other.msgid) else this
+
     companion object {
         fun from(message: IrcEvent.ChatMessage): NotificationMessageKey =
-            if (message.ctx.msgid != null) {
-                NotificationMessageKey(message.ctx.msgid, null, null, null)
-            } else {
-                NotificationMessageKey(
-                    msgid = null,
-                    serverTime = message.ctx.serverTime,
-                    sender = message.source.nick,
-                    text = message.text,
-                )
-            }
+            NotificationMessageKey(
+                msgid = message.ctx.msgid,
+                serverTime = message.ctx.serverTime,
+                sender = message.source.nick,
+                text = message.text,
+            )
     }
 }
 

@@ -13,6 +13,8 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.di.ForegroundBufferTrackerImpl
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
@@ -21,6 +23,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -43,6 +46,7 @@ class MotdNotificationsFoolTest {
     private lateinit var db: MotdDatabase
     private lateinit var repo: DataStoreSettingsRepository
     private lateinit var notifications: MotdNotifications
+    private var networkId: Long = 0
     private var bufferId: Long = 0
 
     private val context: Context get() = ApplicationProvider.getApplicationContext()
@@ -52,7 +56,7 @@ class MotdNotificationsFoolTest {
         db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        val networkId = db.networkDao().insert(
+        networkId = db.networkDao().insert(
             NetworkEntity(
                 name = "libera", role = NetworkRole.DIRECT, host = "irc.libera.chat",
                 port = 6697, nick = "me", username = "me", realname = "Me",
@@ -73,7 +77,10 @@ class MotdNotificationsFoolTest {
     }
 
     @After
-    fun tearDown() {
+    fun tearDown() = runTest {
+        // The application-scoped DataStore outlives this Robolectric class; do not leak the fool
+        // fixture into another test class or make this class depend on JUnit method order.
+        repo.setFool("troll", false)
         db.close()
     }
 
@@ -131,6 +138,185 @@ class MotdNotificationsFoolTest {
             .activeNotifications.single().notification
         val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted)
         assertEquals(listOf("only once"), style?.messages?.map { it.text.toString() })
+    }
+
+    @Test
+    fun differentDurableMsgids_withSameFingerprint_remainDistinctNotifications() = runTest {
+        val message = chat("durable-identity-fixture", "legitimately repeated")
+
+        notifications.onIncoming(
+            networkId = networkId,
+            bufferId = bufferId,
+            type = BufferType.QUERY,
+            hasMention = false,
+            message = message.copy(ctx = message.ctx.copy(msgid = "durable-a")),
+        )
+        notifications.onIncoming(
+            networkId = networkId,
+            bufferId = bufferId,
+            type = BufferType.QUERY,
+            hasMention = false,
+            message = message.copy(ctx = message.ctx.copy(msgid = "durable-b")),
+        )
+
+        val posted = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+            .activeNotifications.single().notification
+        val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted)
+        assertEquals(
+            listOf("legitimately repeated", "legitimately repeated"),
+            style?.messages?.map { it.text.toString() },
+        )
+    }
+
+    @Test
+    fun sojuHistoryThenDelayedPushAndReconnect_persistsAndNotifiesMentionOnlyOnce() = runTest {
+        val channelId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "#systemcrafters",
+                displayName = "#systemcrafters",
+                type = BufferType.CHANNEL,
+            ),
+        )
+        val processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+        processor.onRegistered(networkId, "me", emptyMap())
+        val history = IrcEvent.ChatMessage(
+            ctx = MessageContext(
+                msgid = "soju-durable-mention",
+                serverTime = 10_000,
+                account = "soju-fixture",
+                batchId = "history",
+                label = null,
+            ),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("soju-fixture"),
+            target = "#systemcrafters",
+            text = "me: only one row and notification",
+            isSelf = false,
+            replyToMsgid = "parent-msgid",
+        )
+
+        processor.process(networkId, IrcEvent.HistoryBatch("#systemcrafters", listOf(history)))
+        val msgidlessDelivery = history.copy(
+            ctx = history.ctx.copy(msgid = null, account = null, batchId = null),
+            replyToMsgid = null,
+        )
+        processor.processPush(networkId, msgidlessDelivery)
+        assertEquals(1, db.messageDao().countForBuffer(channelId))
+        processor.process(networkId, msgidlessDelivery.copy(ctx = msgidlessDelivery.ctx.copy(serverTime = 10_750)))
+
+        assertEquals(1, db.messageDao().countForBuffer(channelId))
+        val row = db.messageDao().byMsgid(channelId, "soju-durable-mention")
+        assertNotNull(row)
+        assertEquals("soju-fixture", row?.senderAccount)
+        assertEquals("parent-msgid", row?.replyToMsgid)
+
+        val posted = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+            .activeNotifications.single().notification
+        val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted)
+        assertEquals(
+            listOf("me: only one row and notification"),
+            style?.messages?.map { it.text.toString() },
+        )
+    }
+
+    @Test
+    fun sojuMsgidlessPushThenHistoryAndReconnect_persistsAndNotifiesMentionOnlyOnce() = runTest {
+        val channelId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "#systemcrafters",
+                displayName = "#systemcrafters",
+                type = BufferType.CHANNEL,
+            ),
+        )
+        val processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+        processor.onRegistered(networkId, "me", emptyMap())
+        val push = IrcEvent.ChatMessage(
+            ctx = MessageContext(
+                msgid = null,
+                serverTime = 20_000,
+                account = null,
+                batchId = null,
+                label = null,
+            ),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("soju-fixture"),
+            target = "#systemcrafters",
+            text = "me: identity promoted after notification",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+
+        processor.processPush(networkId, push)
+        assertEquals(0, db.messageDao().countForBuffer(channelId))
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "#systemcrafters",
+                listOf(
+                    push.copy(
+                        ctx = push.ctx.copy(
+                            msgid = "soju-promoted-mention",
+                            account = "soju-fixture",
+                            batchId = "history",
+                        ),
+                        replyToMsgid = "parent-msgid",
+                    ),
+                ),
+            ),
+        )
+        assertEquals(1, db.messageDao().countForBuffer(channelId))
+        processor.process(networkId, push.copy(ctx = push.ctx.copy(serverTime = 20_750)))
+
+        assertEquals(1, db.messageDao().countForBuffer(channelId))
+        assertNotNull(db.messageDao().byMsgid(channelId, "soju-promoted-mention"))
+        val posted = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+            .activeNotifications.single().notification
+        val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted)
+        assertEquals(
+            listOf("me: identity promoted after notification"),
+            style?.messages?.map { it.text.toString() },
+        )
+    }
+
+    @Test
+    fun msgidlessNewDmPush_createsDeepLinkBufferButWaitsForHistoryRow() = runTest {
+        val processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+        processor.onRegistered(networkId, "me", emptyMap())
+        val push = IrcEvent.ChatMessage(
+            ctx = MessageContext(
+                msgid = null,
+                serverTime = 30_000,
+                account = null,
+                batchId = null,
+                label = null,
+            ),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("new-dm-push-fixture"),
+            target = "me",
+            text = "notification before history",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+
+        processor.processPush(networkId, push)
+
+        val buffer = requireNotNull(db.bufferDao().byName(networkId, "new-dm-push-fixture"))
+        assertEquals(BufferType.QUERY, buffer.type)
+        assertEquals(0, db.messageDao().countForBuffer(buffer.id))
+        assertEquals(
+            buffer.id,
+            db.bufferDao().openTargets(networkId).single { it.name == "new-dm-push-fixture" }.id,
+        )
+
+        val posted = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+            .activeNotifications.single().notification
+        val open = shadowOf(posted.contentIntent).savedIntent
+        assertEquals(MotdNotifications.ACTION_OPEN_BUFFER, open.action)
+        assertEquals(buffer.id, open.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1))
+        assertNull(open.getStringExtra(MotdNotifications.EXTRA_JUMP_MSGID))
+        assertEquals(30_000, open.getLongExtra(MotdNotifications.EXTRA_JUMP_TIME, -1))
     }
 
     @Test

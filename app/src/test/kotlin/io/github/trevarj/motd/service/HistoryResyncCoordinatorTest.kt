@@ -187,6 +187,58 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun transientNewDmPush_isIncludedInReconnectHistoryCatchup() = runTest {
+        val target = "new-dm-history-fixture"
+        val push = IrcEvent.ChatMessage(
+            ctx = MessageContext(null, 400, null, null, null),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix(target),
+            target = "me",
+            text = "transient notification",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.processPush(networkId, push)
+        val dmBuffer = requireNotNull(db.bufferDao().byName(networkId, target))
+        assertEquals(0, db.messageDao().countForBuffer(dmBuffer.id))
+
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    ChatHistoryResult(emptyList(), listOf(target to 400L))
+                ChatHistoryRequest.Subcommand.LATEST -> ChatHistoryResult(
+                    events = if (request.target == target) {
+                        listOf(
+                            push.copy(
+                                ctx = push.ctx.copy(msgid = "durable-new-dm", batchId = "history"),
+                            ),
+                        )
+                    } else {
+                        emptyList()
+                    },
+                    targets = emptyList(),
+                )
+                else -> ChatHistoryResult(emptyList(), emptyList())
+            }
+        }
+
+        val result = coordinator.resyncNetwork(
+            networkId,
+            db.bufferDao().openTargets(networkId).map { it.id to it.name },
+            source,
+        )
+
+        assertEquals(HistoryResyncState.Updated(1), result)
+        assertEquals(1, db.messageDao().countForBuffer(dmBuffer.id))
+        assertTrue(db.messageDao().byMsgid(dmBuffer.id, "durable-new-dm") != null)
+        assertTrue(
+            source.requests.any {
+                it.subcommand == ChatHistoryRequest.Subcommand.LATEST && it.target == target
+            },
+        )
+    }
+
+    @Test
     fun rejectedAfterFallsBackToLatestOverlap() = runTest {
         processor.process(networkId, message("seed", 100))
         val source = FakeSource { request ->

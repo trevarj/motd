@@ -363,7 +363,7 @@ failure log.
 | H | Inline image viewer | Conditional; skipped without a reachable seeded image |
 | I | Delete-chat cancellation, final crash sweep, clean reset | Required |
 | J | Soju control-center panels, admin discovery, safe console command | Required with the local admin fixture |
-| K | ntfy discovery, soju WebPush ACK, background/cold/Doze delivery, exactly-once notifications | Conditional; skipped without F-Droid ntfy |
+| K | ntfy discovery, soju WebPush ACK, background/cold/Doze delivery, exactly-once notifications and visible rows | Conditional; skipped without F-Droid ntfy |
 | S | Deterministic public screenshot showcase | Required when selected by `headless.sh showcase` |
 
 Phase K is intentionally excluded from the default A–I sweep because it needs an installed

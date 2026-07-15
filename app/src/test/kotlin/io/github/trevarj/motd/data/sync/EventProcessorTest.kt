@@ -433,6 +433,21 @@ class EventProcessorTest {
     }
 
     @Test
+    fun msgidlessPushServerNotice_createsServerBufferWithoutPersisting() = runTest {
+        processor.processPush(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(), kind = IrcEvent.ChatKind.NOTICE,
+            source = Prefix("irc.libera.chat"), target = "me", text = "transient server notice",
+            isSelf = false, replyToMsgid = null,
+        ))
+
+        val server = serverBuffer()
+        assertNotNull(server)
+        assertEquals(BufferType.SERVER, server!!.type)
+        assertEquals(0, pagingList(server.id).size)
+        assertNull(db.bufferDao().byName(networkId, "irc.libera.chat"))
+    }
+
+    @Test
     fun nickServNotice_stillCreatesQueryBuffer() = runTest {
         processor.process(networkId, IrcEvent.ChatMessage(
             ctx = ctx(), kind = IrcEvent.ChatKind.NOTICE,

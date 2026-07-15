@@ -320,22 +320,22 @@ interface MessageDao {
     suspend fun byDedupKey(bufferId: Long, dedupKey: String): MessageEntity?
 
     /**
-     * At most two durable incoming rows matching a msgid-less live delivery. Returning two lets
-     * EventProcessor reject an ambiguous match instead of merging legitimately repeated text.
+     * At most two durable incoming rows matching a msgid-less live representation. Account and
+     * reply tags are deliberately excluded: bouncers may add or strip those optional tags between
+     * live and history delivery. Returning two lets EventProcessor reject an ambiguous match
+     * instead of merging legitimately repeated text.
      */
     @Query(
         """SELECT * FROM messages WHERE bufferId = :bufferId AND isSelf = 0 AND msgid IS NOT NULL
-          AND sender = :sender AND senderAccount IS :senderAccount AND kind = :kind AND text = :text
-          AND replyToMsgid IS :replyToMsgid AND serverTime BETWEEN :lo AND :hi
+          AND sender = :sender AND kind = :kind AND text = :text
+          AND serverTime BETWEEN :lo AND :hi
           ORDER BY serverTime DESC, id DESC LIMIT 2""",
     )
     suspend fun findDurableIncomingCandidates(
         bufferId: Long,
         sender: String,
-        senderAccount: String?,
         kind: MessageKind,
         text: String,
-        replyToMsgid: String?,
         lo: Long,
         hi: Long,
     ): List<MessageEntity>

@@ -1135,6 +1135,7 @@ phase_k() {
 
   step "Deliver a channel highlight and DM through public ntfy"
   _token="motd-up-$(date +%s)"
+  _push_sender="${MOTD_SECOND_NICK:-motdadb2}"
   "$E2E_DIR/local-stack.sh" push "$_token"
   _found=false
   for _attempt in $(seq 1 45); do
@@ -1151,29 +1152,33 @@ phase_k() {
   fi
   assert_no_crash
 
-  step "Open the pushed conversation and verify the stored message"
+  step "Open the pushed conversation and verify reconnect history exactly once"
   adb_shell cmd statusbar expand-notifications >/dev/null 2>&1 || true
   sleep 2
   dump || true
   if [ -n "$(bounds_of_text "${_token}-dm")" ]; then
     tap_text "${_token}-dm"
-    wait_for_text "${_token}-dm" 10 || true
-    assert_text "${_token}-dm"
-    step "Verify foreground reconnect, catch-up, and live send"
-    input_tag chat_composer_field "Foreground ${_token}"
-    redump
-    tap_desc "Send"
-    wait_for_text "Foreground ${_token}" 10 || true
-    assert_text "Foreground ${_token}"
-    reset_to_chatlist >/dev/null 2>&1 || true
-    wait_for_text "$MOTD_TEST_CHANNEL" 10 || true
-    tap_text "$MOTD_TEST_CHANNEL"
-    wait_for_text "${MOTD_NICK}: ${_token}-mention" 10 || true
-    assert_text "${MOTD_NICK}: ${_token}-mention"
   else
-    note "notification shade did not expose exact MessagingStyle text; delivery was verified via dumpsys"
+    note "notification shade did not expose exact text; opening the push-created DM from chat list"
     adb_shell input keyevent 4 >/dev/null 2>&1 || true
+    reset_to_chatlist >/dev/null 2>&1 || true
+    wait_for_text "$_push_sender" 15 || true
+    tap_text "$_push_sender"
   fi
+  wait_for_text "${_token}-dm" 30 || true
+  assert_text_exactly_once "${_token}-dm"
+
+  step "Verify foreground reconnect, channel history catch-up, and live send"
+  input_tag chat_composer_field "Foreground ${_token}"
+  redump
+  tap_desc "Send"
+  wait_for_text "Foreground ${_token}" 10 || true
+  assert_text "Foreground ${_token}"
+  reset_to_chatlist >/dev/null 2>&1 || true
+  wait_for_text "$MOTD_TEST_CHANNEL" 10 || true
+  tap_text "$MOTD_TEST_CHANNEL"
+  wait_for_text "${MOTD_NICK}: ${_token}-mention" 30 || true
+  assert_text_exactly_once "${MOTD_NICK}: ${_token}-mention"
   assert_no_crash
 
   step "Verify cold receiver delivery without force-stop"
