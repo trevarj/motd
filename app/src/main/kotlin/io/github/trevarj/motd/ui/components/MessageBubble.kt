@@ -1,6 +1,12 @@
 package io.github.trevarj.motd.ui.components
 
 import android.text.format.DateFormat
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -59,6 +65,7 @@ import io.github.trevarj.motd.ui.chat.parseInlineCode
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalConversationFontScale
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
 import java.text.DateFormat as JavaDateFormat
@@ -620,11 +627,23 @@ internal fun messageStatus(isSelf: Boolean, pending: Boolean, failed: Boolean): 
 /** Renders the single leading status glyph (clock / error / sent-check) for the timestamp row. */
 @Composable
 internal fun MessageStatusIcon(isSelf: Boolean, pending: Boolean, failed: Boolean) {
-    when (messageStatus(isSelf, pending, failed)) {
-        MsgStatus.FAILED -> FailedIcon()
-        MsgStatus.PENDING -> PendingIcon()
-        MsgStatus.SENT -> SentIcon()
-        MsgStatus.NONE -> {}
+    AnimatedContent(
+        targetState = messageStatus(isSelf, pending, failed),
+        transitionSpec = {
+            (fadeIn(MotdMotion.microFadeIn) + scaleIn(initialScale = 0.85f, animationSpec = MotdMotion.softSpring))
+                .togetherWith(
+                    fadeOut(MotdMotion.microFadeOut) +
+                        scaleOut(targetScale = 0.95f, animationSpec = MotdMotion.softSpring),
+                )
+        },
+        label = "message_status",
+    ) { status ->
+        when (status) {
+            MsgStatus.FAILED -> FailedIcon()
+            MsgStatus.PENDING -> PendingIcon()
+            MsgStatus.SENT -> SentIcon()
+            MsgStatus.NONE -> {}
+        }
     }
 }
 

@@ -3,9 +3,13 @@ package io.github.trevarj.motd.ui.chat
 import android.content.ClipData
 import android.content.Intent
 import android.os.Trace
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -89,8 +93,9 @@ import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.typingText
-import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ConversationTypography
+import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -331,6 +336,7 @@ fun ChatContent(
 ) {
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
+    var liveEntryId by remember { mutableStateOf<Long?>(null) }
     val visibilityPolicy = remember(showJoinPartQuit, fools, foolsMode) {
         MessageVisibilityPolicy(MessageVisibilitySpec(showJoinPartQuit, fools, foolsMode))
     }
@@ -740,6 +746,7 @@ fun ChatContent(
                 val followingBefore = autoFollow.following
                 if (suppressNextAutoFollow) {
                     autoFollow.reset(newCount, atBottom, newestEffectiveId)
+                    liveEntryId = null
                     suppressNextAutoFollow = false
                     AutoFollowTrace.record("paging_initial", traceBufferId, traceSessionId) {
                         "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
@@ -747,17 +754,19 @@ fun ChatContent(
                             "append=${loadStateName(items.loadState.append)}"
                     }
                 } else {
-                    val shouldFollow = autoFollow.onTimelineChanged(newCount, newestEffectiveId)
+                    val change = autoFollow.onTimelineChangedWithEntry(newCount, newestEffectiveId)
+                    liveEntryId = change.liveEntryId
                     val newest = if (newCount > 0) items.peek(0) else null
                     AutoFollowTrace.record("follow_decision", traceBufferId, traceSessionId) {
                         "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
                             "following_before=$followingBefore following_after=${autoFollow.following} " +
-                            "follow=$shouldFollow newest_row=${newest?.id ?: -1} " +
+                            "follow=${change.shouldFollow} live_entry=${change.liveEntryId ?: -1} " +
+                            "newest_row=${newest?.id ?: -1} " +
                             "newest_kind=${newest?.kind?.name ?: "NONE"} " +
                             "refresh=${loadStateName(items.loadState.refresh)} " +
                             "append=${loadStateName(items.loadState.append)}"
                     }
-                    if (shouldFollow) scrollToNewest(animate = false, reason = "live_arrival")
+                    if (change.shouldFollow) scrollToNewest(animate = false, reason = "live_arrival")
                 }
             }
     }
@@ -804,13 +813,21 @@ fun ChatContent(
                                 text = buffer?.displayName ?: "",
                                 style = MaterialTheme.typography.titleMedium,
                             )
-                            val subtitle = chatSubtitle(state, ctx)
-                            if (subtitle != null) {
-                                Text(
-                                    text = subtitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                            AnimatedContent(
+                                targetState = chatSubtitle(state, ctx),
+                                transitionSpec = {
+                                    fadeIn(MotdMotion.microFadeIn) togetherWith
+                                        fadeOut(MotdMotion.microFadeOut)
+                                },
+                                label = "chat_subtitle",
+                            ) { subtitle ->
+                                if (subtitle != null) {
+                                    Text(
+                                        text = subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                     }
@@ -910,6 +927,8 @@ fun ChatContent(
                     MessageList(
                         items = items,
                         listState = listState,
+                        liveEntryId = liveEntryId,
+                        onLiveEntryConsumed = { id -> if (liveEntryId == id) liveEntryId = null },
                         networkId = state.buffer?.networkId,
                         // Frozen read-marker so the "— New messages —" divider stays put (plans/15 #2).
                         readMarkerTime = readMarkerSnapshot,

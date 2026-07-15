@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -150,6 +151,20 @@ class ChatModelsTest {
 
         assertFalse(tracker.onTimelineChanged(newItemCount = 11, newNewestEffectiveId = 7))
         assertTrue(tracker.onTimelineChanged(newItemCount = 12, newNewestEffectiveId = 8))
+    }
+
+    @Test fun `live entry animation is emitted only for a followed newer identity`() {
+        val tracker = AutoFollowTracker(initialItemCount = 10)
+        tracker.reset(itemCount = 10, atBottom = true, newestEffectiveId = 7)
+
+        assertNull(tracker.onTimelineChangedWithEntry(11, 7).liveEntryId)
+
+        val live = tracker.onTimelineChangedWithEntry(12, 8)
+        assertTrue(live.shouldFollow)
+        assertEquals(8L, live.liveEntryId)
+
+        tracker.onScrollStateChanged(scrolling = true, programmatic = false, atBottom = false)
+        assertNull(tracker.onTimelineChangedWithEntry(13, 9).liveEntryId)
     }
 
     @Test fun `paging invalidation cannot break following live arrivals`() {

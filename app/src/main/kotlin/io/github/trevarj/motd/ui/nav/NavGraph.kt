@@ -29,6 +29,7 @@ import io.github.trevarj.motd.ui.settings.NickListKind
 import io.github.trevarj.motd.ui.settings.SettingsScreen
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkScreen
 import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetworksScreen
+import io.github.trevarj.motd.ui.theme.MotdMotion
 
 /**
  * App navigation graph. Routes come from [Routes.kt] (frozen). Each destination is wired to its
@@ -38,8 +39,6 @@ import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetworksScreen
 // to the left; back reverses it. 300ms tween is the standard container-transform duration. These are
 // set at the NavHost level so every composable<Route> inherits them; the pop transitions are also
 // what the Android 13+ predictive-back scrim animates.
-private const val SLIDE_DURATION_MS = 300
-
 @Composable
 fun MotdNavGraph(
     navController: NavHostController = rememberNavController(),
@@ -63,10 +62,18 @@ fun MotdNavGraph(
     NavHost(
         navController = navController,
         startDestination = ChatListRoute,
-        enterTransition = { slideIntoContainer(SlideDirection.Start, tween(SLIDE_DURATION_MS)) },
-        exitTransition = { slideOutOfContainer(SlideDirection.Start, tween(SLIDE_DURATION_MS)) },
-        popEnterTransition = { slideIntoContainer(SlideDirection.End, tween(SLIDE_DURATION_MS)) },
-        popExitTransition = { slideOutOfContainer(SlideDirection.End, tween(SLIDE_DURATION_MS)) },
+        enterTransition = {
+            slideIntoContainer(SlideDirection.Start, tween(MotdMotion.NavigationDurationMs))
+        },
+        exitTransition = {
+            slideOutOfContainer(SlideDirection.Start, tween(MotdMotion.NavigationDurationMs))
+        },
+        popEnterTransition = {
+            slideIntoContainer(SlideDirection.End, tween(MotdMotion.NavigationDurationMs))
+        },
+        popExitTransition = {
+            slideOutOfContainer(SlideDirection.End, tween(MotdMotion.NavigationDurationMs))
+        },
     ) {
         composable<ChatListRoute> {
             ChatListScreen(
@@ -179,10 +186,10 @@ fun MotdNavGraph(
         }
         composable<ImageViewerRoute>(
             // Full-screen image reads better appearing/dismissing in place than sliding sideways.
-            enterTransition = { fadeIn(tween(SLIDE_DURATION_MS)) },
-            exitTransition = { fadeOut(tween(SLIDE_DURATION_MS)) },
-            popEnterTransition = { fadeIn(tween(SLIDE_DURATION_MS)) },
-            popExitTransition = { fadeOut(tween(SLIDE_DURATION_MS)) },
+            enterTransition = { fadeIn(tween(MotdMotion.NavigationDurationMs)) },
+            exitTransition = { fadeOut(tween(MotdMotion.NavigationDurationMs)) },
+            popEnterTransition = { fadeIn(tween(MotdMotion.NavigationDurationMs)) },
+            popExitTransition = { fadeOut(tween(MotdMotion.NavigationDurationMs)) },
         ) { entry ->
             val route = entry.toRoute<ImageViewerRoute>()
             ImageViewerScreen(url = route.url, onBack = { navController.popBackStack() })

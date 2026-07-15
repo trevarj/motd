@@ -238,6 +238,18 @@ internal class AutoFollowTracker(initialItemCount: Int) {
      * exposing an older row after deletion) is not mistaken for a live arrival.
      */
     fun onTimelineChanged(newItemCount: Int, newNewestEffectiveId: Long?): Boolean {
+        return onTimelineChangedWithEntry(newItemCount, newNewestEffectiveId).shouldFollow
+    }
+
+    /**
+     * Classify a timeline update for both viewport following and the one-shot entrance animation.
+     * The entry id is only exposed while the user is following the newest row; initial/history
+     * updates and changes made while reading older messages must remain visually quiet.
+     */
+    fun onTimelineChangedWithEntry(
+        newItemCount: Int,
+        newNewestEffectiveId: Long?,
+    ): TimelineChange {
         val previousNewestId = newestEffectiveId
         val shouldFollow = following && previousNewestId != null &&
             newNewestEffectiveId != null && newNewestEffectiveId > previousNewestId
@@ -249,9 +261,18 @@ internal class AutoFollowTracker(initialItemCount: Int) {
         ) {
             newestEffectiveId = newNewestEffectiveId
         }
-        return shouldFollow
+        return TimelineChange(
+            shouldFollow = shouldFollow,
+            liveEntryId = newNewestEffectiveId.takeIf { shouldFollow },
+        )
     }
 }
+
+/** The small piece of timeline state that is allowed to cross into row rendering. */
+internal data class TimelineChange(
+    val shouldFollow: Boolean,
+    val liveEntryId: Long?,
+)
 
 fun newestEffectiveMessageId(
     itemCount: Int,

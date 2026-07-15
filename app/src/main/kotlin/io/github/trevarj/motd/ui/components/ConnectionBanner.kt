@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /**
@@ -35,8 +36,8 @@ fun ConnectionBanner(
     val status = bannerStatus(states, networkName)
     AnimatedVisibility(
         visible = status != null,
-        enter = fadeIn() + expandVertically(),
-        exit = fadeOut() + shrinkVertically(),
+        enter = fadeIn(MotdMotion.fadeIn) + expandVertically(),
+        exit = fadeOut(MotdMotion.fadeOut) + shrinkVertically(),
         modifier = modifier,
     ) {
         // status is stable within a composition frame; remembered snapshot avoids null flicker.

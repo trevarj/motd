@@ -77,6 +77,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.components.ConnectionBanner
 import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlinx.coroutines.launch
 
 /** Stateful entry: wires the ViewModel and drives navigation/empty-state. */
@@ -412,11 +413,39 @@ private fun ChatList(
                 SectionHeader(stringResource(R.string.chatlist_friends))
             }
             items(sections.friends, key = { "f-${it.bufferId}" }) { row ->
-                RowWithMenu(row, presence[row.bufferId], isFriend = true, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
+                RowWithMenu(
+                    row,
+                    presence[row.bufferId],
+                    isFriend = true,
+                    multiNetwork,
+                    onOpenBuffer,
+                    onSetPinned,
+                    onSetMuted,
+                    onDeleteBuffer,
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = MotdMotion.microFadeIn,
+                        fadeOutSpec = MotdMotion.microFadeOut,
+                        placementSpec = MotdMotion.rowPlacement,
+                    ),
+                )
             }
         }
         items(sections.regular, key = { it.bufferId }) { row ->
-            RowWithMenu(row, presence[row.bufferId], isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
+            RowWithMenu(
+                row,
+                presence[row.bufferId],
+                isFriend = false,
+                multiNetwork,
+                onOpenBuffer,
+                onSetPinned,
+                onSetMuted,
+                onDeleteBuffer,
+                modifier = Modifier.animateItem(
+                    fadeInSpec = MotdMotion.microFadeIn,
+                    fadeOutSpec = MotdMotion.microFadeOut,
+                    placementSpec = MotdMotion.rowPlacement,
+                ),
+            )
         }
         if (sections.fools.isNotEmpty()) {
             item(key = "fools-header") {
@@ -428,7 +457,15 @@ private fun ChatList(
             }
             if (foolsExpanded) {
                 items(sections.fools, key = { "o-${it.bufferId}" }) { row ->
-                    Box(modifier = Modifier.alpha(0.55f)) {
+                    Box(
+                        modifier = Modifier
+                            .alpha(0.55f)
+                            .animateItem(
+                                fadeInSpec = MotdMotion.microFadeIn,
+                                fadeOutSpec = MotdMotion.microFadeOut,
+                                placementSpec = MotdMotion.rowPlacement,
+                            ),
+                    ) {
                         RowWithMenu(row, presence[row.bufferId], isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
                     }
                 }
@@ -472,6 +509,7 @@ private fun RowWithMenu(
     onSetPinned: (Long, Boolean) -> Unit,
     onSetMuted: (Long, Boolean) -> Unit,
     onDeleteBuffer: (ChatListRow) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -489,11 +527,12 @@ private fun RowWithMenu(
         },
     )
 
-    SwipeToDismissBox(
-        state = dismissState,
+    Box(modifier = modifier) {
+        SwipeToDismissBox(
+            state = dismissState,
         enableDismissFromStartToEnd = false,
         backgroundContent = { DeleteSwipeBackground() },
-    ) {
+        ) {
         // Row background must be opaque so the swipe background stays hidden until swiped.
         Box(modifier = Modifier.background(MaterialTheme.colorScheme.background)) {
             ChatListRowItem(
@@ -570,6 +609,7 @@ private fun RowWithMenu(
             },
             onDismiss = { confirmDelete = false },
         )
+        }
     }
 }
 

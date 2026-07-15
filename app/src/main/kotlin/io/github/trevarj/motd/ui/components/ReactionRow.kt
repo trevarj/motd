@@ -1,5 +1,9 @@
 package io.github.trevarj.motd.ui.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,6 +17,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -21,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.MotdMotion
 
 /** One aggregated reaction: an emoji, its count, and whether the current user reacted. */
 data class ReactionChip(val emoji: String, val count: Int, val mine: Boolean)
@@ -44,7 +50,9 @@ fun ReactionRow(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         reactions.forEach { chip ->
-            ReactionChipView(chip = chip, onClick = { onReact(chip.emoji) })
+            key(chip.emoji) {
+                ReactionChipView(chip = chip, onClick = { onReact(chip.emoji) })
+            }
         }
     }
 }
@@ -74,12 +82,20 @@ private fun ReactionChipView(chip: ReactionChip, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text = chip.emoji, color = Color.Unspecified, style = MaterialTheme.typography.bodySmall)
-        Text(
-            text = chip.count.toString(),
-            color = fg,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
+        AnimatedContent(
+            targetState = chip.count,
+            transitionSpec = {
+                fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
+            },
+            label = "reaction_count",
+        ) { count ->
+            Text(
+                text = count.toString(),
+                color = fg,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 

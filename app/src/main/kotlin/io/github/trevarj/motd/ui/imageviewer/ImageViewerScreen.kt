@@ -7,6 +7,7 @@ import android.os.Build
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -47,7 +48,9 @@ import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URL
@@ -136,18 +139,49 @@ fun ImageViewerScreen(
                     detectTapGestures(
                         onTap = { chromeVisible = !chromeVisible },
                         onDoubleTap = { tap ->
+                            val targetScale: Float
+                            val targetOffsetX: Float
+                            val targetOffsetY: Float
                             if (scale > 1f) {
-                                scale = 1f
-                                offsetX = 0f
-                                offsetY = 0f
+                                targetScale = 1f
+                                targetOffsetX = 0f
+                                targetOffsetY = 0f
                             } else {
                                 // Zoom toward the tapped point, not the center (plans/15 #26).
                                 val focusX = tap.x - size.width / 2f
                                 val focusY = tap.y - size.height / 2f
-                                scale = DOUBLE_TAP_SCALE
-                                offsetX = -focusX * (DOUBLE_TAP_SCALE - 1f)
-                                offsetY = -focusY * (DOUBLE_TAP_SCALE - 1f)
-                                clampOffsets()
+                                targetScale = DOUBLE_TAP_SCALE
+                                targetOffsetX = -focusX * (DOUBLE_TAP_SCALE - 1f)
+                                targetOffsetY = -focusY * (DOUBLE_TAP_SCALE - 1f)
+                            }
+                            val maxTargetX = ((targetScale - 1f) * boxSize.width / 2f).coerceAtLeast(0f)
+                            val maxTargetY = ((targetScale - 1f) * boxSize.height / 2f).coerceAtLeast(0f)
+                            val clampedTargetOffsetX = targetOffsetX.coerceIn(-maxTargetX, maxTargetX)
+                            val clampedTargetOffsetY = targetOffsetY.coerceIn(-maxTargetY, maxTargetY)
+                            scope.launch {
+                                coroutineScope {
+                                    launch {
+                                        animate(
+                                            initialValue = scale,
+                                            targetValue = targetScale,
+                                            animationSpec = MotdMotion.softSpring,
+                                        ) { value, _ -> scale = value }
+                                    }
+                                    launch {
+                                        animate(
+                                            initialValue = offsetX,
+                                            targetValue = clampedTargetOffsetX,
+                                            animationSpec = MotdMotion.softSpring,
+                                        ) { value, _ -> offsetX = value }
+                                    }
+                                    launch {
+                                        animate(
+                                            initialValue = offsetY,
+                                            targetValue = clampedTargetOffsetY,
+                                            animationSpec = MotdMotion.softSpring,
+                                        ) { value, _ -> offsetY = value }
+                                    }
+                                }
                             }
                         },
                     )

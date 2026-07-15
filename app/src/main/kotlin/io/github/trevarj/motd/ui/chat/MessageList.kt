@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -41,6 +42,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -66,11 +69,14 @@ import io.github.trevarj.motd.ui.components.SwipeToReplyContainer
 import io.github.trevarj.motd.ui.components.DaySeparator
 import io.github.trevarj.motd.ui.components.dayStart
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Limit collapsed system-event work per composed row during high-velocity history traversal. */
@@ -155,6 +161,8 @@ fun MessageList(
     showLinkPreviews: Boolean,
     onOpenLink: (String) -> Unit,
     modifier: Modifier = Modifier,
+    liveEntryId: Long? = null,
+    onLiveEntryConsumed: (Long) -> Unit = {},
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
     replyPreview: (String) -> Flow<ReplyPreviewData?> = { flowOf(null) },
     onDelete: (MessageEntity) -> Unit = {},
@@ -259,33 +267,44 @@ fun MessageList(
             // bubble, retry row, and read-marker/day dividers. A Box would stack them on top of one
             // another (dividers over message text; the fool-collapse chip trapped behind the bubble).
             // A Column lays them out top-to-bottom so each affordance owns its own space and taps.
-            Column(modifier = Modifier.fillMaxWidth().background(highlightColor)) {
-            MessageRow(
-                msg = msg,
-                networkId = networkId,
-                older = older,
-                formatTime = formatMessageTime,
-                readMarkerTime = readMarkerTime,
-                // An expanded fool row shows a small tap-to-re-collapse chip above its bubble so the
-                // toggle is bidirectional without stealing the bubble's long-press/link taps (#9).
-                onCollapseFool = if (isFool) ({ onToggleFool(msg.id) }) else null,
-                senderIsFriend = !msg.isSelf && normalizeNick(msg.sender) in friends,
-                reactions = msg.msgid?.let(reactionChips).orEmpty(),
-                knownNicks = knownNicks,
-                onLongPress = onLongPress,
-                onReply = onReply,
-                onReact = onReact,
-                onImageClick = onImageClick,
-                onRetry = onRetry,
-                onDelete = onDelete,
-                loadPreview = loadPreview,
-                showImages = showImages,
-                showLinkPreviews = showLinkPreviews,
-                richContentEnabled = richContentEnabled,
-                onOpenLink = onOpenLink,
-                onSenderClick = onSenderClick,
-                replyPreview = replyPreview,
-            )
+            val rowContent: @Composable () -> Unit = {
+                Column(modifier = Modifier.fillMaxWidth().background(highlightColor)) {
+                    MessageRow(
+                        msg = msg,
+                        networkId = networkId,
+                        older = older,
+                        formatTime = formatMessageTime,
+                        readMarkerTime = readMarkerTime,
+                        // An expanded fool row shows a small tap-to-re-collapse chip above its bubble so the
+                        // toggle is bidirectional without stealing the bubble's long-press/link taps (#9).
+                        onCollapseFool = if (isFool) ({ onToggleFool(msg.id) }) else null,
+                        senderIsFriend = !msg.isSelf && normalizeNick(msg.sender) in friends,
+                        reactions = msg.msgid?.let(reactionChips).orEmpty(),
+                        knownNicks = knownNicks,
+                        onLongPress = onLongPress,
+                        onReply = onReply,
+                        onReact = onReact,
+                        onImageClick = onImageClick,
+                        onRetry = onRetry,
+                        onDelete = onDelete,
+                        loadPreview = loadPreview,
+                        showImages = showImages,
+                        showLinkPreviews = showLinkPreviews,
+                        richContentEnabled = richContentEnabled,
+                        onOpenLink = onOpenLink,
+                        onSenderClick = onSenderClick,
+                        replyPreview = replyPreview,
+                    )
+                }
+            }
+            if (liveEntryId == msg.id) {
+                LiveMessageEntry(
+                    messageId = msg.id,
+                    onConsumed = onLiveEntryConsumed,
+                    content = rowContent,
+                )
+            } else {
+                rowContent()
             }
         }
 
@@ -294,6 +313,44 @@ fun MessageList(
         item(key = "append-state", contentType = "loadstate") {
             LoadStateFooter(items.loadState.append)
         }
+    }
+}
+
+/**
+ * One-shot live-message entrance. Transforming the already-measured row avoids changing the
+ * reverse list's height while it is following a burst of IRC arrivals.
+ */
+@Composable
+private fun LiveMessageEntry(
+    messageId: Long,
+    onConsumed: (Long) -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val initialOffset = with(LocalDensity.current) { 8.dp.toPx() }
+    val alpha = remember(messageId) { Animatable(0f) }
+    val scale = remember(messageId) { Animatable(0.96f) }
+    val translationY = remember(messageId, initialOffset) { Animatable(initialOffset) }
+
+    LaunchedEffect(messageId) {
+        coroutineScope {
+            launch { alpha.animateTo(1f, MotdMotion.fadeIn) }
+            launch { scale.animateTo(1f, MotdMotion.softSpring) }
+            launch { translationY.animateTo(0f, MotdMotion.softSpring) }
+        }
+        onConsumed(messageId)
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                this.alpha = alpha.value
+                scaleX = scale.value
+                scaleY = scale.value
+                this.translationY = translationY.value
+            },
+    ) {
+        content()
     }
 }
 

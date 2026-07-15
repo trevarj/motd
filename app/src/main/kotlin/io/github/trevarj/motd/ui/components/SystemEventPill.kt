@@ -1,5 +1,10 @@
 package io.github.trevarj.motd.ui.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.LocalSpacing
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /**
@@ -66,6 +72,7 @@ fun SystemEventPill(
                     MaterialTheme.colorScheme.surfaceContainerHigh,
                     RoundedCornerShape(50),
                 )
+                .animateContentSize(animationSpec = MotdMotion.contentSize)
                 .then(
                     if (collapsible) Modifier.semantics {
                         role = Role.Button
@@ -82,22 +89,32 @@ fun SystemEventPill(
                 .padding(horizontal = 14.dp, vertical = 6.dp),
             horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
         ) {
-            if (expanded && collapsible) {
-                lines.orEmpty().forEach { line ->
+            AnimatedContent(
+                targetState = expanded && collapsible,
+                transitionSpec = {
+                    fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
+                },
+                label = "system_event_content",
+            ) { showLines ->
+                if (showLines) {
+                    Column {
+                        lines.orEmpty().forEach { line ->
+                            Text(
+                                text = line,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                } else {
                     Text(
-                        text = line,
+                        text = summary,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                     )
                 }
-            } else {
-                Text(
-                    text = summary,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
             }
         }
     }

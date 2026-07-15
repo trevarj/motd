@@ -1,6 +1,9 @@
 package io.github.trevarj.motd.ui.onboarding
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -63,6 +66,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.settings.BouncerLoginFields
 import io.github.trevarj.motd.ui.settings.NetworkForm
 import io.github.trevarj.motd.ui.settings.PasswordField
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Stateful entry: wires the ViewModel; the wizard is a single route with an internal pager. */
@@ -440,15 +444,19 @@ private fun StateIndicator(connState: IrcClientState?) {
                 else -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             }
         }
-        Text(
-            when (connState) {
+        AnimatedContent(
+            targetState = when (connState) {
                 is IrcClientState.Ready -> "Connected as ${connState.nick}"
                 is IrcClientState.Failed -> "Failed"
                 IrcClientState.Registering -> "Registering…"
                 IrcClientState.Connecting -> "Connecting…"
                 else -> "Starting…"
             },
-        )
+            transitionSpec = {
+                fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
+            },
+            label = "onboarding_connection_label",
+        ) { label -> Text(label) }
     }
 }
 

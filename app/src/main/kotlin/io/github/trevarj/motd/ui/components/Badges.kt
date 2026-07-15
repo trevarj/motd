@@ -1,5 +1,10 @@
 package io.github.trevarj.motd.ui.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.defaultMinSize
@@ -19,6 +24,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Unread count pill (primary). Renders "99+" for large counts. */
@@ -79,6 +85,7 @@ private fun CountBadge(
     Box(
         modifier = modifier
             .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+            .animateContentSize(animationSpec = MotdMotion.contentSize)
             .background(background, CircleShape)
             .padding(horizontal = 6.dp, vertical = 1.dp)
             // Expose the real count as one CD node ("N unread"/"N mentions") for the e2e harness,
@@ -92,12 +99,20 @@ private fun CountBadge(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = text,
-            color = foreground,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        AnimatedContent(
+            targetState = text,
+            transitionSpec = {
+                fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)
+            },
+            label = "badge_count",
+        ) { currentText ->
+            Text(
+                text = currentText,
+                color = foreground,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
     }
 }
 
