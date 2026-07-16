@@ -4,15 +4,21 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -74,28 +80,41 @@ class BackgroundConnectionRetentionTest {
     }
 
     @Test
-    fun concurrentBackgroundSignalsCreateOneExpiryCallback() = runTest {
+    fun concurrentBackgroundSignalsCreateOneExpiryCallback() = runBlocking {
         val elapsedCount = AtomicInteger()
+        val callbackStarted = CompletableDeferred<Unit>()
+        val releaseCallback = CompletableDeferred<Unit>()
+        val retentionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val retention = BackgroundConnectionRetention(
-            scope = this,
-            graceMs = 300_000L,
-            nowMs = { testScheduler.currentTime },
+            scope = retentionScope,
+            graceMs = 0L,
         )
 
-        coroutineScope {
-            List(64) {
-                async(Dispatchers.Default) {
-                    retention.onBackgrounded { elapsedCount.incrementAndGet() }
-                }
-            }.awaitAll()
-        }
-        // The contenders run on real worker threads while the expiry uses virtual time. Drain the
-        // test scheduler completely so the deadline callback and its finally cleanup both finish
-        // before asserting; a boundary advance can otherwise race the newly enqueued lazy job.
-        advanceUntilIdle()
+        try {
+            coroutineScope {
+                List(64) {
+                    async(Dispatchers.Default) {
+                        retention.onBackgrounded {
+                            callbackStarted.complete(Unit)
+                            releaseCallback.await()
+                            elapsedCount.incrementAndGet()
+                        }
+                    }
+                }.awaitAll()
+            }
+            withTimeout(5_000L) { callbackStarted.await() }
+            assertTrue(retention.isRetaining)
 
-        assertEquals(1, elapsedCount.get())
-        assertFalse(retention.isRetaining)
+            releaseCallback.complete(Unit)
+            withTimeout(5_000L) {
+                while (retention.isRetaining) yield()
+            }
+
+            assertEquals(1, elapsedCount.get())
+            assertFalse(retention.isRetaining)
+        } finally {
+            retentionScope.cancel()
+        }
     }
 
     @Test
