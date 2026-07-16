@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -7,17 +8,18 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -54,11 +56,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -84,7 +92,9 @@ import io.github.trevarj.motd.ui.chat.searchSystemEmojis
 import io.github.trevarj.motd.ui.chat.systemEmojiSearchEntries
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class ComposerReply(val sender: String, val text: String)
 
@@ -95,6 +105,47 @@ internal fun composerPanel(showEmoji: Boolean, hasAutocomplete: Boolean): Compos
     hasAutocomplete -> ComposerPanel.AUTOCOMPLETE
     else -> ComposerPanel.NONE
 }
+
+/**
+ * The picker has two visual phases. While [OPEN], it fills the space released by the IME. While
+ * [RESTORING_IME], that same space shrinks as the IME returns, so the composer row stays put.
+ */
+internal enum class EmojiPickerPhase { OPEN, RESTORING_IME }
+
+internal data class EmojiPickerSession(
+    val capturedImeHeightPx: Int,
+    val restoresKeyboard: Boolean,
+    val phase: EmojiPickerPhase = EmojiPickerPhase.OPEN,
+)
+
+internal fun openEmojiPickerSession(
+    imeHeightPx: Int,
+    compactPickerHeightPx: Int,
+): EmojiPickerSession {
+    val visibleImeHeightPx = imeHeightPx.coerceAtLeast(0)
+    return EmojiPickerSession(
+        capturedImeHeightPx = if (visibleImeHeightPx > 0) visibleImeHeightPx else compactPickerHeightPx.coerceAtLeast(0),
+        restoresKeyboard = visibleImeHeightPx > 0,
+    )
+}
+
+internal fun closeEmojiPickerSession(session: EmojiPickerSession): EmojiPickerSession? =
+    if (session.restoresKeyboard) session.copy(phase = EmojiPickerPhase.RESTORING_IME) else null
+
+internal fun reopenEmojiPickerSession(session: EmojiPickerSession): EmojiPickerSession =
+    session.copy(phase = EmojiPickerPhase.OPEN)
+
+/**
+ * With adjustResize the window bottom rises by [currentImeHeightPx]. Keeping this complementary
+ * space below the input row makes its screen position independent of the IME animation.
+ */
+internal fun emojiPickerReplacementHeight(
+    capturedImeHeightPx: Int,
+    currentImeHeightPx: Int,
+): Int = (capturedImeHeightPx.coerceAtLeast(0) - currentImeHeightPx.coerceAtLeast(0)).coerceAtLeast(0)
+
+private const val EMOJI_IME_RESTORE_TIMEOUT_MILLIS = 1_000L
+private val COMPACT_EMOJI_PICKER_HEIGHT = 250.dp
 
 /** Modern chat composer with embedded tools and a stable, separate primary send action. */
 @Composable
@@ -111,16 +162,63 @@ fun Composer(
     onAttachment: (() -> Unit)? = null,
     autocomplete: (@Composable () -> Unit)? = null,
 ) {
-    var showEmojiPicker by remember { mutableStateOf(false) }
+    var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
     val emojiQuery = activeEmojiQuery(value)
     val emojiSearchEntries = remember { systemEmojiSearchEntries() }
     val emojiSuggestions = remember(emojiQuery, emojiSearchEntries) {
         emojiQuery?.let { searchSystemEmojis(emojiSearchEntries, it.query) }.orEmpty()
     }
     val hasAutocomplete = emojiSuggestions.isNotEmpty() || autocomplete != null
-    val visiblePanel = composerPanel(showEmojiPicker, hasAutocomplete)
+    // Keep autocomplete hidden for the entire restoration handoff. Otherwise it would introduce
+    // another independently-sized panel above the input row while the IME is animating.
+    val visiblePanel = composerPanel(emojiPickerSession != null, hasAutocomplete)
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+    val density = LocalDensity.current
+    val imeInsets = WindowInsets.ime
+    val compactPickerHeightPx = with(density) { COMPACT_EMOJI_PICKER_HEIGHT.roundToPx() }
+    val restoringSession = emojiPickerSession?.takeIf { it.phase == EmojiPickerPhase.RESTORING_IME }
+    val closeEmojiPickerDescription = stringResource(R.string.chat_composer_emoji_close)
+
+    fun dismissEmojiPicker() {
+        val session = emojiPickerSession ?: return
+        if (session.phase == EmojiPickerPhase.OPEN) {
+            emojiPickerSession = closeEmojiPickerSession(session)
+        }
+    }
+
+    fun openEmojiPicker() {
+        emojiPickerSession = openEmojiPickerSession(
+            imeHeightPx = imeInsets.getBottom(density),
+            compactPickerHeightPx = compactPickerHeightPx,
+        )
+        keyboard?.hide()
+    }
+
+    // Requesting focus and showing the IME from an effect makes the reverse transition reliable
+    // even when the emoji icon was tapped while the field's input connection was momentarily idle.
+    LaunchedEffect(restoringSession) {
+        if (restoringSession != null) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+            withTimeoutOrNull(EMOJI_IME_RESTORE_TIMEOUT_MILLIS) {
+                snapshotFlow { imeInsets.getBottom(density) }
+                    .first { it >= restoringSession.capturedImeHeightPx }
+            }
+            if (emojiPickerSession == restoringSession) {
+                // Hardware keyboards and failed IME requests have no inset animation. Do not
+                // leave the captured keyboard-sized gap below the composer indefinitely.
+                emojiPickerSession = null
+            }
+        }
+    }
+
+    // The first Back closes the picker and restores the keyboard only when it replaced one. Once
+    // the picker state is gone, the platform handles a second Back normally.
+    BackHandler(enabled = emojiPickerSession?.phase == EmojiPickerPhase.OPEN) {
+        dismissEmojiPicker()
+    }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -173,41 +271,61 @@ fun Composer(
                         if (showEmojiButton) {
                             IconButton(
                                 onClick = {
-                                    showEmojiPicker = !showEmojiPicker
-                                    if (showEmojiPicker) {
-                                        keyboard?.hide()
-                                        focusManager.clearFocus(force = true)
+                                    when (emojiPickerSession?.phase) {
+                                        EmojiPickerPhase.OPEN -> dismissEmojiPicker()
+                                        EmojiPickerPhase.RESTORING_IME -> {
+                                            emojiPickerSession = emojiPickerSession?.let(::reopenEmojiPickerSession)
+                                            keyboard?.hide()
+                                        }
+                                        null -> openEmojiPicker()
                                     }
                                 },
                                 modifier = Modifier
                                     .size(52.dp)
                                     .testTag("chat_composer_emoji")
-                                    .semantics { selected = showEmojiPicker },
+                                    .semantics { selected = emojiPickerSession?.phase == EmojiPickerPhase.OPEN },
                             ) {
                                 Icon(
                                     Icons.Outlined.Mood,
                                     contentDescription = stringResource(
-                                        if (showEmojiPicker) R.string.chat_composer_emoji_close
+                                        if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) R.string.chat_composer_emoji_close
                                         else R.string.chat_composer_emoji,
                                     ),
-                                    tint = if (showEmojiPicker) MaterialTheme.colorScheme.primary
+                                    tint = if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
 
-                        ComposerTextField(
-                            value = value,
-                            onValueChange = onValueChange,
-                            placeholder = placeholder,
-                            onFocused = { showEmojiPicker = false },
-                            modifier = Modifier.weight(1f),
-                        )
+                        Box(Modifier.weight(1f)) {
+                            ComposerTextField(
+                                value = value,
+                                onValueChange = onValueChange,
+                                placeholder = placeholder,
+                                onFocused = { dismissEmojiPicker() },
+                                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                            )
+
+                            // A physical tap on the text field while the picker is open should
+                            // perform the same seamless handoff as the emoji toggle. Letting the
+                            // field receive that tap directly can make Android show the keyboard
+                            // before the complementary panel has been installed.
+                            if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) {
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .clickable { dismissEmojiPicker() }
+                                        .semantics {
+                                            contentDescription = closeEmojiPickerDescription
+                                        },
+                                )
+                            }
+                        }
 
                         onAttachment?.let { action ->
                             IconButton(
                                 onClick = {
-                                    showEmojiPicker = false
+                                    emojiPickerSession = null
                                     keyboard?.hide()
                                     focusManager.clearFocus(force = true)
                                     action()
@@ -227,7 +345,7 @@ fun Composer(
                 val canSend = enabled && value.text.isNotBlank()
                 FilledIconButton(
                     onClick = {
-                        showEmojiPicker = false
+                        dismissEmojiPicker()
                         onSend()
                     },
                     enabled = canSend,
@@ -253,14 +371,54 @@ fun Composer(
                 }
             }
 
-            AnimatedVisibility(
-                visible = visiblePanel == ComposerPanel.EMOJI,
-                enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
-            ) {
-                EmojiPickerPanel(onPick = { emoji -> onValueChange(insertAtCursor(value, emoji)) })
-            }
+            EmojiPickerReplacementSurface(
+                session = emojiPickerSession,
+                imeInsets = imeInsets,
+                onPick = { emoji -> onValueChange(insertAtCursor(value, emoji)) },
+            )
         }
+    }
+}
+
+@Composable
+private fun EmojiPickerReplacementSurface(
+    session: EmojiPickerSession?,
+    imeInsets: WindowInsets,
+    onPick: (String) -> Unit,
+) {
+    session ?: return
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .emojiPickerReplacementHeight(imeInsets, session.capturedImeHeightPx)
+            .clipToBounds(),
+    ) {
+        AnimatedVisibility(
+            visible = session.phase == EmojiPickerPhase.OPEN,
+            modifier = Modifier.fillMaxSize(),
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            EmojiPickerPanel(
+                onPick = onPick,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+/** Reads the current animated IME inset during measurement, rather than animating a second size. */
+private fun Modifier.emojiPickerReplacementHeight(
+    imeInsets: WindowInsets,
+    capturedImeHeightPx: Int,
+): Modifier = layout { measurable, constraints ->
+    val desiredHeightPx = emojiPickerReplacementHeight(capturedImeHeightPx, imeInsets.getBottom(this))
+        .coerceIn(constraints.minHeight, constraints.maxHeight)
+    val placeable = measurable.measure(
+        constraints.copy(minHeight = desiredHeightPx, maxHeight = desiredHeightPx),
+    )
+    layout(placeable.width, desiredHeightPx) {
+        placeable.placeRelative(0, 0)
     }
 }
 
@@ -365,7 +523,10 @@ private fun EmojiAutocompletePanel(
 }
 
 @Composable
-private fun EmojiPickerPanel(onPick: (String) -> Unit) {
+private fun EmojiPickerPanel(
+    onPick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val labels = listOf(
         stringResource(R.string.emoji_people),
         stringResource(R.string.emoji_nature),
@@ -380,14 +541,14 @@ private fun EmojiPickerPanel(onPick: (String) -> Unit) {
     val pager = rememberPagerState(pageCount = { pages.size })
     val scope = rememberCoroutineScope()
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .testTag("chat_composer_emoji_picker")
             .padding(start = 8.dp, end = 8.dp, top = 8.dp)
-            .fillMaxWidth(),
+            .fillMaxSize(),
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
-        Column {
+        Column(Modifier.fillMaxSize()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -407,10 +568,16 @@ private fun EmojiPickerPanel(onPick: (String) -> Unit) {
                     }
                 }
             }
-            HorizontalPager(state = pager, modifier = Modifier.testTag("chat_composer_emoji_pages")) { pageIndex ->
+            HorizontalPager(
+                state = pager,
+                modifier = Modifier.weight(1f).testTag("chat_composer_emoji_pages"),
+            ) { pageIndex ->
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(8),
-                    modifier = Modifier.testTag("chat_composer_emoji_grid").fillMaxWidth().height(190.dp).padding(horizontal = 8.dp),
+                    modifier = Modifier
+                        .testTag("chat_composer_emoji_grid")
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp),
                 ) {
                     items(pages[pageIndex].emojis, key = { it }) { emoji ->
                         Box(
