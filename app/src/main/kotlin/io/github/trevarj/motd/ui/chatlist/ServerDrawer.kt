@@ -11,10 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -45,34 +43,16 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkRole
-import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.irc.event.IrcClientState
-import io.github.trevarj.motd.ui.components.IrcNetworkBadge
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.UnreadBadge
-import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.MotdTheme
-
-// Static, theme-independent semaphore for the status dot (plans/16 §3.2). Ready green, in-flight
-// amber; Failed/Disconnected come from the theme so they read as error/muted.
-private val ReadyColor = Color(0xFF4CAF50)
-private val PendingColor = Color(0xFFFFB300)
-
-@Composable
-private fun statusColor(state: IrcClientState): Color = when (state) {
-    is IrcClientState.Ready -> ReadyColor
-    IrcClientState.Connecting, IrcClientState.Registering -> PendingColor
-    is IrcClientState.Failed -> MaterialTheme.colorScheme.error
-    IrcClientState.Disconnected -> MaterialTheme.colorScheme.outlineVariant
-}
 
 /**
  * Server-drawer content (plans/16 §3.1). Stateless: takes the built [DrawerRow]s + rollups and
@@ -262,28 +242,6 @@ private fun DrawerNetworkItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // State is color-only in the dot; expose it as a CD ("status:Ready") + tag so the
-            // harness can read a per-network connection state from a text dump.
-            val statusCd = "status:${statusName(row.state)}"
-            if (LocalAvatarStyle.current == AvatarStyle.IRC_SPRITE) {
-                IrcNetworkBadge(
-                    name = row.name,
-                    networkId = row.networkId,
-                    status = statusColor(row.state),
-                    size = 32.dp,
-                    modifier = Modifier
-                        .testTag("drawer_status_dot_${row.networkId}")
-                        .semantics { contentDescription = statusCd },
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .testTag("drawer_status_dot_${row.networkId}")
-                        .semantics { contentDescription = statusCd }
-                        .size(10.dp)
-                        .background(statusColor(row.state), CircleShape),
-                )
-            }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = row.name,
@@ -341,15 +299,6 @@ private fun DrawerNetworkItem(
             )
         }
     }
-}
-
-/** Stable, non-localized state token for the status-dot CD (harness matches "status:Ready" etc.). */
-private fun statusName(state: IrcClientState): String = when (state) {
-    is IrcClientState.Ready -> "Ready"
-    IrcClientState.Connecting -> "Connecting"
-    IrcClientState.Registering -> "Registering"
-    is IrcClientState.Failed -> "Failed"
-    IrcClientState.Disconnected -> "Disconnected"
 }
 
 @Composable

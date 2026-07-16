@@ -83,7 +83,11 @@ class MotdNotifications @Inject constructor(
 
     // -- status notification (foreground service) --
 
-    fun statusNotification(connectedCount: Int, reconnecting: Boolean): Notification {
+    fun statusNotification(
+        connectedCount: Int,
+        reconnecting: Boolean,
+        starting: Boolean = false,
+    ): Notification {
         val contentIntent = PendingIntent.getActivity(
             context, 0,
             context.packageManager.getLaunchIntentForPackage(context.packageName)
@@ -95,7 +99,7 @@ class MotdNotifications @Inject constructor(
             Intent(context, IrcForegroundService::class.java).setAction(IrcForegroundService.ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val text = if (reconnecting) "Reconnecting…" else "Connected to $connectedCount networks"
+        val text = statusNotificationText(connectedCount, reconnecting, starting)
         return NotificationCompat.Builder(context, CHANNEL_STATUS)
             .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
             .setContentTitle("motd")
@@ -344,6 +348,16 @@ class MotdNotifications @Inject constructor(
         internal fun invitationNotificationId(messageId: Long): Int =
             0x40000000 or (messageId xor (messageId ushr 32)).toInt().and(0x3fffffff)
     }
+}
+
+internal fun statusNotificationText(
+    connectedCount: Int,
+    reconnecting: Boolean,
+    starting: Boolean,
+): String = when {
+    starting -> "Keeping chats connected"
+    reconnecting -> "Reconnecting…"
+    else -> "Connected to $connectedCount networks"
 }
 
 /** Stable identity for one notification entry, independent of live/push delivery provenance. */
