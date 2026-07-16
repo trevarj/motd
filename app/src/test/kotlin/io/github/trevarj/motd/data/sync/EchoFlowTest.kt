@@ -165,6 +165,51 @@ class EchoFlowTest {
     }
 
     @Test
+    fun existingTaggedMsgidlessHistory_collapsesLocallyTimedReplayWithoutConstraintFailure() = runTest {
+        val history = IrcEvent.ChatMessage(
+            ctx = MessageContext(
+                msgid = null,
+                serverTime = 800_000,
+                account = null,
+                batchId = "history-a",
+                label = null,
+                serverTimeSource = ServerTimeSource.TAG,
+            ),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#chan",
+            text = "already stored",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(history)))
+
+        processor.process(
+            networkId,
+            history.copy(
+                ctx = history.ctx.copy(
+                    serverTime = 801_000,
+                    batchId = null,
+                    serverTimeSource = ServerTimeSource.LOCAL,
+                ),
+            ),
+        )
+        assertEquals(2, rows().size)
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "#chan",
+                listOf(history.copy(ctx = history.ctx.copy(batchId = "history-b"))),
+            ),
+        )
+
+        val row = rows().single()
+        assertNull(row.msgid)
+        assertEquals(800_000, row.serverTime)
+    }
+
+    @Test
     fun locallyTimedLiveDoesNotMergeAmbiguousRepeatedHistoryMessages() = runTest {
         val live = IrcEvent.ChatMessage(
             ctx = MessageContext(

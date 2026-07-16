@@ -374,12 +374,32 @@ class EventProcessor @Inject constructor(
                 existing.text == storedText &&
                 st.normalize(existing.sender) == identitySender
             ) {
+                val canonicalKey = EchoDeduper.keyFor(e.ctx, identitySender, storedText)
+                val canonical = messageDao.byDedupKey(bufferId, canonicalKey)
+                if (canonical != null && canonical.id != existing.id) {
+                    val retained = canonical.copy(
+                        senderAccount =
+                            canonical.senderAccount ?: existing.senderAccount ?: row.senderAccount,
+                        hasMention = canonical.hasMention || existing.hasMention || row.hasMention,
+                        replyToMsgid =
+                            canonical.replyToMsgid ?: existing.replyToMsgid ?: row.replyToMsgid,
+                    )
+                    if (retained != canonical) messageDao.update(retained)
+                    messageDao.deleteById(existing.id)
+                    recentSyntheticIncoming[networkId]?.removeAll { it.rowId == candidate.rowId }
+                    traceMessageWrite(
+                        "room_synthetic_existing_reconcile",
+                        retained,
+                        fromHistory = true,
+                    )
+                    return
+                }
                 val reconciled = existing.copy(
                     serverTime = e.ctx.serverTime,
                     senderAccount = existing.senderAccount ?: row.senderAccount,
                     hasMention = existing.hasMention || row.hasMention,
                     replyToMsgid = existing.replyToMsgid ?: row.replyToMsgid,
-                    dedupKey = EchoDeduper.keyFor(e.ctx, identitySender, storedText),
+                    dedupKey = canonicalKey,
                 )
                 messageDao.update(reconciled)
                 recentSyntheticIncoming[networkId]?.removeAll { it.rowId == candidate.rowId }

@@ -66,10 +66,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
@@ -432,11 +431,8 @@ class ChatViewModel @Inject constructor(
      * either a socket echo or either history pass can resolve the reaction immediately.
      */
     private suspend fun resolveReactionMsgid(messageId: Long): String? =
-        withTimeoutOrNull(REACT_QUEUE_TIMEOUT_MS) {
-            coroutineScope {
-                val observedMsgid = async {
-                    messageRepository.awaitMsgid(messageId, REACT_QUEUE_TIMEOUT_MS)
-                }
+        coroutineScope {
+            val reconciliation = launch {
                 val currentBuffer = buffer.value
                 val client = currentBuffer?.let { connectionManager.clientFor(it.networkId) }
                 if (currentBuffer != null && client != null) {
@@ -448,12 +444,13 @@ class ChatViewModel @Inject constructor(
                                 connectionManager.clientFor(currentBuffer.networkId) === client
                             },
                         )
-                        if (observedMsgid.isCompleted) {
-                            return@coroutineScope observedMsgid.await()
-                        }
                     }
                 }
-                observedMsgid.await()
+            }
+            try {
+                messageRepository.awaitMsgid(messageId, REACT_QUEUE_TIMEOUT_MS)
+            } finally {
+                reconciliation.cancelAndJoin()
             }
         }
 

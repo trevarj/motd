@@ -60,6 +60,7 @@ import io.github.trevarj.motd.ui.nav.ChatRoute
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -274,6 +275,40 @@ class ChatViewModelTest {
         assertEquals(listOf(SentReaction(channel.id, "server-parent", "👍")), manager.reactions)
     }
 
+    @Test
+    fun `reaction uses fast msgid without waiting for slow history`() = runTest {
+        val messages = FakeMessageRepository().apply {
+            msgid.value = "fast-server-parent"
+        }
+        val history = FakeHistoryResyncController {
+            awaitCancellation()
+        }
+        val manager = FakeConnectionManager(
+            networkId = network.id,
+            state = IrcClientState.Ready("me", setOf("message-tags"), emptyMap()),
+            client = testClient(),
+        )
+        val vm = viewModel(channel, manager, history, messages)
+        vm.state.first { it.buffer != null }
+
+        vm.react(
+            message(
+                bufferId = channel.id,
+                text = "fast parent",
+                msgid = null,
+                sender = "me",
+                id = 43,
+            ),
+            "👍",
+        )
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(SentReaction(channel.id, "fast-server-parent", "👍")),
+            manager.reactions,
+        )
+    }
+
     private fun viewModel(
         buffer: BufferEntity,
         manager: FakeConnectionManager,
@@ -377,7 +412,7 @@ class ChatViewModelTest {
     }
 
     private class FakeHistoryResyncController(
-        private val onReconcile: (Int) -> Unit = {},
+        private val onReconcile: suspend (Int) -> Unit = {},
     ) : HistoryResyncController {
         private val states = MutableStateFlow<HistoryResyncState>(HistoryResyncState.Idle)
         val reconciledBuffers = mutableListOf<Long>()
