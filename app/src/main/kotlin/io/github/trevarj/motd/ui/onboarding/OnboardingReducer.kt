@@ -77,14 +77,22 @@ data class AuthForm(
     val saslUser: String = "",
     val saslPassword: String = "",
     val certAlias: String? = null,
+    val serverPassword: String = "",
 ) {
+    val serverPasswordValid: Boolean
+        get() = serverPassword.none { it == '\r' || it == '\n' } &&
+            serverPassword.toByteArray(Charsets.UTF_8).size <= MAX_SERVER_PASSWORD_BYTES
+
     val isValid: Boolean
-        get() = when (mode) {
+        get() = serverPasswordValid && when (mode) {
             AuthMode.NONE -> true
             AuthMode.PLAIN -> saslUser.isNotBlank() && saslPassword.isNotBlank()
             AuthMode.EXTERNAL -> certAlias != null
         }
 }
+
+/** Leaves room for `PASS :`, CRLF, and the IRC 512-byte non-tag message limit. */
+private const val MAX_SERVER_PASSWORD_BYTES = 504
 
 /** A bouncer network row on the CONNECT page (soju import list / add form results). */
 data class BouncerNetworkRow(

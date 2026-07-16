@@ -77,6 +77,8 @@
     <string name="onboarding_auth_external">SASL EXTERNAL (client certificate)</string>
     <string name="onboarding_auth_sasl_user">SASL username</string>
     <string name="onboarding_auth_sasl_password">Password</string>
+    <string name="onboarding_auth_server_password">Server password (optional)</string>
+    <string name="onboarding_auth_server_password_desc">Sent with IRC PASS before registration. For CLoak, use username/network:password and leave SASL set to None.</string>
     <string name="onboarding_auth_choose_cert">Choose certificate</string>
     <string name="onboarding_auth_cert_selected">Certificate: %1$s</string>
     <!-- soju bouncer auth: always SASL PLAIN, no picker (WP-S2) -->

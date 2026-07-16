@@ -8,10 +8,31 @@ import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Field-matrix coverage for [buildNetworkEntity] across the connection variants. */
 class NetworkFormTest {
+
+    @Test
+    fun `server password round trips independently of SASL`() {
+        val entity = buildNetworkEntity(
+            server = ServerForm(host = "cloak.example.org", nick = "me"),
+            auth = AuthForm(mode = AuthMode.NONE, serverPassword = "trev/libera:secret"),
+            role = NetworkRole.DIRECT,
+        )
+
+        assertEquals(SaslMechanism.NONE.name, entity.saslMechanism)
+        assertEquals("trev/libera:secret", entity.serverPassword)
+        assertEquals("trev/libera:secret", entity.toAuthForm().serverPassword)
+    }
+
+    @Test
+    fun `server password validation rejects line injection and oversized values`() {
+        assertTrue(AuthForm(serverPassword = "trev/libera:secret").isValid)
+        assertEquals(false, AuthForm(serverPassword = "secret\nQUIT").isValid)
+        assertEquals(false, AuthForm(serverPassword = "x".repeat(505)).isValid)
+    }
 
     @Test
     fun `embedded REALITY persists only the VLESS link and never a proxy endpoint`() {

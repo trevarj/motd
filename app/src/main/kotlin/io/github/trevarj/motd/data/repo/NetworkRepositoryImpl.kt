@@ -62,9 +62,9 @@ internal fun normalizeHost(host: String): String =
  *   import loop and the notify-mirror racing to insert the same child.
  * - **BOUNCER_ROOT**: `(host, port, saslUser)` — one soju account (login) per host:port. Adding
  *   the same bouncer account twice reuses the existing root.
- * - **DIRECT**: `(host, port, nick, ZNC selector?)` — ordinary direct rows use the first three;
- *   slash-bearing ZNC authcids add their selected upstream network so one endpoint can hold more
- *   than one ZNC network.
+ * - **DIRECT**: `(host, port, nick, bouncer selector?)` — ordinary direct rows use the first
+ *   three; ZNC's slash-bearing SASL authcid or CLoak's PASS `user/network:password` adds the
+ *   selected upstream network so one endpoint can hold more than one bouncer network.
  *
  * A `null` sub-key element is kept distinct (encoded as an empty segment) so under-specified rows
  * don't collapse onto each other.
@@ -74,9 +74,18 @@ internal fun networkIdentityKey(n: NetworkEntity): String = when (n.role) {
     NetworkRole.BOUNCER_ROOT ->
         "root|${normalizeHost(n.host)}|${n.port}|${n.saslUser.orEmpty()}"
     NetworkRole.DIRECT -> {
-        // A ZNC downstream identifies one upstream network in the SASL authcid. Keep that selector
-        // in the identity so two networks on the same bouncer may share an endpoint and nick.
-        val bouncerSelector = n.saslUser?.takeIf { '/' in it }.orEmpty()
+        // ZNC selects an upstream in its SASL authcid; CLoak does so in the non-secret prefix of
+        // PASS. Keep only that selector in the key so passwords never become identity material.
+        val saslSelector = n.saslUser?.takeIf { '/' in it }
+        val passSelector = n.serverPassword?.let(::serverPasswordSelector)
+        val bouncerSelector = saslSelector ?: passSelector.orEmpty()
         "direct|${normalizeHost(n.host)}|${n.port}|${n.nick}|$bouncerSelector"
     }
+}
+
+/** Extract CLoak's `user/network` selector without retaining its trailing password. */
+private fun serverPasswordSelector(password: String): String? {
+    val slash = password.indexOf('/')
+    val colon = password.lastIndexOf(':')
+    return password.substring(0, colon).takeIf { slash >= 0 && colon > slash }
 }

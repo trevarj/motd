@@ -433,12 +433,16 @@ fun PasswordField(
     label: String,
     modifier: Modifier = Modifier,
     imeAction: ImeAction = ImeAction.Done,
+    supportingText: String? = null,
+    isError: Boolean = false,
 ) {
     var visible by remember { mutableStateOf(false) }
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
+        supportingText = supportingText?.let { text -> ({ Text(text) }) },
+        isError = isError,
         singleLine = true,
         visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = imeAction),
@@ -459,6 +463,14 @@ fun PasswordField(
 @Composable
 private fun AuthSection(auth: AuthForm, onAuthChange: (AuthForm) -> Unit) {
     val context = LocalContext.current
+    PasswordField(
+        value = auth.serverPassword,
+        onValueChange = { onAuthChange(auth.copy(serverPassword = it)) },
+        label = stringResource(R.string.onboarding_auth_server_password),
+        modifier = Modifier.testTag("server_password_field"),
+        supportingText = stringResource(R.string.onboarding_auth_server_password_desc),
+        isError = !auth.serverPasswordValid,
+    )
     Column(Modifier.selectableGroup()) {
         AuthOption(AuthMode.NONE, auth.mode, stringResource(R.string.onboarding_auth_none)) {
             onAuthChange(auth.copy(mode = AuthMode.NONE))
@@ -584,6 +596,7 @@ fun buildNetworkEntity(
         saslMechanism = mechanism.name,
         saslUser = auth.saslUser.trim().ifBlank { null },
         saslPassword = auth.saslPassword.ifBlank { null },
+        serverPassword = auth.serverPassword.ifEmpty { null },
         clientCertAlias = if (isSoju) null else auth.certAlias,
         wsUrl = wsUrl?.trim()?.ifBlank { null },
         // NONE stores null so a direct row stays clean; other modes store the mode + trimmed proxy.
@@ -612,4 +625,5 @@ fun NetworkEntity.toAuthForm(): AuthForm = AuthForm(
     saslUser = saslUser.orEmpty(),
     saslPassword = saslPassword.orEmpty(),
     certAlias = clientCertAlias,
+    serverPassword = serverPassword.orEmpty(),
 )

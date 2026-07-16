@@ -4,7 +4,7 @@ import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Isupport
 
 /**
- * Drives IRC registration (plans/02 steps 1-11): CAP LS 302 → CAP REQ/ACK → SASL →
+ * Drives IRC registration (plans/02 steps 1-11): optional PASS → CAP LS 302 → CAP REQ/ACK → SASL →
  * optional BOUNCER BIND → CAP END → 001/005 → Ready. Message-driven and side-effect free:
  * [start] returns the opening lines; [onMessage] returns [Action]s for each inbound message.
  *
@@ -42,18 +42,28 @@ internal class RegistrationStateMachine(
     private val isupport = Isupport()
     private var sasl: SaslAuthenticator? = null
 
-    /** Opening lines: CAP LS 302, NICK, USER. */
-    fun start(): List<Action> = listOf(
-        Action.SetNick(nick),
-        Action.Send("CAP LS 302"),
-        Action.Send("NICK $nick"),
-        Action.Send("USER ${config.username} 0 * :${config.realname}"),
-    )
+    /** Opening lines: optional PASS, then CAP LS 302, NICK, USER. */
+    fun start(): List<Action> {
+        val actions = mutableListOf<Action>(Action.SetNick(nick))
+        config.serverPassword?.takeIf { it.isNotEmpty() }?.let { password ->
+            val passLine = runCatching {
+                IrcMessage(command = "PASS", params = listOf(password)).serialize()
+            }.getOrElse {
+                return fail("invalid server password", fatal = true)
+            }
+            actions += Action.Send(passLine)
+        }
+        actions += Action.Send("CAP LS 302")
+        actions += Action.Send("NICK $nick")
+        actions += Action.Send("USER ${config.username} 0 * :${config.realname}")
+        return actions
+    }
 
     fun onMessage(msg: IrcMessage): List<Action> {
         return when (msg.command) {
             "CAP" -> onCap(msg)
             "AUTHENTICATE", "900", "901", "902", "903", "904", "905", "906", "907" -> onSasl(msg)
+            "464" -> fail("server password rejected", fatal = true)
             "432", "433", "436" -> onNickError(msg)
             "001" -> onWelcome(msg)
             "005" -> { onIsupport(msg); emptyList() }

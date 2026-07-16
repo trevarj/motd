@@ -7,6 +7,82 @@ import org.junit.Test
 
 class RegistrationStateMachineTest {
     @Test
+    fun `server password is sent before CAP NICK and USER`() {
+        val machine = RegistrationStateMachine(
+            IrcClientConfig(
+                host = "cloak",
+                port = 6697,
+                tls = true,
+                nick = "motd",
+                username = "motd-android",
+                realname = "MOTD",
+                serverPassword = "trev/libera:secret",
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                "PASS trev/libera:secret",
+                "CAP LS 302",
+                "NICK motd",
+                "USER motd-android 0 * :MOTD",
+            ),
+            machine.start().sentLines(),
+        )
+    }
+
+    @Test
+    fun `server password uses safe trailing parameter serialization`() {
+        val machine = RegistrationStateMachine(
+            IrcClientConfig(
+                host = "irc.example",
+                port = 6697,
+                tls = true,
+                nick = "motd",
+                username = "motd",
+                realname = "MOTD",
+                serverPassword = "secret with spaces",
+            ),
+        )
+
+        assertEquals("PASS :secret with spaces", machine.start().sentLines().first())
+    }
+
+    @Test
+    fun `invalid server password fails without transmitting registration`() {
+        val machine = RegistrationStateMachine(
+            IrcClientConfig(
+                host = "irc.example",
+                port = 6697,
+                tls = true,
+                nick = "motd",
+                username = "motd",
+                realname = "MOTD",
+                serverPassword = "secret\r\nQUIT",
+            ),
+        )
+
+        val actions = machine.start()
+        val fail = actions.single() as RegistrationStateMachine.Action.Fail
+        assertEquals("invalid server password", fail.reason)
+        assertTrue(fail.fatal)
+    }
+
+    @Test
+    fun `password mismatch is a fatal registration failure`() {
+        val machine = RegistrationStateMachine(
+            IrcClientConfig("cloak", 6697, true, "motd", "motd", "MOTD", serverPassword = "bad"),
+        )
+
+        val fail = machine.onMessage(
+            IrcMessage(command = "464", params = listOf("motd", "Password incorrect")),
+        ).single() as RegistrationStateMachine.Action.Fail
+
+        assertEquals("server password rejected", fail.reason)
+        assertTrue(fail.fatal)
+    }
+
+    @Test
     fun `bouncer bind fallback completes without racing post-welcome caps`() {
         val machine = RegistrationStateMachine(
             IrcClientConfig(

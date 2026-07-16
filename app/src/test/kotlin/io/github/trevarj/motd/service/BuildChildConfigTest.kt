@@ -83,10 +83,16 @@ class BuildChildConfigTest {
 
     @Test
     fun `direct network uses its own fields and no bind`() {
-        val direct = child().copy(role = NetworkRole.DIRECT, parentId = null, bouncerNetId = null)
+        val direct = child().copy(
+            role = NetworkRole.DIRECT,
+            parentId = null,
+            bouncerNetId = null,
+            serverPassword = "motd/libera:secret",
+        )
         val cfg = buildChildConfig(direct, root = null)
         assertEquals("irc.libera.chat", cfg.host)
         assertNull(cfg.bouncerNetId)
+        assertEquals("motd/libera:secret", cfg.serverPassword)
     }
 
     @Test
@@ -148,6 +154,7 @@ class BuildChildConfigTest {
             root.copy(saslMechanism = SaslMechanism.EXTERNAL.name),
             root.copy(saslUser = "other-account"),
             root.copy(saslPassword = "changed-secret"),
+            root.copy(serverPassword = "changed-server-secret"),
             root.copy(clientCertAlias = "client-cert"),
             root.copy(wsUrl = "wss://bnc.example.org:443/"),
             root.copy(obfsMode = ObfsMode.SOCKS5, proxyHost = "127.0.0.1", proxyPort = 1080),

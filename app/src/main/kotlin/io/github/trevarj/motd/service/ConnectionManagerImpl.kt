@@ -1477,6 +1477,7 @@ internal fun buildChildConfig(row: NetworkEntity, root: NetworkEntity?): IrcClie
         sasl = runCatching { SaslMechanism.valueOf(endpoint.saslMechanism) }.getOrDefault(SaslMechanism.NONE),
         saslUser = saslUser,
         saslPassword = endpoint.saslPassword,
+        serverPassword = endpoint.serverPassword,
         bouncerNetId = null,
         // WSS transport follows the physical endpoint: the bouncer's wsUrl for a bound child.
         wsUrl = endpoint.wsUrl,
@@ -1551,7 +1552,8 @@ internal fun resolveTransportProxy(
 internal fun networkFingerprint(row: NetworkEntity, root: NetworkEntity? = null): String {
     val endpoint = if (row.role == NetworkRole.BOUNCER_CHILD) root ?: row else row
     return "${endpoint.host}:${endpoint.port}:${endpoint.tls}:${row.nick}:${row.username}:${row.realname}:" +
-        "${endpoint.saslMechanism}:${endpoint.saslUser}:${endpoint.saslPassword}:${row.bouncerNetId}:" +
+        "${endpoint.saslMechanism}:${endpoint.saslUser}:${endpoint.saslPassword}:${endpoint.serverPassword}:" +
+        "${row.bouncerNetId}:" +
         "${endpoint.clientCertAlias}:${endpoint.wsUrl}:${endpoint.obfsMode}:${endpoint.proxyHost}:${endpoint.proxyPort}:${endpoint.obfsLink}"
 }
 

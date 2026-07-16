@@ -54,6 +54,8 @@ data class IrcClientConfig(
     val sasl: SaslMechanism = SaslMechanism.NONE,
     val saslUser: String? = null,
     val saslPassword: String? = null,
+    /** Optional IRC server password, sent with PASS before registration. */
+    val serverPassword: String? = null,
     /** soju: bind this connection to a bouncer network before CAP END. */
     val bouncerNetId: String? = null,
     /** Extra caps to request beyond the built-in tiers (rarely needed). */

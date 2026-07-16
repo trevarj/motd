@@ -142,6 +142,27 @@ class NetworkDedupTest {
     }
 
     @Test
+    fun `different CLoak network selectors on one endpoint stay distinct`() = runBlocking {
+        val dao = InMemoryNetworkDao()
+        val repo = NetworkRepositoryImpl(dao)
+        val seed = direct("cloak.example.org").copy(serverPassword = "motd/libera:secret")
+        repo.addNetwork(seed)
+        repo.addNetwork(seed.copy(name = "oftc", serverPassword = "motd/oftc:secret"))
+        assertEquals(2, dao.rows.size)
+    }
+
+    @Test
+    fun `same CLoak selector deduplicates without using its password`() = runBlocking {
+        val dao = InMemoryNetworkDao()
+        val repo = NetworkRepositoryImpl(dao)
+        val seed = direct("cloak.example.org").copy(serverPassword = "motd/libera:old-secret")
+        val first = repo.addNetwork(seed)
+        val second = repo.addNetwork(seed.copy(name = "renamed", serverPassword = "motd/libera:new-secret"))
+        assertEquals(first, second)
+        assertEquals(1, dao.rows.size)
+    }
+
+    @Test
     fun `different port is a distinct network`() = runBlocking {
         val dao = InMemoryNetworkDao()
         val repo = NetworkRepositoryImpl(dao)

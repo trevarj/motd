@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -109,6 +109,16 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
             "CREATE UNIQUE INDEX IF NOT EXISTS index_messages_bufferId_eventKey " +
                 "ON messages(bufferId, eventKey)",
         )
+    }
+}
+
+/**
+ * v6 -> v7: add a nullable IRC server password. Existing connections continue without PASS;
+ * the value is deliberately separate from SASL credentials because IRC servers may require both.
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE networks ADD COLUMN serverPassword TEXT")
     }
 }
 

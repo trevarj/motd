@@ -36,6 +36,8 @@ data class NetworkEntity(
     val nick: String, val username: String, val realname: String,
     val saslMechanism: String = "NONE",  // SaslMechanism.name
     val saslUser: String? = null, val saslPassword: String? = null,
+    /** Optional IRC PASS value. Kept separate because servers may require PASS with or without SASL. */
+    val serverPassword: String? = null,
     val clientCertAlias: String? = null,
     val autoConnect: Boolean = true,
     val ordering: Int = 0,
@@ -52,7 +54,8 @@ data class NetworkEntity(
     /** Pasted VLESS+REALITY link. It contains credentials, so [toString] must never expose it. */
     val obfsLink: String? = null,
 ) {
-    // Redact secrets (saslPassword) from logs; proxyHost/port are non-sensitive so keep them out
+    // Redact secrets (saslPassword, serverPassword, obfsLink) from logs; proxyHost/port are
+    // non-sensitive so keep them out
     // too for brevity — the endpoint host:port is enough to identify the row.
     override fun toString() = "NetworkEntity(id=$id, name=$name, role=$role, host=$host:$port)"
 }
