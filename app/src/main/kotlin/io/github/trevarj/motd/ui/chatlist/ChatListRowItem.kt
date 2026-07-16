@@ -1,8 +1,10 @@
 package io.github.trevarj.motd.ui.chatlist
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -24,23 +27,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
+import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.NetworkChip
 import io.github.trevarj.motd.ui.components.UnreadBadge
+import io.github.trevarj.motd.ui.components.isAppliedThemeDark
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.service.PresenceState
+import io.github.trevarj.motd.ui.theme.presenceOnlineColor
 
 /**
  * One chat-list row: avatar, display name (+ network chip when multi-network), last-message
@@ -64,20 +71,38 @@ fun ChatListRowItem(
 ) {
     // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
     val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
+    val queryPresence = presence.takeIf { row.type == BufferType.QUERY }
+    val presenceDescription = queryPresence?.let {
+        stringResource(
+            when (it) {
+                PresenceState.ONLINE -> R.string.presence_online
+                PresenceState.OFFLINE -> R.string.presence_offline
+                PresenceState.UNKNOWN -> R.string.presence_unknown
+            },
+        )
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
             // Per-buffer handle so the harness selects a specific row (display names collide).
             .testTag("chatlist_row_${row.bufferId}")
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .then(
+                if (presenceDescription != null) {
+                    Modifier.semantics { stateDescription = presenceDescription }
+                } else {
+                    Modifier
+                },
+            )
             .padding(horizontal = 16.dp, vertical = 10.dp)
             .alpha(if (row.muted) 0.55f else 1f),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Avatar(
+        PresenceAvatar(
             name = row.displayName,
             isChannel = row.type == BufferType.CHANNEL,
             networkId = row.networkId,
+            presence = queryPresence,
         )
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -101,27 +126,6 @@ fun ChatListRowItem(
                     overflow = TextOverflow.Ellipsis,
                     modifier = nameModifier,
                 )
-                if (presence != null && row.type == BufferType.QUERY) {
-                    val description = stringResource(
-                        when (presence) {
-                            PresenceState.ONLINE -> R.string.presence_online
-                            PresenceState.OFFLINE -> R.string.presence_offline
-                            PresenceState.UNKNOWN -> R.string.presence_unknown
-                        },
-                    )
-                    Text(
-                        text = "●",
-                        color = when (presence) {
-                            PresenceState.ONLINE -> MaterialTheme.colorScheme.primary
-                            PresenceState.OFFLINE -> MaterialTheme.colorScheme.error
-                            PresenceState.UNKNOWN -> MaterialTheme.colorScheme.outline
-                        },
-                        modifier = Modifier
-                            .padding(start = 5.dp)
-                            .testTag("chatlist_presence_${presence.name.lowercase()}")
-                            .semantics { contentDescription = description },
-                    )
-                }
                 if (isFriend) {
                     Icon(
                         imageVector = Icons.Filled.Star,
@@ -192,6 +196,88 @@ fun ChatListRowItem(
     }
 }
 
+internal enum class PresenceBadgeVisual { FILLED, HOLLOW, UNKNOWN }
+
+internal fun presenceBadgeVisual(presence: PresenceState): PresenceBadgeVisual = when (presence) {
+    PresenceState.ONLINE -> PresenceBadgeVisual.FILLED
+    PresenceState.OFFLINE -> PresenceBadgeVisual.HOLLOW
+    PresenceState.UNKNOWN -> PresenceBadgeVisual.UNKNOWN
+}
+
+@Composable
+private fun PresenceAvatar(
+    name: String,
+    isChannel: Boolean,
+    networkId: Long,
+    presence: PresenceState?,
+) {
+    Box(modifier = Modifier.size(44.dp)) {
+        Avatar(
+            name = name,
+            isChannel = isChannel,
+            networkId = networkId,
+            modifier = Modifier.align(Alignment.Center),
+        )
+        presence?.let { state ->
+            PresenceBadge(
+                visual = presenceBadgeVisual(state),
+                tag = "chatlist_presence_${state.name.lowercase()}",
+                modifier = Modifier.align(Alignment.BottomEnd),
+            )
+        }
+    }
+}
+
+@Composable
+private fun PresenceBadge(
+    visual: PresenceBadgeVisual,
+    tag: String,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val online = presenceOnlineColor(isAppliedThemeDark())
+    Box(
+        modifier = modifier
+            .size(14.dp)
+            .clip(CircleShape)
+            .background(scheme.background)
+            .testTag(tag),
+        contentAlignment = Alignment.Center,
+    ) {
+        when (visual) {
+            PresenceBadgeVisual.FILLED -> Box(
+                Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(online)
+                    .clearAndSetSemantics {},
+            )
+            PresenceBadgeVisual.HOLLOW -> Box(
+                Modifier
+                    .size(10.dp)
+                    .border(2.dp, scheme.onSurfaceVariant, CircleShape)
+                    .clearAndSetSemantics {},
+            )
+            PresenceBadgeVisual.UNKNOWN -> Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(scheme.surfaceContainerHighest)
+                    .clearAndSetSemantics {},
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "?",
+                    color = scheme.onSurfaceVariant,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 8.sp,
+                )
+            }
+        }
+    }
+}
+
 /** "sender: text" one-liner; falls back to plain text (queries) or empty. */
 private fun lastMessageLine(row: ChatListRow): String {
     val text = row.lastMessageText ?: return ""
@@ -203,34 +289,50 @@ private fun lastMessageLine(row: ChatListRow): String {
     }
 }
 
-@Preview
+@PreviewLightDark
 @Composable
-private fun ChatListRowItemPreview() {
+private fun ChatListPresencePreview() {
     MotdTheme {
         Column {
             ChatListRowItem(
                 row = ChatListRow(
                     bufferId = 1, networkId = 1, networkName = "Libera",
-                    displayName = "#libera", type = BufferType.CHANNEL,
+                    displayName = "alice", type = BufferType.QUERY,
                     pinned = true, muted = false,
-                    lastMessageText = "welcome to the channel", lastMessageSender = "alice",
+                    lastMessageText = "I am around", lastMessageSender = "alice",
                     lastMessageTime = System.currentTimeMillis() - 120_000,
                     unreadCount = 12, mentionCount = 2,
                 ),
                 showNetworkChip = true,
                 onClick = {}, onLongClick = {},
+                isFriend = true,
+                presence = PresenceState.ONLINE,
             )
             ChatListRowItem(
                 row = ChatListRow(
                     bufferId = 2, networkId = 1, networkName = "Libera",
                     displayName = "bob", type = BufferType.QUERY,
-                    pinned = false, muted = true,
+                    pinned = false, muted = false,
                     lastMessageText = "see you later", lastMessageSender = "bob",
                     lastMessageTime = System.currentTimeMillis() - 3_600_000 * 26,
                     unreadCount = 0, mentionCount = 0,
                 ),
                 showNetworkChip = false,
                 onClick = {}, onLongClick = {},
+                presence = PresenceState.OFFLINE,
+            )
+            ChatListRowItem(
+                row = ChatListRow(
+                    bufferId = 3, networkId = 1, networkName = "Libera",
+                    displayName = "carol", type = BufferType.QUERY,
+                    pinned = false, muted = false,
+                    lastMessageText = "reconnecting", lastMessageSender = "carol",
+                    lastMessageTime = System.currentTimeMillis() - 60_000,
+                    unreadCount = 0, mentionCount = 0,
+                ),
+                showNetworkChip = false,
+                onClick = {}, onLongClick = {},
+                presence = PresenceState.UNKNOWN,
             )
         }
     }

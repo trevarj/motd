@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.theme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.isFixedPalette
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -20,6 +21,14 @@ class ThemeCatalogTest {
             val scheme = requireNotNull(fixedThemeScheme(preset))
             assertTrue("$preset background contrast", contrast(scheme.background, scheme.onBackground) >= 4.5)
             assertTrue("$preset surface contrast", contrast(scheme.surface, scheme.onSurface) >= 4.5)
+        }
+    }
+
+    @Test fun onlinePresence_meetsNonTextContrastAgainstEveryNamedTheme() {
+        ColorThemePreset.entries.filter { it.isFixedPalette }.forEach { preset ->
+            val scheme = requireNotNull(fixedThemeScheme(preset))
+            val online = presenceOnlineColor(preset.isDark)
+            assertTrue("$preset online presence contrast", contrast(scheme.background, online) >= 3.0)
         }
     }
 
