@@ -327,7 +327,6 @@ private fun DrawScope.drawUserSprite(
     if (detail != AvatarDetail.MINI) {
         drawAccessory(traits.accessory, colors)
         drawExpression(traits.expression, colors)
-        drawChestEmblem(traits, colors)
     }
 }
 
@@ -441,21 +440,6 @@ private fun DrawScope.drawExpression(variant: Int, colors: SpritePalette) {
             drawLine(color, p(9.8f, 15f), p(12f, 13.8f), 0.65f, StrokeCap.Round)
             drawLine(color, p(12f, 13.8f), p(14.2f, 15f), 0.65f, StrokeCap.Round)
         }
-    }
-}
-
-private fun DrawScope.drawChestEmblem(traits: GeneratedAvatarTraits, colors: SpritePalette) {
-    val glyph = traits.projectMark?.fontAwesomeGlyph() ?: FontAwesomeGlyph.forBadge(traits.genericBadge)
-    val maxSize = 5.35f
-    val scale = maxSize / max(glyph.viewBoxWidth, glyph.viewBoxHeight)
-    val width = glyph.viewBoxWidth * scale
-    val height = glyph.viewBoxHeight * scale
-    // Render the glyph directly on the torso: no panel, outline, or app-icon-shaped badge.
-    withTransform({
-        translate(12f - width / 2f, 19.1f - height / 2f)
-        scale(scale, scale, pivot = Offset.Zero)
-    }) {
-        drawPath(glyph.path, colors.ink.copy(alpha = 0.88f))
     }
 }
 
