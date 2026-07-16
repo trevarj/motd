@@ -402,7 +402,9 @@ class ChatHeadlessE2eTest : HeadlessE2eDriver() {
         longClickMessageContaining(parent)
         waitForTag("message_action_sheet")
         clickText("👍")
-        waitForTag("chat_reaction_chip_👍", timeoutMillis = 20_000)
+        // A reaction to a just-sent row can legitimately wait up to 32 seconds for its server
+        // msgid before ChatViewModel sends the TAGMSG. Keep the E2E allowance beyond that contract.
+        waitForTag("chat_reaction_chip_👍", timeoutMillis = 40_000)
         clickTag("chat_reaction_chip_👍")
         waitForTagToDisappear("chat_reaction_chip_👍", timeoutMillis = 20_000)
 
