@@ -134,7 +134,7 @@ internal fun CompactMessageRow(
                 onLongClick = onLongPress,
                 onLongClickLabel = actionsLabel,
             )
-            .padding(horizontal = 12.dp, vertical = spacing.compactRowVPad),
+            .padding(horizontal = spacing.messageOuterHPad, vertical = spacing.compactRowVPad),
     ) {
         reply?.let { ReplyMiniBubble(it, nickColors) }
 

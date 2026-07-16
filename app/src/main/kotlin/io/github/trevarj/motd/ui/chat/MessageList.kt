@@ -74,6 +74,7 @@ import io.github.trevarj.motd.ui.components.DaySeparator
 import io.github.trevarj.motd.ui.components.dayStart
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.LocalSpacing
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -771,7 +772,7 @@ private fun FoolPlaceholderRow(
                 .testTag(messageTag(msg))
                 .clickable { onExpand() }
                 .alpha(0.7f)
-                .padding(horizontal = 16.dp, vertical = 2.dp),
+                .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -809,7 +810,7 @@ private fun FoolCollapseChip(sender: String, onCollapse: () -> Unit) {
         modifier = Modifier
             .clickable { onCollapse() }
             .alpha(0.7f)
-            .padding(horizontal = 16.dp, vertical = 2.dp),
+            .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -871,7 +872,7 @@ private fun RetryRow(onRetry: () -> Unit, onDelete: () -> Unit) {
     androidx.compose.foundation.layout.Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 2.dp),
+            .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
     ) {

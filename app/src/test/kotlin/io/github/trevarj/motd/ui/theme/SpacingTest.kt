@@ -11,6 +11,7 @@ class SpacingTest {
     @Test
     fun compact_tokens() {
         val s = spacingFor(LayoutDensity.COMPACT)
+        assertEquals(12.dp, s.messageOuterHPad)
         assertEquals(0.dp, s.bubbleRowVPad)
         assertEquals(4.dp, s.bubbleInnerVPad)
         assertEquals(8.dp, s.bubbleInnerHPad)
@@ -30,6 +31,7 @@ class SpacingTest {
     @Test
     fun comfortable_tokens_match_current_literals() {
         val s = spacingFor(LayoutDensity.COMFORTABLE)
+        assertEquals(12.dp, s.messageOuterHPad)
         assertEquals(1.dp, s.bubbleRowVPad)
         assertEquals(6.dp, s.bubbleInnerVPad)
         assertEquals(10.dp, s.bubbleInnerHPad)
@@ -48,6 +50,7 @@ class SpacingTest {
     @Test
     fun two_line_tokens() {
         val s = spacingFor(LayoutDensity.TWO_LINE)
+        assertEquals(12.dp, s.messageOuterHPad)
         assertEquals(2.dp, s.bubbleRowVPad)
         assertEquals(4.dp, s.bubbleInnerVPad)
         assertEquals(12.dp, s.bubbleInnerHPad)

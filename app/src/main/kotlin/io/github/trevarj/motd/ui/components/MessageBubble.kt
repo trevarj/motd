@@ -282,7 +282,10 @@ fun MessageBubble(
     }
 
     Row(
-        modifier = renderedModifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = spacing.bubbleRowVPad),
+        modifier = renderedModifier.fillMaxWidth().padding(
+            horizontal = spacing.messageOuterHPad,
+            vertical = spacing.bubbleRowVPad,
+        ),
         horizontalArrangement = if (isSelf) Arrangement.End else Arrangement.Start,
     ) {
         // Left avatar column for others, only on a group's first bubble.
@@ -525,7 +528,7 @@ private fun ActionMessageRow(
                     onLongClickLabel = actionsLabel,
                 )
                 .padding(
-                    horizontal = if (spacing.compact || spacing.twoLine) 12.dp else 16.dp,
+                    horizontal = spacing.messageOuterHPad,
                     vertical = spacing.actionVPad,
                 ),
         ) {
@@ -717,7 +720,7 @@ private fun TwoLineMessageRow(
                 onLongClick = onLongPress,
                 onLongClickLabel = actionsLabel,
             )
-            .padding(horizontal = 12.dp, vertical = spacing.bubbleRowVPad),
+            .padding(horizontal = spacing.messageOuterHPad, vertical = spacing.bubbleRowVPad),
     ) {
         // Line 1 (header): avatar + nick + (own) sent check + timestamp — only on a group's first
         // message. Continuations (showSender == false) omit the header and indent the body under it.
