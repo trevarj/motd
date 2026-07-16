@@ -340,7 +340,9 @@ private fun DrawScope.drawProminentGlyph(glyph: FontAwesomeGlyph, colors: Sprite
     val height = glyph.viewBoxHeight * scale
     withTransform({
         translate(12f - width / 2f, 12f - height / 2f)
-        scale(scale, scale)
+        // Glyph coordinates start at the SVG view-box origin. Compose otherwise scales around
+        // the canvas centre, which shifts this already-translated path outside the badge.
+        scale(scale, scale, pivot = Offset.Zero)
     }) {
         drawPath(glyph.path, colors.ink.copy(alpha = 0.92f))
     }
@@ -451,7 +453,7 @@ private fun DrawScope.drawChestEmblem(traits: GeneratedAvatarTraits, colors: Spr
     // Render the glyph directly on the torso: no panel, outline, or app-icon-shaped badge.
     withTransform({
         translate(12f - width / 2f, 19.1f - height / 2f)
-        scale(scale, scale)
+        scale(scale, scale, pivot = Offset.Zero)
     }) {
         drawPath(glyph.path, colors.ink.copy(alpha = 0.88f))
     }
