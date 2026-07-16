@@ -17,6 +17,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -37,15 +39,40 @@ interface ChannelCloseCoordinator {
  * action has the required acceptance signal.
  */
 @Singleton
-class PendingChannelCloseCoordinator @Inject constructor(
+class PendingChannelCloseCoordinator private constructor(
     private val db: MotdDatabase,
     private val connections: ConnectionManager,
     private val bouncerServ: BouncerServClient,
     private val clock: AppClock,
-    @ApplicationScope private val scope: CoroutineScope,
+    private val scope: CoroutineScope,
+    private val retryWait: suspend (attempt: Int) -> Unit,
 ) : ChannelCloseCoordinator {
+    @Inject
+    constructor(
+        db: MotdDatabase,
+        connections: ConnectionManager,
+        bouncerServ: BouncerServClient,
+        clock: AppClock,
+        @ApplicationScope scope: CoroutineScope,
+    ) : this(
+        db = db,
+        connections = connections,
+        bouncerServ = bouncerServ,
+        clock = clock,
+        scope = scope,
+        retryWait = { attempt -> delay(channelCloseRetryDelayMillis(attempt)) },
+    )
+
     private val started = AtomicBoolean(false)
     private val attempts = ConcurrentHashMap<Long, Mutex>()
+    private val retryJobs = ConcurrentHashMap<Long, Job>()
+    private val retryCounts = ConcurrentHashMap<Long, Int>()
+
+    private enum class CloseOutcome {
+        COMPLETED,
+        AWAITING_CONFIRMATION,
+        RETRY,
+    }
 
     override fun start() {
         if (!started.compareAndSet(false, true)) return
@@ -79,12 +106,18 @@ class PendingChannelCloseCoordinator @Inject constructor(
     private suspend fun attempt(bufferId: Long) {
         val guard = attempts.getOrPut(bufferId) { Mutex() }
         guard.withLock {
-            val buffer = db.bufferDao().observeById(bufferId) ?: return
-            if (buffer.type != BufferType.CHANNEL || buffer.pendingCloseAt == null) return
+            val buffer = db.bufferDao().observeById(bufferId) ?: run {
+                clearRetry(bufferId)
+                return
+            }
+            if (buffer.type != BufferType.CHANNEL || buffer.pendingCloseAt == null) {
+                clearRetry(bufferId)
+                return
+            }
             val network = db.networkDao().byId(buffer.networkId) ?: return
             if (!isReadyFor(network, connections.connectionStates.value)) return
 
-            val accepted = try {
+            val outcome = try {
                 if (network.role == NetworkRole.BOUNCER_CHILD) {
                     closeSojuChannel(buffer, network)
                 } else {
@@ -93,32 +126,66 @@ class PendingChannelCloseCoordinator @Inject constructor(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                false
+                CloseOutcome.RETRY
             }
-            if (accepted) db.bufferDao().deleteBuffer(buffer.id)
+            when (outcome) {
+                CloseOutcome.COMPLETED -> {
+                    db.bufferDao().deleteBuffer(buffer.id)
+                    clearRetry(buffer.id)
+                }
+                CloseOutcome.AWAITING_CONFIRMATION,
+                CloseOutcome.RETRY,
+                -> scheduleRetry(buffer.id)
+            }
         }
     }
 
-    private suspend fun closeSojuChannel(buffer: BufferEntity, child: NetworkEntity): Boolean {
-        val rootId = child.parentId ?: return false
-        if (connections.connectionStates.value[rootId] !is IrcClientState.Ready) return false
-        val result = bouncerServ.execute(
+    private suspend fun closeSojuChannel(
+        buffer: BufferEntity,
+        child: NetworkEntity,
+    ): CloseOutcome {
+        val rootId = child.parentId ?: return CloseOutcome.RETRY
+        if (connections.connectionStates.value[rootId] !is IrcClientState.Ready) {
+            return CloseOutcome.RETRY
+        }
+        val deleteResult = bouncerServ.execute(
             rootNetworkId = rootId,
             command = BouncerServCommands.channelDelete(
                 channel = buffer.displayName,
                 network = child.name,
             ),
         )
-        // A timeout/partial reply is not server acceptance. Keep the pending row for the next
-        // Ready transition rather than erasing local history optimistically.
-        return result is BouncerServResult.Success
+        if (!deleteResult.isSuccessfulBouncerMutation()) return CloseOutcome.RETRY
+
+        // BouncerServ can reply while reporting a command-level error. Reconcile against the
+        // authoritative channel listing and delete local history only once the target is absent.
+        val statusResult = bouncerServ.execute(
+            rootNetworkId = rootId,
+            command = BouncerServCommands.channelStatus(child.name),
+        )
+        val remainingChannels = statusResult.bouncerChannelNames() ?: return CloseOutcome.RETRY
+        return if (remainingChannels.none { it.equals(buffer.displayName, ignoreCase = true) }) {
+            CloseOutcome.COMPLETED
+        } else {
+            CloseOutcome.RETRY
+        }
     }
 
-    private suspend fun closeDirectChannel(buffer: BufferEntity, network: NetworkEntity): Boolean {
-        if (connections.connectionStates.value[network.id] !is IrcClientState.Ready) return false
+    private suspend fun closeDirectChannel(
+        buffer: BufferEntity,
+        network: NetworkEntity,
+    ): CloseOutcome {
+        if (connections.connectionStates.value[network.id] !is IrcClientState.Ready) {
+            return CloseOutcome.RETRY
+        }
         // The boolean seam distinguishes a real transport write from a client that disappeared
-        // between the Ready snapshot above and the send boundary.
-        return connections.partChannelForClose(buffer.id)
+        // between the Ready snapshot above and the send boundary. A successful write still does
+        // not erase history: EventProcessor waits for the matching self-PART (or 403/442) first.
+        return if (connections.partChannelForClose(buffer.id)) {
+            CloseOutcome.AWAITING_CONFIRMATION
+        } else {
+            CloseOutcome.RETRY
+        }
     }
 
     private fun isReadyFor(
@@ -132,4 +199,82 @@ class PendingChannelCloseCoordinator @Inject constructor(
         }
         return states[relevantId] is IrcClientState.Ready
     }
+
+    private fun scheduleRetry(bufferId: Long) {
+        retryJobs.compute(bufferId) { _, active ->
+            if (active?.isActive == true) {
+                active
+            } else {
+                scope.launch {
+                    val attempt = retryCounts.merge(bufferId, 1, Int::plus) ?: 1
+                    try {
+                        retryWait(attempt)
+                    } catch (cancelled: CancellationException) {
+                        retryJobs.remove(bufferId)
+                        throw cancelled
+                    }
+                    retryJobs.remove(bufferId)
+                    retryPendingCloses()
+                }
+            }
+        }
+    }
+
+    private fun clearRetry(bufferId: Long) {
+        retryJobs.remove(bufferId)?.cancel()
+        retryCounts.remove(bufferId)
+        attempts.remove(bufferId)
+    }
+
+    internal companion object {
+        fun forTest(
+            db: MotdDatabase,
+            connections: ConnectionManager,
+            bouncerServ: BouncerServClient,
+            clock: AppClock,
+            scope: CoroutineScope,
+            retryWait: suspend (attempt: Int) -> Unit,
+        ): PendingChannelCloseCoordinator = PendingChannelCloseCoordinator(
+            db = db,
+            connections = connections,
+            bouncerServ = bouncerServ,
+            clock = clock,
+            scope = scope,
+            retryWait = retryWait,
+        )
+    }
 }
+
+internal fun channelCloseRetryDelayMillis(attempt: Int): Long {
+    val shift = (attempt.coerceAtLeast(1) - 1).coerceAtMost(3)
+    return (CHANNEL_CLOSE_RETRY_INITIAL_MS shl shift).coerceAtMost(CHANNEL_CLOSE_RETRY_MAX_MS)
+}
+
+private fun BouncerServResult.isSuccessfulBouncerMutation(): Boolean =
+    this is BouncerServResult.Success && replies.none(::looksLikeBouncerError)
+
+private fun BouncerServResult.bouncerChannelNames(): Set<String>? {
+    val success = this as? BouncerServResult.Success ?: return null
+    if (success.replies.any(::looksLikeBouncerError)) return null
+    val replies = success.replies.map(String::trim).filter(String::isNotEmpty)
+    if (replies.isEmpty()) return null
+    if (replies.any { it.startsWith("no channels", ignoreCase = true) }) return emptySet()
+    val names = replies.mapNotNull { line ->
+        BOUNCER_CHANNEL_ROW.matchEntire(line)?.groupValues?.get(1)
+    }
+    // Unknown output is not proof that the channel disappeared. Keep the durable request and
+    // retry instead of deleting history against a response format we did not understand.
+    return names.takeIf { it.size == replies.size }?.toSet()
+}
+
+private fun looksLikeBouncerError(line: String): Boolean {
+    val normalized = line.trim().lowercase()
+    return normalized.startsWith("error") ||
+        normalized.startsWith("failed") ||
+        normalized.startsWith("unknown ") ||
+        normalized.startsWith("usage:")
+}
+
+private val BOUNCER_CHANNEL_ROW = Regex("^(.+) \\[(.+)]$")
+private const val CHANNEL_CLOSE_RETRY_INITIAL_MS = 15_000L
+private const val CHANNEL_CLOSE_RETRY_MAX_MS = 60_000L

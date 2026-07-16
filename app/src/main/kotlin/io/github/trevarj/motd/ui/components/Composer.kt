@@ -45,6 +45,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -59,6 +60,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -75,9 +77,16 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import androidx.emoji2.emojipicker.EmojiPickerView
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
@@ -97,18 +106,27 @@ internal fun composerPanel(showEmoji: Boolean, hasAutocomplete: Boolean): Compos
     else -> ComposerPanel.NONE
 }
 
-internal data class AutocompleteOverlayPlacement(
-    val layoutHeightPx: Int,
-    val overlayYPx: Int,
+internal fun autocompletePopupPosition(
+    anchorBounds: IntRect,
+    popupContentSize: IntSize,
+    layoutDirection: LayoutDirection,
+): IntOffset = IntOffset(
+    x = if (layoutDirection == LayoutDirection.Ltr) {
+        anchorBounds.left
+    } else {
+        anchorBounds.right - popupContentSize.width
+    },
+    y = anchorBounds.top - popupContentSize.height,
 )
 
-internal fun autocompleteOverlayPlacement(
-    anchorHeightPx: Int,
-    overlayHeightPx: Int,
-): AutocompleteOverlayPlacement = AutocompleteOverlayPlacement(
-    layoutHeightPx = anchorHeightPx.coerceAtLeast(0),
-    overlayYPx = -overlayHeightPx.coerceAtLeast(0),
-)
+private object AutocompletePopupPositionProvider : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset = autocompletePopupPosition(anchorBounds, popupContentSize, layoutDirection)
+}
 
 /**
  * The picker has two visual phases. While [OPEN], it fills the space released by the IME. While
@@ -456,9 +474,8 @@ fun Composer(
 }
 
 /**
- * Measures the suggestion panel without adding it to the composer's height, then places it
- * immediately above the stable composer surface. This keeps both the input row and reverse
- * timeline anchored while suggestions fade/translate in and out.
+ * Hosts suggestions in a real popup immediately above the composer. A popup has its own hit-test
+ * bounds, so rows remain clickable without contributing height or moving the input/timeline.
  */
 @Composable
 private fun AutocompleteOverlayLayout(
@@ -466,24 +483,26 @@ private fun AutocompleteOverlayLayout(
     overlay: @Composable () -> Unit,
     anchor: @Composable () -> Unit,
 ) {
-    Layout(
-        modifier = modifier,
-        content = {
-            anchor()
-            overlay()
-        },
-    ) { measurables, constraints ->
-        val anchorPlaceable = measurables[0].measure(constraints)
-        val overlayPlaceable = measurables[1].measure(
-            constraints.copy(minWidth = 0, minHeight = 0),
-        )
-        val placement = autocompleteOverlayPlacement(
-            anchorHeightPx = anchorPlaceable.height,
-            overlayHeightPx = overlayPlaceable.height,
-        )
-        layout(anchorPlaceable.width, placement.layoutHeightPx) {
-            anchorPlaceable.placeRelative(0, 0)
-            overlayPlaceable.placeRelative(0, placement.overlayYPx)
+    var anchorWidthPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    Box(
+        modifier = modifier.onSizeChanged { anchorWidthPx = it.width },
+    ) {
+        anchor()
+        if (anchorWidthPx > 0) {
+            Popup(
+                popupPositionProvider = AutocompletePopupPositionProvider,
+                properties = PopupProperties(
+                    focusable = false,
+                    dismissOnBackPress = false,
+                    dismissOnClickOutside = false,
+                    clippingEnabled = false,
+                ),
+            ) {
+                Box(Modifier.width(with(density) { anchorWidthPx.toDp() })) {
+                    overlay()
+                }
+            }
         }
     }
 }

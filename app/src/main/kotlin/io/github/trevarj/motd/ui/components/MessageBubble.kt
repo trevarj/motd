@@ -133,6 +133,7 @@ fun MessageBubble(
     imageUrl: String? = null,
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
+    linkPreviewResolved: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
     // Normalized nicks known in the current buffer; @mentions of these in the body are colored with
     // the nick's own color (plans/17). Empty = no mention coloring.
@@ -178,6 +179,7 @@ fun MessageBubble(
             imageUrl = imageUrl,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
+            linkPreviewResolved = linkPreviewResolved,
             reactions = reactions,
             knownNicks = knownNicks,
             onLongPress = onLongPress,
@@ -208,6 +210,7 @@ fun MessageBubble(
             imageUrl = imageUrl,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
+            linkPreviewResolved = linkPreviewResolved,
             reactions = reactions,
             knownNicks = knownNicks,
             showSender = showSender,
@@ -242,6 +245,7 @@ fun MessageBubble(
             imageUrl = imageUrl,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
+            linkPreviewResolved = linkPreviewResolved,
             reactions = reactions,
             knownNicks = knownNicks,
             showSender = showSender,
@@ -401,7 +405,7 @@ fun MessageBubble(
                 )
             }
 
-            if (linkPreview != null || linkPreviewLoading) {
+            if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
                 Box(Modifier.padding(top = 4.dp)) {
                     LinkPreviewCard(
                         preview = linkPreview,
@@ -448,6 +452,7 @@ private fun ActionMessageRow(
     imageUrl: String? = null,
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
+    linkPreviewResolved: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
     knownNicks: Set<String> = emptySet(),
     onLongPress: () -> Unit = {},
@@ -574,7 +579,7 @@ private fun ActionMessageRow(
                 )
             }
 
-            if (linkPreview != null || linkPreviewLoading) {
+            if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
                 Box(Modifier.padding(top = 4.dp)) {
                     LinkPreviewCard(
                         preview = linkPreview,
@@ -685,6 +690,7 @@ private fun TwoLineMessageRow(
     imageUrl: String? = null,
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
+    linkPreviewResolved: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
     knownNicks: Set<String> = emptySet(),
     onLongPress: () -> Unit = {},
@@ -830,7 +836,7 @@ private fun TwoLineMessageRow(
                 )
             }
 
-            if (linkPreview != null || linkPreviewLoading) {
+            if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
                 Box(Modifier.padding(top = 4.dp)) {
                     LinkPreviewCard(
                         preview = linkPreview,

@@ -76,6 +76,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
@@ -110,6 +113,32 @@ private const val REACTION_PREFETCH_ROWS = 12
 private const val MAX_VISIBLE_REACTION_MSGIDS = 80
 private const val MAX_UNREAD_BADGE_COUNT = 100
 
+internal class ChatForegroundLifecycleGate(
+    private val onResume: () -> Unit,
+    private val onPause: () -> Unit,
+) {
+    private var resumed = false
+
+    fun sync(isResumed: Boolean) {
+        if (isResumed == resumed) return
+        resumed = isResumed
+        if (isResumed) onResume() else onPause()
+    }
+
+    fun onEvent(event: Lifecycle.Event) {
+        when (event) {
+            Lifecycle.Event.ON_RESUME -> sync(true)
+            Lifecycle.Event.ON_PAUSE,
+            Lifecycle.Event.ON_STOP,
+            Lifecycle.Event.ON_DESTROY,
+            -> sync(false)
+            else -> Unit
+        }
+    }
+
+    fun dispose() = sync(false)
+}
+
 /** Stateful entry: wires the ViewModel, lifecycle mark-read, and navigation. */
 @Composable
 fun ChatScreen(
@@ -130,11 +159,21 @@ fun ChatScreen(
     val memberNicks by viewModel.memberNicks.collectAsStateWithLifecycle()
     val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
 
-    // Foreground-buffer tracker on resume/pause (notification suppression, plans/05). Read state
-    // is deliberately deferred until the one-shot entry position has settled below.
-    DisposableEffect(Unit) {
-        viewModel.onResume()
-        onDispose { viewModel.onPause() }
+    // Composition survives Home/recents, so use the actual resumed lifecycle instead of treating
+    // "still composed" as foreground. This gates notifications and chat sounds correctly.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val gate = ChatForegroundLifecycleGate(
+            onResume = viewModel::onResume,
+            onPause = viewModel::onPause,
+        )
+        val observer = LifecycleEventObserver { _, event -> gate.onEvent(event) }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        gate.sync(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            gate.dispose()
+        }
     }
 
     val chipsByMsgid by viewModel.reactionChips.collectAsStateWithLifecycle()

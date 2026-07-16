@@ -30,6 +30,12 @@ import coil.compose.AsyncImage
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
+internal fun shouldShowLinkPreview(
+    preview: LinkPreview?,
+    loading: Boolean,
+    resolved: Boolean,
+): Boolean = preview != null || loading || resolved
+
 /**
  * OG-tag link preview card. Loading, success, and a known unavailable result retain the same card
  * footprint, so completion cannot shift a reverse LazyColumn row under the user's finger.

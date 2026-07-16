@@ -76,6 +76,7 @@ internal fun CompactMessageRow(
     imageUrl: String? = null,
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
+    linkPreviewResolved: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
     // Normalized nicks known in the current buffer; @mentions of these are colored (plans/17).
     knownNicks: Set<String> = emptySet(),
@@ -175,7 +176,7 @@ internal fun CompactMessageRow(
             )
         }
 
-        if (linkPreview != null || linkPreviewLoading) {
+        if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
             Box(Modifier.padding(top = 2.dp)) {
                 LinkPreviewCard(preview = linkPreview, loading = linkPreviewLoading, onClick = onLinkPreviewClick)
             }

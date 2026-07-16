@@ -1083,7 +1083,20 @@ class ConnectionManagerImpl @Inject constructor(
             }
             armEchoTimeout(bufferId, label)
         }
-        if (chunks.isNotEmpty()) chatSoundPlayer.onOutgoingAccepted(bufferId)
+        if (chunks.isNotEmpty()) {
+            try {
+                chatSoundPlayer.onOutgoingAccepted(bufferId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                diagnostics.record("chat_sound", "outgoing_failed") {
+                    mapOf(
+                        "buffer_id" to bufferId,
+                        "error" to error::class.simpleName,
+                    )
+                }
+            }
+        }
     }
 
     /**

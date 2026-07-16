@@ -165,8 +165,8 @@ fun MessageList(
     showImages: Boolean,
     showLinkPreviews: Boolean,
     onOpenLink: (String) -> Unit,
-    cachedPreview: (String) -> CachedLinkPreview? = { null },
     modifier: Modifier = Modifier,
+    cachedPreview: (String) -> CachedLinkPreview? = { null },
     liveEntryId: Long? = null,
     onLiveEntryConsumed: (Long) -> Unit = {},
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
@@ -675,6 +675,7 @@ private fun MessageRow(
     }
     val preview = (previewState as? PreviewState.Done)?.preview?.withImageGate(showImages)
     val previewLoading = linkUrl != null && previewState is PreviewState.Loading
+    val previewResolved = linkUrl != null && previewState is PreviewState.Done
     val formattedTime = remember(msg.serverTime, formatTime) { formatTime(msg.serverTime) }
     // Ordinary rows stay on the hot scrolling path without even resolving the accessibility
     // string; mention state is immutable for a stored row and only the sparse highlighted rows
@@ -718,6 +719,7 @@ private fun MessageRow(
             imageUrl = imageUrl,
             linkPreview = preview,
             linkPreviewLoading = previewLoading,
+            linkPreviewResolved = previewResolved,
             reactions = reactions,
             knownNicks = knownNicks,
             onLongPress = { onLongPress(msg) },

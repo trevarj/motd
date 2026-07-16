@@ -124,6 +124,28 @@ class MotdNotificationsFoolTest {
     }
 
     @Test
+    fun delayedPushAtLocalUnreadFloor_doesNotNotifyAfterUnmute() = runTest {
+        val buffer = db.bufferDao().observeById(bufferId)!!
+        db.bufferDao().update(
+            buffer.copy(
+                muted = false,
+                readMarkerTime = null,
+                localUnreadFloorTime = 1_000,
+            ),
+        )
+
+        notifications.onIncoming(
+            networkId = networkId,
+            bufferId = bufferId,
+            type = BufferType.QUERY,
+            hasMention = false,
+            message = chat("troll", "delayed while muted"),
+        )
+
+        assertEquals(0, postedCount())
+    }
+
+    @Test
     fun duplicateDelivery_addsBodyToMessagingStyleOnlyOnce() = runTest {
         val message = chat("troll", "only once")
 

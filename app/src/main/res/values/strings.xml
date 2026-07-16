@@ -60,8 +60,6 @@
     <string name="bouncer_znc_login_guidance">Use the ZNC username, network identifier, and password shown in your ZNC configuration.</string>
     <string name="onboarding_choice_network_title">Connect to an IRC network</string>
     <string name="onboarding_choice_network_desc">Connect directly to a single IRC server.</string>
-    <string name="onboarding_libera_preset">Use Libera.Chat</string>
-    <string name="onboarding_libera_preset_desc">irc.libera.chat · 6697 · TLS</string>
     <string name="onboarding_server_title">Server</string>
     <string name="onboarding_field_host">Host</string>
     <string name="onboarding_field_port">Port</string>

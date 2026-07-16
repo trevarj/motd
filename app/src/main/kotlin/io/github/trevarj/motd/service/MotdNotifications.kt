@@ -14,6 +14,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.MainActivity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.effectiveReadFloorTime
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -126,7 +127,7 @@ class MotdNotifications @Inject constructor(
         val muted = buffer?.muted == true
         val senderIsFriend = sender in settings.friends
         val senderIsFool = sender in settings.fools
-        val alreadyRead = buffer?.readMarkerTime?.let { message.ctx.serverTime <= it } == true
+        val alreadyRead = buffer?.effectiveReadFloorTime?.let { message.ctx.serverTime <= it } == true
         val decision = shouldPostNotification(foreground, muted, senderIsFriend, senderIsFool, alreadyRead)
         diagnostics.record("notifications", "message_evaluated") {
             mapOf(

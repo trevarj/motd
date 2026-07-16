@@ -18,7 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -45,7 +45,7 @@ class PendingChannelCloseCoordinatorTest {
     }
 
     @Test
-    fun directClose_waitsForReady_thenDeletesOnlyAfterPartReturns() = runTest {
+    fun directClose_waitsForReady_thenKeepsHistoryUntilServerAcknowledgesPart() = runTest {
         val database = inMemoryDb().also { db = it }
         val networkId = database.networkDao().insert(directNetwork())
         val bufferId = database.bufferDao().insert(channel(networkId))
@@ -61,7 +61,7 @@ class PendingChannelCloseCoordinatorTest {
         coordinator.retryPendingCloses()
 
         assertEquals(listOf(bufferId), connections.parts)
-        assertNull(database.bufferDao().observeById(bufferId))
+        assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
     }
 
     @Test
@@ -71,13 +71,35 @@ class PendingChannelCloseCoordinatorTest {
         val bufferId = database.bufferDao().insert(channel(networkId))
         val connections = FakeConnections().apply { failPart = true }
         connections.states.value = mapOf(networkId to ready())
-        val coordinator = coordinator(database, connections, backgroundScope)
+        val releaseRetry = CompletableDeferred<Unit>()
+        val retryScheduled = CompletableDeferred<Unit>()
+        val coordinator = coordinator(
+            database = database,
+            connections = connections,
+            scope = backgroundScope,
+            retryWait = { attempt ->
+                if (attempt == 1) {
+                    retryScheduled.complete(Unit)
+                    releaseRetry.await()
+                } else {
+                    awaitCancellation()
+                }
+            },
+        )
 
         coordinator.requestClose(bufferId)
+        retryScheduled.await()
 
         assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
         assertNotNull(database.bufferDao().observeById(bufferId))
         assertEquals(listOf(bufferId), connections.parts)
+
+        connections.failPart = false
+        releaseRetry.complete(Unit)
+        connections.secondPartAttempted.await()
+
+        assertEquals(listOf(bufferId, bufferId), connections.parts)
+        assertNotNull(database.bufferDao().observeById(bufferId))
     }
 
     @Test
@@ -121,9 +143,70 @@ class PendingChannelCloseCoordinatorTest {
         assertEquals(rootId, bouncer.rootIds.single())
         assertEquals("channel delete #motd/libera", bouncer.commands.single().wire)
 
-        bouncer.next = BouncerServResult.Success("channel delete #motd/libera", listOf("deleted"))
+        bouncer.results.addLast(BouncerServResult.Success("channel delete #motd/libera", listOf("deleted")))
+        bouncer.results.addLast(BouncerServResult.Success("channel status", listOf("No channels configured")))
         coordinator.retryPendingCloses()
         assertNull(database.bufferDao().observeById(bufferId))
+    }
+
+    @Test
+    fun sojuClose_commandLevelError_keepsPending() = runTest {
+        val database = inMemoryDb().also { db = it }
+        val rootId = database.networkDao().insert(
+            directNetwork(name = "soju", role = NetworkRole.BOUNCER_ROOT),
+        )
+        val childId = database.networkDao().insert(
+            directNetwork(
+                name = "libera",
+                role = NetworkRole.BOUNCER_CHILD,
+                parentId = rootId,
+                bouncerNetId = "net-1",
+            ),
+        )
+        val bufferId = database.bufferDao().insert(channel(childId, "#motd"))
+        val connections = FakeConnections().apply {
+            states.value = mapOf(rootId to ready())
+        }
+        val bouncer = FakeBouncer().apply {
+            next = BouncerServResult.Success(
+                "channel delete #motd/libera",
+                listOf("error: channel is protected"),
+            )
+        }
+
+        coordinator(database, connections, backgroundScope, bouncer).requestClose(bufferId)
+
+        assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
+        assertEquals(1, bouncer.commands.size)
+    }
+
+    @Test
+    fun sojuClose_unknownStatusOutput_keepsPending() = runTest {
+        val database = inMemoryDb().also { db = it }
+        val rootId = database.networkDao().insert(
+            directNetwork(name = "soju", role = NetworkRole.BOUNCER_ROOT),
+        )
+        val childId = database.networkDao().insert(
+            directNetwork(
+                name = "libera",
+                role = NetworkRole.BOUNCER_CHILD,
+                parentId = rootId,
+                bouncerNetId = "net-1",
+            ),
+        )
+        val bufferId = database.bufferDao().insert(channel(childId, "#motd"))
+        val connections = FakeConnections().apply {
+            states.value = mapOf(rootId to ready())
+        }
+        val bouncer = FakeBouncer().apply {
+            results.addLast(BouncerServResult.Success("channel delete #motd/libera", listOf("deleted")))
+            results.addLast(BouncerServResult.Success("channel status", listOf("future output format")))
+        }
+
+        coordinator(database, connections, backgroundScope, bouncer).requestClose(bufferId)
+
+        assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
+        assertEquals(2, bouncer.commands.size)
     }
 
     @Test
@@ -148,13 +231,10 @@ class PendingChannelCloseCoordinatorTest {
             withContext(Dispatchers.Default) {
                 withTimeout(5_000) {
                     connections.partAttempted.await()
-                    while (database.bufferDao().observeById(bufferId) != null) {
-                        delay(1)
-                    }
                 }
             }
             assertEquals(listOf(bufferId), connections.parts)
-            assertNull(database.bufferDao().observeById(bufferId))
+            assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
         } finally {
             job.cancel()
         }
@@ -165,18 +245,23 @@ class PendingChannelCloseCoordinatorTest {
         connections: FakeConnections,
         scope: CoroutineScope,
         bouncer: FakeBouncer = FakeBouncer(),
-    ) = PendingChannelCloseCoordinator(
+        retryWait: suspend (attempt: Int) -> Unit = { attempt ->
+            kotlinx.coroutines.delay(channelCloseRetryDelayMillis(attempt))
+        },
+    ) = PendingChannelCloseCoordinator.forTest(
         db = database,
         connections = connections,
         bouncerServ = bouncer,
         clock = AppClock { 1234L },
         scope = scope,
+        retryWait = retryWait,
     )
 
     private class FakeConnections : ConnectionManager {
         val states = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
         val parts = mutableListOf<Long>()
         val partAttempted = CompletableDeferred<Unit>()
+        val secondPartAttempted = CompletableDeferred<Unit>()
         var failPart = false
         var reportPartSuccess = true
         override val connectionStates: StateFlow<Map<Long, IrcClientState>> = states
@@ -197,6 +282,7 @@ class PendingChannelCloseCoordinatorTest {
         override suspend fun partChannelForClose(bufferId: Long, reason: String?): Boolean {
             parts += bufferId
             partAttempted.complete(Unit)
+            if (parts.size >= 2) secondPartAttempted.complete(Unit)
             if (failPart) error("send failed")
             return reportPartSuccess
         }
@@ -212,11 +298,12 @@ class PendingChannelCloseCoordinatorTest {
     private class FakeBouncer : BouncerServClient {
         val rootIds = mutableListOf<Long>()
         val commands = mutableListOf<BouncerServCommand>()
+        val results = ArrayDeque<BouncerServResult>()
         var next: BouncerServResult = BouncerServResult.Disconnected("pending")
         override suspend fun execute(rootNetworkId: Long, command: BouncerServCommand): BouncerServResult {
             rootIds += rootNetworkId
             commands += command
-            return next
+            return results.removeFirstOrNull() ?: next
         }
         override suspend fun probe(rootNetworkId: Long) = BouncerServCapabilities()
     }
