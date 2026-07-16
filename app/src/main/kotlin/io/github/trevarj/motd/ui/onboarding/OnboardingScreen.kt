@@ -27,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -66,6 +67,8 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.settings.BouncerLoginFields
 import io.github.trevarj.motd.ui.settings.NetworkForm
 import io.github.trevarj.motd.ui.settings.PasswordField
+import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
+import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetPicker
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -82,7 +85,7 @@ fun OnboardingScreen(
         onBack = viewModel::back,
         onChoose = viewModel::chooseConnection,
         onChooseBouncerKind = viewModel::chooseBouncerKind,
-        onLibera = viewModel::applyLiberaPreset,
+        onSelectPreset = viewModel::selectPreset,
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
         onSojuLoginChange = viewModel::editSojuLogin,
@@ -91,6 +94,8 @@ fun OnboardingScreen(
         onToggleBouncer = viewModel::toggleBouncerNetwork,
         onAddBouncer = viewModel::addBouncerNetwork,
         onFinish = { viewModel.finish(onDone) },
+        onConfirmPlaintext = viewModel::confirmPlaintext,
+        onDismissPlaintext = viewModel::dismissPlaintextWarning,
     )
 }
 
@@ -101,7 +106,7 @@ fun OnboardingContent(
     onBack: () -> Unit,
     onChoose: (ConnectionChoice) -> Unit,
     onChooseBouncerKind: (BouncerKind) -> Unit,
-    onLibera: () -> Unit,
+    onSelectPreset: (NetworkPresetId) -> Unit,
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
     onSojuLoginChange: (SojuLoginForm) -> Unit,
@@ -110,6 +115,8 @@ fun OnboardingContent(
     onToggleBouncer: (String) -> Unit,
     onAddBouncer: (String, String) -> Unit,
     onFinish: () -> Unit,
+    onConfirmPlaintext: () -> Unit,
+    onDismissPlaintext: () -> Unit,
 ) {
     val steps = OnboardingStep.entries
     val pagerState = rememberPagerState(pageCount = { steps.size })
@@ -127,7 +134,8 @@ fun OnboardingContent(
         ) { page ->
             when (steps[page]) {
                 OnboardingStep.WELCOME -> WelcomePage()
-                OnboardingStep.CHOICE -> ChoicePage(state, onChoose, onChooseBouncerKind, onLibera)
+                OnboardingStep.CHOICE ->
+                    ChoicePage(state, onChoose, onChooseBouncerKind, onSelectPreset)
                 OnboardingStep.SERVER -> ServerPage(state, onServerChange, onAuthChange, authOnly = false)
                 OnboardingStep.AUTH ->
                     if (state.isBouncer) {
@@ -145,6 +153,25 @@ fun OnboardingContent(
             onNext = onNext,
             onBack = onBack,
             onFinish = onFinish,
+        )
+    }
+
+    if (state.showPlaintextWarning) {
+        AlertDialog(
+            modifier = Modifier.testTag("plaintext_network_warning"),
+            onDismissRequest = onDismissPlaintext,
+            title = { Text(stringResource(R.string.add_network_plaintext_title)) },
+            text = { Text(stringResource(R.string.add_network_plaintext_message)) },
+            confirmButton = {
+                Button(onClick = onConfirmPlaintext) {
+                    Text(stringResource(R.string.add_network_plaintext_continue))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissPlaintext) {
+                    Text(stringResource(R.string.dialog_cancel))
+                }
+            },
         )
     }
 }
@@ -220,7 +247,7 @@ private fun ChoicePage(
     state: OnboardingState,
     onChoose: (ConnectionChoice) -> Unit,
     onChooseBouncerKind: (BouncerKind) -> Unit,
-    onLibera: () -> Unit,
+    onSelectPreset: (NetworkPresetId) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
@@ -263,14 +290,11 @@ private fun ChoicePage(
             onClick = { onChoose(ConnectionChoice.NETWORK) },
             modifier = Modifier.testTag("onboarding_choice_network"),
         )
-        OutlinedButton(onClick = onLibera, modifier = Modifier.fillMaxWidth()) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(stringResource(R.string.onboarding_libera_preset))
-                Text(
-                    stringResource(R.string.onboarding_libera_preset_desc),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+        if (state.choice == ConnectionChoice.NETWORK) {
+            NetworkPresetPicker(
+                selected = state.presetId,
+                onSelect = onSelectPreset,
+            )
         }
     }
 }
@@ -559,9 +583,10 @@ private fun OnboardingChoicePreview() {
         Surface {
             OnboardingContent(
                 state = OnboardingState(step = OnboardingStep.CHOICE, choice = ConnectionChoice.NETWORK),
-                onNext = {}, onBack = {}, onChoose = {}, onChooseBouncerKind = {}, onLibera = {},
+                onNext = {}, onBack = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
                 onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
                 onToggleBouncer = {}, onAddBouncer = { _, _ -> }, onFinish = {},
+                onConfirmPlaintext = {}, onDismissPlaintext = {},
             )
         }
     }
@@ -584,9 +609,10 @@ private fun OnboardingConnectPreview() {
                         BouncerNetworkRow("2", "OFTC", selected = false),
                     ),
                 ),
-                onNext = {}, onBack = {}, onChoose = {}, onChooseBouncerKind = {}, onLibera = {},
+                onNext = {}, onBack = {}, onChoose = {}, onChooseBouncerKind = {}, onSelectPreset = {},
                 onServerChange = {}, onAuthChange = {}, onSojuLoginChange = {}, onZncLoginChange = {}, onRetry = {},
                 onToggleBouncer = {}, onAddBouncer = { _, _ -> }, onFinish = {},
+                onConfirmPlaintext = {}, onDismissPlaintext = {},
             )
         }
     }

@@ -203,7 +203,7 @@ fun AddNetworkContent(
 }
 
 @Composable
-private fun NetworkPresetPicker(
+internal fun NetworkPresetPicker(
     selected: NetworkPresetId,
     onSelect: (NetworkPresetId) -> Unit,
 ) {
