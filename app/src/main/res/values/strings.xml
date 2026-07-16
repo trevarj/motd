@@ -421,6 +421,8 @@
     <string name="network_settings_avatar_unmanage">Leave unchanged</string>
     <string name="settings_composer_emoji">Emoji button</string>
     <string name="settings_composer_emoji_desc">Show the emoji button in the message composer.</string>
+    <string name="settings_chat_sounds">Chat sounds</string>
+    <string name="settings_chat_sounds_desc">Play subtle sounds when sending or receiving in the open chat.</string>
     <string name="settings_reply_prefix">Visible reply prefix</string>
     <string name="settings_reply_prefix_desc">Prefix channel replies with the recipient’s nick for clients that do not render reply tags.</string>
     <string name="settings_wallpaper">Chat wallpaper</string>

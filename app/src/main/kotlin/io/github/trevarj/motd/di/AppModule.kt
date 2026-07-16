@@ -36,6 +36,7 @@ import io.github.trevarj.motd.data.repo.NetworkRepositoryImpl
 import io.github.trevarj.motd.data.repo.SearchRepository
 import io.github.trevarj.motd.data.repo.SearchRepositoryImpl
 import io.github.trevarj.motd.data.sync.ChatHistoryMediatorFactoryImpl
+import io.github.trevarj.motd.data.sync.ChatSoundPlayer
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
@@ -48,6 +49,7 @@ import io.github.trevarj.motd.push.UnifiedPushApi
 import io.github.trevarj.motd.push.UnifiedPushApiImpl
 import io.github.trevarj.motd.push.WebPushCryptoFacade
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.AndroidChatSoundPlayer
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistoryResyncCoordinator
@@ -169,6 +171,9 @@ internal abstract class AppModule {
     /** Message/mention notification hook consumed by EventProcessor (WP5 seam → MotdNotifications). */
     @Binds @Singleton
     abstract fun messageNotifier(impl: MotdNotifications): MessageNotifier
+
+    @Binds @Singleton
+    abstract fun chatSoundPlayer(impl: AndroidChatSoundPlayer): ChatSoundPlayer
 
     @Binds @Singleton
     abstract fun diagnosticLogger(impl: FileDiagnosticLogger): DiagnosticLogger

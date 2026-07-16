@@ -48,6 +48,7 @@ fun ChatSettingsScreen(
         onShowJoinPartQuit = viewModel::setShowJoinPartQuit,
         onFoolsMode = viewModel::setFoolsMode,
         onShowComposerEmoji = viewModel::setShowComposerEmoji,
+        onChatSoundsEnabled = viewModel::setChatSoundsEnabled,
         onVisibleReplyPrefix = viewModel::setVisibleReplyPrefix,
         onShowImages = viewModel::setShowImages,
         onShowLinkPreviews = viewModel::setShowLinkPreviews,
@@ -67,6 +68,7 @@ fun ChatSettingsContent(
     onShowJoinPartQuit: (Boolean) -> Unit,
     onFoolsMode: (FoolsMode) -> Unit,
     onShowComposerEmoji: (Boolean) -> Unit,
+    onChatSoundsEnabled: (Boolean) -> Unit,
     onVisibleReplyPrefix: (Boolean) -> Unit,
     onShowImages: (Boolean) -> Unit,
     onShowLinkPreviews: (Boolean) -> Unit,
@@ -107,6 +109,14 @@ fun ChatSettingsContent(
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_composer_section)) {
+            SwitchRow(
+                title = stringResource(R.string.settings_chat_sounds),
+                subtitle = stringResource(R.string.settings_chat_sounds_desc),
+                checked = settings.chatSoundsEnabled,
+                onCheckedChange = onChatSoundsEnabled,
+                switchTag = "settings_switch_chat_sounds",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
                 title = stringResource(R.string.settings_composer_emoji),
                 subtitle = stringResource(R.string.settings_composer_emoji_desc),
@@ -178,6 +188,7 @@ private fun ChatSettingsPreview() {
             avatars = AvatarConfig(),
             onBack = {}, onOpenFriends = {}, onOpenFools = {},
             onShowJoinPartQuit = {}, onFoolsMode = {}, onShowComposerEmoji = {},
+            onChatSoundsEnabled = {},
             onVisibleReplyPrefix = {},
             onShowImages = {}, onShowLinkPreviews = {}, onShowSharedAvatars = {},
         )

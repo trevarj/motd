@@ -39,6 +39,7 @@ class EventProcessor @Inject constructor(
     private val db: MotdDatabase,
     private val typing: TypingTrackerImpl,
     private val notifier: MessageNotifier,
+    private val chatSoundPlayer: ChatSoundPlayer = ChatSoundPlayer.Noop,
     private val bufferStore: BufferStore = BufferStore(db),
     private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) : IrcEventSink {
@@ -488,6 +489,9 @@ class EventProcessor @Inject constructor(
         if (isRootServiceReply && origin == EventOrigin.LIVE) {
             bufferDao.advanceReadMarker(bufferId, e.ctx.serverTime)
             return
+        }
+        if (origin == EventOrigin.LIVE && !e.isSelf) {
+            chatSoundPlayer.onIncoming(bufferId, type, e)
         }
         if (origin.notifies) maybeNotify(networkId, bufferId, type, hasMention, e)
     }

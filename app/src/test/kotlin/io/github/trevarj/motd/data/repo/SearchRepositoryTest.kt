@@ -105,5 +105,6 @@ class SearchRepositoryTest {
         override suspend fun setAvatarStyle(style: AvatarStyle) = Unit
         override suspend fun setChatWallpaper(w: ChatWallpaper) = Unit
         override suspend fun setShowComposerEmoji(show: Boolean) = Unit
+        override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
     }
 }

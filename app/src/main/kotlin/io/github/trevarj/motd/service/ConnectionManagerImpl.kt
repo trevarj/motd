@@ -20,6 +20,7 @@ import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.sync.BufferStore
+import io.github.trevarj.motd.data.sync.ChatSoundPlayer
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.MessageNotifier
@@ -179,6 +180,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val historyResyncCoordinator: HistoryResyncCoordinator,
     private val readMarkerRepository: ReadMarkerRepository,
     private val messageNotifier: MessageNotifier,
+    private val chatSoundPlayer: ChatSoundPlayer,
     private val presetEnrollmentCoordinator: PresetEnrollmentCoordinator,
     private val avatarCoordinator: AvatarCoordinator,
     private val pushHealthStore: PushHealthStore,
@@ -1052,7 +1054,8 @@ class ConnectionManagerImpl @Inject constructor(
         )
         val outgoingText = delivery.text
 
-        for (chunk in prepareOutgoingMessageChunks(outgoingText, isBouncerServ)) {
+        val chunks = prepareOutgoingMessageChunks(outgoingText, isBouncerServ)
+        for (chunk in chunks) {
             val displayChunk = chunk.displayText
             // Persist the pending row in beforeSend — BEFORE the PRIVMSG hits the wire — so a
             // fast labeled echo can't be processed ahead of the insert and duplicate the send.
@@ -1080,6 +1083,7 @@ class ConnectionManagerImpl @Inject constructor(
             }
             armEchoTimeout(bufferId, label)
         }
+        if (chunks.isNotEmpty()) chatSoundPlayer.onOutgoingAccepted(bufferId)
     }
 
     /**
