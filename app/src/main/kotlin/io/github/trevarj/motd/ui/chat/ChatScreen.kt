@@ -199,6 +199,7 @@ fun ChatScreen(
     val rawNewestTime by viewModel.rawNewestTime.collectAsStateWithLifecycle()
     // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
     val appearance by viewModel.appearance.collectAsStateWithLifecycle(
         initialValue = io.github.trevarj.motd.data.prefs.AppearanceConfig(),
     )
@@ -218,6 +219,8 @@ fun ChatScreen(
         friends = settings.friends,
         fools = settings.fools,
         foolsMode = settings.foolsMode,
+        hiddenFoolsRevealed = hiddenFoolsRevealed,
+        onHiddenFoolsRevealedChange = viewModel::setHiddenFoolsRevealed,
         showJoinPartQuit = settings.showJoinPartQuit,
         chatWallpaper = appearance.wallpaper,
         conversationFontScalePercent = appearance.conversationFontScalePercent,
@@ -351,6 +354,8 @@ fun ChatContent(
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    hiddenFoolsRevealed: Boolean = false,
+    onHiddenFoolsRevealedChange: (Boolean) -> Unit = {},
     showJoinPartQuit: Boolean = true,
     chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection = io.github.trevarj.motd.data.prefs.WallpaperSelection(),
     conversationFontScalePercent: Int = io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT,
@@ -926,23 +931,6 @@ fun ChatContent(
                     }
                 },
                 actions = {
-                    // Global fool expand/collapse (bug #9): only meaningful with configured fools in
-                    // COLLAPSE mode. Toggling clears the per-row overrides so it acts as a clean reset.
-                    if (foolsMode == FoolsMode.COLLAPSE && fools.isNotEmpty()) {
-                        IconButton(onClick = {
-                            expandAllFools = !expandAllFools
-                            expandedFools = emptySet()
-                            collapsedFools = emptySet()
-                        }) {
-                            Icon(
-                                if (expandAllFools) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = stringResource(
-                                    if (expandAllFools) R.string.chat_fool_collapse_all
-                                    else R.string.chat_fool_expand_all,
-                                ),
-                            )
-                        }
-                    }
                     IconButton(onClick = { buffer?.let { onOpenSearch(it.id) } }) {
                         Icon(
                             Icons.Outlined.Search,
@@ -956,6 +944,40 @@ fun ChatContent(
                         Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
                     }
                     DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                        if (fools.isNotEmpty()) {
+                            val foolsShown = if (foolsMode == FoolsMode.HIDE) {
+                                hiddenFoolsRevealed
+                            } else {
+                                expandAllFools
+                            }
+                            DropdownMenuItem(
+                                modifier = Modifier.testTag("chat_toggle_fools_visibility"),
+                                text = {
+                                    Text(
+                                        stringResource(
+                                            if (foolsShown) R.string.chat_fool_collapse_all
+                                            else R.string.chat_fool_expand_all,
+                                        ),
+                                    )
+                                },
+                                onClick = {
+                                    overflowOpen = false
+                                    if (foolsMode == FoolsMode.HIDE) {
+                                        onHiddenFoolsRevealedChange(!hiddenFoolsRevealed)
+                                    } else {
+                                        expandAllFools = !expandAllFools
+                                        expandedFools = emptySet()
+                                        collapsedFools = emptySet()
+                                    }
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        if (foolsShown) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                        contentDescription = null,
+                                    )
+                                },
+                            )
+                        }
                         val running = historyResyncState as? HistoryResyncState.Running
                         val historyBusy = running != null ||
                             historyResyncState == HistoryResyncState.WaitingForCapability

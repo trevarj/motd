@@ -147,8 +147,13 @@ class ChatViewModel @Inject constructor(
     // Behavioral filter (JPQ visibility + fools HIDE). Distinct so unrelated settings edits don't
     // re-emit the paging stream (plans/13 §2.5). ChatState is untouched — the screen collects
     // [settings] separately (mirrors R1 keeping the 5-ary combine stable).
+    private val _hiddenFoolsRevealed = MutableStateFlow(false)
+    val hiddenFoolsRevealed: StateFlow<Boolean> = _hiddenFoolsRevealed.asStateFlow()
+
     private val filterSpec = settingsRepository.settings
-        .map(MessageVisibilitySpec::from)
+        .combine(_hiddenFoolsRevealed) { settings, revealHiddenFools ->
+            MessageVisibilitySpec.from(settings).copy(revealHiddenFools = revealHiddenFools)
+        }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, MessageVisibilitySpec())
 
@@ -167,6 +172,10 @@ class ChatViewModel @Inject constructor(
     /** Full settings for the timeline (friends/fools/foolsMode/nick styling); collected in the screen. */
     val settings: StateFlow<Settings> = settingsRepository.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Settings())
+
+    fun setHiddenFoolsRevealed(revealed: Boolean) {
+        _hiddenFoolsRevealed.value = revealed
+    }
 
     private val replyTo = MutableStateFlow<MessageEntity?>(null)
     private val _members = MutableStateFlow<List<MemberEntity>>(emptyList())
