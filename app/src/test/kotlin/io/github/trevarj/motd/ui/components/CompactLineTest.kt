@@ -12,7 +12,7 @@ import org.junit.Test
 
 /**
  * Pure text-shape assertions for the COMPACT single-line renderer's line builder. Verifies the
- * per-kind prefix/separator ("nick: " / "* nick " / "-nick- ") and that body URLs stay linkified.
+ * per-kind prefix/separator ("nick: " / "-nick- ") and that body URLs stay linkified.
  * Color is a plain value class here, so no Android runtime is needed.
  */
 class CompactLineTest {
@@ -35,12 +35,6 @@ class CompactLineTest {
 
         assertEquals(14.sp, style.fontSize)
         assertEquals(FontWeight.Bold, style.fontWeight)
-    }
-
-    @Test
-    fun action_renders_star_nick_text_no_colon() {
-        val line = buildCompactLine("bob", "waves", MessageKind.ACTION, nick, body, link, noTint)
-        assertEquals("* bob waves", line.text)
     }
 
     @Test
@@ -68,15 +62,6 @@ class CompactLineTest {
             showSender = false,
         )
         assertEquals("second line", line.text)
-    }
-
-    @Test
-    fun continuation_action_keeps_star_marker() {
-        val line = buildCompactLine(
-            "bob", "still waving", MessageKind.ACTION, nick, body, link, noTint,
-            showSender = false,
-        )
-        assertEquals("* still waving", line.text)
     }
 
     @Test
@@ -111,8 +96,8 @@ class CompactLineTest {
     }
 
     @Test
-    fun inline_code_is_shared_by_privmsg_action_and_notice() {
-        for (kind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION, MessageKind.NOTICE)) {
+    fun inline_code_is_shared_by_privmsg_and_notice() {
+        for (kind in listOf(MessageKind.PRIVMSG, MessageKind.NOTICE)) {
             val line = buildCompactLine(
                 "alice", "run `echo hi'", kind, nick, body, link, noTint,
                 codeBackground = Color.DarkGray,

@@ -372,7 +372,8 @@ class ChatHeadlessE2eTest : HeadlessE2eDriver() {
         waitForText("/join")
         replaceTag("chat_composer_field", "/me waves")
         clickTag("chat_composer_send")
-        waitForText("waves", timeoutMillis = 20_000)
+        waitForText("* $nick waves", timeoutMillis = 20_000)
+        assertTag("chat_action_row")
 
         clickDescription("Search")
         waitForText("Search messages")

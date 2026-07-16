@@ -3,6 +3,8 @@ package io.github.trevarj.motd.ui.components
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -83,5 +85,63 @@ class MessageBubbleTextTest {
         val redRuns = body.spanStyles.filter { it.item.color == Color.Red }
             .map { body.text.substring(it.start, it.end) }
         assertEquals(listOf("@bob"), redRuns)
+    }
+
+    @Test
+    fun action_line_keeps_star_sender_and_body_visually_distinct() {
+        val line = buildActionLine(
+            sender = "alice",
+            text = "waves hello",
+            accentColor = Color.Magenta,
+            nameColor = Color.Green,
+            bodyColor = Color.Gray,
+            linkColor = Color.Blue,
+            mentionsActive = false,
+        )
+
+        assertEquals("* alice waves hello", line.text)
+        val star = line.spanStyles.first { it.start == 0 && it.end == 2 }.item
+        val sender = line.spanStyles.first { it.start == 2 && it.end == 7 }.item
+        val body = line.spanStyles.first { it.start == 8 && it.end == line.length }.item
+        assertEquals(Color.Magenta, star.color)
+        assertEquals(FontStyle.Normal, star.fontStyle)
+        assertEquals(Color.Green, sender.color)
+        assertEquals(FontWeight.Bold, sender.fontWeight)
+        assertEquals(FontStyle.Normal, sender.fontStyle)
+        assertEquals(Color.Gray, body.color)
+        assertEquals(FontStyle.Italic, body.fontStyle)
+    }
+
+    @Test
+    fun action_body_preserves_links_mentions_code_and_friend_tint() {
+        val friendTint = Color.Yellow
+        val line = buildActionLine(
+            sender = "alice",
+            text = "greets @bob at https://example.com with `hello`",
+            accentColor = Color.Magenta,
+            nameColor = Color.Green,
+            bodyColor = Color.Gray,
+            linkColor = Color.Blue,
+            friendTint = friendTint,
+            mentionColor = { nick -> if (nick == "bob") Color.Red else null },
+            codeBackground = Color.DarkGray,
+            codeColor = Color.White,
+        )
+
+        val sender = line.spanStyles.first { it.start == 2 && it.end == 7 }.item
+        assertEquals(friendTint, sender.background)
+        assertTrue(line.hasLinkAnnotations(0, line.length))
+        assertTrue(
+            line.spanStyles.any {
+                it.item.color == Color.Red && line.text.substring(it.start, it.end) == "@bob"
+            },
+        )
+        assertTrue(
+            line.spanStyles.any {
+                it.item.fontFamily == FontFamily.Monospace &&
+                    it.item.fontStyle == FontStyle.Normal &&
+                    line.text.substring(it.start, it.end) == "hello"
+            },
+        )
     }
 }

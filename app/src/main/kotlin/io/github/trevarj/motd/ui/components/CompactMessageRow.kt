@@ -50,7 +50,8 @@ private const val COMPACT_ROW_TINT_ALPHA = 0.10f
  * Classic single-line IRC rendering used in COMPACT density: `nick: text` on one wrapping line,
  * nick colored via [NickColorScheme.nick] (friend tint preserved), a small trailing timestamp, no
  * avatar, no bubble, minimal vertical padding, uniformly left-aligned (IRC has no own-message
- * right-alignment). ACTION renders as `* nick text` (italic); NOTICE gets a subtle `-nick-` marker.
+ * right-alignment). NOTICE gets a subtle `-nick-` marker; ACTION is handled by the shared accent
+ * row before this renderer.
  *
  * Sender grouping is per-line here (every row shows its nick), matching irssi/HexChat. Reply,
  * inline image, link preview, reactions, and pending/failed decorations are still shown, just
@@ -104,8 +105,8 @@ internal fun CompactMessageRow(
         nameColor.copy(alpha = COMPACT_ROW_TINT_ALPHA)
     }
 
-    // The `nick: text` (or `* nick text`) content is a single flowing AnnotatedString so it wraps as
-    // one paragraph like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
+    // The `nick: text` content is a single flowing AnnotatedString so it wraps as one paragraph
+    // like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
     // Continuation lines (showSender == false) drop the `nick:` prefix so a run reads as one speaker.
     // Known-nick @mentions in the body are colored via the memoized resolver.
     val mentionColor = rememberMentionColor(knownNicks, nickColors)
@@ -141,8 +142,6 @@ internal fun CompactMessageRow(
             Text(
                 text = line,
                 style = MaterialTheme.typography.bodyLarge,
-                // ACTION reads as italic prose the way irssi shows `* nick …`.
-                fontStyle = if (kind == MessageKind.ACTION) FontStyle.Italic else FontStyle.Normal,
                 modifier = Modifier
                     .weight(1f)
                     // Tapping the row's nick opens the nick sheet; the whole line is the target since
@@ -188,12 +187,10 @@ internal fun CompactMessageRow(
 }
 
 /**
- * Build the single-line `nick: text` content for COMPACT rendering. Prefix depends on kind:
- * ACTION → `* nick ` (no colon), NOTICE → `-nick- ` (subtle marker), else `nick: `. The nick span
- * is colored (+ optional friend background); URLs in the body are linkified and known-nick
- * @mentions ([mentionColor]) are colored. When [showSender] is false the row is a group
- * continuation: the `nick:`/`* nick`/`-nick-` prefix is dropped so the run reads as one speaker
- * (the body alone is rendered). Pure/testable.
+ * Build the single-line `nick: text` content for COMPACT rendering. NOTICE uses `-nick-`; ordinary
+ * messages use `nick: `. The nick span is colored (+ optional friend background); URLs in the body
+ * are linkified and known-nick @mentions ([mentionColor]) are colored. When [showSender] is false
+ * the prefix is dropped so the run reads as one speaker. Pure/testable.
  */
 internal fun buildCompactLine(
     sender: String,
@@ -215,15 +212,9 @@ internal fun buildCompactLine(
         fontWeight = FontWeight.Bold,
         background = friendTint,
     )
-    // Continuation lines omit the sender prefix entirely; ACTION keeps the leading `* ` marker so an
-    // action line stays recognizable even mid-run.
+    // Continuation lines omit the sender prefix entirely.
     if (showSender) {
         when (kind) {
-            MessageKind.ACTION -> {
-                withStyle(SpanStyle(color = bodyColor)) { append("* ") }
-                withStyle(nickStyle) { append(sender) }
-                append(" ")
-            }
             MessageKind.NOTICE -> {
                 // irssi-style notice marker: `-nick-`.
                 withStyle(nickStyle) { append("-$sender-") }
@@ -234,8 +225,6 @@ internal fun buildCompactLine(
                 withStyle(SpanStyle(color = bodyColor)) { append(": ") }
             }
         }
-    } else if (kind == MessageKind.ACTION) {
-        withStyle(SpanStyle(color = bodyColor)) { append("* ") }
     }
     appendRichText(
         text = text,

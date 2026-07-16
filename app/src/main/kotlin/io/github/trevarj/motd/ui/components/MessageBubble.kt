@@ -47,6 +47,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -58,6 +60,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -79,6 +82,7 @@ import java.text.DateFormat as JavaDateFormat
  *  of a nick's messages are trackable, faint enough to stay readable in light and dark themes. */
 private const val TWO_LINE_ROW_TINT_ALPHA = 0.10f
 internal const val MENTION_ROW_TINT_ALPHA = 0.55f
+private const val ACTION_ROW_TINT_ALPHA = 0.22f
 
 /** Persistent, non-animated mention marker shared by every message density. */
 private fun Modifier.mentionHighlight(accent: Color): Modifier = drawWithContent {
@@ -140,7 +144,6 @@ fun MessageBubble(
     // Tapping the sender name/avatar opens the nick sheet; null (self / non-first bubbles) = inert.
     onSenderClick: (() -> Unit)? = null,
 ) {
-    val actionsLabel = stringResource(R.string.chat_bubble_actions)
     // Production timelines pass a string from one list-scoped formatter. The fallback keeps
     // previews/direct callers source-compatible without making every real row query system time
     // settings and construct its own formatter.
@@ -149,17 +152,41 @@ fun MessageBubble(
     // is the only action entry, labeled for TalkBack (plans/15 #31).
     // Density tokens + nick-color scheme flow through CompositionLocals; no signature churn.
     val spacing = LocalSpacing.current
-    val conversationFontScale = LocalConversationFontScale.current
     val nickColors = LocalNickColors.current
-    val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
-    val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
     // EventProcessor never marks self messages as mentions. Keep the UI defensive so a malformed
     // or legacy row cannot style an own message as an incoming highlight.
     val mentionHighlighted = hasMention && !isSelf
-    val renderedModifier = if (mentionHighlighted) {
+    val renderedModifier = if (mentionHighlighted && kind != MessageKind.ACTION) {
         modifier.mentionHighlight(accent = MaterialTheme.colorScheme.secondary)
     } else {
         modifier
+    }
+
+    if (kind == MessageKind.ACTION) {
+        ActionMessageRow(
+            sender = sender,
+            text = text,
+            formattedTime = displayedTime,
+            isSelf = isSelf,
+            nickColors = nickColors,
+            modifier = renderedModifier,
+            hasMention = mentionHighlighted,
+            senderIsFriend = senderIsFriend,
+            failed = failed,
+            pending = pending,
+            reply = reply,
+            imageUrl = imageUrl,
+            linkPreview = linkPreview,
+            linkPreviewLoading = linkPreviewLoading,
+            reactions = reactions,
+            knownNicks = knownNicks,
+            onLongPress = onLongPress,
+            onReact = onReact,
+            onImageClick = onImageClick,
+            onLinkPreviewClick = onLinkPreviewClick,
+            onSenderClick = onSenderClick,
+        )
+        return
     }
 
     // COMPACT density = classic single-line IRC rendering (`nick: text`). Delegate the whole row to
@@ -227,70 +254,10 @@ fun MessageBubble(
         return
     }
 
-    // ACTION renders as centered-left italic text, no bubble (plans/07). Still carries reactions +
-    // failed + timestamp decorations (plans/15 #16).
-    if (kind == MessageKind.ACTION) {
-        val linkColor = MaterialTheme.colorScheme.primary
-        val mentionColor = rememberMentionColor(knownNicks, nickColors)
-        val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
-        val richBody = remember(
-            text, linkColor, mentionsActive, mentionColor, codeBackground, codeColor,
-        ) {
-            linkifiedBody(
-                text,
-                linkColor,
-                mentionsActive,
-                mentionColor,
-                codeBackground,
-                codeColor,
-            )
-        }
-        val actionLine = remember(sender, richBody) {
-            buildAnnotatedString {
-                append("* $sender ")
-                append(richBody)
-            }
-        }
-        Column(
-            modifier = renderedModifier
-                .fillMaxWidth()
-                .background(
-                    if (mentionHighlighted) {
-                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
-                    } else {
-                        Color.Transparent
-                    },
-                )
-                .combinedClickable(
-                    // No ripple is drawn, so a MutableInteractionSource would only allocate per row.
-                    interactionSource = null,
-                    indication = null,
-                    onClick = {},
-                    onLongClick = onLongPress,
-                    onLongClickLabel = actionsLabel,
-                )
-                .padding(horizontal = 16.dp, vertical = spacing.actionVPad),
-        ) {
-            reply?.let { ReplyMiniBubble(it, nickColors) }
-            Text(
-                text = actionLine,
-                style = MaterialTheme.typography.bodyMedium,
-                fontStyle = FontStyle.Italic,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
-                Text(
-                    text = displayedTime,
-                    fontSize = 10.sp * conversationFontScale,
-                    color = if (failed) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                )
-            }
-            ReactionRow(reactions = reactions, onReact = onReact)
-        }
-        return
-    }
+    val actionsLabel = stringResource(R.string.chat_bubble_actions)
+    val conversationFontScale = LocalConversationFontScale.current
+    val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+    val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     // Window width in dp = container px / density; keeps the 0.78 bubble max-width behavior.
     val containerWidthPx = LocalWindowInfo.current.containerSize.width
@@ -458,13 +425,235 @@ fun MessageBubble(
 }
 
 /**
+ * Shared ACTION renderer for every conversation density. The accent band distinguishes emotes from
+ * ordinary chat without turning them into another bubble type; the traditional `* nick action`
+ * shape remains intact and the body keeps the same rich-text behavior as a normal message.
+ */
+@Composable
+private fun ActionMessageRow(
+    sender: String,
+    text: String,
+    formattedTime: String,
+    isSelf: Boolean,
+    nickColors: NickColorScheme,
+    modifier: Modifier = Modifier,
+    hasMention: Boolean = false,
+    senderIsFriend: Boolean = false,
+    failed: Boolean = false,
+    pending: Boolean = false,
+    reply: ReplyPreviewData? = null,
+    imageUrl: String? = null,
+    linkPreview: LinkPreview? = null,
+    linkPreviewLoading: Boolean = false,
+    reactions: List<ReactionChip> = emptyList(),
+    knownNicks: Set<String> = emptySet(),
+    onLongPress: () -> Unit = {},
+    onReact: (String) -> Unit = {},
+    onImageClick: (String) -> Unit = {},
+    onLinkPreviewClick: () -> Unit = {},
+    onSenderClick: (() -> Unit)? = null,
+) {
+    val actionsLabel = stringResource(R.string.chat_bubble_actions)
+    val actionDescription = stringResource(R.string.chat_action_message)
+    val spacing = LocalSpacing.current
+    val conversationFontScale = LocalConversationFontScale.current
+    val accent = if (hasMention) {
+        MaterialTheme.colorScheme.secondary
+    } else {
+        MaterialTheme.colorScheme.tertiary
+    }
+    val rowColor = if (hasMention) {
+        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+    } else {
+        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = ACTION_ROW_TINT_ALPHA)
+    }
+    val bodyColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
+    val linkColor = MaterialTheme.colorScheme.primary
+    val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+    val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val friendTint = if (senderIsFriend) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+    } else {
+        Color.Unspecified
+    }
+    val mentionColor = rememberMentionColor(knownNicks, nickColors)
+    val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
+    val senderLink = remember(onSenderClick) {
+        onSenderClick?.let { callback ->
+            LinkAnnotation.Clickable(
+                tag = "action-sender",
+                linkInteractionListener = { callback() },
+            )
+        }
+    }
+    val actionLine = remember(
+        sender, text, accent, nameColor, bodyColor, linkColor, friendTint, mentionsActive,
+        mentionColor, codeBackground, codeColor, senderLink,
+    ) {
+        buildActionLine(
+            sender = sender,
+            text = text,
+            accentColor = accent,
+            nameColor = nameColor,
+            bodyColor = bodyColor,
+            linkColor = linkColor,
+            friendTint = friendTint,
+            mentionsActive = mentionsActive,
+            mentionColor = mentionColor,
+            codeBackground = codeBackground,
+            codeColor = codeColor,
+            senderLink = senderLink,
+        )
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("chat_action_row")
+            .semantics { stateDescription = actionDescription }
+            .background(rowColor)
+            .actionAccentRail(accent)
+            .combinedClickable(
+                interactionSource = null,
+                indication = null,
+                onClick = {},
+                onLongClick = onLongPress,
+                onLongClickLabel = actionsLabel,
+            )
+            .padding(
+                horizontal = if (spacing.compact || spacing.twoLine) 12.dp else 16.dp,
+                vertical = spacing.actionVPad,
+            ),
+    ) {
+        reply?.let { ReplyMiniBubble(it, nickColors) }
+
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                text = actionLine,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("chat_action_text"),
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
+            ) {
+                MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
+                Text(
+                    text = formattedTime,
+                    fontSize = 10.sp * conversationFontScale,
+                    color = if (failed) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        bodyColor.copy(alpha = 0.6f)
+                    },
+                )
+            }
+        }
+
+        imageUrl?.let { url ->
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .widthIn(max = 280.dp)
+                    .heightIn(max = 240.dp)
+                    .aspectRatio(4f / 3f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
+            )
+        }
+
+        if (linkPreview != null || linkPreviewLoading) {
+            Box(Modifier.padding(top = 4.dp)) {
+                LinkPreviewCard(
+                    preview = linkPreview,
+                    loading = linkPreviewLoading,
+                    onClick = onLinkPreviewClick,
+                )
+            }
+        }
+
+        ReactionRow(reactions = reactions, onReact = onReact)
+    }
+}
+
+/** Build the styled `* nick action` paragraph shared by all ACTION rows. */
+internal fun buildActionLine(
+    sender: String,
+    text: String,
+    accentColor: Color,
+    nameColor: Color,
+    bodyColor: Color,
+    linkColor: Color,
+    friendTint: Color = Color.Unspecified,
+    mentionsActive: Boolean = true,
+    mentionColor: (String) -> Color? = { null },
+    codeBackground: Color = Color.Unspecified,
+    codeColor: Color = Color.Unspecified,
+    senderLink: LinkAnnotation? = null,
+): AnnotatedString = buildAnnotatedString {
+    withStyle(SpanStyle(color = accentColor, fontStyle = FontStyle.Normal)) { append("* ") }
+    val senderStyle = SpanStyle(
+        color = nameColor,
+        fontWeight = FontWeight.Bold,
+        fontStyle = FontStyle.Normal,
+        background = friendTint,
+    )
+    if (senderLink != null) {
+        withLink(senderLink) { withStyle(senderStyle) { append(sender) } }
+    } else {
+        withStyle(senderStyle) { append(sender) }
+    }
+    append(" ")
+    appendRichText(
+        text = text,
+        plainStyle = SpanStyle(color = bodyColor, fontStyle = FontStyle.Italic),
+        linkStyle = SpanStyle(
+            color = linkColor,
+            fontStyle = FontStyle.Italic,
+            textDecoration = TextDecoration.Underline,
+        ),
+        codeStyle = SpanStyle(
+            color = codeColor,
+            background = codeBackground,
+            fontFamily = FontFamily.Monospace,
+            fontStyle = FontStyle.Normal,
+        ),
+        mentionColor = if (mentionsActive) mentionColor else ({ null }),
+    )
+}
+
+/** Theme-aware leading rail shared by ordinary and mention-highlighted ACTION rows. */
+private fun Modifier.actionAccentRail(accent: Color): Modifier = drawWithContent {
+    drawContent()
+    val railWidth = 3.dp.toPx()
+    val inset = 2.dp.toPx()
+    val railX = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Ltr) {
+        0f
+    } else {
+        size.width - railWidth
+    }
+    drawRoundRect(
+        color = accent,
+        topLeft = Offset(railX, inset),
+        size = Size(railWidth, (size.height - inset * 2).coerceAtLeast(0f)),
+        cornerRadius = CornerRadius(railWidth / 2f, railWidth / 2f),
+    )
+}
+
+/**
  * TWO_LINE density renderer (plans/13): a compact two-line message row.
  *  - Line 1: a small avatar, the nick-colored name (friend tint/star preserved), the own-message
  *    sent check ([MessageStatusIcon], own messages only), and the timestamp.
  *  - Line 2: the message body (linkified), plus the reply preview, inline image, link preview, and
  *    the now-compact reactions.
  *
- * ACTION renders as `* nick text` italic (like the bubble/IRC renderers); NOTICE gets its label.
+ * NOTICE gets its label. ACTION is handled by the shared accent-row renderer before this function.
  * Uniformly left-aligned — no own-message right alignment or bubble background.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -627,16 +816,9 @@ private fun TwoLineMessageRow(
                         codeColor,
                     )
                 }
-                val body = remember(kind, sender, richBody) {
-                    if (kind != MessageKind.ACTION) richBody else buildAnnotatedString {
-                        append("* $sender ")
-                        append(richBody)
-                    }
-                }
                 Text(
-                    text = body,
-                    color = if (kind == MessageKind.ACTION) MaterialTheme.colorScheme.onSurfaceVariant else bodyColor,
-                    fontStyle = if (kind == MessageKind.ACTION) FontStyle.Italic else FontStyle.Normal,
+                    text = richBody,
+                    color = bodyColor,
                     style = MaterialTheme.typography.bodyLarge,
                 )
             }
@@ -1013,10 +1195,34 @@ private fun MessageBubbleSelfPreview() {
     }
 }
 
-@Preview
+@PreviewLightDark
 @Composable
-private fun MessageBubbleActionPreview() {
-    MotdTheme {
+private fun MessageBubbleActionComfortablePreview() {
+    MotdTheme(layoutDensity = io.github.trevarj.motd.data.prefs.LayoutDensity.COMFORTABLE) {
+        MessageBubble(
+            sender = "bob", text = "waves to @alice across the room", timeMs = System.currentTimeMillis(),
+            isSelf = false, kind = MessageKind.ACTION, showSender = true,
+            knownNicks = setOf("alice"),
+            reactions = listOf(ReactionChip("👋", 2, mine = false)),
+        )
+    }
+}
+
+@PreviewLightDark
+@Composable
+private fun MessageBubbleActionCompactPreview() {
+    MotdTheme(layoutDensity = io.github.trevarj.motd.data.prefs.LayoutDensity.COMPACT) {
+        MessageBubble(
+            sender = "bob", text = "waves hello", timeMs = System.currentTimeMillis(),
+            isSelf = false, kind = MessageKind.ACTION, showSender = true,
+        )
+    }
+}
+
+@PreviewLightDark
+@Composable
+private fun MessageBubbleActionTwoLinePreview() {
+    MotdTheme(layoutDensity = io.github.trevarj.motd.data.prefs.LayoutDensity.TWO_LINE) {
         MessageBubble(
             sender = "bob", text = "waves hello", timeMs = System.currentTimeMillis(),
             isSelf = false, kind = MessageKind.ACTION, showSender = true,

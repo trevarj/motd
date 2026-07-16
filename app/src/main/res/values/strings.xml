@@ -361,6 +361,7 @@
     <string name="chat_action_quote">Quote</string>
     <string name="chat_action_more_reactions">More reactions</string>
     <string name="chat_bubble_actions">Message actions</string>
+    <string name="chat_action_message">Action message</string>
     <string name="chat_message_mentions_you">Mentions you</string>
     <!-- Chat screen / message list (plans/15 #25) -->
     <string name="chat_back">Back</string>

@@ -442,12 +442,11 @@ phase_c() {
   input_tag chat_composer_field "/me waves"
   redump
   tap_desc "Send"
-  # An ACTION renders as "* nick waves" (compact) or "nick waves" (bubble), never a bare "waves",
-  # so the exact-match assert is wrong. The send is what matters — treat the render as a soft check.
-  if wait_for_text "* ${MOTD_NICK} waves" 8 || [ -n "$(bounds_of_text "${MOTD_NICK} waves")" ]; then
+  # ACTION uses the same sender-prefixed text in every layout density.
+  if wait_for_text "* ${MOTD_NICK} waves" 8; then
     ok "/me action rendered"
   else
-    note "/me sent; exact action node text not matched (renders with a nick prefix)"
+    fail "/me action did not render with its sender prefix"
   fi
   assert_no_crash
 
