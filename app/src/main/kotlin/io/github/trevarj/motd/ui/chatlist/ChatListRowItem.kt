@@ -46,7 +46,7 @@ import io.github.trevarj.motd.service.PresenceState
  * One chat-list row: avatar, display name (+ network chip when multi-network), last-message
  * one-liner, relative time, unread/mention badges. Muted rows render dimmed with a bell-off glyph.
  * Pinned rows carry a small inline [Icons.Outlined.PushPin] beside the name (there is no separate
- * "Pinned" section; the query orders pinned rows first within their section).
+ * "Pinned" section; pinning gives the row global list priority).
  *
  * Round 4 (plans/13 §3.5, Confirmed decision #4): a friend row gets a trailing [Icons.Filled.Star]
  * plus a subtle primary-tinted rounded background behind the display name (theme-aware, layered

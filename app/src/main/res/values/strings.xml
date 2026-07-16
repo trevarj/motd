@@ -454,6 +454,7 @@
     <string name="chat_fool_expand_all">Show fools\' messages</string>
     <string name="chat_fool_collapse_all">Hide fools\' messages</string>
     <string name="chatlist_friends">Friends</string>
+    <string name="chatlist_recent">Recent</string>
     <string name="chatlist_fools">Fools (%1$d)</string>
     <string name="channelinfo_fools_section">Fools (%1$d)</string>
     <plurals name="settings_nick_count">

@@ -397,9 +397,8 @@ private fun ChatList(
     onSetMuted: (Long, Boolean) -> Unit,
     onDeleteBuffer: (ChatListRow) -> Unit,
 ) {
-    // Precedence: friend > fool > regular (plans/13 §3.5). Pinned rows are no longer a separate
-    // section; they sort first within their section (query orders pinned-first) and carry an inline
-    // pin icon on the row itself.
+    // Pinning has global priority, then unpinned friends, recent chats, and collapsed fools.
+    // Pin state remains an inline row marker; it does not add a visible section header.
     val sections = sectionChatList(rows, friends, fools)
     // Fools section is collapsed by default; state is local to the screen (accepted, plans/13).
     var foolsExpanded by remember { mutableStateOf(false) }
@@ -408,11 +407,28 @@ private fun ChatList(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 88.dp),
     ) {
+        items(sections.pinned, key = { it.bufferId }) { row ->
+            RowWithMenu(
+                row,
+                presence[row.bufferId],
+                isFriend = isFriendQuery(row, friends),
+                multiNetwork,
+                onOpenBuffer,
+                onSetPinned,
+                onSetMuted,
+                onDeleteBuffer,
+                modifier = Modifier.animateItem(
+                    fadeInSpec = MotdMotion.microFadeIn,
+                    fadeOutSpec = MotdMotion.microFadeOut,
+                    placementSpec = MotdMotion.rowPlacement,
+                ),
+            )
+        }
         if (sections.friends.isNotEmpty()) {
             item(key = "friends-header") {
                 SectionHeader(stringResource(R.string.chatlist_friends))
             }
-            items(sections.friends, key = { "f-${it.bufferId}" }) { row ->
+            items(sections.friends, key = { it.bufferId }) { row ->
                 RowWithMenu(
                     row,
                     presence[row.bufferId],
@@ -428,6 +444,11 @@ private fun ChatList(
                         placementSpec = MotdMotion.rowPlacement,
                     ),
                 )
+            }
+        }
+        if (sections.showRecentHeader) {
+            item(key = "recent-header") {
+                SectionHeader(stringResource(R.string.chatlist_recent))
             }
         }
         items(sections.regular, key = { it.bufferId }) { row ->
@@ -456,7 +477,7 @@ private fun ChatList(
                 )
             }
             if (foolsExpanded) {
-                items(sections.fools, key = { "o-${it.bufferId}" }) { row ->
+                items(sections.fools, key = { it.bufferId }) { row ->
                     Box(
                         modifier = Modifier
                             .alpha(0.55f)
