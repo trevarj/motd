@@ -64,6 +64,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -71,6 +72,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -244,6 +246,34 @@ class ChatViewModelTest {
         assertTrue(history.reconciledBuffers.isEmpty())
     }
 
+    @Test
+    fun `reaction retries history after stale reconciliation and uses promoted msgid`() = runTest {
+        val messages = FakeMessageRepository()
+        val history = FakeHistoryResyncController { attempt ->
+            if (attempt == 2) messages.msgid.value = "server-parent"
+        }
+        val manager = FakeConnectionManager(
+            networkId = network.id,
+            state = IrcClientState.Ready("me", setOf("message-tags"), emptyMap()),
+            client = testClient(),
+        )
+        val vm = viewModel(channel, manager, history, messages)
+        vm.state.first { it.buffer != null }
+        val pending = message(
+            bufferId = channel.id,
+            text = "pending parent",
+            msgid = null,
+            sender = "me",
+            id = 42,
+        )
+
+        vm.react(pending, "👍")
+        advanceUntilIdle()
+
+        assertEquals(listOf(channel.id, channel.id), history.reconciledBuffers)
+        assertEquals(listOf(SentReaction(channel.id, "server-parent", "👍")), manager.reactions)
+    }
+
     private fun viewModel(
         buffer: BufferEntity,
         manager: FakeConnectionManager,
@@ -252,12 +282,13 @@ class ChatViewModelTest {
             processor = processor,
             scope = CoroutineScope(Dispatchers.Unconfined),
         ),
+        messages: MessageRepository = FakeMessageRepository(),
     ): ChatViewModel {
         val settings = FakeSettingsRepository()
         val eventSink: IrcEventSink = processor
         return ChatViewModel(
             savedStateHandle = SavedStateHandle(mapOf("bufferId" to buffer.id)),
-            messageRepository = FakeMessageRepository(),
+            messageRepository = messages,
             bufferRepository = FakeBufferRepository(buffer),
             connectionManager = manager,
             typingTracker = FakeTypingTracker(),
@@ -287,19 +318,22 @@ class ChatViewModelTest {
     private fun message(
         bufferId: Long,
         text: String,
-        msgid: String,
+        msgid: String?,
         sender: String,
+        id: Long = 0,
     ) = MessageEntity(
+        id = id,
         bufferId = bufferId,
         msgid = msgid,
         serverTime = 1,
         sender = sender,
         kind = MessageKind.PRIVMSG,
         text = text,
-        dedupKey = msgid,
+        dedupKey = msgid ?: "pending:$id",
     )
 
     private data class SentMessage(val bufferId: Long, val text: String, val replyTo: String?)
+    private data class SentReaction(val bufferId: Long, val msgid: String, val emoji: String)
 
     private class FakeConnectionManager(
         networkId: Long,
@@ -312,6 +346,7 @@ class ChatViewModelTest {
         override val rosterStates: StateFlow<Map<Long, RosterLoadState>> = MutableStateFlow(emptyMap())
         override val certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
         val messages = mutableListOf<SentMessage>()
+        val reactions = mutableListOf<SentReaction>()
         val typing = mutableListOf<Pair<Long, String>>()
         val sentLines = mutableListOf<String>()
 
@@ -325,7 +360,9 @@ class ChatViewModelTest {
             messages += SentMessage(bufferId, text, replyToMsgid)
         }
         override suspend fun sendTyping(bufferId: Long, state: String) { typing += bufferId to state }
-        override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
+        override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) {
+            reactions += SentReaction(bufferId, msgid, emoji)
+        }
         override suspend fun joinChannel(networkId: Long, channel: String) = Unit
         override suspend fun partChannel(bufferId: Long, reason: String?) = Unit
         override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 2L
@@ -339,7 +376,9 @@ class ChatViewModelTest {
         override suspend fun dismissInvite(messageId: Long) = Unit
     }
 
-    private class FakeHistoryResyncController : HistoryResyncController {
+    private class FakeHistoryResyncController(
+        private val onReconcile: (Int) -> Unit = {},
+    ) : HistoryResyncController {
         private val states = MutableStateFlow<HistoryResyncState>(HistoryResyncState.Idle)
         val reconciledBuffers = mutableListOf<Long>()
 
@@ -360,6 +399,7 @@ class ChatViewModelTest {
         ): HistoryResyncState {
             check(isCurrent())
             reconciledBuffers += buffer.id
+            onReconcile(reconciledBuffers.size)
             return HistoryResyncState.UpToDate
         }
     }
@@ -374,12 +414,15 @@ class ChatViewModelTest {
     }
 
     private class FakeMessageRepository : MessageRepository {
+        val msgid = MutableStateFlow<String?>(null)
+
         override fun messages(bufferId: Long): Flow<PagingData<MessageEntity>> = flowOf(PagingData.empty())
         override fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>> = flowOf(emptyList())
         override fun reactionsForBuffer(bufferId: Long): Flow<List<ReactionEntity>> = flowOf(emptyList())
         override suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity? = null
         override fun observeByMsgid(bufferId: Long, msgid: String): Flow<MessageEntity?> = flowOf(null)
-        override suspend fun awaitMsgid(id: Long, timeoutMs: Long): String? = null
+        override suspend fun awaitMsgid(id: Long, timeoutMs: Long): String? =
+            withTimeoutOrNull(timeoutMs) { msgid.filterNotNull().first() }
         override suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int = 0
         override suspend fun firstUnreadOtherTime(bufferId: Long, after: Long): Long? = null
         override suspend fun deleteMessage(id: Long) = Unit

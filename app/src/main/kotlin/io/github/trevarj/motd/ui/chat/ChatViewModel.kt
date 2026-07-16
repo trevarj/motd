@@ -66,7 +66,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
@@ -407,7 +410,7 @@ class ChatViewModel @Inject constructor(
             _snackbar.value = "reaction_blocked"
             return@launch
         }
-        val msgid = message.msgid ?: messageRepository.awaitMsgid(message.id, REACT_QUEUE_TIMEOUT_MS)
+        val msgid = message.msgid ?: resolveReactionMsgid(message.id)
         if (msgid == null) {
             _snackbar.value = "react_failed" // sentinel; screen maps to chat_react_failed
             return@launch
@@ -420,6 +423,39 @@ class ChatViewModel @Inject constructor(
             _snackbar.value = "reaction_send_failed"
         }
     }
+
+    /**
+     * A bouncer without labeled-response can echo our send before its durable msgid is available.
+     * The normal chat-open reconciliation may also already be in flight and therefore miss a send
+     * that happens after its LATEST request began. Join that single flight once, then request one
+     * fresh reconciliation if the row still has no msgid. The Room observer runs concurrently so
+     * either a socket echo or either history pass can resolve the reaction immediately.
+     */
+    private suspend fun resolveReactionMsgid(messageId: Long): String? =
+        withTimeoutOrNull(REACT_QUEUE_TIMEOUT_MS) {
+            coroutineScope {
+                val observedMsgid = async {
+                    messageRepository.awaitMsgid(messageId, REACT_QUEUE_TIMEOUT_MS)
+                }
+                val currentBuffer = buffer.value
+                val client = currentBuffer?.let { connectionManager.clientFor(it.networkId) }
+                if (currentBuffer != null && client != null) {
+                    repeat(REACTION_HISTORY_RECONCILIATIONS) {
+                        historyResyncCoordinator.reconcileBuffer(
+                            buffer = currentBuffer,
+                            client = client,
+                            isCurrent = {
+                                connectionManager.clientFor(currentBuffer.networkId) === client
+                            },
+                        )
+                        if (observedMsgid.isCompleted) {
+                            return@coroutineScope observedMsgid.await()
+                        }
+                    }
+                }
+                observedMsgid.await()
+            }
+        }
 
     /**
      * Retry a failed message: drop the old failed row first (no permanent duplicate), then resend.
@@ -938,6 +974,7 @@ class ChatViewModel @Inject constructor(
         // Max wait for a pending own message's msgid to land before a queued reaction gives up. Sits
         // just past the 30s echo-failure flip so a message that will fail has already flipped by then.
         const val REACT_QUEUE_TIMEOUT_MS = 32_000L
+        const val REACTION_HISTORY_RECONCILIATIONS = 2
     }
 }
 
