@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.irc.client
 
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Isupport
 import org.junit.Assert.assertEquals
@@ -17,6 +18,21 @@ class EventMapperMessageTagsTest {
         ) as IrcEvent.ChatMessage
 
         assertEquals("parent", event.replyToMsgid)
+    }
+
+    @Test
+    fun `message context distinguishes tagged time from local fallback`() {
+        val tagged = mapper.map(
+            IrcMessage.parse(
+                "@time=2026-07-16T19:09:19.000Z :alice!u@h PRIVMSG #chan :tagged",
+            ),
+        ) as IrcEvent.ChatMessage
+        val local = mapper.map(
+            IrcMessage.parse(":alice!u@h PRIVMSG #chan :local"),
+        ) as IrcEvent.ChatMessage
+
+        assertEquals(ServerTimeSource.TAG, tagged.ctx.serverTimeSource)
+        assertEquals(ServerTimeSource.LOCAL, local.ctx.serverTimeSource)
     }
 
     @Test

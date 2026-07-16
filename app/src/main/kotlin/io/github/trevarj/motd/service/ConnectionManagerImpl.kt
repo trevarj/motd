@@ -1124,6 +1124,7 @@ class ConnectionManagerImpl @Inject constructor(
                 account = null,
                 batchId = null,
                 label = null,
+                serverTimeSource = io.github.trevarj.motd.irc.event.ServerTimeSource.LOCAL,
             ),
             kind = chatKind,
             source = io.github.trevarj.motd.irc.proto.Prefix(nick = buffer_meNick(client)),

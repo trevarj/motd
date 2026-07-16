@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.Prefix
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -120,6 +121,94 @@ class EchoFlowTest {
 
         assertEquals(1, rows().size)
         assertEquals("history-a", rows().single().msgid)
+    }
+
+    @Test
+    fun locallyTimedLiveThenTaggedMsgidlessHistory_reconcilesTimestampSkew() = runTest {
+        val live = IrcEvent.ChatMessage(
+            ctx = MessageContext(
+                msgid = null,
+                serverTime = 1_784_228_957_447,
+                account = null,
+                batchId = null,
+                label = null,
+                serverTimeSource = ServerTimeSource.LOCAL,
+            ),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("antti"),
+            target = "#chan",
+            text = "!tell trev reproduce the duplicate",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.process(networkId, live)
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "#chan",
+                listOf(
+                    live.copy(
+                        ctx = live.ctx.copy(
+                            serverTime = 1_784_228_959_000,
+                            batchId = "history",
+                            serverTimeSource = ServerTimeSource.TAG,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val row = rows().single()
+        assertNull(row.msgid)
+        assertEquals(1_784_228_959_000, row.serverTime)
+    }
+
+    @Test
+    fun locallyTimedLiveDoesNotMergeAmbiguousRepeatedHistoryMessages() = runTest {
+        val live = IrcEvent.ChatMessage(
+            ctx = MessageContext(
+                msgid = null,
+                serverTime = 700_000,
+                account = null,
+                batchId = null,
+                label = null,
+                serverTimeSource = ServerTimeSource.LOCAL,
+            ),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#chan",
+            text = "same",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.process(networkId, live)
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "#chan",
+                listOf(
+                    live.copy(
+                        ctx = live.ctx.copy(
+                            serverTime = 701_000,
+                            batchId = "history-a",
+                            serverTimeSource = ServerTimeSource.TAG,
+                        ),
+                    ),
+                    live.copy(
+                        ctx = live.ctx.copy(
+                            serverTime = 701_500,
+                            batchId = "history-b",
+                            serverTimeSource = ServerTimeSource.TAG,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(3, rows().size)
+        assertEquals(setOf(700_000L, 701_000L, 701_500L), rows().map { it.serverTime }.toSet())
     }
 
     @Test

@@ -10,6 +10,11 @@ sealed interface IrcClientState {
     data class Failed(val reason: String, val fatal: Boolean) : IrcClientState  // fatal = don't auto-retry (e.g. SASL fail)
 }
 
+enum class ServerTimeSource {
+    TAG,
+    LOCAL,
+}
+
 /** Context shared by chat-ish events. serverTime = epoch millis (from server-time tag or local clock). */
 data class MessageContext(
     val msgid: String?,
@@ -17,6 +22,7 @@ data class MessageContext(
     val account: String?,     // account-tag
     val batchId: String?,     // enclosing batch, null when live
     val label: String?,       // labeled-response echo correlation
+    val serverTimeSource: ServerTimeSource = ServerTimeSource.TAG,
 )
 
 sealed interface IrcEvent {

@@ -3,6 +3,7 @@ package io.github.trevarj.motd.push
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.IrcParseException
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.reactionValue
@@ -176,20 +177,28 @@ class PushEventHandler(
             )
         }
 
-        private fun context(msg: IrcMessage): MessageContext = MessageContext(
-            msgid = msg.tags["msgid"],
-            serverTime = parseServerTime(msg.tags["time"]),
-            account = msg.tags["account"],
-            batchId = null,
-            label = null,
-        )
+        private data class ParsedServerTime(val value: Long, val source: ServerTimeSource)
 
-        private fun parseServerTime(time: String?): Long {
-            if (time == null) return System.currentTimeMillis()
+        private fun context(msg: IrcMessage): MessageContext {
+            val parsedTime = parseServerTime(msg.tags["time"])
+            return MessageContext(
+                msgid = msg.tags["msgid"],
+                serverTime = parsedTime.value,
+                account = msg.tags["account"],
+                batchId = null,
+                label = null,
+                serverTimeSource = parsedTime.source,
+            )
+        }
+
+        private fun parseServerTime(time: String?): ParsedServerTime {
+            if (time == null) {
+                return ParsedServerTime(System.currentTimeMillis(), ServerTimeSource.LOCAL)
+            }
             return try {
-                Instant.parse(time).toEpochMilli()
+                ParsedServerTime(Instant.parse(time).toEpochMilli(), ServerTimeSource.TAG)
             } catch (_: DateTimeParseException) {
-                System.currentTimeMillis()
+                ParsedServerTime(System.currentTimeMillis(), ServerTimeSource.LOCAL)
             }
         }
     }

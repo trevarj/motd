@@ -17,6 +17,7 @@ import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.replyReference
 import io.github.trevarj.motd.irc.proto.unreactionValue
 import io.github.trevarj.motd.service.IrcEventSink
@@ -56,8 +57,29 @@ class EventProcessor @Inject constructor(
 
     private val states = ConcurrentHashMap<Long, NetworkState>()
     private val rosterSnapshots = ConcurrentHashMap<RosterKey, MutableList<RosterDelta>>()
+    private val recentSyntheticIncoming = ConcurrentHashMap<Long, MutableList<SyntheticIncomingCandidate>>()
+    private val activeSyntheticHistoryMatches =
+        ConcurrentHashMap<Long, MutableMap<SyntheticHistoryKey, SyntheticIncomingCandidate>>()
 
     private data class RosterKey(val networkId: Long, val bufferId: Long)
+
+    private data class SyntheticIncomingCandidate(
+        val rowId: Long,
+        val bufferId: Long,
+        val normalizedSender: String,
+        val kind: MessageKind,
+        val text: String,
+        val serverTime: Long,
+        val observedAtNanos: Long,
+    )
+
+    private data class SyntheticHistoryKey(
+        val bufferId: Long,
+        val normalizedSender: String,
+        val kind: MessageKind,
+        val text: String,
+        val serverTime: Long,
+    )
 
     private sealed interface RosterDelta {
         data class Upsert(val nick: String) : RosterDelta
@@ -326,6 +348,46 @@ class EventProcessor @Inject constructor(
             }
         }
 
+        // During reconnect, a bouncer can replay one line before server-time finishes negotiating,
+        // then return the same msgid-less line through CHATHISTORY with its authoritative timestamp.
+        // The first row used the device clock, so the ordinary timestamp/sender/text key cannot
+        // match it. Reconcile only a one-to-one pair prepared from this history batch and a recent
+        // live row explicitly marked as locally timestamped; general history remains exact.
+        if (origin == EventOrigin.HISTORY &&
+            incomingMsgid == null &&
+            e.ctx.serverTimeSource == ServerTimeSource.TAG
+        ) {
+            val historyKey = SyntheticHistoryKey(
+                bufferId = bufferId,
+                normalizedSender = identitySender,
+                kind = row.kind,
+                text = storedText,
+                serverTime = e.ctx.serverTime,
+            )
+            val candidate = activeSyntheticHistoryMatches[networkId]?.remove(historyKey)
+            val existing = candidate?.let { messageDao.byId(it.rowId) }
+            if (candidate != null &&
+                existing != null &&
+                existing.msgid == null &&
+                existing.bufferId == bufferId &&
+                existing.kind == row.kind &&
+                existing.text == storedText &&
+                st.normalize(existing.sender) == identitySender
+            ) {
+                val reconciled = existing.copy(
+                    serverTime = e.ctx.serverTime,
+                    senderAccount = existing.senderAccount ?: row.senderAccount,
+                    hasMention = existing.hasMention || row.hasMention,
+                    replyToMsgid = existing.replyToMsgid ?: row.replyToMsgid,
+                    dedupKey = EchoDeduper.keyFor(e.ctx, identitySender, storedText),
+                )
+                messageDao.update(reconciled)
+                recentSyntheticIncoming[networkId]?.removeAll { it.rowId == candidate.rowId }
+                traceMessageWrite("room_synthetic_time_reconcile", reconciled, fromHistory = true)
+                return
+            }
+        }
+
         // A bouncer can replay a msgid-less representation after PUSH has already persisted its
         // durable msgid-bearing copy. The same can happen when the live socket receives the
         // upstream line after history. Retain the durable row and discard only an unambiguous
@@ -487,6 +549,25 @@ class EventProcessor @Inject constructor(
             return // dedup no-op
         }
         traceMessageWrite("room_insert", row.copy(id = inserted), e.ctx.batchId != null)
+        if (origin == EventOrigin.LIVE &&
+            type == BufferType.CHANNEL &&
+            !e.isSelf &&
+            incomingMsgid == null &&
+            e.ctx.serverTimeSource == ServerTimeSource.LOCAL
+        ) {
+            rememberSyntheticIncoming(
+                networkId = networkId,
+                candidate = SyntheticIncomingCandidate(
+                    rowId = inserted,
+                    bufferId = bufferId,
+                    normalizedSender = identitySender,
+                    kind = row.kind,
+                    text = storedText,
+                    serverTime = e.ctx.serverTime,
+                    observedAtNanos = System.nanoTime(),
+                ),
+            )
+        }
         if (isRootServiceReply && origin == EventOrigin.LIVE) {
             bufferDao.advanceReadMarker(bufferId, e.ctx.serverTime)
             return
@@ -562,8 +643,14 @@ class EventProcessor @Inject constructor(
                 "events" to batch.events.size,
             )
         }
-        db.withTransaction {
-            for (ev in batch.events) processEvent(networkId, ev, EventOrigin.HISTORY, batch.target)
+        activeSyntheticHistoryMatches[networkId] =
+            prepareSyntheticHistoryMatches(networkId, batch).toMutableMap()
+        try {
+            db.withTransaction {
+                for (ev in batch.events) processEvent(networkId, ev, EventOrigin.HISTORY, batch.target)
+            }
+        } finally {
+            activeSyntheticHistoryMatches.remove(networkId)
         }
         diagnostics.record("history", "batch_finished") {
             mapOf(
@@ -571,6 +658,72 @@ class EventProcessor @Inject constructor(
                 "target_fp" to diagnostics.fingerprint(batch.target),
                 "events" to batch.events.size,
             )
+        }
+    }
+
+    private fun rememberSyntheticIncoming(
+        networkId: Long,
+        candidate: SyntheticIncomingCandidate,
+    ) {
+        val now = System.nanoTime()
+        val candidates = recentSyntheticIncoming.getOrPut(networkId) { mutableListOf() }
+        candidates.removeAll { now - it.observedAtNanos > SYNTHETIC_INCOMING_TTL_NANOS }
+        candidates += candidate
+        while (candidates.size > MAX_SYNTHETIC_INCOMING_CANDIDATES) {
+            candidates.removeAt(0)
+        }
+    }
+
+    private suspend fun prepareSyntheticHistoryMatches(
+        networkId: Long,
+        batch: IrcEvent.HistoryBatch,
+    ): Map<SyntheticHistoryKey, SyntheticIncomingCandidate> {
+        val candidates = recentSyntheticIncoming[networkId] ?: return emptyMap()
+        val now = System.nanoTime()
+        candidates.removeAll { now - it.observedAtNanos > SYNTHETIC_INCOMING_TTL_NANOS }
+        if (candidates.isEmpty()) {
+            recentSyntheticIncoming.remove(networkId)
+            return emptyMap()
+        }
+
+        val st = stateFor(networkId)
+        val bufferId = bufferDao.byName(networkId, st.normalize(batch.target))?.id ?: return emptyMap()
+        val bufferCandidates = candidates.filter { it.bufferId == bufferId }
+        if (bufferCandidates.isEmpty()) return emptyMap()
+
+        val historyMessages = batch.events
+            .filterIsInstance<IrcEvent.ChatMessage>()
+            .filter { event ->
+                !event.isSelf &&
+                    event.ctx.msgid == null &&
+                    event.ctx.serverTimeSource == ServerTimeSource.TAG &&
+                    st.normalize(event.target) == st.normalize(batch.target)
+            }
+
+        fun matches(candidate: SyntheticIncomingCandidate, event: IrcEvent.ChatMessage): Boolean =
+            candidate.kind == kindOf(event.kind) &&
+                candidate.normalizedSender == st.normalize(event.source.nick) &&
+                candidate.text == event.text &&
+                kotlin.math.abs(candidate.serverTime - event.ctx.serverTime) <=
+                SYNTHETIC_HISTORY_MATCH_WINDOW_MS
+
+        return buildMap {
+            for (candidate in bufferCandidates) {
+                val matchingEvents = historyMessages.filter { matches(candidate, it) }
+                if (matchingEvents.size != 1) continue
+                val event = matchingEvents.single()
+                if (bufferCandidates.count { matches(it, event) } != 1) continue
+                put(
+                    SyntheticHistoryKey(
+                        bufferId = bufferId,
+                        normalizedSender = st.normalize(event.source.nick),
+                        kind = kindOf(event.kind),
+                        text = event.text,
+                        serverTime = event.ctx.serverTime,
+                    ),
+                    candidate,
+                )
+            }
         }
     }
 
@@ -1213,6 +1366,8 @@ class EventProcessor @Inject constructor(
     /** Disconnected marker → SERVER buffer for cheap in-history reconnect visibility. */
     private suspend fun onDisconnected(networkId: Long, e: IrcEvent.Disconnected) {
         rosterSnapshots.keys.removeAll { it.networkId == networkId }
+        recentSyntheticIncoming.remove(networkId)
+        activeSyntheticHistoryMatches.remove(networkId)
         messageDao.failJoiningInvitesForNetwork(networkId, e.reason ?: "disconnected")
         val st = stateFor(networkId)
         val bufferId = ensureServerBuffer(networkId, st)
@@ -1222,7 +1377,14 @@ class EventProcessor @Inject constructor(
 
     /** A ctx for server-buffer rows: no msgid/label, server time = now (the events carry none). */
     private fun serverCtx(): MessageContext =
-        MessageContext(msgid = null, serverTime = System.currentTimeMillis(), account = null, batchId = null, label = null)
+        MessageContext(
+            msgid = null,
+            serverTime = System.currentTimeMillis(),
+            account = null,
+            batchId = null,
+            label = null,
+            serverTimeSource = ServerTimeSource.LOCAL,
+        )
 
     /** Find-or-create the per-network SERVER buffer (name "*"); mirrors ConnectionManager's. */
     private suspend fun ensureServerBuffer(networkId: Long, st: NetworkState): Long {
@@ -1278,6 +1440,8 @@ class EventProcessor @Inject constructor(
         sequencer.withNetwork(networkId) {
             states.remove(networkId)
             rosterSnapshots.keys.removeAll { it.networkId == networkId }
+            recentSyntheticIncoming.remove(networkId)
+            activeSyntheticHistoryMatches.remove(networkId)
         }
         sequencer.evict(networkId)
     }
@@ -1286,6 +1450,8 @@ class EventProcessor @Inject constructor(
         sequencer.clear()
         states.clear()
         rosterSnapshots.clear()
+        recentSyntheticIncoming.clear()
+        activeSyntheticHistoryMatches.clear()
     }
 
     internal fun sequencerSize(): Int = sequencer.size()
@@ -1388,6 +1554,7 @@ class EventProcessor @Inject constructor(
                 "kind" to message.kind.name,
                 "self" to message.isSelf,
                 "server_time" to message.ctx.serverTime,
+                "server_time_source" to message.ctx.serverTimeSource.name,
                 "batch" to (message.ctx.batchId != null),
             ) + extra()
         }
@@ -1447,6 +1614,9 @@ class EventProcessor @Inject constructor(
         // local clock (send time) and the server clock (echo time) can differ in either direction.
         const val ECHO_MATCH_WINDOW_MS = 30_000L
         const val INCOMING_DELIVERY_MATCH_WINDOW_MS = 2_000L
+        const val SYNTHETIC_HISTORY_MATCH_WINDOW_MS = 2_000L
+        const val SYNTHETIC_INCOMING_TTL_NANOS = 30_000_000_000L
+        const val MAX_SYNTHETIC_INCOMING_CANDIDATES = 64
         const val INVITE_DEDUP_WINDOW_MS = 30_000L
         const val NETWORK_BATCH_DEDUP_WINDOW_MS = 30_000L
 
