@@ -429,6 +429,9 @@ class ChatViewModel @Inject constructor(
     suspend fun linkPreview(url: String): LinkPreview? =
         if (contentPreviews.value.showLinkPreviews) linkPreviewRepository.preview(url) else null
 
+    fun cachedLinkPreview(url: String) =
+        if (contentPreviews.value.showLinkPreviews) linkPreviewRepository.cachedPreview(url) else null
+
     /** Transient one-shot messages surfaced as a snackbar by the screen (plans/16 §5.6). */
     private val _snackbar = MutableStateFlow<String?>(null)
     val snackbar: StateFlow<String?> = _snackbar.asStateFlow()

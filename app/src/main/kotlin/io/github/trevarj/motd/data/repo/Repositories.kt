@@ -72,8 +72,17 @@ interface SearchRepository {
     fun search(query: String, bufferId: Long?): Flow<List<SearchHit>>
 }
 
-/** OG-tag link preview; in-memory LRU + fetch on miss. Null if unfetchable/not HTML. */
+/**
+ * A completed preview lookup kept in the process-lifetime cache. A nullable [preview] distinguishes
+ * a known negative result from a cache miss, represented by a null [cachedPreview] return value.
+ */
+data class CachedLinkPreview(val preview: LinkPreview?)
+
+/** OG-tag link preview; in-memory LRU + shared fetch on miss. Null if unfetchable/not HTML. */
 interface LinkPreviewRepository {
+    /** Returns a completed positive or negative result without starting work. */
+    fun cachedPreview(url: String): CachedLinkPreview? = null
+
     suspend fun preview(url: String): LinkPreview?
 }
 

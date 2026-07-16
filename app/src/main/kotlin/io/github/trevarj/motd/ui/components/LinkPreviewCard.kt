@@ -7,10 +7,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,8 +31,8 @@ import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /**
- * OG-tag link preview card. Shows a shimmer skeleton while [loading]; when [preview] is null and no
- * longer loading the caller hides the card entirely (this composable simply renders nothing).
+ * OG-tag link preview card. Loading, success, and a known unavailable result retain the same card
+ * footprint, so completion cannot shift a reverse LazyColumn row under the user's finger.
  */
 @Composable
 fun LinkPreviewCard(
@@ -40,7 +44,7 @@ fun LinkPreviewCard(
     when {
         loading -> LinkPreviewSkeleton(modifier)
         preview != null -> LinkPreviewContent(preview, onClick, modifier)
-        else -> Unit // unfetchable/not HTML -> hidden
+        else -> LinkPreviewUnavailable(onClick, modifier)
     }
 }
 
@@ -49,6 +53,7 @@ private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit, modifi
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .clickable { onClick() }
@@ -103,6 +108,7 @@ private fun LinkPreviewSkeleton(modifier: Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .padding(8.dp),
@@ -122,6 +128,26 @@ private fun LinkPreviewSkeleton(modifier: Modifier) {
 }
 
 @Composable
+private fun LinkPreviewUnavailable(onClick: () -> Unit, modifier: Modifier) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .clickable { onClick() }
+            .padding(8.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Link,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(24.dp),
+        )
+    }
+}
+
+@Composable
 private fun SkeletonBar(width: androidx.compose.ui.unit.Dp, color: Color) {
     androidx.compose.foundation.layout.Box(
         modifier = Modifier
@@ -131,6 +157,8 @@ private fun SkeletonBar(width: androidx.compose.ui.unit.Dp, color: Color) {
             .background(color),
     )
 }
+
+private val LINK_PREVIEW_MIN_HEIGHT = 72.dp
 
 @Preview
 @Composable

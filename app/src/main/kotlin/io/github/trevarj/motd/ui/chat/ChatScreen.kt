@@ -215,6 +215,7 @@ fun ChatScreen(
         onAcceptInvite = viewModel::acceptInvite,
         onDismissInvite = viewModel::dismissInvite,
         loadPreview = viewModel::linkPreview,
+        cachedPreview = viewModel::cachedLinkPreview,
         consumePrefill = viewModel::consumePrefill,
         loadDraft = viewModel::loadDraft,
         onDraftChanged = viewModel::saveDraft,
@@ -300,6 +301,7 @@ fun ChatContent(
     onReact: (MessageEntity, String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> io.github.trevarj.motd.data.repo.LinkPreview?,
+    cachedPreview: (String) -> io.github.trevarj.motd.data.repo.CachedLinkPreview? = { null },
     reactionChips: (String) -> List<io.github.trevarj.motd.ui.components.ReactionChip> = { emptyList() },
     replyPreview: (String) -> kotlinx.coroutines.flow.Flow<io.github.trevarj.motd.ui.components.ReplyPreviewData?> = { kotlinx.coroutines.flow.flowOf(null) },
     memberNicks: List<String> = emptyList(),
@@ -988,6 +990,7 @@ fun ChatContent(
                         richContentReady = initialPositionSettled,
                         showImages = showImages,
                         showLinkPreviews = showLinkPreviews,
+                        cachedPreview = cachedPreview,
                         // Link-preview tap opens the URL in the system browser.
                         onOpenLink = { ctx.startActivity(Intent(Intent.ACTION_VIEW, it.toUri())) },
                         highlightMsgid = highlightMsgid,
