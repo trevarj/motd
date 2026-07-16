@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.effectiveReadFloorTime
 import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LinkPreview
@@ -333,7 +334,7 @@ class ChatViewModel @Inject constructor(
     // to 0 and stays 0 when scrolling back up — instead of counting already-read messages until
     // re-entry (bug: badge doesn't clear until leaving the chat).
     val readMarkerTime: StateFlow<Long?> = buffer
-        .map { it?.readMarkerTime }
+        .map { it?.effectiveReadFloorTime }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -742,7 +743,7 @@ class ChatViewModel @Inject constructor(
         // you just sent. Null (no real marker, or nothing unread from others) hides both.
         viewModelScope.launch {
             val entrySpec = MessageVisibilitySpec.from(settingsRepository.settings.first())
-            val realMarker = bufferRepository.observeBuffer(bufferId).firstOrNull()?.readMarkerTime
+            val realMarker = bufferRepository.observeBuffer(bufferId).firstOrNull()?.effectiveReadFloorTime
             _readMarkerSnapshot.value = if (realMarker == null) {
                 null
             } else {

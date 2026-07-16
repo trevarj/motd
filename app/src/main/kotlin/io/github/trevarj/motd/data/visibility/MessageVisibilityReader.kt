@@ -144,7 +144,9 @@ class MessageVisibilityReader @Inject constructor(
         forEachMatchingRow(
             where = "bufferId = ? AND isSelf = 0 " +
                 "AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION') " +
-                "AND serverTime > COALESCE((SELECT readMarkerTime FROM buffers WHERE id = ?), 0)",
+                "AND serverTime > (SELECT MAX(" +
+                "COALESCE(readMarkerTime, 0), COALESCE(localUnreadFloorTime, 0)" +
+                ") FROM buffers WHERE id = ?)",
             args = listOf(row.bufferId, row.bufferId),
             order = "serverTime DESC, id DESC",
             predicate = policy::visibleUnread,

@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -119,6 +119,16 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
 val MIGRATION_6_7 = object : Migration(6, 7) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE networks ADD COLUMN serverPassword TEXT")
+    }
+}
+
+/**
+ * v7 -> v8: add a local-only unread floor for muted buffers. It lets unmute discard the locally
+ * accumulated backlog without advancing the IRC/bouncer read marker stored in readMarkerTime.
+ */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE buffers ADD COLUMN localUnreadFloorTime INTEGER")
     }
 }
 

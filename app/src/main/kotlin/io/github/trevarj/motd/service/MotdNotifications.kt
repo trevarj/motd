@@ -27,9 +27,8 @@ import javax.inject.Singleton
 /**
  * Final notification suppression decision (plans/13 §2.6). Pure and unit-tested.
  *
- * Precedence (highest first): foreground buffer suppresses everything; a fool sender is fully
- * silenced (even in an un-muted DM/mention); a friend sender bypasses the muted-buffer
- * suppression; otherwise a muted buffer suppresses. The `(DM || mention)` gate lives upstream in
+ * Precedence (highest first): foreground buffer suppresses everything; an explicit buffer mute
+ * always wins over friend status; a fool sender is fully silenced. The `(DM || mention)` gate lives upstream in
  * [io.github.trevarj.motd.data.sync.EventProcessor.maybeNotify], so by the time this runs the
  * message already qualifies as a DM or a mention.
  */
@@ -39,7 +38,7 @@ fun shouldPostNotification(
     senderIsFriend: Boolean,
     senderIsFool: Boolean,
     alreadyRead: Boolean = false,
-): Boolean = !alreadyRead && !foreground && !senderIsFool && (!muted || senderIsFriend)
+): Boolean = !alreadyRead && !foreground && !muted && !senderIsFool
 
 /**
  * MessagingStyle notifications (plans/05). Owns the notification channels and applies the final
@@ -122,8 +121,7 @@ class MotdNotifications @Inject constructor(
         val settings = runCatching { settingsRepository.settings.first() }.getOrNull() ?: Settings()
         val sender = normalizeNick(message.source.nick)
 
-        // Round 4 (plans/13 §2.3/§2.4/§2.6): fools are fully silenced; friends bypass the
-        // muted-buffer suppression. Foreground suppression still applies to everyone.
+        // Fools and explicit buffer mute are fully silent. Foreground suppression also applies.
         val foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId
         val muted = buffer?.muted == true
         val senderIsFriend = sender in settings.friends

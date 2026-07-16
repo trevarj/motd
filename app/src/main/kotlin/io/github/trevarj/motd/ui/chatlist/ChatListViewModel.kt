@@ -39,9 +39,9 @@ data class ChatListState(
     val allUnread: Int = 0, // "All chats" unread rollup (non-muted)
     val allMentions: Int = 0, // "All chats" mention rollup
 ) {
-    /** Effective unread count for the current drawer scope, including muted chats. */
+    /** Effective unread count for the current drawer scope; muted activity stays row-local. */
     val scopedUnreadCount: Int
-        get() = rows.filterNot { it.type == BufferType.SERVER }.sumOf { it.unreadCount }
+        get() = rows.filterNot { it.type == BufferType.SERVER || it.muted }.sumOf { it.unreadCount }
 
     /** The scoped network's name, or null when unscoped (drives the top-bar title/chip). */
     val selectedNetworkName: String?
@@ -98,7 +98,7 @@ class ChatListViewModel @Inject constructor(
                 selectedNetworkId = validSelection,
                 drawerRows = buildDrawerRows(networks, rows, connection),
                 allUnread = rows.filterNot { it.muted }.sumOf { it.unreadCount },
-                allMentions = rows.sumOf { it.mentionCount },
+                allMentions = rows.filterNot { it.muted }.sumOf { it.mentionCount },
             )
         }.stateIn(
             scope = viewModelScope,
@@ -185,10 +185,10 @@ class ChatListViewModel @Inject constructor(
     }
 }
 
-/** Pure selection seam: muted rows remain eligible; SERVER/zero-unread rows never do. */
+/** Pure selection seam: muted/SERVER/zero-unread rows never participate in mark-all. */
 internal fun unreadBufferIds(rows: List<ChatListRow>): List<Long> = rows
     .asSequence()
-    .filter { it.type != BufferType.SERVER && it.unreadCount > 0 }
+    .filter { !it.muted && it.type != BufferType.SERVER && it.unreadCount > 0 }
     .map { it.bufferId }
     .distinct()
     .toList()

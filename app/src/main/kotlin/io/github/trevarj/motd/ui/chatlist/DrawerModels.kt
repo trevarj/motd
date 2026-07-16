@@ -19,10 +19,10 @@ data class DrawerRow(
     val state: IrcClientState, // IrcClientState.Disconnected when absent from the map
     val nick: String?, // (state as? Ready)?.nick
     val unread: Int, // sum of unreadCount over the network's non-muted rows
-    val mentions: Int, // sum of mentionCount over ALL the network's rows
+    val mentions: Int, // sum of mentionCount over the network's non-muted rows
 )
 
-/** Rollup of unread (non-muted only) + mention counts for a single set of rows. */
+/** Rollup of unread + mention counts for a single set of non-muted rows. */
 private data class Rollup(val unread: Int, val mentions: Int)
 
 private fun rollupFor(rows: List<ChatListRow>, networkId: Long): Rollup {
@@ -30,8 +30,9 @@ private fun rollupFor(rows: List<ChatListRow>, networkId: Long): Rollup {
     var mentions = 0
     for (row in rows) {
         if (row.networkId != networkId) continue
-        if (!row.muted) unread += row.unreadCount // muted rows never contribute to unread
-        mentions += row.mentionCount // mentions count even from muted rows
+        if (row.muted) continue
+        unread += row.unreadCount
+        mentions += row.mentionCount
     }
     return Rollup(unread, mentions)
 }

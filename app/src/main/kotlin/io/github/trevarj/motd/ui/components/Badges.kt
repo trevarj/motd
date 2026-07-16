@@ -54,6 +54,19 @@ fun MentionBadge(count: Int, modifier: Modifier = Modifier) {
     )
 }
 
+/** Subdued total activity count shown only on a muted chat row. */
+@Composable
+fun MutedActivityBadge(count: Int, modifier: Modifier = Modifier) {
+    val cd = pluralStringResource(R.plurals.badge_unread, count, count)
+    CountBadge(
+        text = if (count > 99) "99+" else count.toString(),
+        background = MaterialTheme.colorScheme.surfaceContainerHighest,
+        foreground = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier,
+        contentDescription = cd,
+    )
+}
+
 /** Small outlined chip naming the network; shown when more than one network is present. */
 @Composable
 fun NetworkChip(name: String, modifier: Modifier = Modifier) {

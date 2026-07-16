@@ -96,11 +96,17 @@ interface BufferDao {
             lm.sender AS lastMessageSender,
             lm.serverTime AS lastMessageTime,
             (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
-                AND m.serverTime > COALESCE(b.readMarkerTime, 0)
+                AND m.serverTime > MAX(
+                    COALESCE(b.readMarkerTime, 0),
+                    COALESCE(b.localUnreadFloorTime, 0)
+                )
                 AND m.isSelf = 0
                 AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS unreadCount,
             (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
-                AND m.serverTime > COALESCE(b.readMarkerTime, 0)
+                AND m.serverTime > MAX(
+                    COALESCE(b.readMarkerTime, 0),
+                    COALESCE(b.localUnreadFloorTime, 0)
+                )
                 AND m.isSelf = 0
                 AND m.hasMention = 1
                 AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS mentionCount
@@ -165,7 +171,29 @@ interface BufferDao {
     suspend fun setPinned(id: Long, pinned: Boolean)
 
     @Query("UPDATE buffers SET muted = :muted WHERE id = :id")
-    suspend fun setMuted(id: Long, muted: Boolean)
+    suspend fun writeMuted(id: Long, muted: Boolean)
+
+    @Query(
+        """SELECT MAX(serverTime) FROM messages WHERE bufferId = :id
+           AND isSelf = 0 AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')""",
+    )
+    suspend fun latestIncomingChatTime(id: Long): Long?
+
+    @Query(
+        """UPDATE buffers SET localUnreadFloorTime = :timestamp
+           WHERE id = :id AND (
+               localUnreadFloorTime IS NULL OR localUnreadFloorTime < :timestamp
+           )""",
+    )
+    suspend fun advanceLocalUnreadFloor(id: Long, timestamp: Long)
+
+    @Transaction
+    suspend fun setMuted(id: Long, muted: Boolean) {
+        if (!muted) {
+            latestIncomingChatTime(id)?.let { advanceLocalUnreadFloor(id, it) }
+        }
+        writeMuted(id, muted)
+    }
 
     @Query("UPDATE buffers SET topic = :topic, topicSetBy = :setBy WHERE id = :id")
     suspend fun setTopic(id: Long, topic: String, setBy: String?)
