@@ -172,6 +172,26 @@ class PushEventHandlerTest {
     }
 
     @Test
+    fun handle_accepts_connector_decrypted_body_without_redecrypting() = runTest {
+        val sink = RecordingSink()
+        val handler = PushEventHandler(
+            crypto = { _, _ -> error("connector already decrypted the payload") },
+            eventSink = sink,
+        )
+        val body = ":carol!c@h PRIVMSG #room :already clear".toByteArray()
+
+        val event = handler.handle(
+            networkId = 42L,
+            body = body,
+            keys = WebPushCrypto.generateKeyMaterial(),
+            alreadyDecrypted = true,
+        )
+
+        assertEquals("already clear", (event as IrcEvent.ChatMessage).text)
+        assertEquals(1, sink.pushEvents.size)
+    }
+
+    @Test
     fun handle_swallows_unparseable_line() = runTest {
         val sink = RecordingSink()
         // Facade returns a line that IrcMessage.parse rejects.

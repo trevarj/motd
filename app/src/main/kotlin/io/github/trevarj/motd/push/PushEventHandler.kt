@@ -48,16 +48,26 @@ class PushEventHandler(
      * sink, and post a notification. Returns the produced event, or null when the payload does
      * not map to a chat event (or fails to decrypt/parse — swallowed so a bad push is inert).
      */
-    suspend fun handle(networkId: Long, body: ByteArray, keys: WebPushCrypto.KeyMaterial): IrcEvent? {
+    suspend fun handle(
+        networkId: Long,
+        body: ByteArray,
+        keys: WebPushCrypto.KeyMaterial,
+        alreadyDecrypted: Boolean = false,
+    ): IrcEvent? {
         diagnostics.record("push", "payload_received") {
             mapOf("network_id" to networkId, "bytes" to body.size)
         }
-        val line = runCatching { String(crypto.decrypt(body, keys), Charsets.UTF_8) }
-            .getOrElse {
-                diagnostics.record("push", "decrypt_failed") { mapOf("network_id" to networkId) }
-                healthStore.warning(networkId, "PAYLOAD_DECRYPT_FAILED")
-                return null
-            }
+        val plaintext = if (alreadyDecrypted) {
+            body
+        } else {
+            runCatching { crypto.decrypt(body, keys) }
+                .getOrElse {
+                    diagnostics.record("push", "decrypt_failed") { mapOf("network_id" to networkId) }
+                    healthStore.warning(networkId, "PAYLOAD_DECRYPT_FAILED")
+                    return null
+                }
+        }
+        val line = String(plaintext, Charsets.UTF_8)
         val msg = runCatching { IrcMessage.parse(line) }
             .getOrElse {
                 if (it is IrcParseException) {
