@@ -653,6 +653,17 @@ class ChatViewModel @Inject constructor(
 
     private val jumpMsgid: String? = route.jumpToMsgid
     private val jumpTime: Long = route.jumpToTime
+    private data class JumpRequest(
+        val msgid: String?,
+        val time: Long,
+        val settlesEntryPosition: Boolean,
+    )
+
+    private var activeJumpRequest: JumpRequest? = if (jumpTime > 0) {
+        JumpRequest(jumpMsgid, jumpTime, settlesEntryPosition = true)
+    } else {
+        null
+    }
 
     /**
      * CHATHISTORY AROUND fetch used by [ChatJumpResolver] when a msgid target is not yet local:
@@ -806,7 +817,8 @@ class ChatViewModel @Inject constructor(
     }
 
     private suspend fun publishResolve(name: String?) {
-        when (val r = resolver.resolve(bufferId, jumpMsgid, jumpTime, name)) {
+        val request = activeJumpRequest ?: return
+        when (val r = resolver.resolve(bufferId, request.msgid, request.time, name)) {
             is ChatJumpResolver.Result.Target -> {
                 // Force a distinct emission so the screen's LaunchedEffect(jumpTarget) always
                 // re-runs, even when the re-resolved index equals the previous one (plans/15 #12).
@@ -822,8 +834,10 @@ class ChatViewModel @Inject constructor(
 
     /** Screen calls this after it has scrolled to (or given up on) the current target. */
     fun onJumpHandled() {
+        val settlesEntryPosition = activeJumpRequest?.settlesEntryPosition == true
+        activeJumpRequest = null
         _jumpTarget.value = null
-        markEntryPositionSettled()
+        if (settlesEntryPosition) markEntryPositionSettled()
     }
 
     /** The screen completed its one-shot normal-entry positioning. */
@@ -847,8 +861,24 @@ class ChatViewModel @Inject constructor(
     }
 
     fun onJumpUnresolved() {
+        val settlesEntryPosition = activeJumpRequest?.settlesEntryPosition == true
+        activeJumpRequest = null
         _jumpTarget.value = null
-        markEntryPositionUnresolved()
+        if (settlesEntryPosition) markEntryPositionUnresolved()
+    }
+
+    /**
+     * Resolve and reveal a locally available replied-to message. Reply previews are only clickable
+     * after their target has resolved from Room, so this normally remains a local index lookup; the
+     * shared jump pipeline still supplies bounded paging, index-shift recovery, and highlighting.
+     */
+    fun jumpToRepliedMessage(msgid: String) {
+        activeJumpRequest = JumpRequest(msgid, time = 0, settlesEntryPosition = false)
+        reresolveUsed = false
+        _jumpFailed.value = false
+        viewModelScope.launch {
+            publishResolve(state.value.buffer?.name)
+        }
     }
 
     private fun markEntryPositionSettled() {

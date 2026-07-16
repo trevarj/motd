@@ -171,6 +171,7 @@ fun MessageList(
     onLiveEntryConsumed: (Long) -> Unit = {},
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
     replyPreview: (String) -> Flow<ReplyPreviewData?> = { flowOf(null) },
+    onReplyPreviewClick: (String) -> Unit = {},
     onDelete: (MessageEntity) -> Unit = {},
     highlightMsgid: String? = null,
     // Normalized nicks known in the current buffer (member list). Drives @mention coloring in the
@@ -316,6 +317,7 @@ fun MessageList(
                         onOpenLink = onOpenLink,
                         onSenderClick = onSenderClick,
                         replyPreview = replyPreview,
+                        onReplyPreviewClick = onReplyPreviewClick,
                     )
                 }
             }
@@ -589,6 +591,7 @@ private fun MessageRow(
     onOpenLink: (String) -> Unit,
     onSenderClick: (String) -> Unit,
     replyPreview: (String) -> Flow<ReplyPreviewData?>,
+    onReplyPreviewClick: (String) -> Unit,
     // Non-null for an expanded fool row: renders a "hide" chip above the bubble that re-collapses it.
     onCollapseFool: (() -> Unit)? = null,
 ) {
@@ -716,6 +719,11 @@ private fun MessageRow(
             // Subtle "sending…" state before the 30s failure flip (plans/15 #21).
             pending = msg.pendingLabel != null,
             reply = reply,
+            onReplyClick = if (resolvedReply != null) {
+                msg.replyToMsgid?.let { parentMsgid -> { onReplyPreviewClick(parentMsgid) } }
+            } else {
+                null
+            },
             imageUrl = imageUrl,
             linkPreview = preview,
             linkPreviewLoading = previewLoading,

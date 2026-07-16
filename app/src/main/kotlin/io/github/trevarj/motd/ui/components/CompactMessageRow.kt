@@ -73,6 +73,7 @@ internal fun CompactMessageRow(
     failed: Boolean = false,
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
+    onReplyClick: (() -> Unit)? = null,
     imageUrl: String? = null,
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
@@ -137,7 +138,7 @@ internal fun CompactMessageRow(
             )
             .padding(horizontal = spacing.messageOuterHPad, vertical = spacing.compactRowVPad),
     ) {
-        reply?.let { ReplyMiniBubble(it, nickColors) }
+        reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
         Row(verticalAlignment = Alignment.Top) {
             Text(

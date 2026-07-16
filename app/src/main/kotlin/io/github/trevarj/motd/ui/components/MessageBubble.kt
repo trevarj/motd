@@ -130,6 +130,7 @@ fun MessageBubble(
     failed: Boolean = false,
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
+    onReplyClick: (() -> Unit)? = null,
     imageUrl: String? = null,
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
@@ -176,6 +177,7 @@ fun MessageBubble(
             failed = failed,
             pending = pending,
             reply = reply,
+            onReplyClick = onReplyClick,
             imageUrl = imageUrl,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
@@ -207,6 +209,7 @@ fun MessageBubble(
             failed = failed,
             pending = pending,
             reply = reply,
+            onReplyClick = onReplyClick,
             imageUrl = imageUrl,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
@@ -242,6 +245,7 @@ fun MessageBubble(
             failed = failed,
             pending = pending,
             reply = reply,
+            onReplyClick = onReplyClick,
             imageUrl = imageUrl,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
@@ -359,7 +363,7 @@ fun MessageBubble(
                 )
             }
 
-            reply?.let { ReplyMiniBubble(it, nickColors) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
             imageUrl?.let { url ->
                 AsyncImage(
@@ -449,6 +453,7 @@ private fun ActionMessageRow(
     failed: Boolean = false,
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
+    onReplyClick: (() -> Unit)? = null,
     imageUrl: String? = null,
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
@@ -537,7 +542,7 @@ private fun ActionMessageRow(
                     vertical = spacing.actionVPad,
                 ),
         ) {
-            reply?.let { ReplyMiniBubble(it, nickColors) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
@@ -687,6 +692,7 @@ private fun TwoLineMessageRow(
     failed: Boolean = false,
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
+    onReplyClick: (() -> Unit)? = null,
     imageUrl: String? = null,
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
@@ -786,7 +792,7 @@ private fun TwoLineMessageRow(
                 )
                 .testTag("message_two_line_body"),
         ) {
-            reply?.let { ReplyMiniBubble(it, nickColors) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
             if (kind == MessageKind.NOTICE) {
                 Text(
@@ -1113,14 +1119,26 @@ internal fun Modifier.friendNickTint(): Modifier = this
 data class ReplyPreviewData(val sender: String, val text: String)
 
 @Composable
-internal fun ReplyMiniBubble(reply: ReplyPreviewData, nickColors: NickColorScheme) {
+internal fun ReplyMiniBubble(
+    reply: ReplyPreviewData,
+    nickColors: NickColorScheme,
+    onClick: (() -> Unit)? = null,
+) {
     val accent = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
+    val openLabel = stringResource(R.string.chat_reply_open)
     Row(
         modifier = Modifier
             .testTag("chat_reply_preview")
             .padding(vertical = 2.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)),
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+            .let { modifier ->
+                if (onClick != null) {
+                    modifier.clickable(onClickLabel = openLabel, onClick = onClick)
+                } else {
+                    modifier
+                }
+            },
     ) {
         Box(
             Modifier
