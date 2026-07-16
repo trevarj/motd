@@ -49,9 +49,12 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.components.IrcNetworkBadge
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.UnreadBadge
+import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /**
@@ -242,6 +245,16 @@ private fun DrawerNetworkItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // This is network identity, not connection status. Keeping those concerns separate
+            // prevents short reconnects from making the drawer icon flicker or disappear.
+            if (LocalAvatarStyle.current == AvatarStyle.IRC_SPRITE) {
+                IrcNetworkBadge(
+                    name = row.name,
+                    networkId = row.networkId,
+                    size = 32.dp,
+                    modifier = Modifier.testTag("drawer_network_icon_${row.networkId}"),
+                )
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = row.name,
