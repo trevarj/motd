@@ -12,6 +12,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Row
@@ -943,7 +944,12 @@ fun ChatContent(
         // Scaffold content area gets smaller and the composer stays pinned at the new bottom while
         // the reverse list stays anchored at index 0. An imePadding() here would double-count the
         // IME inset (window already resized) and shove the whole column up above the keyboard.
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(padding)) {
+            // BoxWithConstraints subcomposes with the resized window constraints during Android's
+            // adjustResize measure pass. Passing this exact height to the composer lets its emoji
+            // replacement occupy the released IME space in the same frame instead of reacting to
+            // an OnLayoutChange callback one frame later.
+            val chatWindowHeightPx = constraints.maxHeight
             ConversationTypography(conversationFontScalePercent) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Box(modifier = Modifier.weight(1f)) {
@@ -1088,6 +1094,7 @@ fun ChatContent(
                     },
                     showEmojiButton = showComposerEmoji,
                     onAttachment = { uploadCurrentDraftDirectly = false; attachmentSheetOpen = true },
+                    chatWindowHeightPx = chatWindowHeightPx,
                     autocomplete = if (showAutocomplete && completions.isNotEmpty()) {
                         {
                             AutocompletePanel(

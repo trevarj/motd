@@ -24,4 +24,46 @@ class EmojiCatalogTest {
         assertTrue(results.isNotEmpty())
         assertTrue(results.all { it.name.contains("smil") })
     }
+
+    @Test
+    fun `system names are lower case underscore separated`() {
+        val entries = systemEmojiSearchEntries()
+
+        assertTrue(entries.any { it.name == "grinning_face" })
+        assertTrue(entries.all { it.name == it.name.lowercase() })
+        assertTrue(entries.all { it.name.none { character -> character == ' ' || character == '-' } })
+    }
+
+    @Test
+    fun `spaces hyphens and underscores are equivalent in queries`() {
+        val entries = listOf(EmojiSearchEntry("x", "smiling_face_with_heart-eyes"))
+
+        assertEquals(entries, searchSystemEmojis(entries, "heart eyes"))
+        assertEquals(entries, searchSystemEmojis(entries, "heart_eyes"))
+    }
+
+    @Test
+    fun `fuzzy subsequence finds a partially typed name`() {
+        val entries = listOf(
+            EmojiSearchEntry("x", "grinning_face"),
+            EmojiSearchEntry("y", "heart_eyes"),
+        )
+
+        assertEquals("x", searchSystemEmojis(entries, "grnng").single().emoji)
+    }
+
+    @Test
+    fun `ranking prefers exact and word starts before loose substrings`() {
+        val entries = listOf(
+            EmojiSearchEntry("substring", "interface"),
+            EmojiSearchEntry("word", "grinning_face"),
+            EmojiSearchEntry("exact", "face"),
+            EmojiSearchEntry("prefix", "face_with_tears_of_joy"),
+        )
+
+        assertEquals(
+            listOf("exact", "prefix", "word", "substring"),
+            searchSystemEmojis(entries, "face").map { it.emoji },
+        )
+    }
 }

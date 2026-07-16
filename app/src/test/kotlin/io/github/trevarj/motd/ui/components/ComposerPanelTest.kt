@@ -36,7 +36,12 @@ class ComposerPanelTest {
 
     @Test
     fun `emoji picker captures a visible ime and restores it when dismissed`() {
-        val session = openEmojiPickerSession(imeHeightPx = 320, compactPickerHeightPx = 250)
+        val session = openEmojiPickerSession(
+            imeHeightPx = 320,
+            lastVisibleImeHeightPx = 320,
+            inputFocused = true,
+            compactPickerHeightPx = 250,
+        )
 
         assertEquals(
             EmojiPickerSession(
@@ -54,7 +59,12 @@ class ComposerPanelTest {
 
     @Test
     fun `reopening during ime restoration preserves the captured keyboard height`() {
-        val session = openEmojiPickerSession(imeHeightPx = 320, compactPickerHeightPx = 250)
+        val session = openEmojiPickerSession(
+            imeHeightPx = 320,
+            lastVisibleImeHeightPx = 320,
+            inputFocused = true,
+            compactPickerHeightPx = 250,
+        )
         val restoringSession = closeEmojiPickerSession(session)!!
 
         assertEquals(session, reopenEmojiPickerSession(restoringSession))
@@ -62,13 +72,31 @@ class ComposerPanelTest {
 
     @Test
     fun `emoji picker opened without an ime uses compact panel and does not restore keyboard`() {
-        val session = openEmojiPickerSession(imeHeightPx = 0, compactPickerHeightPx = 250)
+        val session = openEmojiPickerSession(
+            imeHeightPx = 0,
+            lastVisibleImeHeightPx = 320,
+            inputFocused = false,
+            compactPickerHeightPx = 250,
+        )
 
         assertEquals(
             EmojiPickerSession(capturedImeHeightPx = 250, restoresKeyboard = false),
             session,
         )
         assertEquals(null, closeEmojiPickerSession(session))
+    }
+
+    @Test
+    fun `tap-time inset race still restores the last visible keyboard`() {
+        assertEquals(
+            EmojiPickerSession(capturedImeHeightPx = 320, restoresKeyboard = true),
+            openEmojiPickerSession(
+                imeHeightPx = 0,
+                lastVisibleImeHeightPx = 320,
+                inputFocused = true,
+                compactPickerHeightPx = 250,
+            ),
+        )
     }
 
     @Test
@@ -86,5 +114,24 @@ class ComposerPanelTest {
     fun `ime replacement height never becomes negative`() {
         assertEquals(0, emojiPickerReplacementHeight(capturedImeHeightPx = 320, currentImeHeightPx = 400))
         assertEquals(0, emojiPickerReplacementHeight(capturedImeHeightPx = -1, currentImeHeightPx = 0))
+    }
+
+    @Test
+    fun `adjust resize window delta is the keyboard height`() {
+        assertEquals(885, keyboardResizeHeight(largestWindowHeightPx = 2203, currentWindowHeightPx = 1318))
+        assertEquals(0, keyboardResizeHeight(largestWindowHeightPx = 2203, currentWindowHeightPx = 2203))
+    }
+
+    @Test
+    fun `keyboard resize tracker follows the same measure pass and remembers the ime height`() {
+        val tracker = KeyboardResizeTracker()
+
+        assertEquals(0, tracker.update(2_203))
+        assertEquals(400, tracker.update(1_803))
+        assertEquals(885, tracker.update(1_318))
+        assertEquals(885, tracker.lastVisibleKeyboardHeightPx)
+        assertEquals(400, tracker.update(1_803))
+        assertEquals(0, tracker.update(2_203))
+        assertEquals(885, tracker.lastVisibleKeyboardHeightPx)
     }
 }

@@ -236,6 +236,7 @@ dependencies {
     implementation(libs.lifecycle.service)
     implementation(libs.lifecycle.process)
     implementation(libs.core.ktx)
+    implementation(libs.emoji2.emojipicker)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)

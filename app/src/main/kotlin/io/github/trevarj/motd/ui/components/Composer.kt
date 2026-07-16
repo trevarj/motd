@@ -14,22 +14,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.shape.CircleShape
@@ -54,9 +45,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,35 +56,33 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.emoji2.emojipicker.EmojiPickerView
 import io.github.trevarj.motd.R
-import io.github.trevarj.motd.ui.chat.systemEmojiPages
 import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
 import io.github.trevarj.motd.ui.chat.searchSystemEmojis
 import io.github.trevarj.motd.ui.chat.systemEmojiSearchEntries
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 data class ComposerReply(val sender: String, val text: String)
@@ -120,12 +109,19 @@ internal data class EmojiPickerSession(
 
 internal fun openEmojiPickerSession(
     imeHeightPx: Int,
+    lastVisibleImeHeightPx: Int,
+    inputFocused: Boolean,
     compactPickerHeightPx: Int,
 ): EmojiPickerSession {
     val visibleImeHeightPx = imeHeightPx.coerceAtLeast(0)
+    val rememberedImeHeightPx = lastVisibleImeHeightPx.coerceAtLeast(0)
+    val replacesKeyboard = visibleImeHeightPx > 0 || inputFocused && rememberedImeHeightPx > 0
     return EmojiPickerSession(
-        capturedImeHeightPx = if (visibleImeHeightPx > 0) visibleImeHeightPx else compactPickerHeightPx.coerceAtLeast(0),
-        restoresKeyboard = visibleImeHeightPx > 0,
+        capturedImeHeightPx = when {
+            replacesKeyboard -> maxOf(visibleImeHeightPx, rememberedImeHeightPx)
+            else -> compactPickerHeightPx.coerceAtLeast(0)
+        },
+        restoresKeyboard = replacesKeyboard,
     )
 }
 
@@ -144,7 +140,33 @@ internal fun emojiPickerReplacementHeight(
     currentImeHeightPx: Int,
 ): Int = (capturedImeHeightPx.coerceAtLeast(0) - currentImeHeightPx.coerceAtLeast(0)).coerceAtLeast(0)
 
-private const val EMOJI_IME_RESTORE_TIMEOUT_MILLIS = 1_000L
+internal fun keyboardResizeHeight(
+    largestWindowHeightPx: Int,
+    currentWindowHeightPx: Int,
+): Int = (largestWindowHeightPx.coerceAtLeast(0) - currentWindowHeightPx.coerceAtLeast(0)).coerceAtLeast(0)
+
+internal class KeyboardResizeTracker {
+    private var largestWindowHeightPx = 0
+
+    var currentKeyboardHeightPx: Int = 0
+        private set
+
+    var lastVisibleKeyboardHeightPx: Int = 0
+        private set
+
+    fun update(currentWindowHeightPx: Int): Int {
+        if (currentWindowHeightPx <= 0) return currentKeyboardHeightPx
+        largestWindowHeightPx = maxOf(largestWindowHeightPx, currentWindowHeightPx)
+        currentKeyboardHeightPx = keyboardResizeHeight(largestWindowHeightPx, currentWindowHeightPx)
+        if (currentKeyboardHeightPx > 0) {
+            lastVisibleKeyboardHeightPx = maxOf(lastVisibleKeyboardHeightPx, currentKeyboardHeightPx)
+        }
+        return currentKeyboardHeightPx
+    }
+}
+
+private const val EMOJI_IME_RESTORE_TIMEOUT_MILLIS = 1_500L
+private const val IME_SETTLED_FRAME_COUNT = 3
 private val COMPACT_EMOJI_PICKER_HEIGHT = 250.dp
 
 /** Modern chat composer with embedded tools and a stable, separate primary send action. */
@@ -160,6 +182,7 @@ fun Composer(
     placeholder: String = stringResource(R.string.chat_composer_placeholder),
     showEmojiButton: Boolean = true,
     onAttachment: (() -> Unit)? = null,
+    chatWindowHeightPx: Int = 0,
     autocomplete: (@Composable () -> Unit)? = null,
 ) {
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
@@ -176,8 +199,11 @@ fun Composer(
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val density = LocalDensity.current
-    val imeInsets = WindowInsets.ime
+    val keyboardResizeTracker = remember { KeyboardResizeTracker() }
+    val currentKeyboardHeightPx = keyboardResizeTracker.update(chatWindowHeightPx)
     val compactPickerHeightPx = with(density) { COMPACT_EMOJI_PICKER_HEIGHT.roundToPx() }
+    var inputFocused by remember { mutableStateOf(false) }
+    val latestInputFocused by rememberUpdatedState(inputFocused)
     val restoringSession = emojiPickerSession?.takeIf { it.phase == EmojiPickerPhase.RESTORING_IME }
     val closeEmojiPickerDescription = stringResource(R.string.chat_composer_emoji_close)
 
@@ -190,26 +216,54 @@ fun Composer(
 
     fun openEmojiPicker() {
         emojiPickerSession = openEmojiPickerSession(
-            imeHeightPx = imeInsets.getBottom(density),
+            imeHeightPx = currentKeyboardHeightPx,
+            lastVisibleImeHeightPx = keyboardResizeTracker.lastVisibleKeyboardHeightPx,
+            inputFocused = inputFocused,
             compactPickerHeightPx = compactPickerHeightPx,
         )
         keyboard?.hide()
     }
 
-    // Requesting focus and showing the IME from an effect makes the reverse transition reliable
-    // even when the emoji icon was tapped while the field's input connection was momentarily idle.
+    // Re-establish the text input connection on a frame boundary, then keep the picker occupying
+    // the complementary space until the IME animation has actually settled. If an IME refuses the
+    // request, return to the open picker instead of collapsing both input surfaces.
     LaunchedEffect(restoringSession) {
         if (restoringSession != null) {
-            focusRequester.requestFocus()
+            if (!latestInputFocused) focusRequester.requestFocus()
+            withFrameNanos { }
+            var previousHeightPx = -1
+            var settledFrames = 0
+            var framesWithoutIme = 0
             keyboard?.show()
-            withTimeoutOrNull(EMOJI_IME_RESTORE_TIMEOUT_MILLIS) {
-                snapshotFlow { imeInsets.getBottom(density) }
-                    .first { it >= restoringSession.capturedImeHeightPx }
-            }
+            val restored = withTimeoutOrNull(EMOJI_IME_RESTORE_TIMEOUT_MILLIS) {
+                while (settledFrames < IME_SETTLED_FRAME_COUNT) {
+                    withFrameNanos { }
+                    val heightPx = keyboardResizeTracker.currentKeyboardHeightPx
+                    if (heightPx > 0 && heightPx == previousHeightPx) {
+                        settledFrames++
+                    } else {
+                        settledFrames = 0
+                    }
+                    if (heightPx == 0 && ++framesWithoutIme == 6) {
+                        // Most keyboards reopen the still-focused input connection immediately.
+                        // If one ignores that request, create exactly one fresh focus transition
+                        // instead of repeatedly clearing focus and flashing the entire composer.
+                        focusManager.clearFocus(force = true)
+                        withFrameNanos { }
+                        focusRequester.requestFocus()
+                        withFrameNanos { }
+                        keyboard?.show()
+                    }
+                    previousHeightPx = heightPx
+                }
+                true
+            } == true
             if (emojiPickerSession == restoringSession) {
-                // Hardware keyboards and failed IME requests have no inset animation. Do not
-                // leave the captured keyboard-sized gap below the composer indefinitely.
-                emojiPickerSession = null
+                emojiPickerSession = if (restored && previousHeightPx > 0) {
+                    null
+                } else {
+                    reopenEmojiPickerSession(restoringSession)
+                }
             }
         }
     }
@@ -302,6 +356,7 @@ fun Composer(
                                 value = value,
                                 onValueChange = onValueChange,
                                 placeholder = placeholder,
+                                onFocusChanged = { inputFocused = it },
                                 onFocused = { dismissEmojiPicker() },
                                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                             )
@@ -373,7 +428,7 @@ fun Composer(
 
             EmojiPickerReplacementSurface(
                 session = emojiPickerSession,
-                imeInsets = imeInsets,
+                currentKeyboardHeightPx = currentKeyboardHeightPx,
                 onPick = { emoji -> onValueChange(insertAtCursor(value, emoji)) },
             )
         }
@@ -383,42 +438,33 @@ fun Composer(
 @Composable
 private fun EmojiPickerReplacementSurface(
     session: EmojiPickerSession?,
-    imeInsets: WindowInsets,
+    currentKeyboardHeightPx: Int,
     onPick: (String) -> Unit,
 ) {
     session ?: return
-    Box(
+    Layout(
         modifier = Modifier
             .fillMaxWidth()
-            .emojiPickerReplacementHeight(imeInsets, session.capturedImeHeightPx)
             .clipToBounds(),
-    ) {
-        AnimatedVisibility(
-            visible = session.phase == EmojiPickerPhase.OPEN,
-            modifier = Modifier.fillMaxSize(),
-            enter = fadeIn(),
-            exit = fadeOut(),
-        ) {
-            EmojiPickerPanel(
-                onPick = onPick,
-                modifier = Modifier.fillMaxSize(),
-            )
+        content = {
+            // Measure the picker once at the captured keyboard height. Only the clipping viewport
+            // changes during the IME animation, so the pager/grid does not relayout every frame.
+            EmojiPickerPanel(onPick = onPick, modifier = Modifier.fillMaxWidth())
+        },
+    ) { measurables, constraints ->
+        val fullHeightPx = session.capturedImeHeightPx
+            .coerceAtLeast(0)
+            .coerceAtMost(constraints.maxHeight)
+        val visibleHeightPx = emojiPickerReplacementHeight(
+            capturedImeHeightPx = fullHeightPx,
+            currentImeHeightPx = currentKeyboardHeightPx,
+        ).coerceAtMost(fullHeightPx)
+        val placeable = measurables.single().measure(
+            constraints.copy(minHeight = fullHeightPx, maxHeight = fullHeightPx),
+        )
+        layout(placeable.width, visibleHeightPx) {
+            placeable.placeRelative(0, 0)
         }
-    }
-}
-
-/** Reads the current animated IME inset during measurement, rather than animating a second size. */
-private fun Modifier.emojiPickerReplacementHeight(
-    imeInsets: WindowInsets,
-    capturedImeHeightPx: Int,
-): Modifier = layout { measurable, constraints ->
-    val desiredHeightPx = emojiPickerReplacementHeight(capturedImeHeightPx, imeInsets.getBottom(this))
-        .coerceIn(constraints.minHeight, constraints.maxHeight)
-    val placeable = measurable.measure(
-        constraints.copy(minHeight = desiredHeightPx, maxHeight = desiredHeightPx),
-    )
-    layout(placeable.width, desiredHeightPx) {
-        placeable.placeRelative(0, 0)
     }
 }
 
@@ -427,6 +473,7 @@ private fun ComposerTextField(
     value: TextFieldValue,
     onValueChange: (TextFieldValue) -> Unit,
     placeholder: String,
+    onFocusChanged: (Boolean) -> Unit,
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -438,7 +485,10 @@ private fun ComposerTextField(
         onValueChange = onValueChange,
         modifier = modifier
             .heightIn(min = 52.dp, max = 148.dp)
-            .onFocusChanged { if (it.isFocused) onFocused() }
+            .onFocusChanged {
+                onFocusChanged(it.isFocused)
+                if (it.isFocused) onFocused()
+            }
             .testTag("chat_composer_field"),
         textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -527,19 +577,6 @@ private fun EmojiPickerPanel(
     onPick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val labels = listOf(
-        stringResource(R.string.emoji_people),
-        stringResource(R.string.emoji_nature),
-        stringResource(R.string.emoji_food),
-        stringResource(R.string.emoji_activity),
-        stringResource(R.string.emoji_travel),
-        stringResource(R.string.emoji_objects),
-        stringResource(R.string.emoji_symbols),
-        stringResource(R.string.emoji_flags),
-    )
-    val pages = remember(labels) { systemEmojiPages(labels) }
-    val pager = rememberPagerState(pageCount = { pages.size })
-    val scope = rememberCoroutineScope()
     Surface(
         modifier = modifier
             .testTag("chat_composer_emoji_picker")
@@ -548,48 +585,19 @@ private fun EmojiPickerPanel(
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
-        Column(Modifier.fillMaxSize()) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                pages.forEachIndexed { index, page ->
-                    val selected = pager.currentPage == index
-                    Surface(
-                        onClick = { scope.launch { pager.animateScrollToPage(index) } },
-                        modifier = Modifier.size(44.dp).semantics {
-                            this.selected = selected
-                            contentDescription = page.label
-                        },
-                        shape = CircleShape,
-                        color = if (selected) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
-                    ) {
-                        Box(contentAlignment = Alignment.Center) { Text(page.icon, fontSize = 20.sp) }
-                    }
+        AndroidView(
+            factory = { context ->
+                EmojiPickerView(context).apply {
+                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 }
-            }
-            HorizontalPager(
-                state = pager,
-                modifier = Modifier.weight(1f).testTag("chat_composer_emoji_pages"),
-            ) { pageIndex ->
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(8),
-                    modifier = Modifier
-                        .testTag("chat_composer_emoji_grid")
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp),
-                ) {
-                    items(pages[pageIndex].emojis, key = { it }) { emoji ->
-                        Box(
-                            modifier = Modifier.size(44.dp).clip(CircleShape).clickable { onPick(emoji) },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(emoji, fontSize = 24.sp, textAlign = TextAlign.Center)
-                        }
-                    }
-                }
-            }
-        }
+            },
+            update = { picker ->
+                picker.setOnEmojiPickedListener { item -> onPick(item.emoji) }
+            },
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("chat_composer_emoji_grid"),
+        )
     }
 }
 

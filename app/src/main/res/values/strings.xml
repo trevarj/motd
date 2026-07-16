@@ -306,14 +306,6 @@
     <string name="chat_composer_replying_to">Replying to %1$s</string>
     <string name="chat_composer_cancel_reply">Cancel reply</string>
     <string name="chat_composer_attachment">Add attachment</string>
-    <string name="emoji_people">Smileys and people</string>
-    <string name="emoji_nature">Animals and nature</string>
-    <string name="emoji_food">Food and drink</string>
-    <string name="emoji_activity">Activities</string>
-    <string name="emoji_travel">Travel and places</string>
-    <string name="emoji_objects">Objects</string>
-    <string name="emoji_symbols">Symbols</string>
-    <string name="emoji_flags">Flags</string>
     <string name="upload_add_title">Share something</string>
     <string name="upload_add_subtitle">Choose what to add to your message</string>
     <string name="upload_photo">Photo</string>
