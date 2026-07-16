@@ -4,7 +4,7 @@ import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.ServerForm
 
 enum class NetworkPresetId {
-    CUSTOM, LIBERA, OFTC, EFNET, IRCNET, DALNET, RIZON, SNOONET, QUAKENET, UNDERNET,
+    CUSTOM, LIBERA, OFTC, EFNET, IRCNET, DALNET, RIZON, SNOONET, IRCHIGHWAY, QUAKENET, UNDERNET,
 }
 
 data class NetworkPreset(
@@ -28,6 +28,7 @@ val COMMON_NETWORK_PRESETS: List<NetworkPreset> = listOf(
     NetworkPreset(NetworkPresetId.DALNET, "DALnet", "irc.dal.net", 6697, tls = true),
     NetworkPreset(NetworkPresetId.RIZON, "Rizon", "irc.rizon.net", 6697, tls = true),
     NetworkPreset(NetworkPresetId.SNOONET, "Snoonet", "irc.snoonet.org", 6697, tls = true),
+    NetworkPreset(NetworkPresetId.IRCHIGHWAY, "IRCHighWay", "irc.irchighway.net", 6697, tls = true),
     NetworkPreset(NetworkPresetId.QUAKENET, "QuakeNet", "irc.quakenet.org", 6667, false, true),
     NetworkPreset(NetworkPresetId.UNDERNET, "Undernet", "irc.undernet.org", 6667, false, true),
 )

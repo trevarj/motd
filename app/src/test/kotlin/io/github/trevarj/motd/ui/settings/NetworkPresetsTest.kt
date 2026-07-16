@@ -22,12 +22,13 @@ class NetworkPresetsTest {
                 Triple("irc.dal.net", 6697, true),
                 Triple("irc.rizon.net", 6697, true),
                 Triple("irc.snoonet.org", 6697, true),
+                Triple("irc.irchighway.net", 6697, true),
                 Triple("irc.quakenet.org", 6667, false),
                 Triple("irc.undernet.org", 6667, false),
             ),
             COMMON_NETWORK_PRESETS.map { Triple(it.host, it.port, it.tls) },
         )
-        assertEquals(7, COMMON_NETWORK_PRESETS.count { !it.legacyUnencrypted })
+        assertEquals(8, COMMON_NETWORK_PRESETS.count { !it.legacyUnencrypted })
         assertEquals(2, COMMON_NETWORK_PRESETS.count { it.legacyUnencrypted })
     }
 
