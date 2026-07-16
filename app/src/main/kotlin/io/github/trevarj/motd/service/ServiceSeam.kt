@@ -2,6 +2,7 @@ package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -78,6 +79,21 @@ interface ConnectionManager {
 
     /** Part the buffer's channel; [reason] (from `/part <reason>`) becomes the PART trailing param. */
     suspend fun partChannel(bufferId: Long, reason: String? = null)
+
+    /**
+     * PART seam used by durable channel-close requests. Returns true only when the connection
+     * boundary confirms that the write reached its live transport. The default keeps existing
+     * test/fake implementations source-compatible; the real manager overrides it with a strict
+     * Ready/transport check.
+     */
+    suspend fun partChannelForClose(bufferId: Long, reason: String? = null): Boolean = try {
+        partChannel(bufferId, reason)
+        true
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        false
+    }
 
     /** Find-or-create a QUERY buffer for a DM (name Isupport-normalized); returns bufferId. */
     suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long

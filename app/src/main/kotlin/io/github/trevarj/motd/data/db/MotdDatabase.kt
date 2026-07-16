@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -129,6 +129,16 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
 val MIGRATION_7_8 = object : Migration(7, 8) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE buffers ADD COLUMN localUnreadFloorTime INTEGER")
+    }
+}
+
+/**
+ * v8 -> v9: persist a local-only pending CHANNEL close. Nullable rows retain the existing
+ * immediate-delete semantics for QUERY/SERVER buffers and channels that have already completed.
+ */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE buffers ADD COLUMN pendingCloseAt INTEGER")
     }
 }
 

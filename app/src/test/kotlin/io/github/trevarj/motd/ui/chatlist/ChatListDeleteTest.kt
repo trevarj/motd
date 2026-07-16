@@ -20,6 +20,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.BufferReadMarker
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.ChannelCloseCoordinator
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import kotlinx.coroutines.Dispatchers
@@ -37,7 +38,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 
-/** Covers the delete-then-part sequencing in ChatListViewModel.deleteBuffer. */
+/** Covers durable channel-close requests and immediate local-only deletion. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatListDeleteTest {
 
@@ -84,6 +85,12 @@ class ChatListDeleteTest {
         override fun dismissCertPrompt(prompt: CertPrompt) = Unit
     }
 
+    private class FakeChannelCloseCoordinator(private val ops: MutableList<String>) : ChannelCloseCoordinator {
+        var started = false
+        override fun start() { started = true }
+        override suspend fun requestClose(bufferId: Long) { ops += "pending:$bufferId" }
+    }
+
     private class FakeSettingsRepository : SettingsRepository {
         override val settings = MutableStateFlow(
             Settings(ThemeMode.SYSTEM, true, DeliveryMode.PERSISTENT_SOCKET),
@@ -110,11 +117,16 @@ class ChatListDeleteTest {
     @Before fun setUp() { Dispatchers.setMain(dispatcher) }
     @After fun tearDown() { Dispatchers.resetMain() }
 
-    private fun vm(buffers: BufferRepository, cm: ConnectionManager) =
+    private fun vm(
+        buffers: BufferRepository,
+        cm: ConnectionManager,
+        close: ChannelCloseCoordinator,
+    ) =
         ChatListViewModel(
             bufferRepository = buffers,
             networkRepository = FakeNetworkRepository(),
             connectionManager = cm,
+            channelCloseCoordinator = close,
             readMarkerRepository = object : ReadMarkerSnapshotter {
                 override suspend fun latestIncoming(
                     bufferIds: Collection<Long>,
@@ -132,19 +144,20 @@ class ChatListDeleteTest {
     )
 
     @Test
-    fun deleteChannel_partsThenDeletes_inThatOrder() = runTest {
+    fun deleteChannel_marksPending_andLeavesHistoryUntilAccepted() = runTest {
         val ops = mutableListOf<String>()
         val buffers = object : FakeBufferRepository() {
             override suspend fun deleteBuffer(id: Long) { super.deleteBuffer(id); ops += "delete:$id" }
         }
-        val vm = vm(buffers, FakeConnectionManager(ops))
+        val close = FakeChannelCloseCoordinator(ops)
+        val vm = vm(buffers, FakeConnectionManager(ops), close)
 
         vm.deleteBuffer(row(7, BufferType.CHANNEL, "#kotlin"))
         runCurrent()
 
-        // PART must precede the delete so the client can send PART before the buffer disappears.
-        assertEquals(listOf("part:7", "delete:7"), ops)
-        assertEquals(listOf(7L), buffers.deleted)
+        assertEquals(listOf("pending:7"), ops)
+        assertEquals(emptyList<Long>(), buffers.deleted)
+        assertEquals(true, close.started)
     }
 
     @Test
@@ -153,7 +166,7 @@ class ChatListDeleteTest {
         val buffers = object : FakeBufferRepository() {
             override suspend fun deleteBuffer(id: Long) { super.deleteBuffer(id); ops += "delete:$id" }
         }
-        val vm = vm(buffers, FakeConnectionManager(ops))
+        val vm = vm(buffers, FakeConnectionManager(ops), FakeChannelCloseCoordinator(ops))
 
         vm.deleteBuffer(row(9, BufferType.QUERY, "carol"))
         runCurrent()
@@ -168,7 +181,7 @@ class ChatListDeleteTest {
         val buffers = object : FakeBufferRepository() {
             override suspend fun deleteBuffer(id: Long) { super.deleteBuffer(id); ops += "delete:$id" }
         }
-        val vm = vm(buffers, FakeConnectionManager(ops))
+        val vm = vm(buffers, FakeConnectionManager(ops), FakeChannelCloseCoordinator(ops))
 
         vm.deleteBuffer(row(3, BufferType.SERVER, "*"))
         runCurrent()

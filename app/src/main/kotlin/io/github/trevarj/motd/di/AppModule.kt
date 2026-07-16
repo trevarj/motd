@@ -49,6 +49,8 @@ import io.github.trevarj.motd.push.UnifiedPushApi
 import io.github.trevarj.motd.push.UnifiedPushApiImpl
 import io.github.trevarj.motd.push.WebPushCryptoFacade
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.ChannelCloseCoordinator
+import io.github.trevarj.motd.service.PendingChannelCloseCoordinator
 import io.github.trevarj.motd.service.AndroidChatSoundPlayer
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncController
@@ -181,6 +183,10 @@ internal abstract class AppModule {
     // -- service (WP5 / WP1 trivial) --
     @Binds @Singleton
     abstract fun foregroundBufferTracker(impl: ForegroundBufferTrackerImpl): ForegroundBufferTracker
+
+    /** Durable channel leave/delete retry worker; started when the chat list ViewModel is used. */
+    @Binds @Singleton
+    abstract fun channelCloseCoordinator(impl: PendingChannelCloseCoordinator): ChannelCloseCoordinator
 
     @Binds @Singleton
     abstract fun readMarkerSnapshotter(

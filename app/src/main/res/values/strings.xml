@@ -680,7 +680,7 @@
          end to avoid a same-file clobber with the parallel webpush-strings agent. -->
     <string name="chatlist_delete">Delete chat</string>
     <string name="chatlist_delete_confirm_title">Delete chat?</string>
-    <string name="chatlist_delete_confirm_channel">This leaves %1$s and permanently removes its history from this device.</string>
+    <string name="chatlist_delete_confirm_channel">%1$s hides immediately. If you are offline, leaving completes after reconnect. History is removed after the server accepts the leave.</string>
     <string name="chatlist_delete_confirm_message">This permanently removes %1$s and its history from this device.</string>
 
     <!-- Message render style: density now selects the rendering paradigm, not font size. Appended

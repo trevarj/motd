@@ -1266,10 +1266,26 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     override suspend fun partChannel(bufferId: Long, reason: String?) {
-        val buffer = bufferDao.observeById(bufferId) ?: return
+        sendPart(bufferId, reason)
+    }
+
+    override suspend fun partChannelForClose(bufferId: Long, reason: String?): Boolean = try {
+        sendPart(bufferId, reason)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        false
+    }
+
+    private suspend fun sendPart(bufferId: Long, reason: String?): Boolean {
+        val buffer = bufferDao.observeById(bufferId) ?: return false
+        // A close request is retried from the durable coordinator; never treat a disconnected
+        // client (or one still registering) as a successful PART write.
+        val client = clientFor(buffer.networkId) ?: return false
+        if (client.state.value !is IrcClientState.Ready) return false
         // Append the reason as the PART trailing param when the user supplied one (/part <reason>).
         val params = if (reason.isNullOrBlank()) listOf(buffer.name) else listOf(buffer.name, reason)
-        clientFor(buffer.networkId)?.send(
+        return client.sendIfConnected(
             io.github.trevarj.motd.irc.proto.IrcMessage(command = "PART", params = params),
         )
     }
