@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -510,8 +511,13 @@ private fun ActionMessageRow(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .testTag("chat_action_row")
-            .semantics { stateDescription = actionDescription }
+            // Keep the row's test identity and accessibility state on one semantics node.
+            // Separate semantics modifiers can be folded around combinedClickable differently
+            // between Compose test environments, which made the stable row tag disappear in E2E.
+            .semantics {
+                testTag = "chat_action_row"
+                stateDescription = actionDescription
+            }
             .background(rowColor)
             .actionAccentRail(accent)
             .combinedClickable(
