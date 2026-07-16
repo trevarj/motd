@@ -2,10 +2,26 @@ package io.github.trevarj.motd.ui.components
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ComposerPanelTest {
+    @Test
+    fun autocomplete_popup_is_placed_above_the_composer_without_layout_height() {
+        assertEquals(
+            IntOffset(12, 456),
+            autocompletePopupPosition(
+                anchorBounds = IntRect(left = 12, top = 600, right = 412, bottom = 668),
+                popupContentSize = IntSize(width = 400, height = 144),
+                layoutDirection = LayoutDirection.Ltr,
+            ),
+        )
+    }
+
     @Test fun emojiTakesPriorityOverAutocomplete() {
         assertEquals(ComposerPanel.EMOJI, composerPanel(showEmoji = true, hasAutocomplete = true))
     }

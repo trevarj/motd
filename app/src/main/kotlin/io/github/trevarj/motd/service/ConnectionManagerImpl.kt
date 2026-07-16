@@ -20,6 +20,7 @@ import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.sync.BufferStore
+import io.github.trevarj.motd.data.sync.ChatSoundPlayer
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.MessageNotifier
@@ -179,6 +180,7 @@ class ConnectionManagerImpl @Inject constructor(
     private val historyResyncCoordinator: HistoryResyncCoordinator,
     private val readMarkerRepository: ReadMarkerRepository,
     private val messageNotifier: MessageNotifier,
+    private val chatSoundPlayer: ChatSoundPlayer,
     private val presetEnrollmentCoordinator: PresetEnrollmentCoordinator,
     private val avatarCoordinator: AvatarCoordinator,
     private val pushHealthStore: PushHealthStore,
@@ -1052,7 +1054,8 @@ class ConnectionManagerImpl @Inject constructor(
         )
         val outgoingText = delivery.text
 
-        for (chunk in prepareOutgoingMessageChunks(outgoingText, isBouncerServ)) {
+        val chunks = prepareOutgoingMessageChunks(outgoingText, isBouncerServ)
+        for (chunk in chunks) {
             val displayChunk = chunk.displayText
             // Persist the pending row in beforeSend — BEFORE the PRIVMSG hits the wire — so a
             // fast labeled echo can't be processed ahead of the insert and duplicate the send.
@@ -1079,6 +1082,20 @@ class ConnectionManagerImpl @Inject constructor(
                 continue
             }
             armEchoTimeout(bufferId, label)
+        }
+        if (chunks.isNotEmpty()) {
+            try {
+                chatSoundPlayer.onOutgoingAccepted(bufferId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                diagnostics.record("chat_sound", "outgoing_failed") {
+                    mapOf(
+                        "buffer_id" to bufferId,
+                        "error" to error::class.simpleName,
+                    )
+                }
+            }
         }
     }
 
@@ -1262,10 +1279,26 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     override suspend fun partChannel(bufferId: Long, reason: String?) {
-        val buffer = bufferDao.observeById(bufferId) ?: return
+        sendPart(bufferId, reason)
+    }
+
+    override suspend fun partChannelForClose(bufferId: Long, reason: String?): Boolean = try {
+        sendPart(bufferId, reason)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        false
+    }
+
+    private suspend fun sendPart(bufferId: Long, reason: String?): Boolean {
+        val buffer = bufferDao.observeById(bufferId) ?: return false
+        // A close request is retried from the durable coordinator; never treat a disconnected
+        // client (or one still registering) as a successful PART write.
+        val client = clientFor(buffer.networkId) ?: return false
+        if (client.state.value !is IrcClientState.Ready) return false
         // Append the reason as the PART trailing param when the user supplied one (/part <reason>).
         val params = if (reason.isNullOrBlank()) listOf(buffer.name) else listOf(buffer.name, reason)
-        clientFor(buffer.networkId)?.send(
+        return client.sendIfConnected(
             io.github.trevarj.motd.irc.proto.IrcMessage(command = "PART", params = params),
         )
     }

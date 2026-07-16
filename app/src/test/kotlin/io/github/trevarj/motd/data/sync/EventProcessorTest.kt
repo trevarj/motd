@@ -3,6 +3,7 @@ package io.github.trevarj.motd.data.sync
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import android.content.Context
+import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MessageKind
@@ -222,6 +223,105 @@ class EventProcessorTest {
         ))
 
         assertEquals(1, notifications)
+    }
+
+    @Test
+    fun chatSoundFailure_doesNotInterruptPersistenceOrNotification() = runTest {
+        var notifications = 0
+        val recording = EventProcessor(
+            db = db,
+            typing = TypingTrackerImpl(),
+            notifier = object : MessageNotifier {
+                override suspend fun onIncoming(
+                    networkId: Long,
+                    bufferId: Long,
+                    type: BufferType,
+                    hasMention: Boolean,
+                    message: IrcEvent.ChatMessage,
+                ) {
+                    notifications++
+                }
+            },
+            chatSoundPlayer = object : ChatSoundPlayer {
+                override suspend fun onIncoming(
+                    bufferId: Long,
+                    type: BufferType,
+                    message: IrcEvent.ChatMessage,
+                ) {
+                    error("audio service unavailable")
+                }
+
+                override suspend fun onOutgoingAccepted(bufferId: Long) = Unit
+            },
+        )
+        recording.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+
+        recording.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx = ctx(msgid = "sound-failure"),
+                kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix("alice"),
+                target = "#chan",
+                text = "me: still persist and notify",
+                isSelf = false,
+                replyToMsgid = null,
+            ),
+        )
+
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        assertEquals(1, pagingList(buffer.id).size)
+        assertEquals(1, notifications)
+    }
+
+    @Test
+    fun pendingChannelClose_deletesOnlyAfterSelfPartAcknowledgement() = runTest {
+        val bufferId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "#closing",
+                displayName = "#closing",
+                type = BufferType.CHANNEL,
+                pendingCloseAt = 123,
+            ),
+        )
+
+        processor.process(
+            networkId,
+            IrcEvent.Parted(
+                ctx = ctx(),
+                nick = "me",
+                channel = "#closing",
+                reason = null,
+                isSelf = true,
+            ),
+        )
+
+        assertNull(db.bufferDao().observeById(bufferId))
+    }
+
+    @Test
+    fun pendingChannelClose_notOnChannelError_isTerminalAcknowledgement() = runTest {
+        val bufferId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "#already-gone",
+                displayName = "#already-gone",
+                type = BufferType.CHANNEL,
+                pendingCloseAt = 123,
+            ),
+        )
+
+        processor.process(
+            networkId,
+            IrcEvent.ServerError(
+                code = "442",
+                params = listOf("me", "#already-gone", "You're not on that channel"),
+                text = "You're not on that channel",
+            ),
+        )
+
+        assertNull(db.bufferDao().observeById(bufferId))
     }
 
     @Test

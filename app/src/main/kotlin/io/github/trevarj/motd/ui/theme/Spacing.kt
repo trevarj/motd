@@ -24,6 +24,7 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 data class MotdSpacing(
     val compact: Boolean, // true -> classic single-line IRC row; false -> chat bubbles / two-line
     val twoLine: Boolean, // true -> compact two-line row (avatar+nick+time header over the body)
+    val messageOuterHPad: Dp, // canonical horizontal gutter around chat message rows
     val compactRowVPad: Dp, // COMPACT inline row vertical padding (tight IRC rows)
     val bubbleRowVPad: Dp, // MessageBubble outer Row vertical padding
     val bubbleInnerVPad: Dp, // bubble Column inner vertical padding
@@ -43,6 +44,7 @@ fun spacingFor(density: LayoutDensity): MotdSpacing = when (density) {
     LayoutDensity.COMPACT -> MotdSpacing(
         compact = true,
         twoLine = false,
+        messageOuterHPad = 12.dp,
         compactRowVPad = 1.dp,
         bubbleRowVPad = 0.dp,
         bubbleInnerVPad = 4.dp,
@@ -59,6 +61,7 @@ fun spacingFor(density: LayoutDensity): MotdSpacing = when (density) {
     LayoutDensity.COMFORTABLE -> MotdSpacing(
         compact = false,
         twoLine = false,
+        messageOuterHPad = 12.dp,
         compactRowVPad = 1.dp,
         bubbleRowVPad = 1.dp,
         bubbleInnerVPad = 6.dp,
@@ -77,6 +80,7 @@ fun spacingFor(density: LayoutDensity): MotdSpacing = when (density) {
     LayoutDensity.TWO_LINE -> MotdSpacing(
         compact = false,
         twoLine = true,
+        messageOuterHPad = 12.dp,
         compactRowVPad = 2.dp,
         // Tight outer padding for the two-line row; the inner header/body spacing lives in the renderer.
         bubbleRowVPad = 2.dp,

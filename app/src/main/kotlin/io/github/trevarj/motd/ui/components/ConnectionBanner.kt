@@ -18,6 +18,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -25,6 +30,10 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.delay
+
+/** Avoid flashing a transient reconnect/connecting banner during short network handoffs. */
+internal const val CONNECTION_BANNER_GRACE_MS = 3_000L
 
 /**
  * Thin banner under the top bar summarizing connection health across all networks. Hidden when
@@ -37,8 +46,24 @@ fun ConnectionBanner(
     modifier: Modifier = Modifier,
 ) {
     val status = bannerStatus(states, networkName)
+    var transientGraceElapsed by remember { mutableStateOf(false) }
+    LaunchedEffect(status?.transient) {
+        transientGraceElapsed = false
+        if (status?.transient == true) {
+            // Connecting -> registering -> retrying is one unhealthy episode. Keying the timer by
+            // transientness keeps those internal state changes from restarting the same grace.
+            delay(CONNECTION_BANNER_GRACE_MS)
+            transientGraceElapsed = true
+        }
+    }
+    val visibleStatus = when {
+        status == null -> null
+        !status.transient -> status
+        transientGraceElapsed -> status
+        else -> null
+    }
     AnimatedContent(
-        targetState = status,
+        targetState = visibleStatus,
         transitionSpec = {
             val contentTransform = when {
                 initialState == null ->
@@ -88,10 +113,14 @@ fun ConnectionBanner(
     }
 }
 
-private data class BannerStatus(val text: String, val error: Boolean)
+internal data class BannerStatus(
+    val text: String,
+    val error: Boolean,
+    val transient: Boolean,
+)
 
 /** null when nothing to report (empty or all Ready). Prefers errors over in-progress states. */
-private fun bannerStatus(
+internal fun bannerStatus(
     states: Map<Long, IrcClientState>,
     networkName: (Long) -> String?,
 ): BannerStatus? {
@@ -103,10 +132,10 @@ private fun bannerStatus(
         val name = networkName(id)
         val prefix = name?.let { "$it: " } ?: ""
         return if (failed.fatal) {
-            BannerStatus("$prefix${failed.reason}", error = true)
+            BannerStatus("$prefix${failed.reason}", error = true, transient = false)
         } else {
             // Non-fatal: still surface the reason so a retry loop is diagnosable, not just "Offline".
-            BannerStatus("${prefix}reconnecting — ${failed.reason}", error = true)
+            BannerStatus("${prefix}reconnecting — ${failed.reason}", error = true, transient = true)
         }
     }
 
@@ -121,6 +150,7 @@ private fun bannerStatus(
     return BannerStatus(
         name?.let { "Connecting to $it…" } ?: "Connecting…",
         error = false,
+        transient = true,
     )
 }
 

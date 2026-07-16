@@ -96,11 +96,17 @@ interface BufferDao {
             lm.sender AS lastMessageSender,
             lm.serverTime AS lastMessageTime,
             (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
-                AND m.serverTime > COALESCE(b.readMarkerTime, 0)
+                AND m.serverTime > MAX(
+                    COALESCE(b.readMarkerTime, 0),
+                    COALESCE(b.localUnreadFloorTime, 0)
+                )
                 AND m.isSelf = 0
                 AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS unreadCount,
             (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
-                AND m.serverTime > COALESCE(b.readMarkerTime, 0)
+                AND m.serverTime > MAX(
+                    COALESCE(b.readMarkerTime, 0),
+                    COALESCE(b.localUnreadFloorTime, 0)
+                )
                 AND m.isSelf = 0
                 AND m.hasMention = 1
                 AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS mentionCount
@@ -112,7 +118,7 @@ interface BufferDao {
             ORDER BY m.serverTime DESC, m.id DESC
             LIMIT 1
         )
-        WHERE b.type != 'SERVER'
+        WHERE b.type != 'SERVER' AND b.pendingCloseAt IS NULL
         ORDER BY b.pinned DESC,
                  (lastMessageTime IS NULL) ASC,
                  lastMessageTime DESC,
@@ -131,24 +137,34 @@ interface BufferDao {
     @Query("SELECT * FROM buffers WHERE networkId = :nid AND name = :normName")
     suspend fun byName(nid: Long, normName: String): BufferEntity?
 
-    @Query("SELECT id FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL'")
+    @Query("SELECT id FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND pendingCloseAt IS NULL")
     suspend fun channelIds(networkId: Long): List<Long>
 
-    @Query("SELECT displayName FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND joined = 1 ORDER BY id")
+    @Query("SELECT displayName FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND joined = 1 AND pendingCloseAt IS NULL ORDER BY id")
     suspend fun joinedChannelNames(networkId: Long): List<String>
 
-    @Query("SELECT id, name FROM buffers WHERE networkId = :networkId AND type != 'SERVER' ORDER BY id")
+    @Query("SELECT id, name FROM buffers WHERE networkId = :networkId AND type != 'SERVER' AND pendingCloseAt IS NULL ORDER BY id")
     suspend fun openTargets(networkId: Long): List<BufferTargetRow>
 
     @Query(
-        """SELECT id FROM buffers WHERE networkId = :networkId
+        """SELECT id FROM buffers WHERE networkId = :networkId AND pendingCloseAt IS NULL
            AND (name = :target COLLATE NOCASE OR displayName = :target COLLATE NOCASE) LIMIT 1""",
     )
     suspend fun idForTarget(networkId: Long, target: String): Long?
 
+    @Query("SELECT * FROM buffers WHERE pendingCloseAt IS NOT NULL AND type = 'CHANNEL' ORDER BY pendingCloseAt, id")
+    suspend fun pendingChannelCloses(): List<BufferEntity>
+
+    /** Mark a CHANNEL for an asynchronous server-side close, preserving its first attempt time. */
+    @Query(
+        "UPDATE buffers SET pendingCloseAt = :timestamp " +
+            "WHERE id = :id AND type = 'CHANNEL' AND pendingCloseAt IS NULL",
+    )
+    suspend fun markPendingClose(id: Long, timestamp: Long): Int
+
     @Query(
         """SELECT id AS bufferId, name AS target, readMarkerTime AS timestamp
-           FROM buffers WHERE networkId = :networkId AND type != 'SERVER' ORDER BY id""",
+           FROM buffers WHERE networkId = :networkId AND type != 'SERVER' AND pendingCloseAt IS NULL ORDER BY id""",
     )
     suspend fun storedReadMarkers(networkId: Long): List<BufferReadMarkerRow>
 
@@ -165,7 +181,29 @@ interface BufferDao {
     suspend fun setPinned(id: Long, pinned: Boolean)
 
     @Query("UPDATE buffers SET muted = :muted WHERE id = :id")
-    suspend fun setMuted(id: Long, muted: Boolean)
+    suspend fun writeMuted(id: Long, muted: Boolean)
+
+    @Query(
+        """SELECT MAX(serverTime) FROM messages WHERE bufferId = :id
+           AND isSelf = 0 AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')""",
+    )
+    suspend fun latestIncomingChatTime(id: Long): Long?
+
+    @Query(
+        """UPDATE buffers SET localUnreadFloorTime = :timestamp
+           WHERE id = :id AND (
+               localUnreadFloorTime IS NULL OR localUnreadFloorTime < :timestamp
+           )""",
+    )
+    suspend fun advanceLocalUnreadFloor(id: Long, timestamp: Long)
+
+    @Transaction
+    suspend fun setMuted(id: Long, muted: Boolean) {
+        if (!muted) {
+            latestIncomingChatTime(id)?.let { advanceLocalUnreadFloor(id, it) }
+        }
+        writeMuted(id, muted)
+    }
 
     @Query("UPDATE buffers SET topic = :topic, topicSetBy = :setBy WHERE id = :id")
     suspend fun setTopic(id: Long, topic: String, setBy: String?)

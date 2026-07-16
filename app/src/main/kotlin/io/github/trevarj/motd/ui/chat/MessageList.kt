@@ -62,6 +62,7 @@ import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.normalizeNick
+import io.github.trevarj.motd.data.repo.CachedLinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.NewMessagesDivider
@@ -73,6 +74,7 @@ import io.github.trevarj.motd.ui.components.DaySeparator
 import io.github.trevarj.motd.ui.components.dayStart
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.LocalSpacing
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -164,10 +166,12 @@ fun MessageList(
     showLinkPreviews: Boolean,
     onOpenLink: (String) -> Unit,
     modifier: Modifier = Modifier,
+    cachedPreview: (String) -> CachedLinkPreview? = { null },
     liveEntryId: Long? = null,
     onLiveEntryConsumed: (Long) -> Unit = {},
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
     replyPreview: (String) -> Flow<ReplyPreviewData?> = { flowOf(null) },
+    onReplyPreviewClick: (String) -> Unit = {},
     onDelete: (MessageEntity) -> Unit = {},
     highlightMsgid: String? = null,
     // Normalized nicks known in the current buffer (member list). Drives @mention coloring in the
@@ -188,7 +192,9 @@ fun MessageList(
     onDismissInvite: (Long) -> Unit = {},
 ) {
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
-    val richContentEnabled = richContentReady && !scrolling && (showImages || showLinkPreviews)
+    // Scrolling postpones only cache misses. Parsed URLs and resolved previews remain renderable so
+    // a recycled row does not lose rich content halfway through a fling.
+    val canStartNewRichContentWork = richContentReady && !scrolling && (showImages || showLinkPreviews)
     val formatMessageTime = rememberMessageTimeFormatter()
     LazyColumn(
         state = listState,
@@ -306,10 +312,12 @@ fun MessageList(
                         loadPreview = loadPreview,
                         showImages = showImages,
                         showLinkPreviews = showLinkPreviews,
-                        richContentEnabled = richContentEnabled,
+                        canStartNewRichContentWork = canStartNewRichContentWork,
+                        cachedPreview = cachedPreview,
                         onOpenLink = onOpenLink,
                         onSenderClick = onSenderClick,
                         replyPreview = replyPreview,
+                        onReplyPreviewClick = onReplyPreviewClick,
                     )
                 }
             }
@@ -578,10 +586,12 @@ private fun MessageRow(
     loadPreview: suspend (String) -> LinkPreview?,
     showImages: Boolean,
     showLinkPreviews: Boolean,
-    richContentEnabled: Boolean,
+    canStartNewRichContentWork: Boolean,
+    cachedPreview: (String) -> CachedLinkPreview?,
     onOpenLink: (String) -> Unit,
     onSenderClick: (String) -> Unit,
     replyPreview: (String) -> Flow<ReplyPreviewData?>,
+    onReplyPreviewClick: (String) -> Unit,
     // Non-null for an expanded fool row: renders a "hide" chip above the bubble that re-collapses it.
     onCollapseFool: (() -> Unit)? = null,
 ) {
@@ -615,33 +625,47 @@ private fun MessageRow(
         )
     }
 
-    // URL discovery is unnecessary for the overwhelming majority of IRC lines. For the rows that
-    // can contain a URL, wait until the fling settles and do the single regex pass on Default.
+    // URL discovery is unnecessary for the overwhelming majority of IRC lines. Completed parses
+    // come from a bounded process cache first; only a genuine miss waits for the fling to settle.
     val mayContainUrl = remember(msg.text) {
         msg.text.contains("http://") || msg.text.contains("https://")
     }
     var richUrls by remember(msg.id, msg.text) {
-        mutableStateOf<MessageUrls?>(if (mayContainUrl) null else MessageUrls.Empty)
+        mutableStateOf(if (mayContainUrl) MessageUrlCache.get(msg.text) else MessageUrls.Empty)
     }
-    val latestRichContentEnabled by rememberUpdatedState(richContentEnabled)
+    val latestCanStartNewRichContentWork by rememberUpdatedState(canStartNewRichContentWork)
     LaunchedEffect(msg.id, msg.text, mayContainUrl) {
         if (!mayContainUrl || richUrls != null) return@LaunchedEffect
-        snapshotFlow { latestRichContentEnabled }.first { it }
-        richUrls = withContext(Dispatchers.Default) { messageUrls(msg.text) }
+        snapshotFlow { latestCanStartNewRichContentWork }.first { it }
+        val parsed = withContext(Dispatchers.Default) { messageUrls(msg.text) }
+        MessageUrlCache.put(msg.text, parsed)
+        richUrls = parsed
     }
     val visibleUrls = richUrls?.gated(showImages, showLinkPreviews)
     val imageUrl = visibleUrls?.imageUrl
     val linkUrl = visibleUrls?.linkUrl
 
-    // Lazily fetch a link preview for the first non-image URL once the timeline is idle. The
-    // completion state retains a null result (fetch failed / not HTML), so it does not retry or
-    // leave a loading skeleton behind (plans/15 #3).
-    var previewState by remember(msg.id, linkUrl) { mutableStateOf<PreviewState>(PreviewState.Idle) }
-    val latestPreviewsEnabled by rememberUpdatedState(richContentEnabled)
+    // A cached completion is rendered synchronously even while scrolling. A cache miss waits for
+    // idle, then joins the repository's process-owned single-flight fetch. Null is a completed
+    // negative result, not a loading state, so recycling does not restart a skeleton indefinitely.
+    val initialCachedPreview = linkUrl?.let(cachedPreview)
+    var previewState by remember(msg.id, linkUrl) {
+        mutableStateOf<PreviewState>(initialCachedPreview?.let { PreviewState.Done(it.preview) } ?: PreviewState.Idle)
+    }
+    val latestCachedPreview by rememberUpdatedState(cachedPreview)
     LaunchedEffect(msg.id, linkUrl) {
         val url = linkUrl ?: return@LaunchedEffect
-        snapshotFlow { latestPreviewsEnabled }.first { it }
         if (previewState !is PreviewState.Idle) return@LaunchedEffect
+        latestCachedPreview(url)?.let {
+            previewState = PreviewState.Done(it.preview)
+            return@LaunchedEffect
+        }
+        snapshotFlow { latestCanStartNewRichContentWork }.first { it }
+        if (previewState !is PreviewState.Idle) return@LaunchedEffect
+        latestCachedPreview(url)?.let {
+            previewState = PreviewState.Done(it.preview)
+            return@LaunchedEffect
+        }
         previewState = PreviewState.Loading
         val preview = try {
             loadPreview(url)
@@ -654,6 +678,7 @@ private fun MessageRow(
     }
     val preview = (previewState as? PreviewState.Done)?.preview?.withImageGate(showImages)
     val previewLoading = linkUrl != null && previewState is PreviewState.Loading
+    val previewResolved = linkUrl != null && previewState is PreviewState.Done
     val formattedTime = remember(msg.serverTime, formatTime) { formatTime(msg.serverTime) }
     // Ordinary rows stay on the hot scrolling path without even resolving the accessibility
     // string; mention state is immutable for a stored row and only the sparse highlighted rows
@@ -694,9 +719,15 @@ private fun MessageRow(
             // Subtle "sending…" state before the 30s failure flip (plans/15 #21).
             pending = msg.pendingLabel != null,
             reply = reply,
+            onReplyClick = if (resolvedReply != null) {
+                msg.replyToMsgid?.let { parentMsgid -> { onReplyPreviewClick(parentMsgid) } }
+            } else {
+                null
+            },
             imageUrl = imageUrl,
             linkPreview = preview,
             linkPreviewLoading = previewLoading,
+            linkPreviewResolved = previewResolved,
             reactions = reactions,
             knownNicks = knownNicks,
             onLongPress = { onLongPress(msg) },
@@ -751,7 +782,7 @@ private fun FoolPlaceholderRow(
                 .testTag(messageTag(msg))
                 .clickable { onExpand() }
                 .alpha(0.7f)
-                .padding(horizontal = 16.dp, vertical = 2.dp),
+                .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -789,7 +820,7 @@ private fun FoolCollapseChip(sender: String, onCollapse: () -> Unit) {
         modifier = Modifier
             .clickable { onCollapse() }
             .alpha(0.7f)
-            .padding(horizontal = 16.dp, vertical = 2.dp),
+            .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -851,7 +882,7 @@ private fun RetryRow(onRetry: () -> Unit, onDelete: () -> Unit) {
     androidx.compose.foundation.layout.Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 2.dp),
+            .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
     ) {

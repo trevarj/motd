@@ -465,6 +465,13 @@ class IrcClient(
         transport?.send(msg.serialize())
     }
 
+    /** Send one raw IRC message and report whether a live transport accepted the write. */
+    suspend fun sendIfConnected(msg: IrcMessage): Boolean {
+        val t = transport ?: return false
+        t.send(msg.serialize())
+        return true
+    }
+
     /** Attach a label tag, suspend until the labeled response/ack batch completes. */
     suspend fun sendLabeled(msg: IrcMessage): List<IrcMessage> {
         val t = transport ?: return emptyList()

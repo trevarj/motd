@@ -55,6 +55,26 @@ class MessageVisibilityPolicyTest {
     }
 
     @Test
+    fun `temporarily revealed hidden fool is timeline-only`() {
+        val fool = message(sender = "alice")
+        val policy = MessageVisibilityPolicy(
+            MessageVisibilitySpec(
+                fools = setOf("alice"),
+                foolsMode = FoolsMode.HIDE,
+                revealHiddenFools = true,
+            ),
+        )
+
+        assertTrue(policy.timeline(fool))
+        assertFalse(policy.search(fool))
+        assertFalse(policy.preview(fool))
+        assertFalse(policy.activity(fool))
+        assertFalse(policy.visibleUnread(fool))
+        assertFalse(policy.anchor(fool))
+        assertFalse(policy.effectiveBottom(fool))
+    }
+
+    @Test
     fun `own and system rows are never treated as fools`() {
         val policy = policy(FoolsMode.HIDE)
         val own = message(sender = "alice", isSelf = true)

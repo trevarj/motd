@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.effectiveReadFloorTime
 import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LinkPreview
@@ -146,8 +147,13 @@ class ChatViewModel @Inject constructor(
     // Behavioral filter (JPQ visibility + fools HIDE). Distinct so unrelated settings edits don't
     // re-emit the paging stream (plans/13 §2.5). ChatState is untouched — the screen collects
     // [settings] separately (mirrors R1 keeping the 5-ary combine stable).
+    private val _hiddenFoolsRevealed = MutableStateFlow(false)
+    val hiddenFoolsRevealed: StateFlow<Boolean> = _hiddenFoolsRevealed.asStateFlow()
+
     private val filterSpec = settingsRepository.settings
-        .map(MessageVisibilitySpec::from)
+        .combine(_hiddenFoolsRevealed) { settings, revealHiddenFools ->
+            MessageVisibilitySpec.from(settings).copy(revealHiddenFools = revealHiddenFools)
+        }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, MessageVisibilitySpec())
 
@@ -166,6 +172,10 @@ class ChatViewModel @Inject constructor(
     /** Full settings for the timeline (friends/fools/foolsMode/nick styling); collected in the screen. */
     val settings: StateFlow<Settings> = settingsRepository.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Settings())
+
+    fun setHiddenFoolsRevealed(revealed: Boolean) {
+        _hiddenFoolsRevealed.value = revealed
+    }
 
     private val replyTo = MutableStateFlow<MessageEntity?>(null)
     private val _members = MutableStateFlow<List<MemberEntity>>(emptyList())
@@ -333,7 +343,7 @@ class ChatViewModel @Inject constructor(
     // to 0 and stays 0 when scrolling back up — instead of counting already-read messages until
     // re-entry (bug: badge doesn't clear until leaving the chat).
     val readMarkerTime: StateFlow<Long?> = buffer
-        .map { it?.readMarkerTime }
+        .map { it?.effectiveReadFloorTime }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -428,6 +438,9 @@ class ChatViewModel @Inject constructor(
 
     suspend fun linkPreview(url: String): LinkPreview? =
         if (contentPreviews.value.showLinkPreviews) linkPreviewRepository.preview(url) else null
+
+    fun cachedLinkPreview(url: String) =
+        if (contentPreviews.value.showLinkPreviews) linkPreviewRepository.cachedPreview(url) else null
 
     /** Transient one-shot messages surfaced as a snackbar by the screen (plans/16 §5.6). */
     private val _snackbar = MutableStateFlow<String?>(null)
@@ -649,6 +662,17 @@ class ChatViewModel @Inject constructor(
 
     private val jumpMsgid: String? = route.jumpToMsgid
     private val jumpTime: Long = route.jumpToTime
+    private data class JumpRequest(
+        val msgid: String?,
+        val time: Long,
+        val settlesEntryPosition: Boolean,
+    )
+
+    private var activeJumpRequest: JumpRequest? = if (jumpTime > 0) {
+        JumpRequest(jumpMsgid, jumpTime, settlesEntryPosition = true)
+    } else {
+        null
+    }
 
     /**
      * CHATHISTORY AROUND fetch used by [ChatJumpResolver] when a msgid target is not yet local:
@@ -739,7 +763,7 @@ class ChatViewModel @Inject constructor(
         // you just sent. Null (no real marker, or nothing unread from others) hides both.
         viewModelScope.launch {
             val entrySpec = MessageVisibilitySpec.from(settingsRepository.settings.first())
-            val realMarker = bufferRepository.observeBuffer(bufferId).firstOrNull()?.readMarkerTime
+            val realMarker = bufferRepository.observeBuffer(bufferId).firstOrNull()?.effectiveReadFloorTime
             _readMarkerSnapshot.value = if (realMarker == null) {
                 null
             } else {
@@ -802,7 +826,8 @@ class ChatViewModel @Inject constructor(
     }
 
     private suspend fun publishResolve(name: String?) {
-        when (val r = resolver.resolve(bufferId, jumpMsgid, jumpTime, name)) {
+        val request = activeJumpRequest ?: return
+        when (val r = resolver.resolve(bufferId, request.msgid, request.time, name)) {
             is ChatJumpResolver.Result.Target -> {
                 // Force a distinct emission so the screen's LaunchedEffect(jumpTarget) always
                 // re-runs, even when the re-resolved index equals the previous one (plans/15 #12).
@@ -818,8 +843,10 @@ class ChatViewModel @Inject constructor(
 
     /** Screen calls this after it has scrolled to (or given up on) the current target. */
     fun onJumpHandled() {
+        val settlesEntryPosition = activeJumpRequest?.settlesEntryPosition == true
+        activeJumpRequest = null
         _jumpTarget.value = null
-        markEntryPositionSettled()
+        if (settlesEntryPosition) markEntryPositionSettled()
     }
 
     /** The screen completed its one-shot normal-entry positioning. */
@@ -843,8 +870,24 @@ class ChatViewModel @Inject constructor(
     }
 
     fun onJumpUnresolved() {
+        val settlesEntryPosition = activeJumpRequest?.settlesEntryPosition == true
+        activeJumpRequest = null
         _jumpTarget.value = null
-        markEntryPositionUnresolved()
+        if (settlesEntryPosition) markEntryPositionUnresolved()
+    }
+
+    /**
+     * Resolve and reveal a locally available replied-to message. Reply previews are only clickable
+     * after their target has resolved from Room, so this normally remains a local index lookup; the
+     * shared jump pipeline still supplies bounded paging, index-shift recovery, and highlighting.
+     */
+    fun jumpToRepliedMessage(msgid: String) {
+        activeJumpRequest = JumpRequest(msgid, time = 0, settlesEntryPosition = false)
+        reresolveUsed = false
+        _jumpFailed.value = false
+        viewModelScope.launch {
+            publishResolve(state.value.buffer?.name)
+        }
     }
 
     private fun markEntryPositionSettled() {

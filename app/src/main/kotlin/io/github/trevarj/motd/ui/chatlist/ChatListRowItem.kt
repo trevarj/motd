@@ -42,12 +42,29 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.MentionBadge
+import io.github.trevarj.motd.ui.components.MutedActivityBadge
 import io.github.trevarj.motd.ui.components.NetworkChip
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.components.isAppliedThemeDark
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.presenceOnlineColor
+
+internal data class ChatListBadgeState(
+    val mutedActivity: Int? = null,
+    val mentions: Int? = null,
+    val unread: Int? = null,
+)
+
+internal fun chatListBadgeState(row: ChatListRow): ChatListBadgeState =
+    if (row.muted) {
+        ChatListBadgeState(mutedActivity = row.unreadCount.takeIf { it > 0 })
+    } else {
+        ChatListBadgeState(
+            mentions = row.mentionCount.takeIf { it > 0 },
+            unread = row.unreadCount.takeIf { it > 0 },
+        )
+    }
 
 /**
  * One chat-list row: avatar, display name (+ network chip when multi-network), last-message
@@ -72,6 +89,7 @@ fun ChatListRowItem(
     // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
     val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
     val queryPresence = presence.takeIf { row.type == BufferType.QUERY }
+    val badges = chatListBadgeState(row)
     val presenceDescription = queryPresence?.let {
         stringResource(
             when (it) {
@@ -185,11 +203,17 @@ fun ChatListRowItem(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (row.mentionCount > 0) {
-                    MentionBadge(count = row.mentionCount, modifier = Modifier.testTag("chatlist_row_mention_badge"))
+                badges.mutedActivity?.let { count ->
+                    MutedActivityBadge(
+                        count = count,
+                        modifier = Modifier.testTag("chatlist_row_muted_activity_badge"),
+                    )
                 }
-                if (row.unreadCount > 0) {
-                    UnreadBadge(count = row.unreadCount, modifier = Modifier.testTag("chatlist_row_unread_badge"))
+                badges.mentions?.let { count ->
+                    MentionBadge(count = count, modifier = Modifier.testTag("chatlist_row_mention_badge"))
+                }
+                badges.unread?.let { count ->
+                    UnreadBadge(count = count, modifier = Modifier.testTag("chatlist_row_unread_badge"))
                 }
             }
         }

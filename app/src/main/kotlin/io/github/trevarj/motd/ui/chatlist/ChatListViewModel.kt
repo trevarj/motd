@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.service.ChannelCloseCoordinator
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
@@ -39,9 +40,9 @@ data class ChatListState(
     val allUnread: Int = 0, // "All chats" unread rollup (non-muted)
     val allMentions: Int = 0, // "All chats" mention rollup
 ) {
-    /** Effective unread count for the current drawer scope, including muted chats. */
+    /** Effective unread count for the current drawer scope; muted activity stays row-local. */
     val scopedUnreadCount: Int
-        get() = rows.filterNot { it.type == BufferType.SERVER }.sumOf { it.unreadCount }
+        get() = rows.filterNot { it.type == BufferType.SERVER || it.muted }.sumOf { it.unreadCount }
 
     /** The scoped network's name, or null when unscoped (drives the top-bar title/chip). */
     val selectedNetworkName: String?
@@ -57,10 +58,17 @@ class ChatListViewModel @Inject constructor(
     private val bufferRepository: BufferRepository,
     private val networkRepository: NetworkRepository,
     private val connectionManager: ConnectionManager,
+    private val channelCloseCoordinator: ChannelCloseCoordinator,
     private val readMarkerRepository: ReadMarkerSnapshotter,
     private val settingsRepository: SettingsRepository,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
+
+    init {
+        // The coordinator is process-scoped and observes persisted pending closes, so creating a
+        // fresh ViewModel after process/configuration recreation re-drives any unfinished leaves.
+        channelCloseCoordinator.start()
+    }
 
     // Scope selection survives config changes; null = unified list (default).
     private val selection = MutableStateFlow(savedStateHandle.get<Long?>(KEY_SELECTED))
@@ -98,7 +106,7 @@ class ChatListViewModel @Inject constructor(
                 selectedNetworkId = validSelection,
                 drawerRows = buildDrawerRows(networks, rows, connection),
                 allUnread = rows.filterNot { it.muted }.sumOf { it.unreadCount },
-                allMentions = rows.sumOf { it.mentionCount },
+                allMentions = rows.filterNot { it.muted }.sumOf { it.mentionCount },
             )
         }.stateIn(
             scope = viewModelScope,
@@ -119,18 +127,17 @@ class ChatListViewModel @Inject constructor(
     }
 
     /**
-     * Delete a chat/buffer from the list. A CHANNEL is PARTed first (no-op when not connected —
-     * [ConnectionManager.partChannel] only sends when a live client exists), then the buffer and all
-     * of its content (messages/members/reactions) are removed. QUERY/SERVER rows just remove.
-     *
-     * Scope note: list scoping keys off networkId, never a bufferId, so deleting a buffer cannot be
-     * the scoped selection — no scope reset is needed here.
+     * Delete a chat/buffer from the list. QUERY/SERVER rows are local-only and are removed at once.
+     * CHANNEL rows are marked pending immediately (which hides them from every normal projection);
+     * the process-scoped coordinator performs the server close and removes history only after it
+     * succeeds. Scope selection keys off networkId, never a bufferId, so no scope reset is needed.
      */
     fun deleteBuffer(row: ChatListRow) = viewModelScope.launch {
         if (row.type == BufferType.CHANNEL) {
-            connectionManager.partChannel(row.bufferId)
+            channelCloseCoordinator.requestClose(row.bufferId)
+        } else {
+            bufferRepository.deleteBuffer(row.bufferId)
         }
-        bufferRepository.deleteBuffer(row.bufferId)
     }
 
     /** Find-or-create a query buffer, then hand the id to [onOpen] for navigation. */
@@ -185,10 +192,10 @@ class ChatListViewModel @Inject constructor(
     }
 }
 
-/** Pure selection seam: muted rows remain eligible; SERVER/zero-unread rows never do. */
+/** Pure selection seam: muted/SERVER/zero-unread rows never participate in mark-all. */
 internal fun unreadBufferIds(rows: List<ChatListRow>): List<Long> = rows
     .asSequence()
-    .filter { it.type != BufferType.SERVER && it.unreadCount > 0 }
+    .filter { !it.muted && it.type != BufferType.SERVER && it.unreadCount > 0 }
     .map { it.bufferId }
     .distinct()
     .toList()

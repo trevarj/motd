@@ -5,6 +5,9 @@ import io.github.trevarj.motd.bouncer.SojuLoginForm
 import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
+import io.github.trevarj.motd.ui.settings.addnetwork.applyNetworkPreset
+import io.github.trevarj.motd.ui.settings.addnetwork.networkPreset
 
 /**
  * Pure state machine for the onboarding wizard. No Android/Compose/coroutine dependencies so the
@@ -109,6 +112,9 @@ data class OnboardingState(
     val server: ServerForm = ServerForm(),
     /** Direct-network authentication draft; bouncer credentials are kept separately. */
     val auth: AuthForm = AuthForm(),
+    val presetId: NetworkPresetId = NetworkPresetId.CUSTOM,
+    val showPlaintextWarning: Boolean = false,
+    val plaintextConfirmed: Boolean = false,
     val sojuLogin: SojuLoginForm = SojuLoginForm(),
     val zncLogin: ZncLoginForm = ZncLoginForm(),
     // Connect-test progress.
@@ -154,9 +160,6 @@ data class OnboardingState(
         }
 }
 
-/** Libera.Chat one-tap preset (spec). */
-val LIBERA_PRESET = ServerForm(host = "irc.libera.chat", port = "6697", tls = true)
-
 /** All actions that can mutate wizard state. Pure — no side effects here. */
 sealed interface OnboardingAction {
     data object Next : OnboardingAction
@@ -165,7 +168,10 @@ sealed interface OnboardingAction {
 
     data class ChooseConnection(val choice: ConnectionChoice) : OnboardingAction
     data class ChooseBouncerKind(val kind: BouncerKind) : OnboardingAction
-    data object ApplyLiberaPreset : OnboardingAction
+    data class SelectPreset(val id: NetworkPresetId) : OnboardingAction
+    data object ShowPlaintextWarning : OnboardingAction
+    data object ConfirmPlaintext : OnboardingAction
+    data object DismissPlaintextWarning : OnboardingAction
 
     data class EditServer(val server: ServerForm) : OnboardingAction
     data class EditAuth(val auth: AuthForm) : OnboardingAction
@@ -204,22 +210,66 @@ fun onboardingReducer(state: OnboardingState, action: OnboardingAction): Onboard
 
         is OnboardingAction.GoTo -> state.copy(step = action.step)
 
-        is OnboardingAction.ChooseConnection -> state.copy(choice = action.choice)
+        is OnboardingAction.ChooseConnection -> state.copy(
+            choice = action.choice,
+            presetId = if (action.choice == ConnectionChoice.NETWORK) {
+                state.presetId
+            } else {
+                NetworkPresetId.CUSTOM
+            },
+            showPlaintextWarning = false,
+            plaintextConfirmed = false,
+        )
 
-        is OnboardingAction.ChooseBouncerKind -> state.copy(bouncerKind = action.kind)
+        is OnboardingAction.ChooseBouncerKind -> state.copy(
+            bouncerKind = action.kind,
+            showPlaintextWarning = false,
+            plaintextConfirmed = false,
+        )
 
-        is OnboardingAction.ApplyLiberaPreset ->
+        is OnboardingAction.SelectPreset -> {
+            val preset = networkPreset(action.id)
+            if (preset == null) {
+                state.copy(
+                    presetId = NetworkPresetId.CUSTOM,
+                    showPlaintextWarning = false,
+                    plaintextConfirmed = false,
+                )
+            } else {
+                val (server, auth) = applyNetworkPreset(preset, state.server)
+                state.copy(
+                    choice = ConnectionChoice.NETWORK,
+                    server = server,
+                    auth = auth,
+                    presetId = action.id,
+                    showPlaintextWarning = false,
+                    plaintextConfirmed = false,
+                )
+            }
+        }
+
+        is OnboardingAction.ShowPlaintextWarning ->
+            state.copy(showPlaintextWarning = true)
+
+        is OnboardingAction.ConfirmPlaintext ->
+            state.copy(showPlaintextWarning = false, plaintextConfirmed = true)
+
+        is OnboardingAction.DismissPlaintextWarning ->
+            state.copy(showPlaintextWarning = false)
+
+        is OnboardingAction.EditServer -> {
+            val selected = networkPreset(state.presetId)
             state.copy(
-                choice = ConnectionChoice.NETWORK,
-                // Preserve any identity fields the user already typed.
-                server = state.server.copy(
-                    host = LIBERA_PRESET.host,
-                    port = LIBERA_PRESET.port,
-                    tls = LIBERA_PRESET.tls,
-                ),
+                server = action.server,
+                presetId = if (selected?.matches(action.server) == true) {
+                    state.presetId
+                } else {
+                    NetworkPresetId.CUSTOM
+                },
+                showPlaintextWarning = false,
+                plaintextConfirmed = false,
             )
-
-        is OnboardingAction.EditServer -> state.copy(server = action.server)
+        }
 
         is OnboardingAction.EditAuth -> state.copy(auth = action.auth)
 

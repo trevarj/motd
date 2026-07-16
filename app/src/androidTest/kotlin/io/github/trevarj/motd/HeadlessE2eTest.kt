@@ -205,6 +205,17 @@ abstract class HeadlessE2eDriver {
         compose.onAllNodes(matcher, useUnmergedTree = true).onFirst().performClick()
     }
 
+    protected fun assertTagPrefix(prefix: String) {
+        val matcher = SemanticsMatcher("test tag starts with $prefix") { node ->
+            node.config.contains(SemanticsProperties.TestTag) &&
+                node.config[SemanticsProperties.TestTag].startsWith(prefix)
+        }
+        compose.waitUntil(15_000) {
+            compose.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onAllNodes(matcher, useUnmergedTree = true).onFirst().assertIsDisplayed()
+    }
+
     protected fun clickText(text: String) {
         waitForText(text)
         compose.onAllNodes(
@@ -340,6 +351,9 @@ class OnboardingHeadlessE2eTest : HeadlessE2eDriver() {
     @Test
     fun connectsImportsNetworkAndAutomaticallyBackfillsRetainedHistory() {
         waitForDescription("Open navigation drawer")
+        clickDescription("Open navigation drawer")
+        assertTagPrefix("drawer_network_icon_")
+        back()
         waitForDescription("New conversation")
         // The retained channel must arrive via the automatic CHATHISTORY TARGETS/LATEST pass;
         // do not create or join it manually before making this assertion.
@@ -402,7 +416,9 @@ class ChatHeadlessE2eTest : HeadlessE2eDriver() {
         longClickMessageContaining(parent)
         waitForTag("message_action_sheet")
         clickText("👍")
-        waitForTag("chat_reaction_chip_👍", timeoutMillis = 20_000)
+        // A reaction to a just-sent row can legitimately wait up to 32 seconds for its server
+        // msgid before ChatViewModel sends the TAGMSG. Keep the E2E allowance beyond that contract.
+        waitForTag("chat_reaction_chip_👍", timeoutMillis = 40_000)
         clickTag("chat_reaction_chip_👍")
         waitForTagToDisappear("chat_reaction_chip_👍", timeoutMillis = 20_000)
 

@@ -55,10 +55,28 @@ class LinkPreviewRequestGateTest {
         )
         prefs.setShowLinkPreviews(true)
         assertNotNull(repository.preview(url))
+        assertNotNull(repository.cachedPreview(url)?.preview)
         assertEquals(1, server.requestCount)
 
         prefs.setShowLinkPreviews(false)
         assertNull(repository.preview(url))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun completed_negative_result_is_distinct_from_a_cache_miss() = runTest {
+        val repository = LinkPreviewRepositoryImpl(prefs, this, StandardTestDispatcher(testScheduler))
+        val url = server.url("/binary").toString()
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "application/octet-stream")
+                .setBody("not html"),
+        )
+
+        assertNull(repository.cachedPreview(url))
+        assertNull(repository.preview(url))
+        assertNotNull(repository.cachedPreview(url))
+        assertNull(repository.cachedPreview(url)?.preview)
         assertEquals(1, server.requestCount)
     }
 

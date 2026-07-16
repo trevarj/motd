@@ -46,4 +46,16 @@ class LinkifyTest {
             messageUrls("`https://inside.example/photo.png'"),
         )
     }
+
+    @Test fun process_cache_retains_positive_and_empty_url_parses() {
+        MessageUrlCache.clearForTest()
+        val richText = "read https://example.com/article and https://example.com/photo.webp"
+        val richUrls = messageUrls(richText)
+
+        MessageUrlCache.put(richText, richUrls)
+        MessageUrlCache.put("plain", MessageUrls.Empty)
+
+        assertEquals(richUrls, MessageUrlCache.get(richText))
+        assertEquals(MessageUrls.Empty, MessageUrlCache.get("plain"))
+    }
 }

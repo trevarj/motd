@@ -24,6 +24,7 @@ import io.github.trevarj.motd.service.RoomReactionMutationStore
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 
 /**
@@ -39,6 +40,7 @@ class EventProcessor @Inject constructor(
     private val db: MotdDatabase,
     private val typing: TypingTrackerImpl,
     private val notifier: MessageNotifier,
+    private val chatSoundPlayer: ChatSoundPlayer = ChatSoundPlayer.Noop,
     private val bufferStore: BufferStore = BufferStore(db),
     private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) : IrcEventSink {
@@ -489,6 +491,21 @@ class EventProcessor @Inject constructor(
             bufferDao.advanceReadMarker(bufferId, e.ctx.serverTime)
             return
         }
+        if (origin == EventOrigin.LIVE && !e.isSelf) {
+            try {
+                chatSoundPlayer.onIncoming(bufferId, type, e)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                diagnostics.record("chat_sound", "incoming_failed") {
+                    mapOf(
+                        "network_id" to networkId,
+                        "buffer_id" to bufferId,
+                        "error" to error::class.simpleName,
+                    )
+                }
+            }
+        }
         if (origin.notifies) maybeNotify(networkId, bufferId, type, hasMention, e)
     }
 
@@ -757,7 +774,14 @@ class EventProcessor @Inject constructor(
 
     private suspend fun onParted(networkId: Long, e: IrcEvent.Parted) {
         val st = stateFor(networkId)
-        val bufferId = bufferDao.byName(networkId, st.normalize(e.channel))?.id ?: return
+        val buffer = bufferDao.byName(networkId, st.normalize(e.channel)) ?: return
+        if (e.isSelf && buffer.pendingCloseAt != null) {
+            // A self-PART is the direct/ZNC server acknowledgement for a queued close. Only now is
+            // it safe to cascade-delete local history; the row stayed hidden while awaiting this.
+            bufferDao.deleteBuffer(buffer.id)
+            return
+        }
+        val bufferId = buffer.id
         memberDao.remove(bufferId, e.nick)
         if (e.isSelf) {
             rosterSnapshots.remove(RosterKey(networkId, bufferId))
@@ -1130,6 +1154,16 @@ class EventProcessor @Inject constructor(
     /** ServerError → SERVER buffer, kind ERROR. The event carries no ctx, so use the wall clock. */
     private suspend fun onServerError(networkId: Long, e: IrcEvent.ServerError) {
         val st = stateFor(networkId)
+        if (e.code in PART_ALREADY_CLOSED_NUMERICS) {
+            val channel = e.params.firstOrNull { isChannel(it, st) }
+            val buffer = channel?.let { bufferDao.byName(networkId, st.normalize(it)) }
+            if (buffer?.pendingCloseAt != null) {
+                // 403/442 confirms the server has no membership to leave. Treat that as the same
+                // terminal acknowledgement as our echoed PART.
+                bufferDao.deleteBuffer(buffer.id)
+                return
+            }
+        }
         if (e.code in JOIN_ERROR_NUMERICS) {
             val channel = e.params.firstOrNull { isChannel(it, st) }
             val inviteBufferId = channel?.let { bufferDao.byName(networkId, st.normalize(it))?.id }
@@ -1434,6 +1468,7 @@ class EventProcessor @Inject constructor(
         val JOIN_ERROR_NUMERICS: Set<String> = setOf(
             "403", "405", "471", "473", "474", "475", "476",
         )
+        val PART_ALREADY_CLOSED_NUMERICS: Set<String> = setOf("403", "442")
     }
 }
 

@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
+import java.util.LinkedHashMap
+
 /** URL detection shared by the composer/bubble. Deliberately conservative (http/https only). */
 private val URL_REGEX = Regex("""https?://[^\s<>]+""")
 
@@ -9,6 +11,32 @@ private val IMAGE_EXT = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic"
 data class MessageUrls(val imageUrl: String?, val linkUrl: String?) {
     companion object {
         val Empty = MessageUrls(imageUrl = null, linkUrl = null)
+    }
+}
+
+/**
+ * Bounded process-lifetime parse cache. Lazy rows are routinely disposed and recreated while
+ * scrolling or switching buffers, so retaining both positive and empty parses avoids repeating the
+ * regex/code-segment walk before already-known rich content can be rendered.
+ */
+internal object MessageUrlCache {
+    private const val MAX_ENTRIES = 512
+    private val entries = object : LinkedHashMap<String, MessageUrls>(MAX_ENTRIES, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MessageUrls>?): Boolean =
+            size > MAX_ENTRIES
+    }
+
+    @Synchronized
+    fun get(text: String): MessageUrls? = entries[text]
+
+    @Synchronized
+    fun put(text: String, urls: MessageUrls) {
+        entries[text] = urls
+    }
+
+    @Synchronized
+    internal fun clearForTest() {
+        entries.clear()
     }
 }
 

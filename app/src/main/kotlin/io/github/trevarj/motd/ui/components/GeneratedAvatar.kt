@@ -215,7 +215,7 @@ internal fun IrcSpriteAvatar(
     )
 }
 
-/** Deterministic network badge for a server-drawer row; [status] remains visible as an outer ring. */
+/** Deterministic network badge whose outer [status] ring remains independent of its identity. */
 @Composable
 internal fun IrcNetworkBadge(
     name: String,

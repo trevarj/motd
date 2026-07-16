@@ -7,13 +7,17 @@ import io.github.trevarj.motd.di.IoDispatcher
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -21,9 +25,10 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 // OG-tag link preview. HttpURLConnection GET, 5s connect/read timeouts, only text/html, body
-// capped at 512 KB. Results (including nulls for unfetchable / non-HTML pages) are cached in an
-// in-memory LruCache(256) so repeated renders don't refetch. The OG parser is a small
-// regex-based extractor (no HTML-parser dependency) and is unit-tested against fixtures.
+// capped at 512 KB. Completed results (including nulls for unfetchable / non-HTML pages) live in a
+// bounded process cache, while concurrent callers for the same URL await one shared request. The OG
+// parser is a small regex-based extractor (no HTML-parser dependency) and is unit-tested against
+// fixtures.
 @Singleton
 class LinkPreviewRepositoryImpl @Inject constructor(
     private val contentPreviewPrefs: ContentPreviewPrefs,
@@ -32,22 +37,47 @@ class LinkPreviewRepositoryImpl @Inject constructor(
 ) : LinkPreviewRepository {
     // LruCache does not permit null values, so wrap results in an Optional-ish holder.
     private val cache = LruCache<String, Holder>(CACHE_SIZE)
+    private val inFlight = ConcurrentHashMap<String, Deferred<Holder>>()
+
+    override fun cachedPreview(url: String): CachedLinkPreview? =
+        synchronized(cache) {
+            cache.get(url)?.let { CachedLinkPreview(it.value) }
+        }
 
     override suspend fun preview(url: String): LinkPreview? {
         // Gate before even consulting cached metadata: disabled means neither network nor render.
         if (!contentPreviewPrefs.config.first().showLinkPreviews) return null
-        cache.get(url)?.let { return it.value }
-        val result = try {
-            fetch(url)
-        } catch (cancelled: CancellationException) {
-            // A row leaving composition is normal cancellation, not a negative preview result.
-            // Propagate it so a later visible row may retry instead of poisoning the LRU with null.
-            throw cancelled
-        } catch (_: Exception) {
-            null
+        cachedPreview(url)?.let { return it.preview }
+        return sharedFetch(url).await().value
+    }
+
+    /**
+     * The process-owned request survives one lazy row leaving composition: other rows (or a later
+     * recycle of the same row) can join it, and its completed positive/negative value is retained.
+     */
+    private fun sharedFetch(url: String): Deferred<Holder> {
+        val created = applicationScope.async(ioDispatcher, start = CoroutineStart.LAZY) {
+            val result = try {
+                fetch(url)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            Holder(result).also { holder ->
+                synchronized(cache) {
+                    cache.put(url, holder)
+                }
+            }
         }
-        cache.put(url, Holder(result))
-        return result
+        val existing = inFlight.putIfAbsent(url, created)
+        if (existing != null) {
+            created.cancel()
+            return existing
+        }
+        created.invokeOnCompletion { inFlight.remove(url, created) }
+        created.start()
+        return created
     }
 
     private suspend fun fetch(url: String): LinkPreview? = suspendCancellableCoroutine { continuation ->

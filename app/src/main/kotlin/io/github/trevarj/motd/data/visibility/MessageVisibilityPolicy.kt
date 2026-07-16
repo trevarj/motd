@@ -22,6 +22,8 @@ data class MessageVisibilitySpec(
     val showJoinPartQuit: Boolean = true,
     val fools: Set<String> = emptySet(),
     val foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    /** Chat-local escape hatch: reveal HIDE-mode rows without making them meaningful activity. */
+    val revealHiddenFools: Boolean = false,
 ) {
     companion object {
         fun from(settings: Settings): MessageVisibilitySpec = MessageVisibilitySpec(
@@ -44,7 +46,7 @@ class MessageVisibilityPolicy(
     /** Rows physically presented by the timeline. Collapse retains its expandable placeholder. */
     fun timeline(message: MessageEntity): Boolean =
         (spec.showJoinPartQuit || message.kind !in JOIN_PART_QUIT_KINDS) &&
-            !(spec.foolsMode == FoolsMode.HIDE && isFool(message))
+            !(spec.foolsMode == FoolsMode.HIDE && !spec.revealHiddenFools && isFool(message))
 
     /** Preview and activity use the same eligibility; fools never reorder the chat list. */
     fun preview(message: MessageEntity): Boolean =

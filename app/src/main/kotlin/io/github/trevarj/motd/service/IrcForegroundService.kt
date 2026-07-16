@@ -50,7 +50,11 @@ class IrcForegroundService : LifecycleService() {
     // when analyzing the shared service against the Google flavor's manifest overlay.
     @SuppressLint("ForegroundServiceType")
     private fun startAsForeground() {
-        val notification = notifications.statusNotification(connectedCount = 0, reconnecting = true)
+        val notification = notifications.statusNotification(
+            connectedCount = 0,
+            reconnecting = false,
+            starting = true,
+        )
         // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is an API 34 constant; only pass the type on 34+.
         // On 29-33 use the 2-arg overload (the manifest still declares foregroundServiceType).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -62,10 +66,14 @@ class IrcForegroundService : LifecycleService() {
 
     private fun updateStatus(states: Map<Long, IrcClientState>) {
         val connected = states.values.count { it is IrcClientState.Ready }
-        val reconnecting = states.isEmpty() || states.values.any {
+        val reconnecting = states.values.any {
             it is IrcClientState.Connecting || it is IrcClientState.Registering
         }
-        val notification = notifications.statusNotification(connected, reconnecting && connected == 0)
+        val notification = notifications.statusNotification(
+            connectedCount = connected,
+            reconnecting = reconnecting && connected == 0,
+            starting = states.isEmpty(),
+        )
         // POST_NOTIFICATIONS is only a runtime permission on API 33+; guard so lint's flow
         // analysis is satisfied and we don't attempt to post the status update without it.
         val canPost = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||

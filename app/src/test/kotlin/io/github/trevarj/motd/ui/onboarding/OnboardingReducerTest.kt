@@ -5,6 +5,7 @@ import io.github.trevarj.motd.bouncer.SojuLoginForm
 import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -141,7 +142,7 @@ class OnboardingReducerTest {
     fun `libera preset fills host port tls and selects network path`() {
         val s = onboardingReducer(
             OnboardingState(step = OnboardingStep.CHOICE),
-            OnboardingAction.ApplyLiberaPreset,
+            OnboardingAction.SelectPreset(NetworkPresetId.LIBERA),
         )
         assertEquals(ConnectionChoice.NETWORK, s.choice)
         assertEquals("irc.libera.chat", s.server.host)
@@ -154,10 +155,43 @@ class OnboardingReducerTest {
         val s = reduce(
             OnboardingState(step = OnboardingStep.CHOICE),
             OnboardingAction.EditServer(ServerForm(nick = "trev")),
-            OnboardingAction.ApplyLiberaPreset,
+            OnboardingAction.SelectPreset(NetworkPresetId.LIBERA),
         )
         assertEquals("trev", s.server.nick)
         assertEquals("irc.libera.chat", s.server.host)
+    }
+
+    @Test
+    fun `legacy preset uses plaintext and requires confirmation`() {
+        val selected = onboardingReducer(
+            OnboardingState(step = OnboardingStep.CHOICE),
+            OnboardingAction.SelectPreset(NetworkPresetId.QUAKENET),
+        )
+
+        assertEquals(ConnectionChoice.NETWORK, selected.choice)
+        assertEquals(NetworkPresetId.QUAKENET, selected.presetId)
+        assertFalse(selected.server.tls)
+        assertFalse(selected.plaintextConfirmed)
+        assertTrue(
+            onboardingReducer(selected, OnboardingAction.ShowPlaintextWarning)
+                .showPlaintextWarning,
+        )
+    }
+
+    @Test
+    fun `editing a preset endpoint falls back to custom without losing identity`() {
+        val selected = onboardingReducer(
+            OnboardingState(server = ServerForm(nick = "trev", username = "t")),
+            OnboardingAction.SelectPreset(NetworkPresetId.OFTC),
+        )
+        val edited = onboardingReducer(
+            selected,
+            OnboardingAction.EditServer(selected.server.copy(host = "irc.example.org")),
+        )
+
+        assertEquals(NetworkPresetId.CUSTOM, edited.presetId)
+        assertEquals("trev", edited.server.nick)
+        assertEquals("t", edited.server.username)
     }
 
     @Test

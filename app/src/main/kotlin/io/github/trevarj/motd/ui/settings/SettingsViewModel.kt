@@ -182,6 +182,10 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.setShowComposerEmoji(show)
     }
 
+    fun setChatSoundsEnabled(enabled: Boolean) = viewModelScope.launch {
+        settingsRepository.setChatSoundsEnabled(enabled)
+    }
+
     fun setVisibleReplyPrefix(show: Boolean) = viewModelScope.launch {
         replyPrefs.setVisibleChannelPrefix(show)
     }

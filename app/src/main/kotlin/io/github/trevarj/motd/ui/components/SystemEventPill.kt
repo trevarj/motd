@@ -63,7 +63,10 @@ fun SystemEventPill(
         if (expanded) R.string.system_event_expanded else R.string.system_event_collapsed,
     )
     Row(
-        modifier = modifier.fillMaxWidth().padding(vertical = LocalSpacing.current.systemPillVPad, horizontal = 12.dp),
+        modifier = modifier.fillMaxWidth().padding(
+            vertical = LocalSpacing.current.systemPillVPad,
+            horizontal = LocalSpacing.current.messageOuterHPad,
+        ),
         horizontalArrangement = Arrangement.Center,
     ) {
         Column(

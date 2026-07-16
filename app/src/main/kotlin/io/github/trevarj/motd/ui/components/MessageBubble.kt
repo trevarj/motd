@@ -130,9 +130,11 @@ fun MessageBubble(
     failed: Boolean = false,
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
+    onReplyClick: (() -> Unit)? = null,
     imageUrl: String? = null,
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
+    linkPreviewResolved: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
     // Normalized nicks known in the current buffer; @mentions of these in the body are colored with
     // the nick's own color (plans/17). Empty = no mention coloring.
@@ -175,9 +177,11 @@ fun MessageBubble(
             failed = failed,
             pending = pending,
             reply = reply,
+            onReplyClick = onReplyClick,
             imageUrl = imageUrl,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
+            linkPreviewResolved = linkPreviewResolved,
             reactions = reactions,
             knownNicks = knownNicks,
             onLongPress = onLongPress,
@@ -205,9 +209,11 @@ fun MessageBubble(
             failed = failed,
             pending = pending,
             reply = reply,
+            onReplyClick = onReplyClick,
             imageUrl = imageUrl,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
+            linkPreviewResolved = linkPreviewResolved,
             reactions = reactions,
             knownNicks = knownNicks,
             showSender = showSender,
@@ -239,9 +245,11 @@ fun MessageBubble(
             failed = failed,
             pending = pending,
             reply = reply,
+            onReplyClick = onReplyClick,
             imageUrl = imageUrl,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
+            linkPreviewResolved = linkPreviewResolved,
             reactions = reactions,
             knownNicks = knownNicks,
             showSender = showSender,
@@ -282,7 +290,10 @@ fun MessageBubble(
     }
 
     Row(
-        modifier = renderedModifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = spacing.bubbleRowVPad),
+        modifier = renderedModifier.fillMaxWidth().padding(
+            horizontal = spacing.messageOuterHPad,
+            vertical = spacing.bubbleRowVPad,
+        ),
         horizontalArrangement = if (isSelf) Arrangement.End else Arrangement.Start,
     ) {
         // Left avatar column for others, only on a group's first bubble.
@@ -352,7 +363,7 @@ fun MessageBubble(
                 )
             }
 
-            reply?.let { ReplyMiniBubble(it, nickColors) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
             imageUrl?.let { url ->
                 AsyncImage(
@@ -398,7 +409,7 @@ fun MessageBubble(
                 )
             }
 
-            if (linkPreview != null || linkPreviewLoading) {
+            if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
                 Box(Modifier.padding(top = 4.dp)) {
                     LinkPreviewCard(
                         preview = linkPreview,
@@ -442,9 +453,11 @@ private fun ActionMessageRow(
     failed: Boolean = false,
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
+    onReplyClick: (() -> Unit)? = null,
     imageUrl: String? = null,
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
+    linkPreviewResolved: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
     knownNicks: Set<String> = emptySet(),
     onLongPress: () -> Unit = {},
@@ -507,78 +520,82 @@ private fun ActionMessageRow(
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag("chat_action_row")
-            .semantics { stateDescription = actionDescription }
-            .background(rowColor)
-            .actionAccentRail(accent)
-            .combinedClickable(
-                interactionSource = null,
-                indication = null,
-                onClick = {},
-                onLongClick = onLongPress,
-                onLongClickLabel = actionsLabel,
-            )
-            .padding(
-                horizontal = if (spacing.compact || spacing.twoLine) 12.dp else 16.dp,
-                vertical = spacing.actionVPad,
-            ),
-    ) {
-        reply?.let { ReplyMiniBubble(it, nickColors) }
+    // The caller's modifier carries the stable per-message semantics. Keep the ACTION-specific
+    // identity on a nested layout node so its test tag does not compete with that message tag.
+    Box(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("chat_action_row")
+                .semantics { stateDescription = actionDescription }
+                .background(rowColor)
+                .actionAccentRail(accent)
+                .combinedClickable(
+                    interactionSource = null,
+                    indication = null,
+                    onClick = {},
+                    onLongClick = onLongPress,
+                    onLongClickLabel = actionsLabel,
+                )
+                .padding(
+                    horizontal = spacing.messageOuterHPad,
+                    vertical = spacing.actionVPad,
+                ),
+        ) {
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                text = actionLine,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("chat_action_text"),
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
-            ) {
-                MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
+            Row(verticalAlignment = Alignment.Bottom) {
                 Text(
-                    text = formattedTime,
-                    fontSize = 10.sp * conversationFontScale,
-                    color = if (failed) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        bodyColor.copy(alpha = 0.6f)
-                    },
+                    text = actionLine,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("chat_action_text"),
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
+                ) {
+                    MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
+                    Text(
+                        text = formattedTime,
+                        fontSize = 10.sp * conversationFontScale,
+                        color = if (failed) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            bodyColor.copy(alpha = 0.6f)
+                        },
+                    )
+                }
+            }
+
+            imageUrl?.let { url ->
+                AsyncImage(
+                    model = url,
+                    contentDescription = null,
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .widthIn(max = 280.dp)
+                        .heightIn(max = 240.dp)
+                        .aspectRatio(4f / 3f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
                 )
             }
-        }
 
-        imageUrl?.let { url ->
-            AsyncImage(
-                model = url,
-                contentDescription = null,
-                contentScale = ContentScale.FillWidth,
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .widthIn(max = 280.dp)
-                    .heightIn(max = 240.dp)
-                    .aspectRatio(4f / 3f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
-            )
-        }
-
-        if (linkPreview != null || linkPreviewLoading) {
-            Box(Modifier.padding(top = 4.dp)) {
-                LinkPreviewCard(
-                    preview = linkPreview,
-                    loading = linkPreviewLoading,
-                    onClick = onLinkPreviewClick,
-                )
+            if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
+                Box(Modifier.padding(top = 4.dp)) {
+                    LinkPreviewCard(
+                        preview = linkPreview,
+                        loading = linkPreviewLoading,
+                        onClick = onLinkPreviewClick,
+                    )
+                }
             }
-        }
 
-        ReactionRow(reactions = reactions, onReact = onReact)
+            ReactionRow(reactions = reactions, onReact = onReact)
+        }
     }
 }
 
@@ -675,9 +692,11 @@ private fun TwoLineMessageRow(
     failed: Boolean = false,
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
+    onReplyClick: (() -> Unit)? = null,
     imageUrl: String? = null,
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
+    linkPreviewResolved: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
     knownNicks: Set<String> = emptySet(),
     onLongPress: () -> Unit = {},
@@ -713,7 +732,7 @@ private fun TwoLineMessageRow(
                 onLongClick = onLongPress,
                 onLongClickLabel = actionsLabel,
             )
-            .padding(horizontal = 12.dp, vertical = spacing.bubbleRowVPad),
+            .padding(horizontal = spacing.messageOuterHPad, vertical = spacing.bubbleRowVPad),
     ) {
         // Line 1 (header): avatar + nick + (own) sent check + timestamp — only on a group's first
         // message. Continuations (showSender == false) omit the header and indent the body under it.
@@ -773,7 +792,7 @@ private fun TwoLineMessageRow(
                 )
                 .testTag("message_two_line_body"),
         ) {
-            reply?.let { ReplyMiniBubble(it, nickColors) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
             if (kind == MessageKind.NOTICE) {
                 Text(
@@ -823,7 +842,7 @@ private fun TwoLineMessageRow(
                 )
             }
 
-            if (linkPreview != null || linkPreviewLoading) {
+            if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
                 Box(Modifier.padding(top = 4.dp)) {
                     LinkPreviewCard(
                         preview = linkPreview,
@@ -1100,14 +1119,26 @@ internal fun Modifier.friendNickTint(): Modifier = this
 data class ReplyPreviewData(val sender: String, val text: String)
 
 @Composable
-internal fun ReplyMiniBubble(reply: ReplyPreviewData, nickColors: NickColorScheme) {
+internal fun ReplyMiniBubble(
+    reply: ReplyPreviewData,
+    nickColors: NickColorScheme,
+    onClick: (() -> Unit)? = null,
+) {
     val accent = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
+    val openLabel = stringResource(R.string.chat_reply_open)
     Row(
         modifier = Modifier
             .testTag("chat_reply_preview")
             .padding(vertical = 2.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)),
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+            .let { modifier ->
+                if (onClick != null) {
+                    modifier.clickable(onClickLabel = openLabel, onClick = onClick)
+                } else {
+                    modifier
+                }
+            },
     ) {
         Box(
             Modifier

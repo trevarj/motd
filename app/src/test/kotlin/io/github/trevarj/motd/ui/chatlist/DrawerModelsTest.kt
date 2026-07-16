@@ -52,14 +52,14 @@ class DrawerModelsTest {
     }
 
     @Test
-    fun `muted rows excluded from unread but mentions still count`() {
+    fun `muted rows are excluded from unread and mention rollups`() {
         val rows = listOf(
             row(1, networkId = 1, muted = false, unread = 3, mentions = 1),
             row(2, networkId = 1, muted = true, unread = 5, mentions = 2),
         )
         val drawer = buildDrawerRows(listOf(net(1)), rows, emptyMap())
-        assertEquals(3, drawer[0].unread) // muted row's 5 unread dropped
-        assertEquals(3, drawer[0].mentions) // muted row's 2 mentions still count
+        assertEquals(3, drawer[0].unread)
+        assertEquals(1, drawer[0].mentions)
     }
 
     @Test
@@ -127,7 +127,7 @@ class DrawerModelsTest {
     }
 
     @Test
-    fun `mark all selection includes muted unread and excludes server and read rows`() {
+    fun `mark all and scoped count exclude muted server and read rows`() {
         val rows = listOf(
             row(1, networkId = 1, unread = 2),
             row(2, networkId = 1, muted = true, unread = 4),
@@ -135,7 +135,7 @@ class DrawerModelsTest {
             row(4, networkId = 1, unread = 7, type = BufferType.SERVER),
         )
 
-        assertEquals(listOf(1L, 2L), unreadBufferIds(rows))
-        assertEquals(6, ChatListState(rows = rows).scopedUnreadCount)
+        assertEquals(listOf(1L), unreadBufferIds(rows))
+        assertEquals(2, ChatListState(rows = rows).scopedUnreadCount)
     }
 }

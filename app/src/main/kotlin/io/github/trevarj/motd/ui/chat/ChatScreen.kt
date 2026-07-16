@@ -56,6 +56,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -75,6 +76,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
@@ -109,6 +113,32 @@ private const val REACTION_PREFETCH_ROWS = 12
 private const val MAX_VISIBLE_REACTION_MSGIDS = 80
 private const val MAX_UNREAD_BADGE_COUNT = 100
 
+internal class ChatForegroundLifecycleGate(
+    private val onResume: () -> Unit,
+    private val onPause: () -> Unit,
+) {
+    private var resumed = false
+
+    fun sync(isResumed: Boolean) {
+        if (isResumed == resumed) return
+        resumed = isResumed
+        if (isResumed) onResume() else onPause()
+    }
+
+    fun onEvent(event: Lifecycle.Event) {
+        when (event) {
+            Lifecycle.Event.ON_RESUME -> sync(true)
+            Lifecycle.Event.ON_PAUSE,
+            Lifecycle.Event.ON_STOP,
+            Lifecycle.Event.ON_DESTROY,
+            -> sync(false)
+            else -> Unit
+        }
+    }
+
+    fun dispose() = sync(false)
+}
+
 /** Stateful entry: wires the ViewModel, lifecycle mark-read, and navigation. */
 @Composable
 fun ChatScreen(
@@ -129,11 +159,21 @@ fun ChatScreen(
     val memberNicks by viewModel.memberNicks.collectAsStateWithLifecycle()
     val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
 
-    // Foreground-buffer tracker on resume/pause (notification suppression, plans/05). Read state
-    // is deliberately deferred until the one-shot entry position has settled below.
-    DisposableEffect(Unit) {
-        viewModel.onResume()
-        onDispose { viewModel.onPause() }
+    // Composition survives Home/recents, so use the actual resumed lifecycle instead of treating
+    // "still composed" as foreground. This gates notifications and chat sounds correctly.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val gate = ChatForegroundLifecycleGate(
+            onResume = viewModel::onResume,
+            onPause = viewModel::onPause,
+        )
+        val observer = LifecycleEventObserver { _, event -> gate.onEvent(event) }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        gate.sync(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            gate.dispose()
+        }
     }
 
     val chipsByMsgid by viewModel.reactionChips.collectAsStateWithLifecycle()
@@ -159,6 +199,7 @@ fun ChatScreen(
     val rawNewestTime by viewModel.rawNewestTime.collectAsStateWithLifecycle()
     // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
     val appearance by viewModel.appearance.collectAsStateWithLifecycle(
         initialValue = io.github.trevarj.motd.data.prefs.AppearanceConfig(),
     )
@@ -178,6 +219,8 @@ fun ChatScreen(
         friends = settings.friends,
         fools = settings.fools,
         foolsMode = settings.foolsMode,
+        hiddenFoolsRevealed = hiddenFoolsRevealed,
+        onHiddenFoolsRevealedChange = viewModel::setHiddenFoolsRevealed,
         showJoinPartQuit = settings.showJoinPartQuit,
         chatWallpaper = appearance.wallpaper,
         conversationFontScalePercent = appearance.conversationFontScalePercent,
@@ -187,6 +230,7 @@ fun ChatScreen(
         showLinkPreviews = contentPreviews.showLinkPreviews,
         reactionChips = reactionChipsForMessage,
         replyPreview = viewModel::replyPreview,
+        onReplyPreviewClick = viewModel::jumpToRepliedMessage,
         memberNicks = memberNicks,
         knownNicks = knownNicks,
         readMarkerSnapshot = readMarkerSnapshot,
@@ -215,6 +259,7 @@ fun ChatScreen(
         onAcceptInvite = viewModel::acceptInvite,
         onDismissInvite = viewModel::dismissInvite,
         loadPreview = viewModel::linkPreview,
+        cachedPreview = viewModel::cachedLinkPreview,
         consumePrefill = viewModel::consumePrefill,
         loadDraft = viewModel::loadDraft,
         onDraftChanged = viewModel::saveDraft,
@@ -300,13 +345,17 @@ fun ChatContent(
     onReact: (MessageEntity, String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> io.github.trevarj.motd.data.repo.LinkPreview?,
+    cachedPreview: (String) -> io.github.trevarj.motd.data.repo.CachedLinkPreview? = { null },
     reactionChips: (String) -> List<io.github.trevarj.motd.ui.components.ReactionChip> = { emptyList() },
     replyPreview: (String) -> kotlinx.coroutines.flow.Flow<io.github.trevarj.motd.ui.components.ReplyPreviewData?> = { kotlinx.coroutines.flow.flowOf(null) },
+    onReplyPreviewClick: (String) -> Unit = {},
     memberNicks: List<String> = emptyList(),
     knownNicks: Set<String> = emptySet(),
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    hiddenFoolsRevealed: Boolean = false,
+    onHiddenFoolsRevealedChange: (Boolean) -> Unit = {},
     showJoinPartQuit: Boolean = true,
     chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection = io.github.trevarj.motd.data.prefs.WallpaperSelection(),
     conversationFontScalePercent: Int = io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT,
@@ -426,6 +475,20 @@ fun ChatContent(
     }
     LaunchedEffect(mentionPrefill) {
         mentionPrefill?.second?.let { composerText = appendPrefill(composerText, it) }
+    }
+    val latestComposerText by rememberUpdatedState(composerText)
+    val latestBufferType by rememberUpdatedState(state.buffer?.type)
+    val latestVisibleReplyPrefix by rememberUpdatedState(visibleReplyPrefix)
+    val timelineReply = remember(onSetReply) {
+        { target: MessageEntity ->
+            onSetReply(target)
+            composerText = composerTextForReply(
+                value = latestComposerText,
+                sender = target.sender,
+                bufferType = latestBufferType,
+                visibleReplyPrefix = latestVisibleReplyPrefix,
+            )
+        }
     }
 
     // Cap-miss / not-loaded → transient snackbar. jumpFailed is a latch StateFlow (replay-safe), so
@@ -868,23 +931,6 @@ fun ChatContent(
                     }
                 },
                 actions = {
-                    // Global fool expand/collapse (bug #9): only meaningful with configured fools in
-                    // COLLAPSE mode. Toggling clears the per-row overrides so it acts as a clean reset.
-                    if (foolsMode == FoolsMode.COLLAPSE && fools.isNotEmpty()) {
-                        IconButton(onClick = {
-                            expandAllFools = !expandAllFools
-                            expandedFools = emptySet()
-                            collapsedFools = emptySet()
-                        }) {
-                            Icon(
-                                if (expandAllFools) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = stringResource(
-                                    if (expandAllFools) R.string.chat_fool_collapse_all
-                                    else R.string.chat_fool_expand_all,
-                                ),
-                            )
-                        }
-                    }
                     IconButton(onClick = { buffer?.let { onOpenSearch(it.id) } }) {
                         Icon(
                             Icons.Outlined.Search,
@@ -898,6 +944,40 @@ fun ChatContent(
                         Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
                     }
                     DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                        if (fools.isNotEmpty()) {
+                            val foolsShown = if (foolsMode == FoolsMode.HIDE) {
+                                hiddenFoolsRevealed
+                            } else {
+                                expandAllFools
+                            }
+                            DropdownMenuItem(
+                                modifier = Modifier.testTag("chat_toggle_fools_visibility"),
+                                text = {
+                                    Text(
+                                        stringResource(
+                                            if (foolsShown) R.string.chat_fool_collapse_all
+                                            else R.string.chat_fool_expand_all,
+                                        ),
+                                    )
+                                },
+                                onClick = {
+                                    overflowOpen = false
+                                    if (foolsMode == FoolsMode.HIDE) {
+                                        onHiddenFoolsRevealedChange(!hiddenFoolsRevealed)
+                                    } else {
+                                        expandAllFools = !expandAllFools
+                                        expandedFools = emptySet()
+                                        collapsedFools = emptySet()
+                                    }
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        if (foolsShown) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                        contentDescription = null,
+                                    )
+                                },
+                            )
+                        }
                         val running = historyResyncState as? HistoryResyncState.Running
                         val historyBusy = running != null ||
                             historyResyncState == HistoryResyncState.WaitingForCapability
@@ -968,16 +1048,9 @@ fun ChatContent(
                         readMarkerTime = readMarkerSnapshot,
                         reactionChips = reactionChips,
                         replyPreview = replyPreview,
+                        onReplyPreviewClick = onReplyPreviewClick,
                         onLongPress = { sheetTarget = it },
-                        onReply = { target ->
-                            onSetReply(target)
-                            composerText = composerTextForReply(
-                                value = composerText,
-                                sender = target.sender,
-                                bufferType = state.buffer?.type,
-                                visibleReplyPrefix = visibleReplyPrefix,
-                            )
-                        },
+                        onReply = timelineReply,
                         onReact = onReact,
                         onImageClick = onOpenImage,
                         onRetry = onRetry,
@@ -988,6 +1061,7 @@ fun ChatContent(
                         richContentReady = initialPositionSettled,
                         showImages = showImages,
                         showLinkPreviews = showLinkPreviews,
+                        cachedPreview = cachedPreview,
                         // Link-preview tap opens the URL in the system browser.
                         onOpenLink = { ctx.startActivity(Intent(Intent.ACTION_VIEW, it.toUri())) },
                         highlightMsgid = highlightMsgid,

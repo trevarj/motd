@@ -8,14 +8,18 @@ import io.github.trevarj.motd.bouncer.SojuLoginForm
 import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.settings.buildNetworkEntity
+import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
+import io.github.trevarj.motd.ui.settings.addnetwork.networkPreset
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -27,6 +31,7 @@ import javax.inject.Inject
 class OnboardingViewModel @Inject constructor(
     private val networkRepository: NetworkRepository,
     private val connectionManager: ConnectionManager,
+    private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
     private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
 ) : ViewModel() {
 
@@ -41,6 +46,16 @@ class OnboardingViewModel @Inject constructor(
 
     fun next() {
         val before = _state.value
+        if (
+            before.step == OnboardingStep.AUTH &&
+            before.canAdvance &&
+            !before.isBouncer &&
+            !before.server.tls &&
+            !before.plaintextConfirmed
+        ) {
+            dispatch(OnboardingAction.ShowPlaintextWarning)
+            return
+        }
         dispatch(OnboardingAction.Next)
         // Kick off the connect test when entering the CONNECT step.
         if (before.step == OnboardingStep.AUTH && _state.value.step == OnboardingStep.CONNECT) {
@@ -60,12 +75,19 @@ class OnboardingViewModel @Inject constructor(
 
     fun chooseConnection(choice: ConnectionChoice) = dispatch(OnboardingAction.ChooseConnection(choice))
     fun chooseBouncerKind(kind: BouncerKind) = dispatch(OnboardingAction.ChooseBouncerKind(kind))
-    fun applyLiberaPreset() = dispatch(OnboardingAction.ApplyLiberaPreset)
+    fun selectPreset(id: NetworkPresetId) = dispatch(OnboardingAction.SelectPreset(id))
     fun editServer(server: ServerForm) = dispatch(OnboardingAction.EditServer(server))
     fun editAuth(auth: AuthForm) = dispatch(OnboardingAction.EditAuth(auth))
     fun editSojuLogin(login: SojuLoginForm) = dispatch(OnboardingAction.EditSojuLogin(login))
     fun editZncLogin(login: ZncLoginForm) = dispatch(OnboardingAction.EditZncLogin(login))
     fun toggleBouncerNetwork(netId: String) = dispatch(OnboardingAction.ToggleBouncerNetwork(netId))
+
+    fun confirmPlaintext() {
+        dispatch(OnboardingAction.ConfirmPlaintext)
+        next()
+    }
+
+    fun dismissPlaintextWarning() = dispatch(OnboardingAction.DismissPlaintextWarning)
 
     // -- side effects --------------------------------------------------------------------------
 
@@ -99,9 +121,21 @@ class OnboardingViewModel @Inject constructor(
                 server = server,
                 auth = s.activeAuth,
                 role = s.role,
-                name = if (s.isZnc) s.zncLogin.network.trim() else s.server.host,
+                name = when {
+                    s.isZnc -> s.zncLogin.network.trim()
+                    else -> networkPreset(s.presetId)?.displayName ?: s.server.host
+                },
             )
+            val existingNetworkIds = networkRepository.observeNetworks().first()
+                .mapTo(mutableSetOf()) { it.id }
             val networkId = networkRepository.addNetwork(entity)
+            if (
+                networkId !in existingNetworkIds &&
+                !s.isBouncer &&
+                s.presetId == NetworkPresetId.LIBERA
+            ) {
+                presetEnrollmentPrefs.markLiberaEligible(networkId)
+            }
             dispatch(OnboardingAction.NetworkCreated(networkId))
 
             connectionManager.connect(networkId)

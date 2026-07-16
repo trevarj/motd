@@ -5,6 +5,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -43,6 +45,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -57,6 +60,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -73,9 +77,16 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import androidx.emoji2.emojipicker.EmojiPickerView
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
@@ -93,6 +104,28 @@ internal fun composerPanel(showEmoji: Boolean, hasAutocomplete: Boolean): Compos
     showEmoji -> ComposerPanel.EMOJI
     hasAutocomplete -> ComposerPanel.AUTOCOMPLETE
     else -> ComposerPanel.NONE
+}
+
+internal fun autocompletePopupPosition(
+    anchorBounds: IntRect,
+    popupContentSize: IntSize,
+    layoutDirection: LayoutDirection,
+): IntOffset = IntOffset(
+    x = if (layoutDirection == LayoutDirection.Ltr) {
+        anchorBounds.left
+    } else {
+        anchorBounds.right - popupContentSize.width
+    },
+    y = anchorBounds.top - popupContentSize.height,
+)
+
+private object AutocompletePopupPositionProvider : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset = autocompletePopupPosition(anchorBounds, popupContentSize, layoutDirection)
 }
 
 /**
@@ -274,18 +307,13 @@ fun Composer(
         dismissEmojiPicker()
     }
 
-    Surface(
+    AutocompleteOverlayLayout(
         modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 3.dp,
-    ) {
-        Column {
-            HorizontalDivider(thickness = Dp.Hairline, color = MaterialTheme.colorScheme.outlineVariant)
-
+        overlay = {
             AnimatedVisibility(
                 visible = visiblePanel == ComposerPanel.AUTOCOMPLETE,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
+                enter = fadeIn() + slideInVertically { height -> height / 8 },
+                exit = fadeOut() + slideOutVertically { height -> height / 8 },
             ) {
                 Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
                     if (emojiSuggestions.isNotEmpty() && emojiQuery != null) {
@@ -300,22 +328,31 @@ fun Composer(
                     }
                 }
             }
+        },
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 3.dp,
+        ) {
+            Column {
+                HorizontalDivider(thickness = Dp.Hairline, color = MaterialTheme.colorScheme.outlineVariant)
 
-            AnimatedVisibility(
-                visible = reply != null,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
-            ) {
-                reply?.let { ReplyBar(it, onCancelReply) }
-            }
+                AnimatedVisibility(
+                    visible = reply != null,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut(),
+                ) {
+                    reply?.let { ReplyBar(it, onCancelReply) }
+                }
 
-            Row(
-                modifier = Modifier
-                    .testTag("chat_composer_input_row")
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
+                Row(
+                    modifier = Modifier
+                        .testTag("chat_composer_input_row")
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
                 Surface(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(28.dp),
@@ -426,11 +463,46 @@ fun Composer(
                 }
             }
 
-            EmojiPickerReplacementSurface(
-                session = emojiPickerSession,
-                currentKeyboardHeightPx = currentKeyboardHeightPx,
-                onPick = { emoji -> onValueChange(insertAtCursor(value, emoji)) },
-            )
+                EmojiPickerReplacementSurface(
+                    session = emojiPickerSession,
+                    currentKeyboardHeightPx = currentKeyboardHeightPx,
+                    onPick = { emoji -> onValueChange(insertAtCursor(value, emoji)) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Hosts suggestions in a real popup immediately above the composer. A popup has its own hit-test
+ * bounds, so rows remain clickable without contributing height or moving the input/timeline.
+ */
+@Composable
+private fun AutocompleteOverlayLayout(
+    modifier: Modifier = Modifier,
+    overlay: @Composable () -> Unit,
+    anchor: @Composable () -> Unit,
+) {
+    var anchorWidthPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    Box(
+        modifier = modifier.onSizeChanged { anchorWidthPx = it.width },
+    ) {
+        anchor()
+        if (anchorWidthPx > 0) {
+            Popup(
+                popupPositionProvider = AutocompletePopupPositionProvider,
+                properties = PopupProperties(
+                    focusable = false,
+                    dismissOnBackPress = false,
+                    dismissOnClickOutside = false,
+                    clippingEnabled = false,
+                ),
+            ) {
+                Box(Modifier.width(with(density) { anchorWidthPx.toDp() })) {
+                    overlay()
+                }
+            }
         }
     }
 }

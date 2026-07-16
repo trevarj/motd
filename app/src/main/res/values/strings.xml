@@ -60,8 +60,6 @@
     <string name="bouncer_znc_login_guidance">Use the ZNC username, network identifier, and password shown in your ZNC configuration.</string>
     <string name="onboarding_choice_network_title">Connect to an IRC network</string>
     <string name="onboarding_choice_network_desc">Connect directly to a single IRC server.</string>
-    <string name="onboarding_libera_preset">Use Libera.Chat</string>
-    <string name="onboarding_libera_preset_desc">irc.libera.chat · 6697 · TLS</string>
     <string name="onboarding_server_title">Server</string>
     <string name="onboarding_field_host">Host</string>
     <string name="onboarding_field_port">Port</string>
@@ -349,6 +347,7 @@
     <string name="action_more">More actions</string>
     <string name="chat_action_reply">Reply</string>
     <string name="chat_reply_target_unavailable">Original message not available</string>
+    <string name="chat_reply_open">Go to replied message</string>
     <string name="chat_action_copy">Copy</string>
     <string name="chat_action_quote">Quote</string>
     <string name="chat_action_more_reactions">More reactions</string>
@@ -421,6 +420,8 @@
     <string name="network_settings_avatar_unmanage">Leave unchanged</string>
     <string name="settings_composer_emoji">Emoji button</string>
     <string name="settings_composer_emoji_desc">Show the emoji button in the message composer.</string>
+    <string name="settings_chat_sounds">Chat sounds</string>
+    <string name="settings_chat_sounds_desc">Play subtle sounds when sending or receiving in the open chat.</string>
     <string name="settings_reply_prefix">Visible reply prefix</string>
     <string name="settings_reply_prefix_desc">Prefix channel replies with the recipient’s nick for clients that do not render reply tags.</string>
     <string name="settings_wallpaper">Chat wallpaper</string>
@@ -485,6 +486,7 @@
     <string name="drawer_network_settings">Network settings</string>
     <string name="drawer_state_connecting">Connecting…</string>
     <string name="drawer_state_registering">Registering…</string>
+    <string name="drawer_state_connected">Connected</string>
     <string name="drawer_state_disconnected">Disconnected</string>
 
     <!-- Chat-list scoping (WP-V1, §3.5) -->
@@ -678,7 +680,7 @@
          end to avoid a same-file clobber with the parallel webpush-strings agent. -->
     <string name="chatlist_delete">Delete chat</string>
     <string name="chatlist_delete_confirm_title">Delete chat?</string>
-    <string name="chatlist_delete_confirm_channel">This leaves %1$s and permanently removes its history from this device.</string>
+    <string name="chatlist_delete_confirm_channel">%1$s hides immediately. If you are offline, leaving completes after reconnect. History is removed after the server accepts the leave.</string>
     <string name="chatlist_delete_confirm_message">This permanently removes %1$s and its history from this device.</string>
 
     <!-- Message render style: density now selects the rendering paradigm, not font size. Appended

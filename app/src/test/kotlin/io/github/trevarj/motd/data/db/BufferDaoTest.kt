@@ -207,4 +207,30 @@ class BufferDaoTest {
         bufDao.advanceReadMarker(bid, 300)
         assertEquals(300L, bufDao.observeById(bid)!!.readMarkerTime)
     }
+
+    @Test
+    fun unmute_clears_local_backlog_without_advancing_remote_read_marker() = runTest {
+        val bufDao = db.bufferDao()
+        val msgDao = db.messageDao()
+        val bid = bufDao.insert(buffer(networkId, "#muted"))
+        bufDao.setMuted(bid, true)
+        msgDao.insertAll(
+            listOf(
+                message(bid, "one", serverTime = 100, dedupKey = "mute-1"),
+                message(bid, "two", serverTime = 200, dedupKey = "mute-2", hasMention = true),
+                message(bid, "three", serverTime = 300, dedupKey = "mute-3"),
+            ),
+        )
+        assertEquals(3, bufDao.observeChatList().first().single().unreadCount)
+
+        bufDao.setMuted(bid, false)
+
+        val unmuted = checkNotNull(bufDao.observeById(bid))
+        assertEquals(null, unmuted.readMarkerTime)
+        assertEquals(300L, unmuted.localUnreadFloorTime)
+        assertEquals(0, bufDao.observeChatList().first().single().unreadCount)
+
+        msgDao.insertAll(listOf(message(bid, "new", serverTime = 400, dedupKey = "mute-4")))
+        assertEquals(1, bufDao.observeChatList().first().single().unreadCount)
+    }
 }

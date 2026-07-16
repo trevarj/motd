@@ -79,9 +79,16 @@ data class BufferEntity(
     val pinned: Boolean = false, val muted: Boolean = false,
     val ordering: Int = 0,
     val readMarkerTime: Long? = null,    // epoch ms, synced via draft/read-marker
+    val localUnreadFloorTime: Long? = null, // local-only mute backlog floor; never synced
     val oldestFetchedTime: Long? = null, // CHATHISTORY paging bookkeeping
     val historyComplete: Boolean = false,
+    /** Non-null while a CHANNEL leave/delete is waiting for server acceptance. */
+    val pendingCloseAt: Long? = null,
 )
+
+/** Local presentation/count floor; remote MARKREAD continues to use [BufferEntity.readMarkerTime]. */
+val BufferEntity.effectiveReadFloorTime: Long?
+    get() = listOfNotNull(readMarkerTime, localUnreadFloorTime).maxOrNull()
 
 @Entity(
     tableName = "messages",

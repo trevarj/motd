@@ -5,8 +5,10 @@ import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertIsDisplayed
+import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
@@ -63,5 +65,31 @@ class ComposerUiTest {
             0,
             compose.onAllNodesWithTag("chat_composer_emoji_picker").fetchSemanticsNodes().size,
         )
+    }
+
+    @Test
+    fun autocompletePopup_rowIsClickableOutsideComposerBounds() {
+        var picked: String? = null
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = TextFieldValue("ali"),
+                    onValueChange = {},
+                    onSend = {},
+                    enabled = true,
+                    autocomplete = {
+                        AutocompletePanel(
+                            candidates = listOf("alice"),
+                            onPick = { picked = it },
+                        )
+                    },
+                )
+            }
+        }
+
+        compose.onNodeWithText("alice").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals("alice", picked)
+        }
     }
 }

@@ -14,6 +14,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.MainActivity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.effectiveReadFloorTime
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -27,9 +28,8 @@ import javax.inject.Singleton
 /**
  * Final notification suppression decision (plans/13 §2.6). Pure and unit-tested.
  *
- * Precedence (highest first): foreground buffer suppresses everything; a fool sender is fully
- * silenced (even in an un-muted DM/mention); a friend sender bypasses the muted-buffer
- * suppression; otherwise a muted buffer suppresses. The `(DM || mention)` gate lives upstream in
+ * Precedence (highest first): foreground buffer suppresses everything; an explicit buffer mute
+ * always wins over friend status; a fool sender is fully silenced. The `(DM || mention)` gate lives upstream in
  * [io.github.trevarj.motd.data.sync.EventProcessor.maybeNotify], so by the time this runs the
  * message already qualifies as a DM or a mention.
  */
@@ -39,7 +39,7 @@ fun shouldPostNotification(
     senderIsFriend: Boolean,
     senderIsFool: Boolean,
     alreadyRead: Boolean = false,
-): Boolean = !alreadyRead && !foreground && !senderIsFool && (!muted || senderIsFriend)
+): Boolean = !alreadyRead && !foreground && !muted && !senderIsFool
 
 /**
  * MessagingStyle notifications (plans/05). Owns the notification channels and applies the final
@@ -83,7 +83,11 @@ class MotdNotifications @Inject constructor(
 
     // -- status notification (foreground service) --
 
-    fun statusNotification(connectedCount: Int, reconnecting: Boolean): Notification {
+    fun statusNotification(
+        connectedCount: Int,
+        reconnecting: Boolean,
+        starting: Boolean = false,
+    ): Notification {
         val contentIntent = PendingIntent.getActivity(
             context, 0,
             context.packageManager.getLaunchIntentForPackage(context.packageName)
@@ -95,7 +99,7 @@ class MotdNotifications @Inject constructor(
             Intent(context, IrcForegroundService::class.java).setAction(IrcForegroundService.ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val text = if (reconnecting) "Reconnecting…" else "Connected to $connectedCount networks"
+        val text = statusNotificationText(connectedCount, reconnecting, starting)
         return NotificationCompat.Builder(context, CHANNEL_STATUS)
             .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
             .setContentTitle("motd")
@@ -118,13 +122,12 @@ class MotdNotifications @Inject constructor(
         val settings = runCatching { settingsRepository.settings.first() }.getOrNull() ?: Settings()
         val sender = normalizeNick(message.source.nick)
 
-        // Round 4 (plans/13 §2.3/§2.4/§2.6): fools are fully silenced; friends bypass the
-        // muted-buffer suppression. Foreground suppression still applies to everyone.
+        // Fools and explicit buffer mute are fully silent. Foreground suppression also applies.
         val foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId
         val muted = buffer?.muted == true
         val senderIsFriend = sender in settings.friends
         val senderIsFool = sender in settings.fools
-        val alreadyRead = buffer?.readMarkerTime?.let { message.ctx.serverTime <= it } == true
+        val alreadyRead = buffer?.effectiveReadFloorTime?.let { message.ctx.serverTime <= it } == true
         val decision = shouldPostNotification(foreground, muted, senderIsFriend, senderIsFool, alreadyRead)
         diagnostics.record("notifications", "message_evaluated") {
             mapOf(
@@ -344,6 +347,16 @@ class MotdNotifications @Inject constructor(
         internal fun invitationNotificationId(messageId: Long): Int =
             0x40000000 or (messageId xor (messageId ushr 32)).toInt().and(0x3fffffff)
     }
+}
+
+internal fun statusNotificationText(
+    connectedCount: Int,
+    reconnecting: Boolean,
+    starting: Boolean,
+): String = when {
+    starting -> "Keeping chats connected"
+    reconnecting -> "Reconnecting…"
+    else -> "Connected to $connectedCount networks"
 }
 
 /** Stable identity for one notification entry, independent of live/push delivery provenance. */
