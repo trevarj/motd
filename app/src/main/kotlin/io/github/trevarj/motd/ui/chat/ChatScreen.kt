@@ -56,6 +56,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -428,6 +429,20 @@ fun ChatContent(
     }
     LaunchedEffect(mentionPrefill) {
         mentionPrefill?.second?.let { composerText = appendPrefill(composerText, it) }
+    }
+    val latestComposerText by rememberUpdatedState(composerText)
+    val latestBufferType by rememberUpdatedState(state.buffer?.type)
+    val latestVisibleReplyPrefix by rememberUpdatedState(visibleReplyPrefix)
+    val timelineReply = remember(onSetReply) {
+        { target: MessageEntity ->
+            onSetReply(target)
+            composerText = composerTextForReply(
+                value = latestComposerText,
+                sender = target.sender,
+                bufferType = latestBufferType,
+                visibleReplyPrefix = latestVisibleReplyPrefix,
+            )
+        }
     }
 
     // Cap-miss / not-loaded → transient snackbar. jumpFailed is a latch StateFlow (replay-safe), so
@@ -971,15 +986,7 @@ fun ChatContent(
                         reactionChips = reactionChips,
                         replyPreview = replyPreview,
                         onLongPress = { sheetTarget = it },
-                        onReply = { target ->
-                            onSetReply(target)
-                            composerText = composerTextForReply(
-                                value = composerText,
-                                sender = target.sender,
-                                bufferType = state.buffer?.type,
-                                visibleReplyPrefix = visibleReplyPrefix,
-                            )
-                        },
+                        onReply = timelineReply,
                         onReact = onReact,
                         onImageClick = onOpenImage,
                         onRetry = onRetry,

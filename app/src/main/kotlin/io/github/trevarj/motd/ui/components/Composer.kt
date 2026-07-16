@@ -5,6 +5,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -94,6 +96,19 @@ internal fun composerPanel(showEmoji: Boolean, hasAutocomplete: Boolean): Compos
     hasAutocomplete -> ComposerPanel.AUTOCOMPLETE
     else -> ComposerPanel.NONE
 }
+
+internal data class AutocompleteOverlayPlacement(
+    val layoutHeightPx: Int,
+    val overlayYPx: Int,
+)
+
+internal fun autocompleteOverlayPlacement(
+    anchorHeightPx: Int,
+    overlayHeightPx: Int,
+): AutocompleteOverlayPlacement = AutocompleteOverlayPlacement(
+    layoutHeightPx = anchorHeightPx.coerceAtLeast(0),
+    overlayYPx = -overlayHeightPx.coerceAtLeast(0),
+)
 
 /**
  * The picker has two visual phases. While [OPEN], it fills the space released by the IME. While
@@ -274,18 +289,13 @@ fun Composer(
         dismissEmojiPicker()
     }
 
-    Surface(
+    AutocompleteOverlayLayout(
         modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 3.dp,
-    ) {
-        Column {
-            HorizontalDivider(thickness = Dp.Hairline, color = MaterialTheme.colorScheme.outlineVariant)
-
+        overlay = {
             AnimatedVisibility(
                 visible = visiblePanel == ComposerPanel.AUTOCOMPLETE,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
+                enter = fadeIn() + slideInVertically { height -> height / 8 },
+                exit = fadeOut() + slideOutVertically { height -> height / 8 },
             ) {
                 Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
                     if (emojiSuggestions.isNotEmpty() && emojiQuery != null) {
@@ -300,22 +310,31 @@ fun Composer(
                     }
                 }
             }
+        },
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 3.dp,
+        ) {
+            Column {
+                HorizontalDivider(thickness = Dp.Hairline, color = MaterialTheme.colorScheme.outlineVariant)
 
-            AnimatedVisibility(
-                visible = reply != null,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
-            ) {
-                reply?.let { ReplyBar(it, onCancelReply) }
-            }
+                AnimatedVisibility(
+                    visible = reply != null,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut(),
+                ) {
+                    reply?.let { ReplyBar(it, onCancelReply) }
+                }
 
-            Row(
-                modifier = Modifier
-                    .testTag("chat_composer_input_row")
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
+                Row(
+                    modifier = Modifier
+                        .testTag("chat_composer_input_row")
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
                 Surface(
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(28.dp),
@@ -426,11 +445,45 @@ fun Composer(
                 }
             }
 
-            EmojiPickerReplacementSurface(
-                session = emojiPickerSession,
-                currentKeyboardHeightPx = currentKeyboardHeightPx,
-                onPick = { emoji -> onValueChange(insertAtCursor(value, emoji)) },
-            )
+                EmojiPickerReplacementSurface(
+                    session = emojiPickerSession,
+                    currentKeyboardHeightPx = currentKeyboardHeightPx,
+                    onPick = { emoji -> onValueChange(insertAtCursor(value, emoji)) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Measures the suggestion panel without adding it to the composer's height, then places it
+ * immediately above the stable composer surface. This keeps both the input row and reverse
+ * timeline anchored while suggestions fade/translate in and out.
+ */
+@Composable
+private fun AutocompleteOverlayLayout(
+    modifier: Modifier = Modifier,
+    overlay: @Composable () -> Unit,
+    anchor: @Composable () -> Unit,
+) {
+    Layout(
+        modifier = modifier,
+        content = {
+            anchor()
+            overlay()
+        },
+    ) { measurables, constraints ->
+        val anchorPlaceable = measurables[0].measure(constraints)
+        val overlayPlaceable = measurables[1].measure(
+            constraints.copy(minWidth = 0, minHeight = 0),
+        )
+        val placement = autocompleteOverlayPlacement(
+            anchorHeightPx = anchorPlaceable.height,
+            overlayHeightPx = overlayPlaceable.height,
+        )
+        layout(anchorPlaceable.width, placement.layoutHeightPx) {
+            anchorPlaceable.placeRelative(0, 0)
+            overlayPlaceable.placeRelative(0, placement.overlayYPx)
         }
     }
 }

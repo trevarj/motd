@@ -6,6 +6,17 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ComposerPanelTest {
+    @Test
+    fun autocomplete_overlay_does_not_change_composer_height() {
+        val placement = autocompleteOverlayPlacement(
+            anchorHeightPx = 68,
+            overlayHeightPx = 144,
+        )
+
+        assertEquals(68, placement.layoutHeightPx)
+        assertEquals(-144, placement.overlayYPx)
+    }
+
     @Test fun emojiTakesPriorityOverAutocomplete() {
         assertEquals(ComposerPanel.EMOJI, composerPanel(showEmoji = true, hasAutocomplete = true))
     }
