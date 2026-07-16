@@ -49,7 +49,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -508,83 +507,82 @@ private fun ActionMessageRow(
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            // Keep the row's test identity and accessibility state on one semantics node.
-            // Separate semantics modifiers can be folded around combinedClickable differently
-            // between Compose test environments, which made the stable row tag disappear in E2E.
-            .semantics {
-                testTag = "chat_action_row"
-                stateDescription = actionDescription
-            }
-            .background(rowColor)
-            .actionAccentRail(accent)
-            .combinedClickable(
-                interactionSource = null,
-                indication = null,
-                onClick = {},
-                onLongClick = onLongPress,
-                onLongClickLabel = actionsLabel,
-            )
-            .padding(
-                horizontal = if (spacing.compact || spacing.twoLine) 12.dp else 16.dp,
-                vertical = spacing.actionVPad,
-            ),
-    ) {
-        reply?.let { ReplyMiniBubble(it, nickColors) }
+    // The caller's modifier carries the stable per-message semantics. Keep the ACTION-specific
+    // identity on a nested layout node so its test tag does not compete with that message tag.
+    Box(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("chat_action_row")
+                .semantics { stateDescription = actionDescription }
+                .background(rowColor)
+                .actionAccentRail(accent)
+                .combinedClickable(
+                    interactionSource = null,
+                    indication = null,
+                    onClick = {},
+                    onLongClick = onLongPress,
+                    onLongClickLabel = actionsLabel,
+                )
+                .padding(
+                    horizontal = if (spacing.compact || spacing.twoLine) 12.dp else 16.dp,
+                    vertical = spacing.actionVPad,
+                ),
+        ) {
+            reply?.let { ReplyMiniBubble(it, nickColors) }
 
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                text = actionLine,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("chat_action_text"),
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
-            ) {
-                MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
+            Row(verticalAlignment = Alignment.Bottom) {
                 Text(
-                    text = formattedTime,
-                    fontSize = 10.sp * conversationFontScale,
-                    color = if (failed) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        bodyColor.copy(alpha = 0.6f)
-                    },
+                    text = actionLine,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("chat_action_text"),
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
+                ) {
+                    MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
+                    Text(
+                        text = formattedTime,
+                        fontSize = 10.sp * conversationFontScale,
+                        color = if (failed) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            bodyColor.copy(alpha = 0.6f)
+                        },
+                    )
+                }
+            }
+
+            imageUrl?.let { url ->
+                AsyncImage(
+                    model = url,
+                    contentDescription = null,
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .widthIn(max = 280.dp)
+                        .heightIn(max = 240.dp)
+                        .aspectRatio(4f / 3f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
                 )
             }
-        }
 
-        imageUrl?.let { url ->
-            AsyncImage(
-                model = url,
-                contentDescription = null,
-                contentScale = ContentScale.FillWidth,
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .widthIn(max = 280.dp)
-                    .heightIn(max = 240.dp)
-                    .aspectRatio(4f / 3f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .combinedClickable(onClick = { onImageClick(url) }, onLongClick = onLongPress),
-            )
-        }
-
-        if (linkPreview != null || linkPreviewLoading) {
-            Box(Modifier.padding(top = 4.dp)) {
-                LinkPreviewCard(
-                    preview = linkPreview,
-                    loading = linkPreviewLoading,
-                    onClick = onLinkPreviewClick,
-                )
+            if (linkPreview != null || linkPreviewLoading) {
+                Box(Modifier.padding(top = 4.dp)) {
+                    LinkPreviewCard(
+                        preview = linkPreview,
+                        loading = linkPreviewLoading,
+                        onClick = onLinkPreviewClick,
+                    )
+                }
             }
-        }
 
-        ReactionRow(reactions = reactions, onReact = onReact)
+            ReactionRow(reactions = reactions, onReact = onReact)
+        }
     }
 }
 
