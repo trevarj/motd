@@ -8,12 +8,12 @@ import org.unifiedpush.android.connector.UnifiedPush
 
 /**
  * Real [UnifiedPushApi] over the static `org.unifiedpush.android.connector.UnifiedPush` calls
- * (connector 2.5.0). Signatures verified against the artifact:
+ * (connector 3.3.3). Signatures verified against the artifact:
  *   getDistributors(context) -> List<String>
  *   getAckDistributor(context) -> String?
  *   saveDistributor(context, distributor)
- *   registerApp(context, instance, ...)   // extra args default
- *   unregisterApp(context, instance)
+ *   register(context, instance, ...)   // extra args default
+ *   unregister(context, instance)
  *
  * All calls take the application context; the instance string is `networkId.toString()`.
  */
@@ -24,6 +24,6 @@ class UnifiedPushApiImpl @Inject constructor(
     override fun getDistributors(): List<String> = UnifiedPush.getDistributors(context)
     override fun getAckDistributor(): String? = UnifiedPush.getAckDistributor(context)
     override fun saveDistributor(distributor: String) = UnifiedPush.saveDistributor(context, distributor)
-    override fun registerApp(instance: String) = UnifiedPush.registerApp(context, instance)
-    override fun unregisterApp(instance: String) = UnifiedPush.unregisterApp(context, instance)
+    override fun registerApp(instance: String) = UnifiedPush.register(context, instance)
+    override fun unregisterApp(instance: String) = UnifiedPush.unregister(context, instance)
 }

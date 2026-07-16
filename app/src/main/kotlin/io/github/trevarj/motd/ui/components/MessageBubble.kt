@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -1181,7 +1182,7 @@ internal fun formatTime(ms: Long): String {
 @Composable
 internal fun rememberMessageTimeFormatter(): (Long) -> String {
     val context = LocalContext.current
-    val locale = java.util.Locale.getDefault()
+    val locale = LocalLocale.current.platformLocale
     val is24 = remember(context, locale) { DateFormat.is24HourFormat(context) }
     val formatter = remember(is24, locale) {
         // getTimeFormat honors the 12/24h system setting; not thread-safe but only used on the UI thread.

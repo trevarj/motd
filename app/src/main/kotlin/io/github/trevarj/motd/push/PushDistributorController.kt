@@ -65,7 +65,7 @@ class PushDistributorController @Inject constructor(
             }
             throw IllegalStateException("old UnifiedPush distributor did not unregister")
         }
-        UnifiedPush.safeRemoveDistributor(context)
+        UnifiedPush.removeDistributor(context)
         unifiedPush.saveDistributor(packageName)
         retryLocked()
     }

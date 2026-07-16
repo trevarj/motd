@@ -16,19 +16,22 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
+import org.unifiedpush.android.connector.FailedReason
 import org.unifiedpush.android.connector.MessagingReceiver
+import org.unifiedpush.android.connector.data.PushEndpoint
+import org.unifiedpush.android.connector.data.PushMessage
 
 /**
- * UnifiedPush entry point (connector 2.5.0 `MessagingReceiver`). Distributors deliver endpoint
+ * UnifiedPush entry point (connector 3.3.3 `MessagingReceiver`). Distributors deliver endpoint
  * lifecycle callbacks and encrypted push bodies here, one per-network `instance` string.
  *
  * Instance scheme: `instance = networkId.toString()`. Non-numeric or unknown-network instances
  * are logged, ignored, and `unregisterApp`-ed as stale hygiene.
  *
- * Callback signatures for connector 2.5.0:
- *   onNewEndpoint(context, endpoint, instance)
- *   onMessage(context, message: ByteArray, instance)
- *   onRegistrationFailed(context, instance)
+ * Callback signatures for connector 3.3.3:
+ *   onNewEndpoint(context, endpoint: PushEndpoint, instance)
+ *   onMessage(context, message: PushMessage, instance)
+ *   onRegistrationFailed(context, reason: FailedReason, instance)
  *   onUnregistered(context, instance)
  *
  * `MessagingReceiver.onReceive` holds a wakelock for the duration of these callbacks, so each
@@ -68,34 +71,34 @@ class MotdPushReceiver : MessagingReceiver() {
     private fun entry(context: Context): PushEntryPoint =
         EntryPointAccessors.fromApplication(context.applicationContext, PushEntryPoint::class.java)
 
-    override fun onNewEndpoint(context: Context, endpoint: String, instance: String) {
+    override fun onNewEndpoint(context: Context, endpoint: PushEndpoint, instance: String) {
         val e = entry(context)
         runOnWakelock {
             if (e.pushProviderPrefs().provider.first() != PushProvider.UNIFIED_PUSH) return@runOnWakelock
             val networkId = resolveInstance(e, instance) ?: return@runOnWakelock
             // Mode is user-driven and precedes registration; do NOT flip it here.
-            e.registrar().onNewEndpoint(networkId, endpoint)
+            e.registrar().onNewEndpoint(networkId, endpoint.url)
             // Endpoints now exist for this network; let the manager re-evaluate push teardown.
             e.connectionManager().evaluatePushMode()
         }
     }
 
-    override fun onMessage(context: Context, message: ByteArray, instance: String) {
+    override fun onMessage(context: Context, message: PushMessage, instance: String) {
         val e = entry(context)
         runOnWakelock {
             if (e.pushProviderPrefs().provider.first() != PushProvider.UNIFIED_PUSH) return@runOnWakelock
             val networkId = resolveInstance(e, instance) ?: return@runOnWakelock
             val keys = e.registrar().loadOrCreateKeys()
-            e.eventHandler().handle(networkId, message, keys)
+            e.eventHandler().handle(networkId, message.content, keys, message.decrypted)
         }
     }
 
-    override fun onRegistrationFailed(context: Context, instance: String) {
+    override fun onRegistrationFailed(context: Context, reason: FailedReason, instance: String) {
         val e = entry(context)
         runOnWakelock {
             if (e.pushProviderPrefs().provider.first() != PushProvider.UNIFIED_PUSH) return@runOnWakelock
             val networkId = resolveInstance(e, instance) ?: return@runOnWakelock
-            e.pushHealthStore().failed(networkId, "DISTRIBUTOR_REGISTRATION_FAILED")
+            e.pushHealthStore().failed(networkId, "DISTRIBUTOR_REGISTRATION_${reason.name}")
             // Preserve the user's UnifiedPush choice, but immediately restore this network's
             // socket-backed fallback so a distributor problem never leaves it dark.
             e.connectionManager().startAll()
