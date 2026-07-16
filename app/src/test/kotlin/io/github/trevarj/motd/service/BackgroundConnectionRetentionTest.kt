@@ -9,6 +9,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -88,8 +89,10 @@ class BackgroundConnectionRetentionTest {
                 }
             }.awaitAll()
         }
-        advanceTimeBy(300_000L)
-        runCurrent()
+        // The contenders run on real worker threads while the expiry uses virtual time. Drain the
+        // test scheduler completely so the deadline callback and its finally cleanup both finish
+        // before asserting; a boundary advance can otherwise race the newly enqueued lazy job.
+        advanceUntilIdle()
 
         assertEquals(1, elapsedCount.get())
         assertFalse(retention.isRetaining)
