@@ -486,6 +486,7 @@
     <string name="drawer_network_settings">Network settings</string>
     <string name="drawer_state_connecting">Connecting…</string>
     <string name="drawer_state_registering">Registering…</string>
+    <string name="drawer_state_connected">Connected</string>
     <string name="drawer_state_disconnected">Disconnected</string>
 
     <!-- Chat-list scoping (WP-V1, §3.5) -->

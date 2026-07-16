@@ -43,6 +43,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -56,6 +58,8 @@ import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.MotdTheme
+
+private val ConnectedRingColor = Color(0xFF4CAF50)
 
 /**
  * Server-drawer content (plans/16 §3.1). Stateless: takes the built [DrawerRow]s + rollups and
@@ -245,14 +249,26 @@ private fun DrawerNetworkItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // This is network identity, not connection status. Keeping those concerns separate
-            // prevents short reconnects from making the drawer icon flicker or disappear.
             if (LocalAvatarStyle.current == AvatarStyle.IRC_SPRITE) {
+                val connected = row.state is IrcClientState.Ready
+                val statusDescription = stringResource(
+                    if (connected) R.string.drawer_state_connected
+                    else R.string.drawer_state_disconnected,
+                )
                 IrcNetworkBadge(
                     name = row.name,
                     networkId = row.networkId,
+                    status = if (connected) {
+                        ConnectedRingColor
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    },
                     size = 32.dp,
-                    modifier = Modifier.testTag("drawer_network_icon_${row.networkId}"),
+                    modifier = Modifier
+                        .testTag("drawer_network_icon_${row.networkId}")
+                        .semantics {
+                            stateDescription = statusDescription
+                        },
                 )
             }
             Column(modifier = Modifier.weight(1f)) {

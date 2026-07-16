@@ -1,8 +1,12 @@
 package io.github.trevarj.motd
 
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.test.platform.app.InstrumentationRegistry
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.chatlist.DrawerRow
@@ -43,9 +47,16 @@ class ServerDrawerUiTest {
             }
         }
 
-        for (networkId in 1L..3L) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val expectedStates = mapOf(
+            1L to context.getString(R.string.drawer_state_connected),
+            2L to context.getString(R.string.drawer_state_disconnected),
+            3L to context.getString(R.string.drawer_state_disconnected),
+        )
+        for ((networkId, state) in expectedStates) {
             compose.onNodeWithTag("drawer_network_icon_$networkId", useUnmergedTree = true)
                 .assertIsDisplayed()
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, state))
         }
     }
 
