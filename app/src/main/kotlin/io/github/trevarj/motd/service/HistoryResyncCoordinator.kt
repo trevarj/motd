@@ -3,6 +3,7 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.prefs.NoopHistorySyncPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
@@ -72,6 +73,16 @@ interface HistoryResyncController {
         client: IrcClient,
         isCurrent: () -> Boolean,
     ): HistoryResyncState
+
+    /**
+     * Fetch the newest page without waiting behind network-wide discovery/backfill. This urgent
+     * path promotes a just-sent local row before a reply or reaction needs its durable msgid.
+     */
+    suspend fun reconcilePendingMessage(
+        buffer: BufferEntity,
+        client: IrcClient,
+        isCurrent: () -> Boolean,
+    ): HistoryResyncState
 }
 
 /**
@@ -133,6 +144,63 @@ class HistoryResyncCoordinator @Inject constructor(
         HistoryRefreshRange.MISSING,
         publishState = false,
     )
+
+    override suspend fun reconcilePendingMessage(
+        buffer: BufferEntity,
+        client: IrcClient,
+        isCurrent: () -> Boolean,
+    ): HistoryResyncState = reconcilePendingMessage(
+        networkId = buffer.networkId,
+        bufferId = buffer.id,
+        target = buffer.ircTarget,
+        source = ClientHistorySource(client),
+        isCurrent = isCurrent,
+    )
+
+    /**
+     * A normal reconciliation owns the coarse per-network gate while it discovers targets and
+     * repairs gaps. A user action that only needs the newest msgid must not queue behind that whole
+     * pass. IrcClient still correlates labeled responses and serializes unlabeled CHATHISTORY at
+     * the wire boundary, while EventProcessor remains the sole Room writer.
+     */
+    internal suspend fun reconcilePendingMessage(
+        networkId: Long,
+        bufferId: Long,
+        target: String,
+        source: HistorySource,
+        isCurrent: () -> Boolean = { true },
+    ): HistoryResyncState {
+        if (!source.hasChatHistory()) return HistoryResyncState.Unsupported
+        if (!isCurrent()) return staleConnection()
+        val before = messageCount(bufferId)
+        return try {
+            val latest = withTimeout(PENDING_MESSAGE_TIMEOUT_MS) {
+                source.chathistory(
+                    ChatHistoryRequest(
+                        subcommand = ChatHistoryRequest.Subcommand.LATEST,
+                        target = target,
+                        limit = source.pageLimit(),
+                    ),
+                )
+            }
+            if (!isCurrent()) return staleConnection()
+            if (latest.events.isNotEmpty()) {
+                processor.process(networkId, IrcEvent.HistoryBatch(target, latest.events))
+            }
+            val inserted = (messageCount(bufferId) - before).coerceAtLeast(0)
+            if (inserted > 0) HistoryResyncState.Updated(inserted) else HistoryResyncState.UpToDate
+        } catch (_: TimeoutCancellationException) {
+            HistoryResyncState.Failed("Pending message history refresh timed out")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: StaleConnectionException) {
+            staleConnection()
+        } catch (error: Exception) {
+            HistoryResyncState.Failed(
+                error.message?.take(160) ?: "Pending message history refresh failed",
+            )
+        }
+    }
 
     private suspend fun resyncBuffer(
         buffer: BufferEntity,
@@ -742,6 +810,7 @@ class HistoryResyncCoordinator @Inject constructor(
         const val CHATHISTORY_CAP = "draft/chathistory"
         const val PAGE_LIMIT = 100
         const val REQUEST_TIMEOUT_MS = 35_000L
+        const val PENDING_MESSAGE_TIMEOUT_MS = 65_000L
         const val TARGETS_FUZZ_MS = 10_000L
         const val CAPABILITY_WAIT_TIMEOUT_MS = 30_000L
         const val ALL_HISTORY_LIMIT = 5_000

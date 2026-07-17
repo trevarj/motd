@@ -7,11 +7,13 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.sync.CanonicalHistorySingleFlight
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -27,8 +29,10 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -279,6 +283,61 @@ class HistoryResyncCoordinatorTest {
             coordinator.resyncBuffer(networkId, bufferId, "#chan", source),
         )
         assertEquals(listOf("newest", "gap", "old"), rows().mapNotNull { it.msgid })
+    }
+
+    @Test
+    fun pendingMessageReconciliationBypassesNetworkWideHistoryGate() = runTest {
+        val pendingId = processor.insertPending(
+            bufferId = bufferId,
+            label = "local-pending",
+            sender = "me",
+            text = "react-now",
+            replyToMsgid = null,
+            kind = MessageKind.PRIVMSG,
+        )
+        val lockHeld = CompletableDeferred<Unit>()
+        val releaseLock = CompletableDeferred<Unit>()
+        val holder = backgroundScope.launch {
+            CanonicalHistorySingleFlight.withNetwork(networkId) {
+                lockHeld.complete(Unit)
+                releaseLock.await()
+            }
+        }
+        lockHeld.await()
+        try {
+            val source = FakeSource { request ->
+                assertEquals(ChatHistoryRequest.Subcommand.LATEST, request.subcommand)
+                ChatHistoryResult(
+                    events = listOf(
+                        IrcEvent.ChatMessage(
+                            ctx = MessageContext(
+                                msgid = "durable-react-target",
+                                serverTime = System.currentTimeMillis(),
+                                account = "me",
+                                batchId = "history",
+                                label = null,
+                            ),
+                            kind = IrcEvent.ChatKind.PRIVMSG,
+                            source = Prefix("me"),
+                            target = "#chan",
+                            text = "react-now",
+                            isSelf = true,
+                            replyToMsgid = null,
+                        ),
+                    ),
+                    targets = emptyList(),
+                )
+            }
+
+            assertEquals(
+                HistoryResyncState.UpToDate,
+                coordinator.reconcilePendingMessage(networkId, bufferId, "#chan", source),
+            )
+            assertEquals("durable-react-target", db.messageDao().byCanonicalId(pendingId)?.msgid)
+        } finally {
+            releaseLock.complete(Unit)
+            holder.join()
+        }
     }
 
     @Test

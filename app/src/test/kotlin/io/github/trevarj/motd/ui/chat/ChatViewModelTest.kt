@@ -274,10 +274,10 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `reaction retries history until a later reconciliation promotes the msgid`() = runTest {
+    fun `reaction uses urgent history reconciliation to promote the msgid`() = runTest {
         val messages = FakeMessageRepository()
         val history = FakeHistoryResyncController { attempt ->
-            if (attempt == 3) messages.msgid.value = "server-parent"
+            if (attempt == 1) messages.msgid.value = "server-parent"
         }
         val manager = FakeConnectionManager(
             networkId = network.id,
@@ -297,16 +297,19 @@ class ChatViewModelTest {
         vm.react(pending, "👍")
         advanceUntilIdle()
 
-        assertEquals(listOf(channel.id, channel.id, channel.id), history.reconciledBuffers)
+        assertEquals(listOf(channel.id), history.pendingReconciledBuffers)
+        assertTrue(history.reconciledBuffers.isEmpty())
         assertEquals(listOf(SentReaction(channel.id, "server-parent", "👍")), manager.reactions)
     }
 
     @Test
-    fun `reaction waits behind serialized history before fresh reconciliation`() = runTest {
+    fun `reaction allows urgent history to finish a serialized wire wait`() = runTest {
         val messages = FakeMessageRepository()
         val history = FakeHistoryResyncController { attempt ->
-            if (attempt == 1) delay(35_000)
-            if (attempt == 2) messages.msgid.value = "delayed-server-parent"
+            if (attempt == 1) {
+                delay(35_000)
+                messages.msgid.value = "delayed-server-parent"
+            }
         }
         val manager = FakeConnectionManager(
             networkId = network.id,
@@ -328,7 +331,7 @@ class ChatViewModelTest {
         )
         advanceUntilIdle()
 
-        assertEquals(listOf(channel.id, channel.id), history.reconciledBuffers)
+        assertEquals(listOf(channel.id), history.pendingReconciledBuffers)
         assertEquals(
             listOf(SentReaction(channel.id, "delayed-server-parent", "👍")),
             manager.reactions,
@@ -549,6 +552,7 @@ class ChatViewModelTest {
     ) : HistoryResyncController {
         private val states = MutableStateFlow<HistoryResyncState>(HistoryResyncState.Idle)
         val reconciledBuffers = mutableListOf<Long>()
+        val pendingReconciledBuffers = mutableListOf<Long>()
 
         override fun state(bufferId: Long): Flow<HistoryResyncState> = states
         override fun consumeState(bufferId: Long) { states.value = HistoryResyncState.Idle }
@@ -568,6 +572,17 @@ class ChatViewModelTest {
             check(isCurrent())
             reconciledBuffers += buffer.id
             onReconcile(reconciledBuffers.size)
+            return HistoryResyncState.UpToDate
+        }
+
+        override suspend fun reconcilePendingMessage(
+            buffer: BufferEntity,
+            client: IrcClient,
+            isCurrent: () -> Boolean,
+        ): HistoryResyncState {
+            check(isCurrent())
+            pendingReconciledBuffers += buffer.id
+            onReconcile(pendingReconciledBuffers.size)
             return HistoryResyncState.UpToDate
         }
     }

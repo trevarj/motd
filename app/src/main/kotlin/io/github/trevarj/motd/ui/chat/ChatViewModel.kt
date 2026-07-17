@@ -71,7 +71,6 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.yield
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import javax.inject.Inject
@@ -445,11 +444,10 @@ class ChatViewModel @Inject constructor(
 
     /**
      * A bouncer without labeled-response can echo our send before its durable msgid is available.
-     * The normal chat-open reconciliation may also already be in flight and therefore miss a send
-     * that happens after its LATEST request began. Join that single flight once, then allow two
-     * fresh reconciliations: a bouncer can briefly expose the live message before it becomes
-     * queryable through CHATHISTORY. The Room observer runs concurrently so any socket echo or
-     * history pass can resolve the reaction immediately.
+     * The normal chat-open reconciliation may already own the network-wide history gate for target
+     * discovery or gap repair. Use the coordinator's urgent newest-page path so msgid recovery only
+     * waits for the client's current wire request, not the whole network pass. The Room observer
+     * runs concurrently so either a socket echo or that history page resolves the reaction.
      */
     private suspend fun resolveReactionMsgid(messageId: Long): String? =
         coroutineScope {
@@ -457,18 +455,13 @@ class ChatViewModel @Inject constructor(
                 val currentBuffer = buffer.value
                 val client = currentBuffer?.let { connectionManager.clientFor(it.networkId) }
                 if (currentBuffer != null && client != null) {
-                    repeat(REACTION_HISTORY_RECONCILIATIONS) {
-                        historyResyncCoordinator.reconcileBuffer(
-                            buffer = currentBuffer,
-                            client = client,
-                            isCurrent = {
-                                connectionManager.clientFor(currentBuffer.networkId) === client
-                            },
-                        )
-                        // Give the concurrent Room observer a chance to finish the race before
-                        // starting another network request after a successful promotion.
-                        yield()
-                    }
+                    historyResyncCoordinator.reconcilePendingMessage(
+                        buffer = currentBuffer,
+                        client = client,
+                        isCurrent = {
+                            connectionManager.clientFor(currentBuffer.networkId) === client
+                        },
+                    )
                 }
             }
             try {
@@ -1053,12 +1046,9 @@ class ChatViewModel @Inject constructor(
         const val ENTRY_POSITION_UNRESOLVED_KEY = "entry_position_unresolved"
 
         // Max wait for a pending own message's msgid to land before a queued reaction gives up.
-        // History is serialized per network and each request has a 35s timeout, so recovery can
-        // legitimately join one request before issuing two fresh attempts. Cover all three request
-        // windows plus a small scheduling margin; the observer still completes immediately on a
-        // fast echo.
-        const val REACT_QUEUE_TIMEOUT_MS = 108_000L
-        const val REACTION_HISTORY_RECONCILIATIONS = 3
+        // Urgent history recovery may wait behind one unlabeled 30s wire request before its own
+        // bounded newest-page request. The observer still completes immediately on a fast echo.
+        const val REACT_QUEUE_TIMEOUT_MS = 72_000L
     }
 }
 
