@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.channellist
 
 import io.github.trevarj.motd.irc.client.ChannelListing
+import io.github.trevarj.motd.irc.event.IrcClientState
 
 /** Default user-count floor for the auto-fetch on entry (plans/16 §5.7, Confirmed #6). */
 const val DEFAULT_MIN_USERS = 50
@@ -11,6 +12,39 @@ const val DEFAULT_MIN_USERS = 50
  */
 fun sortListings(listings: List<ChannelListing>): List<ChannelListing> =
     listings.sortedByDescending { it.userCount }
+
+/** Prefer the scoped client's live state, especially when the manager snapshot has not caught up. */
+fun channelBrowserConnectionState(
+    managerState: IrcClientState?,
+    clientState: IrcClientState?,
+): IrcClientState = when {
+    clientState != null -> clientState
+    managerState != null -> managerState
+    else -> IrcClientState.Disconnected
+}
+
+enum class ChannelBrowserAvailability {
+    INITIALIZING,
+    ROOT_UNAVAILABLE,
+    CONNECTING,
+    READY,
+    OFFLINE,
+    FAILED,
+}
+
+fun channelBrowserAvailability(
+    initialized: Boolean,
+    isRoot: Boolean,
+    connection: IrcClientState,
+): ChannelBrowserAvailability = when {
+    !initialized -> ChannelBrowserAvailability.INITIALIZING
+    isRoot -> ChannelBrowserAvailability.ROOT_UNAVAILABLE
+    connection is IrcClientState.Ready -> ChannelBrowserAvailability.READY
+    connection is IrcClientState.Connecting || connection is IrcClientState.Registering ->
+        ChannelBrowserAvailability.CONNECTING
+    connection is IrcClientState.Failed -> ChannelBrowserAvailability.FAILED
+    else -> ChannelBrowserAvailability.OFFLINE
+}
 
 /**
  * Fetch-gating for channel browsing (Confirmed decision #6).

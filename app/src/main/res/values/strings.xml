@@ -631,12 +631,32 @@
     <string name="channel_list_title">Browse channels</string>
     <string name="channel_list_search_hint">Search channels</string>
     <string name="channel_list_gated">Search for a channel to browse this network.</string>
-    <string name="channel_list_connect_to_browse">Connect to browse channels</string>
     <string name="channel_list_root_cant_browse">This soju account can\'t browse channels. Open one of its networks instead.</string>
-    <string name="channel_list_connect">Connect</string>
     <string name="channel_list_empty">No channels found</string>
-    <string name="channel_list_joining">Joining %1$s…</string>
-    <string name="channel_list_users">%1$d</string>
+    <string name="channel_list_empty_message">Try a different channel name or search term.</string>
+    <string name="channel_list_search_title">Find a channel</string>
+    <string name="channel_list_search_ready">Search this network by channel name.</string>
+    <string name="channel_list_search_action">Search channels</string>
+    <string name="channel_list_refresh">Refresh channel list</string>
+    <string name="channel_list_loading">Loading channels…</string>
+    <plurals name="channel_list_results">
+        <item quantity="one">%1$d channel</item>
+        <item quantity="other">%1$d channels</item>
+    </plurals>
+    <string name="channel_list_join">Join</string>
+    <plurals name="channel_list_users">
+        <item quantity="one">%1$d user</item>
+        <item quantity="other">%1$d users</item>
+    </plurals>
+    <string name="channel_list_error_title">Couldn\'t load channels</string>
+    <string name="channel_list_retry">Try again</string>
+    <string name="channel_list_checking">Checking network…</string>
+    <string name="channel_list_checking_message">Looking for the active IRC connection.</string>
+    <string name="channel_list_connecting">Connecting…</string>
+    <string name="channel_list_connecting_message">Channels will appear when this network is ready.</string>
+    <string name="channel_list_unavailable">Connection unavailable</string>
+    <string name="channel_list_offline">Network offline</string>
+    <string name="channel_list_offline_message">Reconnect this network from the network drawer, then return here to browse channels.</string>
 
     <!-- Nick action sheet + whois (WP-V3, §5.8) -->
     <string name="nick_sheet_message">Message</string>
