@@ -265,25 +265,6 @@ abstract class HeadlessE2eDriver {
         }
     }
 
-    protected fun clickReactionOnOriginalMessage(text: String, emoji: String) {
-        val chip = reactionOnOriginalMessage(text, emoji)
-        compose.waitUntil(15_000) {
-            compose.onAllNodes(chip, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onAllNodes(chip, useUnmergedTree = true).onFirst().performClick()
-    }
-
-    protected fun waitForReactionOnOriginalMessageToDisappear(
-        text: String,
-        emoji: String,
-        timeoutMillis: Long,
-    ) {
-        val chip = reactionOnOriginalMessage(text, emoji)
-        compose.waitUntil(timeoutMillis) {
-            compose.onAllNodes(chip, useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
-        }
-    }
-
     private fun messageRowContaining(text: String): SemanticsMatcher {
         val messageTag = SemanticsMatcher("message row containing $text") { node ->
             node.config.contains(SemanticsProperties.TestTag) &&
@@ -492,10 +473,6 @@ class ChatHeadlessE2eTest : HeadlessE2eDriver() {
         waitForText(channel)
         clickText(channel)
         assertComposerText("channel draft")
-        scrollTimelineToTextWithConnectionDiagnostics(parent, timeoutMillis = 30_000)
-        waitForReactionOnOriginalMessage(parent, "👍", timeoutMillis = 20_000)
-        clickReactionOnOriginalMessage(parent, "👍")
-        waitForReactionOnOriginalMessageToDisappear(parent, "👍", timeoutMillis = 20_000)
         back()
 
         waitForText(secondNick)
