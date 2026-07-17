@@ -41,11 +41,9 @@ private val AmoledColors = DarkColors.copy(
 )
 
 private val BaseTypography = Typography()
-private const val UI_DEFAULT_FONT_BASE_SCALE = 1.1f
-val LocalConversationFontScale: ProvidableCompositionLocal<Float> = staticCompositionLocalOf { 1f }
 
 internal fun typographyScaleFactor(percent: Int): Float =
-    normalizeFontScalePercent(percent) / 100f * UI_DEFAULT_FONT_BASE_SCALE
+    normalizeFontScalePercent(percent) / 100f
 
 internal fun conversationTypographyScaleFactor(percent: Int): Float =
     normalizeFontScalePercent(percent) / 100f
@@ -53,10 +51,11 @@ internal fun conversationTypographyScaleFactor(percent: Int): Float =
 private fun TextUnit.scaledBy(factor: Float): TextUnit =
     if (this != TextUnit.Unspecified) this * factor else this
 
+// Keep Material's per-role tracking intact; it is tuned for each type role rather than being a
+// proportional dimension of the glyph size.
 internal fun TextStyle.scaledBy(factor: Float): TextStyle = copy(
     fontSize = fontSize.scaledBy(factor),
     lineHeight = lineHeight.scaledBy(factor),
-    letterSpacing = letterSpacing.scaledBy(factor),
 )
 
 private fun scaledTypographyBy(base: Typography, factor: Float): Typography =
@@ -91,16 +90,12 @@ fun ConversationTypography(
     content: @Composable () -> Unit,
 ) {
     val typography = remember(scalePercent) { scaledConversationTypography(scalePercent) }
-    CompositionLocalProvider(
-        LocalConversationFontScale provides conversationTypographyScaleFactor(scalePercent),
-    ) {
-        MaterialTheme(
-            colorScheme = MaterialTheme.colorScheme,
-            shapes = MaterialTheme.shapes,
-            typography = typography,
-            content = content,
-        )
-    }
+    MaterialTheme(
+        colorScheme = MaterialTheme.colorScheme,
+        shapes = MaterialTheme.shapes,
+        typography = typography,
+        content = content,
+    )
 }
 
 /**

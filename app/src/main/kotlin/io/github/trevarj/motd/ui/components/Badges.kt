@@ -22,7 +22,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -81,8 +80,7 @@ fun NetworkChip(name: String, modifier: Modifier = Modifier) {
         Text(
             text = name,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.labelSmall,
         )
     }
 }
@@ -126,7 +124,7 @@ private fun CountBadge(
             Text(
                 text = currentText,
                 color = foreground,
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
             )
         }

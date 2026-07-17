@@ -37,7 +37,6 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
-import io.github.trevarj.motd.ui.theme.LocalConversationFontScale
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
 import androidx.compose.ui.res.stringResource
@@ -89,7 +88,6 @@ internal fun CompactMessageRow(
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val spacing = LocalSpacing.current
-    val conversationFontScale = LocalConversationFontScale.current
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     // Self text stays on the default body color; others too (IRC is uniform). The nick carries color.
     val bodyColor = MaterialTheme.colorScheme.onSurface
@@ -155,7 +153,7 @@ internal fun CompactMessageRow(
                 MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                 Text(
                     text = formattedTime,
-                    fontSize = 10.sp * conversationFontScale,
+                    style = MaterialTheme.typography.labelSmall,
                     color = if (failed) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 )

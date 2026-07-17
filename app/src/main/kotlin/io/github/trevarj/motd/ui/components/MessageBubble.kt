@@ -63,7 +63,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
@@ -73,7 +72,6 @@ import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.parseInlineCode
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
-import io.github.trevarj.motd.ui.theme.LocalConversationFontScale
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
@@ -264,7 +262,6 @@ fun MessageBubble(
     }
 
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
-    val conversationFontScale = LocalConversationFontScale.current
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
     val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -424,7 +421,7 @@ fun MessageBubble(
                 MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                 Text(
                     text = displayedTime,
-                    fontSize = 10.sp * conversationFontScale,
+                    style = MaterialTheme.typography.labelSmall,
                     color = if (failed) MaterialTheme.colorScheme.error
                     else textColor.copy(alpha = 0.6f),
                     modifier = Modifier.align(Alignment.CenterVertically),
@@ -470,7 +467,6 @@ private fun ActionMessageRow(
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val actionDescription = stringResource(R.string.chat_action_message)
     val spacing = LocalSpacing.current
-    val conversationFontScale = LocalConversationFontScale.current
     val accent = if (hasMention) {
         MaterialTheme.colorScheme.secondary
     } else {
@@ -560,7 +556,7 @@ private fun ActionMessageRow(
                     MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                     Text(
                         text = formattedTime,
-                        fontSize = 10.sp * conversationFontScale,
+                        style = MaterialTheme.typography.labelSmall,
                         color = if (failed) {
                             MaterialTheme.colorScheme.error
                         } else {
@@ -707,7 +703,6 @@ private fun TwoLineMessageRow(
     onSenderClick: (() -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
-    val conversationFontScale = LocalConversationFontScale.current
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val bodyColor = MaterialTheme.colorScheme.onSurface
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
@@ -773,7 +768,7 @@ private fun TwoLineMessageRow(
                     MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                     Text(
                         text = formattedTime,
-                        fontSize = 10.sp * conversationFontScale,
+                        style = MaterialTheme.typography.labelSmall,
                         color = if (failed) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     )
