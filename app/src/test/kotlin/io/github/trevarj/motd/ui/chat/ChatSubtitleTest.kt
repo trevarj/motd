@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.event.IrcClientState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -12,6 +13,11 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class ChatSubtitleTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
+
+    @Test
+    fun initialSnapshotDoesNotClaimTheChatIsDisconnected() {
+        assertNull(chatSubtitle(ChatState(), context))
+    }
 
     @Test
     fun transientFailureShowsCurrentReconnectStateWithoutStaleProxyDetail() {

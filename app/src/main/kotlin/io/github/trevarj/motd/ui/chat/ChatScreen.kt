@@ -1089,8 +1089,13 @@ fun ChatContent(
                         onSenderClick = onSenderClick,
                     )
 
-                    // Empty buffer once the first refresh settles → placeholder (plans/15 #27).
-                    if (items.itemCount == 0 && items.loadState.refresh is LoadState.NotLoading) {
+                    // Paging begins with a transient empty refresh before Room delivers its first
+                    // page. Only show the empty state once APPEND proves the buffer is terminally
+                    // empty; otherwise the large placeholder flashes during every chat entry.
+                    if (items.loadState.refresh is LoadState.NotLoading &&
+                        initialPagingPage(items.itemCount, items.loadState.append) ==
+                        InitialPagingPage.TerminalEmpty
+                    ) {
                         io.github.trevarj.motd.ui.components.EmptyState(
                             icon = Icons.Outlined.Forum,
                             title = stringResource(R.string.chat_empty_title),
@@ -1468,6 +1473,7 @@ internal fun composerNeedsMemberNicks(value: TextFieldValue): Boolean {
 
 internal fun chatSubtitle(state: ChatState, context: android.content.Context): String? {
     when (val connection = state.connState) {
+        null -> return null
         IrcClientState.Connecting -> return context.getString(R.string.drawer_state_connecting)
         IrcClientState.Registering -> return context.getString(R.string.drawer_state_registering)
         IrcClientState.Disconnected -> return context.getString(R.string.drawer_state_disconnected)

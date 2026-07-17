@@ -136,6 +136,10 @@ class ChatJumpResolverTest {
 
     @Test fun `empty refresh waits for a loading append then accepts its target rows`() {
         assertEquals(InitialPagingPage.Pending, initialPagingPage(itemCount = 0, append = LoadState.Loading))
+        assertEquals(
+            InitialPagingPage.Pending,
+            initialPagingPage(itemCount = 0, append = LoadState.NotLoading(endOfPaginationReached = false)),
+        )
         assertEquals(InitialPagingPage.RowsAvailable, initialPagingPage(itemCount = 1, append = LoadState.Loading))
     }
 

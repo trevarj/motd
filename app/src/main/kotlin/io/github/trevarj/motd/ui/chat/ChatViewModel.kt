@@ -87,7 +87,9 @@ data class ChatState(
     val memberCount: Int? = null,
     val typingNicks: List<String> = emptyList(),
     val replyTo: MessageEntity? = null,
-    val connState: IrcClientState = IrcClientState.Disconnected,
+    // Null means the buffer/connection snapshot has not loaded yet. Do not use Disconnected as a
+    // loading sentinel: it briefly paints a false status while entering an already-connected chat.
+    val connState: IrcClientState? = null,
     val presence: Map<PresenceKey, PresenceState> = emptyMap(),
 )
 
@@ -200,11 +202,11 @@ class ChatViewModel @Inject constructor(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, bufferId)
 
-    private val connState: StateFlow<IrcClientState> = buffer
+    private val connState: StateFlow<IrcClientState?> = buffer
         .combine(connectionManager.connectionStates) { buffer, states ->
-            buffer?.let { states[it.networkId] } ?: IrcClientState.Disconnected
+            buffer?.let { states[it.networkId] ?: IrcClientState.Disconnected }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), IrcClientState.Disconnected)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private var nextVisibleSession = 0L
     private val visibleSession = MutableStateFlow<Long?>(null)

@@ -22,6 +22,8 @@ object MotdMotion {
 
     private val StandardEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
     private const val SoftSpringStiffness = 340f
+    private const val MaterialDefaultSpatialDampingRatio = 0.9f
+    private const val MaterialDefaultSpatialStiffness = 700f
 
     val fadeIn: FiniteAnimationSpec<Float> = tween(
         durationMillis = StandardDurationMs,
@@ -38,6 +40,16 @@ object MotdMotion {
     val microFadeOut: FiniteAnimationSpec<Float> = tween(
         durationMillis = MicroDurationMs,
         easing = StandardEasing,
+    )
+
+    /**
+     * The standard spatial spring used by Material 3's
+     * [androidx.compose.material3.ModalNavigationDrawer]. Material 3 1.4 keeps its motion scheme
+     * internal, so custom navigation mirrors the pinned token values.
+     */
+    val navigationDrawerSpatial: FiniteAnimationSpec<IntOffset> = spring(
+        dampingRatio = MaterialDefaultSpatialDampingRatio,
+        stiffness = MaterialDefaultSpatialStiffness,
     )
 
     /** A calm spring: responsive and soft, without a playful bounce. */

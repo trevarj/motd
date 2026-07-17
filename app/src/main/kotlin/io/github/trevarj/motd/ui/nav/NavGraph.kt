@@ -1,11 +1,15 @@
 package io.github.trevarj.motd.ui.nav
 
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -36,9 +40,9 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
  * screen composable; WP7/WP8 fill in their own screen bodies behind these signatures.
  */
 // Material shared-axis X feel: forward pushes the new screen in from the right and the old one out
-// to the left; back reverses it. The shared navigation duration is set at the NavHost level so every
-// composable<Route> inherits it; the pop transitions are also what the Android 13+ predictive-back
-// scrim animates.
+// to the left; back reverses it. Chat uses a drawer-style transition: only the chat surface moves,
+// while the adjacent destination stays stationary beneath it. This avoids transforming two full
+// Compose trees while the first Room and Paging emissions arrive.
 @Composable
 fun MotdNavGraph(
     navController: NavHostController = rememberNavController(),
@@ -68,16 +72,35 @@ fun MotdNavGraph(
         navController = navController,
         startDestination = ChatListRoute,
         enterTransition = {
-            slideIntoContainer(SlideDirection.Start, tween(MotdMotion.NavigationDurationMs))
+            if (isChatTarget()) {
+                slideIntoContainer(SlideDirection.Start, MotdMotion.navigationDrawerSpatial)
+            } else {
+                slideIntoContainer(SlideDirection.Start, tween(MotdMotion.NavigationDurationMs))
+            }
         },
         exitTransition = {
-            slideOutOfContainer(SlideDirection.Start, tween(MotdMotion.NavigationDurationMs))
+            if (isChatTarget()) {
+                // Keep the current screen in place until the incoming chat finishes, mirroring
+                // ModalNavigationDrawer's single moving surface over stationary content.
+                ExitTransition.KeepUntilTransitionsFinished
+            } else {
+                slideOutOfContainer(SlideDirection.Start, tween(MotdMotion.NavigationDurationMs))
+            }
         },
         popEnterTransition = {
-            slideIntoContainer(SlideDirection.End, tween(MotdMotion.NavigationDurationMs))
+            if (isChatInitial()) {
+                // The destination is already visible beneath the outgoing chat surface.
+                EnterTransition.None
+            } else {
+                slideIntoContainer(SlideDirection.End, tween(MotdMotion.NavigationDurationMs))
+            }
         },
         popExitTransition = {
-            slideOutOfContainer(SlideDirection.End, tween(MotdMotion.NavigationDurationMs))
+            if (isChatInitial()) {
+                slideOutOfContainer(SlideDirection.End, MotdMotion.navigationDrawerSpatial)
+            } else {
+                slideOutOfContainer(SlideDirection.End, tween(MotdMotion.NavigationDurationMs))
+            }
         },
     ) {
         composable<ChatListRoute> {
@@ -229,4 +252,17 @@ fun MotdNavGraph(
             )
         }
     }
+}
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.isChatTarget(): Boolean =
+    isChatRoutePattern(targetState.destination.route)
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.isChatInitial(): Boolean =
+    isChatRoutePattern(initialState.destination.route)
+
+internal fun isChatRoutePattern(route: String?): Boolean {
+    val chatRouteName = ChatRoute::class.qualifiedName ?: return false
+    return route == chatRouteName ||
+        route?.startsWith("$chatRouteName/") == true ||
+        route?.startsWith("$chatRouteName?") == true
 }
