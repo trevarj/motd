@@ -145,7 +145,7 @@ fun SettingsContent(
         CategoryRow(
             icon = Icons.Outlined.Info,
             title = stringResource(R.string.settings_about),
-            summary = appVersion(context),
+            summary = stringResource(R.string.settings_about_summary, appVersion(context)),
             modifier = Modifier.testTag("settings_category_about"),
             onClick = onOpenAbout,
         )

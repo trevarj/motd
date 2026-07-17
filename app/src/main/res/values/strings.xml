@@ -150,14 +150,15 @@
     <string name="settings_managed_networks_section">Managed networks</string>
     <string name="settings_about">About</string>
     <!-- Settings category submenu summaries (top-level Settings list). -->
-    <string name="settings_appearance_summary">Theme, density, avatars, nick colors, wallpaper</string>
-    <string name="settings_chat_summary">Fools, join/part/quit, and chat behavior</string>
+    <string name="settings_appearance_summary">Personalize themes, text size, chat layout, avatars, and wallpaper.</string>
+    <string name="settings_chat_summary">Control message previews, composer options, sounds, friends, and fools.</string>
     <string name="settings_messages_section">Message display</string>
     <string name="settings_composer_section">Composer</string>
-    <string name="settings_delivery_summary">Delivery mode, push, battery optimization</string>
-    <string name="settings_networks_summary">Manage your IRC networks and bouncers</string>
+    <string name="settings_delivery_summary">Choose how messages arrive and keep background delivery reliable.</string>
+    <string name="settings_networks_summary">Add and manage IRC networks, bouncers, and connection details.</string>
     <string name="settings_uploads">Uploads</string>
-    <string name="settings_uploads_summary">Paste and file upload defaults</string>
+    <string name="settings_uploads_summary">Choose where uploads go and set privacy, expiry, and size limits.</string>
+    <string name="settings_about_summary">Version %1$s · Diagnostics, license, and project links.</string>
     <string name="settings_upload_destination">Default destination</string>
     <string name="settings_upload_termbin_warning">Termbin sends text without encryption to a public service. Never upload passwords or private information.</string>
     <string name="settings_upload_endpoint">Service endpoint</string>
