@@ -31,6 +31,7 @@ internal object SeededFuzz {
     ) {
         val configuredSeed = System.getenv("MOTD_FUZZ_SEED")
         val configuredCase = System.getenv("MOTD_FUZZ_CASE")?.toIntOrNull()
+        val configuredShard = System.getenv("MOTD_FUZZ_SHARD")?.toIntOrNull()?.takeIf { it >= 0 } ?: 0
         val profileCases = if (System.getenv("MOTD_FUZZ_PROFILE") == "nightly") {
             nightlyCases
         } else {
@@ -42,9 +43,12 @@ internal object SeededFuzz {
         val requested = if (configuredCase != null) {
             listOf(CorpusCase(configuredSeed ?: DEFAULT_SEED, configuredCase))
         } else {
+            val firstGeneratedCase = configuredShard * generatedCases
             buildList {
                 addAll(regressions(target, version))
-                repeat(generatedCases) { add(CorpusCase(configuredSeed ?: DEFAULT_SEED, it)) }
+                repeat(generatedCases) { offset ->
+                    add(CorpusCase(configuredSeed ?: DEFAULT_SEED, firstGeneratedCase + offset))
+                }
             }.distinct()
         }
 

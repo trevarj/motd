@@ -36,7 +36,7 @@ class EventProcessorStateMachineFuzzTest {
             target = "event-processor",
             version = 1,
             prCases = 12,
-            nightlyCases = 120,
+            nightlyCases = 500,
             replayTest = javaClass.name,
         ) { fuzz ->
             val databaseName = "processor-fuzz-${fuzz.seed.hashCode()}-${fuzz.index}.db"

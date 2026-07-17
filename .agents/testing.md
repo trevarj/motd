@@ -47,10 +47,19 @@ seeded generated tests. Their defaults are stable; CI replaces the seed with the
 pull-request commit and `.github/workflows/fuzz.yml` runs the larger nightly
 profile.
 
+The nightly workflow runs three disjoint case-index shards for each module. An
+IRC shard covers 200,000 parser cases and 75,000 mapper cases. An app shard
+covers 75,000 presentation cases, 1,500 canonical-timeline cases with 128
+operations each, and 500 EventProcessor cases. Job summaries report the
+effective counts, index ranges, and any manual overrides.
+
 - `MOTD_FUZZ_SEED=<text>` selects an exact seed.
 - `MOTD_FUZZ_CASE=<index>` replays one independently seeded case.
 - `MOTD_FUZZ_PROFILE=pr|nightly` selects the bounded workload.
 - `MOTD_FUZZ_CASES=<count>` and `MOTD_FUZZ_STEPS=<count>` override campaign size.
+- `MOTD_FUZZ_SHARD=<zero-based index>` offsets generated case indices by one
+  configured case-count, allowing parallel jobs to cover disjoint cases under
+  the same reproducible seed. Exact `MOTD_FUZZ_CASE` replay ignores the shard.
 
 Failures print an exact Nix/Gradle replay command and write the generated
 operation trace below the module's `build/fuzz-failures/` directory. Minimize a

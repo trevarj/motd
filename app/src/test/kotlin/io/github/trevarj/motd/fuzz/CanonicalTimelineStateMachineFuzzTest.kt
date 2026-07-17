@@ -37,7 +37,7 @@ class CanonicalTimelineStateMachineFuzzTest {
             target = "canonical-timeline",
             version = 1,
             prCases = 24,
-            nightlyCases = 300,
+            nightlyCases = 1_500,
             replayTest = javaClass.name,
         ) { fuzz ->
             val databaseName = "canonical-fuzz-${fuzz.seed.hashCode()}-${fuzz.index}.db"
@@ -75,7 +75,7 @@ class CanonicalTimelineStateMachineFuzzTest {
                     add(Operation.History(logical))
                     add(Operation.History(logical.takeLast(3)))
                 }
-                val operationCount = fuzzSteps(pr = 32, nightly = 64)
+                val operationCount = fuzzSteps(pr = 32, nightly = 128)
                 val reopenAt = setOf(
                     fuzz.random.nextInt(1, operationCount),
                     fuzz.random.nextInt(1, operationCount),
