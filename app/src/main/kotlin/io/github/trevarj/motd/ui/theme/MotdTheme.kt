@@ -41,12 +41,14 @@ private val AmoledColors = DarkColors.copy(
 )
 
 private val BaseTypography = Typography()
-private const val DEFAULT_FONT_BASE_SCALE = 1.1f
-val LocalConversationFontScale: ProvidableCompositionLocal<Float> =
-    staticCompositionLocalOf { DEFAULT_FONT_BASE_SCALE }
+private const val UI_DEFAULT_FONT_BASE_SCALE = 1.1f
+val LocalConversationFontScale: ProvidableCompositionLocal<Float> = staticCompositionLocalOf { 1f }
 
 internal fun typographyScaleFactor(percent: Int): Float =
-    normalizeFontScalePercent(percent) / 100f * DEFAULT_FONT_BASE_SCALE
+    normalizeFontScalePercent(percent) / 100f * UI_DEFAULT_FONT_BASE_SCALE
+
+internal fun conversationTypographyScaleFactor(percent: Int): Float =
+    normalizeFontScalePercent(percent) / 100f
 
 private fun TextUnit.scaledBy(factor: Float): TextUnit =
     if (this != TextUnit.Unspecified) this * factor else this
@@ -57,9 +59,8 @@ internal fun TextStyle.scaledBy(factor: Float): TextStyle = copy(
     letterSpacing = letterSpacing.scaledBy(factor),
 )
 
-internal fun scaledTypography(percent: Int, base: Typography = BaseTypography): Typography {
-    val factor = typographyScaleFactor(percent)
-    return base.copy(
+private fun scaledTypographyBy(base: Typography, factor: Float): Typography =
+    base.copy(
         displayLarge = base.displayLarge.scaledBy(factor),
         displayMedium = base.displayMedium.scaledBy(factor),
         displaySmall = base.displaySmall.scaledBy(factor),
@@ -76,7 +77,12 @@ internal fun scaledTypography(percent: Int, base: Typography = BaseTypography): 
         labelMedium = base.labelMedium.scaledBy(factor),
         labelSmall = base.labelSmall.scaledBy(factor),
     )
-}
+
+internal fun scaledTypography(percent: Int, base: Typography = BaseTypography): Typography =
+    scaledTypographyBy(base, typographyScaleFactor(percent))
+
+internal fun scaledConversationTypography(percent: Int, base: Typography = BaseTypography): Typography =
+    scaledTypographyBy(base, conversationTypographyScaleFactor(percent))
 
 /** Override text tokens only; colors, shapes, density, icons, and geometry remain unchanged. */
 @Composable
@@ -84,8 +90,10 @@ fun ConversationTypography(
     scalePercent: Int,
     content: @Composable () -> Unit,
 ) {
-    val typography = remember(scalePercent) { scaledTypography(scalePercent) }
-    CompositionLocalProvider(LocalConversationFontScale provides typographyScaleFactor(scalePercent)) {
+    val typography = remember(scalePercent) { scaledConversationTypography(scalePercent) }
+    CompositionLocalProvider(
+        LocalConversationFontScale provides conversationTypographyScaleFactor(scalePercent),
+    ) {
         MaterialTheme(
             colorScheme = MaterialTheme.colorScheme,
             shapes = MaterialTheme.shapes,

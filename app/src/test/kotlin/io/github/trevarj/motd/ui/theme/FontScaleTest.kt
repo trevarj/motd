@@ -15,15 +15,23 @@ class FontScaleTest {
     }
 
     @Test
+    fun conversation_scale_keeps_the_original_baseline() {
+        assertEquals(0.8f, conversationTypographyScaleFactor(-1), 0.001f)
+        assertEquals(0.85f, conversationTypographyScaleFactor(83), 0.001f)
+        assertEquals(1f, conversationTypographyScaleFactor(100), 0.001f)
+        assertEquals(1.4f, conversationTypographyScaleFactor(999), 0.001f)
+    }
+
+    @Test
     fun independent_derivations_always_start_from_unscaled_base_tokens() {
         val base = Typography()
         val ui = scaledTypography(140, base)
-        val conversation = scaledTypography(80, base)
+        val conversation = scaledConversationTypography(80, base)
 
         assertEquals(base.bodyLarge.fontSize.value * 1.54f, ui.bodyLarge.fontSize.value, 0.001f)
-        assertEquals(base.bodyLarge.fontSize.value * 0.88f, conversation.bodyLarge.fontSize.value, 0.001f)
+        assertEquals(base.bodyLarge.fontSize.value * 0.8f, conversation.bodyLarge.fontSize.value, 0.001f)
         assertNotEquals(
-            ui.bodyLarge.fontSize.value * typographyScaleFactor(80),
+            ui.bodyLarge.fontSize.value * conversationTypographyScaleFactor(80),
             conversation.bodyLarge.fontSize.value,
             0.001f,
         )
