@@ -1,0 +1,2 @@
+# target<TAB>generatorVersion<TAB>seed<TAB>case<TAB>namedFixture
+# Add a row together with a minimized named JUnit regression whenever generated testing finds a bug.

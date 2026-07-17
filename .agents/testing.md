@@ -40,6 +40,24 @@ Google APK unless the maintainer explicitly reactivates that distribution.
 Lint warnings are errors. Keep the single-worker/no-daemon form for final lint
 and release checks because it avoids a known Android lint worker race.
 
+## Deterministic generated tests
+
+The ordinary `:irc:test` and `:app:testFossDebugUnitTest` tasks include bounded,
+seeded generated tests. Their defaults are stable; CI replaces the seed with the
+pull-request commit and `.github/workflows/fuzz.yml` runs the larger nightly
+profile.
+
+- `MOTD_FUZZ_SEED=<text>` selects an exact seed.
+- `MOTD_FUZZ_CASE=<index>` replays one independently seeded case.
+- `MOTD_FUZZ_PROFILE=pr|nightly` selects the bounded workload.
+- `MOTD_FUZZ_CASES=<count>` and `MOTD_FUZZ_STEPS=<count>` override campaign size.
+
+Failures print an exact Nix/Gradle replay command and write the generated
+operation trace below the module's `build/fuzz-failures/` directory. Minimize a
+real failure into a named JUnit regression and retain its target, generator
+version, seed, case, and fixture in that module's
+`src/test/resources/fuzz/regressions.tsv` file.
+
 ## Device and E2E selection
 
 - Do not run the headless emulator suite during routine local development. It

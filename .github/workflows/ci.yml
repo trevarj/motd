@@ -17,6 +17,9 @@ jobs:
   irc:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      MOTD_FUZZ_PROFILE: pr
+      MOTD_FUZZ_SEED: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
@@ -24,12 +27,24 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
       - name: irc unit tests
         run: ./gradlew :irc:test --stacktrace
+      - name: Upload IRC generated-test failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        with:
+          name: irc-fuzz-failure-${{ github.run_id }}
+          path: |
+            irc/build/fuzz-failures/**
+            irc/build/reports/tests/test/**
+          if-no-files-found: ignore
 
   # Android app: unit tests, lint, and debug APK. Uses the preinstalled
   # Android SDK on ubuntu-latest (no SDK download) plus the Gradle cache.
   app:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      MOTD_FUZZ_PROFILE: pr
+      MOTD_FUZZ_SEED: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
@@ -37,6 +52,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
       - name: App unit tests
         run: ./gradlew :app:testFossDebugUnitTest --stacktrace
+      - name: Upload app generated-test failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        with:
+          name: app-fuzz-failure-${{ github.run_id }}
+          path: |
+            app/build/fuzz-failures/**
+            app/build/reports/tests/testFossDebugUnitTest/**
+          if-no-files-found: ignore
       - name: Verify checked-in Room schemas
         run: |
           git diff --exit-code -- app/schemas

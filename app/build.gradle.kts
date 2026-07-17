@@ -270,3 +270,14 @@ dependencies {
     // Real WebSocket handshake for the WSS transport framing test (plans/19 §3.3).
     testImplementation(libs.okhttp.mockwebserver)
 }
+
+// Generated JUnit cases are deterministic only for the selected profile/seed/replay inputs.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    listOf(
+        "MOTD_FUZZ_PROFILE",
+        "MOTD_FUZZ_SEED",
+        "MOTD_FUZZ_CASE",
+        "MOTD_FUZZ_CASES",
+        "MOTD_FUZZ_STEPS",
+    ).forEach { name -> inputs.property(name, providers.environmentVariable(name).orElse("")) }
+}
