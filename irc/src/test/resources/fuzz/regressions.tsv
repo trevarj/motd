@@ -1,2 +1,3 @@
 # target<TAB>generatorVersion<TAB>seed<TAB>case<TAB>namedFixture
 # Add a row together with a minimized named JUnit regression whenever generated testing finds a bug.
+event-mapper	1	9cfda07e519885c116e8de94f13f925c50b4a108-29573753858	28136	unknownCtcpEnvelopeInAnOtherwiseArbitraryChatBodyIsIgnored

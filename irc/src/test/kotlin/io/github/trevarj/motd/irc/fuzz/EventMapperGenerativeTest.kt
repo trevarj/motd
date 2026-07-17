@@ -38,6 +38,20 @@ class EventMapperGenerativeTest {
             }
         }
     }
+
+    @Test
+    fun unknownCtcpEnvelopeInAnOtherwiseArbitraryChatBodyIsIgnored() {
+        val replies = mutableListOf<IrcMessage>()
+        val mapper = EventMapper({ "me" }, { Isupport() }, { 1L })
+        val message = IrcMessage(
+            source = Prefix("alice"),
+            command = "PRIVMSG",
+            params = listOf("#room", "\u0001UNKNOWN arbitrary controls \u0002\u000f\u0001"),
+        )
+
+        assertNull(mapper.map(message, ctcpReply = replies::add))
+        assertTrue(replies.isEmpty())
+    }
 }
 
 private fun FuzzCase.validReactionCase(mapper: EventMapper) {
@@ -106,13 +120,14 @@ private fun FuzzCase.validChatCase(mapper: EventMapper, now: Long) {
     record("chat command=$command actor=$actor target=$target mode=$mode msgid=$msgid body=${body.quotedSummary()}")
     val replies = mutableListOf<IrcMessage>()
     val event = mapper.map(message, ctcpReply = replies::add)
+    val ctcpPayload = wireBody.ctcpPayload()
 
-    if (mode == 3 && command == "PRIVMSG") {
+    if (ctcpPayload == "VERSION" && command == "PRIVMSG") {
         assertNull(event)
         assertEquals(1, replies.size)
         return
     }
-    if (mode == 3 || mode == 4) {
+    if (ctcpPayload != null && ctcpPayload != "ACTION" && !ctcpPayload.startsWith("ACTION ")) {
         assertNull(event)
         assertTrue(replies.isEmpty())
         return
@@ -127,15 +142,29 @@ private fun FuzzCase.validChatCase(mapper: EventMapper, now: Long) {
     assertEquals(if (validTime) 1_784_228_959_123L else now, event.ctx.serverTime)
     assertEquals(actor, event.source.nick)
     assertEquals(target, event.target)
-    assertEquals(if (mode == 1) body else if (mode == 2) "" else body, event.text)
     assertEquals(
-        when (mode) {
-            1, 2 -> IrcEvent.ChatKind.ACTION
-            else -> if (command == "NOTICE") IrcEvent.ChatKind.NOTICE else IrcEvent.ChatKind.PRIVMSG
+        when {
+            ctcpPayload == "ACTION" -> ""
+            ctcpPayload?.startsWith("ACTION ") == true -> ctcpPayload.removePrefix("ACTION ")
+            else -> wireBody
+        },
+        event.text,
+    )
+    assertEquals(
+        if (ctcpPayload == "ACTION" || ctcpPayload?.startsWith("ACTION ") == true) {
+            IrcEvent.ChatKind.ACTION
+        } else if (command == "NOTICE") {
+            IrcEvent.ChatKind.NOTICE
+        } else {
+            IrcEvent.ChatKind.PRIVMSG
         },
         event.kind,
     )
 }
+
+private fun String.ctcpPayload(): String? =
+    takeIf { length >= 2 && first() == '\u0001' && last() == '\u0001' }
+        ?.substring(1, length - 1)
 
 private fun Random.structuralMessage(): IrcMessage {
     val commands = listOf(
