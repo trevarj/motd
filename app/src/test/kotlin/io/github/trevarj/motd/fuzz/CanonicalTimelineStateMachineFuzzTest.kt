@@ -17,6 +17,7 @@ import io.github.trevarj.motd.data.sync.CanonicalTimelineStore
 import io.github.trevarj.motd.data.sync.TimelineObservation
 import java.nio.charset.StandardCharsets
 import kotlin.random.Random
+import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -32,13 +33,13 @@ class CanonicalTimelineStateMachineFuzzTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
 
     @Test
-    fun generatedDeliveryAndHistorySequencesPreserveCanonicalInvariants() = runTest {
+    fun generatedDeliveryAndHistorySequencesPreserveCanonicalInvariants() = runTest(timeout = 10.minutes) {
         SeededFuzz.runSuspending(
             target = "canonical-timeline",
             version = 1,
             prCases = 24,
             nightlyCases = 1_500,
-            replayTest = javaClass.name,
+            replayTest = CanonicalTimelineStateMachineFuzzTest::class.java.name,
         ) { fuzz ->
             val databaseName = "canonical-fuzz-${fuzz.seed.hashCode()}-${fuzz.index}.db"
             context.deleteDatabase(databaseName)

@@ -37,7 +37,7 @@ class EventProcessorStateMachineFuzzTest {
             version = 1,
             prCases = 12,
             nightlyCases = 500,
-            replayTest = javaClass.name,
+            replayTest = EventProcessorStateMachineFuzzTest::class.java.name,
         ) { fuzz ->
             val databaseName = "processor-fuzz-${fuzz.seed.hashCode()}-${fuzz.index}.db"
             context.deleteDatabase(databaseName)
