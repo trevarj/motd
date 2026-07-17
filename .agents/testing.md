@@ -30,7 +30,7 @@ Full release-parity Gradle verification:
 nix develop -c ./gradlew \
   :irc:build \
   :app:testFossDebugUnitTest :app:testFossReleaseUnitTest \
-  :app:lintFossDebug :app:assembleFossRelease \
+  :app:lintFossDebug :app:lintFossRelease :app:assembleFossRelease \
   --stacktrace --no-daemon --max-workers=1
 ```
 

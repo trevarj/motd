@@ -37,11 +37,11 @@ jobs:
             irc/build/reports/tests/test/**
           if-no-files-found: ignore
 
-  # Android app: unit tests, lint, and debug APK. Uses the preinstalled
-  # Android SDK on ubuntu-latest (no SDK download) plus the Gradle cache.
+  # Android app: debug + release unit tests, lint, and APK assembly. The release APK is unsigned in
+  # required CI; tag builds inject the production signing secrets in release.yml.
   app:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       MOTD_FUZZ_PROFILE: pr
       MOTD_FUZZ_SEED: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -50,8 +50,10 @@ jobs:
       - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
-      - name: App unit tests
-        run: ./gradlew :app:testFossDebugUnitTest --stacktrace
+      - name: App unit tests (debug and release)
+        run: >-
+          ./gradlew :app:testFossDebugUnitTest :app:testFossReleaseUnitTest
+          --stacktrace --no-daemon --max-workers=1
       - name: Upload app generated-test failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -60,6 +62,7 @@ jobs:
           path: |
             app/build/fuzz-failures/**
             app/build/reports/tests/testFossDebugUnitTest/**
+            app/build/reports/tests/testFossReleaseUnitTest/**
           if-no-files-found: ignore
       - name: Verify checked-in Room schemas
         run: |
@@ -73,14 +76,17 @@ jobs:
         run: |
           for attempt in 1 2; do
             echo "::group::lint attempt $attempt"
-            ./gradlew :app:lintFossDebug --stacktrace \
-              -Dorg.gradle.workers.max=1 && { echo "::endgroup::"; exit 0; }
+            ./gradlew :app:lintFossDebug :app:lintFossRelease \
+              --stacktrace --no-daemon --max-workers=1 \
+              && { echo "::endgroup::"; exit 0; }
             echo "::endgroup::"
             echo "lint attempt $attempt failed; retrying" >&2
           done
           exit 1
-      - name: Assemble debug APK
-        run: ./gradlew :app:assembleFossDebug --stacktrace
+      - name: Assemble debug and release APKs
+        run: >-
+          ./gradlew :app:assembleFossDebug :app:assembleFossRelease
+          --stacktrace --no-daemon --max-workers=1
       - name: Validate E2E shell and Compose configuration
         run: ./test/e2e/validate.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
