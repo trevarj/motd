@@ -62,6 +62,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -298,6 +299,40 @@ class ChatViewModelTest {
 
         assertEquals(listOf(channel.id, channel.id), history.reconciledBuffers)
         assertEquals(listOf(SentReaction(channel.id, "server-parent", "👍")), manager.reactions)
+    }
+
+    @Test
+    fun `reaction waits behind serialized history before fresh reconciliation`() = runTest {
+        val messages = FakeMessageRepository()
+        val history = FakeHistoryResyncController { attempt ->
+            if (attempt == 1) delay(35_000)
+            if (attempt == 2) messages.msgid.value = "delayed-server-parent"
+        }
+        val manager = FakeConnectionManager(
+            networkId = network.id,
+            state = IrcClientState.Ready("me", setOf("message-tags"), emptyMap()),
+            client = testClient(),
+        )
+        val vm = viewModel(channel, manager, history, messages)
+        vm.state.first { it.buffer != null }
+
+        vm.react(
+            message(
+                bufferId = channel.id,
+                text = "pending behind history",
+                msgid = null,
+                sender = "me",
+                id = 44,
+            ),
+            "👍",
+        )
+        advanceUntilIdle()
+
+        assertEquals(listOf(channel.id, channel.id), history.reconciledBuffers)
+        assertEquals(
+            listOf(SentReaction(channel.id, "delayed-server-parent", "👍")),
+            manager.reactions,
+        )
     }
 
     @Test

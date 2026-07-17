@@ -1047,9 +1047,11 @@ class ChatViewModel @Inject constructor(
         const val ENTRY_POSITION_SETTLED_KEY = "entry_position_settled"
         const val ENTRY_POSITION_UNRESOLVED_KEY = "entry_position_unresolved"
 
-        // Max wait for a pending own message's msgid to land before a queued reaction gives up. Sits
-        // just past the 30s echo-failure flip so a message that will fail has already flipped by then.
-        const val REACT_QUEUE_TIMEOUT_MS = 32_000L
+        // Max wait for a pending own message's msgid to land before a queued reaction gives up.
+        // History is serialized per network and each request has a 35s timeout, so recovery can
+        // legitimately wait behind one request before issuing its own. Cover both request windows
+        // plus a small scheduling margin; the observer still completes immediately on a fast echo.
+        const val REACT_QUEUE_TIMEOUT_MS = 72_000L
         const val REACTION_HISTORY_RECONCILIATIONS = 2
     }
 }
