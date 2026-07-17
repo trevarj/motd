@@ -243,7 +243,6 @@ internal class ConnectionRegistry(
             }
             is Command.Disconnect -> {
                 removeActor(command.networkId, clearTerminal = false)
-                states.remove(command.networkId)
                 publish()
                 command.result.complete(Unit)
             }
@@ -372,6 +371,10 @@ internal class ConnectionRegistry(
             callbackJobs.remove(token)
         }
         actors.remove(networkId)?.actor?.stopAndJoin()
+        // State belongs to the actor generation. Keeping its last Connecting/Failed value after
+        // the actor is removed leaves an orphan in connectionStates forever: the drawer can show
+        // a replacement network as Ready while the global banner still reports the stale actor.
+        states.remove(networkId)
         if (clearTerminal) terminalFingerprints.remove(networkId)
     }
 

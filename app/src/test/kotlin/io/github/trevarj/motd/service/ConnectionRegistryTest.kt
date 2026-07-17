@@ -240,4 +240,37 @@ class ConnectionRegistryTest {
         assertEquals(2, created.size)
         assertEquals(1, created.last().stops)
     }
+
+    @Test
+    fun reconcileRemovingActors_clearsConnectingAndFailedPublishedStates() = runTest {
+        val registry = ConnectionRegistry(
+            backgroundScope,
+            actorFactory = { _, _ -> FakeActor() },
+            isConfigurationFailure = { false },
+        )
+        val connecting = network(id = 1)
+        val accountRequired = network(id = 2)
+        val rows = listOf(connecting to "connecting-fp", accountRequired to "failed-fp")
+        registry.beginStart()
+        registry.reconcile(rows, setOf(connecting.id, accountRequired.id), emptySet())
+        registry.actorState(
+            connecting.id,
+            registry.snapshot.value.actors.getValue(connecting.id).generation,
+            "connecting-fp",
+            IrcClientState.Connecting,
+        )
+        registry.actorState(
+            accountRequired.id,
+            registry.snapshot.value.actors.getValue(accountRequired.id).generation,
+            "failed-fp",
+            IrcClientState.Failed("ACCOUNT_REQUIRED", fatal = true),
+        )
+        runCurrent()
+        assertEquals(setOf(connecting.id, accountRequired.id), registry.connectionStates.value.keys)
+
+        registry.reconcile(rows, emptySet(), emptySet())
+
+        assertTrue(registry.snapshot.value.actors.isEmpty())
+        assertTrue(registry.connectionStates.value.isEmpty())
+    }
 }
