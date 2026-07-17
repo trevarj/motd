@@ -49,7 +49,7 @@ jobs:
         run: ./gradlew :irc:test --tests 'io.github.trevarj.motd.irc.fuzz.*' --stacktrace
       - name: Upload IRC fuzz diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: nightly-irc-fuzz-${{ github.run_id }}
           path: |
@@ -75,7 +75,7 @@ jobs:
         run: ./gradlew :app:testFossDebugUnitTest --tests 'io.github.trevarj.motd.fuzz.*' --stacktrace
       - name: Upload app fuzz diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: nightly-app-fuzz-${{ github.run_id }}
           path: |

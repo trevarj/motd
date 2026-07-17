@@ -29,7 +29,7 @@ jobs:
         run: ./gradlew :irc:test --stacktrace
       - name: Upload IRC generated-test failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: irc-fuzz-failure-${{ github.run_id }}
           path: |
@@ -54,7 +54,7 @@ jobs:
         run: ./gradlew :app:testFossDebugUnitTest --stacktrace
       - name: Upload app generated-test failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: app-fuzz-failure-${{ github.run_id }}
           path: |
