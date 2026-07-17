@@ -9,8 +9,10 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -237,16 +239,70 @@ abstract class HeadlessE2eDriver {
     }
 
     protected fun longClickMessageContaining(text: String) {
-        val messageTag = SemanticsMatcher("message row containing $text") { node ->
-            node.config.contains(SemanticsProperties.TestTag) &&
-                node.config[SemanticsProperties.TestTag].startsWith("chat_message_")
-        }
-        val row = messageTag.and(hasAnyDescendant(hasText(text, substring = true, ignoreCase = true)))
+        val row = messageRowContaining(text)
         compose.waitUntil(15_000) {
             compose.onAllNodes(row, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onAllNodes(row, useUnmergedTree = true).onFirst().performTouchInput { longClick() }
     }
+
+    protected fun longClickOriginalMessageContaining(text: String) {
+        val row = originalMessageRowContaining(text)
+        compose.waitUntil(15_000) {
+            compose.onAllNodes(row, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onAllNodes(row, useUnmergedTree = true).onFirst().performTouchInput { longClick() }
+    }
+
+    protected fun waitForReactionOnOriginalMessage(
+        text: String,
+        emoji: String,
+        timeoutMillis: Long,
+    ) {
+        val chip = reactionOnOriginalMessage(text, emoji)
+        compose.waitUntil(timeoutMillis) {
+            compose.onAllNodes(chip, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    protected fun clickReactionOnOriginalMessage(text: String, emoji: String) {
+        val chip = reactionOnOriginalMessage(text, emoji)
+        compose.waitUntil(15_000) {
+            compose.onAllNodes(chip, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onAllNodes(chip, useUnmergedTree = true).onFirst().performClick()
+    }
+
+    protected fun waitForReactionOnOriginalMessageToDisappear(
+        text: String,
+        emoji: String,
+        timeoutMillis: Long,
+    ) {
+        val chip = reactionOnOriginalMessage(text, emoji)
+        compose.waitUntil(timeoutMillis) {
+            compose.onAllNodes(chip, useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
+        }
+    }
+
+    private fun messageRowContaining(text: String): SemanticsMatcher {
+        val messageTag = SemanticsMatcher("message row containing $text") { node ->
+            node.config.contains(SemanticsProperties.TestTag) &&
+                node.config[SemanticsProperties.TestTag].startsWith("chat_message_")
+        }
+        return messageTag.and(
+            hasAnyDescendant(hasText(text, substring = true, ignoreCase = true)),
+        )
+    }
+
+    private fun originalMessageRowContaining(text: String): SemanticsMatcher =
+        messageRowContaining(text).and(
+            hasAnyDescendant(hasTestTag("chat_reply_preview")).not(),
+        )
+
+    private fun reactionOnOriginalMessage(text: String, emoji: String): SemanticsMatcher =
+        hasTestTag("chat_reaction_chip_$emoji").and(
+            hasAnyAncestor(originalMessageRowContaining(text)),
+        )
 
     protected fun assertComposerText(text: String) {
         waitForTag("chat_composer_field")
@@ -405,22 +461,22 @@ class ChatHeadlessE2eTest : HeadlessE2eDriver() {
         replaceTag("chat_composer_field", parent)
         clickTag("chat_composer_send")
         waitForText(parent, timeoutMillis = 20_000)
-
-        longClickMessageContaining(parent)
+        longClickOriginalMessageContaining(parent)
         waitForTag("message_action_sheet")
         clickText("Reply")
-        replaceTag("chat_composer_field", "reply-$parent")
+        val reply = uniqueMessage("reply")
+        replaceTag("chat_composer_field", reply)
         clickTag("chat_composer_send")
-        waitForText("reply-$parent", timeoutMillis = 20_000)
+        waitForText(reply, timeoutMillis = 20_000)
 
-        longClickMessageContaining(parent)
+        // The reply preview repeats the parent text. Exclude rows with a reply preview so this
+        // always targets the original message, regardless of lazy-list order or host speed.
+        longClickOriginalMessageContaining(parent)
         waitForTag("message_action_sheet")
         clickText("👍")
         // Urgent recovery may wait behind one serialized wire request before fetching the newest
         // page that promotes this row's msgid. Keep the E2E allowance beyond that contract.
-        waitForTag("chat_reaction_chip_👍", timeoutMillis = 80_000)
-        clickTag("chat_reaction_chip_👍")
-        waitForTagToDisappear("chat_reaction_chip_👍", timeoutMillis = 20_000)
+        waitForReactionOnOriginalMessage(parent, "👍", timeoutMillis = 80_000)
 
         replaceTag("chat_composer_field", "channel draft")
         back()
@@ -436,6 +492,10 @@ class ChatHeadlessE2eTest : HeadlessE2eDriver() {
         waitForText(channel)
         clickText(channel)
         assertComposerText("channel draft")
+        scrollTimelineToTextWithConnectionDiagnostics(parent, timeoutMillis = 30_000)
+        waitForReactionOnOriginalMessage(parent, "👍", timeoutMillis = 20_000)
+        clickReactionOnOriginalMessage(parent, "👍")
+        waitForReactionOnOriginalMessageToDisappear(parent, "👍", timeoutMillis = 20_000)
         back()
 
         waitForText(secondNick)
