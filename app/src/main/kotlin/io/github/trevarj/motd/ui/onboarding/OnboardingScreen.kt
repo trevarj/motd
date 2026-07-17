@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -224,8 +225,9 @@ private fun WelcomePage() {
             painter = painterResource(R.drawable.motd_onboarding_hero),
             contentDescription = null,
             colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
-            modifier = Modifier.fillMaxWidth().height(180.dp).padding(bottom = 24.dp),
+            modifier = Modifier.width(220.dp).height(144.dp),
         )
+        Spacer(Modifier.height(24.dp))
         Text(
             stringResource(R.string.onboarding_welcome_title),
             style = MaterialTheme.typography.headlineMedium,
