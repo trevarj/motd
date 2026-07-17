@@ -4,15 +4,16 @@ import io.github.trevarj.motd.irc.event.MessageContext
 import java.security.MessageDigest
 
 /**
- * Dedup-key derivation for messages (plans/04 identity & dedup rules).
+ * Legacy display-row diagnostic keys and stable typed-event payload fingerprints.
  *
  *  - live/history message with `msgid` → the msgid.
  *  - no msgid → `sha1("<serverTime>|<sender>|<text>")` hex.
  *  - locally-sent pending message → `"pending:<label>"` until echo confirms.
  *
- * The UNIQUE(bufferId, dedupKey) index makes CHATHISTORY backfill overlap idempotent.
+ * These values do not participate in chat-event identity. CanonicalTimelineStore enforces that
+ * through persisted aliases; typed system events may use the stable hash as a TYPED_EVENT alias.
  */
-internal object EchoDeduper {
+internal object SemanticIdentity {
     /** Key for a live or history message. */
     fun keyFor(msgid: String?, serverTime: Long, sender: String, text: String): String =
         msgid ?: sha1Hex("$serverTime|$sender|$text")

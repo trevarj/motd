@@ -13,6 +13,9 @@ object ChatHistorySelectors {
 
     fun timestamp(epochMillis: Long): String =
         "timestamp=${timestampFormatter.format(Instant.ofEpochMilli(epochMillis))}"
+
+    /** IRCv3 message references are opaque and case-sensitive. */
+    fun msgid(value: String): String = "msgid=$value"
 }
 
 /**

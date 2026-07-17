@@ -340,7 +340,7 @@ class EchoFlowTest {
         val durableId = rows().single().id
 
         // Soju can deliver its stored, msgid-bearing CHATHISTORY representation before the
-        // delayed WebPush payload. A msgid-less push is notification-only and must not touch Room.
+        // delayed WebPush payload. The observation attaches to the same canonical Room row.
         processor.processPush(
             networkId,
             history.copy(
@@ -352,7 +352,7 @@ class EchoFlowTest {
         assertEquals(durableId, rows().single().id)
         assertEquals("soju-history-a", rows().single().msgid)
         assertEquals(1, notifier.incoming.size)
-        assertNull(notifier.incoming.single().ctx.msgid)
+        assertEquals("soju-history-a", notifier.incoming.single().ctx.msgid)
         assertEquals(600_000, notifier.incoming.single().ctx.serverTime)
     }
 

@@ -5,6 +5,7 @@ import androidx.core.app.NotificationCompat
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
+import io.github.trevarj.motd.data.db.EventRedirectEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -14,6 +15,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.di.ForegroundBufferTrackerImpl
 import io.github.trevarj.motd.irc.event.IrcEvent
@@ -98,6 +100,11 @@ class MotdNotificationsFoolTest {
         shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
             .activeNotifications.size
 
+    private fun assertSilent(notification: android.app.Notification) {
+        assertEquals("silent", notification.group)
+        assertEquals(NotificationCompat.GROUP_ALERT_SUMMARY, notification.groupAlertBehavior)
+    }
+
     /**
      * The crash repro path: add a fool, then run the notification pipeline for that fool's message.
      * onIncoming reads the fools DataStore + the buffer via suspend calls (no runBlocking on the
@@ -121,6 +128,77 @@ class MotdNotificationsFoolTest {
             hasMention = false, message = chat("troll", "hey"),
         )
         assertEquals(1, postedCount())
+        val posted = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+            .activeNotifications.single().notification
+        assertSilent(posted)
+    }
+
+    @Test
+    fun roomMergeRetiresLosingNotificationAndCanonicalReadClearsReplacement() = runTest {
+        val loserId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "other",
+                displayName = "other",
+                type = BufferType.QUERY,
+            ),
+        )
+        val manager = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+        notifications.onIncoming(
+            networkId,
+            loserId,
+            BufferType.QUERY,
+            false,
+            chat("other", "before merge"),
+        )
+        assertEquals(listOf(loserId.toInt()), manager.activeNotifications.map { it.id })
+
+        BufferStore(db, notifications).mergeRooms(bufferId, loserId)
+
+        assertEquals(0, manager.activeNotifications.size)
+        notifications.onIncoming(
+            networkId,
+            bufferId,
+            BufferType.QUERY,
+            false,
+            chat("other", "after merge"),
+        )
+        assertEquals(listOf(bufferId.toInt()), manager.activeNotifications.map { it.id })
+
+        notifications.onRead(bufferId, 1_000)
+        assertEquals(0, manager.activeNotifications.size)
+    }
+
+    @Test
+    fun interruptedNotificationPresentationIsRebuiltFromCanonicalDatabaseState() = runTest {
+        val failing = object : io.github.trevarj.motd.data.sync.MessageNotifier {
+            override suspend fun onIncoming(
+                networkId: Long,
+                bufferId: Long,
+                type: BufferType,
+                hasMention: Boolean,
+                message: IrcEvent.ChatMessage,
+            ) {
+                error("simulated notifier failure")
+            }
+        }
+        val processor = EventProcessor(db, TypingTrackerImpl(), failing)
+        processor.onRegistered(networkId, "me", emptyMap())
+        val incoming = chat("troll", "recover me").copy(
+            ctx = chat("troll", "recover me").ctx.copy(msgid = "recover-event"),
+        )
+
+        processor.process(networkId, incoming)
+        val before = db.messageDao().byMsgid(bufferId, "recover-event")
+        assertEquals(false, before?.notificationHandled)
+        assertEquals(false, before?.notificationClaimed)
+        assertEquals(0, postedCount())
+
+        notifications.recoverCanonicalNotifications()
+
+        assertEquals(1, postedCount())
+        assertEquals(true, db.messageDao().byId(before!!.id)?.notificationHandled)
+        assertEquals(false, db.messageDao().byId(before.id)?.notificationClaimed)
     }
 
     @Test
@@ -271,7 +349,7 @@ class MotdNotificationsFoolTest {
         )
 
         processor.processPush(networkId, push)
-        assertEquals(0, db.messageDao().countForBuffer(channelId))
+        assertEquals(1, db.messageDao().countForBuffer(channelId))
         processor.process(
             networkId,
             IrcEvent.HistoryBatch(
@@ -326,7 +404,7 @@ class MotdNotificationsFoolTest {
 
         val buffer = requireNotNull(db.bufferDao().byName(networkId, "new-dm-push-fixture"))
         assertEquals(BufferType.QUERY, buffer.type)
-        assertEquals(0, db.messageDao().countForBuffer(buffer.id))
+        assertEquals(1, db.messageDao().countForBuffer(buffer.id))
         assertEquals(
             buffer.id,
             db.bufferDao().openTargets(networkId).single { it.name == "new-dm-push-fixture" }.id,
@@ -339,6 +417,8 @@ class MotdNotificationsFoolTest {
         assertEquals(buffer.id, open.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1))
         assertNull(open.getStringExtra(MotdNotifications.EXTRA_JUMP_MSGID))
         assertEquals(30_000, open.getLongExtra(MotdNotifications.EXTRA_JUMP_TIME, -1))
+        val eventId = open.getLongExtra(MotdNotifications.EXTRA_EVENT_ID, -1)
+        assertEquals(buffer.id, requireNotNull(db.messageDao().byId(eventId)).bufferId)
     }
 
     @Test
@@ -365,6 +445,7 @@ class MotdNotificationsFoolTest {
         val posted = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
             .activeNotifications.single().notification
         assertEquals(MotdNotifications.CHANNEL_INVITATIONS, posted.channelId)
+        assertSilent(posted)
         assertEquals(MotdNotifications.ACTION_OPEN_BUFFER, shadowOf(posted.contentIntent).savedIntent.action)
         assertEquals(
             listOf("Join", "Dismiss"),
@@ -380,6 +461,39 @@ class MotdNotificationsFoolTest {
         assertEquals(InviteReceiver.ACTION_DISMISS, shadowOf(posted.deleteIntent).savedIntent.action)
 
         notifications.onInvitationResolved(messageId)
+        assertEquals(0, postedCount())
+    }
+
+    @Test
+    fun invitationPresentationAndResolutionFollowCanonicalEventRedirects() = runTest {
+        fun invite(key: String) = MessageEntity(
+            bufferId = bufferId,
+            msgid = key,
+            serverTime = 3_000,
+            sender = "alice",
+            kind = MessageKind.INVITE,
+            text = "alice invited you",
+            dedupKey = key,
+            eventPayload = "invite-v1:YQ:Yg:Yw",
+            inviteState = InviteState.PENDING,
+        )
+        val winnerId = db.messageDao().insertAll(listOf(invite("winner-invite"))).single()
+        val loserId = db.messageDao().insertAll(listOf(invite("loser-invite"))).single()
+        notifications.onInvitation(1, bufferId, loserId)
+
+        db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
+        db.messageDao().deleteById(loserId)
+        notifications.onInvitation(1, bufferId, loserId)
+
+        val manager = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+        assertEquals(2, manager.activeNotifications.size)
+        val canonical = manager.activeNotifications.single {
+            it.id == MotdNotifications.invitationNotificationId(winnerId)
+        }.notification
+        val join = shadowOf(canonical.actions[0].actionIntent).savedIntent
+        assertEquals(winnerId, join.getLongExtra(MotdNotifications.EXTRA_INVITE_MESSAGE_ID, -1))
+
+        notifications.onInvitationResolved(winnerId)
         assertEquals(0, postedCount())
     }
 }

@@ -2,6 +2,7 @@ package io.github.trevarj.motd.data.visibility
 
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.EventRedirectEntity
 import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
@@ -117,6 +118,45 @@ class MessageVisibilityReaderTest {
         assertEquals(ids[0], anchor?.id)
         assertEquals(100L, reader.firstVisibleUnreadTime(bufferId, 50, spec))
         assertEquals(300L, reader.latestRawTime(bufferId))
+    }
+
+    @Test
+    fun msgidlessSavedAnchorFollowsRedirectAndCorrectedTimestamp() = runTest {
+        val winnerId = db.messageDao().insertAll(
+            listOf(
+                message(
+                    bufferId,
+                    "history",
+                    sender = "bob",
+                    serverTime = 500,
+                    dedupKey = "winner",
+                ),
+            ),
+        ).single()
+        val loserId = db.messageDao().insertAll(
+            listOf(
+                message(
+                    bufferId,
+                    "live",
+                    sender = "bob",
+                    serverTime = 200,
+                    dedupKey = "loser",
+                ),
+            ),
+        ).single()
+        db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
+        db.messageDao().deleteById(loserId)
+
+        val anchor = reader.resolveSavedAnchor(
+            bufferId = bufferId,
+            msgid = null,
+            serverTime = 200,
+            id = loserId,
+            spec = spec(FoolsMode.COLLAPSE),
+        )
+
+        assertEquals(winnerId, anchor?.id)
+        assertEquals(500L, anchor?.serverTime)
     }
 
     @Test

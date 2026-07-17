@@ -61,6 +61,17 @@ class IrcClientTest {
             .groupValues[1]
 
     @Test
+    fun `disconnected send does not invoke persistence callback`() = runTest {
+        val client = IrcClient(config(), FakeTransport().factory(), clientScope())
+        var persisted = false
+
+        val label = client.sendMessage("#chan", "not sent", null) { persisted = true }
+
+        assertEquals("", label)
+        assertFalse(persisted)
+    }
+
+    @Test
     fun `registration happy path with SASL PLAIN reaches Ready`() = runTest {
         val ft = FakeTransport()
         val client = IrcClient(config(SaslMechanism.PLAIN, "alice", "s3cret"), ft.factory(), clientScope())

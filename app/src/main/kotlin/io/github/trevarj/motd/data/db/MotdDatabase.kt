@@ -12,14 +12,22 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [
         NetworkEntity::class,
-        BufferEntity::class,
-        MessageEntity::class,
-        MessageFtsEntity::class,
+        RoomEntity::class,
+        RoomAliasEntity::class,
+        TimelineEventEntity::class,
+        TimelineEventFtsEntity::class,
+        EventAliasEntity::class,
+        EventRedirectEntity::class,
+        EventObservationEntity::class,
+        HistoryCursorEntity::class,
+        NetworkHistoryCursorEntity::class,
+        ConnectionGenerationEntity::class,
+        AppStateEntity::class,
         ReactionEntity::class,
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -30,6 +38,11 @@ abstract class MotdDatabase : RoomDatabase() {
     abstract fun memberDao(): MemberDao
     abstract fun reactionDao(): ReactionDao
     abstract fun userDao(): UserDao
+    abstract fun canonicalTimelineDao(): CanonicalTimelineDao
+    abstract fun roomAliasDao(): RoomAliasDao
+    abstract fun historyCursorDao(): HistoryCursorDao
+    abstract fun connectionGenerationDao(): ConnectionGenerationDao
+    abstract fun appStateDao(): AppStateDao
 }
 
 /**
@@ -139,6 +152,188 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
 val MIGRATION_8_9 = object : Migration(8, 9) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE buffers ADD COLUMN pendingCloseAt INTEGER")
+    }
+}
+
+/**
+ * v9 -> v10 intentionally resets all IRC-derived state while preserving the complete networks
+ * table, including credentials and transport configuration. The old buffer/message identity model
+ * cannot be migrated without carrying its ambiguities into the canonical graph, so rooms, events,
+ * aliases, observations, cursors, reactions, members, and cached users start clean.
+ */
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS messages_fts")
+        db.execSQL("DROP TABLE IF EXISTS messages")
+        db.execSQL("DROP TABLE IF EXISTS reactions")
+        db.execSQL("DROP TABLE IF EXISTS members")
+        db.execSQL("DROP TABLE IF EXISTS users")
+        db.execSQL("DROP TABLE IF EXISTS network_history_cursors")
+        db.execSQL("DROP TABLE IF EXISTS connection_generations")
+        db.execSQL("DROP TABLE IF EXISTS buffers")
+
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `buffers` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `networkId` INTEGER NOT NULL,
+                `name` TEXT NOT NULL,
+                `displayName` TEXT NOT NULL,
+                `type` TEXT NOT NULL,
+                `topic` TEXT,
+                `topicSetBy` TEXT,
+                `joined` INTEGER NOT NULL,
+                `membershipCycle` INTEGER NOT NULL,
+                `pinned` INTEGER NOT NULL,
+                `muted` INTEGER NOT NULL,
+                `ordering` INTEGER NOT NULL,
+                `readMarkerTime` INTEGER,
+                `localUnreadFloorTime` INTEGER,
+                `oldestFetchedTime` INTEGER,
+                `historyComplete` INTEGER NOT NULL,
+                `pendingCloseAt` INTEGER,
+                `redirectToRoomId` INTEGER,
+                FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_buffers_networkId_name` ON `buffers` (`networkId`, `name`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_buffers_redirectToRoomId` ON `buffers` (`redirectToRoomId`)")
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `room_aliases` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `networkId` INTEGER NOT NULL,
+                `namespace` TEXT NOT NULL,
+                `value` TEXT NOT NULL,
+                `roomId` INTEGER NOT NULL,
+                `verified` INTEGER NOT NULL,
+                FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
+                FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_room_aliases_networkId_namespace_value` ON `room_aliases` (`networkId`, `namespace`, `value`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_room_aliases_roomId` ON `room_aliases` (`roomId`)")
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `messages` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `bufferId` INTEGER NOT NULL,
+                `msgid` TEXT,
+                `serverTime` INTEGER NOT NULL,
+                `sender` TEXT NOT NULL,
+                `normalizedActor` TEXT NOT NULL,
+                `senderAccount` TEXT,
+                `kind` TEXT NOT NULL,
+                `text` TEXT NOT NULL,
+                `isSelf` INTEGER NOT NULL,
+                `hasMention` INTEGER NOT NULL,
+                `replyToMsgid` TEXT,
+                `replyToEventId` INTEGER,
+                `pendingLabel` TEXT,
+                `failed` INTEGER NOT NULL,
+                `dedupKey` TEXT NOT NULL,
+                `eventKey` TEXT,
+                `eventPayload` TEXT,
+                `inviteState` TEXT,
+                `serverTimeAuthoritative` INTEGER NOT NULL,
+                `notificationHandled` INTEGER NOT NULL,
+                `notificationClaimed` INTEGER NOT NULL,
+                `notificationClaimOwner` TEXT,
+                `soundHandled` INTEGER NOT NULL,
+                FOREIGN KEY(`bufferId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_bufferId_serverTime_id` ON `messages` (`bufferId`, `serverTime`, `id`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_replyToEventId` ON `messages` (`replyToEventId`)")
+        db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS `messages_fts` USING FTS4(`text` TEXT NOT NULL, `sender` TEXT NOT NULL, content=`messages`)")
+        db.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_BEFORE_UPDATE BEFORE UPDATE ON `messages` BEGIN DELETE FROM `messages_fts` WHERE `docid`=OLD.`id`; END")
+        db.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_BEFORE_DELETE BEFORE DELETE ON `messages` BEGIN DELETE FROM `messages_fts` WHERE `docid`=OLD.`id`; END")
+        db.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_AFTER_UPDATE AFTER UPDATE ON `messages` BEGIN INSERT INTO `messages_fts`(`docid`, `text`, `sender`) VALUES (NEW.`id`, NEW.`text`, NEW.`sender`); END")
+        db.execSQL("CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_AFTER_INSERT AFTER INSERT ON `messages` BEGIN INSERT INTO `messages_fts`(`docid`, `text`, `sender`) VALUES (NEW.`id`, NEW.`text`, NEW.`sender`); END")
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `event_aliases` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `networkId` INTEGER NOT NULL,
+                `namespace` TEXT NOT NULL,
+                `value` BLOB NOT NULL,
+                `timelineEventId` INTEGER NOT NULL,
+                FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
+                FOREIGN KEY(`timelineEventId`) REFERENCES `messages`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_event_aliases_networkId_namespace_value` ON `event_aliases` (`networkId`, `namespace`, `value`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_aliases_timelineEventId` ON `event_aliases` (`timelineEventId`)")
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `event_redirects` (
+                `losingEventId` INTEGER NOT NULL,
+                `canonicalEventId` INTEGER NOT NULL,
+                PRIMARY KEY(`losingEventId`),
+                FOREIGN KEY(`canonicalEventId`) REFERENCES `messages`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_redirects_canonicalEventId` ON `event_redirects` (`canonicalEventId`)")
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `event_observations` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `networkId` INTEGER NOT NULL,
+                `timelineEventId` INTEGER NOT NULL,
+                `origin` TEXT NOT NULL,
+                `connectionGeneration` INTEGER,
+                `receiveOrder` INTEGER NOT NULL,
+                `batchId` TEXT,
+                `timeProvenance` TEXT NOT NULL,
+                `semanticFingerprint` BLOB NOT NULL,
+                `batchExactOrdinal` INTEGER,
+                `observedAt` INTEGER NOT NULL,
+                FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
+                FOREIGN KEY(`timelineEventId`) REFERENCES `messages`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_observations_timelineEventId` ON `event_observations` (`timelineEventId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_event_observations_networkId_receiveOrder` ON `event_observations` (`networkId`, `receiveOrder`)")
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `history_cursors` (
+                `roomId` INTEGER NOT NULL,
+                `newestMsgid` TEXT,
+                `newestServerTime` INTEGER,
+                `oldestMsgid` TEXT,
+                `oldestServerTime` INTEGER,
+                `historyComplete` INTEGER NOT NULL,
+                PRIMARY KEY(`roomId`),
+                FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `network_history_cursors` (
+                `networkId` INTEGER NOT NULL,
+                `lastSuccessfulSync` INTEGER NOT NULL,
+                PRIMARY KEY(`networkId`),
+                FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `connection_generations` (
+                `networkId` INTEGER NOT NULL,
+                `generation` INTEGER NOT NULL,
+                PRIMARY KEY(`networkId`),
+                FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `app_state` (`key` TEXT NOT NULL, PRIMARY KEY(`key`))",
+        )
+        db.execSQL("INSERT OR REPLACE INTO `app_state`(`key`) VALUES ('v10_notification_reset')")
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `reactions` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `bufferId` INTEGER NOT NULL,
+                `targetMsgid` TEXT NOT NULL,
+                `sender` TEXT NOT NULL,
+                `emoji` TEXT NOT NULL,
+                `serverTime` INTEGER NOT NULL,
+                `targetEventId` INTEGER
+            )""",
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_reactions_bufferId_targetMsgid_sender` ON `reactions` (`bufferId`, `targetMsgid`, `sender`)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `users` (`networkId` INTEGER NOT NULL, `nick` TEXT NOT NULL, `username` TEXT, `account` TEXT, `away` INTEGER NOT NULL, `hostmask` TEXT, `realname` TEXT, PRIMARY KEY(`networkId`, `nick`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `members` (`bufferId` INTEGER NOT NULL, `nick` TEXT NOT NULL, `prefixes` TEXT NOT NULL, PRIMARY KEY(`bufferId`, `nick`))")
     }
 }
 

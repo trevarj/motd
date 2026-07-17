@@ -62,9 +62,9 @@ fun SearchScreen(
     // Legacy plain-open (bufferId only). Kept until R3 rewires NavGraph to onOpenHit; onOpenHit
     // defaults to delegating here so the current NavGraph call site stays source-compatible.
     onOpenBuffer: (Long) -> Unit = {},
-    // Deep-jump: NavGraph (R3) routes to ChatRoute(bufferId, msgid, serverTime).
-    onOpenHit: (bufferId: Long, msgid: String?, serverTime: Long) -> Unit =
-        { b, _, _ -> onOpenBuffer(b) },
+    // Deep-jump carries canonical local identity so msgidless repeated events remain exact.
+    onOpenHit: (bufferId: Long, msgid: String?, serverTime: Long, eventId: Long) -> Unit =
+        { b, _, _, _ -> onOpenBuffer(b) },
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(bufferId) { viewModel.init(bufferId) }
@@ -75,7 +75,14 @@ fun SearchScreen(
         onQueryChange = viewModel::onQueryChange,
         onScopeChange = viewModel::onScopeChange,
         onBack = onBack,
-        onOpenHit = { hit -> onOpenHit(hit.message.bufferId, hit.message.msgid, hit.message.serverTime) },
+        onOpenHit = { hit ->
+            onOpenHit(
+                hit.message.bufferId,
+                hit.message.msgid,
+                hit.message.serverTime,
+                hit.message.id,
+            )
+        },
     )
 }
 

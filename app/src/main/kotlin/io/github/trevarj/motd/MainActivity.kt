@@ -171,6 +171,8 @@ class MainActivity : ComponentActivity() {
             bufferId = bufferId,
             jumpToMsgid = intent.getStringExtra(MotdNotifications.EXTRA_JUMP_MSGID),
             jumpToTime = intent.getLongExtra(MotdNotifications.EXTRA_JUMP_TIME, 0L),
+            jumpToEventId = intent.getLongExtra(MotdNotifications.EXTRA_EVENT_ID, -1L)
+                .takeIf { it >= 0L },
         )
     }
 

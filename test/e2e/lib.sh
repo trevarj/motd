@@ -438,6 +438,21 @@ assert_text_exactly_once() {
   fi
 }
 
+# assert_text_count "<text>" <count> — preserves genuine repeated messages while still catching
+# accidental delivery-path duplication.
+assert_text_count() {
+  local t="$1" expected="$2"
+  dump || { fail "dump failed asserting text count '${t}'"; return 1; }
+  local count
+  count="$(_e2e_node_count_from_attr "text" "$t")"
+  if [ "$count" -eq "$expected" ]; then
+    ok "present ${expected} times: text '${t}'"
+  else
+    screencap_step "text_count_$(_e2e_slug "$t")"
+    fail "expected text ${expected} times: '${t}' (found ${count})"
+  fi
+}
+
 # assert_no_text "<text>" — inverse of assert_text.
 assert_no_text() {
   local t="$1"

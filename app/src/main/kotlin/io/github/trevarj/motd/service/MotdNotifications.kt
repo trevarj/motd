@@ -10,18 +10,32 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
+import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.MainActivity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.effectiveReadFloorTime
+import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.sync.MessageNotifier
+import io.github.trevarj.motd.data.sync.NotificationClaimSession
+import io.github.trevarj.motd.data.sync.ROOM_MERGE_PRESENTATION_PREFIX
+import io.github.trevarj.motd.data.sync.parseRoomMergePresentationKey
+import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.event.ServerTimeSource
+import io.github.trevarj.motd.irc.proto.Prefix
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -49,11 +63,12 @@ fun shouldPostNotification(
  */
 @Singleton
 class MotdNotifications @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val db: MotdDatabase,
     private val foregroundBufferTracker: ForegroundBufferTracker,
     private val settingsRepository: SettingsRepository,
     private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
+    @param:ApplicationScope private val applicationScope: CoroutineScope? = null,
 ) : MessageNotifier {
 
     private val manager = NotificationManagerCompat.from(context)
@@ -63,7 +78,99 @@ class MotdNotifications @Inject constructor(
     private val historyKeys = HashMap<Long, MutableList<NotificationMessageKey>>()
     private val latestNotifiedTimes = java.util.concurrent.ConcurrentHashMap<Long, Long>()
 
-    init { ensureChannels() }
+    init {
+        ensureChannels()
+        applicationScope?.launch {
+            // Only the v9→v10 migration writes this marker. Fresh/empty databases must not infer
+            // that another process instance's notifications are obsolete.
+            runCatching {
+                db.withTransaction {
+                    if (db.appStateDao().contains(V10_NOTIFICATION_RESET) > 0) {
+                        manager.activeNotifications
+                            .filter { it.notification.channelId in RESETTABLE_CHANNELS }
+                            .forEach { manager.cancel(it.id) }
+                        db.appStateDao().delete(V10_NOTIFICATION_RESET)
+                    }
+                }
+            }
+            retireCommittedRoomMerges()
+            recoverCanonicalNotifications()
+        }
+    }
+
+    private suspend fun retireCommittedRoomMerges() {
+        val state = db.appStateDao()
+        state.keysLike("$ROOM_MERGE_PRESENTATION_PREFIX%").forEach { key ->
+            val (winnerId, loserId) = parseRoomMergePresentationKey(key) ?: run {
+                state.delete(key)
+                return@forEach
+            }
+            onRoomsMerged(winnerId, loserId)
+            state.delete(key)
+        }
+    }
+
+    /** Rebuild interrupted chat/invitation presentation directly from canonical database state. */
+    internal suspend fun recoverCanonicalNotifications() {
+        val dao = db.canonicalTimelineDao()
+        dao.releaseInterruptedNotificationClaims(NotificationClaimSession.owner)
+        for (event in dao.pendingNotifications(MAX_RECOVERY_NOTIFICATIONS)) {
+            if (dao.claimNotification(event.id, NotificationClaimSession.owner) != 1) continue
+            try {
+                val buffer = db.bufferDao().observeById(event.bufferId)
+                if (buffer == null) {
+                    dao.completeNotification(event.id)
+                    continue
+                }
+                when (event.kind) {
+                    MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION -> {
+                        postIncoming(
+                            networkId = buffer.networkId,
+                            bufferId = buffer.id,
+                            type = buffer.type,
+                            hasMention = event.hasMention,
+                            eventId = event.id,
+                            message = IrcEvent.ChatMessage(
+                                ctx = MessageContext(
+                                    msgid = event.msgid,
+                                    serverTime = event.serverTime,
+                                    account = event.senderAccount,
+                                    batchId = null,
+                                    label = null,
+                                    serverTimeSource = if (event.serverTimeAuthoritative) {
+                                        ServerTimeSource.TAG
+                                    } else {
+                                        ServerTimeSource.LOCAL
+                                    },
+                                ),
+                                kind = when (event.kind) {
+                                    MessageKind.PRIVMSG -> IrcEvent.ChatKind.PRIVMSG
+                                    MessageKind.NOTICE -> IrcEvent.ChatKind.NOTICE
+                                    else -> IrcEvent.ChatKind.ACTION
+                                },
+                                source = Prefix(event.sender),
+                                target = buffer.ircTarget,
+                                text = event.text,
+                                isSelf = false,
+                                replyToMsgid = event.replyToMsgid,
+                            ),
+                        )
+                    }
+                    MessageKind.INVITE -> onInvitation(buffer.networkId, buffer.id, event.id)
+                    else -> Unit
+                }
+                dao.completeNotification(event.id)
+            } catch (cancelled: CancellationException) {
+                dao.releaseNotification(event.id)
+                throw cancelled
+            } catch (error: Exception) {
+                dao.releaseNotification(event.id)
+                diagnostics.record("notifications", "recovery_failed") {
+                    mapOf("event_id" to event.id, "error" to error::class.simpleName)
+                }
+            }
+        }
+    }
 
     private fun ensureChannels() {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
@@ -113,7 +220,31 @@ class MotdNotifications @Inject constructor(
 
     // -- MessageNotifier (message/mention notifications) --
 
-    override suspend fun onIncoming(networkId: Long, bufferId: Long, type: BufferType, hasMention: Boolean, message: IrcEvent.ChatMessage) {
+    override suspend fun onIncoming(
+        networkId: Long,
+        bufferId: Long,
+        type: BufferType,
+        hasMention: Boolean,
+        message: IrcEvent.ChatMessage,
+    ) = postIncoming(networkId, bufferId, type, hasMention, eventId = null, message)
+
+    override suspend fun onCanonicalIncoming(
+        networkId: Long,
+        bufferId: Long,
+        type: BufferType,
+        hasMention: Boolean,
+        eventId: Long,
+        message: IrcEvent.ChatMessage,
+    ) = postIncoming(networkId, bufferId, type, hasMention, eventId, message)
+
+    private suspend fun postIncoming(
+        networkId: Long,
+        bufferId: Long,
+        type: BufferType,
+        hasMention: Boolean,
+        eventId: Long?,
+        message: IrcEvent.ChatMessage,
+    ) {
         // Plain suspend reads: Room and DataStore dispatch off the main thread on their own. The
         // events collector runs on Dispatchers.Main, so the previous runBlocking { suspend query }
         // blocked the main thread and crashed once a (freshly-added) fool's message arrived.
@@ -150,9 +281,38 @@ class MotdNotifications @Inject constructor(
         val channel = if (hasMention) CHANNEL_MENTIONS else CHANNEL_MESSAGES
         val title = buffer?.displayName ?: message.target
         val person = Person.Builder().setName(message.source.nick).build()
+        val restored = if (synchronized(history) { bufferId !in history }) {
+            runCatching {
+                db.messageDao().recentNotifiable(
+                    bufferId = bufferId,
+                    after = buffer?.effectiveReadFloorTime ?: Long.MIN_VALUE,
+                    queryRoom = type == BufferType.QUERY,
+                    excludeEventId = eventId ?: -1L,
+                    limit = MAX_NOTIFICATION_MESSAGES - 1,
+                )
+            }.getOrDefault(emptyList()).asReversed()
+        } else {
+            emptyList()
+        }
         val style = synchronized(history) {
-            val key = NotificationMessageKey.from(message)
             val keys = historyKeys.getOrPut(bufferId, ::mutableListOf)
+            val conversation = history.getOrPut(bufferId) {
+                NotificationCompat.MessagingStyle(Person.Builder().setName("me").build())
+                    .setConversationTitle(title)
+                    .setGroupConversation(type == BufferType.CHANNEL)
+            }
+            restored.forEach { row ->
+                val restoredKey = NotificationMessageKey.from(row)
+                if (keys.none { it.matches(restoredKey) }) {
+                    keys += restoredKey
+                    conversation.addMessage(
+                        row.text,
+                        row.serverTime,
+                        Person.Builder().setName(row.sender).build(),
+                    )
+                }
+            }
+            val key = NotificationMessageKey.from(eventId, message)
             val existingIndex = keys.indexOfFirst { it.matches(key) }
             if (existingIndex >= 0) {
                 // A transient msgid-less push can notify before CHATHISTORY inserts the canonical
@@ -171,12 +331,10 @@ class MotdNotifications @Inject constructor(
             }
             keys += key
             if (keys.size > MAX_NOTIFICATION_MESSAGES) keys.removeAt(0)
-            history.getOrPut(bufferId) {
-                NotificationCompat.MessagingStyle(Person.Builder().setName("me").build())
-                    .setConversationTitle(title)
-                    .setGroupConversation(type == BufferType.CHANNEL)
-            }.also { it.addMessage(message.text, message.ctx.serverTime, person) }
+            conversation.also { it.addMessage(message.text, message.ctx.serverTime, person) }
         }
+        restored.maxOfOrNull { it.serverTime }
+            ?.let { latestNotifiedTimes.merge(bufferId, it, ::maxOf) }
         latestNotifiedTimes.merge(bufferId, message.ctx.serverTime, ::maxOf)
 
         val replyIntent = PendingIntent.getBroadcast(
@@ -215,13 +373,18 @@ class MotdNotifications @Inject constructor(
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra(EXTRA_BUFFER_ID, bufferId)
                 .putExtra(EXTRA_JUMP_MSGID, message.ctx.msgid)
-                .putExtra(EXTRA_JUMP_TIME, message.ctx.serverTime),
+                .putExtra(EXTRA_JUMP_TIME, message.ctx.serverTime)
+                .putExtra(EXTRA_EVENT_ID, eventId),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
         val notification = NotificationCompat.Builder(context, channel)
             .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
             .setStyle(style)
+            // Canonical ChatSoundPlayer owns persisted, mark-before-playback audio. Keeping the
+            // OS notification presentation silent prevents a crash-recovery repost from sounding
+            // a second time while retaining the high-importance visual notification channel.
+            .setSilent(true)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .addAction(replyAction)
@@ -270,40 +433,55 @@ class MotdNotifications @Inject constructor(
         }
     }
 
+    override suspend fun onRoomsMerged(winnerId: Long, loserId: Long) {
+        synchronized(history) {
+            history.remove(loserId)
+            historyKeys.remove(loserId)
+        }
+        latestNotifiedTimes.remove(loserId)
+        manager.cancel(loserId.toInt())
+        diagnostics.record("notifications", "room_notification_retired") {
+            mapOf("winner_id" to winnerId, "loser_id" to loserId)
+        }
+    }
+
     override suspend fun onInvitation(networkId: Long, bufferId: Long, messageId: Long) {
-        val message = db.messageDao().byId(messageId) ?: return
+        val message = db.messageDao().byCanonicalId(messageId) ?: return
+        val canonicalMessageId = message.id
         val buffer = db.bufferDao().observeById(bufferId) ?: return
         val contentIntent = PendingIntent.getActivity(
             context,
-            invitationNotificationId(messageId),
+            invitationNotificationId(canonicalMessageId),
             Intent(context, MainActivity::class.java)
                 .setAction(ACTION_OPEN_BUFFER)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra(EXTRA_BUFFER_ID, bufferId)
                 .putExtra(EXTRA_JUMP_MSGID, message.msgid)
-                .putExtra(EXTRA_JUMP_TIME, message.serverTime),
+                .putExtra(EXTRA_JUMP_TIME, message.serverTime)
+                .putExtra(EXTRA_EVENT_ID, message.id),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         fun actionIntent(action: String, requestOffset: Int): PendingIntent =
             PendingIntent.getBroadcast(
                 context,
-                invitationNotificationId(messageId) + requestOffset,
+                invitationNotificationId(canonicalMessageId) + requestOffset,
                 Intent(context, InviteReceiver::class.java)
                     .setAction(action)
-                    .putExtra(InviteReceiver.EXTRA_MESSAGE_ID, messageId),
+                    .putExtra(InviteReceiver.EXTRA_MESSAGE_ID, canonicalMessageId),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
         val dismissIntent = actionIntent(InviteReceiver.ACTION_DISMISS, 1)
         val joinIntent = PendingIntent.getActivity(
             context,
-            invitationNotificationId(messageId) + 2,
+            invitationNotificationId(canonicalMessageId) + 2,
             Intent(context, MainActivity::class.java)
                 .setAction(ACTION_ACCEPT_INVITE)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra(EXTRA_BUFFER_ID, bufferId)
                 .putExtra(EXTRA_JUMP_MSGID, message.msgid)
                 .putExtra(EXTRA_JUMP_TIME, message.serverTime)
-                .putExtra(EXTRA_INVITE_MESSAGE_ID, messageId),
+                .putExtra(EXTRA_EVENT_ID, message.id)
+                .putExtra(EXTRA_INVITE_MESSAGE_ID, canonicalMessageId),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_INVITATIONS)
@@ -313,6 +491,9 @@ class MotdNotifications @Inject constructor(
             .setStyle(NotificationCompat.BigTextStyle().bigText(message.text))
             .setContentIntent(contentIntent)
             .setDeleteIntent(dismissIntent)
+            // Invitation presentation is recoverable; it must not introduce an untracked system
+            // sound that could replay if the process dies after notify() but before completion.
+            .setSilent(true)
             .setAutoCancel(true)
             .addAction(android.R.drawable.ic_menu_add, "Join", joinIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", dismissIntent)
@@ -322,11 +503,15 @@ class MotdNotifications @Inject constructor(
                 context,
                 android.Manifest.permission.POST_NOTIFICATIONS,
             ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (canPost) manager.notify(invitationNotificationId(messageId), notification)
+        if (canPost) manager.notify(invitationNotificationId(canonicalMessageId), notification)
     }
 
     override suspend fun onInvitationResolved(messageId: Long) {
-        manager.cancel(invitationNotificationId(messageId))
+        val canonicalId = db.canonicalTimelineDao().canonicalEventId(messageId)
+        manager.cancel(invitationNotificationId(canonicalId))
+        db.canonicalTimelineDao().losingEventIds(canonicalId).forEach { losingId ->
+            manager.cancel(invitationNotificationId(losingId))
+        }
     }
 
     companion object {
@@ -335,6 +520,13 @@ class MotdNotifications @Inject constructor(
         const val CHANNEL_MENTIONS = "mentions"
         const val CHANNEL_INVITATIONS = "invitations"
         private const val MAX_NOTIFICATION_MESSAGES = 25
+        private val RESETTABLE_CHANNELS = setOf(
+            CHANNEL_MESSAGES,
+            CHANNEL_MENTIONS,
+            CHANNEL_INVITATIONS,
+        )
+        private const val V10_NOTIFICATION_RESET = "v10_notification_reset"
+        private const val MAX_RECOVERY_NOTIFICATIONS = 200
 
         // Deep-link extras carried by a message notification's content intent (tap → open + jump).
         const val ACTION_OPEN_BUFFER = "io.github.trevarj.motd.OPEN_BUFFER"
@@ -342,6 +534,7 @@ class MotdNotifications @Inject constructor(
         const val EXTRA_BUFFER_ID = "notif_buffer_id"
         const val EXTRA_JUMP_MSGID = "notif_jump_msgid"
         const val EXTRA_JUMP_TIME = "notif_jump_time"
+        const val EXTRA_EVENT_ID = "notif_event_id"
         const val EXTRA_INVITE_MESSAGE_ID = "notif_invite_message_id"
 
         internal fun invitationNotificationId(messageId: Long): Int =
@@ -361,6 +554,7 @@ internal fun statusNotificationText(
 
 /** Stable identity for one notification entry, independent of live/push delivery provenance. */
 private data class NotificationMessageKey(
+    val eventId: Long?,
     val msgid: String?,
     val serverTime: Long,
     val sender: String,
@@ -373,7 +567,9 @@ private data class NotificationMessageKey(
      * sends identical text in the same millisecond.
      */
     fun matches(other: NotificationMessageKey): Boolean =
-        if (msgid != null && other.msgid != null) {
+        if (eventId != null && other.eventId != null) {
+            eventId == other.eventId
+        } else if (msgid != null && other.msgid != null) {
             msgid == other.msgid
         } else {
             serverTime == other.serverTime && sender == other.sender && text == other.text
@@ -383,11 +579,21 @@ private data class NotificationMessageKey(
         if (msgid == null && other.msgid != null) copy(msgid = other.msgid) else this
 
     companion object {
-        fun from(message: IrcEvent.ChatMessage): NotificationMessageKey =
+        fun from(eventId: Long?, message: IrcEvent.ChatMessage): NotificationMessageKey =
             NotificationMessageKey(
+                eventId = eventId,
                 msgid = message.ctx.msgid,
                 serverTime = message.ctx.serverTime,
                 sender = message.source.nick,
+                text = message.text,
+            )
+
+        fun from(message: MessageEntity): NotificationMessageKey =
+            NotificationMessageKey(
+                eventId = message.id,
+                msgid = message.msgid,
+                serverTime = message.serverTime,
+                sender = message.sender,
                 text = message.text,
             )
     }

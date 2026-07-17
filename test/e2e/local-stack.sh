@@ -18,6 +18,7 @@
 #   ./test/e2e/local-stack.sh burst     # post a numbered 12-message live burst
 #   ./test/e2e/local-stack.sh jpq       # emit JOIN/PART/QUIT-only activity
 #   ./test/e2e/local-stack.sh push TOKEN # emit one tagged highlight and direct message
+#   ./test/e2e/local-stack.sh canonical TOKEN # repeated text + account-backed PM nick rewrite
 #   ./test/e2e/local-stack.sh pause-soju  # delay echo/MARKREAD processing via SIGSTOP
 #   ./test/e2e/local-stack.sh resume-soju # resume soju via SIGCONT
 #   ./test/e2e/local-stack.sh stop-soju   # deterministic EOF while preserving soju DB/config
@@ -849,6 +850,7 @@ case "$CMD" in
   burst) sh "$PROVISION" burst ;;
   jpq) sh "$PROVISION" jpq ;;
   push) sh "$PROVISION" push ;;
+  canonical) sh "$PROVISION" canonical ;;
   pause-soju) signal_soju STOP paused ;;
   resume-soju) signal_soju CONT resumed ;;
   stop-soju) stop_soju_for_reconnect ;;
@@ -869,5 +871,5 @@ case "$CMD" in
   obfs-xray-validate) xray_obfs_validate ;;
   obfs-xray-history-check) xray_obfs_history_check ;;
   obfs-xray-negative) xray_obfs_negative ;;
-  *) die "unknown command '$CMD' (want up|down|seed|showcase|showcase-hold|burst|jpq|push|pause-soju|resume-soju|stop-soju|start-soju|status|history-check|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-history-check|obfs-xray-negative)" ;;
+  *) die "unknown command '$CMD' (want up|down|seed|showcase|showcase-hold|burst|jpq|push|canonical|pause-soju|resume-soju|stop-soju|start-soju|status|history-check|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-history-check|obfs-xray-negative)" ;;
 esac

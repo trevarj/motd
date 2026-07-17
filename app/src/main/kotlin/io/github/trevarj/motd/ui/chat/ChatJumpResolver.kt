@@ -37,7 +37,19 @@ class ChatJumpResolver(
         msgid: String?,
         timeMs: Long,
         bufferName: String?,
+        eventId: Long? = null,
     ): Result {
+        // Canonical local identity is exact even for msgid-less push observations. If a later
+        // coalescence replaced this id, retain the wire/time fallbacks below.
+        eventId?.let { id ->
+            val canonicalRoomId = messages.canonicalRoomId(bufferId)
+            messages.byId(id)?.takeIf { it.bufferId == canonicalRoomId }?.let { row ->
+                return Result.Target(
+                    countNewer(bufferId, row.serverTime, row.id),
+                    highlightMsgid = row.msgid,
+                )
+            }
+        }
         if (msgid == null) {
             // No exact target: approximate by time. Long.MAX_VALUE id makes the count include
             // every row at the same serverTime, landing at (or just above) the time boundary.

@@ -19,7 +19,7 @@ import java.time.format.DateTimeParseException
  * Stateful only for NAMES accumulation (353 lines collected until 366). Everything else is a
  * pure function of the message plus the current self-nick / isupport passed in from the client.
  */
-internal class EventMapper(
+class EventMapper(
     /** Returns the client's current nick (tracked through NICK changes). */
     private val selfNick: () -> String,
     private val isupport: () -> Isupport,

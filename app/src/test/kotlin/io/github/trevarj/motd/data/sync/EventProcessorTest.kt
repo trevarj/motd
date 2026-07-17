@@ -23,6 +23,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -32,6 +33,13 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class EventProcessorTest {
+    private enum class InviteDeliveryOrder {
+        HISTORY_LIVE,
+        LIVE_HISTORY,
+        HISTORY_PUSH,
+        PUSH_HISTORY,
+    }
+
     private lateinit var db: MotdDatabase
     private lateinit var processor: EventProcessor
     private var networkId: Long = 0
@@ -88,6 +96,136 @@ class EventProcessorTest {
         val buffer = db.bufferDao().byName(networkId, "bob")
         assertNotNull(buffer)
         assertEquals(BufferType.QUERY, buffer!!.type)
+    }
+
+    @Test
+    fun selfPmEchoAccountTagDoesNotIdentifyDifferentRecipientsAsOneRoom() = runTest {
+        suspend fun echo(target: String, msgid: String) {
+            processor.process(
+                networkId,
+                IrcEvent.ChatMessage(
+                    ctx(msgid = msgid).copy(account = "my-account"),
+                    IrcEvent.ChatKind.PRIVMSG,
+                    Prefix("me"),
+                    target,
+                    "hello $target",
+                    true,
+                    null,
+                ),
+            )
+        }
+
+        echo("Alice", "self-alice")
+        echo("Bob", "self-bob")
+
+        val alice = db.bufferDao().byName(networkId, "alice")!!
+        val bob = db.bufferDao().byName(networkId, "bob")!!
+        assertNotEquals(alice.id, bob.id)
+        assertEquals("my-account", pagingList(alice.id).single().senderAccount)
+        assertEquals("my-account", pagingList(bob.id).single().senderAccount)
+    }
+
+    @Test
+    fun historicalOutgoingPmFromOldSelfNickUsesBatchPeerRoom() = runTest {
+        processor.onRegistered(networkId, "newMe", mapOf("CASEMAPPING" to "rfc1459"))
+        val historical = IrcEvent.ChatMessage(
+            ctx(msgid = "old-self-history", time = 4_000).copy(
+                account = "my-account",
+                batchId = "bob-history",
+            ),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("oldMe"),
+            "Bob",
+            "sent before nick change",
+            false,
+            null,
+        )
+
+        processor.process(networkId, IrcEvent.HistoryBatch("Bob", listOf(historical)))
+
+        val bob = db.bufferDao().byName(networkId, "bob")!!
+        val row = pagingList(bob.id).single()
+        assertTrue(row.isSelf)
+        assertEquals("my-account", row.senderAccount)
+        assertNull(db.bufferDao().byName(networkId, "oldme"))
+    }
+
+    @Test
+    fun historicalIncomingPmFromPeersOldNickRemainsIncomingInBatchPeerRoom() = runTest {
+        processor.onRegistered(networkId, "newMe", mapOf("CASEMAPPING" to "rfc1459"))
+        val historical = IrcEvent.ChatMessage(
+            ctx(msgid = "old-peer-history", time = 4_100).copy(
+                account = "bob-account",
+                batchId = "bob-history",
+            ),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("OldBob"),
+            "oldMe",
+            "sent to my previous nick",
+            false,
+            null,
+        )
+
+        processor.process(networkId, IrcEvent.HistoryBatch("Bob", listOf(historical)))
+
+        val bob = db.bufferDao().byName(networkId, "bob")!!
+        val row = pagingList(bob.id).single()
+        assertFalse(row.isSelf)
+        assertEquals("bob-account", row.senderAccount)
+        assertEquals(
+            bob.id,
+            BufferStore(db).resolveQueryRoom(networkId, "bob", "bob-account")?.id,
+        )
+        assertNull(db.bufferDao().byName(networkId, "oldbob"))
+    }
+
+    @Test
+    fun accountTaggedDmMergesExistingProvisionalNickRoomIntoKnownAccount() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx(msgid = "alice-account", time = 1_000).copy(account = "acct-a"),
+                IrcEvent.ChatKind.PRIVMSG,
+                Prefix("alice"),
+                "me",
+                "from alice",
+                false,
+                null,
+            ),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx(msgid = "bob-provisional", time = 2_000),
+                IrcEvent.ChatKind.PRIVMSG,
+                Prefix("bob"),
+                "me",
+                "before identification",
+                false,
+                null,
+            ),
+        )
+        val bobBefore = db.bufferDao().byName(networkId, "bob")!!
+
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx(msgid = "bob-account", time = 3_000).copy(account = "acct-a"),
+                IrcEvent.ChatKind.PRIVMSG,
+                Prefix("bob"),
+                "me",
+                "after identification",
+                false,
+                null,
+            ),
+        )
+
+        val accountRoom = checkNotNull(
+            BufferStore(db).resolveQueryRoom(networkId, "bob", "acct-a"),
+        )
+        assertEquals(accountRoom.id, db.bufferDao().observeById(bobBefore.id)?.id)
+        assertEquals(3, pagingList(accountRoom.id).size)
+        assertEquals(1, db.bufferDao().observeChatList().first().size)
     }
 
     @Test
@@ -275,6 +413,57 @@ class EventProcessorTest {
     }
 
     @Test
+    fun canonicalEventDrivesOneNotificationAndAtMostOneSoundAcrossHistoryAndLive() = runTest {
+        var notifications = 0
+        var sounds = 0
+        val recording = EventProcessor(
+            db = db,
+            typing = TypingTrackerImpl(),
+            notifier = object : MessageNotifier {
+                override suspend fun onIncoming(
+                    networkId: Long,
+                    bufferId: Long,
+                    type: BufferType,
+                    hasMention: Boolean,
+                    message: IrcEvent.ChatMessage,
+                ) {
+                    notifications++
+                }
+            },
+            chatSoundPlayer = object : ChatSoundPlayer {
+                override suspend fun onIncoming(
+                    bufferId: Long,
+                    type: BufferType,
+                    message: IrcEvent.ChatMessage,
+                ) {
+                    sounds++
+                }
+
+                override suspend fun onOutgoingAccepted(bufferId: Long) = Unit
+            },
+        )
+        recording.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+        val durable = IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "presentation-once", time = 5_000),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#chan",
+            text = "me: one presentation decision",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+
+        recording.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(durable)))
+        recording.process(networkId, durable)
+        recording.process(networkId, durable)
+
+        assertEquals(1, notifications)
+        assertEquals(1, sounds)
+        val buffer = requireNotNull(db.bufferDao().byName(networkId, "#chan"))
+        assertEquals(1, pagingList(buffer.id).size)
+    }
+
+    @Test
     fun pendingChannelClose_deletesOnlyAfterSelfPartAcknowledgement() = runTest {
         val bufferId = db.bufferDao().insert(
             BufferEntity(
@@ -412,6 +601,78 @@ class EventProcessorTest {
 
         val buffer = db.bufferDao().byName(networkId, "#chan")!!
         assertTrue(db.reactionDao().observeFor(buffer.id, listOf("m1")).first().isEmpty())
+    }
+
+    @Test
+    fun queryHistoryReactionsAndUnreactionsFollowBatchPeerAcrossNickChanges() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx = ctx(msgid = "query-parent"),
+                kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix("Bob"),
+                target = "me",
+                text = "parent",
+                isSelf = false,
+                replyToMsgid = null,
+            ),
+        )
+        val buffer = db.bufferDao().byName(networkId, "bob")!!
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "Bob",
+                listOf(
+                    IrcEvent.TagMessage(
+                        ctx = ctx(time = 2_000),
+                        source = Prefix("oldMe"),
+                        target = "Bob",
+                        typing = null,
+                        reactEmoji = "👍",
+                        reactTargetMsgid = "query-parent",
+                    ),
+                    IrcEvent.TagMessage(
+                        ctx = ctx(time = 2_001),
+                        source = Prefix("OldBob"),
+                        target = "oldMe",
+                        typing = null,
+                        reactEmoji = "🔥",
+                        reactTargetMsgid = "query-parent",
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(
+            setOf("oldMe" to "👍", "OldBob" to "🔥"),
+            db.reactionDao().observeFor(buffer.id, listOf("query-parent")).first()
+                .map { it.sender to it.emoji }
+                .toSet(),
+        )
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "Bob",
+                listOf(
+                    IrcEvent.Raw(
+                        IrcMessage.parse(
+                            "@+draft/unreact=👍;+reply=query-parent :oldMe!u@h TAGMSG Bob",
+                        ),
+                    ),
+                    IrcEvent.Raw(
+                        IrcMessage.parse(
+                            "@+draft/unreact=🔥;+reply=query-parent :OldBob!u@h TAGMSG oldMe",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(
+            db.reactionDao().observeFor(buffer.id, listOf("query-parent")).first().isEmpty(),
+        )
     }
 
     @Test
@@ -589,7 +850,86 @@ class EventProcessorTest {
     }
 
     @Test
-    fun msgidlessPushServerNotice_createsServerBufferWithoutPersisting() = runTest {
+    fun repeatedHistoryServerNoticesUseServerRoutingAndPreserveMultiplicity() = runTest {
+        val notice = IrcEvent.ChatMessage(
+            ctx = ctx(msgid = null, time = 2_000).copy(batchId = "notice-history"),
+            kind = IrcEvent.ChatKind.NOTICE,
+            source = Prefix("irc.libera.chat"),
+            target = "me",
+            text = "same historical notice",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        val batch = IrcEvent.HistoryBatch("me", listOf(notice, notice))
+
+        processor.process(networkId, batch)
+        processor.process(networkId, batch)
+
+        val server = checkNotNull(serverBuffer())
+        assertEquals(2, pagingList(server.id).count { it.kind == MessageKind.NOTICE })
+        assertNull(db.bufferDao().byName(networkId, "irc.libera.chat"))
+    }
+
+    @Test
+    fun historyPreflightRoomCreationRollsBackWithFailedBatch() = runTest {
+        db.openHelper.writableDatabase.execSQL(
+            """CREATE TRIGGER reject_history_message BEFORE INSERT ON messages
+               BEGIN SELECT RAISE(ABORT, 'forced history failure'); END""",
+        )
+        val message = IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "rollback-history", time = 2_100).copy(batchId = "rollback"),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"),
+            target = "#rollback",
+            text = "must roll back with its room",
+            isSelf = false,
+            replyToMsgid = null,
+        )
+
+        val result = runCatching {
+            processor.process(networkId, IrcEvent.HistoryBatch("#rollback", listOf(message)))
+        }
+
+        assertTrue(result.isFailure)
+        assertNull(db.bufferDao().byName(networkId, "#rollback"))
+    }
+
+    @Test
+    fun repeatedAccountBackedPmHistoryUsesCanonicalAccountRoom() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx(msgid = "known-account", time = 1_000).copy(account = "acct-a"),
+                IrcEvent.ChatKind.PRIVMSG,
+                Prefix("alice"),
+                "me",
+                "establish account room",
+                false,
+                null,
+            ),
+        )
+        val knownRoom = db.bufferDao().byName(networkId, "alice")!!
+        val repeated = IrcEvent.ChatMessage(
+            ctx(msgid = null, time = 2_200).copy(account = "acct-a", batchId = "account-history"),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("bob"),
+            "me",
+            "same account history",
+            false,
+            null,
+        )
+        val batch = IrcEvent.HistoryBatch("bob", listOf(repeated, repeated))
+
+        processor.process(networkId, batch)
+        processor.process(networkId, batch)
+
+        assertEquals(3, pagingList(knownRoom.id).size)
+        assertEquals(2, pagingList(knownRoom.id).count { it.text == "same account history" })
+        assertNull(db.bufferDao().byName(networkId, "bob"))
+    }
+
+    @Test
+    fun msgidlessPushServerNotice_persistsCanonicalServerEvent() = runTest {
         processor.processPush(networkId, IrcEvent.ChatMessage(
             ctx = ctx(), kind = IrcEvent.ChatKind.NOTICE,
             source = Prefix("irc.libera.chat"), target = "me", text = "transient server notice",
@@ -599,7 +939,7 @@ class EventProcessorTest {
         val server = serverBuffer()
         assertNotNull(server)
         assertEquals(BufferType.SERVER, server!!.type)
-        assertEquals(0, pagingList(server.id).size)
+        assertEquals(1, pagingList(server.id).size)
         assertNull(db.bufferDao().byName(networkId, "irc.libera.chat"))
     }
 
@@ -809,25 +1149,41 @@ class EventProcessorTest {
     }
 
     @Test
+    fun successfulLegacyWriteConfirmsPendingAndCannotLaterTimeoutAsFailed() = runTest {
+        val bufferId = selfBuffer("#chan")
+        val eventId = processor.insertPending(
+            bufferId, "local-attempt", "me", "legacy delivered", null, MessageKind.PRIVMSG,
+        )
+
+        processor.confirmIfStillPending(bufferId, "local-attempt")
+        processor.failIfStillPending(bufferId, "local-attempt")
+
+        val row = db.messageDao().byId(eventId)
+        assertNull(row?.pendingLabel)
+        assertFalse(row?.failed ?: true)
+    }
+
+    @Test
     fun ownMessage_bareEchoThenLaterHistoryWithMsgid_collapsesByMsgid() = runTest {
         // The remaining double-send: a self message confirmed by a BARE echo (no msgid) keeps a
         // msgid-less local row. A reconnect CHATHISTORY replay later delivers the SAME message with
-        // a real msgid, OUTSIDE the 30s echo window. Before the fix that replay fell through to a
-        // fresh INSERT (no msgid on the row, window missed) and the message showed twice.
+        // a real msgid. Its arrival is later, but tagged server-time remains the original event
+        // time, allowing conservative bounded reconciliation without matching a later repeat.
         val bufferId = selfBuffer("#chan")
         // 1. optimistic pending send.
         processor.insertPending(bufferId, "lblz", "me", "double me", null, MessageKind.PRIVMSG)
         // 2. bare echo (echo-message on, but this echo carries no draft/msgid) confirms in place.
+        val originalServerTime = System.currentTimeMillis()
         processor.process(networkId, IrcEvent.ChatMessage(
-            ctx = ctx(msgid = null, time = System.currentTimeMillis(), label = "lblz"),
+            ctx = ctx(msgid = null, time = originalServerTime, label = "lblz"),
             kind = IrcEvent.ChatKind.PRIVMSG, source = Prefix("me"), target = "#chan",
             text = "double me", isSelf = true, replyToMsgid = null,
         ))
         assertEquals(1, pagingList(bufferId).count { it.text == "double me" })
-        // 3. much-later CHATHISTORY replay carries the real msgid, well outside the echo window.
+        // 3. A much-later CHATHISTORY replay carries the original tagged server time and msgid.
         processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(
             IrcEvent.ChatMessage(
-                ctx = ctx(msgid = "hist-msgid", time = 10_000_000L, label = null),
+                ctx = ctx(msgid = "hist-msgid", time = originalServerTime, label = null),
                 kind = IrcEvent.ChatKind.PRIVMSG, source = Prefix("me"), target = "#chan",
                 text = "double me", isSelf = true, replyToMsgid = null,
             ),
@@ -874,6 +1230,98 @@ class EventProcessorTest {
         processor.process(networkId, IrcEvent.Joined(ctx(msgid = "oj", time = 1001), "alice", "#chan", null, null, isSelf = false))
         val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
         assertEquals(2, pagingList(bufferId).count { it.kind == MessageKind.JOIN })
+    }
+
+    @Test
+    fun selfJoinAfterExplicitPartStartsNewMembershipCycle() = runTest {
+        val firstJoin = IrcEvent.Joined(
+            ctx(msgid = null, time = 1_000), "me", "#chan", null, null, true,
+        )
+        processor.process(
+            networkId,
+            firstJoin,
+        )
+        processor.process(
+            networkId,
+            IrcEvent.Parted(ctx(msgid = null, time = 2_000), "me", "#chan", "leaving", true),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.Joined(ctx(msgid = null, time = 3_000), "me", "#chan", null, null, true),
+        )
+        processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(firstJoin)))
+
+        val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
+        assertEquals(2, pagingList(bufferId).count { it.kind == MessageKind.JOIN })
+        assertEquals(1, pagingList(bufferId).count { it.kind == MessageKind.PART })
+    }
+
+    @Test
+    fun selfJoinAfterKickStartsNewCycleWithoutHistoryReplayCoalescingIt() = runTest {
+        val firstJoin = IrcEvent.Joined(
+            ctx(msgid = null, time = 1_000), "me", "#chan", null, null, true,
+        )
+        processor.process(networkId, firstJoin)
+        processor.process(
+            networkId,
+            IrcEvent.Kicked(ctx(msgid = null, time = 2_000), "me", "#chan", "op", null, true),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.Joined(ctx(msgid = null, time = 3_000), "me", "#chan", null, null, true),
+        )
+        processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(firstJoin)))
+
+        val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
+        assertEquals(2, pagingList(bufferId).count { it.kind == MessageKind.JOIN })
+        assertEquals(1, pagingList(bufferId).count { it.kind == MessageKind.KICK })
+    }
+
+    @Test
+    fun historyFirstSelfJoinConvergesWithLaterLiveReconnectJoin() = runTest {
+        val historyJoin = IrcEvent.Joined(
+            ctx(msgid = "history-join", time = 1_000).copy(batchId = "history"),
+            "me",
+            "#chan",
+            null,
+            null,
+            true,
+        )
+        processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(historyJoin)))
+        processor.process(
+            networkId,
+            IrcEvent.Joined(ctx(msgid = null, time = 9_999), "me", "#chan", null, null, true),
+        )
+
+        val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
+        val joins = pagingList(bufferId).filter { it.kind == MessageKind.JOIN }
+        assertEquals(1, joins.size)
+        assertEquals("history-join", joins.single().msgid)
+    }
+
+    @Test
+    fun selfPartAndMembershipCycleAdvanceRollbackTogether() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.Joined(ctx(msgid = null, time = 1_000), "me", "#chan", null, null, true),
+        )
+        val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
+        db.openHelper.writableDatabase.execSQL(
+            """CREATE TRIGGER fail_membership_cycle BEFORE UPDATE OF membershipCycle ON buffers
+               BEGIN SELECT RAISE(ABORT, 'cycle failure'); END""",
+        )
+
+        val failure = runCatching {
+            processor.process(
+                networkId,
+                IrcEvent.Parted(ctx(msgid = null, time = 2_000), "me", "#chan", null, true),
+            )
+        }
+
+        assertTrue(failure.isFailure)
+        assertEquals(0L, db.bufferDao().observeById(bufferId)?.membershipCycle)
+        assertEquals(true, db.bufferDao().observeById(bufferId)?.joined)
+        assertEquals(0, pagingList(bufferId).count { it.kind == MessageKind.PART })
     }
 
     @Test
@@ -1205,7 +1653,7 @@ class EventProcessorTest {
     }
 
     @Test
-    fun networkBatch_withoutMsgidsUsesBucketedFallbackIdentity() = runTest {
+    fun networkBatch_withoutMsgidsPreservesDistinctTaggedOccurrences() = runTest {
         processor.process(
             networkId,
             IrcEvent.Names("#room", listOf(IrcEvent.Names.Member("Alice", "", null, null))),
@@ -1223,7 +1671,7 @@ class EventProcessorTest {
         processor.process(networkId, split(61_000))
 
         val room = db.bufferDao().byName(networkId, "#room")!!
-        assertEquals(2, pagingList(room.id).count { it.kind == MessageKind.NETSPLIT })
+        assertEquals(3, pagingList(room.id).count { it.kind == MessageKind.NETSPLIT })
     }
 
     @Test
@@ -1313,7 +1761,7 @@ class EventProcessorTest {
     }
 
     @Test
-    fun msgidlessInvite_fallbackDeduplicatesWithinBucket_andLaterInviteRemainsDistinct() = runTest {
+    fun msgidlessInvite_preservesDistinctTaggedOccurrences() = runTest {
         val first = IrcEvent.Invited(ctx(msgid = null, time = 31_000), "alice", "me", "#fallback")
         val duplicate = first.copy(ctx = first.ctx.copy(serverTime = 32_000))
         val later = first.copy(ctx = first.ctx.copy(serverTime = 61_000))
@@ -1323,7 +1771,60 @@ class EventProcessorTest {
         processor.process(networkId, later)
 
         val buffer = db.bufferDao().byName(networkId, "#fallback")!!
-        assertEquals(2, pagingList(buffer.id).count { it.kind == MessageKind.INVITE })
+        assertEquals(3, pagingList(buffer.id).count { it.kind == MessageKind.INVITE })
+    }
+
+    @Test
+    fun historyLiveAndPushInvitePermutationsConvergeToOneActionableEvent() = runTest {
+        val notifications = mutableListOf<Long>()
+        val recording = EventProcessor(
+            db,
+            TypingTrackerImpl(),
+            object : MessageNotifier {
+                override suspend fun onIncoming(
+                    networkId: Long,
+                    bufferId: Long,
+                    type: BufferType,
+                    hasMention: Boolean,
+                    message: IrcEvent.ChatMessage,
+                ) = Unit
+
+                override suspend fun onInvitation(networkId: Long, bufferId: Long, messageId: Long) {
+                    notifications += messageId
+                }
+            },
+        )
+        recording.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+
+        enumValues<InviteDeliveryOrder>().forEachIndexed { index, order ->
+            val channel = "#invite-order-$index"
+            val msgid = "invite-order-$index"
+            val live = IrcEvent.Invited(ctx(msgid, 20_000L + index), "alice", "me", channel)
+            val history = live.copy(ctx = live.ctx.copy(batchId = "invite-history-$index"))
+            when (order) {
+                InviteDeliveryOrder.HISTORY_LIVE -> {
+                    recording.process(networkId, IrcEvent.HistoryBatch(channel, listOf(history)))
+                    recording.process(networkId, live)
+                }
+                InviteDeliveryOrder.LIVE_HISTORY -> {
+                    recording.process(networkId, live)
+                    recording.process(networkId, IrcEvent.HistoryBatch(channel, listOf(history)))
+                }
+                InviteDeliveryOrder.HISTORY_PUSH -> {
+                    recording.process(networkId, IrcEvent.HistoryBatch(channel, listOf(history)))
+                    recording.processPush(networkId, live)
+                }
+                InviteDeliveryOrder.PUSH_HISTORY -> {
+                    recording.processPush(networkId, live)
+                    recording.process(networkId, IrcEvent.HistoryBatch(channel, listOf(history)))
+                }
+            }
+
+            val room = db.bufferDao().byName(networkId, channel)!!
+            val row = pagingList(room.id).single { it.msgid == msgid }
+            assertEquals(InviteState.PENDING, row.inviteState)
+            assertEquals(1, notifications.count { it == row.id })
+        }
     }
 
     @Test
@@ -1444,6 +1945,59 @@ class EventProcessorTest {
         processor.process(networkId, batch) // replay overlap → IGNORE
         val buffer = db.bufferDao().byName(networkId, "#chan")!!
         assertEquals(2, pagingList(buffer.id).size)
+    }
+
+    @Test
+    fun historyBatch_identicalMsgidlessTextAtDifferentTaggedTimes_replaysIdempotently() = runTest {
+        val batch = IrcEvent.HistoryBatch(
+            "#chan",
+            listOf(
+                IrcEvent.ChatMessage(
+                    ctx(msgid = null, time = 10_000),
+                    IrcEvent.ChatKind.PRIVMSG,
+                    Prefix("alice"),
+                    "#chan",
+                    "same text",
+                    false,
+                    null,
+                ),
+                IrcEvent.ChatMessage(
+                    ctx(msgid = null, time = 11_000),
+                    IrcEvent.ChatKind.PRIVMSG,
+                    Prefix("alice"),
+                    "#chan",
+                    "same text",
+                    false,
+                    null,
+                ),
+            ),
+        )
+
+        processor.process(networkId, batch)
+        processor.process(networkId, batch)
+
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        val rows = pagingList(buffer.id)
+        assertEquals(2, rows.size)
+        assertEquals(setOf(10_000L, 11_000L), rows.map { it.serverTime }.toSet())
+    }
+
+    @Test
+    fun historyBatch_identicalMsgidlessSystemEventsPreserveMultiplicityAndReplay() = runTest {
+        val mode = IrcEvent.ModeChanged(
+            ctx(msgid = null, time = 12_000).copy(batchId = "history-mode"),
+            "#chan",
+            "+m",
+            emptyList(),
+        )
+        val batch = IrcEvent.HistoryBatch("#chan", listOf(mode, mode))
+
+        processor.process(networkId, batch)
+        processor.process(networkId, batch)
+
+        val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
+        val modes = pagingList(bufferId).filter { it.kind == MessageKind.MODE }
+        assertEquals(2, modes.size)
     }
 
     @Test

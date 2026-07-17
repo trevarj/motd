@@ -14,7 +14,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-private class FakeMessageRepository(rows: List<MessageEntity> = emptyList()) : MessageRepository {
+private class FakeMessageRepository(
+    rows: List<MessageEntity> = emptyList(),
+    private val canonicalRooms: Map<Long, Long> = emptyMap(),
+) : MessageRepository {
     val store = rows.toMutableList()
 
     override fun messages(bufferId: Long): Flow<PagingData<MessageEntity>> = flowOf(PagingData.empty())
@@ -23,6 +26,10 @@ private class FakeMessageRepository(rows: List<MessageEntity> = emptyList()) : M
 
     override fun reactionsForBuffer(bufferId: Long): Flow<List<ReactionEntity>> =
         flowOf(emptyList())
+
+    override suspend fun byId(id: Long): MessageEntity? = store.firstOrNull { it.id == id }
+
+    override suspend fun canonicalRoomId(bufferId: Long): Long = canonicalRooms[bufferId] ?: bufferId
 
     override suspend fun deleteMessage(id: Long) { store.removeAll { it.id == id } }
 
@@ -54,6 +61,45 @@ private fun msg(id: Long, bufferId: Long, serverTime: Long, msgid: String?): Mes
     )
 
 class ChatJumpResolverTest {
+
+    @Test fun `canonical event id resolves exact msgidless row`() = runTest {
+        val repo = FakeMessageRepository(
+            listOf(
+                msg(1, 7, serverTime = 100, msgid = "older"),
+                msg(2, 7, serverTime = 200, msgid = null),
+                msg(3, 7, serverTime = 300, msgid = "newer"),
+            ),
+        )
+        val resolver = ChatJumpResolver(repo, fetchAround = { _, _, _ -> false })
+
+        val result = resolver.resolve(
+            bufferId = 7,
+            msgid = null,
+            timeMs = 0,
+            bufferName = null,
+            eventId = 2,
+        )
+
+        assertEquals(ChatJumpResolver.Result.Target(index = 1, highlightMsgid = null), result)
+    }
+
+    @Test fun `canonical event id accepts a losing room redirect`() = runTest {
+        val repo = FakeMessageRepository(
+            rows = listOf(msg(2, 7, serverTime = 200, msgid = null)),
+            canonicalRooms = mapOf(9L to 7L),
+        )
+        val resolver = ChatJumpResolver(repo, fetchAround = { _, _, _ -> false })
+
+        val result = resolver.resolve(
+            bufferId = 9,
+            msgid = null,
+            timeMs = 0,
+            bufferName = null,
+            eventId = 2,
+        )
+
+        assertEquals(ChatJumpResolver.Result.Target(index = 0, highlightMsgid = null), result)
+    }
 
     @Test fun `only durable unresolved entry state presents the not-loaded snackbar`() {
         assertTrue(shouldPresentUnresolvedEntrySnackbar(entryPositionUnresolved = true))

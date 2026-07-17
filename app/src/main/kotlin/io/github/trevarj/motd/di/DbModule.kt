@@ -20,10 +20,12 @@ import io.github.trevarj.motd.data.db.MIGRATION_5_6
 import io.github.trevarj.motd.data.db.MIGRATION_6_7
 import io.github.trevarj.motd.data.db.MIGRATION_7_8
 import io.github.trevarj.motd.data.db.MIGRATION_8_9
+import io.github.trevarj.motd.data.db.MIGRATION_9_10
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.ReactionDao
 import io.github.trevarj.motd.data.db.UserDao
+import io.github.trevarj.motd.data.db.HistoryCursorDao
 import javax.inject.Singleton
 
 @Module
@@ -40,7 +42,8 @@ internal object DbModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MotdDatabase =
-        // Upgrades stay non-destructive (plans/04): the release app holds real user history.
+        // v10 intentionally resets IRC-derived cache state while preserving saved networks and
+        // credentials; every other registered upgrade remains non-destructive.
         Room.databaseBuilder(context, MotdDatabase::class.java, "motd.db")
             .addMigrations(
                 MIGRATION_1_2,
@@ -51,6 +54,7 @@ internal object DbModule {
                 MIGRATION_6_7,
                 MIGRATION_7_8,
                 MIGRATION_8_9,
+                MIGRATION_9_10,
             )
             // Downgrades only happen in dev when switching between branches with different schema
             // versions (e.g. the obfs branch's v3 vs main's v2); released builds only ever move the
@@ -64,4 +68,5 @@ internal object DbModule {
     @Provides fun provideMemberDao(db: MotdDatabase): MemberDao = db.memberDao()
     @Provides fun provideReactionDao(db: MotdDatabase): ReactionDao = db.reactionDao()
     @Provides fun provideUserDao(db: MotdDatabase): UserDao = db.userDao()
+    @Provides fun provideHistoryCursorDao(db: MotdDatabase): HistoryCursorDao = db.historyCursorDao()
 }

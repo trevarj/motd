@@ -271,6 +271,30 @@ do_push() {
   } | feed_irc
 }
 
+do_canonical() {
+  case "$PUSH_TOKEN" in
+    *[!A-Za-z0-9._-]*) log "FATAL: PUSH_TOKEN contains unsafe IRC characters"; exit 2 ;;
+  esac
+  rewritten_nick="${SEED_NICK}r"
+  log "posting canonical repeated-text and PM room-rewrite fixtures tagged $PUSH_TOKEN"
+  {
+    printf 'NICK %s\r\n' "$SEED_NICK"
+    printf 'USER %s 0 * :motd canonical timeline fixture\r\n' "$SEED_NICK"
+    printf 'NICKSERV IDENTIFY %s %s\r\n' "$SEED_NICK" "$SEED_PASS"
+    sleep 2
+    printf 'JOIN %s\r\n' "$TEST_CHANNEL"
+    sleep 1
+    printf 'PRIVMSG %s :%s-repeat\r\n' "$TEST_CHANNEL" "$PUSH_TOKEN"
+    printf 'PRIVMSG %s :%s-repeat\r\n' "$TEST_CHANNEL" "$PUSH_TOKEN"
+    printf 'PRIVMSG %s :%s-room-before\r\n' "$APP_NICK" "$PUSH_TOKEN"
+    printf 'NICK %s\r\n' "$rewritten_nick"
+    sleep 1
+    printf 'PRIVMSG %s :%s-room-after\r\n' "$APP_NICK" "$PUSH_TOKEN"
+    sleep 1
+    printf 'QUIT :canonical timeline fixture complete\r\n'
+  } | feed_irc
+}
+
 wait_for_ergo
 case "$MODE" in
   register) do_register ;;
@@ -280,10 +304,11 @@ case "$MODE" in
   burst)    do_burst ;;
   jpq)      do_jpq ;;
   push)     do_push ;;
+  canonical) do_canonical ;;
   all)
     do_register
     if [ "$STACK_PROFILE" = showcase ]; then do_showcase_seed; else do_seed; fi
     ;;
-  *) log "FATAL: unknown mode '$MODE' (want register|seed|showcase|showcase-hold|burst|jpq|push|all)"; exit 2 ;;
+  *) log "FATAL: unknown mode '$MODE' (want register|seed|showcase|showcase-hold|burst|jpq|push|canonical|all)"; exit 2 ;;
 esac
 log "done"

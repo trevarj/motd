@@ -160,6 +160,7 @@ The native stack provides deterministic inputs for the baseline matrix:
 ./test/e2e/local-stack.sh burst       # 12 numbered PRIVMSGs, then QUIT
 ./test/e2e/local-stack.sh jpq         # JOIN/PART/JOIN/QUIT, no chat text
 ./test/e2e/local-stack.sh push TOKEN  # tagged highlight + DM for UnifiedPush checks
+./test/e2e/local-stack.sh canonical TOKEN # repeated text + account-backed PM nick rewrite
 ./test/e2e/local-stack.sh pause-soju  # delay socket processing without disconnecting
 ./test/e2e/local-stack.sh resume-soju
 ./test/e2e/local-stack.sh stop-soju   # force EOF; preserve config/database

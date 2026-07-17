@@ -1184,6 +1184,20 @@ phase_k() {
   assert_text_exactly_once "${MOTD_NICK}: ${_token}-mention"
   assert_no_crash
 
+  step "Preserve genuine repeats and follow an account-backed PM nick rewrite"
+  _canonical="${_token}-canonical"
+  _rewritten_sender="${_push_sender}r"
+  "$E2E_DIR/local-stack.sh" canonical "$_canonical"
+  wait_for_text "${_canonical}-repeat" 20 || true
+  assert_text_count "${_canonical}-repeat" 2
+  reset_to_chatlist >/dev/null 2>&1 || true
+  wait_for_text "$_rewritten_sender" 20 || true
+  tap_text "$_rewritten_sender"
+  wait_for_text "${_canonical}-room-after" 20 || true
+  assert_text_exactly_once "${_canonical}-room-before"
+  assert_text_exactly_once "${_canonical}-room-after"
+  assert_no_crash
+
   step "Verify cold receiver delivery without force-stop"
   adb_shell input keyevent 3
   adb_shell am kill "$MOTD_PKG" >/dev/null 2>&1 || true

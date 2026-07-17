@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
     val bufferId: Long,
     val jumpToMsgid: String? = null,   // search deep-jump target
     val jumpToTime: Long = 0,          // epoch ms of target; 0 = no jump
+    val jumpToEventId: Long? = null,   // canonical local identity; notifications prefer this
 )
 @Serializable data object OnboardingRoute
 @Serializable data object AboutRoute
@@ -35,6 +36,7 @@ data class NotificationTarget(
     val bufferId: Long,
     val jumpToMsgid: String?,
     val jumpToTime: Long,
+    val jumpToEventId: Long? = null,
 )
 
 // Round 5 (plans/16): app shell / network management.

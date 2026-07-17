@@ -18,6 +18,7 @@ import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResult
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.Prefix
 import java.io.IOException
 import kotlinx.coroutines.async
@@ -200,7 +201,7 @@ class HistoryResyncCoordinatorTest {
         )
         processor.processPush(networkId, push)
         val dmBuffer = requireNotNull(db.bufferDao().byName(networkId, target))
-        assertEquals(0, db.messageDao().countForBuffer(dmBuffer.id))
+        assertEquals(1, db.messageDao().countForBuffer(dmBuffer.id))
 
         val source = FakeSource { request ->
             when (request.subcommand) {
@@ -228,7 +229,9 @@ class HistoryResyncCoordinatorTest {
             source,
         )
 
-        assertEquals(HistoryResyncState.Updated(1), result)
+        // History enriches the already-persisted push row in place, so the canonical row count is
+        // unchanged even though its durable msgid is attached.
+        assertEquals(HistoryResyncState.UpToDate, result)
         assertEquals(1, db.messageDao().countForBuffer(dmBuffer.id))
         assertTrue(db.messageDao().byMsgid(dmBuffer.id, "durable-new-dm") != null)
         assertTrue(
@@ -347,6 +350,57 @@ class HistoryResyncCoordinatorTest {
         assertEquals("timestamp=1970-01-01T00:00:00.000Z", targets.bound2)
         assertTrue(targets.bound1!!.matches(Regex("timestamp=.*\\.\\d{3}Z")))
         assertTrue(db.bufferDao().byName(networkId, "#old") != null)
+        assertTrue(syncPrefs.lastSuccessfulSync(networkId) != null)
+    }
+
+    @Test
+    fun freshNetworkPagesTargetsToExhaustionBeforeStoringCursor() = runTest {
+        db.bufferDao().deleteBuffer(bufferId)
+        val secondPageUpper = ChatHistorySelectors.timestamp(200)
+        val source = FakeSource(pageLimit = 2) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> ChatHistoryResult(
+                    emptyList(),
+                    if (request.bound1 == secondPageUpper) {
+                        listOf("#oldest" to 100L)
+                    } else {
+                        listOf("#newest" to 300L, "#middle" to 200L)
+                    },
+                )
+                ChatHistoryRequest.Subcommand.LATEST -> {
+                    // Discovery must finish before any per-room sync can make the pass successful.
+                    assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
+                    val time = when (request.target) {
+                        "#newest" -> 300L
+                        "#middle" -> 200L
+                        "#oldest" -> 100L
+                        else -> error("unexpected target ${request.target}")
+                    }
+                    ChatHistoryResult(
+                        listOf(message("retained-${request.target}", time, request.target)),
+                        emptyList(),
+                    )
+                }
+                else -> ChatHistoryResult(emptyList(), emptyList())
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, emptyList(), source)
+
+        assertEquals(HistoryResyncState.Updated(3), result)
+        assertEquals(
+            2,
+            source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS },
+        )
+        assertEquals(
+            setOf("#newest", "#middle", "#oldest"),
+            source.requests.filter { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }
+                .map { it.target }
+                .toSet(),
+        )
+        assertTrue(db.bufferDao().byName(networkId, "#newest") != null)
+        assertTrue(db.bufferDao().byName(networkId, "#middle") != null)
+        assertTrue(db.bufferDao().byName(networkId, "#oldest") != null)
         assertTrue(syncPrefs.lastSuccessfulSync(networkId) != null)
     }
 

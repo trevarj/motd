@@ -35,4 +35,28 @@ internal class Converters {
 
     @TypeConverter
     fun stringToObfsMode(v: String?): ObfsMode? = v?.let { ObfsMode.valueOf(it) }
+
+    @TypeConverter
+    fun roomAliasNamespaceToString(v: RoomAliasNamespace): String = v.name
+
+    @TypeConverter
+    fun stringToRoomAliasNamespace(v: String): RoomAliasNamespace = RoomAliasNamespace.valueOf(v)
+
+    @TypeConverter
+    fun eventAliasNamespaceToString(v: EventAliasNamespace): String = v.name
+
+    @TypeConverter
+    fun stringToEventAliasNamespace(v: String): EventAliasNamespace = EventAliasNamespace.valueOf(v)
+
+    @TypeConverter
+    fun observationOriginToString(v: ObservationOrigin): String = v.name
+
+    @TypeConverter
+    fun stringToObservationOrigin(v: String): ObservationOrigin = ObservationOrigin.valueOf(v)
+
+    @TypeConverter
+    fun timeProvenanceToString(v: TimeProvenance): String = v.name
+
+    @TypeConverter
+    fun stringToTimeProvenance(v: String): TimeProvenance = TimeProvenance.valueOf(v)
 }

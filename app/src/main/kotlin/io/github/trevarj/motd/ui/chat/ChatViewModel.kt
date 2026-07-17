@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.effectiveReadFloorTime
+import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LinkPreview
@@ -113,6 +114,7 @@ internal fun filteredMessagePages(
 }
 
 @HiltViewModel
+@OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val messageRepository: MessageRepository,
@@ -190,7 +192,13 @@ class ChatViewModel @Inject constructor(
 
     private val buffer: StateFlow<BufferEntity?> = bufferRepository.observeBuffer(bufferId)
         .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** The route id may be a durable redirect; all live screen behavior uses the winner id. */
+    private val operationalBufferId: StateFlow<Long> = buffer
+        .map { it?.id ?: bufferId }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, bufferId)
 
     private val connState: StateFlow<IrcClientState> = buffer
         .combine(connectionManager.connectionStates) { buffer, states ->
@@ -235,15 +243,24 @@ class ChatViewModel @Inject constructor(
                     )
                 }
         }
+        viewModelScope.launch {
+            combine(buffer, visibleSession) { currentBuffer, session ->
+                currentBuffer?.id?.takeIf { session != null }
+            }.distinctUntilChanged().collect(foregroundBufferTracker::set)
+        }
     }
 
-    val historyResyncState: StateFlow<HistoryResyncState> = historyResyncCoordinator.state(bufferId)
+    val historyResyncState: StateFlow<HistoryResyncState> = operationalBufferId
+        .flatMapLatest(historyResyncCoordinator::state)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryResyncState.Idle)
+
+    private val typingNicks = operationalBufferId
+        .flatMapLatest(typingTracker::typingNicks)
 
     val state: StateFlow<ChatState> = combine(
         buffer,
         _memberCount,
-        typingTracker.typingNicks(bufferId),
+        typingNicks,
         replyTo,
         connState.combine(connectionManager.presenceStates) { conn, presence -> conn to presence },
     ) { buffer, memberCount, typing, reply, connAndPresence ->
@@ -270,7 +287,8 @@ class ChatViewModel @Inject constructor(
                 combine(
                     bufferRepository.observeMembers(bufferId).distinctUntilChanged(),
                     connectionManager.rosterStates,
-                ) { members, rosterStates -> members to rosterStates[bufferId] }
+                    operationalBufferId,
+                ) { members, rosterStates, roomId -> members to rosterStates[roomId] }
                 .distinctUntilChanged()
                 .collect { (members, rosterState) ->
                     val authoritative = rosterState == RosterLoadState.LOADED
@@ -285,7 +303,7 @@ class ChatViewModel @Inject constructor(
                 }
             }
         }
-        viewModelScope.launch { connectionManager.requestMembers(bufferId) }
+        viewModelScope.launch { connectionManager.requestMembers(operationalBufferId.value) }
     }
 
     // --- reactions aggregation (plans/15 #5, #18) ---
@@ -352,13 +370,13 @@ class ChatViewModel @Inject constructor(
     // --- lifecycle: foreground tracker + mark-read (plans/07) ---
 
     fun onResume() {
-        AutoFollowTrace.record("chat_resume", bufferId)
-        foregroundBufferTracker.set(bufferId)
+        AutoFollowTrace.record("chat_resume", operationalBufferId.value)
+        foregroundBufferTracker.set(operationalBufferId.value)
         if (visibleSession.value == null) visibleSession.value = ++nextVisibleSession
     }
 
     fun onPause() {
-        AutoFollowTrace.record("chat_pause", bufferId)
+        AutoFollowTrace.record("chat_pause", operationalBufferId.value)
         foregroundBufferTracker.set(null)
         visibleSession.value = null
     }
@@ -370,8 +388,9 @@ class ChatViewModel @Inject constructor(
      */
     fun markRead(time: Long) {
         if (time <= 0) return
-        AutoFollowTrace.record("markread_request", bufferId) { "marker=$time" }
-        viewModelScope.launch { connectionManager.markRead(bufferId, time) }
+        val roomId = operationalBufferId.value
+        AutoFollowTrace.record("markread_request", roomId) { "marker=$time" }
+        viewModelScope.launch { connectionManager.markRead(roomId, time) }
     }
 
     fun acceptInvite(messageId: Long) = viewModelScope.launch {
@@ -389,7 +408,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun sendTyping(active: Boolean) = viewModelScope.launch {
-        connectionManager.sendTyping(bufferId, if (active) "active" else "done")
+        connectionManager.sendTyping(operationalBufferId.value, if (active) "active" else "done")
     }
 
     /**
@@ -415,7 +434,7 @@ class ChatViewModel @Inject constructor(
             return@launch
         }
         try {
-            connectionManager.sendReact(bufferId, msgid, emoji)
+            connectionManager.sendReact(operationalBufferId.value, msgid, emoji)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {
@@ -454,14 +473,14 @@ class ChatViewModel @Inject constructor(
             }
         }
 
-    /**
-     * Retry a failed message: drop the old failed row first (no permanent duplicate), then resend.
-     * An ACTION is stored with its display text stripped of the `/me ` prefix, so re-prefix it to
-     * resend as an ACTION rather than a plain PRIVMSG (plans/15 #10).
-     */
+    /** Retry only retires the failed row after a replacement attempt is accepted. */
     fun retry(message: MessageEntity) = viewModelScope.launch {
-        messageRepository.deleteMessage(message.id)
-        connectionManager.sendMessage(bufferId, resendText(message.kind, message.text), message.replyToMsgid)
+        val result = connectionManager.sendMessageForRetry(
+            operationalBufferId.value,
+            resendText(message.kind, message.text),
+            message.replyToMsgid,
+        )
+        if (result.replacementPersisted) messageRepository.deleteMessage(message.id)
     }
 
     /** Delete a failed local row without resending (action-sheet delete affordance, plans/15 #10). */
@@ -498,9 +517,9 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun cancelHistoryRefresh() = historyResyncCoordinator.cancelBufferResync(bufferId)
+    fun cancelHistoryRefresh() = historyResyncCoordinator.cancelBufferResync(operationalBufferId.value)
 
-    fun consumeHistoryResyncState() = historyResyncCoordinator.consumeState(bufferId)
+    fun consumeHistoryResyncState() = historyResyncCoordinator.consumeState(operationalBufferId.value)
 
     /**
      * Parse [raw] and execute the resulting [ChatCommand]. `onOpenBuffer` navigates for /msg /query;
@@ -519,12 +538,12 @@ class ChatViewModel @Inject constructor(
         when (val cmd = parseCommand(raw)) {
             is ChatCommand.None -> Unit
             is ChatCommand.Message -> {
-                connectionManager.sendMessage(bufferId, cmd.text, replyTo.value?.msgid)
+                connectionManager.sendMessage(operationalBufferId.value, cmd.text, replyTo.value?.msgid)
                 replyTo.value = null
-                connectionManager.sendTyping(bufferId, "done")
+                connectionManager.sendTyping(operationalBufferId.value, "done")
             }
             is ChatCommand.Join -> networkId?.let { connectionManager.joinChannel(it, cmd.channel) }
-            is ChatCommand.Part -> connectionManager.partChannel(bufferId, cmd.reason)
+            is ChatCommand.Part -> connectionManager.partChannel(operationalBufferId.value, cmd.reason)
             is ChatCommand.Msg -> networkId?.let { nid ->
                 val target = connectionManager.ensureQueryBuffer(nid, cmd.nick)
                 connectionManager.sendMessage(target, cmd.text)
@@ -683,26 +702,28 @@ class ChatViewModel @Inject constructor(
     // --- composer prefill (mention → draft, plans/11 §A) ---
 
     /** Consume-once composer prefill queued by ChannelInfo before popping back; null when none. */
-    fun consumePrefill(): String? = draftStore.consume(bufferId)
+    fun consumePrefill(): String? = draftStore.consume(operationalBufferId.value)
 
-    fun loadDraft(): String? = draftStore.loadDraft(bufferId)
+    fun loadDraft(): String? = draftStore.loadDraft(operationalBufferId.value)
 
-    fun saveDraft(text: String) = draftStore.saveDraft(bufferId, text)
+    fun saveDraft(text: String) = draftStore.saveDraft(operationalBufferId.value, text)
 
-    fun clearDraft() = draftStore.clearDraft(bufferId)
+    fun clearDraft() = draftStore.clearDraft(operationalBufferId.value)
 
     // --- search deep-jump (plans/11 §C) ---
 
     private val jumpMsgid: String? = route.jumpToMsgid
     private val jumpTime: Long = route.jumpToTime
+    private val jumpEventId: Long? = route.jumpToEventId
     private data class JumpRequest(
         val msgid: String?,
         val time: Long,
+        val eventId: Long?,
         val settlesEntryPosition: Boolean,
     )
 
-    private var activeJumpRequest: JumpRequest? = if (jumpTime > 0) {
-        JumpRequest(jumpMsgid, jumpTime, settlesEntryPosition = true)
+    private var activeJumpRequest: JumpRequest? = if (jumpTime > 0 || jumpEventId != null) {
+        JumpRequest(jumpMsgid, jumpTime, jumpEventId, settlesEntryPosition = true)
     } else {
         null
     }
@@ -811,10 +832,18 @@ class ChatViewModel @Inject constructor(
                     ?: ChatInitialPosition(index = 0)
             }
         }
+        viewModelScope.launch {
+            visibilityReader.observeEventRedirects().collect {
+                restoreRedirectedViewport(filterSpec.value)
+            }
+        }
     }
 
     private suspend fun restoredScrollPosition(spec: MessageVisibilitySpec): ChatInitialPosition? {
-        val saved = scrollPositionStore.get(bufferId) ?: return null
+        val roomId = operationalBufferId.value
+        val saved = scrollPositionStore.get(roomId)
+            ?: bufferId.takeIf { it != roomId }?.let(scrollPositionStore::get)
+            ?: return null
         val anchor = visibilityReader.resolveSavedAnchor(
             bufferId = bufferId,
             msgid = saved.msgid,
@@ -822,7 +851,7 @@ class ChatViewModel @Inject constructor(
             id = saved.rowId,
             spec = spec,
         ) ?: run {
-            scrollPositionStore.remove(bufferId)
+            scrollPositionStore.remove(roomId)
             return null
         }
         val index = visibilityReader.countTimelineNewer(
@@ -831,9 +860,48 @@ class ChatViewModel @Inject constructor(
             anchor.id,
             spec,
         )
+        val canonicalSavedId = visibilityReader.resolveCanonicalEventId(saved.rowId)
         return ChatInitialPosition(
             index = index,
-            offset = saved.offset.takeIf { anchor.id == saved.rowId } ?: 0,
+            offset = saved.offset.takeIf { anchor.id == canonicalSavedId } ?: 0,
+            fromSavedPosition = true,
+        )
+    }
+
+    /** Re-anchor an already-open viewport when coalescence replaces and retimestamps its row. */
+    private suspend fun restoreRedirectedViewport(spec: MessageVisibilitySpec) {
+        val roomId = operationalBufferId.value
+        val saved = scrollPositionStore.get(roomId)
+            ?: bufferId.takeIf { it != roomId }?.let(scrollPositionStore::get)
+            ?: return
+        val canonicalSavedId = visibilityReader.resolveCanonicalEventId(saved.rowId)
+        if (canonicalSavedId == saved.rowId) return
+        val anchor = visibilityReader.resolveSavedAnchor(
+            bufferId = bufferId,
+            msgid = saved.msgid,
+            serverTime = saved.serverTime,
+            id = saved.rowId,
+            spec = spec,
+        ) ?: return
+        if (anchor.id != canonicalSavedId) return
+        val index = visibilityReader.countTimelineNewer(
+            bufferId,
+            anchor.serverTime,
+            anchor.id,
+            spec,
+        )
+        scrollPositionStore.put(
+            roomId,
+            saved.copy(
+                index = index,
+                msgid = anchor.msgid,
+                serverTime = anchor.serverTime,
+                rowId = anchor.id,
+            ),
+        )
+        _initialTarget.value = ChatInitialPosition(
+            index = index,
+            offset = saved.offset,
             fromSavedPosition = true,
         )
     }
@@ -854,13 +922,19 @@ class ChatViewModel @Inject constructor(
     private fun resolveJump() = viewModelScope.launch {
         // The buffer name (chathistory target) may not be in `state` yet on first composition;
         // read it directly from the repo so the AROUND fallback has a target.
-        val name = bufferRepository.observeBuffer(bufferId).firstOrNull()?.name
+        val name = bufferRepository.observeBuffer(bufferId).firstOrNull()?.ircTarget
         publishResolve(name)
     }
 
     private suspend fun publishResolve(name: String?) {
         val request = activeJumpRequest ?: return
-        when (val r = resolver.resolve(bufferId, request.msgid, request.time, name)) {
+        when (val r = resolver.resolve(
+            bufferId,
+            request.msgid,
+            request.time,
+            name,
+            eventId = request.eventId,
+        )) {
             is ChatJumpResolver.Result.Target -> {
                 // Force a distinct emission so the screen's LaunchedEffect(jumpTarget) always
                 // re-runs, even when the re-resolved index equals the previous one (plans/15 #12).
@@ -889,11 +963,11 @@ class ChatViewModel @Inject constructor(
     }
 
     fun saveScrollPosition(position: ChatScrollPosition) {
-        scrollPositionStore.put(bufferId, position)
+        scrollPositionStore.put(operationalBufferId.value, position)
     }
 
     fun clearScrollPosition() {
-        scrollPositionStore.remove(bufferId)
+        scrollPositionStore.remove(operationalBufferId.value)
     }
 
     /** A target could not be loaded safely; retain the read gate rather than marking it read. */
@@ -915,7 +989,12 @@ class ChatViewModel @Inject constructor(
      * shared jump pipeline still supplies bounded paging, index-shift recovery, and highlighting.
      */
     fun jumpToRepliedMessage(msgid: String) {
-        activeJumpRequest = JumpRequest(msgid, time = 0, settlesEntryPosition = false)
+        activeJumpRequest = JumpRequest(
+            msgid,
+            time = 0,
+            eventId = null,
+            settlesEntryPosition = false,
+        )
         reresolveUsed = false
         _jumpFailed.value = false
         viewModelScope.launch {

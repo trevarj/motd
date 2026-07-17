@@ -53,7 +53,12 @@ fun MotdNavGraph(
     LaunchedEffect(notificationTarget) {
         val target = notificationTarget ?: return@LaunchedEffect
         navController.navigate(
-            ChatRoute(target.bufferId, target.jumpToMsgid, target.jumpToTime),
+            ChatRoute(
+                target.bufferId,
+                target.jumpToMsgid,
+                target.jumpToTime,
+                target.jumpToEventId,
+            ),
         ) {
             launchSingleTop = true
         }
@@ -170,8 +175,8 @@ fun MotdNavGraph(
             SearchScreen(
                 bufferId = route.bufferId,
                 onBack = { navController.popBackStack() },
-                onOpenHit = { bufferId, msgid, time ->
-                    navController.navigate(ChatRoute(bufferId, msgid, time))
+                onOpenHit = { bufferId, msgid, time, eventId ->
+                    navController.navigate(ChatRoute(bufferId, msgid, time, eventId))
                 },
             )
         }

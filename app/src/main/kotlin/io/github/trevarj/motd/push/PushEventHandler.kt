@@ -1,29 +1,21 @@
 package io.github.trevarj.motd.push
 
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.irc.client.EventMapper
 import io.github.trevarj.motd.irc.event.IrcEvent
-import io.github.trevarj.motd.irc.event.MessageContext
-import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.IrcParseException
 import io.github.trevarj.motd.irc.proto.IrcMessage
-import io.github.trevarj.motd.irc.proto.reactionValue
-import io.github.trevarj.motd.irc.proto.replyReference
-import io.github.trevarj.motd.irc.proto.unreactionValue
+import io.github.trevarj.motd.irc.proto.Isupport
 import io.github.trevarj.motd.service.IrcEventSink
-import java.time.Instant
-import java.time.format.DateTimeParseException
 import javax.inject.Inject
 
 /**
  * Turns a decrypted Web Push payload (exactly one IRC line, no CRLF) into an [IrcEvent] and
  * feeds it through the [IrcEventSink] contract (EventProcessor implements it in WP5). The sink
- * persists durable msgid-bearing input, while a msgid-less chat push is notification-only and
- * waits for Soju CHATHISTORY to populate Room after reconnect.
+ * persists every visible push observation immediately, including msgid-less provisional input.
  *
- * The `:irc` [io.github.trevarj.motd.irc.client] event mapper is module-`internal`, so this
- * reimplements the small subset that soju webpush actually delivers: PRIVMSG/NOTICE/TAGMSG/INVITE,
- * including CTCP ACTION and reaction mutations. Notification posting is delegated to [notifier] so
- * the mapping stays pure and unit-testable without an Android context.
+ * Socket, history, and push input share the `:irc` [EventMapper], preventing CTCP, tag, reply, and
+ * semantic-event parsing from drifting between delivery paths.
  */
 class PushEventHandler(
     private val crypto: WebPushCryptoFacade,
@@ -100,28 +92,17 @@ class PushEventHandler(
     }
 
     companion object {
-        private const val CTCP = '\u0001'
-
         /**
          * Map a webpush IRC line to an [IrcEvent]. Pure — no side effects. Currently covers the
          * chat commands soju pushes (PRIVMSG/NOTICE + CTCP ACTION); anything else returns null.
          */
-        fun mapToEvent(msg: IrcMessage): IrcEvent? = when (msg.command.uppercase()) {
-            "PRIVMSG", "NOTICE" -> mapChat(msg)
-            "TAGMSG" -> mapTagMessage(msg)
-            "INVITE" -> mapInvite(msg)
-            else -> null
-        }
-
-        private fun mapInvite(msg: IrcMessage): IrcEvent? {
-            val target = msg.params.getOrNull(0) ?: return null
-            val channel = msg.params.getOrNull(1) ?: return null
-            return IrcEvent.Invited(
-                ctx = context(msg),
-                by = msg.source?.nick.orEmpty(),
-                nick = target,
-                channel = channel,
-            )
+        fun mapToEvent(msg: IrcMessage): IrcEvent? {
+            val command = msg.command.uppercase()
+            if (command !in PUSH_COMMANDS) return null
+            return EventMapper(
+                selfNick = { "" },
+                isupport = { Isupport() },
+            ).map(msg.copy(command = command))
         }
 
         internal fun isRegistrationProbe(msg: IrcMessage): Boolean =
@@ -129,78 +110,7 @@ class PushEventHandler(
                 msg.params.getOrNull(0).equals("WEBPUSH", ignoreCase = true) &&
                 msg.params.getOrNull(1).equals("REGISTERED", ignoreCase = true)
 
-        private fun mapChat(msg: IrcMessage): IrcEvent? {
-            val source = msg.source ?: return null
-            val target = msg.params.getOrNull(0) ?: return null
-            var text = msg.params.getOrNull(1) ?: return null
-
-            var kind = if (msg.command.equals("NOTICE", ignoreCase = true)) {
-                IrcEvent.ChatKind.NOTICE
-            } else {
-                IrcEvent.ChatKind.PRIVMSG
-            }
-            // CTCP ACTION: \x01ACTION <text>\x01
-            if (text.length >= 2 && text.first() == CTCP && text.last() == CTCP) {
-                val inner = text.substring(1, text.length - 1)
-                if (inner.startsWith("ACTION ")) {
-                    kind = IrcEvent.ChatKind.ACTION
-                    text = inner.removePrefix("ACTION ")
-                } else {
-                    // Other CTCP (VERSION, PING, ...) is not a chat message.
-                    return null
-                }
-            }
-
-            return IrcEvent.ChatMessage(
-                ctx = context(msg),
-                kind = kind,
-                source = source,
-                target = target,
-                text = text,
-                isSelf = false, // push is delivered while we are offline; never our own echo
-                replyToMsgid = msg.replyReference(),
-            )
-        }
-
-        private fun mapTagMessage(msg: IrcMessage): IrcEvent? {
-            if (msg.unreactionValue() != null) return IrcEvent.Raw(msg)
-            val source = msg.source ?: return null
-            val target = msg.params.firstOrNull() ?: return null
-            val react = msg.reactionValue()
-            return IrcEvent.TagMessage(
-                ctx = context(msg),
-                source = source,
-                target = target,
-                typing = msg.tags["+typing"],
-                reactEmoji = react,
-                reactTargetMsgid = react?.let { msg.replyReference() },
-            )
-        }
-
-        private data class ParsedServerTime(val value: Long, val source: ServerTimeSource)
-
-        private fun context(msg: IrcMessage): MessageContext {
-            val parsedTime = parseServerTime(msg.tags["time"])
-            return MessageContext(
-                msgid = msg.tags["msgid"],
-                serverTime = parsedTime.value,
-                account = msg.tags["account"],
-                batchId = null,
-                label = null,
-                serverTimeSource = parsedTime.source,
-            )
-        }
-
-        private fun parseServerTime(time: String?): ParsedServerTime {
-            if (time == null) {
-                return ParsedServerTime(System.currentTimeMillis(), ServerTimeSource.LOCAL)
-            }
-            return try {
-                ParsedServerTime(Instant.parse(time).toEpochMilli(), ServerTimeSource.TAG)
-            } catch (_: DateTimeParseException) {
-                ParsedServerTime(System.currentTimeMillis(), ServerTimeSource.LOCAL)
-            }
-        }
+        private val PUSH_COMMANDS = setOf("PRIVMSG", "NOTICE", "TAGMSG", "INVITE")
     }
 }
 

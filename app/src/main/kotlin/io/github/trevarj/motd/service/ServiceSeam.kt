@@ -7,6 +7,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 
 enum class DeliveryMode { PERSISTENT_SOCKET, UNIFIED_PUSH }
+enum class RetrySendResult {
+    NO_ATTEMPT,
+    REPLACEMENT_FAILED,
+    ACCEPTED;
+
+    val replacementPersisted: Boolean
+        get() = this != NO_ATTEMPT
+}
 enum class RosterLoadState { NOT_LOADED, LOADING, LOADED, FAILED }
 enum class PresenceState { UNKNOWN, ONLINE, OFFLINE }
 data class PresenceKey(val networkId: Long, val normalizedNick: String)
@@ -64,6 +72,16 @@ interface ConnectionManager {
 
     /** High-level send: resolves buffer -> network/target, handles pending insert + echo. */
     suspend fun sendMessage(bufferId: Long, text: String, replyToMsgid: String? = null)
+
+    /** Retry seam that reports whether a replacement attempt was actually accepted. */
+    suspend fun sendMessageForRetry(
+        bufferId: Long,
+        text: String,
+        replyToMsgid: String? = null,
+    ): RetrySendResult {
+        sendMessage(bufferId, text, replyToMsgid)
+        return RetrySendResult.ACCEPTED
+    }
     suspend fun sendTyping(bufferId: Long, state: String)
     suspend fun sendReact(bufferId: Long, msgid: String, emoji: String)
     suspend fun joinChannel(networkId: Long, channel: String)

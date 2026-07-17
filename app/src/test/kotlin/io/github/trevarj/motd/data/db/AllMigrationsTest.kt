@@ -16,7 +16,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/** Validates the complete released schema path and representative data preservation. */
+/** Validates the complete released schema path and the intentional v10 timeline reset. */
 @RunWith(RobolectricTestRunner::class)
 class AllMigrationsTest {
     private var legacyHelper: SupportSQLiteOpenHelper? = null
@@ -28,7 +28,7 @@ class AllMigrationsTest {
     }
 
     @Test
-    fun migrateVersion1ToCurrent_preservesRelationalAndMessageData() {
+    fun migrateVersion1ToCurrent_preservesNetworkAndResetsIrcDerivedState() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase(DB_NAME)
         legacyHelper = FrameworkSQLiteOpenHelperFactory().create(
@@ -80,25 +80,33 @@ class AllMigrationsTest {
             DB_NAME,
         ).addMigrations(*ALL_MIGRATIONS).build()
         try {
-            migrated.openHelper.writableDatabase.query(
-                """SELECT n.name, b.displayName, m.text, m.eventKey, u.account, u.username,
-                          mb.prefixes, r.emoji
-                   FROM networks n
-                   JOIN buffers b ON b.networkId = n.id
-                   JOIN messages m ON m.bufferId = b.id
-                   JOIN users u ON u.networkId = n.id AND u.nick = m.sender
-                   JOIN members mb ON mb.bufferId = b.id AND mb.nick = m.sender
-                   JOIN reactions r ON r.bufferId = b.id AND r.targetMsgid = m.msgid""",
+            val sqlite = migrated.openHelper.writableDatabase
+            sqlite.query(
+                """SELECT name, host, port, nick FROM networks WHERE id = 1""",
             ).use { cursor ->
                 check(cursor.moveToFirst())
                 assertEquals("libera", cursor.getString(0))
-                assertEquals("#MOTD", cursor.getString(1))
-                assertEquals("hello", cursor.getString(2))
-                assertEquals(null, cursor.getString(3))
-                assertEquals("alice-account", cursor.getString(4))
-                assertEquals(null, cursor.getString(5))
-                assertEquals("@", cursor.getString(6))
-                assertEquals("+1", cursor.getString(7))
+                assertEquals("irc.libera.chat", cursor.getString(1))
+                assertEquals(6697, cursor.getInt(2))
+                assertEquals("me", cursor.getString(3))
+            }
+            listOf(
+                "buffers",
+                "messages",
+                "users",
+                "members",
+                "reactions",
+                "room_aliases",
+                "event_aliases",
+                "event_observations",
+                "history_cursors",
+                "network_history_cursors",
+                "connection_generations",
+            ).forEach { table ->
+                sqlite.query("SELECT COUNT(*) FROM $table").use { cursor ->
+                    check(cursor.moveToFirst())
+                    assertEquals("$table must reset", 0, cursor.getInt(0))
+                }
             }
         } finally {
             migrated.close()
@@ -142,6 +150,7 @@ class AllMigrationsTest {
             MIGRATION_6_7,
             MIGRATION_7_8,
             MIGRATION_8_9,
+            MIGRATION_9_10,
         )
     }
 }

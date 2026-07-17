@@ -45,6 +45,10 @@ interface MessageRepository {
     /** Buffer-scoped reactions (no per-msgid IN list); callers filter to the visible window
      *  in memory to avoid SQLite's bind-variable overflow on large windows (plans/15 #5, #18). */
     fun reactionsForBuffer(bufferId: Long): Flow<List<ReactionEntity>>
+    /** Canonical event-id lookup used by notification and restored-scroll anchors. */
+    suspend fun byId(id: Long): MessageEntity? = null
+    /** Resolve durable losing room redirects before validating an event-scoped deep link. */
+    suspend fun canonicalRoomId(bufferId: Long): Long = bufferId
     suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
     /** Reactive reply-target lookup; emits again when echo/history supplies the referenced msgid. */
     fun observeByMsgid(bufferId: Long, msgid: String): Flow<MessageEntity?>

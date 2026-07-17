@@ -1,8 +1,9 @@
 package io.github.trevarj.motd.data.db
 
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -30,7 +31,7 @@ class MessageDaoTest {
     }
 
     @Test
-    fun dedupUniqueness_sameDedupKeyInsertedTwice_yieldsOneRow() = runTest {
+    fun dedupKeyIsDiagnostic_directDaoInsertsDoNotClaimCanonicalIdentity() = runTest {
         val dao = db.messageDao()
         val a = message(bufferId, "hello", serverTime = 1000, dedupKey = "msg-1", msgid = "msg-1")
         val b = message(bufferId, "hello again", serverTime = 2000, dedupKey = "msg-1", msgid = "msg-1")
@@ -39,25 +40,22 @@ class MessageDaoTest {
         val secondIds = dao.insertAll(listOf(b))
 
         assertEquals(1, firstIds.size)
-        // IGNORE conflict → rowid -1 for the skipped duplicate.
-        assertEquals(-1L, secondIds.single())
-        assertEquals(1000L, dao.newestTime(bufferId))
+        assertEquals(true, secondIds.single() > 0)
+        assertEquals(2000L, dao.newestTime(bufferId))
+        assertEquals(2, dao.pagingList(bufferId).size)
     }
 
     @Test
-    fun msgidUniqueness_sameMsgidDifferentDedupKey_yieldsOneRow() = runTest {
-        // The gap the old UNIQUE(bufferId, dedupKey) index alone missed: a self row confirmed by a
-        // BARE echo keeps a LOCAL dedupKey (sha1/pending) while its msgid stays null; a CHATHISTORY
-        // replay then arrives with the real msgid AS its dedupKey — a different dedupKey, so the old
-        // index would NOT reject it. The new UNIQUE(bufferId, msgid) index rejects it by msgid.
+    fun msgidUniquenessLivesInNetworkScopedAliasStore_notDirectDao() = runTest {
         val dao = db.messageDao()
         val first = message(bufferId, "hi", serverTime = 1000, dedupKey = "srv-9", msgid = "srv-9", isSelf = true)
         // A second row: same msgid, DIFFERENT dedupKey and time (a distinct local key).
         val second = message(bufferId, "hi", serverTime = 2000, dedupKey = "local-sha1", msgid = "srv-9", isSelf = true)
 
         assertEquals(true, dao.insertAll(listOf(first)).single() > 0)
-        assertEquals(-1L, dao.insertAll(listOf(second)).single()) // IGNORE on the msgid index
-        assertEquals(1000L, dao.newestTime(bufferId)) // only the first row survives
+        assertEquals(true, dao.insertAll(listOf(second)).single() > 0)
+        assertEquals(2000L, dao.newestTime(bufferId))
+        assertEquals(2, dao.pagingList(bufferId).size)
     }
 
     @Test
@@ -96,6 +94,45 @@ class MessageDaoTest {
     }
 
     @Test
+    fun observeCanonicalMsgid_followsEventRedirectAfterCoalescence() = runTest {
+        val dao = db.messageDao()
+        val winnerId = dao.insertAll(
+            listOf(
+                message(
+                    bufferId,
+                    "authoritative echo",
+                    serverTime = 1_000,
+                    dedupKey = "server-id",
+                    msgid = "server-id",
+                    isSelf = true,
+                ),
+            ),
+        ).single()
+        val loserId = dao.insertAll(
+            listOf(
+                message(
+                    bufferId,
+                    "optimistic send",
+                    serverTime = 900,
+                    dedupKey = "pending:label",
+                    msgid = null,
+                    isSelf = true,
+                    pendingLabel = "label",
+                ),
+            ),
+        ).single()
+
+        val promoted = async {
+            dao.observeCanonicalMsgid(loserId).first { it != null }
+        }
+        yield()
+        db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
+        dao.deleteById(loserId)
+
+        assertEquals("server-id", promoted.await())
+    }
+
+    @Test
     fun findSelfMsgidlessCandidate_matchesMsgidlessSelfRow_ignoresMsgidBearing() = runTest {
         val dao = db.messageDao()
         dao.insertAll(listOf(
@@ -111,7 +148,7 @@ class MessageDaoTest {
     }
 
     @Test
-    fun echoFlow_pendingInsertThenUpdateInPlace_thenHistoryOverlapIgnored_oneRow() = runTest {
+    fun directDaoDoesNotDeduplicateHistoryOverlapOutsideCanonicalStore() = runTest {
         val dao = db.messageDao()
         val label = "lbl-1"
 
@@ -137,20 +174,20 @@ class MessageDaoTest {
         dao.update(confirmed)
         assertNull(dao.byPendingLabel(bufferId, label))
 
-        // 3. same msgid arrives later via CHATHISTORY → INSERT IGNORE no-ops.
+        // 3. Direct DAO writes deliberately bypass the alias store and therefore do not dedup.
         val history = message(
             bufferId, "hi there",
             sender = "me", serverTime = 600,
             dedupKey = "real-msgid", msgid = "real-msgid", isSelf = true,
         )
         val historyIds = dao.insertAll(listOf(history))
-        assertEquals(-1L, historyIds.single())
+        assertEquals(true, historyIds.single() > 0)
 
-        // Exactly one row survives.
+        // EventProcessor/CanonicalTimelineStore is the only IRC-derived writer in production.
         val all = dao.pagingList(bufferId)
-        assertEquals(1, all.size)
-        assertEquals("real-msgid", all.single().msgid)
-        assertNull(all.single().pendingLabel)
+        assertEquals(2, all.size)
+        assertEquals(setOf("real-msgid"), all.mapNotNull { it.msgid }.toSet())
+        assertEquals(2, all.count { it.pendingLabel == null })
     }
 
     @Test

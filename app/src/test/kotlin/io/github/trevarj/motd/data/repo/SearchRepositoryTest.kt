@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
+import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.service.DeliveryMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -40,7 +41,7 @@ class SearchRepositoryTest {
     fun setUp() = runTest {
         db = inMemoryDb()
         settings = FakeSettingsRepository()
-        repo = SearchRepositoryImpl(db.messageDao(), settings)
+        repo = SearchRepositoryImpl(db.bufferDao(), db.messageDao(), settings)
         val nid = db.networkDao().insert(network())
         b1 = db.bufferDao().insert(buffer(nid, "#one"))
         b2 = db.bufferDao().insert(buffer(nid, "#two"))
@@ -69,6 +70,17 @@ class SearchRepositoryTest {
         val hits = repo.search("hello", b2).first()
         assertEquals(1, hits.size)
         assertEquals("hello there", hits.single().message.text)
+    }
+
+    @Test
+    fun bufferScopedSearch_resolvesLosingRoomRedirect() = runTest {
+        BufferStore(db).mergeRooms(b1, b2)
+
+        val hits = repo.search("there", b2).first()
+
+        assertEquals(1, hits.size)
+        assertEquals("hello there", hits.single().message.text)
+        assertEquals(b1, hits.single().message.bufferId)
     }
 
     @Test

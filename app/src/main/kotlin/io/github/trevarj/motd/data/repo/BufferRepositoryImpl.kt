@@ -12,10 +12,12 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 
 // Buffer-level reads and pin/mute toggles. Mark-read is intentionally NOT here: it flows through
 // ConnectionManager.markRead (single entry point) so Room advance + MARKREAD stay coupled.
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class BufferRepositoryImpl @Inject constructor(
     private val bufferDao: BufferDao,
     private val memberDao: MemberDao,
@@ -30,16 +32,18 @@ class BufferRepositoryImpl @Inject constructor(
     override fun observeBuffer(id: Long): Flow<BufferEntity?> = bufferDao.observe(id)
 
     override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> =
-        memberDao.observe(bufferId)
+        bufferDao.observe(bufferId).flatMapLatest { room ->
+            memberDao.observe(room?.id ?: bufferId)
+        }
 
     override suspend fun setPinned(id: Long, pinned: Boolean) {
-        bufferDao.setPinned(id, pinned)
+        bufferDao.setPinned(bufferDao.canonicalId(id) ?: id, pinned)
     }
 
     override suspend fun setMuted(id: Long, muted: Boolean) {
-        bufferDao.setMuted(id, muted)
+        bufferDao.setMuted(bufferDao.canonicalId(id) ?: id, muted)
     }
 
     // Drop the buffer row (messages cascade via FK) plus its members/reactions in one transaction.
-    override suspend fun deleteBuffer(id: Long) = bufferDao.deleteBuffer(id)
+    override suspend fun deleteBuffer(id: Long) = bufferDao.deleteBuffer(bufferDao.canonicalId(id) ?: id)
 }

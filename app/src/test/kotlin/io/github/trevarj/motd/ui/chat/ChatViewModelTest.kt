@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
+import io.github.trevarj.motd.data.db.EventRedirectEntity
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
@@ -248,6 +249,30 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `stale redirect route uses canonical foreground buffer id`() = runTest {
+        val canonical = channel.copy(id = 42)
+        val foreground = FakeForegroundBufferTracker()
+        val manager = FakeConnectionManager(network.id)
+        val vm = viewModel(
+            buffer = canonical,
+            manager = manager,
+            routeBufferId = channel.id,
+            foreground = foreground,
+        )
+        vm.state.first { it.buffer != null }
+
+        vm.onResume()
+        advanceUntilIdle()
+
+        assertEquals(canonical.id, foreground.foregroundBufferId.value)
+
+        vm.onPause()
+        advanceUntilIdle()
+
+        assertEquals(null, foreground.foregroundBufferId.value)
+    }
+
+    @Test
     fun `reaction retries history after stale reconciliation and uses promoted msgid`() = runTest {
         val messages = FakeMessageRepository()
         val history = FakeHistoryResyncController { attempt ->
@@ -309,6 +334,66 @@ class ChatViewModelTest {
         )
     }
 
+    @Test
+    fun `retry preserves failed row when no replacement is accepted`() = runTest {
+        val messages = FakeMessageRepository()
+        val manager = FakeConnectionManager(network.id, retryAccepted = false)
+        val vm = viewModel(channel, manager, messages = messages)
+        vm.state.first { it.buffer != null }
+        val failed = message(channel.id, "try again", null, "me", id = 77).copy(failed = true)
+
+        vm.retry(failed)
+        advanceUntilIdle()
+
+        assertTrue(messages.deletedIds.isEmpty())
+        assertTrue(manager.messages.isEmpty())
+    }
+
+    @Test
+    fun `coalesced saved viewport follows canonical event and retains pixel offset`() = runTest {
+        val winnerId = db.messageDao().insertAll(
+            listOf(message(channel.id, "history", "server-id", "alice").copy(serverTime = 500)),
+        ).single()
+        val loserId = db.messageDao().insertAll(
+            listOf(message(channel.id, "live", null, "alice").copy(serverTime = 200)),
+        ).single()
+        val positions = ChatScrollPositionStore().apply {
+            put(
+                channel.id,
+                ChatScrollPosition(
+                    index = 1,
+                    offset = 37,
+                    msgid = null,
+                    serverTime = 200,
+                    rowId = loserId,
+                ),
+            )
+        }
+        val vm = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            scrollPositions = positions,
+        )
+        vm.state.first { it.buffer != null }
+        assertEquals(
+            ChatInitialPosition(index = 1, offset = 37, fromSavedPosition = true),
+            vm.initialTarget.first { it != null },
+        )
+        vm.onInitialPositionHandled()
+        assertEquals(null, vm.initialTarget.value)
+
+        db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
+        db.messageDao().deleteById(loserId)
+
+        assertEquals(
+            ChatInitialPosition(index = 0, offset = 37, fromSavedPosition = true),
+            vm.initialTarget.first { it != null },
+        )
+        assertEquals(winnerId, positions.get(channel.id)?.rowId)
+        assertEquals(500L, positions.get(channel.id)?.serverTime)
+        assertEquals(37, positions.get(channel.id)?.offset)
+    }
+
     private fun viewModel(
         buffer: BufferEntity,
         manager: FakeConnectionManager,
@@ -318,21 +403,24 @@ class ChatViewModelTest {
             scope = CoroutineScope(Dispatchers.Unconfined),
         ),
         messages: MessageRepository = FakeMessageRepository(),
+        routeBufferId: Long = buffer.id,
+        foreground: FakeForegroundBufferTracker = FakeForegroundBufferTracker(),
+        scrollPositions: ChatScrollPositionStore = ChatScrollPositionStore(),
     ): ChatViewModel {
         val settings = FakeSettingsRepository()
         val eventSink: IrcEventSink = processor
         return ChatViewModel(
-            savedStateHandle = SavedStateHandle(mapOf("bufferId" to buffer.id)),
+            savedStateHandle = SavedStateHandle(mapOf("bufferId" to routeBufferId)),
             messageRepository = messages,
-            bufferRepository = FakeBufferRepository(buffer),
+            bufferRepository = FakeBufferRepository(buffer, routeBufferId),
             connectionManager = manager,
             typingTracker = FakeTypingTracker(),
-            foregroundBufferTracker = FakeForegroundBufferTracker(),
+            foregroundBufferTracker = foreground,
             linkPreviewRepository = object : LinkPreviewRepository {
                 override suspend fun preview(url: String): LinkPreview? = null
             },
             draftStore = ComposerDraftStore(),
-            scrollPositionStore = ChatScrollPositionStore(),
+            scrollPositionStore = scrollPositions,
             eventSink = eventSink,
             settingsRepository = settings,
             replyPrefs = FakeReplyPrefs(),
@@ -374,6 +462,7 @@ class ChatViewModelTest {
         networkId: Long,
         state: IrcClientState = IrcClientState.Ready("me", emptySet(), emptyMap()),
         private val client: IrcClient? = null,
+        private val retryAccepted: Boolean = true,
     ) : ConnectionManager {
         override val connectionStates = MutableStateFlow(mapOf(networkId to state))
         override val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> =
@@ -393,6 +482,15 @@ class ChatViewModelTest {
         override suspend fun reconnectStale() = Unit
         override suspend fun sendMessage(bufferId: Long, text: String, replyToMsgid: String?) {
             messages += SentMessage(bufferId, text, replyToMsgid)
+        }
+        override suspend fun sendMessageForRetry(
+            bufferId: Long,
+            text: String,
+            replyToMsgid: String?,
+        ): io.github.trevarj.motd.service.RetrySendResult {
+            if (!retryAccepted) return io.github.trevarj.motd.service.RetrySendResult.NO_ATTEMPT
+            sendMessage(bufferId, text, replyToMsgid)
+            return io.github.trevarj.motd.service.RetrySendResult.ACCEPTED
         }
         override suspend fun sendTyping(bufferId: Long, state: String) { typing += bufferId to state }
         override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) {
@@ -439,9 +537,13 @@ class ChatViewModelTest {
         }
     }
 
-    private class FakeBufferRepository(private val current: BufferEntity) : BufferRepository {
+    private class FakeBufferRepository(
+        private val current: BufferEntity,
+        private val routeId: Long = current.id,
+    ) : BufferRepository {
         override fun observeChatList(): Flow<List<ChatListRow>> = flowOf(emptyList())
-        override fun observeBuffer(id: Long): Flow<BufferEntity?> = flowOf(current.takeIf { it.id == id })
+        override fun observeBuffer(id: Long): Flow<BufferEntity?> =
+            flowOf(current.takeIf { id == routeId || id == current.id })
         override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())
         override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
         override suspend fun setMuted(id: Long, muted: Boolean) = Unit
@@ -450,6 +552,7 @@ class ChatViewModelTest {
 
     private class FakeMessageRepository : MessageRepository {
         val msgid = MutableStateFlow<String?>(null)
+        val deletedIds = mutableListOf<Long>()
 
         override fun messages(bufferId: Long): Flow<PagingData<MessageEntity>> = flowOf(PagingData.empty())
         override fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>> = flowOf(emptyList())
@@ -460,7 +563,7 @@ class ChatViewModelTest {
             withTimeoutOrNull(timeoutMs) { msgid.filterNotNull().first() }
         override suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int = 0
         override suspend fun firstUnreadOtherTime(bufferId: Long, after: Long): Long? = null
-        override suspend fun deleteMessage(id: Long) = Unit
+        override suspend fun deleteMessage(id: Long) { deletedIds += id }
     }
 
     private class FakeTypingTracker : TypingTracker {

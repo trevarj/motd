@@ -40,7 +40,19 @@ class MessageVisibilityReader @Inject constructor(
         awaitClose { db.invalidationTracker.removeObserver(observer) }
     }.map { latestRawTime(bufferId) }.distinctUntilChanged()
 
-    suspend fun latestRawTime(bufferId: Long): Long? = db.messageDao().newestTime(bufferId)
+    /** Emits only when event-id coalescence may require a live viewport re-anchor. */
+    fun observeEventRedirects(): Flow<Unit> = callbackFlow {
+        val observer = object : InvalidationTracker.Observer("event_redirects") {
+            override fun onInvalidated(tables: Set<String>) {
+                trySend(Unit)
+            }
+        }
+        db.invalidationTracker.addObserver(observer)
+        awaitClose { db.invalidationTracker.removeObserver(observer) }
+    }
+
+    suspend fun latestRawTime(bufferId: Long): Long? =
+        db.messageDao().newestTime(canonicalRoomId(bufferId))
 
     suspend fun countTimelineNewer(
         bufferId: Long,
@@ -49,7 +61,7 @@ class MessageVisibilityReader @Inject constructor(
         spec: MessageVisibilitySpec,
     ): Int = countMatchingRows(
         where = "bufferId = ? AND (serverTime > ? OR (serverTime = ? AND id > ?))",
-        args = listOf(bufferId, serverTime, serverTime, id),
+        args = listOf(canonicalRoomId(bufferId), serverTime, serverTime, id),
         order = "serverTime DESC, id DESC",
         predicate = MessageVisibilityPolicy(spec)::timeline,
     )
@@ -59,10 +71,11 @@ class MessageVisibilityReader @Inject constructor(
         after: Long,
         spec: MessageVisibilitySpec,
     ): Long? {
+        val roomId = canonicalRoomId(bufferId)
         val policy = MessageVisibilityPolicy(spec)
         return firstMatchingRow(
             where = "bufferId = ? AND serverTime > ?",
-            args = listOf(bufferId, after),
+            args = listOf(roomId, after),
             order = "serverTime ASC, id ASC",
             predicate = policy::visibleUnread,
         )?.serverTime
@@ -75,11 +88,20 @@ class MessageVisibilityReader @Inject constructor(
         id: Long,
         spec: MessageVisibilitySpec,
     ): VisibleMessageAnchor? {
+        val roomId = canonicalRoomId(bufferId)
         val policy = MessageVisibilityPolicy(spec)
+        val canonicalEventId = resolveCanonicalEventId(id)
         val exact = queryRows(
-            where = if (msgid != null) "bufferId = ? AND msgid = ?" else
-                "bufferId = ? AND serverTime = ? AND id = ?",
-            args = if (msgid != null) listOf(bufferId, msgid) else listOf(bufferId, serverTime, id),
+            where = when {
+                msgid != null -> "bufferId = ? AND msgid = ?"
+                canonicalEventId != id -> "bufferId = ? AND id = ?"
+                else -> "bufferId = ? AND serverTime = ? AND id = ?"
+            },
+            args = when {
+                msgid != null -> listOf(roomId, msgid)
+                canonicalEventId != id -> listOf(roomId, canonicalEventId)
+                else -> listOf(roomId, serverTime, id)
+            },
             order = "serverTime DESC, id DESC",
             limit = 1,
             offset = 0,
@@ -90,18 +112,24 @@ class MessageVisibilityReader @Inject constructor(
         // row. This avoids surprising forward jumps while history is being read.
         val older = firstMatchingRow(
             where = "bufferId = ? AND (serverTime < ? OR (serverTime = ? AND id < ?))",
-            args = listOf(bufferId, serverTime, serverTime, id),
+            args = listOf(roomId, serverTime, serverTime, id),
             order = "serverTime DESC, id DESC",
             predicate = policy::anchor,
         )
         if (older != null) return older.toAnchor()
         return firstMatchingRow(
             where = "bufferId = ? AND (serverTime > ? OR (serverTime = ? AND id > ?))",
-            args = listOf(bufferId, serverTime, serverTime, id),
+            args = listOf(roomId, serverTime, serverTime, id),
             order = "serverTime ASC, id ASC",
             predicate = policy::anchor,
         )?.toAnchor()
     }
+
+    private suspend fun canonicalRoomId(bufferId: Long): Long =
+        db.bufferDao().canonicalId(bufferId) ?: bufferId
+
+    suspend fun resolveCanonicalEventId(eventId: Long): Long =
+        db.canonicalTimelineDao().canonicalEventId(eventId)
 
     /** Replace fool-authored chat-list state, then re-sort by the resulting meaningful activity. */
     suspend fun resolveChatList(

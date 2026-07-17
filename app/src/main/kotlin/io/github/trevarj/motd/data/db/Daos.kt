@@ -118,7 +118,7 @@ interface BufferDao {
             ORDER BY m.serverTime DESC, m.id DESC
             LIMIT 1
         )
-        WHERE b.type != 'SERVER' AND b.pendingCloseAt IS NULL
+        WHERE b.type != 'SERVER' AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL
         ORDER BY b.pinned DESC,
                  (lastMessageTime IS NULL) ASC,
                  lastMessageTime DESC,
@@ -127,14 +127,29 @@ interface BufferDao {
     )
     fun observeChatList(): Flow<List<ChatListRow>>
 
-    @Query("SELECT * FROM buffers WHERE id = :id")
+    @Query(
+        """SELECT canonical.* FROM buffers requested
+           JOIN buffers canonical ON canonical.id = COALESCE(requested.redirectToRoomId, requested.id)
+           WHERE requested.id = :id""",
+    )
     fun observe(id: Long): Flow<BufferEntity?>
 
     // Point read for read-modify-write toggles (pin/mute); not part of the frozen surface.
-    @Query("SELECT * FROM buffers WHERE id = :id")
+    @Query(
+        """SELECT canonical.* FROM buffers requested
+           JOIN buffers canonical ON canonical.id = COALESCE(requested.redirectToRoomId, requested.id)
+           WHERE requested.id = :id""",
+    )
     suspend fun observeById(id: Long): BufferEntity?
 
-    @Query("SELECT * FROM buffers WHERE networkId = :nid AND name = :normName")
+    @Query("SELECT COALESCE(redirectToRoomId, id) FROM buffers WHERE id = :id")
+    suspend fun canonicalId(id: RoomId): RoomId?
+
+    @Query(
+        """SELECT canonical.* FROM buffers requested
+           JOIN buffers canonical ON canonical.id = COALESCE(requested.redirectToRoomId, requested.id)
+           WHERE requested.networkId = :nid AND requested.name = :normName""",
+    )
     suspend fun byName(nid: Long, normName: String): BufferEntity?
 
     @Query("SELECT id FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND pendingCloseAt IS NULL")
@@ -143,7 +158,11 @@ interface BufferDao {
     @Query("SELECT displayName FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND joined = 1 AND pendingCloseAt IS NULL ORDER BY id")
     suspend fun joinedChannelNames(networkId: Long): List<String>
 
-    @Query("SELECT id, name FROM buffers WHERE networkId = :networkId AND type != 'SERVER' AND pendingCloseAt IS NULL ORDER BY id")
+    @Query(
+        """SELECT id, CASE WHEN type = 'QUERY' THEN displayName ELSE name END AS name
+           FROM buffers WHERE networkId = :networkId AND type != 'SERVER'
+             AND pendingCloseAt IS NULL AND redirectToRoomId IS NULL ORDER BY id""",
+    )
     suspend fun openTargets(networkId: Long): List<BufferTargetRow>
 
     @Query(
@@ -163,8 +182,10 @@ interface BufferDao {
     suspend fun markPendingClose(id: Long, timestamp: Long): Int
 
     @Query(
-        """SELECT id AS bufferId, name AS target, readMarkerTime AS timestamp
-           FROM buffers WHERE networkId = :networkId AND type != 'SERVER' AND pendingCloseAt IS NULL ORDER BY id""",
+        """SELECT id AS bufferId, CASE WHEN type = 'QUERY' THEN displayName ELSE name END AS target,
+                  readMarkerTime AS timestamp
+           FROM buffers WHERE networkId = :networkId AND type != 'SERVER'
+             AND pendingCloseAt IS NULL AND redirectToRoomId IS NULL ORDER BY id""",
     )
     suspend fun storedReadMarkers(networkId: Long): List<BufferReadMarkerRow>
 
@@ -211,6 +232,9 @@ interface BufferDao {
     @Query("UPDATE buffers SET joined = :joined WHERE id = :id")
     suspend fun setJoined(id: Long, joined: Boolean)
 
+    @Query("UPDATE buffers SET membershipCycle = membershipCycle + 1 WHERE id = :id")
+    suspend fun advanceMembershipCycle(id: RoomId)
+
     @Query("UPDATE buffers SET historyComplete = 1 WHERE id = :id")
     suspend fun markHistoryComplete(id: Long)
 
@@ -233,10 +257,14 @@ interface BufferDao {
     @Query("DELETE FROM buffers WHERE id = :id")
     suspend fun deleteBufferRow(id: Long)
 
+    @Query("DELETE FROM buffers WHERE redirectToRoomId = :id")
+    suspend fun deleteRedirectsTo(id: Long)
+
     @Transaction
     suspend fun deleteBuffer(id: Long) {
         deleteMembersForBuffer(id)
         deleteReactionsForBuffer(id)
+        deleteRedirectsTo(id)
         deleteBufferRow(id) // cascades to messages + messages_fts
     }
 }
@@ -264,6 +292,31 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE id = :id LIMIT 1")
     suspend fun byId(id: Long): MessageEntity?
+
+    @Query(
+        """SELECT * FROM messages WHERE id = COALESCE(
+               (SELECT canonicalEventId FROM event_redirects WHERE losingEventId = :id),
+               :id
+           ) LIMIT 1""",
+    )
+    suspend fun byCanonicalId(id: Long): MessageEntity?
+
+    @Query(
+        """SELECT * FROM messages
+           WHERE bufferId = :bufferId AND id != :excludeEventId
+             AND isSelf = 0 AND failed = 0 AND serverTime > :after
+             AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+             AND (:queryRoom = 1 OR hasMention = 1)
+           ORDER BY serverTime DESC, id DESC
+           LIMIT :limit""",
+    )
+    suspend fun recentNotifiable(
+        bufferId: Long,
+        after: Long,
+        queryRoom: Boolean,
+        excludeEventId: Long,
+        limit: Int,
+    ): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND eventKey = :eventKey LIMIT 1")
     suspend fun byEventKey(bufferId: Long, eventKey: String): MessageEntity?
@@ -323,6 +376,12 @@ interface MessageDao {
            WHERE bufferId = :bufferId AND pendingLabel = :label AND msgid IS NULL""",
     )
     suspend fun failIfStillPending(bufferId: Long, label: String): Int
+
+    @Query(
+        """UPDATE messages SET pendingLabel = NULL, failed = 0
+           WHERE bufferId = :bufferId AND pendingLabel = :label AND msgid IS NULL""",
+    )
+    suspend fun confirmIfStillPending(bufferId: Long, label: String): Int
 
     @Update
     suspend fun update(m: MessageEntity)
@@ -406,6 +465,14 @@ interface MessageDao {
     @Query("SELECT msgid FROM messages WHERE id = :id LIMIT 1")
     fun observeMsgid(id: Long): Flow<String?>
 
+    @Query(
+        """SELECT msgid FROM messages WHERE id = COALESCE(
+               (SELECT canonicalEventId FROM event_redirects WHERE losingEventId = :id),
+               :id
+           ) LIMIT 1""",
+    )
+    fun observeCanonicalMsgid(id: Long): Flow<String?>
+
     /**
      * Newest local self row for [bufferId] matching [text], to collapse an un-labeled echo into a
      * pending/confirmed-local row (plans/03 echo heuristic). A still-pending row (pendingLabel set)
@@ -468,7 +535,10 @@ interface MessageDao {
         JOIN buffers b ON b.id = m.bufferId
         JOIN networks n ON n.id = b.networkId
         WHERE f.messages_fts MATCH :query
-          AND (:bufferId IS NULL OR m.bufferId = :bufferId)
+          AND (:bufferId IS NULL OR m.bufferId = COALESCE(
+              (SELECT COALESCE(redirectToRoomId, id) FROM buffers WHERE id = :bufferId),
+              :bufferId
+          ))
           AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
         ORDER BY m.serverTime DESC LIMIT 200
         """
@@ -556,4 +626,400 @@ interface UserDao {
 
     @Query("SELECT * FROM users WHERE networkId = :nid AND nick = :nick")
     fun observeByNick(nid: Long, nick: String): Flow<UserEntity?>
+}
+
+@Dao
+interface RoomAliasDao {
+    @Query(
+        """SELECT * FROM room_aliases
+           WHERE networkId = :networkId AND namespace = :namespace AND value = :value""",
+    )
+    suspend fun byValue(
+        networkId: Long,
+        namespace: RoomAliasNamespace,
+        value: String,
+    ): RoomAliasEntity?
+
+    @Query("SELECT * FROM room_aliases WHERE roomId = :roomId")
+    suspend fun forRoom(roomId: RoomId): List<RoomAliasEntity>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnore(alias: RoomAliasEntity): Long
+
+    @Query("UPDATE room_aliases SET roomId = :winnerId WHERE roomId = :loserId")
+    suspend fun repoint(loserId: RoomId, winnerId: RoomId)
+
+    @Query("UPDATE messages SET bufferId = :winnerId WHERE bufferId = :loserId")
+    suspend fun moveEvents(loserId: RoomId, winnerId: RoomId)
+
+    @Query(
+        """INSERT OR IGNORE INTO members(bufferId, nick, prefixes)
+           SELECT :winnerId, nick, prefixes FROM members WHERE bufferId = :loserId""",
+    )
+    suspend fun copyMembers(loserId: RoomId, winnerId: RoomId)
+
+    @Query("DELETE FROM members WHERE bufferId = :loserId")
+    suspend fun deleteMembers(loserId: RoomId)
+
+    @Query(
+        """INSERT OR REPLACE INTO reactions(id, bufferId, targetMsgid, sender, emoji, serverTime, targetEventId)
+           SELECT id, :winnerId, targetMsgid, sender, emoji, serverTime, targetEventId
+           FROM reactions WHERE bufferId = :loserId""",
+    )
+    suspend fun copyReactions(loserId: RoomId, winnerId: RoomId)
+
+    @Query("DELETE FROM reactions WHERE bufferId = :loserId")
+    suspend fun deleteReactions(loserId: RoomId)
+
+    @Query("UPDATE buffers SET redirectToRoomId = :winnerId WHERE redirectToRoomId = :loserId")
+    suspend fun repointRedirects(loserId: RoomId, winnerId: RoomId)
+
+    @Query("UPDATE buffers SET redirectToRoomId = :winnerId WHERE id = :loserId")
+    suspend fun markRedirect(loserId: RoomId, winnerId: RoomId)
+
+    @Query(
+        """UPDATE room_aliases SET roomId = :roomId, verified = 1
+           WHERE networkId = :networkId AND namespace = 'VERIFIED_NICK' AND value = :value""",
+    )
+    suspend fun moveVerifiedNick(
+        networkId: Long,
+        value: String,
+        roomId: RoomId,
+    ): Int
+}
+
+@Dao
+interface CanonicalTimelineDao {
+    @Query(
+        """SELECT m.* FROM event_aliases a
+           JOIN messages m ON m.id = a.timelineEventId
+           WHERE a.networkId = :networkId AND a.namespace = :namespace AND a.value = :value""",
+    )
+    suspend fun eventByAlias(
+        networkId: Long,
+        namespace: EventAliasNamespace,
+        value: ByteArray,
+    ): TimelineEventEntity?
+
+    @Query(
+        """SELECT a.* FROM event_aliases a
+           WHERE a.networkId = :networkId AND a.namespace = :namespace AND a.value = :value""",
+    )
+    suspend fun aliasByValue(
+        networkId: Long,
+        namespace: EventAliasNamespace,
+        value: ByteArray,
+    ): EventAliasEntity?
+
+    @Query("SELECT * FROM event_aliases WHERE timelineEventId = :eventId")
+    suspend fun aliasesFor(eventId: TimelineEventId): List<EventAliasEntity>
+
+    @Insert
+    suspend fun insertEvent(event: TimelineEventEntity): TimelineEventId
+
+    @Update
+    suspend fun updateEvent(event: TimelineEventEntity)
+
+    @Query("SELECT * FROM messages WHERE id = :eventId")
+    suspend fun eventById(eventId: TimelineEventId): TimelineEventEntity?
+
+    @Query("SELECT * FROM messages WHERE bufferId = :roomId ORDER BY id")
+    suspend fun eventsForRoom(roomId: RoomId): List<TimelineEventEntity>
+
+    @Query(
+        """SELECT batchExactOrdinal FROM event_observations
+           WHERE timelineEventId = :eventId AND batchExactOrdinal IS NOT NULL
+           ORDER BY id LIMIT 1""",
+    )
+    suspend fun batchExactOrdinal(eventId: TimelineEventId): Int?
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAliasIgnore(alias: EventAliasEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertEventRedirect(redirect: EventRedirectEntity)
+
+    @Query("UPDATE event_redirects SET canonicalEventId = :winnerId WHERE canonicalEventId = :loserId")
+    suspend fun repointEventRedirects(loserId: TimelineEventId, winnerId: TimelineEventId)
+
+    @Query(
+        "SELECT COALESCE((SELECT canonicalEventId FROM event_redirects WHERE losingEventId = :eventId), :eventId)",
+    )
+    suspend fun canonicalEventId(eventId: TimelineEventId): TimelineEventId
+
+    @Query("SELECT losingEventId FROM event_redirects WHERE canonicalEventId = :eventId")
+    suspend fun losingEventIds(eventId: TimelineEventId): List<TimelineEventId>
+
+    @Query(
+        """DELETE FROM event_aliases
+           WHERE networkId = :networkId AND namespace = :namespace AND value = :value
+             AND timelineEventId = :eventId""",
+    )
+    suspend fun deleteOwnedAlias(
+        networkId: Long,
+        namespace: EventAliasNamespace,
+        value: ByteArray,
+        eventId: TimelineEventId,
+    )
+
+    @Insert
+    suspend fun insertObservation(observation: EventObservationEntity): Long
+
+    @Query("SELECT COALESCE(MAX(receiveOrder), 0) + 1 FROM event_observations WHERE networkId = :networkId")
+    suspend fun nextReceiveOrder(networkId: Long): Long
+
+    @Query(
+        """SELECT m.* FROM messages m
+           WHERE m.bufferId = :roomId
+             AND m.kind = :kind
+             AND m.normalizedActor = :sender
+             AND m.text = :text
+             AND m.msgid IS NULL
+             AND m.serverTimeAuthoritative = 0
+             AND EXISTS (
+                 SELECT 1 FROM event_observations o
+                 WHERE o.timelineEventId = m.id
+                   AND o.origin IN ('LIVE', 'PUSH')
+                   AND o.timeProvenance = 'LOCAL_CLOCK'
+             )
+           ORDER BY m.id
+           LIMIT 2""",
+    )
+    suspend fun provisionalCandidates(
+        roomId: RoomId,
+        kind: MessageKind,
+        sender: String,
+        text: String,
+    ): List<TimelineEventEntity>
+
+    @Query(
+        """SELECT m.* FROM messages m
+           WHERE m.bufferId = :roomId
+             AND m.kind = :kind
+             AND m.normalizedActor = :sender
+             AND m.text = :text
+             AND m.msgid IS NULL
+             AND m.isSelf = 1
+             AND (
+                 (m.serverTimeAuthoritative = 1 AND m.serverTime BETWEEN :lo AND :hi)
+                 OR EXISTS (
+                     SELECT 1 FROM event_observations o
+                     WHERE o.timelineEventId = m.id
+                       AND o.timeProvenance = 'LOCAL_CLOCK'
+                 )
+             )
+           ORDER BY m.id
+           LIMIT 2""",
+    )
+    suspend fun selfIdentityFreeCandidates(
+        roomId: RoomId,
+        kind: MessageKind,
+        sender: String,
+        text: String,
+        lo: Long,
+        hi: Long,
+    ): List<TimelineEventEntity>
+
+    @Query(
+        """SELECT m.* FROM messages m
+           WHERE m.bufferId = :roomId AND m.kind = 'JOIN' AND m.isSelf = 1
+             AND m.eventKey IS NULL
+             AND m.normalizedActor = :sender AND m.text = :text
+             AND m.serverTime > COALESCE(
+                 (SELECT MAX(d.serverTime) FROM messages d
+                  WHERE d.bufferId = :roomId AND d.isSelf = 1 AND d.kind IN ('PART', 'KICK')),
+                 -9223372036854775808
+             )
+           ORDER BY m.id
+           LIMIT 2""",
+    )
+    suspend fun selfJoinCycleCandidates(
+        roomId: RoomId,
+        sender: String,
+        text: String,
+    ): List<TimelineEventEntity>
+
+    @Query(
+        """SELECT * FROM messages
+           WHERE bufferId = :roomId AND kind = :kind AND isSelf = 1
+             AND msgid IS NULL AND pendingLabel IS NOT NULL
+           ORDER BY id
+           LIMIT 2""",
+    )
+    suspend fun orderedSelfCandidates(
+        roomId: RoomId,
+        kind: MessageKind,
+    ): List<TimelineEventEntity>
+
+    @Query(
+        """SELECT * FROM messages
+           WHERE bufferId = :roomId AND kind = :kind
+             AND normalizedActor = :sender AND text = :text
+             AND msgid IS NOT NULL AND serverTime BETWEEN :lowerTime AND :upperTime
+           ORDER BY id
+           LIMIT 2""",
+    )
+    suspend fun durableDeliveryCandidates(
+        roomId: RoomId,
+        kind: MessageKind,
+        sender: String,
+        text: String,
+        lowerTime: Long,
+        upperTime: Long,
+    ): List<TimelineEventEntity>
+
+    @Query("UPDATE event_aliases SET timelineEventId = :winnerId WHERE timelineEventId = :loserId")
+    suspend fun repointAliases(loserId: TimelineEventId, winnerId: TimelineEventId)
+
+    @Query("UPDATE event_observations SET timelineEventId = :winnerId WHERE timelineEventId = :loserId")
+    suspend fun repointObservations(loserId: TimelineEventId, winnerId: TimelineEventId)
+
+    @Query("UPDATE messages SET replyToEventId = :winnerId WHERE replyToEventId = :loserId")
+    suspend fun repointReplies(loserId: TimelineEventId, winnerId: TimelineEventId)
+
+    @Query("UPDATE reactions SET targetEventId = :winnerId WHERE targetEventId = :loserId")
+    suspend fun repointReactions(loserId: TimelineEventId, winnerId: TimelineEventId)
+
+    @Query("DELETE FROM messages WHERE id = :eventId")
+    suspend fun deleteEvent(eventId: TimelineEventId)
+
+    @Query(
+        """UPDATE messages SET replyToEventId = :parentId
+           WHERE replyToMsgid = :msgid AND replyToEventId IS NULL
+             AND bufferId IN (SELECT id FROM buffers WHERE networkId = :networkId)""",
+    )
+    suspend fun resolveReplies(networkId: Long, msgid: String, parentId: TimelineEventId)
+
+    @Query(
+        """UPDATE reactions SET targetEventId = :parentId
+           WHERE targetMsgid = :msgid AND targetEventId IS NULL
+             AND bufferId IN (SELECT id FROM buffers WHERE networkId = :networkId)""",
+    )
+    suspend fun resolveReactions(networkId: Long, msgid: String, parentId: TimelineEventId)
+
+    @Query("UPDATE messages SET soundHandled = 1 WHERE id = :eventId AND soundHandled = 0")
+    suspend fun claimSound(eventId: TimelineEventId): Int
+
+    @Query(
+        """UPDATE messages SET notificationClaimed = 1, notificationClaimOwner = :owner
+           WHERE id = COALESCE(
+               (SELECT canonicalEventId FROM event_redirects WHERE losingEventId = :eventId),
+               :eventId
+           ) AND notificationHandled = 0 AND notificationClaimed = 0""",
+    )
+    suspend fun claimNotification(eventId: TimelineEventId, owner: String): Int
+
+    @Query(
+        """UPDATE messages SET notificationHandled = 1, notificationClaimed = 0,
+               notificationClaimOwner = NULL
+           WHERE id = COALESCE(
+               (SELECT canonicalEventId FROM event_redirects WHERE losingEventId = :eventId),
+               :eventId
+           )""",
+    )
+    suspend fun completeNotification(eventId: TimelineEventId)
+
+    @Query(
+        """UPDATE messages SET notificationClaimed = 0, notificationClaimOwner = NULL
+           WHERE id = COALESCE(
+               (SELECT canonicalEventId FROM event_redirects WHERE losingEventId = :eventId),
+               :eventId
+           ) AND notificationHandled = 0""",
+    )
+    suspend fun releaseNotification(eventId: TimelineEventId)
+
+    @Query(
+        """UPDATE messages SET notificationClaimed = 0, notificationClaimOwner = NULL
+           WHERE notificationHandled = 0 AND notificationClaimed = 1
+             AND (notificationClaimOwner IS NULL OR notificationClaimOwner != :currentOwner)""",
+    )
+    suspend fun releaseInterruptedNotificationClaims(currentOwner: String)
+
+    @Query(
+        """SELECT m.* FROM messages m
+           JOIN buffers b ON b.id = m.bufferId
+           WHERE m.notificationHandled = 0 AND m.notificationClaimed = 0
+             AND m.isSelf = 0 AND m.failed = 0
+             AND EXISTS (
+                 SELECT 1 FROM event_observations o
+                 WHERE o.timelineEventId = m.id AND o.origin IN ('LIVE', 'PUSH')
+             )
+             AND (
+                 (m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+                    AND b.type != 'SERVER' AND (b.type = 'QUERY' OR m.hasMention = 1))
+                 OR (m.kind = 'INVITE' AND m.inviteState IN ('PENDING', 'FAILED'))
+             )
+           ORDER BY m.serverTime, m.id
+           LIMIT :limit""",
+    )
+    suspend fun pendingNotifications(limit: Int): List<TimelineEventEntity>
+}
+
+@Dao
+interface HistoryCursorDao {
+    @Query("SELECT * FROM history_cursors WHERE roomId = :roomId")
+    suspend fun byRoom(roomId: RoomId): HistoryCursorEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(cursor: HistoryCursorEntity)
+
+    @Query(
+        """INSERT OR REPLACE INTO history_cursors(
+               roomId, newestMsgid, newestServerTime, oldestMsgid, oldestServerTime, historyComplete
+           ) VALUES (
+               :roomId,
+               (SELECT newestMsgid FROM history_cursors WHERE roomId = :roomId),
+               (SELECT newestServerTime FROM history_cursors WHERE roomId = :roomId),
+               (SELECT oldestMsgid FROM history_cursors WHERE roomId = :roomId),
+               (SELECT oldestServerTime FROM history_cursors WHERE roomId = :roomId),
+               1
+           )""",
+    )
+    suspend fun markComplete(roomId: RoomId)
+
+    @Query("SELECT lastSuccessfulSync FROM network_history_cursors WHERE networkId = :networkId")
+    suspend fun networkLastSuccessfulSync(networkId: Long): Long?
+
+    @Query(
+        "INSERT OR REPLACE INTO network_history_cursors(networkId, lastSuccessfulSync) " +
+            "VALUES (:networkId, :timestamp)",
+    )
+    suspend fun setNetworkLastSuccessfulSync(networkId: Long, timestamp: Long)
+
+    @Query("DELETE FROM network_history_cursors WHERE networkId = :networkId")
+    suspend fun clearNetwork(networkId: Long)
+
+    @Query("DELETE FROM history_cursors WHERE roomId = :roomId")
+    suspend fun deleteRoom(roomId: RoomId)
+}
+
+@Dao
+interface ConnectionGenerationDao {
+    @Query("SELECT generation FROM connection_generations WHERE networkId = :networkId")
+    suspend fun current(networkId: Long): Long?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: ConnectionGenerationEntity)
+
+    @Transaction
+    suspend fun next(networkId: Long): Long {
+        val next = (current(networkId) ?: 0L) + 1L
+        upsert(ConnectionGenerationEntity(networkId, next))
+        return next
+    }
+}
+
+@Dao
+interface AppStateDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insert(state: AppStateEntity): Long
+
+    @Query("SELECT COUNT(*) FROM app_state WHERE `key` = :key")
+    suspend fun contains(key: String): Int
+
+    @Query("SELECT `key` FROM app_state WHERE `key` LIKE :pattern ORDER BY `key`")
+    suspend fun keysLike(pattern: String): List<String>
+
+    @Query("DELETE FROM app_state WHERE `key` = :key")
+    suspend fun delete(key: String)
 }
