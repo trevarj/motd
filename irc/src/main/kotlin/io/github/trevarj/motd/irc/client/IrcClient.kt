@@ -22,6 +22,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,8 +40,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import java.util.concurrent.atomic.AtomicReference
+import java.util.PriorityQueue
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 
 enum class SaslMechanism { NONE, PLAIN, EXTERNAL }
 
@@ -85,6 +87,32 @@ data class BouncerNetwork(val netId: String, val attrs: Map<String, String>) // 
 
 /** One RPL_LIST (322) row. */
 data class ChannelListing(val name: String, val userCount: Int, val topic: String)
+
+/** Memory-bounded accumulator that retains the busiest channels and preserves arrival order ties. */
+private class BoundedChannelListings(private val capacity: Int) {
+    private data class Entry(val listing: ChannelListing, val order: Long)
+
+    private val entries = PriorityQueue<Entry>(
+        compareBy<Entry> { it.listing.userCount }.thenByDescending { it.order },
+    )
+    private var nextOrder = 0L
+
+    fun add(element: ChannelListing) {
+        val entry = Entry(element, nextOrder++)
+        if (capacity <= 0) return
+        if (entries.size < capacity) {
+            entries.add(entry)
+            return
+        }
+        if (element.userCount <= entries.peek().listing.userCount) return
+        entries.remove()
+        entries.add(entry)
+    }
+
+    fun toList(): List<ChannelListing> = entries
+        .sortedWith(compareByDescending<Entry> { it.listing.userCount }.thenBy { it.order })
+        .map(Entry::listing)
+}
 
 data class WhoxResult(val rows: List<IrcEvent.WhoxRow>, val completed: Boolean)
 
@@ -681,7 +709,8 @@ class IrcClient(
     /**
      * LIST. [mask] filters server-side when given; [minUsers] appends the ELIST ">n" filter only
      * when ISUPPORT ELIST contains 'U'. Uses labeled-response when available; otherwise collects
-     * raw 322s until 323 or a 15s timeout. Result truncated to [cap] rows.
+     * raw 322s until 323 or a 15s timeout. Returns only the [cap] most populated rows; the raw
+     * collector stays memory-bounded even for a large unfiltered LIST.
      */
     suspend fun listChannels(mask: String? = null, minUsers: Int? = null, cap: Int = 2000): List<ChannelListing> {
         val params = buildList {
@@ -694,26 +723,28 @@ class IrcClient(
 
         if (hasCap("labeled-response")) {
             val response = sendLabeled(msg)
-            return response.mapNotNull { parseListLine(it) }.take(cap)
+            val out = BoundedChannelListings(cap)
+            response.mapNotNull(::parseListLine).forEach(out::add)
+            return out.toList()
         }
 
         // Raw fallback: subscribe BEFORE sending so no 322/323 lines are missed, then collect until
         // the 323 terminator or a 15s timeout. Implemented inside IrcClient so the raw-numeric
         // fallback does not leak protocol into :app.
-        val out = ArrayList<ChannelListing>()
+        val out = BoundedChannelListings(cap)
         val collector = scope.launch {
             events.collect { ev ->
                 if (ev !is IrcEvent.Raw) return@collect
                 when (ev.message.command) {
-                    "322" -> parseListMessage(ev.message)?.let { if (out.size < cap) out.add(it) }
+                    "322" -> parseListMessage(ev.message)?.let(out::add)
                     "323" -> throw kotlinx.coroutines.CancellationException("LIST end")
                 }
             }
         }
         transport?.send(msg.serialize())
         kotlinx.coroutines.withTimeoutOrNull(LIST_TIMEOUT_MS) { collector.join() }
-        collector.cancel()
-        return out.take(cap)
+        collector.cancelAndJoin()
+        return out.toList()
     }
 
     /** Parse an [IrcMessage] that is (or wraps) an RPL_LIST 322 into a [ChannelListing]. */

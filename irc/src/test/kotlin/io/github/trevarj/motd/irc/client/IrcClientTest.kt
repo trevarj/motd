@@ -580,6 +580,26 @@ class IrcClientTest {
     }
 
     @Test
+    fun `labeled LIST cap retains the most populated rows`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+
+        val result = clientScope().async { client.listChannels(cap = 2) }
+        runCurrent()
+
+        val label = responseLabel(ft.sent.last { it.contains("LIST") })
+        ft.feed("@label=$label BATCH +list draft/labeled-response")
+        ft.feed("@batch=list :srv 322 motd #small 3 :small")
+        ft.feed("@batch=list :srv 322 motd #largest 300 :largest")
+        ft.feed("@batch=list :srv 322 motd #large 200 :large")
+        ft.feed("@batch=list :srv 323 motd :End of /LIST")
+        ft.feed("BATCH -list")
+        runCurrent()
+
+        assertEquals(listOf("#largest", "#large"), result.await().map { it.name })
+    }
+
+    @Test
     fun `raw fallback collects 322s until 323 without labeled-response`() = runTest {
         val ft = FakeTransport()
         val client = registeredNoCaps(ft)
@@ -635,6 +655,23 @@ class IrcClientTest {
         runCurrent()
 
         assertEquals(listOf("#a", "#b"), result.await().map { it.name })
+    }
+
+    @Test
+    fun `listChannels cap retains the most populated raw rows`() = runTest {
+        val ft = FakeTransport()
+        val client = registeredNoCaps(ft)
+
+        val result = clientScope().async { client.listChannels(cap = 2) }
+        runCurrent()
+
+        ft.feed(":srv 322 motd #small 3 :small")
+        ft.feed(":srv 322 motd #largest 300 :largest")
+        ft.feed(":srv 322 motd #large 200 :large")
+        ft.feed(":srv 323 motd :End of /LIST")
+        runCurrent()
+
+        assertEquals(listOf("#largest", "#large"), result.await().map { it.name })
     }
 
     @Test

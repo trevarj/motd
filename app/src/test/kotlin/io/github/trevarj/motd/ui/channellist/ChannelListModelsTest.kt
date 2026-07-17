@@ -3,9 +3,7 @@ package io.github.trevarj.motd.ui.channellist
 import io.github.trevarj.motd.irc.client.ChannelListing
 import io.github.trevarj.motd.irc.event.IrcClientState
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChannelListModelsTest {
@@ -56,21 +54,6 @@ class ChannelListModelsTest {
         assertEquals(listOf("#first", "#second", "#third"), sortListings(input).map { it.name })
     }
 
-    // -- fetch gating (Confirmed decision #6): ELIST 'U' -> auto-fetch; else require a mask --
-
-    @Test
-    fun `canAutoFetch true when ELIST contains U`() {
-        assertTrue(canAutoFetch("CTU"))
-        assertTrue(canAutoFetch("u")) // case-insensitive
-    }
-
-    @Test
-    fun `canAutoFetch false without U or when absent`() {
-        assertFalse(canAutoFetch("CMNT"))
-        assertFalse(canAutoFetch(""))
-        assertFalse(canAutoFetch(null))
-    }
-
     // -- LIST arg resolution --
 
     @Test
@@ -90,5 +73,16 @@ class ChannelListModelsTest {
     @Test
     fun `listArgsFor trims the query`() {
         assertEquals("*linux*", listArgsFor("  linux  ").mask)
+    }
+
+    @Test
+    fun `blank query keeps a compact popular list`() {
+        assertEquals(POPULAR_CHANNEL_LIMIT, channelListLimit(""))
+        assertEquals(POPULAR_CHANNEL_LIMIT, channelListLimit("   "))
+    }
+
+    @Test
+    fun `search query allows the larger result cap`() {
+        assertEquals(CHANNEL_SEARCH_LIMIT, channelListLimit("kotlin"))
     }
 }

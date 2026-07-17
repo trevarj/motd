@@ -22,10 +22,8 @@ import javax.inject.Inject
 /**
  * Channel-browser UI state (plans/16 §5.7).
  *
- * [loaded] distinguishes "fetched, no results" from "not fetched yet". [requiresQuery] is true
- * when the server lacks ELIST 'U' and the user must enter a search mask before the first fetch
- * (Confirmed decision #6). [isRoot] disables browsing for an unbound soju BOUNCER_ROOT (LIST is
- * meaningless on the root connection).
+ * [loaded] distinguishes "fetched, no results" from "not fetched yet". [isRoot] disables
+ * browsing for an unbound soju BOUNCER_ROOT (LIST is meaningless on the root connection).
  */
 data class ChannelListUiState(
     val networkId: Long = 0,
@@ -36,7 +34,6 @@ data class ChannelListUiState(
     val listings: List<ChannelListing> = emptyList(),
     val loading: Boolean = false,
     val loaded: Boolean = false,
-    val requiresQuery: Boolean = false,
     val isRoot: Boolean = false,
     val error: String? = null,
     val joiningChannel: String? = null,
@@ -61,7 +58,7 @@ class ChannelListViewModel @Inject constructor(
 
     private var started = false
 
-    /** Idempotent entry point: mirrors connection state; auto-fetches once Ready + ELIST 'U'. */
+    /** Idempotent entry point: mirrors connection state and auto-fetches once Ready. */
     fun start() {
         if (started) return
         started = true
@@ -74,20 +71,14 @@ class ChannelListViewModel @Inject constructor(
             connectionManager.connectionStates.collect { states ->
                 val clientState = connectionManager.clientFor(networkId)?.state?.value
                 val conn = channelBrowserConnectionState(states[networkId], clientState)
-                val requiresQuery = (conn as? IrcClientState.Ready)
-                    ?.let { !canAutoFetch(it.isupport["ELIST"]) }
-                    ?: _state.value.requiresQuery
                 _state.value = _state.value.copy(
                     connState = conn,
                     initialized = true,
-                    requiresQuery = requiresQuery,
                 )
-                // Auto-fetch the busiest channels on entry when ELIST 'U' is supported; otherwise
-                // gate on a search mask (Confirmed #6). Roots never LIST.
+                // Auto-fetch a bounded set of the busiest channels. ELIST 'U' applies the
+                // population floor server-side; other servers stream into the bounded collector.
                 if (conn is IrcClientState.Ready && !_state.value.loaded && !_state.value.isRoot) {
-                    if (canAutoFetch(conn.isupport["ELIST"])) {
-                        fetch()
-                    }
+                    fetch()
                 }
             }
         }
@@ -100,7 +91,7 @@ class ChannelListViewModel @Inject constructor(
     /** Fetch (or re-fetch) via LIST/ELIST, then sort by user count descending. */
     fun fetch() {
         val s = _state.value
-        if (s.loading || s.isRoot || !s.isReady || (s.requiresQuery && s.query.isBlank())) return
+        if (s.loading || s.isRoot || !s.isReady) return
         val args = listArgsFor(s.query)
         _state.value = s.copy(loading = true, error = null)
         viewModelScope.launch {
@@ -115,7 +106,11 @@ class ChannelListViewModel @Inject constructor(
             val result = if (client == null) {
                 Result.failure(IllegalStateException("Channel listing is not available yet. Try again."))
             } else runCatching {
-                client.listChannels(mask = args.mask, minUsers = args.minUsers, cap = LIST_CAP)
+                client.listChannels(
+                    mask = args.mask,
+                    minUsers = args.minUsers,
+                    cap = channelListLimit(s.query),
+                )
             }
             _state.value = _state.value.copy(
                 loading = false,
@@ -141,7 +136,6 @@ class ChannelListViewModel @Inject constructor(
     }
 
     private companion object {
-        const val LIST_CAP = 2000
         const val CLIENT_WAIT_TIMEOUT_MS = 2_000L
         const val CLIENT_WAIT_POLL_MS = 50L
     }

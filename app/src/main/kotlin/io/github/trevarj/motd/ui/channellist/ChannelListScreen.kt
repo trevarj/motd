@@ -53,9 +53,9 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 /**
  * Channel browser (plans/16 §5.7). LIST/ELIST-backed, scoped to [networkId].
  *
- * Per Confirmed decision #6: when the server advertises ELIST 'U' the busiest channels are
- * auto-fetched on entry; otherwise the user must type a search mask first. Browsing is disabled
- * for an unbound soju BOUNCER_ROOT (its connection can't LIST). Join delegates to
+ * The busiest channels are auto-fetched on entry. ELIST 'U' is used when available; otherwise
+ * the client retains a bounded top set from the LIST stream. Browsing is disabled for an unbound
+ * soju BOUNCER_ROOT (its connection can't LIST). Join delegates to
  * ConnectionManager.joinChannel and pops back; the buffer appears on the JOIN echo.
  *
  * NOTE: the join flow uses [onBack] (per plan §5.7) — no separate nav-to-channel callback is
@@ -117,7 +117,6 @@ private fun ChannelListContent(
                     if (state.availability == ChannelBrowserAvailability.READY && !state.loading) {
                         IconButton(
                             onClick = onSearch,
-                            enabled = !state.requiresQuery || state.query.isNotBlank(),
                         ) {
                             Icon(
                                 Icons.Outlined.Refresh,
@@ -149,7 +148,7 @@ private fun ChannelListContent(
                         trailingIcon = {
                             IconButton(
                                 onClick = onSearch,
-                                enabled = !state.loading && (!state.requiresQuery || text.text.isNotBlank()),
+                                enabled = !state.loading,
                             ) {
                                 Icon(
                                     Icons.Outlined.Search,
@@ -191,17 +190,12 @@ private fun ResultsBody(
 
         state.loading && state.listings.isEmpty() -> ChannelListLoading()
 
-        // No fetch yet: either gated on a search mask (no ELIST 'U') or waiting on the auto-fetch.
+        // No fetch yet: waiting for the entry auto-fetch to begin.
         !state.loaded && !state.loading -> {
-            val msg = if (state.requiresQuery) {
-                stringResource(R.string.channel_list_gated)
-            } else {
-                stringResource(R.string.channel_list_search_ready)
-            }
             EmptyState(
                 icon = Icons.Outlined.Search,
                 title = stringResource(R.string.channel_list_search_title),
-                message = msg,
+                message = stringResource(R.string.channel_list_search_ready),
             )
         }
 
@@ -214,11 +208,15 @@ private fun ResultsBody(
 
         else -> Column(Modifier.fillMaxSize()) {
             Text(
-                pluralStringResource(
-                    R.plurals.channel_list_results,
-                    state.listings.size,
-                    state.listings.size,
-                ),
+                if (state.query.isBlank()) {
+                    stringResource(R.string.channel_list_popular)
+                } else {
+                    pluralStringResource(
+                        R.plurals.channel_list_results,
+                        state.listings.size,
+                        state.listings.size,
+                    )
+                },
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),

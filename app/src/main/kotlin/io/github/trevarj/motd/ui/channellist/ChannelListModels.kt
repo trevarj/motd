@@ -3,8 +3,10 @@ package io.github.trevarj.motd.ui.channellist
 import io.github.trevarj.motd.irc.client.ChannelListing
 import io.github.trevarj.motd.irc.event.IrcClientState
 
-/** Default user-count floor for the auto-fetch on entry (plans/16 §5.7, Confirmed #6). */
+/** Server-side user-count floor when the network advertises ELIST 'U'. */
 const val DEFAULT_MIN_USERS = 50
+const val POPULAR_CHANNEL_LIMIT = 100
+const val CHANNEL_SEARCH_LIMIT = 2000
 
 /**
  * Sort listings by user count descending, stable for ties (plans/16 §5.7).
@@ -47,18 +49,6 @@ fun channelBrowserAvailability(
 }
 
 /**
- * Fetch-gating for channel browsing (Confirmed decision #6).
- *
- * When the server advertises ELIST 'U', the browser auto-fetches the busiest channels
- * (≥[DEFAULT_MIN_USERS] users) on entry with no user input. Otherwise a full LIST would flood
- * (Libera is ~25k channels), so the user must supply a search mask first.
- *
- * @return true when the browser may auto-fetch on entry (no mask required).
- */
-fun canAutoFetch(elistToken: String?): Boolean =
-    elistToken?.contains('U', ignoreCase = true) == true
-
-/**
  * Resolve the LIST arguments for a fetch (plans/16 §5.7).
  *
  * A non-blank [query] fetches with a `*query*` substring mask and no min-users floor. A blank
@@ -73,3 +63,7 @@ fun listArgsFor(query: String): ListArgs =
     } else {
         ListArgs(mask = "*${query.trim()}*", minUsers = null)
     }
+
+/** Popular browsing is deliberately compact; explicit searches may return a larger result set. */
+fun channelListLimit(query: String): Int =
+    if (query.isBlank()) POPULAR_CHANNEL_LIMIT else CHANNEL_SEARCH_LIMIT

@@ -632,7 +632,6 @@
     <!-- Channel browser (WP-V4, §5.7) -->
     <string name="channel_list_title">Browse channels</string>
     <string name="channel_list_search_hint">Search channels</string>
-    <string name="channel_list_gated">Search for a channel to browse this network.</string>
     <string name="channel_list_root_cant_browse">This soju account can\'t browse channels. Open one of its networks instead.</string>
     <string name="channel_list_empty">No channels found</string>
     <string name="channel_list_empty_message">Try a different channel name or search term.</string>
@@ -641,6 +640,7 @@
     <string name="channel_list_search_action">Search channels</string>
     <string name="channel_list_refresh">Refresh channel list</string>
     <string name="channel_list_loading">Loading channels…</string>
+    <string name="channel_list_popular">Popular channels</string>
     <plurals name="channel_list_results">
         <item quantity="one">%1$d channel</item>
         <item quantity="other">%1$d channels</item>
