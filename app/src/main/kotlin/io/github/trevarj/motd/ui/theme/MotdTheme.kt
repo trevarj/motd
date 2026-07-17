@@ -41,9 +41,12 @@ private val AmoledColors = DarkColors.copy(
 )
 
 private val BaseTypography = Typography()
-val LocalConversationFontScale: ProvidableCompositionLocal<Float> = staticCompositionLocalOf { 1f }
+private const val DEFAULT_FONT_BASE_SCALE = 1.1f
+val LocalConversationFontScale: ProvidableCompositionLocal<Float> =
+    staticCompositionLocalOf { DEFAULT_FONT_BASE_SCALE }
 
-internal fun typographyScaleFactor(percent: Int): Float = normalizeFontScalePercent(percent) / 100f
+internal fun typographyScaleFactor(percent: Int): Float =
+    normalizeFontScalePercent(percent) / 100f * DEFAULT_FONT_BASE_SCALE
 
 private fun TextUnit.scaledBy(factor: Float): TextUnit =
     if (this != TextUnit.Unspecified) this * factor else this
