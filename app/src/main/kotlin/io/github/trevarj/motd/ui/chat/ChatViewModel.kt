@@ -71,6 +71,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import javax.inject.Inject
@@ -445,9 +446,10 @@ class ChatViewModel @Inject constructor(
     /**
      * A bouncer without labeled-response can echo our send before its durable msgid is available.
      * The normal chat-open reconciliation may also already be in flight and therefore miss a send
-     * that happens after its LATEST request began. Join that single flight once, then request one
-     * fresh reconciliation if the row still has no msgid. The Room observer runs concurrently so
-     * either a socket echo or either history pass can resolve the reaction immediately.
+     * that happens after its LATEST request began. Join that single flight once, then allow two
+     * fresh reconciliations: a bouncer can briefly expose the live message before it becomes
+     * queryable through CHATHISTORY. The Room observer runs concurrently so any socket echo or
+     * history pass can resolve the reaction immediately.
      */
     private suspend fun resolveReactionMsgid(messageId: Long): String? =
         coroutineScope {
@@ -463,6 +465,9 @@ class ChatViewModel @Inject constructor(
                                 connectionManager.clientFor(currentBuffer.networkId) === client
                             },
                         )
+                        // Give the concurrent Room observer a chance to finish the race before
+                        // starting another network request after a successful promotion.
+                        yield()
                     }
                 }
             }
@@ -1049,10 +1054,11 @@ class ChatViewModel @Inject constructor(
 
         // Max wait for a pending own message's msgid to land before a queued reaction gives up.
         // History is serialized per network and each request has a 35s timeout, so recovery can
-        // legitimately wait behind one request before issuing its own. Cover both request windows
-        // plus a small scheduling margin; the observer still completes immediately on a fast echo.
-        const val REACT_QUEUE_TIMEOUT_MS = 72_000L
-        const val REACTION_HISTORY_RECONCILIATIONS = 2
+        // legitimately join one request before issuing two fresh attempts. Cover all three request
+        // windows plus a small scheduling margin; the observer still completes immediately on a
+        // fast echo.
+        const val REACT_QUEUE_TIMEOUT_MS = 108_000L
+        const val REACTION_HISTORY_RECONCILIATIONS = 3
     }
 }
 

@@ -416,9 +416,9 @@ class ChatHeadlessE2eTest : HeadlessE2eDriver() {
         longClickMessageContaining(parent)
         waitForTag("message_action_sheet")
         clickText("👍")
-        // Recovery can wait behind one serialized 35-second CHATHISTORY request before issuing the
-        // fresh request that promotes this row's msgid. Keep the E2E allowance beyond that contract.
-        waitForTag("chat_reaction_chip_👍", timeoutMillis = 80_000)
+        // Recovery can join one serialized 35-second CHATHISTORY request before issuing up to two
+        // fresh requests that promote this row's msgid. Keep the E2E allowance beyond that contract.
+        waitForTag("chat_reaction_chip_👍", timeoutMillis = 115_000)
         clickTag("chat_reaction_chip_👍")
         waitForTagToDisappear("chat_reaction_chip_👍", timeoutMillis = 20_000)
 

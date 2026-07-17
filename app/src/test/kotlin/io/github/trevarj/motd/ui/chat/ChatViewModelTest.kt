@@ -274,10 +274,10 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `reaction retries history after stale reconciliation and uses promoted msgid`() = runTest {
+    fun `reaction retries history until a later reconciliation promotes the msgid`() = runTest {
         val messages = FakeMessageRepository()
         val history = FakeHistoryResyncController { attempt ->
-            if (attempt == 2) messages.msgid.value = "server-parent"
+            if (attempt == 3) messages.msgid.value = "server-parent"
         }
         val manager = FakeConnectionManager(
             networkId = network.id,
@@ -297,7 +297,7 @@ class ChatViewModelTest {
         vm.react(pending, "👍")
         advanceUntilIdle()
 
-        assertEquals(listOf(channel.id, channel.id), history.reconciledBuffers)
+        assertEquals(listOf(channel.id, channel.id, channel.id), history.reconciledBuffers)
         assertEquals(listOf(SentReaction(channel.id, "server-parent", "👍")), manager.reactions)
     }
 
