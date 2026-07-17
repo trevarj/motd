@@ -347,7 +347,9 @@ fun ChatContent(
     loadPreview: suspend (String) -> io.github.trevarj.motd.data.repo.LinkPreview?,
     cachedPreview: (String) -> io.github.trevarj.motd.data.repo.CachedLinkPreview? = { null },
     reactionChips: (String) -> List<io.github.trevarj.motd.ui.components.ReactionChip> = { emptyList() },
-    replyPreview: (String) -> kotlinx.coroutines.flow.Flow<io.github.trevarj.motd.ui.components.ReplyPreviewData?> = { kotlinx.coroutines.flow.flowOf(null) },
+    replyPreview: (String) -> kotlinx.coroutines.flow.StateFlow<io.github.trevarj.motd.ui.components.ReplyPreviewData?> = {
+        kotlinx.coroutines.flow.MutableStateFlow(null)
+    },
     onReplyPreviewClick: (String) -> Unit = {},
     memberNicks: List<String> = emptyList(),
     knownNicks: Set<String> = emptySet(),

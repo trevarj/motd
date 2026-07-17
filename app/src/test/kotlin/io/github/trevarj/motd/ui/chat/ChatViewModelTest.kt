@@ -57,6 +57,7 @@ import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.TypingTracker
+import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
@@ -146,6 +147,19 @@ class ChatViewModelTest {
         assertEquals(listOf(SentMessage(channel.id, "answer", "parent-1")), manager.messages)
         assertEquals(listOf(channel.id to "done"), manager.typing)
         assertTrue(vm.state.value.replyTo == null)
+    }
+
+    @Test
+    fun `selecting reply primes its timeline preview before repository collection`() = runTest {
+        val manager = FakeConnectionManager(network.id)
+        val vm = viewModel(channel, manager)
+        vm.state.first { it.buffer != null }
+        val parent = message(channel.id, "original text", msgid = "parent-1", sender = "alice")
+        assertTrue(vm.replyPreview("parent-1").value == null)
+
+        vm.setReply(parent)
+
+        assertEquals(ReplyPreviewData("alice", "original text"), vm.replyPreview("parent-1").value)
     }
 
     @Test

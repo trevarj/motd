@@ -78,9 +78,9 @@ import io.github.trevarj.motd.ui.theme.LocalSpacing
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -170,7 +170,7 @@ fun MessageList(
     liveEntryId: Long? = null,
     onLiveEntryConsumed: (Long) -> Unit = {},
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
-    replyPreview: (String) -> Flow<ReplyPreviewData?> = { flowOf(null) },
+    replyPreview: (String) -> StateFlow<ReplyPreviewData?> = { MutableStateFlow(null) },
     onReplyPreviewClick: (String) -> Unit = {},
     onDelete: (MessageEntity) -> Unit = {},
     highlightMsgid: String? = null,
@@ -590,7 +590,7 @@ private fun MessageRow(
     cachedPreview: (String) -> CachedLinkPreview?,
     onOpenLink: (String) -> Unit,
     onSenderClick: (String) -> Unit,
-    replyPreview: (String) -> Flow<ReplyPreviewData?>,
+    replyPreview: (String) -> StateFlow<ReplyPreviewData?>,
     onReplyPreviewClick: (String) -> Unit,
     // Non-null for an expanded fool row: renders a "hide" chip above the bubble that re-collapses it.
     onCollapseFool: (() -> Unit)? = null,
@@ -610,7 +610,7 @@ private fun MessageRow(
     // loaded-window scans during fast traversal; collection is lifecycle-cancelled off-screen.
     val resolvedReply: ReplyPreviewData? = if (msg.replyToMsgid != null) {
         val replyFlow = remember(msg.replyToMsgid) { replyPreview(msg.replyToMsgid) }
-        val resolved by replyFlow.collectAsStateWithLifecycle(initialValue = null)
+        val resolved by replyFlow.collectAsStateWithLifecycle()
         resolved
     } else {
         null

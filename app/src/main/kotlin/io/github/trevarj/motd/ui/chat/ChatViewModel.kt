@@ -345,11 +345,16 @@ class ChatViewModel @Inject constructor(
 
     fun replyPreview(msgid: String): StateFlow<ReplyPreviewData?> = synchronized(replyPreviewCache) {
         replyPreviewCache.getOrPut(msgid) {
-            messageRepository.observeByMsgid(bufferId, msgid)
-                .map { it?.toReplyPreviewData() }
-                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+            createReplyPreviewFlow(msgid, initialValue = null)
         }
     }
+
+    private fun createReplyPreviewFlow(
+        msgid: String,
+        initialValue: ReplyPreviewData?,
+    ): StateFlow<ReplyPreviewData?> = messageRepository.observeByMsgid(bufferId, msgid)
+        .map { it?.toReplyPreviewData() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), initialValue)
 
     // --- read marker snapshot (plans/15 #2) ---
 
@@ -404,6 +409,18 @@ class ChatViewModel @Inject constructor(
     // --- composer actions ---
 
     fun setReply(message: MessageEntity?) {
+        // The selected parent is already in memory. Seed its lookup so the optimistic outgoing row
+        // renders the real quote on its first frame instead of flashing the unresolved placeholder.
+        message?.msgid?.let { msgid ->
+            synchronized(replyPreviewCache) {
+                if (replyPreviewCache[msgid]?.value == null) {
+                    replyPreviewCache[msgid] = createReplyPreviewFlow(
+                        msgid = msgid,
+                        initialValue = message.toReplyPreviewData(),
+                    )
+                }
+            }
+        }
         replyTo.value = message
     }
 
