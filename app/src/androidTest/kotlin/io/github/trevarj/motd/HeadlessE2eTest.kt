@@ -97,7 +97,7 @@ abstract class HeadlessE2eDriver {
     protected fun openOrJoinChannel() {
         clickDescription("New conversation")
         waitForTag("new_conversation_sheet")
-        replaceTag("new_conversation_input", channel)
+        replaceTag("new_conversation_input", channel.removePrefix("#"))
         clickTag("new_conversation_submit")
         waitForText(channel, timeoutMillis = 30_000)
         clickText(channel)

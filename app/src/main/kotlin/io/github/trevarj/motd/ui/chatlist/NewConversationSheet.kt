@@ -127,6 +127,11 @@ private fun NewConversationSheetContent(
             onValueChange = { input = it },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().testTag("new_conversation_input"),
+            prefix = if (tab == 0) {
+                { Text(stringResource(R.string.new_sheet_channel_prefix)) }
+            } else {
+                null
+            },
             label = {
                 Text(
                     stringResource(
@@ -142,7 +147,11 @@ private fun NewConversationSheetContent(
                 val net = selectedNetwork ?: return@Button
                 val value = input.trim()
                 if (value.isEmpty()) return@Button
-                if (tab == 0) onJoinChannel(net.id, value) else onMessageUser(net.id, value)
+                if (tab == 0) {
+                    onJoinChannel(net.id, channelJoinTarget(value))
+                } else {
+                    onMessageUser(net.id, value)
+                }
             },
             enabled = selectedNetwork != null && input.isNotBlank(),
             modifier = Modifier.fillMaxWidth().testTag("new_conversation_submit"),
@@ -165,6 +174,8 @@ private fun NewConversationSheetContent(
         }
     }
 }
+
+internal fun channelJoinTarget(channelName: String): String = "#${channelName.trim()}"
 
 @Composable
 private fun NetworkDropdown(

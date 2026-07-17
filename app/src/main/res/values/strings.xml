@@ -32,7 +32,8 @@
     <string name="new_sheet_join_channel">Join channel</string>
     <string name="new_sheet_message_user">Message user</string>
     <string name="new_sheet_network">Network</string>
-    <string name="new_sheet_channel_hint">#channel</string>
+    <string name="new_sheet_channel_prefix">#</string>
+    <string name="new_sheet_channel_hint">Channel name</string>
     <string name="new_sheet_nick_hint">Nickname</string>
     <string name="new_sheet_join">Join</string>
     <string name="new_sheet_message">Message</string>
