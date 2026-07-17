@@ -1,13 +1,9 @@
 package io.github.trevarj.motd.service
 
-import io.github.trevarj.motd.bouncer.BouncerServClient
-import io.github.trevarj.motd.bouncer.BouncerServCommands
-import io.github.trevarj.motd.bouncer.BouncerServResult
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
-import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -42,7 +38,6 @@ interface ChannelCloseCoordinator {
 class PendingChannelCloseCoordinator private constructor(
     private val db: MotdDatabase,
     private val connections: ConnectionManager,
-    private val bouncerServ: BouncerServClient,
     private val clock: AppClock,
     private val scope: CoroutineScope,
     private val retryWait: suspend (attempt: Int) -> Unit,
@@ -51,13 +46,11 @@ class PendingChannelCloseCoordinator private constructor(
     constructor(
         db: MotdDatabase,
         connections: ConnectionManager,
-        bouncerServ: BouncerServClient,
         clock: AppClock,
         @ApplicationScope scope: CoroutineScope,
     ) : this(
         db = db,
         connections = connections,
-        bouncerServ = bouncerServ,
         clock = clock,
         scope = scope,
         retryWait = { attempt -> delay(channelCloseRetryDelayMillis(attempt)) },
@@ -118,11 +111,7 @@ class PendingChannelCloseCoordinator private constructor(
             if (!isReadyFor(network, connections.connectionStates.value)) return
 
             val outcome = try {
-                if (network.role == NetworkRole.BOUNCER_CHILD) {
-                    closeSojuChannel(buffer, network)
-                } else {
-                    closeDirectChannel(buffer, network)
-                }
+                closeChannel(buffer, network)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -140,38 +129,7 @@ class PendingChannelCloseCoordinator private constructor(
         }
     }
 
-    private suspend fun closeSojuChannel(
-        buffer: BufferEntity,
-        child: NetworkEntity,
-    ): CloseOutcome {
-        val rootId = child.parentId ?: return CloseOutcome.RETRY
-        if (connections.connectionStates.value[rootId] !is IrcClientState.Ready) {
-            return CloseOutcome.RETRY
-        }
-        val deleteResult = bouncerServ.execute(
-            rootNetworkId = rootId,
-            command = BouncerServCommands.channelDelete(
-                channel = buffer.displayName,
-                network = child.name,
-            ),
-        )
-        if (!deleteResult.isSuccessfulBouncerMutation()) return CloseOutcome.RETRY
-
-        // BouncerServ can reply while reporting a command-level error. Reconcile against the
-        // authoritative channel listing and delete local history only once the target is absent.
-        val statusResult = bouncerServ.execute(
-            rootNetworkId = rootId,
-            command = BouncerServCommands.channelStatus(child.name),
-        )
-        val remainingChannels = statusResult.bouncerChannelNames() ?: return CloseOutcome.RETRY
-        return if (remainingChannels.none { it.equals(buffer.displayName, ignoreCase = true) }) {
-            CloseOutcome.COMPLETED
-        } else {
-            CloseOutcome.RETRY
-        }
-    }
-
-    private suspend fun closeDirectChannel(
+    private suspend fun closeChannel(
         buffer: BufferEntity,
         network: NetworkEntity,
     ): CloseOutcome {
@@ -192,12 +150,7 @@ class PendingChannelCloseCoordinator private constructor(
         network: NetworkEntity,
         states: Map<Long, IrcClientState>,
     ): Boolean {
-        val relevantId = if (network.role == NetworkRole.BOUNCER_CHILD) {
-            network.parentId ?: return false
-        } else {
-            network.id
-        }
-        return states[relevantId] is IrcClientState.Ready
+        return states[network.id] is IrcClientState.Ready
     }
 
     private fun scheduleRetry(bufferId: Long) {
@@ -230,14 +183,12 @@ class PendingChannelCloseCoordinator private constructor(
         fun forTest(
             db: MotdDatabase,
             connections: ConnectionManager,
-            bouncerServ: BouncerServClient,
             clock: AppClock,
             scope: CoroutineScope,
             retryWait: suspend (attempt: Int) -> Unit,
         ): PendingChannelCloseCoordinator = PendingChannelCloseCoordinator(
             db = db,
             connections = connections,
-            bouncerServ = bouncerServ,
             clock = clock,
             scope = scope,
             retryWait = retryWait,
@@ -250,31 +201,5 @@ internal fun channelCloseRetryDelayMillis(attempt: Int): Long {
     return (CHANNEL_CLOSE_RETRY_INITIAL_MS shl shift).coerceAtMost(CHANNEL_CLOSE_RETRY_MAX_MS)
 }
 
-private fun BouncerServResult.isSuccessfulBouncerMutation(): Boolean =
-    this is BouncerServResult.Success && replies.none(::looksLikeBouncerError)
-
-private fun BouncerServResult.bouncerChannelNames(): Set<String>? {
-    val success = this as? BouncerServResult.Success ?: return null
-    if (success.replies.any(::looksLikeBouncerError)) return null
-    val replies = success.replies.map(String::trim).filter(String::isNotEmpty)
-    if (replies.isEmpty()) return null
-    if (replies.any { it.startsWith("no channels", ignoreCase = true) }) return emptySet()
-    val names = replies.mapNotNull { line ->
-        BOUNCER_CHANNEL_ROW.matchEntire(line)?.groupValues?.get(1)
-    }
-    // Unknown output is not proof that the channel disappeared. Keep the durable request and
-    // retry instead of deleting history against a response format we did not understand.
-    return names.takeIf { it.size == replies.size }?.toSet()
-}
-
-private fun looksLikeBouncerError(line: String): Boolean {
-    val normalized = line.trim().lowercase()
-    return normalized.startsWith("error") ||
-        normalized.startsWith("failed") ||
-        normalized.startsWith("unknown ") ||
-        normalized.startsWith("usage:")
-}
-
-private val BOUNCER_CHANNEL_ROW = Regex("^(.+) \\[(.+)]$")
 private const val CHANNEL_CLOSE_RETRY_INITIAL_MS = 15_000L
 private const val CHANNEL_CLOSE_RETRY_MAX_MS = 60_000L

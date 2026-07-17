@@ -184,7 +184,7 @@ internal abstract class AppModule {
     @Binds @Singleton
     abstract fun foregroundBufferTracker(impl: ForegroundBufferTrackerImpl): ForegroundBufferTracker
 
-    /** Durable channel leave/delete retry worker; started when the chat list ViewModel is used. */
+    /** Durable channel PART retry worker; started when the chat list ViewModel is used. */
     @Binds @Singleton
     abstract fun channelCloseCoordinator(impl: PendingChannelCloseCoordinator): ChannelCloseCoordinator
 

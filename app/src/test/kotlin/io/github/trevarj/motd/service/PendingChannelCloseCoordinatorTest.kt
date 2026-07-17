@@ -1,9 +1,5 @@
 package io.github.trevarj.motd.service
 
-import io.github.trevarj.motd.bouncer.BouncerServCapabilities
-import io.github.trevarj.motd.bouncer.BouncerServClient
-import io.github.trevarj.motd.bouncer.BouncerServCommand
-import io.github.trevarj.motd.bouncer.BouncerServResult
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MotdDatabase
@@ -28,7 +24,6 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -119,7 +114,7 @@ class PendingChannelCloseCoordinatorTest {
     }
 
     @Test
-    fun sojuClose_requiresBouncerSuccess_andUsesParentRoot() = runTest {
+    fun sojuClose_waitsForBoundChild_thenUsesNormalPart() = runTest {
         val database = inMemoryDb().also { db = it }
         val rootId = database.networkDao().insert(
             directNetwork(name = "soju", role = NetworkRole.BOUNCER_ROOT),
@@ -133,80 +128,20 @@ class PendingChannelCloseCoordinatorTest {
             ),
         )
         val bufferId = database.bufferDao().insert(channel(childId, "#motd"))
-        val connections = FakeConnections()
-        connections.states.value = mapOf(rootId to ready())
-        val bouncer = FakeBouncer().apply { next = BouncerServResult.Timeout("channel delete #motd/libera", emptyList()) }
-        val coordinator = coordinator(database, connections, backgroundScope, bouncer)
+        val connections = FakeConnections().apply {
+            states.value = mapOf(rootId to ready())
+        }
+        val coordinator = coordinator(database, connections, backgroundScope)
 
         coordinator.requestClose(bufferId)
-        assertNotNull(database.bufferDao().observeById(bufferId))
-        assertEquals(rootId, bouncer.rootIds.single())
-        assertEquals("channel delete #motd/libera", bouncer.commands.single().wire)
+        assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
+        assertTrue(connections.parts.isEmpty())
 
-        bouncer.results.addLast(BouncerServResult.Success("channel delete #motd/libera", listOf("deleted")))
-        bouncer.results.addLast(BouncerServResult.Success("channel status", listOf("No channels configured")))
+        connections.states.value = mapOf(rootId to ready(), childId to ready())
         coordinator.retryPendingCloses()
-        assertNull(database.bufferDao().observeById(bufferId))
-    }
 
-    @Test
-    fun sojuClose_commandLevelError_keepsPending() = runTest {
-        val database = inMemoryDb().also { db = it }
-        val rootId = database.networkDao().insert(
-            directNetwork(name = "soju", role = NetworkRole.BOUNCER_ROOT),
-        )
-        val childId = database.networkDao().insert(
-            directNetwork(
-                name = "libera",
-                role = NetworkRole.BOUNCER_CHILD,
-                parentId = rootId,
-                bouncerNetId = "net-1",
-            ),
-        )
-        val bufferId = database.bufferDao().insert(channel(childId, "#motd"))
-        val connections = FakeConnections().apply {
-            states.value = mapOf(rootId to ready())
-        }
-        val bouncer = FakeBouncer().apply {
-            next = BouncerServResult.Success(
-                "channel delete #motd/libera",
-                listOf("error: channel is protected"),
-            )
-        }
-
-        coordinator(database, connections, backgroundScope, bouncer).requestClose(bufferId)
-
+        assertEquals(listOf(bufferId), connections.parts)
         assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
-        assertEquals(1, bouncer.commands.size)
-    }
-
-    @Test
-    fun sojuClose_unknownStatusOutput_keepsPending() = runTest {
-        val database = inMemoryDb().also { db = it }
-        val rootId = database.networkDao().insert(
-            directNetwork(name = "soju", role = NetworkRole.BOUNCER_ROOT),
-        )
-        val childId = database.networkDao().insert(
-            directNetwork(
-                name = "libera",
-                role = NetworkRole.BOUNCER_CHILD,
-                parentId = rootId,
-                bouncerNetId = "net-1",
-            ),
-        )
-        val bufferId = database.bufferDao().insert(channel(childId, "#motd"))
-        val connections = FakeConnections().apply {
-            states.value = mapOf(rootId to ready())
-        }
-        val bouncer = FakeBouncer().apply {
-            results.addLast(BouncerServResult.Success("channel delete #motd/libera", listOf("deleted")))
-            results.addLast(BouncerServResult.Success("channel status", listOf("future output format")))
-        }
-
-        coordinator(database, connections, backgroundScope, bouncer).requestClose(bufferId)
-
-        assertNotNull(database.bufferDao().observeById(bufferId)?.pendingCloseAt)
-        assertEquals(2, bouncer.commands.size)
     }
 
     @Test
@@ -244,14 +179,12 @@ class PendingChannelCloseCoordinatorTest {
         database: MotdDatabase,
         connections: FakeConnections,
         scope: CoroutineScope,
-        bouncer: FakeBouncer = FakeBouncer(),
         retryWait: suspend (attempt: Int) -> Unit = { attempt ->
             kotlinx.coroutines.delay(channelCloseRetryDelayMillis(attempt))
         },
     ) = PendingChannelCloseCoordinator.forTest(
         db = database,
         connections = connections,
-        bouncerServ = bouncer,
         clock = AppClock { 1234L },
         scope = scope,
         retryWait = retryWait,
@@ -293,19 +226,6 @@ class PendingChannelCloseCoordinatorTest {
         override val certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
         override suspend fun trustCert(prompt: CertPrompt) = Unit
         override fun dismissCertPrompt(prompt: CertPrompt) = Unit
-    }
-
-    private class FakeBouncer : BouncerServClient {
-        val rootIds = mutableListOf<Long>()
-        val commands = mutableListOf<BouncerServCommand>()
-        val results = ArrayDeque<BouncerServResult>()
-        var next: BouncerServResult = BouncerServResult.Disconnected("pending")
-        override suspend fun execute(rootNetworkId: Long, command: BouncerServCommand): BouncerServResult {
-            rootIds += rootNetworkId
-            commands += command
-            return results.removeFirstOrNull() ?: next
-        }
-        override suspend fun probe(rootNetworkId: Long) = BouncerServCapabilities()
     }
 
     private fun directNetwork(
