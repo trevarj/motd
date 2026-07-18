@@ -131,6 +131,8 @@ class MotdNotificationsFoolTest {
         val posted = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
             .activeNotifications.single().notification
         assertSilent(posted)
+        val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted)
+        assertNotNull(style?.messages?.single()?.person?.icon)
     }
 
     @Test

@@ -13,12 +13,14 @@ import androidx.core.app.RemoteInput
 import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.MainActivity
+import io.github.trevarj.motd.avatar.notificationAvatarIcon
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.effectiveReadFloorTime
 import io.github.trevarj.motd.data.db.ircTarget
+import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -280,7 +282,7 @@ class MotdNotifications @Inject constructor(
 
         val channel = if (hasMention) CHANNEL_MENTIONS else CHANNEL_MESSAGES
         val title = buffer?.displayName ?: message.target
-        val person = Person.Builder().setName(message.source.nick).build()
+        val person = notificationPerson(networkId, message.source.nick, settings.avatarStyle)
         val restored = if (synchronized(history) { bufferId !in history }) {
             runCatching {
                 db.messageDao().recentNotifiable(
@@ -308,7 +310,7 @@ class MotdNotifications @Inject constructor(
                     conversation.addMessage(
                         row.text,
                         row.serverTime,
-                        Person.Builder().setName(row.sender).build(),
+                        notificationPerson(networkId, row.sender, settings.avatarStyle),
                     )
                 }
             }
@@ -381,6 +383,7 @@ class MotdNotifications @Inject constructor(
         val notification = NotificationCompat.Builder(context, channel)
             .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
             .setStyle(style)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             // Canonical ChatSoundPlayer owns persisted, mark-before-playback audio. Keeping the
             // OS notification presentation silent prevents a crash-recovery repost from sounding
             // a second time while retaining the high-importance visual notification channel.
@@ -409,6 +412,13 @@ class MotdNotifications @Inject constructor(
             )
         }
     }
+
+    private fun notificationPerson(networkId: Long, name: String, style: AvatarStyle): Person =
+        Person.Builder()
+            .setName(name)
+            .setKey("irc:$networkId:${normalizeNick(name)}")
+            .setIcon(notificationAvatarIcon(context, name, style))
+            .build()
 
     override suspend fun onRead(bufferId: Long, upToTime: Long) {
         val activeLatest = runCatching {
