@@ -15,7 +15,9 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
-import io.github.trevarj.motd.irc.client.ChatHistoryResult
+import io.github.trevarj.motd.irc.client.ChatHistoryResponse
+import io.github.trevarj.motd.irc.client.HistoryAvailability
+import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
@@ -62,22 +64,41 @@ class ChatHistoryRemoteMediatorTest {
         isSelf = false, replyToMsgid = null,
     )
 
+    private fun messages(
+        events: List<IrcEvent>,
+        endOfHistory: Boolean = false,
+    ) = ChatHistoryResponse.Messages(events, oldest = null, newest = null, endOfHistory = endOfHistory)
+
     /** Scripts LATEST + BEFORE responses and records the subcommands issued. */
-    private class FakeHistory(
+    private inner class FakeHistory(
         val hasChatHistory: Boolean = true,
+        val offline: Boolean = false,
         val latest: List<IrcEvent> = emptyList(),
         val before: ArrayDeque<List<IrcEvent>> = ArrayDeque(),
+        val beforeEndOfHistory: Boolean = false,
     ) : ChatHistoryRemoteMediator.HistorySource {
         val calls = mutableListOf<ChatHistoryRequest.Subcommand>()
         val requests = mutableListOf<ChatHistoryRequest>()
-        override suspend fun hasCap(cap: String) = hasChatHistory
-        override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResult {
+        override suspend fun availability(): HistoryAvailability = if (offline) {
+            HistoryAvailability.NegotiatingOrOffline
+        } else if (hasChatHistory) {
+            HistoryAvailability.Ready(
+                setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID),
+                100,
+            )
+        } else {
+            HistoryAvailability.Unsupported
+        }
+        override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
             calls += req.subcommand
             requests += req
             return when (req.subcommand) {
-                ChatHistoryRequest.Subcommand.LATEST -> ChatHistoryResult(latest, emptyList())
-                ChatHistoryRequest.Subcommand.BEFORE -> ChatHistoryResult(before.removeFirstOrNull() ?: emptyList(), emptyList())
-                else -> ChatHistoryResult(emptyList(), emptyList())
+                ChatHistoryRequest.Subcommand.LATEST -> messages(latest)
+                ChatHistoryRequest.Subcommand.BEFORE -> messages(
+                    before.removeFirstOrNull() ?: emptyList(),
+                    beforeEndOfHistory,
+                )
+                else -> messages(emptyList())
             }
         }
     }
@@ -156,6 +177,21 @@ class ChatHistoryRemoteMediatorTest {
     }
 
     @Test
+    fun appendWithExplicitEnd_marksHistoryCompleteAfterIngestingPage() = runTest {
+        processor.process(networkId, chatMsg("seed", 500))
+        val history = FakeHistory(
+            before = ArrayDeque(listOf(listOf(chatMsg("oldest", 100)))),
+            beforeEndOfHistory = true,
+        )
+
+        val result = load(mediator(history), LoadType.APPEND)
+
+        assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+        assertTrue(db.bufferDao().observeById(bufferId)!!.historyComplete)
+        assertEquals(2, rowCount())
+    }
+
+    @Test
     fun noCap_paginatesLocalOnly() = runTest {
         val history = FakeHistory(hasChatHistory = false, latest = listOf(chatMsg("a", 100)))
         val result = load(mediator(history), LoadType.APPEND)
@@ -163,5 +199,16 @@ class ChatHistoryRemoteMediatorTest {
         assertTrue((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
         assertTrue(history.calls.isEmpty())
         assertEquals(0, rowCount())
+    }
+
+    @Test
+    fun offlineHistoryIsRetryableAndDoesNotMarkCompletion() = runTest {
+        val history = FakeHistory(offline = true)
+
+        val result = load(mediator(history), LoadType.APPEND)
+
+        assertTrue(result is RemoteMediator.MediatorResult.Error)
+        assertTrue(history.calls.isEmpty())
+        assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
     }
 }

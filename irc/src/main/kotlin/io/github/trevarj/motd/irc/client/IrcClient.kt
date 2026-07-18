@@ -23,7 +23,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -33,8 +37,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -42,6 +46,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.PriorityQueue
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 enum class SaslMechanism { NONE, PLAIN, EXTERNAL }
@@ -77,11 +82,6 @@ data class ChatHistoryRequest(
     val bound1: String? = null, val bound2: String? = null,
     val limit: Int,
 ) { enum class Subcommand { LATEST, BEFORE, AFTER, AROUND, BETWEEN, TARGETS } }
-
-data class ChatHistoryResult(
-    val events: List<IrcEvent>,               // empty = no (more) history
-    val targets: List<Pair<String, Long>>,    // TARGETS only: (name, latest serverTime)
-)
 
 data class BouncerNetwork(val netId: String, val attrs: Map<String, String>) // attrs: name,host,state,nickname,...
 
@@ -130,7 +130,17 @@ class IrcClient(
         extraBufferCapacity = 4096,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
-    val events: SharedFlow<IrcEvent> = _events.asSharedFlow()
+    /** Best-effort fan-out for transient request correlation and UI-adjacent observers. */
+    val broadcastEvents: SharedFlow<IrcEvent> = _events.asSharedFlow()
+
+    private var criticalEventChannel = Channel<IrcEvent>(CRITICAL_EVENT_CAPACITY)
+
+    /**
+     * Ordered, non-dropping delivery for the sole persistence consumer. A new channel is installed
+     * by [start] and closes only after the connection's final event has been published.
+     */
+    val criticalEvents: ReceiveChannel<IrcEvent>
+        get() = criticalEventChannel
 
     // Live snapshot of the bouncer's networks (netId -> attrs), fed by BOUNCER NETWORK
     // notifications. soju advertises no labeled-response, so the LISTNETWORKS reply and the
@@ -162,10 +172,12 @@ class IrcClient(
 
     fun start() {
         stop()
+        val criticalEvents = Channel<IrcEvent>(CRITICAL_EVENT_CAPACITY)
+        criticalEventChannel = criticalEvents
         registered = false
         _bouncerNetworks.value = emptyMap()   // drop any stale networks from a prior connection
         _state.value = IrcClientState.Connecting
-        runJob = scope.launch { run() }
+        runJob = scope.launch { run(criticalEvents) }
     }
 
     fun stop() {
@@ -173,6 +185,7 @@ class IrcClient(
         watchdog = null
         runJob?.cancel()
         runJob = null
+        criticalEventChannel.cancel(CancellationException("client stopped"))
         labels.failAll(CancellationException("client stopped"))
         unlabeledChatHistory.failAll(CancellationException("client stopped"))
         cancelWhoxRequests("client stopped")
@@ -188,6 +201,11 @@ class IrcClient(
         }
     }
 
+    /** Wait until the socket reader has published and closed the current critical event channel. */
+    suspend fun awaitTermination() {
+        runJob?.join()
+    }
+
     /**
      * Probe a registered connection immediately using the watchdog's normal PING/grace
      * semantics. A response (or any other inbound line) keeps the Ready socket in place; a timeout
@@ -198,7 +216,19 @@ class IrcClient(
         return watchdog?.probe(graceMs) == true
     }
 
-    private suspend fun run() {
+    private suspend fun run(criticalEvents: Channel<IrcEvent>) {
+        val disconnectedPublished = AtomicBoolean(false)
+        try {
+            runConnection(criticalEvents, disconnectedPublished)
+        } finally {
+            criticalEvents.close()
+        }
+    }
+
+    private suspend fun runConnection(
+        criticalEvents: Channel<IrcEvent>,
+        disconnectedPublished: AtomicBoolean,
+    ) {
         // proxy is null here; the app's per-network AppTransportFactory captures its own proxy.
         val t = factory.create(config.host, config.port, config.tls, config.wsUrl, null)
         transport = t
@@ -213,20 +243,21 @@ class IrcClient(
                 "connect failed: ${e.message}",
                 fatal = e is TransportConfigurationException,
             )
-            emitDisconnected(e.message)
+            emitDisconnected(criticalEvents, disconnectedPublished, e.message)
+            if (transport === t) transport = null
             return
         }
 
         _state.value = IrcClientState.Registering
         val reg = RegistrationStateMachine(config)
-        for (a in reg.start()) applyRegAction(a, t)
+        for (a in reg.start()) applyRegAction(a, t, criticalEvents, disconnectedPublished)
 
         val wd = PingWatchdog(
             scope = scope,
             sendPing = { payload -> runCatching { t.send("PING $payload") } },
             onDead = {
                 _state.value = IrcClientState.Disconnected
-                emitDisconnected("watchdog timeout")
+                emitDisconnected(criticalEvents, disconnectedPublished, "watchdog timeout")
                 runCatching { t.close() }
             },
         )
@@ -251,29 +282,37 @@ class IrcClient(
                     // registration machine marks them Ready. Retain those values so the
                     // subsequent value-less deferred ACK cannot widen a limited capability.
                     rememberAdvertisedCaps(msg)
-                    for (a in reg.onMessage(msg)) applyRegAction(a, t)
+                    for (a in reg.onMessage(msg)) {
+                        applyRegAction(a, t, criticalEvents, disconnectedPublished)
+                    }
                 } else {
-                    dispatch(msg, t)
+                    dispatch(msg, t, criticalEvents)
                 }
             }
             // Clean EOF.
             if (_state.value !is IrcClientState.Failed) {
                 _state.value = IrcClientState.Disconnected
             }
-            emitDisconnected(null)
+            emitDisconnected(criticalEvents, disconnectedPublished, null)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
             if (_state.value !is IrcClientState.Failed) {
                 _state.value = IrcClientState.Disconnected
             }
-            emitDisconnected(e.message)
+            emitDisconnected(criticalEvents, disconnectedPublished, e.message)
         } finally {
             wd.stop()
-            labels.failAll(CancellationException("connection closed"))
-            unlabeledChatHistory.failAll(CancellationException("connection closed"))
+            if (currentCoroutineContext().isActive) {
+                labels.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
+                unlabeledChatHistory.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
+            } else {
+                labels.failAll(CancellationException("connection closed"))
+                unlabeledChatHistory.failAll(CancellationException("connection closed"))
+            }
             cancelWhoxRequests("connection closed")
             batches.reset()
+            if (transport === t) transport = null
         }
     }
 
@@ -283,7 +322,12 @@ class IrcClient(
         whoxTokens.clear()
     }
 
-    private suspend fun applyRegAction(a: RegistrationStateMachine.Action, t: IrcTransport) {
+    private suspend fun applyRegAction(
+        a: RegistrationStateMachine.Action,
+        t: IrcTransport,
+        criticalEvents: Channel<IrcEvent>,
+        disconnectedPublished: AtomicBoolean,
+    ) {
         when (a) {
             is RegistrationStateMachine.Action.Send -> runCatching { t.send(a.line) }
             is RegistrationStateMachine.Action.SendDeferred -> scope.launch {
@@ -298,18 +342,22 @@ class IrcClient(
                 registered = true
                 val isupportMap = isupportToMap(a.isupport)
                 _state.value = IrcClientState.Ready(a.nick, a.caps, isupportMap)
-                _events.emit(IrcEvent.Registered(a.nick, a.caps, isupportMap))
+                publish(criticalEvents, IrcEvent.Registered(a.nick, a.caps, isupportMap))
             }
             is RegistrationStateMachine.Action.Fail -> {
                 _state.value = IrcClientState.Failed(a.reason, a.fatal)
-                emitDisconnected(a.reason)
+                emitDisconnected(criticalEvents, disconnectedPublished, a.reason)
                 runCatching { t.close() }
             }
         }
     }
 
     /** Steady-state dispatch: label correlation → CAP NEW/DEL → batch assembly → event mapping. */
-    private suspend fun dispatch(msg: IrcMessage, t: IrcTransport) {
+    private suspend fun dispatch(
+        msg: IrcMessage,
+        t: IrcTransport,
+        criticalEvents: Channel<IrcEvent>,
+    ) {
         // Labeled responses are consumed by the correlator (incl. their batch contents).
         if (labels.route(msg)) return
         // soju does not support labeled-response, but its CHATHISTORY replies remain batched.
@@ -317,40 +365,46 @@ class IrcClient(
 
         // Runtime CAP NEW/DEL.
         if (msg.command == "CAP") {
-            handleRuntimeCap(msg, t)
+            handleRuntimeCap(msg, t, criticalEvents)
             return
         }
 
         // 005 normally arrives after 001. Keep Ready's snapshot current so app-owned feature
         // gates (notably CLIENTTAGDENY) do not operate on the empty registration-time map.
-        if (msg.command == "005") updateRuntimeIsupport(msg)
+        if (msg.command == "005") updateRuntimeIsupport(msg, criticalEvents)
 
         when (val outcome = batches.route(msg)) {
             BatchAssembler.Outcome.Buffered -> return
-            is BatchAssembler.Outcome.Closed -> emitBatch(outcome)
+            is BatchAssembler.Outcome.Closed -> emitBatch(outcome, criticalEvents)
             BatchAssembler.Outcome.PassThrough -> {
                 val ev = eventMapper.map(msg, batchId = null) { reply ->
                     // CTCP auto-reply (e.g. VERSION) — fire and forget on the client scope.
                     scope.launch { runCatching { t.send(reply.serialize()) } }
                 }
-                if (ev != null) emitEvent(ev)
+                if (ev != null) emitEvent(ev, criticalEvents)
             }
         }
     }
 
     /** Emit an event, accumulating bouncer-network snapshots as a side effect. */
-    private suspend fun emitEvent(ev: IrcEvent) {
+    private suspend fun emitEvent(
+        ev: IrcEvent,
+        criticalEvents: Channel<IrcEvent>,
+    ) {
         if (ev is IrcEvent.BouncerNetworkState) {
             _bouncerNetworks.update { cur ->
                 // Empty attrs is soju's `BOUNCER NETWORK <id> *` deletion marker.
                 if (ev.attrs.isEmpty()) cur - ev.netId else cur + (ev.netId to ev.attrs)
             }
         }
-        _events.emit(ev)
+        publish(criticalEvents, ev)
     }
 
-    private suspend fun emitBatch(closed: BatchAssembler.Outcome.Closed) {
-        for (event in mapBatchTree(closed.tree)) emitEvent(event)
+    private suspend fun emitBatch(
+        closed: BatchAssembler.Outcome.Closed,
+        criticalEvents: Channel<IrcEvent>,
+    ) {
+        for (event in mapBatchTree(closed.tree)) emitEvent(event, criticalEvents)
     }
 
     internal fun mapBatchTree(tree: BatchTree): List<IrcEvent> {
@@ -410,7 +464,11 @@ class IrcClient(
         }
     }
 
-    private suspend fun handleRuntimeCap(msg: IrcMessage, t: IrcTransport) {
+    private suspend fun handleRuntimeCap(
+        msg: IrcMessage,
+        t: IrcTransport,
+        criticalEvents: Channel<IrcEvent>,
+    ) {
         val sub = msg.params.getOrNull(1) ?: return
         val tokens = msg.params.last().split(' ').filter { it.isNotEmpty() }
         val caps = tokens.map { it.removePrefix("-").substringBefore('=') }.toSet()
@@ -427,7 +485,7 @@ class IrcClient(
             "DEL" -> {
                 ackedCaps.set(ackedCaps.get().filterNot { it.substringBefore('=') in caps }.toSet())
                 updateReadyCaps(ackedCaps.get())
-                _events.emit(IrcEvent.CapsChanged(emptySet(), caps))
+                publish(criticalEvents, IrcEvent.CapsChanged(emptySet(), caps))
             }
             "ACK" -> {
                 val removed = tokens.filter { it.startsWith("-") }
@@ -446,7 +504,10 @@ class IrcClient(
                     .toSet() + added
                 ackedCaps.set(updated)
                 updateReadyCaps(ackedCaps.get())
-                _events.emit(IrcEvent.CapsChanged(added.map { it.substringBefore('=') }.toSet(), removed))
+                publish(
+                    criticalEvents,
+                    IrcEvent.CapsChanged(added.map { it.substringBefore('=') }.toSet(), removed),
+                )
             }
         }
     }
@@ -474,17 +535,33 @@ class IrcClient(
         }
     }
 
-    private suspend fun updateRuntimeIsupport(msg: IrcMessage) {
+    private suspend fun updateRuntimeIsupport(
+        msg: IrcMessage,
+        criticalEvents: Channel<IrcEvent>,
+    ) {
         val isupport = _isupport.get()
         isupport.update(msg.params.drop(1).dropLast(1))
         val current = _state.value as? IrcClientState.Ready ?: return
         val snapshot = isupportToMap(isupport)
         _state.value = current.copy(isupport = snapshot)
-        _events.emit(IrcEvent.Registered(current.nick, current.caps, snapshot))
+        publish(criticalEvents, IrcEvent.Registered(current.nick, current.caps, snapshot))
     }
 
-    private suspend fun emitDisconnected(reason: String?) {
-        _events.emit(IrcEvent.Disconnected(reason))
+    private suspend fun emitDisconnected(
+        criticalEvents: Channel<IrcEvent>,
+        disconnectedPublished: AtomicBoolean,
+        reason: String?,
+    ) {
+        if (!disconnectedPublished.compareAndSet(false, true)) return
+        publish(criticalEvents, IrcEvent.Disconnected(reason))
+    }
+
+    private suspend fun publish(
+        criticalEvents: Channel<IrcEvent>,
+        event: IrcEvent,
+    ) {
+        criticalEvents.send(event)
+        _events.emit(event)
     }
 
     // -- public send API --
@@ -502,21 +579,27 @@ class IrcClient(
 
     /** Attach a label tag, suspend until the labeled response/ack batch completes. */
     suspend fun sendLabeled(msg: IrcMessage): List<IrcMessage> {
-        val t = transport ?: return emptyList()
+        return sendLabeledResponse(msg).messages
+    }
+
+    private suspend fun sendLabeledResponse(msg: IrcMessage): CorrelatedResponse {
+        val t = transport ?: throw IrcDisconnectedException(msg.command, null)
         // Degrade without labeled-response: send unlabeled, complete immediately with empty list.
         if (!hasCap("labeled-response")) {
             t.send(msg.serialize())
-            return emptyList()
+            return CorrelatedResponse(emptyList(), rootBatch = null)
         }
         val label = labels.next()
-        val deferred = CompletableDeferred<List<IrcMessage>>()
-        labels.register(label, deferred)
+        val deferred = CompletableDeferred<CorrelatedResponse>()
+        labels.register(label, msg.command, deferred)
         val labeled = msg.copy(tags = msg.tags + ("label" to label))
-        t.send(labeled.serialize())
         return try {
+            t.send(labeled.serialize())
             withTimeout(LABEL_TIMEOUT_MS) { deferred.await() }
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             throw IrcTimeoutException(label)
+        } finally {
+            labels.unregister(label, deferred)
         }
     }
 
@@ -568,7 +651,7 @@ class IrcClient(
         t.send(msg.serialize())
     }
 
-    suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResult {
+    suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
         val limit = clampHistoryLimit(req.limit)
         val msg = when (req.subcommand) {
             ChatHistoryRequest.Subcommand.LATEST -> ChatHistoryCommands.latest(req.target, limit)
@@ -581,26 +664,53 @@ class IrcClient(
                 ChatHistoryCommands.targets(req.bound1.orEmpty(), req.bound2.orEmpty(), limit)
         }
         val response = if (hasCap("labeled-response")) {
-            sendLabeled(msg)
+            sendLabeledResponse(msg)
         } else {
             sendUnlabeledChatHistory(req, msg)
         }
-        return if (req.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
-            ChatHistoryResult(events = emptyList(), targets = parseTargets(response))
+        val root = response.rootBatch
+            ?: throw IrcProtocolException("CHATHISTORY", "response did not contain a complete root batch")
+        val expectedType = if (req.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
+            "draft/chathistory-targets"
         } else {
-            val events = response
+            "chathistory"
+        }
+        if (root.command != "BATCH" || !root.params.getOrNull(1).orEmpty().equals(expectedType, ignoreCase = true)) {
+            throw IrcProtocolException(
+                "CHATHISTORY",
+                "unexpected batch type ${root.params.getOrNull(1).orEmpty()}",
+            )
+        }
+        val endOfHistory = "draft/chathistory-end" in root.tags
+        return if (req.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
+            ChatHistoryResponse.Targets(parseTargets(response.messages), endOfHistory)
+        } else {
+            val mapped = response.messages
                 .filter { it.command != "BATCH" } // drop nested batch open/close markers
-                .mapNotNull { eventMapper.map(it, batchId = it.tags["batch"]) }
-            ChatHistoryResult(events = events, targets = emptyList())
+                .mapNotNull { message ->
+                    eventMapper.map(message, batchId = message.tags["batch"])?.let { message to it }
+                }
+            val primaryReferences = mapped.mapNotNull { (message, _) ->
+                if ("draft/chathistory-context" in message.tags) null
+                else historyReference(message)
+            }
+            ChatHistoryResponse.Messages(
+                events = mapped.map { it.second },
+                // Message IDs are opaque and may be the only exact selector. Keep the server's
+                // completed-batch order rather than attempting to sort or normalize references.
+                oldest = primaryReferences.firstOrNull(),
+                newest = primaryReferences.lastOrNull(),
+                endOfHistory = endOfHistory,
+            )
         }
     }
 
     private suspend fun sendUnlabeledChatHistory(
         request: ChatHistoryRequest,
         message: IrcMessage,
-    ): List<IrcMessage> = unlabeledChatHistoryLock.withLock {
-        val t = transport ?: return emptyList()
-        val deferred = CompletableDeferred<List<IrcMessage>>()
+    ): CorrelatedResponse = unlabeledChatHistoryLock.withLock {
+        val t = transport ?: throw IrcDisconnectedException("CHATHISTORY", null)
+        val deferred = CompletableDeferred<CorrelatedResponse>()
         unlabeledChatHistory.register(request, deferred)
         try {
             t.send(message.serialize())
@@ -651,7 +761,7 @@ class IrcClient(
         }
         val rows = ArrayList<IrcEvent.WhoxRow>()
         val collector = scope.async(start = CoroutineStart.UNDISPATCHED) {
-            events.first { event ->
+            broadcastEvents.first { event ->
                 when (event) {
                     is IrcEvent.WhoxRow -> {
                         if (event.token == token) rows += event
@@ -733,7 +843,7 @@ class IrcClient(
         // fallback does not leak protocol into :app.
         val out = BoundedChannelListings(cap)
         val collector = scope.launch {
-            events.collect { ev ->
+            broadcastEvents.collect { ev ->
                 if (ev !is IrcEvent.Raw) return@collect
                 when (ev.message.command) {
                     "322" -> parseListMessage(ev.message)?.let(out::add)
@@ -787,7 +897,7 @@ class IrcClient(
         val t = transport ?: throw IllegalStateException("IRC client is not connected")
         coroutineScope {
             val response = async(start = CoroutineStart.UNDISPATCHED) {
-                events.mapNotNull { event ->
+                broadcastEvents.mapNotNull { event ->
                     when (event) {
                         is IrcEvent.Raw -> {
                             val raw = event.message
@@ -840,28 +950,95 @@ class IrcClient(
     /** Live ISUPPORT state (normalize(), prefixModes, ...); empty until Ready. */
     val isupport: Isupport get() = _isupport.get()
 
+    val historyAvailability: HistoryAvailability
+        get() {
+            if (_state.value !is IrcClientState.Ready) return HistoryAvailability.NegotiatingOrOffline
+            if (!hasCap("draft/chathistory")) {
+                val bouncerChild = config.bouncerNetId != null || config.saslUser?.contains('/') == true
+                return if (bouncerChild) {
+                    HistoryAvailability.NegotiatingOrOffline
+                } else {
+                    HistoryAvailability.Unsupported
+                }
+            }
+            val referenceTypes = _isupport.get()["MSGREFTYPES"]?.let { advertised ->
+                advertised.split(',', ' ').mapNotNullTo(linkedSetOf()) { type ->
+                    when {
+                        type.equals("timestamp", ignoreCase = true) -> HistoryReferenceType.TIMESTAMP
+                        type.equals("msgid", ignoreCase = true) -> HistoryReferenceType.MSGID
+                        else -> null
+                    }
+                }
+            } ?: linkedSetOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID)
+            val advertisedLimit = _isupport.get()["CHATHISTORY"]?.toIntOrNull()
+            val pageLimit = when {
+                advertisedLimit == 0 -> Int.MAX_VALUE
+                advertisedLimit != null && advertisedLimit > 0 -> advertisedLimit
+                else -> DEFAULT_HISTORY_PAGE_LIMIT
+            }
+            return HistoryAvailability.Ready(referenceTypes, pageLimit)
+        }
+
     // -- helpers --
 
     private fun clampHistoryLimit(requested: Int): Int {
-        val max = _isupport.get()["CHATHISTORY"]?.toIntOrNull() ?: 100
-        return requested.coerceIn(1, max)
+        val advertised = _isupport.get()["CHATHISTORY"]?.toIntOrNull()
+        val max = when {
+            advertised == 0 -> Int.MAX_VALUE
+            advertised != null && advertised > 0 -> advertised
+            else -> DEFAULT_HISTORY_PAGE_LIMIT
+        }
+        return requested.coerceAtLeast(1).coerceAtMost(max)
     }
 
-    private fun parseTargets(response: List<IrcMessage>): List<Pair<String, Long>> =
-        response.mapNotNull { m ->
-            // CHATHISTORY TARGETS <target> <ISO timestamp>
-            if (m.command != "CHATHISTORY" || m.params.getOrNull(0) != "TARGETS") return@mapNotNull null
-            val target = m.params.getOrNull(1) ?: return@mapNotNull null
-            val iso = m.params.getOrNull(2) ?: return@mapNotNull null
-            val ts = runCatching { java.time.Instant.parse(iso).toEpochMilli() }.getOrDefault(0L)
-            target to ts
+    private fun parseTargets(response: List<IrcMessage>): List<ChatHistoryTarget> = buildList {
+        for (message in response) {
+            // Generic labeled correlation retains nested batch framing. It is the only unrelated
+            // protocol shape valid inside an otherwise completed TARGETS batch.
+            if (message.command == "BATCH") continue
+            if (message.command != "CHATHISTORY" ||
+                !message.params.firstOrNull().orEmpty().equals("TARGETS", ignoreCase = true)
+            ) {
+                throw IrcProtocolException(
+                    "CHATHISTORY TARGETS",
+                    "unexpected ${message.command} record",
+                )
+            }
+            if (message.params.size != 3) {
+                throw IrcProtocolException(
+                    "CHATHISTORY TARGETS",
+                    "record must contain subcommand, target, and timestamp",
+                )
+            }
+            val target = message.params[1]
+            if (target.isEmpty()) {
+                throw IrcProtocolException("CHATHISTORY TARGETS", "record target is empty")
+            }
+            val timestamp = runCatching {
+                java.time.Instant.parse(message.params[2]).toEpochMilli()
+            }.getOrElse {
+                throw IrcProtocolException("CHATHISTORY TARGETS", "record timestamp is invalid")
+            }
+            add(ChatHistoryTarget(target, timestamp))
         }
+    }
+
+    private fun historyReference(message: IrcMessage): ChatHistoryReference? {
+        val msgid = message.tags["msgid"]?.takeIf(String::isNotEmpty)
+        val serverTime = message.tags["time"]?.let { encoded ->
+            runCatching { java.time.Instant.parse(encoded).toEpochMilli() }.getOrNull()
+        }
+        if (msgid == null && serverTime == null) return null
+        return ChatHistoryReference(msgid, serverTime)
+    }
 
     private companion object {
         const val LABEL_TIMEOUT_MS = 30_000L
         const val LIST_TIMEOUT_MS = 15_000L
         const val WEBPUSH_TIMEOUT_MS = 30_000L
         const val WHOX_TIMEOUT_MS = 15_000L
+        const val CRITICAL_EVENT_CAPACITY = 4096
+        const val DEFAULT_HISTORY_PAGE_LIMIT = 100
     }
 }
 
@@ -879,6 +1056,7 @@ private fun isupportToMap(isupport: Isupport): Map<String, String> {
         "CHANTYPES",
         "PREFIX",
         "CHATHISTORY",
+        "MSGREFTYPES",
         "MONITOR",
         "BOUNCER_NETID",
         "VAPID",

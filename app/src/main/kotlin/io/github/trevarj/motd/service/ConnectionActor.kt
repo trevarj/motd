@@ -10,9 +10,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
@@ -27,9 +26,12 @@ import kotlin.random.Random
  */
 interface ManagedConnection {
     val state: StateFlow<IrcClientState>
-    val events: Flow<IrcEvent>
+    val criticalEvents: ReceiveChannel<IrcEvent>
     fun start()
     fun stop()
+
+    /** Completes after the producer has closed [criticalEvents] on a normal terminal connection. */
+    suspend fun awaitTermination()
 
     /**
      * Send an immediate watchdog-style liveness probe. Implementations that do not expose a
@@ -44,8 +46,9 @@ class IrcClientConnection(
     private val onStop: () -> Unit = {},
 ) : ManagedConnection {
     override val state: StateFlow<IrcClientState> get() = client.state
-    override val events: SharedFlow<IrcEvent> get() = client.events
+    override val criticalEvents: ReceiveChannel<IrcEvent> get() = client.criticalEvents
     override fun start() = client.start()
+    override suspend fun awaitTermination() = client.awaitTermination()
     override suspend fun probeLiveness(graceMs: Long): Boolean = client.probeLiveness(graceMs)
     override fun stop() {
         client.stop()
@@ -160,11 +163,20 @@ class ConnectionActor(
             conn.start()
 
             val attemptScope = CoroutineScope(currentCoroutineContext())
-            val collector = attemptScope.launch { conn.events.collect { onEvent(networkId, it) } }
+            val collector = attemptScope.launch {
+                for (event in conn.criticalEvents) onEvent(networkId, event)
+            }
             val outcome = try {
                 runConnection(conn) { attempt = 0 }
             } finally {
-                collector.cancelAndJoin()
+                if (currentCoroutineContext().isActive) {
+                    // State becomes terminal before the socket reader can publish its final event.
+                    // Wait for the producer to close, then let the sole consumer empty the queue.
+                    conn.awaitTermination()
+                    collector.join()
+                } else {
+                    collector.cancelAndJoin()
+                }
                 conn.stop()
                 connection = null
                 onConnectionChanged(networkId, null)

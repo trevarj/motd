@@ -5,6 +5,8 @@ import io.github.trevarj.motd.irc.event.IrcEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -17,6 +19,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.io.IOException
 import java.util.Base64
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -124,6 +127,9 @@ class IrcClientTest {
         val ft = FakeTransport()
         val client = IrcClient(config(SaslMechanism.PLAIN, "bob", "wrong"), ft.factory(), clientScope())
         client.start()
+        val critical = clientScope().async {
+            buildList { for (event in client.criticalEvents) add(event) }
+        }
         runCurrent()
         ft.feed(":srv CAP * LS :$fullLs")
         runCurrent()
@@ -138,6 +144,8 @@ class IrcClientTest {
         assertTrue(state is IrcClientState.Failed)
         state as IrcClientState.Failed
         assertTrue(state.fatal)
+        client.awaitTermination()
+        assertEquals(1, critical.await().count { it is IrcEvent.Disconnected })
     }
 
     @Test
@@ -199,7 +207,7 @@ class IrcClientTest {
 
         // Echo carrying the label flows through as a self ChatMessage.
         val collected = mutableListOf<IrcEvent>()
-        val job = launch { client.events.toList(collected) }
+        val job = launch { client.broadcastEvents.toList(collected) }
         runCurrent() // ensure the subscriber is registered before the emit
         ft.feed("@label=$label;msgid=abc :motd!u@h PRIVMSG #chan :hello")
         runCurrent()
@@ -231,7 +239,7 @@ class IrcClientTest {
         val ft = FakeTransport()
         val client = registered(ft)
         val collected = mutableListOf<IrcEvent>()
-        val job = launch { client.events.toList(collected) }
+        val job = launch { client.broadcastEvents.toList(collected) }
         runCurrent()
 
         ft.feed("@+reply=new;+draft/reply=old :alice!u@h PRIVMSG #chan :new reply")
@@ -250,7 +258,7 @@ class IrcClientTest {
         val ft = FakeTransport()
         val client = registered(ft)
         val collected = mutableListOf<IrcEvent>()
-        val job = launch { client.events.toList(collected) }
+        val job = launch { client.broadcastEvents.toList(collected) }
         runCurrent()
 
         ft.feed("@+draft/unreact=👍;+reply=parent-1 :alice!u@h TAGMSG #chan")
@@ -275,6 +283,39 @@ class IrcClientTest {
     }
 
     @Test
+    fun `history availability defaults references and honors zero as unlimited`() = runTest {
+        val defaultTransport = FakeTransport()
+        val defaultClient = registeredWithIsupport(defaultTransport, "CHATHISTORY=25")
+        assertEquals(
+            HistoryAvailability.Ready(
+                setOf(HistoryReferenceType.TIMESTAMP, HistoryReferenceType.MSGID),
+                25,
+            ),
+            defaultClient.historyAvailability,
+        )
+
+        val timestampTransport = FakeTransport()
+        val timestampClient = registeredWithIsupport(
+            timestampTransport,
+            "CHATHISTORY=0 MSGREFTYPES=timestamp",
+        )
+        assertEquals(
+            HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), Int.MAX_VALUE),
+            timestampClient.historyAvailability,
+        )
+        assertEquals("timestamp", (timestampClient.state.value as IrcClientState.Ready).isupport["MSGREFTYPES"])
+
+        val unlimitedRequest = clientScope().async {
+            timestampClient.chathistory(
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#chan", limit = 250),
+            )
+        }
+        runCurrent()
+        assertTrue(timestampTransport.sent.last { it.contains("CHATHISTORY") }.contains(" #chan * 250"))
+        unlimitedRequest.cancelAndJoin()
+    }
+
+    @Test
     fun `labeled chathistory reassembles nested batch`() = runTest {
         val ft = FakeTransport()
         val client = registered(ft)
@@ -290,7 +331,7 @@ class IrcClientTest {
         val label = responseLabel(labeled)
 
         // Outer chathistory batch containing a nested batch and messages.
-        ft.feed("@label=$label BATCH +hist chathistory #chan")
+        ft.feed("@label=$label;draft/chathistory-end BATCH +hist chathistory #chan")
         ft.feed("@batch=hist BATCH +nested draft/foo")
         ft.feed("@batch=nested :a!u@h PRIVMSG #chan :nested-line")
         ft.feed("@batch=nested BATCH -nested")
@@ -300,7 +341,8 @@ class IrcClientTest {
         ft.feed("BATCH -hist")
         runCurrent()
 
-        val res = result.await()
+        val res = result.await() as ChatHistoryResponse.Messages
+        assertTrue(res.endOfHistory)
         val texts = res.events.filterIsInstance<IrcEvent.ChatMessage>().map { it.text }
         assertEquals(listOf("nested-line", "outer-line"), texts)
         assertEquals(
@@ -318,12 +360,184 @@ class IrcClientTest {
     }
 
     @Test
+    fun `labeled root close with open nested batch fails and clears aliases`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+        val request = clientScope().async {
+            runCatching {
+                client.chathistory(
+                    ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#chan", limit = 50),
+                )
+            }.exceptionOrNull()
+        }
+        runCurrent()
+        val label = responseLabel(ft.sent.last { it.contains("CHATHISTORY") })
+
+        ft.feed("@label=$label BATCH +history chathistory #chan")
+        ft.feed("@batch=history BATCH +nested draft/example")
+        ft.feed("BATCH -history")
+        runCurrent()
+        assertTrue(request.await() is IrcProtocolException)
+
+        val retry = clientScope().async {
+            client.chathistory(
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#chan", limit = 50),
+            )
+        }
+        runCurrent()
+        val retryLabel = responseLabel(ft.sent.last { it.contains("CHATHISTORY") })
+        // Reusing the failed request's nested ref proves every alias was removed eagerly.
+        ft.feed("@label=$retryLabel BATCH +nested chathistory #chan")
+        ft.feed("BATCH -nested")
+        runCurrent()
+
+        assertTrue(retry.await() is ChatHistoryResponse.Messages)
+    }
+
+    @Test
+    fun `concurrent labeled requests remain independently correlated`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+
+        val first = clientScope().async {
+            client.sendLabeled(io.github.trevarj.motd.irc.proto.IrcMessage(command = "WHOIS", params = listOf("alice")))
+        }
+        val second = clientScope().async {
+            client.sendLabeled(io.github.trevarj.motd.irc.proto.IrcMessage(command = "WHOIS", params = listOf("bob")))
+        }
+        runCurrent()
+        val firstLabel = responseLabel(ft.sent.first { it.contains("WHOIS alice") })
+        val secondLabel = responseLabel(ft.sent.first { it.contains("WHOIS bob") })
+
+        ft.feed("@label=$secondLabel :srv 318 motd bob :End of WHOIS")
+        ft.feed("@label=$firstLabel :srv 318 motd alice :End of WHOIS")
+        runCurrent()
+
+        assertEquals("alice", first.await().single().params[1])
+        assertEquals("bob", second.await().single().params[1])
+    }
+
+    @Test
+    fun `cancelled labeled request unregisters before a late response`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+        val request = clientScope().async {
+            client.sendLabeled(io.github.trevarj.motd.irc.proto.IrcMessage(command = "WHOIS", params = listOf("alice")))
+        }
+        runCurrent()
+        val label = responseLabel(ft.sent.last { it.contains("WHOIS alice") })
+        request.cancelAndJoin()
+        val late = clientScope().async {
+            client.broadcastEvents.first { event ->
+                event is IrcEvent.Raw && event.message.tags["label"] == label
+            }
+        }
+
+        ft.feed("@label=$label :srv 318 motd alice :late")
+        runCurrent()
+
+        assertTrue(late.await() is IrcEvent.Raw)
+    }
+
+    @Test
+    fun `timed out labeled request unregisters before a late response`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+        val request = clientScope().async {
+            runCatching {
+                client.sendLabeled(io.github.trevarj.motd.irc.proto.IrcMessage(command = "WHOIS", params = listOf("alice")))
+            }.exceptionOrNull()
+        }
+        runCurrent()
+        val label = responseLabel(ft.sent.last { it.contains("WHOIS alice") })
+        advanceTimeBy(30_001L)
+        runCurrent()
+        assertTrue(request.await() is IrcTimeoutException)
+        val late = clientScope().async {
+            client.broadcastEvents.first { event ->
+                event is IrcEvent.Raw && event.message.tags["label"] == label
+            }
+        }
+
+        ft.feed("@label=$label :srv 318 motd alice :late")
+        runCurrent()
+
+        assertTrue(late.await() is IrcEvent.Raw)
+    }
+
+    @Test
+    fun `labeled write failure unregisters before a late response`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+        ft.sendFailure = IOException("write failed")
+
+        val error = runCatching {
+            client.sendLabeled(io.github.trevarj.motd.irc.proto.IrcMessage(command = "WHOIS", params = listOf("alice")))
+        }.exceptionOrNull()
+        val label = responseLabel(ft.sent.last { it.contains("WHOIS alice") })
+        assertTrue(error is IOException)
+        ft.sendFailure = null
+        val late = clientScope().async {
+            client.broadcastEvents.first { event ->
+                event is IrcEvent.Raw && event.message.tags["label"] == label
+            }
+        }
+
+        ft.feed("@label=$label :srv 318 motd alice :late")
+        runCurrent()
+
+        assertTrue(late.await() is IrcEvent.Raw)
+    }
+
+    @Test
+    fun `critical channel retains ordered burst through clean EOF`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+        val collected = clientScope().async {
+            buildList {
+                for (event in client.criticalEvents) add(event)
+            }
+        }
+        repeat(500) { index ->
+            ft.feed(":alice!u@h PRIVMSG #chan :line-$index")
+        }
+        ft.eof()
+        runCurrent()
+        client.awaitTermination()
+
+        val events = collected.await()
+        assertEquals(
+            (0 until 500).map { "line-$it" },
+            events.filterIsInstance<IrcEvent.ChatMessage>().map { it.text },
+        )
+        assertTrue(events.last() is IrcEvent.Disconnected)
+        assertEquals(1, events.count { it is IrcEvent.Disconnected })
+    }
+
+    @Test
+    fun `socket read failure publishes one terminal event`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+        val critical = clientScope().async {
+            buildList { for (event in client.criticalEvents) add(event) }
+        }
+
+        ft.fail(IOException("read reset"))
+        runCurrent()
+        client.awaitTermination()
+
+        val disconnects = critical.await().filterIsInstance<IrcEvent.Disconnected>()
+        assertEquals(1, disconnects.size)
+        assertEquals("read reset", disconnects.single().reason)
+    }
+
+    @Test
     fun `CAP NEW mid session requests and emits CapsChanged`() = runTest {
         val ft = FakeTransport()
         val client = registered(ft)
 
         val collected = mutableListOf<IrcEvent>()
-        val job = launch { client.events.toList(collected) }
+        val job = launch { client.broadcastEvents.toList(collected) }
         runCurrent() // ensure the subscriber is registered before emits
 
         ft.feed(":srv CAP motd NEW :draft/chathistory")
@@ -501,6 +715,9 @@ class IrcClientTest {
     fun `watchdog timeout disconnects`() = runTest {
         val ft = FakeTransport()
         val client = registered(ft)
+        val critical = clientScope().async {
+            buildList { for (event in client.criticalEvents) add(event) }
+        }
         assertTrue(client.state.value is IrcClientState.Ready)
 
         // The idle window running when the welcome lines arrived is reset by them; the next
@@ -513,6 +730,10 @@ class IrcClientTest {
         advanceTimeBy(30_001)
         runCurrent()
         assertEquals(IrcClientState.Disconnected, client.state.value)
+        client.awaitTermination()
+        val disconnects = critical.await().filterIsInstance<IrcEvent.Disconnected>()
+        assertEquals(1, disconnects.size)
+        assertEquals("watchdog timeout", disconnects.single().reason)
     }
 
     @Test

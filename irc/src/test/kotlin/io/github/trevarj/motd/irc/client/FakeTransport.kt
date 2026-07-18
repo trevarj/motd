@@ -17,6 +17,7 @@ class FakeTransport : IrcTransport {
 
     @Volatile var connected = false
     @Volatile var closed = false
+    @Volatile var sendFailure: Throwable? = null
 
     override suspend fun connect() {
         connected = true
@@ -26,6 +27,7 @@ class FakeTransport : IrcTransport {
 
     override suspend fun send(line: String) {
         sent.add(line)
+        sendFailure?.let { throw it }
     }
 
     override suspend fun close() {
@@ -41,6 +43,11 @@ class FakeTransport : IrcTransport {
     /** Complete the incoming flow (clean EOF). */
     fun eof() {
         inbound.close()
+    }
+
+    /** Complete the incoming flow exceptionally, as a socket read failure would. */
+    fun fail(cause: Throwable) {
+        inbound.close(cause)
     }
 
     fun factory(): TransportFactory = TransportFactory { _, _, _, _, _ -> this }

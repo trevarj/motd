@@ -32,6 +32,7 @@ import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcClientConfig
+import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.NO_IMPLICIT_NAMES_ALIASES
 import io.github.trevarj.motd.irc.client.SaslMechanism
 import io.github.trevarj.motd.irc.client.canSendClientTag
@@ -895,7 +896,7 @@ class ConnectionManagerImpl @Inject constructor(
                 if (isCurrent()) reconcileReadMarkersForConnection(row, client, isCurrent)
             }
             launch {
-                awaitCapabilityAvailable(client, CHATHISTORY_CAP)
+                if (!awaitHistoryReady(client)) return@launch
                 if (!isCurrent()) return@launch
                 // If read-marker was already negotiated, establish the durable max before
                 // history rows arrive. If it appears later, its own watcher will still converge.
@@ -992,7 +993,7 @@ class ConnectionManagerImpl @Inject constructor(
                     if (!isCurrent()) return@async
                     val response = try {
                         awaitReadMarkerResponse(
-                            events = client.events,
+                            events = client.broadcastEvents,
                             target = request.target,
                             normalize = client.isupport::normalize,
                             timeoutMs = READ_MARKER_RESPONSE_TIMEOUT_MS,
@@ -1024,6 +1025,18 @@ class ConnectionManagerImpl @Inject constructor(
         client.state.filterIsInstance<IrcClientState.Ready>().first { ready ->
             ready.caps.any { it == capability || it.startsWith("$capability=") }
         }
+    }
+
+    private suspend fun awaitHistoryReady(client: IrcClient): Boolean {
+        when (client.historyAvailability) {
+            is HistoryAvailability.Ready -> return true
+            HistoryAvailability.Unsupported -> return false
+            HistoryAvailability.NegotiatingOrOffline -> Unit
+        }
+        client.state.filterIsInstance<IrcClientState.Ready>().first {
+            client.historyAvailability !is HistoryAvailability.NegotiatingOrOffline
+        }
+        return client.historyAvailability is HistoryAvailability.Ready
     }
 
     private suspend fun openBuffers(networkId: Long): List<Pair<Long, String>> =
@@ -1248,7 +1261,7 @@ class ConnectionManagerImpl @Inject constructor(
             val completed = withTimeoutOrNull(ROSTER_REQUEST_TIMEOUT_MS) {
                 coroutineScope {
                     val names = async(start = CoroutineStart.UNDISPATCHED) {
-                        client.events.filterIsInstance<IrcEvent.Names>().first {
+                        client.broadcastEvents.filterIsInstance<IrcEvent.Names>().first {
                             client.isupport.normalize(it.channel) == buffer.name
                         }
                     }
@@ -1413,7 +1426,6 @@ class ConnectionManagerImpl @Inject constructor(
     companion object {
         // Stable logcat tag for reconnect catch-up failures.
         private const val TAG = "MotdCatchUp"
-        const val CHATHISTORY_CAP = "draft/chathistory"
         const val READ_MARKER_CAP = "draft/read-marker"
         const val WEBPUSH_CAP = "soju.im/webpush"
         const val READ_MARKER_RESPONSE_TIMEOUT_MS = 5_000L

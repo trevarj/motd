@@ -17,7 +17,10 @@ import io.github.trevarj.motd.data.sync.CanonicalHistorySingleFlight
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
-import io.github.trevarj.motd.irc.client.ChatHistoryResult
+import io.github.trevarj.motd.irc.client.ChatHistoryResponse
+import io.github.trevarj.motd.irc.client.ChatHistoryTarget
+import io.github.trevarj.motd.irc.client.HistoryAvailability
+import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
@@ -113,19 +116,46 @@ class HistoryResyncCoordinatorTest {
         return loaded.data
     }
 
+    private data class FakeResponse(
+        val events: List<IrcEvent> = emptyList(),
+        val targets: List<Pair<String, Long>> = emptyList(),
+        val endOfHistory: Boolean = false,
+    )
+
     private class FakeSource(
         var supported: Boolean = true,
         var msgidRefs: Boolean = true,
         var pageLimit: Int = 100,
-        val responder: suspend (ChatHistoryRequest) -> ChatHistoryResult,
+        val responder: suspend (ChatHistoryRequest) -> FakeResponse,
     ) : HistoryResyncCoordinator.HistorySource {
         val requests = mutableListOf<ChatHistoryRequest>()
-        override fun hasChatHistory() = supported
-        override fun supportsMsgidReferences() = msgidRefs
-        override fun pageLimit() = pageLimit
-        override suspend fun chathistory(request: ChatHistoryRequest): ChatHistoryResult {
+        override fun availability(): HistoryAvailability = if (supported) {
+            HistoryAvailability.Ready(
+                buildSet {
+                    add(HistoryReferenceType.TIMESTAMP)
+                    if (msgidRefs) add(HistoryReferenceType.MSGID)
+                },
+                pageLimit,
+            )
+        } else {
+            HistoryAvailability.Unsupported
+        }
+        override suspend fun chathistory(request: ChatHistoryRequest): ChatHistoryResponse {
             requests += request
-            return responder(request)
+            val response = responder(request)
+            return if (request.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
+                ChatHistoryResponse.Targets(
+                    response.targets.map { (name, time) -> ChatHistoryTarget(name, time) },
+                    response.endOfHistory,
+                )
+            } else {
+                ChatHistoryResponse.Messages(
+                    events = response.events,
+                    oldest = null,
+                    newest = null,
+                    endOfHistory = response.endOfHistory,
+                )
+            }
         }
     }
 
@@ -134,12 +164,12 @@ class HistoryResyncCoordinatorTest {
         processor.process(networkId, message("seed", 100))
         val source = FakeSource { request ->
             when (request.subcommand) {
-                ChatHistoryRequest.Subcommand.AFTER -> ChatHistoryResult(listOf(message("tail", 200)), emptyList())
-                ChatHistoryRequest.Subcommand.LATEST -> ChatHistoryResult(
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(listOf(message("tail", 200)), emptyList())
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
                     listOf(message("seed", 100), message("tail", 200)),
                     emptyList(),
                 )
-                else -> ChatHistoryResult(emptyList(), emptyList())
+                else -> FakeResponse(emptyList(), emptyList())
             }
         }
 
@@ -156,7 +186,7 @@ class HistoryResyncCoordinatorTest {
     @Test
     fun timestampBoundaryIsUsedWhenMsgidReferencesAreUnavailable() = runTest {
         processor.process(networkId, message("seed", 1_000))
-        val source = FakeSource(msgidRefs = false) { ChatHistoryResult(emptyList(), emptyList()) }
+        val source = FakeSource(msgidRefs = false) { FakeResponse(emptyList(), emptyList()) }
 
         coordinator.resyncBuffer(networkId, bufferId, "#chan", source)
 
@@ -166,7 +196,7 @@ class HistoryResyncCoordinatorTest {
     @Test
     fun timestampBoundaryRetainsMillisecondsWithExactlyThreeFractionalDigits() = runTest {
         processor.process(networkId, message("seed", 1_234))
-        val source = FakeSource(msgidRefs = false) { ChatHistoryResult(emptyList(), emptyList()) }
+        val source = FakeSource(msgidRefs = false) { FakeResponse(emptyList(), emptyList()) }
 
         coordinator.resyncBuffer(networkId, bufferId, "#chan", source)
 
@@ -176,7 +206,7 @@ class HistoryResyncCoordinatorTest {
     @Test
     fun emptyBoundaryUsesBoundedLatest() = runTest {
         val source = FakeSource { request ->
-            ChatHistoryResult(
+            FakeResponse(
                 events = if (request.subcommand == ChatHistoryRequest.Subcommand.LATEST) {
                     listOf(message("latest", 200))
                 } else emptyList(),
@@ -210,8 +240,8 @@ class HistoryResyncCoordinatorTest {
         val source = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS ->
-                    ChatHistoryResult(emptyList(), listOf(target to 400L))
-                ChatHistoryRequest.Subcommand.LATEST -> ChatHistoryResult(
+                    FakeResponse(emptyList(), listOf(target to 400L))
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
                     events = if (request.target == target) {
                         listOf(
                             push.copy(
@@ -223,7 +253,7 @@ class HistoryResyncCoordinatorTest {
                     },
                     targets = emptyList(),
                 )
-                else -> ChatHistoryResult(emptyList(), emptyList())
+                else -> FakeResponse(emptyList(), emptyList())
             }
         }
 
@@ -250,7 +280,7 @@ class HistoryResyncCoordinatorTest {
         processor.process(networkId, message("seed", 100))
         val source = FakeSource { request ->
             if (request.subcommand == ChatHistoryRequest.Subcommand.AFTER) throw IOException("bad selector")
-            ChatHistoryResult(listOf(message("recovered", 150)), emptyList())
+            FakeResponse(listOf(message("recovered", 150)), emptyList())
         }
 
         assertEquals(
@@ -269,12 +299,12 @@ class HistoryResyncCoordinatorTest {
         processor.process(networkId, message("newest", 300))
         val source = FakeSource { request ->
             when (request.subcommand) {
-                ChatHistoryRequest.Subcommand.AFTER -> ChatHistoryResult(emptyList(), emptyList())
-                ChatHistoryRequest.Subcommand.LATEST -> ChatHistoryResult(
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(emptyList(), emptyList())
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
                     listOf(message("old", 100), message("gap", 200), message("newest", 300)),
                     emptyList(),
                 )
-                else -> ChatHistoryResult(emptyList(), emptyList())
+                else -> FakeResponse(emptyList(), emptyList())
             }
         }
 
@@ -307,7 +337,7 @@ class HistoryResyncCoordinatorTest {
         try {
             val source = FakeSource { request ->
                 assertEquals(ChatHistoryRequest.Subcommand.LATEST, request.subcommand)
-                ChatHistoryResult(
+                FakeResponse(
                     events = listOf(
                         IrcEvent.ChatMessage(
                             ctx = MessageContext(
@@ -355,7 +385,7 @@ class HistoryResyncCoordinatorTest {
                 }
                 else -> emptyList()
             }
-            ChatHistoryResult(events, emptyList())
+            FakeResponse(events, emptyList())
         }
 
         assertEquals(
@@ -378,7 +408,7 @@ class HistoryResyncCoordinatorTest {
                 ChatHistoryRequest.Subcommand.BEFORE -> (3L..102L).map { message("m$it", it) }
                 else -> emptyList()
             }
-            ChatHistoryResult(events, emptyList())
+            FakeResponse(events, emptyList())
         }
 
         assertEquals(
@@ -400,12 +430,12 @@ class HistoryResyncCoordinatorTest {
         processor.process(networkId, message("seed", 100))
         val source = FakeSource { request ->
             when (request.subcommand) {
-                ChatHistoryRequest.Subcommand.TARGETS -> ChatHistoryResult(emptyList(), listOf("#new" to 500L))
-                ChatHistoryRequest.Subcommand.LATEST -> ChatHistoryResult(
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(emptyList(), listOf("#new" to 500L))
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
                     if (request.target == "#new") listOf(message("found", 500, "#new")) else emptyList(),
                     emptyList(),
                 )
-                else -> ChatHistoryResult(emptyList(), emptyList())
+                else -> FakeResponse(emptyList(), emptyList())
             }
         }
 
@@ -421,12 +451,12 @@ class HistoryResyncCoordinatorTest {
         db.bufferDao().deleteBuffer(bufferId)
         val source = FakeSource { request ->
             when (request.subcommand) {
-                ChatHistoryRequest.Subcommand.TARGETS -> ChatHistoryResult(emptyList(), listOf("#old" to 500L))
-                ChatHistoryRequest.Subcommand.LATEST -> ChatHistoryResult(
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(emptyList(), listOf("#old" to 500L))
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
                     if (request.target == "#old") listOf(message("retained", 500, "#old")) else emptyList(),
                     emptyList(),
                 )
-                else -> ChatHistoryResult(emptyList(), emptyList())
+                else -> FakeResponse(emptyList(), emptyList())
             }
         }
 
@@ -446,7 +476,7 @@ class HistoryResyncCoordinatorTest {
         val secondPageUpper = ChatHistorySelectors.timestamp(200)
         val source = FakeSource(pageLimit = 2) { request ->
             when (request.subcommand) {
-                ChatHistoryRequest.Subcommand.TARGETS -> ChatHistoryResult(
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
                     emptyList(),
                     if (request.bound1 == secondPageUpper) {
                         listOf("#oldest" to 100L)
@@ -463,12 +493,12 @@ class HistoryResyncCoordinatorTest {
                         "#oldest" -> 100L
                         else -> error("unexpected target ${request.target}")
                     }
-                    ChatHistoryResult(
+                    FakeResponse(
                         listOf(message("retained-${request.target}", time, request.target)),
                         emptyList(),
                     )
                 }
-                else -> ChatHistoryResult(emptyList(), emptyList())
+                else -> FakeResponse(emptyList(), emptyList())
             }
         }
 
@@ -512,11 +542,11 @@ class HistoryResyncCoordinatorTest {
         val source = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS ->
-                    ChatHistoryResult(emptyList(), listOf("#chan" to 1_000L))
-                ChatHistoryRequest.Subcommand.AFTER -> ChatHistoryResult(emptyList(), emptyList())
+                    FakeResponse(emptyList(), listOf("#chan" to 1_000L))
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(emptyList(), emptyList())
                 ChatHistoryRequest.Subcommand.LATEST ->
-                    ChatHistoryResult(listOf(message("retained", 500)), emptyList())
-                else -> ChatHistoryResult(emptyList(), emptyList())
+                    FakeResponse(listOf(message("retained", 500)), emptyList())
+                else -> FakeResponse(emptyList(), emptyList())
             }
         }
 
@@ -545,8 +575,8 @@ class HistoryResyncCoordinatorTest {
         val source = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS ->
-                    ChatHistoryResult(emptyList(), listOf("#chan" to (base + 300)))
-                ChatHistoryRequest.Subcommand.AFTER -> ChatHistoryResult(
+                    FakeResponse(emptyList(), listOf("#chan" to (base + 300)))
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(
                     events = if (request.bound1?.startsWith("timestamp=") == true) {
                         // Soju may overlap the already-delivered live line. Room must insert only
                         // the missed line and retain one copy of the live line by msgid.
@@ -556,7 +586,7 @@ class HistoryResyncCoordinatorTest {
                     },
                     targets = emptyList(),
                 )
-                else -> ChatHistoryResult(emptyList(), emptyList())
+                else -> FakeResponse(emptyList(), emptyList())
             }
         }
 
@@ -576,7 +606,7 @@ class HistoryResyncCoordinatorTest {
         val now = System.currentTimeMillis()
         val source = FakeSource { request ->
             assertEquals(ChatHistoryRequest.Subcommand.AFTER, request.subcommand)
-            ChatHistoryResult(listOf(message("recent", now - 1_000)), emptyList())
+            FakeResponse(listOf(message("recent", now - 1_000)), emptyList())
         }
 
         val result = coordinator.resyncBuffer(
@@ -612,7 +642,7 @@ class HistoryResyncCoordinatorTest {
                     listOf(message("m1", 1))
                 }
             }
-            ChatHistoryResult(response, emptyList())
+            FakeResponse(response, emptyList())
         }
 
         val result = coordinator.resyncBuffer(
@@ -630,7 +660,7 @@ class HistoryResyncCoordinatorTest {
 
     @Test
     fun unsupportedAndTimeoutAreExplicitRetryableResults() = runTest {
-        val unsupported = FakeSource(supported = false) { ChatHistoryResult(emptyList(), emptyList()) }
+        val unsupported = FakeSource(supported = false) { FakeResponse(emptyList(), emptyList()) }
         assertEquals(
             HistoryResyncState.Unsupported,
             coordinator.resyncBuffer(networkId, bufferId, "#chan", unsupported),
@@ -640,7 +670,7 @@ class HistoryResyncCoordinatorTest {
         coordinator.requestTimeoutMs = 5
         val slow = FakeSource {
             delay(100)
-            ChatHistoryResult(emptyList(), emptyList())
+            FakeResponse(emptyList(), emptyList())
         }
         val result = coordinator.resyncBuffer(networkId, bufferId, "#chan", slow)
         assertTrue(result is HistoryResyncState.Failed)
@@ -652,7 +682,7 @@ class HistoryResyncCoordinatorTest {
         var current = true
         val source = FakeSource {
             current = false
-            ChatHistoryResult(listOf(message("stale", 200)), emptyList())
+            FakeResponse(listOf(message("stale", 200)), emptyList())
         }
 
         val result = coordinator.resyncBuffer(
@@ -673,7 +703,7 @@ class HistoryResyncCoordinatorTest {
         val source = FakeSource {
             calls++
             delay(20)
-            ChatHistoryResult(emptyList(), emptyList())
+            FakeResponse(emptyList(), emptyList())
         }
 
         val results = coroutineScope {
@@ -696,10 +726,10 @@ class HistoryResyncCoordinatorTest {
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.AFTER -> {
                     afterPage++
-                    ChatHistoryResult(if (afterPage == 1) full else listOf(message("last", 102)), emptyList())
+                    FakeResponse(if (afterPage == 1) full else listOf(message("last", 102)), emptyList())
                 }
-                ChatHistoryRequest.Subcommand.LATEST -> ChatHistoryResult(listOf(message("last", 102)), emptyList())
-                else -> ChatHistoryResult(emptyList(), emptyList())
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(listOf(message("last", 102)), emptyList())
+                else -> FakeResponse(emptyList(), emptyList())
             }
         }
 

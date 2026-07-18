@@ -11,7 +11,9 @@ import io.github.trevarj.motd.data.sync.CanonicalHistorySingleFlight
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
-import io.github.trevarj.motd.irc.client.ChatHistoryResult
+import io.github.trevarj.motd.irc.client.ChatHistoryResponse
+import io.github.trevarj.motd.irc.client.HistoryAvailability
+import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
@@ -100,10 +102,8 @@ class HistoryResyncCoordinator @Inject constructor(
     private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
 ) : HistoryResyncController {
     internal interface HistorySource {
-        fun hasChatHistory(): Boolean
-        fun supportsMsgidReferences(): Boolean
-        fun pageLimit(): Int = 100
-        suspend fun chathistory(request: ChatHistoryRequest): ChatHistoryResult
+        fun availability(): HistoryAvailability
+        suspend fun chathistory(request: ChatHistoryRequest): ChatHistoryResponse
     }
 
     private data class RequestKey(val networkId: Long, val bufferId: Long?)
@@ -178,11 +178,15 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         isCurrent: () -> Boolean = { true },
     ): HistoryResyncState {
-        if (!source.hasChatHistory()) return HistoryResyncState.Unsupported
+        when (source.availability()) {
+            HistoryAvailability.Unsupported -> return HistoryResyncState.Unsupported
+            HistoryAvailability.NegotiatingOrOffline -> return historyUnavailable()
+            is HistoryAvailability.Ready -> Unit
+        }
         if (!isCurrent()) return staleConnection()
         val before = messageCount(bufferId)
         return try {
-            val latest = withTimeout(PENDING_MESSAGE_TIMEOUT_MS) {
+            val response = withTimeout(PENDING_MESSAGE_TIMEOUT_MS) {
                 source.chathistory(
                     ChatHistoryRequest(
                         subcommand = ChatHistoryRequest.Subcommand.LATEST,
@@ -191,6 +195,8 @@ class HistoryResyncCoordinator @Inject constructor(
                     ),
                 )
             }
+            val latest = response as? ChatHistoryResponse.Messages
+                ?: error("CHATHISTORY LATEST returned a TARGETS response")
             if (!isCurrent()) return staleConnection()
             if (latest.events.isNotEmpty()) {
                 processor.process(networkId, IrcEvent.HistoryBatch(target, latest.events))
@@ -226,7 +232,7 @@ class HistoryResyncCoordinator @Inject constructor(
             )
         }
         val source = ClientHistorySource(client)
-        if (!source.hasChatHistory()) {
+        if (source.availability() !is HistoryAvailability.Ready) {
             if (publishState) {
                 states.update { it + (buffer.id to HistoryResyncState.WaitingForCapability) }
             }
@@ -290,7 +296,11 @@ class HistoryResyncCoordinator @Inject constructor(
         diagnostics.record("history", "network_sync_started") {
             mapOf("network_id" to networkId, "open_buffers" to openBuffers.size)
         }
-        if (!source.hasChatHistory()) return@coalesced HistoryResyncState.Unsupported
+        when (source.availability()) {
+            HistoryAvailability.Unsupported -> return@coalesced HistoryResyncState.Unsupported
+            HistoryAvailability.NegotiatingOrOffline -> return@coalesced historyUnavailable()
+            is HistoryAvailability.Ready -> Unit
+        }
         // A room row's newest message is not a reliable reconnect cursor: a newer push-delivered
         // message in one buffer can otherwise hide an older missed message in another. Advance a
         // dedicated cursor only after a whole network pass has completed.
@@ -357,7 +367,7 @@ class HistoryResyncCoordinator @Inject constructor(
         val targets = LinkedHashMap<String, String>()
         var pageUpper = upper
         while (true) {
-            val page = request(
+            val page = requestTargets(
                 source,
                 ChatHistoryRequest(
                     subcommand = ChatHistoryRequest.Subcommand.TARGETS,
@@ -367,10 +377,10 @@ class HistoryResyncCoordinator @Inject constructor(
                     limit = limit,
                 ),
             ).targets
-            page.forEach { (target, _) -> targets.putIfAbsent(target.lowercase(), target) }
+            page.forEach { target -> targets.putIfAbsent(target.name.lowercase(), target.name) }
             if (page.size < limit) break
 
-            val nextUpper = page.minOf { (_, latestMessageTime) -> latestMessageTime }
+            val nextUpper = page.minOf { it.latestMessageTime }
             if (nextUpper <= lower) break
             check(nextUpper < pageUpper) {
                 "CHATHISTORY TARGETS pagination did not advance"
@@ -426,7 +436,11 @@ class HistoryResyncCoordinator @Inject constructor(
         range: HistoryRefreshRange,
         healSparseGaps: Boolean,
     ): HistoryResyncState {
-        if (!source.hasChatHistory()) return HistoryResyncState.Unsupported
+        when (source.availability()) {
+            HistoryAvailability.Unsupported -> return HistoryResyncState.Unsupported
+            HistoryAvailability.NegotiatingOrOffline -> return historyUnavailable()
+            is HistoryAvailability.Ready -> Unit
+        }
         if (!isCurrent()) return staleConnection()
         val before = messageCount(bufferId)
         return try {
@@ -552,7 +566,11 @@ class HistoryResyncCoordinator @Inject constructor(
         reconnectBoundary: Boundary?,
         includeRecentOverlap: Boolean,
     ): HistoryResyncState {
-        if (!source.hasChatHistory()) return HistoryResyncState.Unsupported
+        when (source.availability()) {
+            HistoryAvailability.Unsupported -> return HistoryResyncState.Unsupported
+            HistoryAvailability.NegotiatingOrOffline -> return historyUnavailable()
+            is HistoryAvailability.Ready -> Unit
+        }
         if (!isCurrent()) return staleConnection()
         return try {
             var inserted = 0
@@ -645,7 +663,7 @@ class HistoryResyncCoordinator @Inject constructor(
             }
         }
 
-        var latestPage: ChatHistoryResult? = null
+        var latestPage: ChatHistoryResponse.Messages? = null
         if (boundary == null || afterRejected || includeRecentOverlap || lacksStoredChat) {
             val latest = request(
                 source,
@@ -746,8 +764,33 @@ class HistoryResyncCoordinator @Inject constructor(
         }
     }
 
-    private suspend fun request(source: HistorySource, request: ChatHistoryRequest): ChatHistoryResult =
-        withTimeout(requestTimeoutMs) { source.chathistory(request) }
+    private suspend fun request(
+        source: HistorySource,
+        request: ChatHistoryRequest,
+    ): ChatHistoryResponse.Messages {
+        val response = withTimeout(requestTimeoutMs) { source.chathistory(request) }
+        return response as? ChatHistoryResponse.Messages
+            ?: error("CHATHISTORY ${request.subcommand} returned a TARGETS response")
+    }
+
+    private suspend fun requestTargets(
+        source: HistorySource,
+        request: ChatHistoryRequest,
+    ): ChatHistoryResponse.Targets {
+        val response = withTimeout(requestTimeoutMs) { source.chathistory(request) }
+        return response as? ChatHistoryResponse.Targets
+            ?: error("CHATHISTORY TARGETS returned a message response")
+    }
+
+    private fun HistorySource.pageLimit(): Int =
+        ((availability() as? HistoryAvailability.Ready)?.pageLimit ?: PAGE_LIMIT)
+            .coerceAtMost(PAGE_LIMIT)
+            .coerceAtLeast(1)
+
+    private fun HistorySource.supportsMsgidReferences(): Boolean =
+        (availability() as? HistoryAvailability.Ready)
+            ?.referenceTypes
+            ?.contains(HistoryReferenceType.MSGID) == true
 
     private suspend fun latestBoundary(bufferId: Long): Boundary? =
         db.messageDao().latestBoundary(bufferId)?.let { Boundary(it.msgid, it.serverTime) }
@@ -805,38 +848,32 @@ class HistoryResyncCoordinator @Inject constructor(
         client: IrcClient,
         isCurrent: () -> Boolean,
     ): CapabilityAvailability {
-        if (client.hasCap(CHATHISTORY_CAP)) return CapabilityAvailability.AVAILABLE
+        if (client.historyAvailability is HistoryAvailability.Ready) return CapabilityAvailability.AVAILABLE
         val role = db.networkDao().byId(networkId)?.role
-        if (role != NetworkRole.BOUNCER_CHILD) return CapabilityAvailability.UNSUPPORTED
+        if (role != NetworkRole.BOUNCER_CHILD) {
+            return if (client.historyAvailability is HistoryAvailability.Unsupported) {
+                CapabilityAvailability.UNSUPPORTED
+            } else {
+                CapabilityAvailability.PENDING
+            }
+        }
         val ready = withTimeoutOrNull(CAPABILITY_WAIT_TIMEOUT_MS) {
             client.state.filterIsInstance<IrcClientState.Ready>().first { snapshot ->
-                snapshot.caps.any { it == CHATHISTORY_CAP || it.startsWith("$CHATHISTORY_CAP=") }
+                snapshot.caps.any { it == CHATHISTORY_CAP || it.startsWith("$CHATHISTORY_CAP=") } &&
+                    client.historyAvailability is HistoryAvailability.Ready
             }
         }
         return when {
             !isCurrent() -> CapabilityAvailability.PENDING
-            ready != null || client.hasCap(CHATHISTORY_CAP) -> CapabilityAvailability.AVAILABLE
+            ready != null || client.historyAvailability is HistoryAvailability.Ready -> CapabilityAvailability.AVAILABLE
             else -> CapabilityAvailability.PENDING
         }
     }
 
     private class ClientHistorySource(private val client: IrcClient) : HistorySource {
-        override fun hasChatHistory(): Boolean = client.hasCap(CHATHISTORY_CAP)
+        override fun availability(): HistoryAvailability = client.historyAvailability
 
-        override fun supportsMsgidReferences(): Boolean =
-            client.isupport["MSGREFTYPES"]
-                ?.split(',', ' ')
-                ?.any { it.equals("msgid", ignoreCase = true) }
-                // IRCv3 requires clients to assume timestamp and msgid when MSGREFTYPES is absent.
-                ?: true
-
-        override fun pageLimit(): Int = client.isupport["CHATHISTORY"]
-            ?.toIntOrNull()
-            ?.takeIf { it > 0 }
-            ?.coerceAtMost(PAGE_LIMIT)
-            ?: PAGE_LIMIT
-
-        override suspend fun chathistory(request: ChatHistoryRequest): ChatHistoryResult =
+        override suspend fun chathistory(request: ChatHistoryRequest): ChatHistoryResponse =
             client.chathistory(request)
     }
 
@@ -844,6 +881,9 @@ class HistoryResyncCoordinator @Inject constructor(
 
     private fun staleConnection(): HistoryResyncState.Failed =
         HistoryResyncState.Failed("Connection changed; try again")
+
+    private fun historyUnavailable(): HistoryResyncState.Failed =
+        HistoryResyncState.Failed("History support is still negotiating or the connection is offline")
 
     private companion object {
         const val CHATHISTORY_CAP = "draft/chathistory"

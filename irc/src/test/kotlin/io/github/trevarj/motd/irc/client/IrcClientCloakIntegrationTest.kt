@@ -58,7 +58,7 @@ class IrcClientCloakIntegrationTest {
             scope = scope,
         )
         val cloakEvents = CopyOnWriteArrayList<IrcEvent>()
-        val cloakRecorder = scope.launch { cloaked.events.collect(cloakEvents::add) }
+        val cloakRecorder = scope.launch { cloaked.broadcastEvents.collect(cloakEvents::add) }
         try {
             cloaked.start()
             direct.start()
@@ -72,7 +72,7 @@ class IrcClientCloakIntegrationTest {
 
             val directJoined = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(TIMEOUT_MS) {
-                    direct.events.filterIsInstance<IrcEvent.Joined>()
+                    direct.broadcastEvents.filterIsInstance<IrcEvent.Joined>()
                         .first { it.channel == CHANNEL && it.isSelf }
                 }
             }
@@ -82,7 +82,7 @@ class IrcClientCloakIntegrationTest {
             val inboundText = "cloak-inbound-$suffix"
             val inbound = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(TIMEOUT_MS) {
-                    cloaked.events.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == inboundText }
+                    cloaked.broadcastEvents.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == inboundText }
                 }
             }
             direct.sendMessage(CHANNEL, inboundText, null)
@@ -91,7 +91,7 @@ class IrcClientCloakIntegrationTest {
             val outboundText = "cloak-outbound-$suffix"
             val outbound = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(TIMEOUT_MS) {
-                    direct.events.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == outboundText }
+                    direct.broadcastEvents.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == outboundText }
                 }
             }
             cloaked.sendMessage(CHANNEL, outboundText, null)
@@ -106,7 +106,7 @@ class IrcClientCloakIntegrationTest {
 
             val replay = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(TIMEOUT_MS) {
-                    cloaked.events.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == gapText }
+                    cloaked.broadcastEvents.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == gapText }
                 }
             }
             cloaked.start()

@@ -36,8 +36,8 @@ class IrcInteroperabilityIntegrationTest {
         val b = client("motdib$suffix", port, scope)
         val aEvents = java.util.concurrent.CopyOnWriteArrayList<IrcEvent>()
         val bEvents = java.util.concurrent.CopyOnWriteArrayList<IrcEvent>()
-        val aRecorder = scope.launch { a.events.collect(aEvents::add) }
-        val bRecorder = scope.launch { b.events.collect(bEvents::add) }
+        val aRecorder = scope.launch { a.broadcastEvents.collect(aEvents::add) }
+        val bRecorder = scope.launch { b.broadcastEvents.collect(bEvents::add) }
         try {
             a.start()
             b.start()
@@ -46,12 +46,12 @@ class IrcInteroperabilityIntegrationTest {
 
             val aJoined = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(TIMEOUT_MS) {
-                    a.events.filterIsInstance<IrcEvent.Joined>().first { it.channel == CHANNEL && it.isSelf }
+                    a.broadcastEvents.filterIsInstance<IrcEvent.Joined>().first { it.channel == CHANNEL && it.isSelf }
                 }
             }
             val bJoined = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(TIMEOUT_MS) {
-                    b.events.filterIsInstance<IrcEvent.Joined>().first { it.channel == CHANNEL && it.isSelf }
+                    b.broadcastEvents.filterIsInstance<IrcEvent.Joined>().first { it.channel == CHANNEL && it.isSelf }
                 }
             }
             a.send(IrcMessage(command = "JOIN", params = listOf(CHANNEL)))
@@ -62,7 +62,7 @@ class IrcInteroperabilityIntegrationTest {
             val parentText = "motd interop parent ${sequence.incrementAndGet()} $suffix"
             val parentArrival = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(TIMEOUT_MS) {
-                    b.events.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == parentText }
+                    b.broadcastEvents.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == parentText }
                 }
             }
             a.sendMessage(CHANNEL, parentText, null)
@@ -73,7 +73,7 @@ class IrcInteroperabilityIntegrationTest {
             val replyText = "motd interop reply ${sequence.incrementAndGet()} $suffix"
             val replyArrival = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeoutOrNull(TIMEOUT_MS) {
-                    a.events.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == replyText }
+                    a.broadcastEvents.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == replyText }
                 }
             }
             b.sendMessage(CHANNEL, replyText, parentMsgid)
@@ -83,7 +83,7 @@ class IrcInteroperabilityIntegrationTest {
 
             val reactArrival = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeout(TIMEOUT_MS) {
-                    a.events.filterIsInstance<IrcEvent.TagMessage>().first {
+                    a.broadcastEvents.filterIsInstance<IrcEvent.TagMessage>().first {
                         it.reactEmoji == "👍" && it.reactTargetMsgid == parentMsgid
                     }
                 }
@@ -93,7 +93,7 @@ class IrcInteroperabilityIntegrationTest {
 
             val unreactArrival = async(start = CoroutineStart.UNDISPATCHED) {
                 withTimeoutOrNull(TIMEOUT_MS) {
-                    a.events.filterIsInstance<IrcEvent.Raw>().first {
+                    a.broadcastEvents.filterIsInstance<IrcEvent.Raw>().first {
                         it.message.tags["+draft/unreact"] == "👍" &&
                             (it.message.tags["+reply"] ?: it.message.tags["+draft/reply"]) == parentMsgid
                     }
@@ -114,7 +114,7 @@ class IrcInteroperabilityIntegrationTest {
 
             val replay = a.chathistory(
                 ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, CHANNEL, limit = 50),
-            )
+            ) as ChatHistoryResponse.Messages
             assertEquals(
                 parentMsgid,
                 replay.events.filterIsInstance<IrcEvent.ChatMessage>()

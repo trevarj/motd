@@ -33,6 +33,8 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
+import io.github.trevarj.motd.irc.client.ChatHistoryResponse
+import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcEvent
@@ -755,17 +757,18 @@ class ChatViewModel @Inject constructor(
         fetchAround = fetch@ { name, timeMs, limit ->
             val networkId = state.value.buffer?.networkId ?: return@fetch false
             val client = connectionManager.clientFor(networkId) ?: return@fetch false
-            if (!client.hasCap("draft/chathistory")) return@fetch false
+            val availability = client.historyAvailability as? HistoryAvailability.Ready
+                ?: return@fetch false
             val result = runCatching {
                 client.chathistory(
                     ChatHistoryRequest(
                         subcommand = ChatHistoryRequest.Subcommand.AROUND,
                         target = name,
                         bound1 = ChatHistorySelectors.timestamp(timeMs),
-                        limit = limit,
+                        limit = minOf(limit, availability.pageLimit),
                     ),
                 )
-            }.getOrNull() ?: return@fetch false
+            }.getOrNull() as? ChatHistoryResponse.Messages ?: return@fetch false
             if (result.events.isEmpty()) return@fetch false
             eventSink.process(networkId, IrcEvent.HistoryBatch(name, result.events))
             true

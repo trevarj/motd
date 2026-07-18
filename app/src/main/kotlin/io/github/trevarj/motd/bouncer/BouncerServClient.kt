@@ -56,7 +56,7 @@ class ConnectionBouncerServSessionProvider @Inject constructor(
         val client = connections.clientFor(rootNetworkId) ?: return null
         return BouncerServSession(
             token = client,
-            events = client.events,
+            events = client.broadcastEvents,
             send = { wire ->
                 val bufferId = connections.ensureQueryBuffer(rootNetworkId, SERVICE_NICK)
                 connections.sendMessage(bufferId, wire)
