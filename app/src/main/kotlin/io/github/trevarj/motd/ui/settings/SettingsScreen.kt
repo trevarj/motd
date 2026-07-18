@@ -1,6 +1,11 @@
 package io.github.trevarj.motd.ui.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,6 +62,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.about.appVersion
+import io.github.trevarj.motd.ui.theme.MotdMotion
 
 /**
  * Top-level Settings screen: a short list of category rows that each open a focused sub-screen. The
@@ -75,20 +81,47 @@ fun SettingsScreen(
 ) {
     var localPage by rememberSaveable { mutableStateOf(SettingsLocalPage.ROOT) }
     BackHandler(enabled = localPage != SettingsLocalPage.ROOT) { localPage = SettingsLocalPage.ROOT }
-    if (localPage == SettingsLocalPage.UPLOADS) {
-        SettingsScaffold(title = stringResource(R.string.settings_uploads), onBack = { localPage = SettingsLocalPage.ROOT }) {
-            UploadsSettingsContent()
+    // Uploads is local to Settings, so mirror NavHost's shared-axis transition here instead of
+    // swapping the two scaffolds abruptly.
+    AnimatedContent(
+        targetState = localPage,
+        modifier = Modifier.testTag("settings_local_page"),
+        transitionSpec = {
+            if (targetState == SettingsLocalPage.UPLOADS) {
+                slideInHorizontally(
+                    animationSpec = tween(MotdMotion.NavigationDurationMs),
+                    initialOffsetX = { it },
+                ) togetherWith slideOutHorizontally(
+                    animationSpec = tween(MotdMotion.NavigationDurationMs),
+                    targetOffsetX = { -it },
+                )
+            } else {
+                slideInHorizontally(
+                    animationSpec = tween(MotdMotion.NavigationDurationMs),
+                    initialOffsetX = { -it },
+                ) togetherWith slideOutHorizontally(
+                    animationSpec = tween(MotdMotion.NavigationDurationMs),
+                    targetOffsetX = { it },
+                )
+            }
+        },
+        label = "settings_local_page",
+    ) { page ->
+        if (page == SettingsLocalPage.UPLOADS) {
+            SettingsScaffold(title = stringResource(R.string.settings_uploads), onBack = { localPage = SettingsLocalPage.ROOT }) {
+                UploadsSettingsContent()
+            }
+        } else {
+            SettingsContent(
+                onBack = onBack,
+                onOpenAppearance = onOpenAppearance,
+                onOpenChat = onOpenChat,
+                onOpenDelivery = onOpenDelivery,
+                onOpenNetworks = onOpenNetworks,
+                onOpenUploads = { localPage = SettingsLocalPage.UPLOADS },
+                onOpenAbout = onOpenAbout,
+            )
         }
-    } else {
-        SettingsContent(
-            onBack = onBack,
-            onOpenAppearance = onOpenAppearance,
-            onOpenChat = onOpenChat,
-            onOpenDelivery = onOpenDelivery,
-            onOpenNetworks = onOpenNetworks,
-            onOpenUploads = { localPage = SettingsLocalPage.UPLOADS },
-            onOpenAbout = onOpenAbout,
-        )
     }
 }
 
