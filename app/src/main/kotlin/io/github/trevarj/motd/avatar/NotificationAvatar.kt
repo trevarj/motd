@@ -9,6 +9,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import androidx.core.graphics.ColorUtils
+import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.IconCompat
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 
@@ -26,7 +27,7 @@ internal fun notificationAvatarBitmap(context: Context, name: String, style: Ava
     val dark = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
         Configuration.UI_MODE_NIGHT_YES
     val accent = notificationNickColor(name, dark)
-    return Bitmap.createBitmap(AVATAR_SIZE_PX, AVATAR_SIZE_PX, Bitmap.Config.ARGB_8888).also { bitmap ->
+    return createBitmap(AVATAR_SIZE_PX, AVATAR_SIZE_PX).also { bitmap ->
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         when (style) {
