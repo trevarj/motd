@@ -316,7 +316,7 @@ private fun ChannelHeader(
                         text = topic,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f, fill = false),
+                        modifier = Modifier.weight(1f, fill = false).testTag("channelinfo_topic"),
                     )
                 }
                 IconButton(onClick = onEditTopic) {

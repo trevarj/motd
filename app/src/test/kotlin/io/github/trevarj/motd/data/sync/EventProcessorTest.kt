@@ -87,6 +87,21 @@ class EventProcessorTest {
     }
 
     @Test
+    fun topicSnapshot_updatesChannelTopic_withoutAddingTimelineEntry() = runTest {
+        processor.process(networkId, IrcEvent.TopicSnapshot("#Room", "Welcome to the room"))
+
+        val buffer = db.bufferDao().byName(networkId, "#room")!!
+        assertEquals("Welcome to the room", buffer.topic)
+        assertNull(buffer.topicSetBy)
+        assertTrue(pagingList(buffer.id).isEmpty())
+
+        processor.process(networkId, IrcEvent.TopicSnapshot("#Room", ""))
+
+        assertEquals("", db.bufferDao().byName(networkId, "#room")!!.topic)
+        assertTrue(pagingList(buffer.id).isEmpty())
+    }
+
+    @Test
     fun chatMessage_dm_autoCreatesQueryBuffer_keyedBySender() = runTest {
         processor.process(networkId, IrcEvent.ChatMessage(
             ctx = ctx(msgid = "m2"), kind = IrcEvent.ChatKind.PRIVMSG,

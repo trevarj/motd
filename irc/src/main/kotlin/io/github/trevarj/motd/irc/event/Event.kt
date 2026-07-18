@@ -97,6 +97,8 @@ sealed interface IrcEvent {
 
     // -- channel state
     data class TopicChanged(val ctx: MessageContext, val channel: String, val topic: String, val setBy: String?) : IrcEvent
+    /** Current channel topic supplied by RPL_TOPIC/RPL_NOTOPIC; this is state, not a timeline event. */
+    data class TopicSnapshot(val channel: String, val topic: String) : IrcEvent
     data class ModeChanged(val ctx: MessageContext, val target: String, val modes: String, val args: List<String>) : IrcEvent
     data class Invited(val ctx: MessageContext, val by: String, val nick: String, val channel: String) : IrcEvent
 

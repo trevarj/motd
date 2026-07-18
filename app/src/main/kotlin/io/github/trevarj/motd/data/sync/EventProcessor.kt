@@ -238,6 +238,7 @@ class EventProcessor @Inject constructor(
             is IrcEvent.NickChanged -> if (origin == EventOrigin.LIVE) onNickChanged(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalNickChanged(networkId, event, historyTarget)
             is IrcEvent.NamesStarted -> if (origin.mutatesSessionState) onNamesStarted(networkId, event)
             is IrcEvent.Names -> if (origin.mutatesSessionState) onNames(networkId, event)
+            is IrcEvent.TopicSnapshot -> if (origin.mutatesSessionState) onTopicSnapshot(networkId, event)
             is IrcEvent.TopicChanged -> when (origin) {
                 EventOrigin.LIVE -> onTopicChanged(networkId, event)
                 EventOrigin.HISTORY -> onHistoricalTopicChanged(networkId, event)
@@ -1087,6 +1088,14 @@ class EventProcessor @Inject constructor(
             ?: ensureBufferEntity(networkId, e.channel, BufferType.CHANNEL, st)
         bufferDao.setTopic(buffer.id, e.topic, e.setBy)
         insertSystem(buffer.id, e.ctx, MessageKind.TOPIC, e.setBy ?: "", "topic: ${e.topic}")
+    }
+
+    /** Persist the 331/332 topic state received during JOIN without adding a fake topic change. */
+    private suspend fun onTopicSnapshot(networkId: Long, e: IrcEvent.TopicSnapshot) {
+        val st = stateFor(networkId)
+        val buffer = bufferDao.byName(networkId, st.normalize(e.channel))
+            ?: ensureBufferEntity(networkId, e.channel, BufferType.CHANNEL, st)
+        bufferDao.setTopic(buffer.id, e.topic, setBy = null)
     }
 
     private suspend fun onHistoricalTopicChanged(networkId: Long, e: IrcEvent.TopicChanged) {

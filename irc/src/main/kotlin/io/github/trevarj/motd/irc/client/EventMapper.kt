@@ -96,6 +96,7 @@ class EventMapper(
                 val channel = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
                 IrcEvent.TopicChanged(c(), channel, msg.params.getOrNull(1).orEmpty(), msg.source?.nick)
             }
+            "331", "332" -> mapTopicSnapshot(msg)
             "MODE" -> {
                 val target = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
                 val modes = msg.params.getOrNull(1).orEmpty()
@@ -301,6 +302,15 @@ class EventMapper(
         val realname = msg.params.getOrNull(7)
         val account = accountRaw?.takeUnless { it == "0" || it == "*" }
         return IrcEvent.WhoxRow(token, username, host, nick, account, flags, realname)
+    }
+
+    /** Map initial TOPIC replies without turning the join-time snapshot into a timeline event. */
+    private fun mapTopicSnapshot(msg: IrcMessage): IrcEvent {
+        // 331: <nick> <channel> :No topic is set
+        // 332: <nick> <channel> :<topic>
+        val channel = msg.params.getOrNull(1) ?: return IrcEvent.Raw(msg)
+        val topic = if (msg.command == "331") "" else msg.params.getOrNull(2) ?: return IrcEvent.Raw(msg)
+        return IrcEvent.TopicSnapshot(channel, topic)
     }
 
     private fun mapNumericOrRaw(msg: IrcMessage): IrcEvent {
