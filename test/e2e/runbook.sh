@@ -373,6 +373,15 @@ phase_c() {
   echo ""
   echo "${_C_CYA}########## Phase C: join channel & chat ##########${_C_RST}"
 
+  # Message action sheets are separate Compose windows. Re-anchor through the
+  # chat list after each action so an unavailable sheet control cannot leave
+  # the following action interacting with an overlay or BACK out of the app.
+  reopen_seed_chat() {
+    reset_to_chatlist || return 1
+    tap_tag_prefix_containing_text chatlist_row_ "$MOTD_TEST_CHANNEL" || return 1
+    wait_for_desc "Search" 8 || true
+  }
+
   # 17. New conversation sheet.
   step "Open new-conversation sheet"
   tap_desc "New conversation"
@@ -467,6 +476,7 @@ phase_c() {
     note "reaction quick-row not detected"
   fi
   assert_no_crash
+  reopen_seed_chat
 
   # 25. More reactions.
   step "More reactions grid"
@@ -478,10 +488,10 @@ phase_c() {
     tap_desc "More reactions"
     note "opened more-reactions grid"
   else
-    note "more-reactions control not detected; dismissing"
-    adb_shell input keyevent 4
+    note "more-reactions control not detected"
   fi
   assert_no_crash
+  reopen_seed_chat
 
   # 26. Reply.
   step "Reply bar"
@@ -497,6 +507,7 @@ phase_c() {
     note "Reply action not detected"
   fi
   assert_no_crash
+  reopen_seed_chat
 
   # 27. Copy / Quote.
   step "Copy action (no crash)"
@@ -506,10 +517,10 @@ phase_c() {
     tap_text "Copy"                      # clipboard is not asserted through UI
     ok "Copy tapped"
   else
-    note "Copy action not detected; dismissing"
-    adb_shell input keyevent 4
+    note "Copy action not detected"
   fi
   assert_no_crash
+  reopen_seed_chat
 
   # 28. Scroll-to-bottom FAB.
   step "Scroll-to-bottom FAB"
