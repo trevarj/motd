@@ -382,9 +382,15 @@ phase_c() {
 
   # 18. Join seed channel.
   step "Join seed channel ${MOTD_TEST_CHANNEL}"
-  tap_tag new_conversation_join_tab
-  input_tag new_conversation_input "$MOTD_TEST_CHANNEL"
-  tap_tag new_conversation_submit
+  # ModalBottomSheet has its own Compose window. UIAutomator can read its visible
+  # labels but does not export its testTags as resource ids, so do not use the
+  # otherwise-preferred tag selectors here.
+  # The join field supplies the first '#'; enter one fewer prefix so the default
+  # ##motdtest fixture reaches the intended double-hash channel.
+  local join_input="${MOTD_TEST_CHANNEL#\#}"
+  tap_text "Join channel"
+  input_by_text_label "Channel name" "$join_input"
+  tap_text "Join"
   wait_for_text "$MOTD_TEST_CHANNEL" 15 || true
   assert_text "$MOTD_TEST_CHANNEL"
   assert_no_crash
