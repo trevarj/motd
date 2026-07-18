@@ -13,11 +13,11 @@ import org.robolectric.RobolectricTestRunner
 class AppearancePrefsTest {
     private val prefs: AppearancePrefs = AppearancePrefsImpl(ApplicationProvider.getApplicationContext<Context>())
 
-    @Test fun defaults_areSystemAndChatterAtForty() {
+    @Test fun defaults_areSystemAndChatterAtEighty() {
         assertEquals(
             AppearanceConfig(
                 ColorThemePreset.SYSTEM,
-                WallpaperSelection(ChatWallpaperPreset.CHATTER, 40),
+                WallpaperSelection(ChatWallpaperPreset.CHATTER, 80),
                 100,
                 100,
             ),
