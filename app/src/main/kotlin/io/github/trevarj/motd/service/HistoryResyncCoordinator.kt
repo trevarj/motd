@@ -127,7 +127,14 @@ class HistoryResyncCoordinator @Inject constructor(
         client: IrcClient,
         isCurrent: () -> Boolean,
         range: HistoryRefreshRange,
-    ): HistoryResyncState = resyncBuffer(buffer, client, isCurrent, range, publishState = true)
+    ): HistoryResyncState = resyncBuffer(
+        buffer,
+        client,
+        isCurrent,
+        range,
+        publishState = true,
+        healSparseGaps = true,
+    )
 
     /**
      * Reconcile a visible chat without exposing manual-refresh progress or result snackbars. The
@@ -143,6 +150,7 @@ class HistoryResyncCoordinator @Inject constructor(
         isCurrent,
         HistoryRefreshRange.MISSING,
         publishState = false,
+        healSparseGaps = false,
     )
 
     override suspend fun reconcilePendingMessage(
@@ -208,6 +216,7 @@ class HistoryResyncCoordinator @Inject constructor(
         isCurrent: () -> Boolean,
         range: HistoryRefreshRange,
         publishState: Boolean,
+        healSparseGaps: Boolean,
     ): HistoryResyncState {
         diagnostics.record("history", "buffer_sync_requested") {
             mapOf(
@@ -247,6 +256,7 @@ class HistoryResyncCoordinator @Inject constructor(
                 source = source,
                 isCurrent = isCurrent,
                 range = range,
+                healSparseGaps = healSparseGaps,
             )
         }
         if (publishState) states.update { it + (buffer.id to result) }
@@ -378,7 +388,33 @@ class HistoryResyncCoordinator @Inject constructor(
         isCurrent: () -> Boolean = { true },
         range: HistoryRefreshRange = HistoryRefreshRange.MISSING,
     ): HistoryResyncState = coalesced(RequestKey(networkId, bufferId)) {
-        syncBufferRange(networkId, bufferId, target, source, isCurrent, range)
+        syncBufferRange(
+            networkId,
+            bufferId,
+            target,
+            source,
+            isCurrent,
+            range,
+            healSparseGaps = true,
+        )
+    }
+
+    internal suspend fun reconcileBuffer(
+        networkId: Long,
+        bufferId: Long,
+        target: String,
+        source: HistorySource,
+        isCurrent: () -> Boolean = { true },
+    ): HistoryResyncState = coalesced(RequestKey(networkId, bufferId)) {
+        syncBufferRange(
+            networkId,
+            bufferId,
+            target,
+            source,
+            isCurrent,
+            HistoryRefreshRange.MISSING,
+            healSparseGaps = false,
+        )
     }
 
     private suspend fun syncBufferRange(
@@ -388,6 +424,7 @@ class HistoryResyncCoordinator @Inject constructor(
         source: HistorySource,
         isCurrent: () -> Boolean,
         range: HistoryRefreshRange,
+        healSparseGaps: Boolean,
     ): HistoryResyncState {
         if (!source.hasChatHistory()) return HistoryResyncState.Unsupported
         if (!isCurrent()) return staleConnection()
@@ -401,7 +438,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     source,
                     isCurrent,
                     includeRecentOverlap = true,
-                    healSparseGaps = true,
+                    healSparseGaps = healSparseGaps,
                 )
                 HistoryRefreshRange.HOURS_24,
                 HistoryRefreshRange.DAYS_7,
@@ -624,9 +661,11 @@ class HistoryResyncCoordinator @Inject constructor(
 
         // A newest-page overlap catches small holes but cannot repair a sparse timeline whose
         // newest and oldest rows survived while more than one server page vanished locally. Only
-        // explicit/visible-buffer MISSING reconciliation performs this bounded backward walk;
-        // normal reconnect sync keeps its existing request pattern. Stop at overlap, a short page,
-        // or strict request/message caps so an unusual server cannot trigger unbounded traffic.
+        // explicit MISSING reconciliation performs this bounded backward walk. Automatic
+        // visible-buffer and reconnect reconciliation stop at the newest-page overlap so merely
+        // reopening a chat cannot import hundreds of older retained messages. Stop at overlap, a
+        // short page, or strict request/message caps so an unusual server cannot trigger
+        // unbounded traffic.
         val overlap = latestPage
         var backwardBoundary = overlap?.events?.let { pageBoundary(it, newest = false) }
         var previousPageSize = overlap?.events?.size ?: 0

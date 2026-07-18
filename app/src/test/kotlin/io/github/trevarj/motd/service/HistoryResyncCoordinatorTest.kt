@@ -368,6 +368,34 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun reopeningVisibleBufferDoesNotWalkBackwardIntoOldSparseHistory() = runTest {
+        processor.process(networkId, message("m1", 1))
+        (103L..202L).forEach { processor.process(networkId, message("m$it", it)) }
+        val source = FakeSource(pageLimit = 100) { request ->
+            val events = when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.AFTER -> emptyList()
+                ChatHistoryRequest.Subcommand.LATEST -> (103L..202L).map { message("m$it", it) }
+                ChatHistoryRequest.Subcommand.BEFORE -> (3L..102L).map { message("m$it", it) }
+                else -> emptyList()
+            }
+            ChatHistoryResult(events, emptyList())
+        }
+
+        assertEquals(
+            HistoryResyncState.UpToDate,
+            coordinator.reconcileBuffer(networkId, bufferId, "#chan", source),
+        )
+        assertEquals(
+            listOf(
+                ChatHistoryRequest.Subcommand.AFTER,
+                ChatHistoryRequest.Subcommand.LATEST,
+            ),
+            source.requests.map { it.subcommand },
+        )
+        assertTrue(rows().none { it.msgid == "m102" })
+    }
+
+    @Test
     fun automaticNetworkResyncDiscoversTargetsAndCreatesMissingBuffer() = runTest {
         processor.process(networkId, message("seed", 100))
         val source = FakeSource { request ->
