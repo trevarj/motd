@@ -422,7 +422,10 @@ fun MessageBubble(
                 }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.align(Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                 Text(
                     text = displayedTime,

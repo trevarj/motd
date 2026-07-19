@@ -361,7 +361,7 @@
     <string name="chat_back">Back</string>
     <string name="chat_search">Search</string>
     <string name="chat_scroll_to_bottom">Scroll to bottom</string>
-    <string name="chat_new_messages">— New messages —</string>
+    <string name="chat_new_messages">New messages</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_delete_failed">Delete</string>
     <string name="chat_sending">Sending…</string>

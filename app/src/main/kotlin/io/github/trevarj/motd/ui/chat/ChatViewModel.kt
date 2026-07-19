@@ -505,7 +505,7 @@ class ChatViewModel @Inject constructor(
 
     // --- read marker snapshot (plans/15 #2) ---
 
-    // Frozen on buffer entry so the "— New messages —" divider keeps a stable boundary instead of
+    // Frozen on buffer entry so the "New messages" divider keeps a stable boundary instead of
     // flashing/vanishing as markRead advances the live marker. Used ONLY for the divider now.
     private val _readMarkerSnapshot = MutableStateFlow<TimelineAnchor?>(null)
     val readMarkerSnapshot: StateFlow<TimelineAnchor?> = _readMarkerSnapshot.asStateFlow()

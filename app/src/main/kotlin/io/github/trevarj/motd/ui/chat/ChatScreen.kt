@@ -195,7 +195,7 @@ fun ChatScreen(
     val initialTarget by viewModel.initialTarget.collectAsStateWithLifecycle()
     val entryPositionSettled by viewModel.entryPositionSettled.collectAsStateWithLifecycle()
     val entryPositionUnresolved by viewModel.entryPositionUnresolved.collectAsStateWithLifecycle()
-    // Read marker frozen on entry so the "— New messages —" divider doesn't flash away (plans/15 #2).
+    // Read marker frozen on entry so the "New messages" divider doesn't flash away (plans/15 #2).
     val readMarkerSnapshot by viewModel.readMarkerSnapshot.collectAsStateWithLifecycle()
     // Live read marker drives the FAB unread badge so it clears as messages are read (not on exit).
     val localReadAnchor by viewModel.localReadAnchor.collectAsStateWithLifecycle()
@@ -1094,7 +1094,7 @@ fun ChatContent(
                             liveEntryId = consumeLiveEntryId(liveEntryId, id)
                         },
                         networkId = state.buffer?.networkId,
-                        // Frozen read-marker so the "— New messages —" divider stays put (plans/15 #2).
+                        // Frozen read-marker so the "New messages" divider stays put (plans/15 #2).
                         readMarkerTime = readMarkerSnapshot,
                         reactionChips = reactionChips,
                         replyPreview = replyPreview,
