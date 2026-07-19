@@ -1,0 +1,1381 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 14,
+    "identityHash": "729b84629a3e76c391a7828b14ae384f",
+    "entities": [
+      {
+        "tableName": "networks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `role` TEXT NOT NULL, `parentId` INTEGER, `bouncerNetId` TEXT, `host` TEXT NOT NULL, `port` INTEGER NOT NULL, `tls` INTEGER NOT NULL, `nick` TEXT NOT NULL, `username` TEXT NOT NULL, `realname` TEXT NOT NULL, `saslMechanism` TEXT NOT NULL, `saslUser` TEXT, `saslPassword` TEXT, `serverPassword` TEXT, `clientCertAlias` TEXT, `autoConnect` INTEGER NOT NULL, `ordering` INTEGER NOT NULL, `wsUrl` TEXT, `obfsMode` TEXT, `proxyHost` TEXT, `proxyPort` INTEGER, `obfsLink` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentId",
+            "columnName": "parentId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "bouncerNetId",
+            "columnName": "bouncerNetId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "host",
+            "columnName": "host",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "port",
+            "columnName": "port",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tls",
+            "columnName": "tls",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nick",
+            "columnName": "nick",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "username",
+            "columnName": "username",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "realname",
+            "columnName": "realname",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "saslMechanism",
+            "columnName": "saslMechanism",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "saslUser",
+            "columnName": "saslUser",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "saslPassword",
+            "columnName": "saslPassword",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverPassword",
+            "columnName": "serverPassword",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "clientCertAlias",
+            "columnName": "clientCertAlias",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "autoConnect",
+            "columnName": "autoConnect",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ordering",
+            "columnName": "ordering",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wsUrl",
+            "columnName": "wsUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "obfsMode",
+            "columnName": "obfsMode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "proxyHost",
+            "columnName": "proxyHost",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "proxyPort",
+            "columnName": "proxyPort",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "obfsLink",
+            "columnName": "obfsLink",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "network_identity",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`networkId` INTEGER NOT NULL, `caseMapping` TEXT, `chanTypes` TEXT, `selfNick` TEXT, PRIMARY KEY(`networkId`), FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "networkId",
+            "columnName": "networkId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "caseMapping",
+            "columnName": "caseMapping",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "chanTypes",
+            "columnName": "chanTypes",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "selfNick",
+            "columnName": "selfNick",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "networkId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "networks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "networkId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "buffers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `networkId` INTEGER NOT NULL, `name` TEXT NOT NULL, `displayName` TEXT NOT NULL, `type` TEXT NOT NULL, `topic` TEXT, `topicSetBy` TEXT, `joined` INTEGER NOT NULL, `membershipCycle` INTEGER NOT NULL, `pinned` INTEGER NOT NULL, `muted` INTEGER NOT NULL, `ordering` INTEGER NOT NULL, `readMarkerTime` INTEGER, `localReadAnchorTime` INTEGER, `localReadAnchorEventId` INTEGER, `localUnreadFloorTime` INTEGER, `oldestFetchedTime` INTEGER, `historyComplete` INTEGER NOT NULL, `dismissed` INTEGER NOT NULL, `historyDiscardedThroughMsgid` TEXT, `historyDiscardedThroughTime` INTEGER, `pendingCloseAt` INTEGER, `redirectToRoomId` INTEGER, FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "networkId",
+            "columnName": "networkId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "topic",
+            "columnName": "topic",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "topicSetBy",
+            "columnName": "topicSetBy",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "joined",
+            "columnName": "joined",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "membershipCycle",
+            "columnName": "membershipCycle",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pinned",
+            "columnName": "pinned",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "muted",
+            "columnName": "muted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ordering",
+            "columnName": "ordering",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "readMarkerTime",
+            "columnName": "readMarkerTime",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "localReadAnchorTime",
+            "columnName": "localReadAnchorTime",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "localReadAnchorEventId",
+            "columnName": "localReadAnchorEventId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "localUnreadFloorTime",
+            "columnName": "localUnreadFloorTime",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "oldestFetchedTime",
+            "columnName": "oldestFetchedTime",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "historyComplete",
+            "columnName": "historyComplete",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dismissed",
+            "columnName": "dismissed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "historyDiscardedThroughMsgid",
+            "columnName": "historyDiscardedThroughMsgid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "historyDiscardedThroughTime",
+            "columnName": "historyDiscardedThroughTime",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "pendingCloseAt",
+            "columnName": "pendingCloseAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "redirectToRoomId",
+            "columnName": "redirectToRoomId",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_buffers_networkId_name",
+            "unique": true,
+            "columnNames": [
+              "networkId",
+              "name"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_buffers_networkId_name` ON `${TABLE_NAME}` (`networkId`, `name`)"
+          },
+          {
+            "name": "index_buffers_redirectToRoomId",
+            "unique": false,
+            "columnNames": [
+              "redirectToRoomId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_buffers_redirectToRoomId` ON `${TABLE_NAME}` (`redirectToRoomId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "networks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "networkId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "discarded_message_ids",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`roomId` INTEGER NOT NULL, `msgid` TEXT NOT NULL, PRIMARY KEY(`roomId`, `msgid`), FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "roomId",
+            "columnName": "roomId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "msgid",
+            "columnName": "msgid",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "roomId",
+            "msgid"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "buffers",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "roomId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "room_aliases",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `networkId` INTEGER NOT NULL, `namespace` TEXT NOT NULL, `value` TEXT NOT NULL, `roomId` INTEGER NOT NULL, `verified` INTEGER NOT NULL, FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "networkId",
+            "columnName": "networkId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "namespace",
+            "columnName": "namespace",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value",
+            "columnName": "value",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "roomId",
+            "columnName": "roomId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "verified",
+            "columnName": "verified",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_room_aliases_networkId_namespace_value",
+            "unique": true,
+            "columnNames": [
+              "networkId",
+              "namespace",
+              "value"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_room_aliases_networkId_namespace_value` ON `${TABLE_NAME}` (`networkId`, `namespace`, `value`)"
+          },
+          {
+            "name": "index_room_aliases_roomId",
+            "unique": false,
+            "columnNames": [
+              "roomId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_room_aliases_roomId` ON `${TABLE_NAME}` (`roomId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "networks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "networkId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "buffers",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "roomId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "messages",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `bufferId` INTEGER NOT NULL, `msgid` TEXT, `serverTime` INTEGER NOT NULL, `sender` TEXT NOT NULL, `normalizedActor` TEXT NOT NULL, `senderAccount` TEXT, `kind` TEXT NOT NULL, `text` TEXT NOT NULL, `isSelf` INTEGER NOT NULL, `hasMention` INTEGER NOT NULL, `replyToMsgid` TEXT, `replyToEventId` INTEGER, `pendingLabel` TEXT, `failed` INTEGER NOT NULL, `dedupKey` TEXT NOT NULL, `eventKey` TEXT, `eventPayload` TEXT, `inviteState` TEXT, `serverTimeAuthoritative` INTEGER NOT NULL, `notificationHandled` INTEGER NOT NULL, `notificationClaimed` INTEGER NOT NULL, `notificationClaimOwner` TEXT, `soundHandled` INTEGER NOT NULL, FOREIGN KEY(`bufferId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bufferId",
+            "columnName": "bufferId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "msgid",
+            "columnName": "msgid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverTime",
+            "columnName": "serverTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sender",
+            "columnName": "sender",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "normalizedActor",
+            "columnName": "normalizedActor",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "senderAccount",
+            "columnName": "senderAccount",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "text",
+            "columnName": "text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isSelf",
+            "columnName": "isSelf",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hasMention",
+            "columnName": "hasMention",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "replyToMsgid",
+            "columnName": "replyToMsgid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "replyToEventId",
+            "columnName": "replyToEventId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "pendingLabel",
+            "columnName": "pendingLabel",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "failed",
+            "columnName": "failed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dedupKey",
+            "columnName": "dedupKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventKey",
+            "columnName": "eventKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventPayload",
+            "columnName": "eventPayload",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "inviteState",
+            "columnName": "inviteState",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serverTimeAuthoritative",
+            "columnName": "serverTimeAuthoritative",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notificationHandled",
+            "columnName": "notificationHandled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notificationClaimed",
+            "columnName": "notificationClaimed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notificationClaimOwner",
+            "columnName": "notificationClaimOwner",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "soundHandled",
+            "columnName": "soundHandled",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_messages_bufferId_serverTime_id",
+            "unique": false,
+            "columnNames": [
+              "bufferId",
+              "serverTime",
+              "id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_serverTime_id` ON `${TABLE_NAME}` (`bufferId`, `serverTime`, `id`)"
+          },
+          {
+            "name": "index_messages_replyToEventId",
+            "unique": false,
+            "columnNames": [
+              "replyToEventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_replyToEventId` ON `${TABLE_NAME}` (`replyToEventId`)"
+          },
+          {
+            "name": "index_messages_bufferId_msgid",
+            "unique": false,
+            "columnNames": [
+              "bufferId",
+              "msgid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_msgid` ON `${TABLE_NAME}` (`bufferId`, `msgid`)"
+          },
+          {
+            "name": "index_messages_bufferId_replyToMsgid_replyToEventId",
+            "unique": false,
+            "columnNames": [
+              "bufferId",
+              "replyToMsgid",
+              "replyToEventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_replyToMsgid_replyToEventId` ON `${TABLE_NAME}` (`bufferId`, `replyToMsgid`, `replyToEventId`)"
+          },
+          {
+            "name": "index_messages_bufferId_pendingLabel",
+            "unique": false,
+            "columnNames": [
+              "bufferId",
+              "pendingLabel"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_pendingLabel` ON `${TABLE_NAME}` (`bufferId`, `pendingLabel`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "buffers",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "bufferId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "messages_fts",
+        "createSql": "CREATE VIRTUAL TABLE IF NOT EXISTS `${TABLE_NAME}` USING FTS4(`text` TEXT NOT NULL, `sender` TEXT NOT NULL, content=`messages`)",
+        "fields": [
+          {
+            "fieldPath": "text",
+            "columnName": "text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sender",
+            "columnName": "sender",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": []
+        },
+        "ftsVersion": "FTS4",
+        "ftsOptions": {
+          "tokenizer": "simple",
+          "tokenizerArgs": [],
+          "contentTable": "messages",
+          "languageIdColumnName": "",
+          "matchInfo": "FTS4",
+          "notIndexedColumns": [],
+          "prefixSizes": [],
+          "preferredOrder": "ASC"
+        },
+        "contentSyncTriggers": [
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_BEFORE_UPDATE BEFORE UPDATE ON `messages` BEGIN DELETE FROM `messages_fts` WHERE `docid`=OLD.`rowid`; END",
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_BEFORE_DELETE BEFORE DELETE ON `messages` BEGIN DELETE FROM `messages_fts` WHERE `docid`=OLD.`rowid`; END",
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_AFTER_UPDATE AFTER UPDATE ON `messages` BEGIN INSERT INTO `messages_fts`(`docid`, `text`, `sender`) VALUES (NEW.`rowid`, NEW.`text`, NEW.`sender`); END",
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_messages_fts_AFTER_INSERT AFTER INSERT ON `messages` BEGIN INSERT INTO `messages_fts`(`docid`, `text`, `sender`) VALUES (NEW.`rowid`, NEW.`text`, NEW.`sender`); END"
+        ]
+      },
+      {
+        "tableName": "composer_drafts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`roomId` INTEGER NOT NULL, `text` TEXT NOT NULL, `replyToEventId` INTEGER, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`roomId`), FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "roomId",
+            "columnName": "roomId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "text",
+            "columnName": "text",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "replyToEventId",
+            "columnName": "replyToEventId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "roomId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "buffers",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "roomId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "event_aliases",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `networkId` INTEGER NOT NULL, `namespace` TEXT NOT NULL, `value` BLOB NOT NULL, `timelineEventId` INTEGER NOT NULL, FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`timelineEventId`) REFERENCES `messages`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "networkId",
+            "columnName": "networkId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "namespace",
+            "columnName": "namespace",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value",
+            "columnName": "value",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timelineEventId",
+            "columnName": "timelineEventId",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_event_aliases_networkId_namespace_value",
+            "unique": true,
+            "columnNames": [
+              "networkId",
+              "namespace",
+              "value"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_event_aliases_networkId_namespace_value` ON `${TABLE_NAME}` (`networkId`, `namespace`, `value`)"
+          },
+          {
+            "name": "index_event_aliases_timelineEventId",
+            "unique": false,
+            "columnNames": [
+              "timelineEventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_aliases_timelineEventId` ON `${TABLE_NAME}` (`timelineEventId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "networks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "networkId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "messages",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "timelineEventId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "event_redirects",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`losingEventId` INTEGER NOT NULL, `canonicalEventId` INTEGER NOT NULL, PRIMARY KEY(`losingEventId`), FOREIGN KEY(`canonicalEventId`) REFERENCES `messages`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "losingEventId",
+            "columnName": "losingEventId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalEventId",
+            "columnName": "canonicalEventId",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "losingEventId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_event_redirects_canonicalEventId",
+            "unique": false,
+            "columnNames": [
+              "canonicalEventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_redirects_canonicalEventId` ON `${TABLE_NAME}` (`canonicalEventId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "messages",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "canonicalEventId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "event_observations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `networkId` INTEGER NOT NULL, `timelineEventId` INTEGER NOT NULL, `origin` TEXT NOT NULL, `connectionGeneration` INTEGER, `receiveOrder` INTEGER NOT NULL, `batchId` TEXT, `timeProvenance` TEXT NOT NULL, `semanticFingerprint` BLOB NOT NULL, `batchExactOrdinal` INTEGER, `observedAt` INTEGER NOT NULL, FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`timelineEventId`) REFERENCES `messages`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "networkId",
+            "columnName": "networkId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timelineEventId",
+            "columnName": "timelineEventId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "origin",
+            "columnName": "origin",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "connectionGeneration",
+            "columnName": "connectionGeneration",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "receiveOrder",
+            "columnName": "receiveOrder",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "batchId",
+            "columnName": "batchId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "timeProvenance",
+            "columnName": "timeProvenance",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "semanticFingerprint",
+            "columnName": "semanticFingerprint",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "batchExactOrdinal",
+            "columnName": "batchExactOrdinal",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "observedAt",
+            "columnName": "observedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_event_observations_timelineEventId",
+            "unique": false,
+            "columnNames": [
+              "timelineEventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_observations_timelineEventId` ON `${TABLE_NAME}` (`timelineEventId`)"
+          },
+          {
+            "name": "index_event_observations_networkId_receiveOrder",
+            "unique": false,
+            "columnNames": [
+              "networkId",
+              "receiveOrder"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_observations_networkId_receiveOrder` ON `${TABLE_NAME}` (`networkId`, `receiveOrder`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "networks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "networkId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "messages",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "timelineEventId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "history_cursors",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`roomId` INTEGER NOT NULL, `newestMsgid` TEXT, `newestServerTime` INTEGER, `oldestMsgid` TEXT, `oldestServerTime` INTEGER, `historyComplete` INTEGER NOT NULL, PRIMARY KEY(`roomId`), FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "roomId",
+            "columnName": "roomId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "newestMsgid",
+            "columnName": "newestMsgid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "newestServerTime",
+            "columnName": "newestServerTime",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "oldestMsgid",
+            "columnName": "oldestMsgid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "oldestServerTime",
+            "columnName": "oldestServerTime",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "historyComplete",
+            "columnName": "historyComplete",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "roomId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "buffers",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "roomId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "network_history_cursors",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`networkId` INTEGER NOT NULL, `lastSuccessfulSync` INTEGER NOT NULL, `serverDerived` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`networkId`), FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "networkId",
+            "columnName": "networkId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSuccessfulSync",
+            "columnName": "lastSuccessfulSync",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverDerived",
+            "columnName": "serverDerived",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "networkId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "networks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "networkId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "connection_generations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`networkId` INTEGER NOT NULL, `generation` INTEGER NOT NULL, PRIMARY KEY(`networkId`), FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "networkId",
+            "columnName": "networkId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "generation",
+            "columnName": "generation",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "networkId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "networks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "networkId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "app_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, PRIMARY KEY(`key`))",
+        "fields": [
+          {
+            "fieldPath": "key",
+            "columnName": "key",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "key"
+          ]
+        }
+      },
+      {
+        "tableName": "reactions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `bufferId` INTEGER NOT NULL, `targetMsgid` TEXT NOT NULL, `actorKey` TEXT NOT NULL, `sender` TEXT NOT NULL, `emoji` TEXT NOT NULL, `serverTime` INTEGER NOT NULL, `targetEventId` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bufferId",
+            "columnName": "bufferId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetMsgid",
+            "columnName": "targetMsgid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "actorKey",
+            "columnName": "actorKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sender",
+            "columnName": "sender",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "emoji",
+            "columnName": "emoji",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverTime",
+            "columnName": "serverTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetEventId",
+            "columnName": "targetEventId",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_reactions_bufferId_targetMsgid_actorKey_emoji",
+            "unique": true,
+            "columnNames": [
+              "bufferId",
+              "targetMsgid",
+              "actorKey",
+              "emoji"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_reactions_bufferId_targetMsgid_actorKey_emoji` ON `${TABLE_NAME}` (`bufferId`, `targetMsgid`, `actorKey`, `emoji`)"
+          },
+          {
+            "name": "index_reactions_bufferId_targetMsgid_targetEventId",
+            "unique": false,
+            "columnNames": [
+              "bufferId",
+              "targetMsgid",
+              "targetEventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_reactions_bufferId_targetMsgid_targetEventId` ON `${TABLE_NAME}` (`bufferId`, `targetMsgid`, `targetEventId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "users",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`networkId` INTEGER NOT NULL, `nick` TEXT NOT NULL, `username` TEXT, `account` TEXT, `away` INTEGER NOT NULL, `hostmask` TEXT, `realname` TEXT, PRIMARY KEY(`networkId`, `nick`))",
+        "fields": [
+          {
+            "fieldPath": "networkId",
+            "columnName": "networkId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nick",
+            "columnName": "nick",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "username",
+            "columnName": "username",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "account",
+            "columnName": "account",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "away",
+            "columnName": "away",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hostmask",
+            "columnName": "hostmask",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "realname",
+            "columnName": "realname",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "networkId",
+            "nick"
+          ]
+        }
+      },
+      {
+        "tableName": "members",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`bufferId` INTEGER NOT NULL, `nick` TEXT NOT NULL, `prefixes` TEXT NOT NULL, PRIMARY KEY(`bufferId`, `nick`))",
+        "fields": [
+          {
+            "fieldPath": "bufferId",
+            "columnName": "bufferId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nick",
+            "columnName": "nick",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "prefixes",
+            "columnName": "prefixes",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "bufferId",
+            "nick"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '729b84629a3e76c391a7828b14ae384f')"
+    ]
+  }
+}

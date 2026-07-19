@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
@@ -31,10 +32,12 @@ import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.Prefix
 import java.io.IOException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.CoroutineScope
@@ -52,6 +55,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class HistoryResyncCoordinatorTest {
     private lateinit var db: MotdDatabase
     private lateinit var processor: EventProcessor
@@ -116,8 +120,18 @@ class HistoryResyncCoordinatorTest {
         replyToMsgid = null,
     )
 
-    private suspend fun rows(): List<MessageEntity> {
-        val loaded = db.messageDao().pagingSource(bufferId).load(
+    private fun directMessage(msgid: String, time: Long, peer: String = "bob") = IrcEvent.ChatMessage(
+        ctx = MessageContext(msgid, time, null, "batch", null),
+        kind = IrcEvent.ChatKind.PRIVMSG,
+        source = Prefix(peer),
+        target = "me",
+        text = msgid,
+        isSelf = false,
+        replyToMsgid = null,
+    )
+
+    private suspend fun rows(id: Long = bufferId): List<MessageEntity> {
+        val loaded = db.messageDao().pagingSource(id).load(
             PagingSource.LoadParams.Refresh(key = null, loadSize = 500, placeholdersEnabled = false),
         ) as PagingSource.LoadResult.Page
         return loaded.data
@@ -154,14 +168,19 @@ class HistoryResyncCoordinatorTest {
     private class FakeSource(
         var supported: Boolean = true,
         var msgidRefs: Boolean = true,
+        var timestampRefs: Boolean = true,
         var pageLimit: Int = 100,
+        var targetClassificationReady: Boolean = true,
+        val channelClassifier: (String) -> Boolean = { target ->
+            target.startsWith('#') || target.startsWith('&')
+        },
         val responder: suspend (ChatHistoryRequest) -> FakeResponse,
     ) : HistoryResyncCoordinator.HistorySource {
         val requests = mutableListOf<ChatHistoryRequest>()
         override fun availability(): HistoryAvailability = if (supported) {
             HistoryAvailability.Ready(
                 buildSet {
-                    add(HistoryReferenceType.TIMESTAMP)
+                    if (timestampRefs) add(HistoryReferenceType.TIMESTAMP)
                     if (msgidRefs) add(HistoryReferenceType.MSGID)
                 },
                 pageLimit,
@@ -169,6 +188,8 @@ class HistoryResyncCoordinatorTest {
         } else {
             HistoryAvailability.Unsupported
         }
+        override fun canClassifyTargets(): Boolean = targetClassificationReady
+        override fun isChannelTarget(target: String): Boolean = channelClassifier(target)
         override suspend fun chathistory(request: ChatHistoryRequest): ChatHistoryResponse {
             requests += request
             val response = responder(request)
@@ -464,14 +485,17 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
-    fun automaticNetworkResyncDiscoversTargetsAndCreatesMissingBuffer() = runTest {
+    fun automaticNetworkResyncDiscoversQueriesButNotDepartedChannels() = runTest {
         processor.process(networkId, message("seed", 100))
         val source = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS ->
-                    FakeResponse(targets = listOf("#new" to 500L), endOfHistory = true)
+                    FakeResponse(
+                        targets = listOf("Alice" to 500L, "#departed" to 400L),
+                        endOfHistory = true,
+                    )
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
-                    if (request.target == "#new") listOf(message("found", 500, "#new")) else emptyList(),
+                    if (request.target == "Alice") listOf(message("found", 500, "me")) else emptyList(),
                     emptyList(),
                 )
                 else -> FakeResponse(emptyList(), emptyList())
@@ -481,19 +505,80 @@ class HistoryResyncCoordinatorTest {
         val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
 
         assertEquals(HistoryResyncState.Updated(1), result)
-        assertTrue(db.bufferDao().byName(networkId, "#new") != null)
+        val query = db.bufferDao().byName(networkId, "alice")
+        assertEquals(BufferType.QUERY, query?.type)
+        assertEquals("found", db.messageDao().newestMessage(query!!.id)?.msgid)
+        assertEquals(null, db.bufferDao().byName(networkId, "#departed"))
         assertTrue(source.requests.any { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
     }
 
     @Test
-    fun freshNetworkDiscoversRetainedTargetsFromEpochAndStoresCursor() = runTest {
+    fun liveChantypesClassificationCanDiscoverHashPrefixedQuery() = runTest {
+        db.bufferDao().deleteBuffer(bufferId)
+        val source = FakeSource(channelClassifier = { false }) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#peer" to 500L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = listOf(
+                        IrcEvent.ChatMessage(
+                            MessageContext("custom-query-in", 500, null, "batch", null),
+                            IrcEvent.ChatKind.PRIVMSG,
+                            Prefix("#peer"),
+                            "me",
+                            "hello",
+                            false,
+                            null,
+                        ),
+                        IrcEvent.ChatMessage(
+                            MessageContext("custom-query-out", 501, null, "batch", null),
+                            IrcEvent.ChatKind.PRIVMSG,
+                            Prefix("me"),
+                            "#peer",
+                            "reply",
+                            true,
+                            null,
+                        ),
+                    ),
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        assertEquals(HistoryResyncState.Updated(2), coordinator.resyncNetwork(networkId, emptyList(), source))
+        val query = db.bufferDao().byName(networkId, "#peer")
+        assertEquals(BufferType.QUERY, query?.type)
+        assertEquals(2, db.messageDao().countForBuffer(query!!.id))
+    }
+
+    @Test
+    fun networkWatermarkWaitsForTargetClassification() = runTest {
+        val source = FakeSource(targetClassificationReady = false) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> error("TARGETS must wait for CHANTYPES")
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(endOfHistory = true)
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+
+        assertTrue(result is HistoryResyncState.Incomplete)
+        assertTrue((result as HistoryResyncState.Incomplete).awaitsTargetClassification)
+        assertTrue(source.requests.none { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
+        assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
+    fun freshNetworkDiscoversRetainedQueriesFromEpochAndStoresCursor() = runTest {
         db.bufferDao().deleteBuffer(bufferId)
         val source = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS ->
-                    FakeResponse(targets = listOf("#old" to 500L), endOfHistory = true)
+                    FakeResponse(targets = listOf("old-friend" to 500L), endOfHistory = true)
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
-                    if (request.target == "#old") listOf(message("retained", 500, "#old")) else emptyList(),
+                    if (request.target == "old-friend") listOf(message("retained", 500, "me")) else emptyList(),
                     emptyList(),
                 )
                 else -> FakeResponse(emptyList(), emptyList())
@@ -506,7 +591,7 @@ class HistoryResyncCoordinatorTest {
         val targets = source.requests.first { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS }
         assertEquals("timestamp=1970-01-01T00:00:00.000Z", targets.bound2)
         assertTrue(targets.bound1!!.matches(Regex("timestamp=.*\\.\\d{3}Z")))
-        assertTrue(db.bufferDao().byName(networkId, "#old") != null)
+        assertTrue(db.bufferDao().byName(networkId, "old-friend") != null)
         assertEquals(500L, syncPrefs.lastSuccessfulSync(networkId))
     }
 
@@ -519,9 +604,9 @@ class HistoryResyncCoordinatorTest {
                 ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
                     emptyList(),
                     if (request.bound1 == secondPageUpper) {
-                        listOf("#middle" to 200L, "#oldest" to 100L)
+                        listOf("middle" to 200L, "oldest" to 100L)
                     } else {
-                        listOf("#newest" to 300L, "#middle" to 200L)
+                        listOf("newest" to 300L, "middle" to 200L)
                     },
                     endOfHistory = request.bound1 == secondPageUpper,
                 )
@@ -529,13 +614,13 @@ class HistoryResyncCoordinatorTest {
                     // Discovery must finish before any per-room sync can make the pass successful.
                     assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
                     val time = when (request.target) {
-                        "#newest" -> 300L
-                        "#middle" -> 200L
-                        "#oldest" -> 100L
+                        "newest" -> 300L
+                        "middle" -> 200L
+                        "oldest" -> 100L
                         else -> error("unexpected target ${request.target}")
                     }
                     FakeResponse(
-                        listOf(message("retained-${request.target}", time, request.target)),
+                        listOf(message("retained-${request.target}", time, "me")),
                         emptyList(),
                     )
                 }
@@ -551,15 +636,308 @@ class HistoryResyncCoordinatorTest {
             source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS },
         )
         assertEquals(
-            setOf("#newest", "#middle", "#oldest"),
+            setOf("newest", "middle", "oldest"),
             source.requests.filter { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }
                 .map { it.target }
                 .toSet(),
         )
-        assertTrue(db.bufferDao().byName(networkId, "#newest") != null)
-        assertTrue(db.bufferDao().byName(networkId, "#middle") != null)
-        assertTrue(db.bufferDao().byName(networkId, "#oldest") != null)
+        assertTrue(db.bufferDao().byName(networkId, "newest") != null)
+        assertTrue(db.bufferDao().byName(networkId, "middle") != null)
+        assertTrue(db.bufferDao().byName(networkId, "oldest") != null)
         assertEquals(300L, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
+    fun dismissedQueryIgnoresUnchangedHistoryThenRevivesForNewDm() = runTest {
+        processor.process(networkId, directMessage("dm-old", 100))
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+        syncPrefs.setLastSuccessfulSync(networkId, 150)
+
+        val unchanged = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("bob" to 100L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(endOfHistory = true)
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = if (request.target == "bob") listOf(directMessage("dm-old", 100)) else emptyList(),
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.UpToDate,
+            coordinator.resyncNetwork(
+                networkId,
+                db.bufferDao().openTargets(networkId).map { it.id to it.name },
+                unchanged,
+            ),
+        )
+        assertTrue(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertEquals(0, db.messageDao().countForBuffer(query.id))
+
+        val updated = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("bob" to 200L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(
+                    events = if (request.target == "bob") listOf(directMessage("dm-new", 200)) else emptyList(),
+                    endOfHistory = true,
+                )
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = if (request.target == "bob") {
+                        listOf(directMessage("dm-old", 100), directMessage("dm-new", 200))
+                    } else {
+                        emptyList()
+                    },
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(1),
+            coordinator.resyncNetwork(
+                networkId,
+                db.bufferDao().openTargets(networkId).map { it.id to it.name },
+                updated,
+            ),
+        )
+        assertTrue(!db.bufferDao().rawById(query.id)!!.dismissed)
+        assertEquals(listOf("dm-new"), rows(query.id).mapNotNull { it.msgid })
+    }
+
+    @Test
+    fun dismissedQueryUsesLatestWhenDiscardBoundarySelectorIsUnsupported() = runTest {
+        processor.process(networkId, directMessage("dm-old", 100))
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+        val shell = db.bufferDao().rawById(query.id)!!
+        db.bufferDao().update(shell.copy(historyDiscardedThroughTime = null))
+        db.historyCursorDao().upsert(
+            HistoryCursorEntity(roomId = query.id, newestMsgid = "dm-old"),
+        )
+        assertTrue(db.bufferDao().isDiscardedMessageId(query.id, "dm-old"))
+        val source = FakeSource(msgidRefs = false) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("bob" to 200L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = if (request.target == "bob") {
+                        listOf(directMessage("dm-old", 100), directMessage("dm-new", 200))
+                    } else {
+                        emptyList()
+                    },
+                    endOfHistory = true,
+                )
+                ChatHistoryRequest.Subcommand.AFTER -> error("unsupported discard cursor must be skipped")
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(
+            networkId,
+            db.bufferDao().openTargets(networkId).map { it.id to it.name },
+            source,
+        )
+        assertEquals(listOf("dm-new"), rows(query.id).mapNotNull { it.msgid })
+        assertEquals(HistoryResyncState.Updated(1), result)
+        assertTrue(source.requests.none { it.subcommand == ChatHistoryRequest.Subcommand.AFTER })
+
+        db.historyCursorDao().upsert(
+            HistoryCursorEntity(roomId = query.id, newestMsgid = "dm-new"),
+        )
+        val visibleSource = FakeSource(msgidRefs = false) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = listOf(directMessage("dm-newer", 300)),
+                    endOfHistory = true,
+                )
+                ChatHistoryRequest.Subcommand.AFTER -> error("visible unsupported cursor must be skipped")
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(1),
+            coordinator.reconcileBuffer(networkId, query.id, "bob", visibleSource),
+        )
+        assertTrue(visibleSource.requests.none { it.subcommand == ChatHistoryRequest.Subcommand.AFTER })
+        assertEquals(listOf("dm-newer", "dm-new"), rows(query.id).mapNotNull { it.msgid })
+    }
+
+    @Test
+    fun runtimeMsgidRejectionStillChecksDismissedQueryLatest() = runTest {
+        processor.process(networkId, directMessage("dm-old", 100))
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+        val shell = db.bufferDao().rawById(query.id)!!
+        db.bufferDao().update(shell.copy(historyDiscardedThroughTime = null))
+        db.historyCursorDao().upsert(
+            HistoryCursorEntity(roomId = query.id, newestMsgid = "dm-old"),
+        )
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("bob" to 200L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.AFTER -> throw IrcCommandException(
+                    "CHATHISTORY",
+                    "INVALID_MSGREFTYPE",
+                    "msgid unsupported",
+                )
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = if (request.target == "bob") listOf(directMessage("dm-new", 200)) else emptyList(),
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(
+            networkId,
+            db.bufferDao().openTargets(networkId).map { it.id to it.name },
+            source,
+        )
+
+        assertTrue(result is HistoryResyncState.Incomplete)
+        assertEquals(1, (result as HistoryResyncState.Incomplete).inserted)
+        assertEquals(listOf("dm-new"), rows(query.id).mapNotNull { it.msgid })
+        assertTrue(source.requests.any { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
+    }
+
+    @Test
+    fun accountRerouteDoesNotReviveDismissedQueryForRejectedHistory() = runTest {
+        fun accountMessage(msgid: String, time: Long, peer: String) = IrcEvent.ChatMessage(
+            ctx = MessageContext(msgid, time, "shared-account", "batch", null),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix(peer),
+            target = "me",
+            text = msgid,
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.process(networkId, accountMessage("account-old", 100, "alice"))
+        val query = db.bufferDao().byName(networkId, "alice")!!
+        db.bufferDao().deleteBuffer(query.id)
+
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("newnick" to 90L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = listOf(
+                        accountMessage("account-older", 90, "newnick"),
+                        IrcEvent.NickChanged(
+                            MessageContext("old-nick", 90, null, "batch", null),
+                            from = "newnick",
+                            to = "oldernick",
+                            isSelf = false,
+                        ),
+                    ),
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.UpToDate,
+            coordinator.resyncNetwork(networkId, emptyList(), source),
+        )
+        assertTrue(db.bufferDao().observeById(query.id)!!.dismissed)
+        assertEquals(0, db.messageDao().countForBuffer(query.id))
+        assertTrue(db.bufferDao().observeChatList().first().none { it.bufferId == query.id })
+    }
+
+    @Test
+    fun accountRerouteFiltersContextAgainstSelectedRoomWithoutMerge() = runTest {
+        fun accountMessage(msgid: String, time: Long, peer: String, account: String) =
+            IrcEvent.ChatMessage(
+                ctx = MessageContext(msgid, time, account, "batch", null),
+                kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix(peer),
+                target = "me",
+                text = msgid,
+                isSelf = false,
+                replyToMsgid = null,
+            )
+        processor.process(networkId, accountMessage("account-old", 100, "alice", "account-a"))
+        val accountA = db.bufferDao().byName(networkId, "alice")!!
+        db.bufferDao().deleteBuffer(accountA.id)
+        processor.process(networkId, accountMessage("account-b", 80, "newnick", "account-b"))
+        val accountB = db.bufferDao().byName(networkId, "newnick")!!
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("newnick" to 90L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = listOf(
+                        IrcEvent.ChatMessage(
+                            MessageContext("account-a-outgoing", 90, null, "batch", null),
+                            IrcEvent.ChatKind.PRIVMSG,
+                            Prefix("me"),
+                            "newnick",
+                            "old outgoing",
+                            true,
+                            null,
+                        ),
+                        accountMessage("account-a-older", 90, "newnick", "account-a"),
+                        IrcEvent.NickChanged(
+                            MessageContext("old-context", 90, null, "batch", null),
+                            from = "newnick",
+                            to = "oldernick",
+                            isSelf = false,
+                        ),
+                    ),
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.UpToDate,
+            coordinator.resyncNetwork(networkId, emptyList(), source),
+        )
+        assertTrue(db.bufferDao().rawById(accountA.id)!!.dismissed)
+        assertEquals(listOf("account-b"), rows(accountB.id).mapNotNull { it.msgid })
+        assertEquals(0, db.messageDao().countForBuffer(accountA.id))
+    }
+
+    @Test
+    fun accountRerouteCountsAcceptedHistoryInCanonicalRoom() = runTest {
+        fun accountMessage(msgid: String, time: Long, peer: String) = IrcEvent.ChatMessage(
+            ctx = MessageContext(msgid, time, "shared-account", "batch", null),
+            kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix(peer),
+            target = "me",
+            text = msgid,
+            isSelf = false,
+            replyToMsgid = null,
+        )
+        processor.process(networkId, accountMessage("account-old", 100, "alice"))
+        val query = db.bufferDao().byName(networkId, "alice")!!
+        db.bufferDao().deleteBuffer(query.id)
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("newnick" to 200L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = listOf(accountMessage("account-new", 200, "newnick")),
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(1),
+            coordinator.resyncNetwork(networkId, emptyList(), source),
+        )
+        assertEquals("account-new", db.messageDao().newestMessage(query.id)?.msgid)
     }
 
     @Test
@@ -603,6 +981,72 @@ class HistoryResyncCoordinatorTest {
             source.requests.map { it.subcommand },
         )
         assertTrue(rows().any { it.msgid == "retained" })
+    }
+
+    @Test
+    fun lateLiveJoinCanSeedHistoryAfterTargetsSkippedUnknownChannel() = runTest {
+        db.bufferDao().deleteBuffer(bufferId)
+        val discovery = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#late" to 500L), endOfHistory = true)
+                else -> error("departed channel must not be synchronized")
+            }
+        }
+
+        assertEquals(HistoryResyncState.UpToDate, coordinator.resyncNetwork(networkId, emptyList(), discovery))
+        assertEquals(null, db.bufferDao().byName(networkId, "#late"))
+
+        processor.process(
+            networkId,
+            IrcEvent.Joined(
+                MessageContext("join-late", 600, null, null, null),
+                "me",
+                "#late",
+                null,
+                null,
+                true,
+            ),
+        )
+        val joined = db.bufferDao().byName(networkId, "#late")!!
+        val latest = FakeSource { request ->
+            assertEquals(ChatHistoryRequest.Subcommand.LATEST, request.subcommand)
+            FakeResponse(events = listOf(message("late-history", 500, "#late")), endOfHistory = true)
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(1),
+            coordinator.reconcileBuffer(networkId, joined.id, "#late", latest),
+        )
+        assertEquals("late-history", rows(joined.id).first { it.kind == MessageKind.PRIVMSG }.msgid)
+    }
+
+    @Test
+    fun channelDeletedWhileHistoryIsInFlightIsNotRecreated() = runTest {
+        val requestStarted = CompletableDeferred<Unit>()
+        val releaseResponse = CompletableDeferred<Unit>()
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 500L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.LATEST -> {
+                    requestStarted.complete(Unit)
+                    releaseResponse.await()
+                    FakeResponse(events = listOf(message("too-late", 500)), endOfHistory = true)
+                }
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+        val result = async {
+            coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+        }
+        requestStarted.await()
+
+        db.bufferDao().deleteBuffer(bufferId)
+        releaseResponse.complete(Unit)
+
+        assertTrue(result.await() is HistoryResyncState.Failed)
+        assertEquals(null, db.bufferDao().byName(networkId, "#chan"))
     }
 
     @Test
@@ -837,9 +1281,10 @@ class HistoryResyncCoordinatorTest {
         }
 
         assertEquals(
-            HistoryResyncState.Updated(3),
+            HistoryResyncState.Updated(2),
             coordinator.resyncBuffer(networkId, bufferId, "#chan", source),
         )
+        assertTrue(rows().any { it.msgid == "live" })
         assertEquals(
             listOf("msgid=seed", "msgid=page-boundary"),
             source.requests.filter { it.subcommand == ChatHistoryRequest.Subcommand.AFTER }
@@ -1218,11 +1663,11 @@ class HistoryResyncCoordinatorTest {
         val source = FakeSource(pageLimit = 5) { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS -> when (targetsPage++) {
-                    0 -> FakeResponse(targets = listOf("#new" to 300L))
+                    0 -> FakeResponse(targets = listOf("New" to 300L))
                     else -> {
                         assertEquals(ChatHistorySelectors.timestamp(301), request.bound1)
                         FakeResponse(
-                            targets = listOf("#NEW" to 300L, "#old" to 200L),
+                            targets = listOf("NEW" to 300L, "old" to 200L),
                             endOfHistory = true,
                         )
                     }
@@ -1236,6 +1681,31 @@ class HistoryResyncCoordinatorTest {
         assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
         assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
         assertEquals(300L, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
+    fun sojuTargetsWithoutEndMarkerAdvancePastFinalOverlapToEmptyPage() = runTest {
+        db.bufferDao().deleteBuffer(bufferId)
+        val source = FakeSource(pageLimit = 3) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
+                    targets = when (request.bound1) {
+                        ChatHistorySelectors.timestamp(201) ->
+                            listOf("middle" to 200L, "oldest" to 100L)
+                        ChatHistorySelectors.timestamp(101) -> listOf("oldest" to 100L)
+                        ChatHistorySelectors.timestamp(100) -> emptyList()
+                        else -> listOf("newest" to 300L, "middle" to 200L)
+                    },
+                )
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(endOfHistory = true)
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        assertTrue(coordinator.resyncNetwork(networkId, emptyList(), source) is HistoryResyncState.Incomplete)
+        assertEquals(4, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
+        assertEquals(3, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
+        assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
     }
 
     @Test

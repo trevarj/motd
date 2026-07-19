@@ -191,7 +191,7 @@ class ChatHistoryRemoteMediator(
         // Apply the page as one IRC history batch. EventProcessor wraps HistoryBatch in a single
         // Room transaction, so Paging sees one invalidation instead of up to 50 row-by-row refreshes
         // while the user is entering or flinging through a channel.
-        processor.persistHistoryPage(networkId, request, result)
+        processor.persistHistoryPage(networkId, request, result, expectedRoomId = bufferId)
         if (result.isComplete) return MediatorResult.Success(endOfPaginationReached = true)
         return MediatorResult.Success(endOfPaginationReached = false)
     }
@@ -212,7 +212,7 @@ class ChatHistoryRemoteMediator(
         if (!result.isComplete && !result.hasUsableOldest(referenceTypes, true)) {
             error("CHATHISTORY LATEST returned no advertised primary-message boundary")
         }
-        processor.persistHistoryPage(networkId, request, result)
+        processor.persistHistoryPage(networkId, request, result, expectedRoomId = bufferId)
         return result
     }
 

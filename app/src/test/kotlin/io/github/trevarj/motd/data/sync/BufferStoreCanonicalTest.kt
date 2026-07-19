@@ -146,6 +146,120 @@ class BufferStoreCanonicalTest {
     }
 
     @Test
+    fun channelPromotionClearsDismissedQueryState() = runTest {
+        val query = store.getOrCreate(networkId, "#room", "#room", BufferType.QUERY)
+        db.messageDao().insertAll(
+            listOf(
+                MessageEntity(
+                    bufferId = query.id,
+                    msgid = "query-history",
+                    serverTime = 100,
+                    sender = "peer",
+                    kind = MessageKind.PRIVMSG,
+                    text = "old query",
+                    dedupKey = "query-history",
+                ),
+            ),
+        )
+        db.bufferDao().deleteBuffer(query.id)
+
+        val channel = store.getOrCreate(networkId, "#room", "#room", BufferType.CHANNEL)
+
+        assertEquals(query.id, channel.id)
+        assertEquals(BufferType.CHANNEL, channel.type)
+        assertFalse(channel.dismissed)
+        assertEquals(null, channel.historyDiscardedThroughMsgid)
+        assertEquals(null, channel.historyDiscardedThroughTime)
+        assertEquals(null, db.historyCursorDao().byRoom(channel.id))
+        assertFalse(db.bufferDao().isDiscardedMessageId(channel.id, "query-history"))
+        assertTrue(db.bufferDao().observeChatList().first().any { it.bufferId == channel.id })
+    }
+
+    @Test
+    fun visibleQueryPromotionPreservesReadAndHistoryState() = runTest {
+        val query = store.getOrCreate(networkId, "#visible", "#visible", BufferType.QUERY)
+        db.bufferDao().update(
+            query.copy(
+                readMarkerTime = 100,
+                localReadAnchorTime = 101,
+                localUnreadFloorTime = 99,
+                oldestFetchedTime = 50,
+                historyComplete = true,
+            ),
+        )
+        val cursor = HistoryCursorEntity(
+            roomId = query.id,
+            newestMsgid = "newest",
+            newestServerTime = 100,
+            oldestMsgid = "oldest",
+            oldestServerTime = 50,
+            historyComplete = true,
+        )
+        db.historyCursorDao().upsert(cursor)
+
+        val channel = store.getOrCreate(networkId, "#visible", "#visible", BufferType.CHANNEL)
+
+        assertEquals(100L, channel.readMarkerTime)
+        assertEquals(101L, channel.localReadAnchorTime)
+        assertEquals(99L, channel.localUnreadFloorTime)
+        assertEquals(50L, channel.oldestFetchedTime)
+        assertTrue(channel.historyComplete)
+        assertEquals(cursor, db.historyCursorDao().byRoom(channel.id))
+    }
+
+    @Test
+    fun historyDiscoveryOnlyDismissesNewQueries() = runTest {
+        val visible = store.getOrCreate(networkId, "visible", "Visible", BufferType.QUERY)
+
+        val existing = store.getOrCreate(
+            networkId,
+            "visible",
+            "Visible",
+            BufferType.QUERY,
+            initiallyDismissed = true,
+        )
+        val discovered = store.getOrCreate(
+            networkId,
+            "discovered",
+            "Discovered",
+            BufferType.QUERY,
+            initiallyDismissed = true,
+        )
+
+        assertEquals(visible.id, existing.id)
+        assertFalse(existing.dismissed)
+        assertTrue(discovered.dismissed)
+    }
+
+    @Test
+    fun visibleRoomDoesNotInheritDismissedShellReadFloorOnMerge() = runTest {
+        val shell = store.getOrCreate(networkId, "oldnick", "OldNick", BufferType.QUERY)
+        db.messageDao().insertAll(
+            listOf(
+                MessageEntity(
+                    bufferId = shell.id,
+                    msgid = "old",
+                    serverTime = 100,
+                    sender = "oldnick",
+                    kind = MessageKind.PRIVMSG,
+                    text = "old",
+                    dedupKey = "old",
+                ),
+            ),
+        )
+        db.bufferDao().update(shell.copy(localUnreadFloorTime = 10_000))
+        db.bufferDao().deleteBuffer(shell.id)
+        val visible = store.getOrCreate(networkId, "newnick", "NewNick", BufferType.QUERY)
+
+        val merged = store.mergeRooms(shell.id, visible.id)
+
+        assertFalse(merged.dismissed)
+        assertEquals(null, merged.localReadAnchorTime)
+        assertEquals(null, merged.localUnreadFloorTime)
+        assertEquals(100L, merged.historyDiscardedThroughTime)
+    }
+
+    @Test
     fun roomMergeRekeysExactFingerprintAliasesForMovedEvents() = runTest {
         val winner = store.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
         val loser = store.getOrCreate(networkId, "bob", "Bob", BufferType.QUERY)
@@ -420,7 +534,7 @@ class BufferStoreCanonicalTest {
     }
 
     @Test
-    fun deletingCanonicalRoomAlsoDeletesRedirectsAndAllowsNickRecreation() = runTest {
+    fun dismissingCanonicalQueryPreservesRedirectsAndNickIdentity() = runTest {
         val old = store.getOrCreate(networkId, "oldnick", "OldNick", BufferType.QUERY)
         val next = store.getOrCreate(networkId, "newnick", "NewNick", BufferType.QUERY)
         val merged = checkNotNull(
@@ -430,9 +544,9 @@ class BufferStoreCanonicalTest {
 
         db.bufferDao().deleteBuffer(merged.id)
 
-        assertEquals(null, db.bufferDao().canonicalId(losingId))
-        val recreated = store.getOrCreate(networkId, "newnick", "NewNick", BufferType.QUERY)
-        assertNotEquals(merged.id, recreated.id)
-        assertEquals("newnick", recreated.name)
+        assertEquals(merged.id, db.bufferDao().canonicalId(losingId))
+        assertTrue(db.bufferDao().rawById(merged.id)!!.dismissed)
+        val resolved = store.getOrCreate(networkId, "newnick", "NewNick", BufferType.QUERY)
+        assertEquals(merged.id, resolved.id)
     }
 }

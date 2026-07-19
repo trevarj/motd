@@ -20,7 +20,13 @@ internal class RegistrationStateMachine(
         data class SetNick(val nick: String) : Action
         data class SendDeferred(val line: String, val delayMs: Long) : Action
         /** Registration succeeded. */
-        data class Complete(val nick: String, val caps: Set<String>, val isupport: Isupport) : Action
+        data class Complete(
+            val nick: String,
+            val caps: Set<String>,
+            val isupport: Isupport,
+            /** Soju child fallback: the stalled welcome burst requires protocol-default CHANTYPES. */
+            val assumeDefaultTargetClassification: Boolean = false,
+        ) : Action
         /** Registration failed terminally. */
         data class Fail(val reason: String, val fatal: Boolean) : Action
     }
@@ -210,7 +216,12 @@ internal class RegistrationStateMachine(
         phase = Phase.DONE
         val actions = mutableListOf<Action>(
             Action.SetNick(nick),
-            Action.Complete(nick, acked.toSet(), isupport),
+            Action.Complete(
+                nick,
+                acked.toSet(),
+                isupport,
+                assumeDefaultTargetClassification = true,
+            ),
         )
         // Soju can remove capabilities while BOUNCER BIND selects the upstream network. Request
         // each deferred capability separately so one stale capability can be NAKed without also

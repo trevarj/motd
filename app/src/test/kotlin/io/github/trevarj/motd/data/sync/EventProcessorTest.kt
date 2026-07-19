@@ -444,6 +444,269 @@ class EventProcessorTest {
     }
 
     @Test
+    fun dismissedQueryDropsOldHistoryAndRevivesForNewDm() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx("m-old", 100),
+                IrcEvent.ChatKind.PRIVMSG,
+                Prefix("bob"),
+                "me",
+                "discard me",
+                false,
+                null,
+            ),
+        )
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "bob",
+                listOf(
+                    IrcEvent.ChatMessage(
+                        ctx("m-older", 90).copy(batchId = "history"),
+                        IrcEvent.ChatKind.PRIVMSG,
+                        Prefix("bob"),
+                        "me",
+                        "older",
+                        false,
+                        null,
+                    ),
+                    IrcEvent.ChatMessage(
+                        ctx("m-old", 100).copy(batchId = "history"),
+                        IrcEvent.ChatKind.PRIVMSG,
+                        Prefix("bob"),
+                        "me",
+                        "discard me",
+                        false,
+                        null,
+                    ),
+                    IrcEvent.ChatMessage(
+                        ctx("m-new", 101).copy(batchId = "history"),
+                        IrcEvent.ChatKind.PRIVMSG,
+                        Prefix("bob"),
+                        "me",
+                        "new dm",
+                        false,
+                        null,
+                    ),
+                ),
+            ),
+        )
+
+        assertFalse(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertEquals(listOf("m-new"), pagingList(query.id).mapNotNull { it.msgid })
+    }
+
+    @Test
+    fun dismissedQueryConservativelyRevivesForEqualTimeDifferentMsgid() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx("m-old", 100),
+                IrcEvent.ChatKind.PRIVMSG,
+                Prefix("bob"),
+                "me",
+                "old",
+                false,
+                null,
+            ),
+        )
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "bob",
+                listOf(
+                    IrcEvent.ChatMessage(
+                        ctx("m-same-time", 100).copy(batchId = "history"),
+                        IrcEvent.ChatKind.PRIVMSG,
+                        Prefix("bob"),
+                        "me",
+                        "possibly new",
+                        false,
+                        null,
+                    ),
+                ),
+            ),
+        )
+
+        assertFalse(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertEquals("m-same-time", pagingList(query.id).single().msgid)
+    }
+
+    @Test
+    fun dismissedQueryRejectsEveryExactMsgidAtTimestampTie() = runTest {
+        listOf("m-tie-a", "m-tie-b").forEach { msgid ->
+            processor.process(
+                networkId,
+                IrcEvent.ChatMessage(
+                    ctx(msgid, 100),
+                    IrcEvent.ChatKind.PRIVMSG,
+                    Prefix("bob"),
+                    "me",
+                    msgid,
+                    false,
+                    null,
+                ),
+            )
+        }
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "bob",
+                listOf("m-tie-a", "m-tie-b").map { msgid ->
+                    IrcEvent.ChatMessage(
+                        ctx(msgid, 100).copy(batchId = "history"),
+                        IrcEvent.ChatKind.PRIVMSG,
+                        Prefix("bob"),
+                        "me",
+                        msgid,
+                        false,
+                        null,
+                    )
+                },
+            ),
+        )
+
+        assertTrue(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertTrue(pagingList(query.id).isEmpty())
+    }
+
+    @Test
+    fun dismissedQueryAlwaysRevivesForPushDespiteServerClockSkew() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx("m-old", 100),
+                IrcEvent.ChatKind.PRIVMSG,
+                Prefix("bob"),
+                "me",
+                "old",
+                false,
+                null,
+            ),
+        )
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+
+        processor.processPush(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx("m-push", 50),
+                IrcEvent.ChatKind.PRIVMSG,
+                Prefix("bob"),
+                "me",
+                "clock-skewed new dm",
+                false,
+                null,
+            ),
+        )
+
+        assertFalse(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertEquals("m-push", pagingList(query.id).single().msgid)
+        assertEquals(1, db.bufferDao().observeChatList().first().single {
+            it.bufferId == query.id
+        }.unreadCount)
+    }
+
+    @Test
+    fun dismissedQueryIgnoresExactDelayedPushDuplicate() = runTest {
+        val message = IrcEvent.ChatMessage(
+            ctx("m-old", 100),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("bob"),
+            "me",
+            "old",
+            false,
+            null,
+        )
+        processor.process(networkId, message)
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+
+        processor.processPush(networkId, message.copy(ctx = ctx("m-old", 150)))
+
+        assertTrue(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertTrue(pagingList(query.id).isEmpty())
+    }
+
+    @Test
+    fun outgoingMessageRevivesDismissedQueryBeforePersisting() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx("old", 100),
+                IrcEvent.ChatKind.PRIVMSG,
+                Prefix("bob"),
+                "me",
+                "old",
+                false,
+                null,
+            ),
+        )
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+
+        processor.insertPending(
+            query.id,
+            "send-after-delete",
+            "me",
+            "new outgoing",
+            replyToMsgid = null,
+            kind = MessageKind.PRIVMSG,
+        )
+
+        assertFalse(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertEquals("new outgoing", pagingList(query.id).single().text)
+    }
+
+    @Test
+    fun dismissedAccountQueryAppliesFloorAfterHistoricalNickRerouting() = runTest {
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx("account-old", 1_000, account = "acct-a"),
+                IrcEvent.ChatKind.PRIVMSG,
+                Prefix("alice"),
+                "me",
+                "old",
+                false,
+                null,
+            ),
+        )
+        val query = db.bufferDao().byName(networkId, "alice")!!
+        db.bufferDao().deleteBuffer(query.id)
+        fun history(msgid: String, time: Long) = IrcEvent.ChatMessage(
+            ctx(msgid, time, account = "acct-a").copy(batchId = "history"),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("bob"),
+            "me",
+            msgid,
+            false,
+            null,
+        )
+
+        processor.process(networkId, IrcEvent.HistoryBatch("bob", listOf(history("older", 900))))
+
+        assertTrue(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertTrue(pagingList(query.id).isEmpty())
+        assertNull(db.bufferDao().byName(networkId, "bob"))
+
+        processor.process(networkId, IrcEvent.HistoryBatch("bob", listOf(history("newer", 1_100))))
+
+        assertFalse(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertEquals(listOf("newer"), pagingList(query.id).mapNotNull { it.msgid })
+    }
+
+    @Test
     fun liveTypingTracksPeersButIgnoresSelfUsingServerCaseMapping() = runTest {
         val typing = TypingTrackerImpl()
         val recording = EventProcessor(db, typing, MessageNotifier.Noop)
@@ -2859,6 +3122,35 @@ class EventProcessorTest {
     }
 
     @Test
+    fun protocolPageDoesNotRecreateDeletedExpectedRoom() = runTest {
+        val room = BufferStore(db).getOrCreate(networkId, "#gone", "#gone", BufferType.CHANNEL)
+        db.bufferDao().deleteBuffer(room.id)
+
+        val result = runCatching {
+            processor.persistHistoryPage(
+                networkId,
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#gone", limit = 50),
+                ChatHistoryResponse.Messages(
+                    events = listOf(
+                        IrcEvent.ChatMessage(
+                            ctx("late", 100), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"),
+                            "#gone", "too late", false, null,
+                        ),
+                    ),
+                    oldest = ChatHistoryReference("late", 100),
+                    newest = ChatHistoryReference("late", 100),
+                    endOfHistory = true,
+                    primaryMessageCount = 1,
+                ),
+                expectedRoomId = room.id,
+            )
+        }
+
+        assertTrue(result.isFailure)
+        assertEquals(null, db.bufferDao().byName(networkId, "#gone"))
+    }
+
+    @Test
     fun protocolPageCompletionIsDirectional() = runTest {
         val empty = ChatHistoryResponse.Messages(
             events = emptyList(),
@@ -2929,6 +3221,12 @@ class EventProcessorTest {
             false,
             null,
         )
+        val historyNick = IrcEvent.NickChanged(
+            ctx(msgid = "page-context", time = 201),
+            from = "Bob",
+            to = "Robert",
+            isSelf = false,
+        )
 
         val roomId = processor.persistHistoryPage(
             networkId,
@@ -2939,7 +3237,7 @@ class EventProcessorTest {
                 limit = 50,
             ),
             ChatHistoryResponse.Messages(
-                events = listOf(historyMessage),
+                events = listOf(historyMessage, historyNick),
                 oldest = ChatHistoryReference("page", 200),
                 newest = ChatHistoryReference("page", 200),
                 endOfHistory = false,
@@ -2953,6 +3251,8 @@ class EventProcessorTest {
         assertEquals(100L, cursor?.oldestServerTime)
         assertEquals("winner-newest", cursor?.newestMsgid)
         assertEquals(1_000L, cursor?.newestServerTime)
+        assertEquals(winner.id, db.messageDao().byMsgid(winner.id, "page-context")?.bufferId)
+        assertEquals(null, db.messageDao().byMsgid(loser.id, "page-context"))
         assertNull(db.historyCursorDao().byRoom(loser.id))
     }
 

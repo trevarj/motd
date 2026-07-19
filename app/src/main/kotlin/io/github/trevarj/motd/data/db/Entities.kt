@@ -129,6 +129,11 @@ data class RoomEntity(
     val localUnreadFloorTime: Long? = null, // local-only mute backlog floor; never synced
     val oldestFetchedTime: Long? = null, // CHATHISTORY paging bookkeeping
     val historyComplete: Boolean = false,
+    /** QUERY removed from normal UI while its identity and reconnect cursor remain durable. */
+    val dismissed: Boolean = false,
+    /** Permanent lower bound preventing discarded query history from being imported again. */
+    val historyDiscardedThroughMsgid: String? = null,
+    val historyDiscardedThroughTime: Long? = null,
     /** Non-null while a CHANNEL leave/delete is waiting for server acceptance. */
     val pendingCloseAt: Long? = null,
     /** Losing room ids remain durable redirects so stale navigation/deep links keep working. */
@@ -137,6 +142,22 @@ data class RoomEntity(
 
 /** Compatibility name retained while callers migrate to the canonical room vocabulary. */
 typealias BufferEntity = RoomEntity
+
+/** Exact server identities retained for discarded messages tied at an ambiguous history boundary. */
+@Entity(
+    tableName = "discarded_message_ids",
+    primaryKeys = ["roomId", "msgid"],
+    foreignKeys = [ForeignKey(
+        entity = RoomEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["roomId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+)
+data class DiscardedMessageIdEntity(
+    val roomId: RoomId,
+    val msgid: String,
+)
 
 /** Exact local presentation/count floor. The mute floor intentionally includes its whole ms. */
 val RoomEntity.effectiveLocalReadAnchor: TimelineAnchor?

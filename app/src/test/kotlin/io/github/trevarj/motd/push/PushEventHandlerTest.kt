@@ -50,6 +50,7 @@ class PushEventHandlerTest {
             networkId: Long,
             request: ChatHistoryRequest,
             response: ChatHistoryResponse.Messages,
+            expectedRoomId: Long?,
         ): Long = error("push tests do not persist history pages")
     }
 

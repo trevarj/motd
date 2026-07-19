@@ -44,6 +44,6 @@ class BufferRepositoryImpl @Inject constructor(
         bufferDao.setMuted(bufferDao.canonicalId(id) ?: id, muted)
     }
 
-    // Drop the buffer row (messages cascade via FK) plus its members/reactions in one transaction.
+    // QUERY rows become hidden cursor shells; other types are physically removed with their graph.
     override suspend fun deleteBuffer(id: Long) = bufferDao.deleteBuffer(bufferDao.canonicalId(id) ?: id)
 }

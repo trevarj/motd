@@ -157,7 +157,8 @@ interface BufferDao {
             ORDER BY m.serverTime DESC, m.id DESC
             LIMIT 1
         )
-        WHERE b.type != 'SERVER' AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL
+        WHERE b.type != 'SERVER' AND b.dismissed = 0
+          AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL
         ORDER BY b.pinned DESC,
                  (lastMessageTime IS NULL) ASC,
                  lastMessageTime DESC,
@@ -265,6 +266,38 @@ interface BufferDao {
     suspend fun writeMuted(id: Long, muted: Boolean)
 
     @Query(
+        """UPDATE buffers SET
+               localReadAnchorTime = CASE WHEN dismissed = 1 THEN NULL ELSE localReadAnchorTime END,
+               localReadAnchorEventId = CASE WHEN dismissed = 1 THEN NULL ELSE localReadAnchorEventId END,
+               localUnreadFloorTime = CASE WHEN dismissed = 1 THEN NULL ELSE localUnreadFloorTime END,
+               dismissed = 0
+           WHERE id = :id AND type = 'QUERY'""",
+    )
+    suspend fun reviveQuery(id: RoomId): Int
+
+    @Query(
+        """INSERT OR IGNORE INTO discarded_message_ids(roomId, msgid)
+           SELECT :id, msgid FROM messages WHERE bufferId = :id AND msgid IS NOT NULL""",
+    )
+    suspend fun rememberDiscardedMessageIds(id: RoomId)
+
+    @Query(
+        """SELECT EXISTS(
+               SELECT 1 FROM discarded_message_ids WHERE roomId = :id AND msgid = :msgid
+           )""",
+    )
+    suspend fun isDiscardedMessageId(id: RoomId, msgid: String): Boolean
+
+    @Query(
+        """INSERT OR IGNORE INTO discarded_message_ids(roomId, msgid)
+           SELECT :toId, msgid FROM discarded_message_ids WHERE roomId = :fromId""",
+    )
+    suspend fun copyDiscardedMessageIds(fromId: RoomId, toId: RoomId)
+
+    @Query("DELETE FROM discarded_message_ids WHERE roomId = :id")
+    suspend fun deleteDiscardedMessageIds(id: RoomId)
+
+    @Query(
         """SELECT MAX(serverTime) FROM messages WHERE bufferId = :id
            AND isSelf = 0 AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')""",
     )
@@ -345,12 +378,86 @@ interface BufferDao {
     @Query("DELETE FROM buffers WHERE redirectToRoomId = :id")
     suspend fun deleteRedirectsTo(id: Long)
 
+    @Query("DELETE FROM messages WHERE bufferId = :id")
+    suspend fun deleteMessagesForBuffer(id: RoomId)
+
+    @Query("DELETE FROM composer_drafts WHERE roomId = :id")
+    suspend fun deleteDraftForBuffer(id: RoomId)
+
+    @Query("SELECT * FROM history_cursors WHERE roomId = :id")
+    suspend fun historyCursorForBuffer(id: RoomId): HistoryCursorEntity?
+
+    @Query(
+        """SELECT m.msgid,
+                  CASE WHEN m.serverTimeAuthoritative = 1 THEN m.serverTime ELSE (
+                      SELECT MAX(a.serverTime) FROM messages a
+                      WHERE a.bufferId = :id AND a.serverTimeAuthoritative = 1
+                  ) END AS serverTime
+           FROM messages m
+           WHERE m.bufferId = :id
+             AND (m.msgid IS NOT NULL OR m.serverTimeAuthoritative = 1)
+           ORDER BY m.serverTime DESC, m.id DESC LIMIT 1""",
+    )
+    suspend fun latestBoundaryForBuffer(id: RoomId): MessageBoundaryRow?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertHistoryCursor(cursor: HistoryCursorEntity)
+
     @Transaction
     suspend fun deleteBuffer(id: Long) {
+        val room = rawById(id) ?: return
+        if (room.type == BufferType.QUERY) {
+            dismissQuery(room)
+            return
+        }
         deleteMembersForBuffer(id)
         deleteReactionsForBuffer(id)
         deleteRedirectsTo(id)
         deleteBufferRow(id) // cascades to messages + messages_fts
+    }
+
+    /** Purge local query content while retaining enough identity and protocol state to detect DMs. */
+    @Transaction
+    suspend fun dismissQuery(room: BufferEntity) {
+        val cursor = historyCursorForBuffer(room.id)
+        val latest = latestBoundaryForBuffer(room.id)
+        val candidates = listOf(
+            room.historyDiscardedThroughMsgid to room.historyDiscardedThroughTime,
+            cursor?.newestMsgid to cursor?.newestServerTime,
+            latest?.msgid to latest?.serverTime,
+            null to room.readMarkerTime,
+        ).filter { (msgid, time) -> msgid != null || time != null }
+        val floorTime = candidates.mapNotNull { it.second }.maxOrNull()
+        val floorMsgid = candidates.asSequence()
+            .filter { it.first != null }
+            .maxByOrNull { it.second ?: Long.MIN_VALUE }
+            ?.first
+
+        update(
+            room.copy(
+                pinned = false,
+                muted = false,
+                localReadAnchorTime = floorTime,
+                localReadAnchorEventId = null,
+                oldestFetchedTime = null,
+                historyComplete = false,
+                dismissed = true,
+                historyDiscardedThroughMsgid = floorMsgid,
+                historyDiscardedThroughTime = floorTime,
+            ),
+        )
+        deleteMembersForBuffer(room.id)
+        deleteReactionsForBuffer(room.id)
+        deleteDraftForBuffer(room.id)
+        rememberDiscardedMessageIds(room.id)
+        deleteMessagesForBuffer(room.id)
+        upsertHistoryCursor(
+            HistoryCursorEntity(
+                roomId = room.id,
+                newestMsgid = floorMsgid,
+                newestServerTime = floorTime,
+            ),
+        )
     }
 }
 
@@ -558,6 +665,13 @@ interface MessageDao {
 
     @Query("SELECT COUNT(*) FROM messages WHERE bufferId = :bufferId")
     suspend fun countForBuffer(bufferId: Long): Int
+
+    @Query(
+        """SELECT COUNT(*) FROM messages m
+           JOIN buffers b ON b.id = m.bufferId
+           WHERE b.networkId = :networkId""",
+    )
+    suspend fun countForNetwork(networkId: Long): Int
 
     @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE bufferId = :bufferId AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION'))")
     suspend fun hasStoredChat(bufferId: Long): Boolean
@@ -1284,6 +1398,9 @@ interface HistoryCursorDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(cursor: HistoryCursorEntity)
+
+    @Query("DELETE FROM history_cursors WHERE roomId = :roomId")
+    suspend fun delete(roomId: RoomId)
 
     @Query(
         """INSERT OR REPLACE INTO history_cursors(

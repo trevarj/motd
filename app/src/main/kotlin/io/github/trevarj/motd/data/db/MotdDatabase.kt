@@ -14,6 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NetworkEntity::class,
         NetworkIdentityEntity::class,
         RoomEntity::class,
+        DiscardedMessageIdEntity::class,
         RoomAliasEntity::class,
         TimelineEventEntity::class,
         TimelineEventFtsEntity::class,
@@ -29,7 +30,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -502,6 +503,27 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
                 `selfNick` TEXT,
                 PRIMARY KEY(`networkId`),
                 FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`)
+                    ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+    }
+}
+
+/**
+ * v13 -> v14 adds a local dismissed-query shell, an immutable discarded-history boundary, and
+ * exact msgid tombstones for ambiguous timestamp ties. Existing rooms and timeline rows survive.
+ */
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE buffers ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE buffers ADD COLUMN historyDiscardedThroughMsgid TEXT")
+        db.execSQL("ALTER TABLE buffers ADD COLUMN historyDiscardedThroughTime INTEGER")
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `discarded_message_ids` (
+                `roomId` INTEGER NOT NULL,
+                `msgid` TEXT NOT NULL,
+                PRIMARY KEY(`roomId`, `msgid`),
+                FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`)
                     ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
         )

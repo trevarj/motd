@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -66,5 +67,87 @@ class DeleteBufferDaoTest {
         // FTS stays consistent: a search for the deleted text finds nothing, the kept one does.
         assertTrue(msgDao.search("gone*", null).first().isEmpty())
         assertEquals("stays", msgDao.search("stays*", null).first().single().message.text)
+    }
+
+    @Test
+    fun deleteQuery_purgesContentButKeepsHiddenIdentityAndHistoryFloor() = runTest {
+        val query = db.bufferDao().insert(buffer(networkId, "alice", BufferType.QUERY))
+        db.roomAliasDao().insertIgnore(
+            RoomAliasEntity(
+                networkId = networkId,
+                namespace = RoomAliasNamespace.PROVISIONAL_NICK,
+                value = "alice",
+                roomId = query,
+            ),
+        )
+        db.messageDao().insertAll(
+            listOf(message(query, "discarded", serverTime = 100, dedupKey = "old", msgid = "m-old")),
+        )
+        db.historyCursorDao().upsert(
+            HistoryCursorEntity(
+                roomId = query,
+                newestMsgid = "m-old",
+                newestServerTime = 100,
+                oldestMsgid = "m-old",
+                oldestServerTime = 100,
+                historyComplete = true,
+            ),
+        )
+        db.composerDraftDao().upsert(ComposerDraftEntity(query, "draft", null, 101))
+        db.memberDao().upsert(MemberEntity(query, "alice"))
+        db.reactionDao().upsert(
+            ReactionEntity(
+                bufferId = query,
+                targetMsgid = "m-old",
+                actorKey = "nick:bob",
+                sender = "bob",
+                emoji = "+1",
+                serverTime = 101,
+            ),
+        )
+
+        db.bufferDao().deleteBuffer(query)
+
+        val shell = db.bufferDao().rawById(query)!!
+        assertTrue(shell.dismissed)
+        assertEquals("m-old", shell.historyDiscardedThroughMsgid)
+        assertEquals(100L, shell.historyDiscardedThroughTime)
+        assertNull(db.messageDao().byMsgid(query, "m-old"))
+        assertNull(db.composerDraftDao().byRoom(query))
+        assertTrue(db.memberDao().observe(query).first().isEmpty())
+        assertTrue(db.reactionDao().observeForBuffer(query).first().isEmpty())
+        assertEquals(query, db.roomAliasDao().byValue(
+            networkId,
+            RoomAliasNamespace.PROVISIONAL_NICK,
+            "alice",
+        )?.roomId)
+        assertEquals("m-old", db.historyCursorDao().byRoom(query)?.newestMsgid)
+        assertFalse(db.bufferDao().observeChatList().first().any { it.bufferId == query })
+    }
+
+    @Test
+    fun deleteQueryNeverUsesDeviceClockAsHistoryFloor() = runTest {
+        val query = db.bufferDao().insert(buffer(networkId, "alice", BufferType.QUERY))
+        db.messageDao().insertAll(
+            listOf(
+                message(query, "authoritative", serverTime = 100, dedupKey = "m1", msgid = "m1"),
+                message(
+                    query,
+                    "local-clock",
+                    serverTime = 10_000,
+                    dedupKey = "m2",
+                    msgid = null,
+                ).copy(serverTimeAuthoritative = false),
+            ),
+        )
+        val room = db.bufferDao().rawById(query)!!
+        db.bufferDao().update(room.copy(localReadAnchorTime = 10_000))
+
+        db.bufferDao().deleteBuffer(query)
+
+        val shell = db.bufferDao().rawById(query)!!
+        assertEquals("m1", shell.historyDiscardedThroughMsgid)
+        assertEquals(100L, shell.historyDiscardedThroughTime)
+        assertEquals(100L, shell.localReadAnchorTime)
     }
 }

@@ -34,8 +34,13 @@ class ComposerDraftStore @Inject constructor(
         text: String,
         replyToEventId: TimelineEventId?,
     ): ComposerDraftEntity? = db.withTransaction {
-        val roomId = db.bufferDao().canonicalId(bufferId) ?: return@withTransaction null
+        val room = db.bufferDao().observeById(bufferId) ?: return@withTransaction null
+        val roomId = room.id
         val dao = db.composerDraftDao()
+        if (room.dismissed) {
+            dao.delete(roomId)
+            return@withTransaction null
+        }
         val canonicalReplyId = replyToEventId?.let {
             db.canonicalTimelineDao().canonicalEventId(it)
         }

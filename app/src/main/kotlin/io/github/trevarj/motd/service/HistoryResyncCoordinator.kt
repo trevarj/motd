@@ -3,6 +3,7 @@ package io.github.trevarj.motd.service
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.prefs.NoopHistorySyncPrefs
@@ -66,7 +67,11 @@ sealed interface HistoryResyncState {
 
         open override fun toString(): String = "${javaClass.simpleName}(reason=$reason)"
     }
-    data class Incomplete(val inserted: Int, override val reason: String) : Failed(reason)
+    data class Incomplete(
+        val inserted: Int,
+        override val reason: String,
+        val awaitsTargetClassification: Boolean = false,
+    ) : Failed(reason)
     data class Capped(val inserted: Int, val limit: Int, override val reason: String) : Failed(reason)
 }
 
@@ -117,7 +122,9 @@ class HistoryResyncCoordinator @Inject constructor(
     internal interface HistorySource {
         fun availability(): HistoryAvailability
         fun flightIdentity(): Any = this
+        fun canClassifyTargets(): Boolean = true
         fun normalizeTarget(target: String): String = IrcIdentityRules().normalize(target)
+        fun isChannelTarget(target: String): Boolean = IrcIdentityRules().isChannel(target)
         suspend fun chathistory(request: ChatHistoryRequest): ChatHistoryResponse
     }
 
@@ -149,13 +156,18 @@ class HistoryResyncCoordinator @Inject constructor(
 
     private sealed interface WorkStatus {
         data object Complete : WorkStatus
-        data class Incomplete(val reason: String) : WorkStatus
+        data class Incomplete(
+            val reason: String,
+            val awaitsTargetClassification: Boolean = false,
+        ) : WorkStatus
         data class Capped(val reason: String, val limit: Int) : WorkStatus
     }
 
     private data class WorkResult(
         val status: WorkStatus = WorkStatus.Complete,
         val highWater: Long? = null,
+        val inserted: Int = 0,
+        val boundaryRejected: Boolean = false,
     )
 
     private data class TargetPass(
@@ -249,7 +261,6 @@ class HistoryResyncCoordinator @Inject constructor(
             is HistoryAvailability.Ready -> Unit
         }
         if (!isCurrent()) return staleConnection()
-        val before = messageCount(bufferId)
         return try {
             val request = ChatHistoryRequest(
                 subcommand = ChatHistoryRequest.Subcommand.LATEST,
@@ -262,8 +273,7 @@ class HistoryResyncCoordinator @Inject constructor(
             val latest = response as? ChatHistoryResponse.Messages
                 ?: error("CHATHISTORY LATEST returned a TARGETS response")
             if (!isCurrent()) return staleConnection()
-            ingest(networkId, request, latest)
-            val inserted = (messageCount(bufferId) - before).coerceAtLeast(0)
+            val inserted = ingest(networkId, bufferId, request, latest)
             if (
                 !latest.isTerminalPage() &&
                 !latest.hasUsableDirectionalBoundary(
@@ -409,7 +419,15 @@ class HistoryResyncCoordinator @Inject constructor(
         openBuffers: List<Pair<Long, String>>,
         client: IrcClient,
         isCurrent: () -> Boolean,
-    ): HistoryResyncState = resyncNetwork(networkId, openBuffers, ClientHistorySource(client), isCurrent)
+    ): HistoryResyncState {
+        if (!client.targetClassificationReady.value) {
+            withTimeoutOrNull(TARGET_CLASSIFICATION_WAIT_TIMEOUT_MS) {
+                client.targetClassificationReady.first { it }
+            }
+        }
+        if (!isCurrent()) return staleConnection()
+        return resyncNetwork(networkId, openBuffers, ClientHistorySource(client), isCurrent)
+    }
 
     internal suspend fun resyncNetwork(
         networkId: Long,
@@ -441,7 +459,18 @@ class HistoryResyncCoordinator @Inject constructor(
             .coerceAtLeast(Instant.EPOCH.toEpochMilli())
         val upper = Instant.now().toEpochMilli() + TARGETS_FUZZ_MS
         val result = try {
-            val discovery = discoverTargets(source, upper, lower)
+            val discovery = if (source.canClassifyTargets()) {
+                discoverTargets(source, upper, lower)
+            } else {
+                TargetDiscovery(
+                    targets = emptyList(),
+                    status = WorkStatus.Incomplete(
+                        "CHATHISTORY TARGETS deferred until CHANTYPES negotiation settles",
+                        awaitsTargetClassification = true,
+                    ),
+                    highWater = null,
+                )
+            }
             val targetPass = syncTargets(
                 networkId = networkId,
                 targets = (openBuffers + discovery.targets.map { null to it })
@@ -504,6 +533,7 @@ class HistoryResyncCoordinator @Inject constructor(
         var pageUpper = upper
         var highWater: Long? = null
         var previousTie: Pair<Long, Set<String>>? = null
+        var status: WorkStatus = WorkStatus.Complete
         repeat(targetsRequestLimit.coerceAtLeast(1)) { requestIndex ->
             val response = requestTargets(
                 source,
@@ -521,7 +551,7 @@ class HistoryResyncCoordinator @Inject constructor(
                 highWater = maxHighWater(highWater, target.latestMessageTime)
             }
             if (response.endOfHistory || page.isEmpty()) {
-                return TargetDiscovery(targets.values.toList(), WorkStatus.Complete, highWater)
+                return TargetDiscovery(targets.values.toList(), status, highWater)
             }
 
             val oldest = page.minOf { it.latestMessageTime }
@@ -530,14 +560,32 @@ class HistoryResyncCoordinator @Inject constructor(
                 .map { source.normalizeTarget(it.name) }
                 .toSet()
             if (previousTie == (oldest to tiedKeys)) {
-                val reason = if (page.size >= limit) {
-                    "CHATHISTORY TARGETS saturated a timestamp tie and could not advance"
-                } else {
-                    "CHATHISTORY TARGETS pagination did not advance"
+                if (page.size < limit && oldest > lower) {
+                    // Soju 0.10.x omits draft/chathistory-end. Move beyond its repeated short tie
+                    // page so older targets are still recovered, but never call the pass complete:
+                    // IRCv3 permits a server to return fewer than the requested limit, so another
+                    // same-time target could remain undisclosed.
+                    status = status.merge(
+                        WorkStatus.Incomplete(
+                            "CHATHISTORY TARGETS could not prove a timestamp tie was exhausted",
+                        ),
+                    )
+                    if (requestIndex + 1 >= targetsRequestLimit.coerceAtLeast(1)) {
+                        return TargetDiscovery(
+                            targets.values.toList(),
+                            status,
+                            highWater,
+                        )
+                    }
+                    pageUpper = oldest
+                    previousTie = null
+                    return@repeat
                 }
                 return TargetDiscovery(
                     targets.values.toList(),
-                    WorkStatus.Incomplete(reason),
+                    WorkStatus.Incomplete(
+                        "CHATHISTORY TARGETS saturated a timestamp tie and could not advance",
+                    ),
                     highWater,
                 )
             }
@@ -643,7 +691,6 @@ class HistoryResyncCoordinator @Inject constructor(
             is HistoryAvailability.Ready -> Unit
         }
         if (!isCurrent()) return staleConnection()
-        val before = messageCount(bufferId)
         return try {
             val work = when (range) {
                 HistoryRefreshRange.MISSING -> syncTarget(
@@ -675,8 +722,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     isCurrent,
                 )
             }
-            val inserted = (messageCount(bufferId) - before).coerceAtLeast(0)
-            work.status.toState(inserted)
+            work.status.toState(work.inserted)
         } catch (_: TimeoutCancellationException) {
             HistoryResyncState.Failed("History refresh timed out")
         } catch (cancelled: CancellationException) {
@@ -699,6 +745,7 @@ class HistoryResyncCoordinator @Inject constructor(
         range: HistoryRefreshRange,
     ): WorkResult = paginateMessages(
         networkId = networkId,
+        expectedRoomId = bufferId,
         target = target,
         source = source,
         isCurrent = isCurrent,
@@ -727,21 +774,25 @@ class HistoryResyncCoordinator @Inject constructor(
         )
         val latest = request(source, latestRequest)
         if (!isCurrent()) throw StaleConnectionException()
-        ingest(networkId, latestRequest, latest)
+        val latestInserted = ingest(networkId, bufferId, latestRequest, latest)
         val fetched = latest.primaryMessageCount
         var highWater = latest.highWater()
         states.update { it + (bufferId to HistoryResyncState.Running(fetched, ALL_HISTORY_LIMIT)) }
-        if (latest.isTerminalPage()) return WorkResult(highWater = highWater)
+        if (latest.isTerminalPage()) {
+            return WorkResult(highWater = highWater, inserted = latestInserted)
+        }
 
         val oldest = latest.directionalBoundary(ChatHistoryRequest.Subcommand.LATEST)?.toBoundary()
             ?: return WorkResult(
                 WorkStatus.Incomplete("CHATHISTORY LATEST returned no usable oldest boundary"),
                 highWater,
+                latestInserted,
             )
         if (oldest.selector(source, source.supportsReference(HistoryReferenceType.MSGID)) == null) {
             return WorkResult(
                 WorkStatus.Incomplete("CHATHISTORY LATEST returned an unsupported oldest boundary"),
                 highWater,
+                latestInserted,
             )
         }
         if (fetched >= ALL_HISTORY_LIMIT) {
@@ -751,6 +802,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     ALL_HISTORY_LIMIT,
                 ),
                 highWater,
+                latestInserted,
             )
         }
         if (paginationRequestLimit <= 1) {
@@ -760,11 +812,13 @@ class HistoryResyncCoordinator @Inject constructor(
                     paginationRequestLimit,
                 ),
                 highWater,
+                latestInserted,
             )
         }
 
         val older = paginateMessages(
             networkId = networkId,
+            expectedRoomId = bufferId,
             target = target,
             source = source,
             isCurrent = isCurrent,
@@ -779,7 +833,7 @@ class HistoryResyncCoordinator @Inject constructor(
             },
         )
         highWater = maxHighWater(highWater, older.highWater)
-        return WorkResult(older.status, highWater)
+        return WorkResult(older.status, highWater, latestInserted + older.inserted)
     }
 
     private suspend fun syncTargets(
@@ -801,9 +855,11 @@ class HistoryResyncCoordinator @Inject constructor(
         var highWater: Long? = null
         for ((knownBufferId, target) in targets) {
             if (!isCurrent()) throw StaleConnectionException()
-            val canonicalRoomId = knownBufferId
-                ?: processor.ensureHistoryRoom(networkId, target)
-            val before = messageCount(canonicalRoomId)
+            val canonicalRoomId = knownBufferId ?: if (source.isChannelTarget(target)) {
+                continue
+            } else {
+                processor.ensureHistoryQuery(networkId, target, source.normalizeTarget(target))
+            }
             val targetResult = syncTarget(
                 networkId,
                 canonicalRoomId,
@@ -813,7 +869,7 @@ class HistoryResyncCoordinator @Inject constructor(
                 includeRecentOverlap,
                 reconnectBoundary,
             )
-            inserted += (messageCount(canonicalRoomId) - before).coerceAtLeast(0)
+            inserted += targetResult.inserted
             status = status.merge(targetResult.status)
             highWater = maxHighWater(highWater, targetResult.highWater)
         }
@@ -832,32 +888,47 @@ class HistoryResyncCoordinator @Inject constructor(
     ): WorkResult {
         val pageLimit = source.pageLimit()
         val bufferId = knownBufferId
+        val room = db.bufferDao().observeById(bufferId)
         val protocolCursor = db.historyCursorDao().byRoom(bufferId)
-        val boundary = reconnectBoundary ?: if (protocolCursor != null) {
+        val discardedBoundary = room?.let {
+            Boundary(it.historyDiscardedThroughMsgid, it.historyDiscardedThroughTime)
+                .takeIf { boundary -> boundary.msgid != null || boundary.serverTime != null }
+        }
+        val storedBoundary = if (protocolCursor != null) {
             Boundary(protocolCursor.newestMsgid, protocolCursor.newestServerTime)
                 .takeIf { it.msgid?.isNotEmpty() == true || it.serverTime != null }
         } else {
             latestBoundaryFromRoom(bufferId)
         }
+        val boundary = reconnectBoundary ?: storedBoundary ?: discardedBoundary
         // A live self-JOIN/part/topic row is not evidence that its retained chat history was
         // imported. In particular, older releases marked a network sync complete after using that
         // row as an AFTER cursor, leaving an existing bouncer channel permanently empty. Bypass
         // AFTER for a target with no stored chat content and seed it from LATEST instead.
-        val lacksStoredChat = !hasStoredChat(bufferId)
+        val lacksStoredChat = !hasStoredChat(bufferId) && discardedBoundary == null
         val knownOldestTime = when {
             lacksStoredChat -> null
             protocolCursor != null -> protocolCursor.oldestServerTime
             else -> db.messageDao().oldestTime(bufferId)
         }
         val pagingBoundary = when {
+            room?.dismissed == true && discardedBoundary != null -> discardedBoundary
             reconnectBoundary != null -> reconnectBoundary
             lacksStoredChat -> null
             else -> boundary
         }
         var highWater: Long? = null
-        if (pagingBoundary != null) {
+        var inserted = 0
+        var status: WorkStatus = WorkStatus.Complete
+        var forceLatest = false
+        val pagingBoundarySupported = pagingBoundary?.selector(
+            source,
+            source.supportsReference(HistoryReferenceType.MSGID),
+        ) != null
+        if (pagingBoundary != null && pagingBoundarySupported) {
             val after = paginateMessages(
                 networkId = networkId,
+                expectedRoomId = bufferId,
                 target = target,
                 source = source,
                 isCurrent = isCurrent,
@@ -865,14 +936,23 @@ class HistoryResyncCoordinator @Inject constructor(
                 initialBoundary = pagingBoundary,
                 maxRequests = paginationRequestLimit,
             )
+            inserted += after.inserted
             highWater = maxHighWater(highWater, after.highWater)
             if (after.status != WorkStatus.Complete) {
-                return WorkResult(after.status, highWater)
+                if (after.boundaryRejected) {
+                    status = after.status
+                    forceLatest = true
+                } else {
+                    return WorkResult(after.status, highWater, inserted)
+                }
             }
         }
 
         var latestPage: ChatHistoryResponse.Messages? = null
-        if (boundary == null || includeRecentOverlap || lacksStoredChat) {
+        if (
+            boundary == null || includeRecentOverlap || lacksStoredChat || room?.dismissed == true ||
+            pagingBoundary != null && !pagingBoundarySupported || forceLatest
+        ) {
             val latestRequest = ChatHistoryRequest(
                 ChatHistoryRequest.Subcommand.LATEST,
                 target,
@@ -881,7 +961,7 @@ class HistoryResyncCoordinator @Inject constructor(
             val latest = request(source, latestRequest)
             latestPage = latest
             if (!isCurrent()) throw StaleConnectionException()
-            ingest(networkId, latestRequest, latest)
+            inserted += ingest(networkId, bufferId, latestRequest, latest)
             if (!isCurrent()) throw StaleConnectionException()
             highWater = maxHighWater(highWater, latest.highWater())
         }
@@ -893,27 +973,29 @@ class HistoryResyncCoordinator @Inject constructor(
         // a chat cannot import hundreds of older retained messages.
         val overlap = latestPage
         if (overlap == null) {
-            return WorkResult(highWater = highWater)
+            return WorkResult(status, highWater, inserted)
         }
         if (overlap.isTerminalPage()) {
-            return WorkResult(highWater = highWater)
+            return WorkResult(status, highWater, inserted)
         }
         val backwardBoundary = overlap.directionalBoundary(ChatHistoryRequest.Subcommand.LATEST)?.toBoundary()
             ?: return WorkResult(
-                WorkStatus.Incomplete("CHATHISTORY LATEST returned no usable oldest boundary"),
+                status.merge(WorkStatus.Incomplete("CHATHISTORY LATEST returned no usable oldest boundary")),
                 highWater,
+                inserted,
             )
         if (backwardBoundary.selector(source, source.supportsReference(HistoryReferenceType.MSGID)) == null) {
             return WorkResult(
-                WorkStatus.Incomplete("CHATHISTORY LATEST returned an unsupported oldest boundary"),
+                status.merge(WorkStatus.Incomplete("CHATHISTORY LATEST returned an unsupported oldest boundary")),
                 highWater,
+                inserted,
             )
         }
         if (!healSparseGaps || knownOldestTime == null) {
-            return WorkResult(highWater = highWater)
+            return WorkResult(status, highWater, inserted)
         }
         if (backwardBoundary.serverTime != null && backwardBoundary.serverTime < knownOldestTime) {
-            return WorkResult(highWater = highWater)
+            return WorkResult(status, highWater, inserted)
         }
         val lower = Boundary(
             msgid = null,
@@ -922,6 +1004,7 @@ class HistoryResyncCoordinator @Inject constructor(
         )
         val between = paginateMessages(
             networkId = networkId,
+            expectedRoomId = bufferId,
             target = target,
             source = source,
             isCurrent = isCurrent,
@@ -932,8 +1015,9 @@ class HistoryResyncCoordinator @Inject constructor(
             maxEvents = MISSING_BACKFILL_MESSAGE_LIMIT,
         )
         return WorkResult(
-            between.status,
+            status.merge(between.status),
             maxHighWater(highWater, between.highWater),
+            inserted + between.inserted,
         )
     }
 
@@ -948,6 +1032,7 @@ class HistoryResyncCoordinator @Inject constructor(
      */
     private suspend fun paginateMessages(
         networkId: Long,
+        expectedRoomId: RoomId,
         target: String,
         source: HistorySource,
         isCurrent: () -> Boolean,
@@ -975,6 +1060,7 @@ class HistoryResyncCoordinator @Inject constructor(
         var msgidAllowed = source.supportsReference(HistoryReferenceType.MSGID)
         var fetched = 0
         var highWater: Long? = null
+        var inserted = 0
         val usedSelectors = HashSet<String>()
         repeat(requestCap) { requestIndex ->
             if (!isCurrent()) throw StaleConnectionException()
@@ -986,6 +1072,7 @@ class HistoryResyncCoordinator @Inject constructor(
                         maxEvents,
                     ),
                     highWater,
+                    inserted,
                 )
             }
             val requested = requestAtBoundary(
@@ -999,18 +1086,20 @@ class HistoryResyncCoordinator @Inject constructor(
             ) ?: return WorkResult(
                 WorkStatus.Incomplete("CHATHISTORY $subcommand has no usable response boundary"),
                 highWater,
+                inserted,
+                boundaryRejected = true,
             )
             msgidAllowed = requested.msgidAllowed
             usedSelectors += requested.selector.value
             val page = requested.response
             if (!isCurrent()) throw StaleConnectionException()
-            ingest(networkId, requested.request, page)
+            inserted += ingest(networkId, expectedRoomId, requested.request, page)
             if (!isCurrent()) throw StaleConnectionException()
             fetched += page.primaryMessageCount
             onFetched(fetched)
             highWater = maxHighWater(highWater, page.highWater())
             if (page.isTerminalPage()) {
-                return WorkResult(highWater = highWater)
+                return WorkResult(highWater = highWater, inserted = inserted)
             }
 
             val next = page.directionalBoundary(subcommand)?.toBoundary() ?: return WorkResult(
@@ -1018,6 +1107,7 @@ class HistoryResyncCoordinator @Inject constructor(
                     "CHATHISTORY $subcommand returned no usable response boundary",
                 ),
                 highWater,
+                inserted,
             )
             val nextSelector = next.selector(source, msgidAllowed)
                 ?: return WorkResult(
@@ -1025,6 +1115,7 @@ class HistoryResyncCoordinator @Inject constructor(
                         "CHATHISTORY $subcommand returned an unsupported response boundary",
                     ),
                     highWater,
+                    inserted,
                 )
             val wrongTimestampDirection =
                 requested.selector.type == HistoryReferenceType.TIMESTAMP &&
@@ -1035,12 +1126,12 @@ class HistoryResyncCoordinator @Inject constructor(
                         ChatHistoryRequest.Subcommand.BEFORE,
                         ChatHistoryRequest.Subcommand.BETWEEN,
                         -> next.serverTime!! >= boundary.serverTime!!
-                        else -> false
                     }
             if (nextSelector.value in usedSelectors || wrongTimestampDirection) {
                 return WorkResult(
                     WorkStatus.Incomplete("CHATHISTORY $subcommand pagination did not advance"),
                     highWater,
+                    inserted,
                 )
             }
             if (maxEvents != null && fetched >= maxEvents) {
@@ -1050,6 +1141,7 @@ class HistoryResyncCoordinator @Inject constructor(
                         maxEvents,
                     ),
                     highWater,
+                    inserted,
                 )
             }
             if (requestIndex + 1 >= requestCap) {
@@ -1059,6 +1151,7 @@ class HistoryResyncCoordinator @Inject constructor(
                         requestCap,
                     ),
                     highWater,
+                    inserted,
                 )
             }
             boundary = next
@@ -1196,8 +1289,6 @@ class HistoryResyncCoordinator @Inject constructor(
     private suspend fun latestBoundaryFromRoom(bufferId: Long): Boundary? =
         db.messageDao().latestBoundary(bufferId)?.let { Boundary(it.msgid, it.serverTime) }
 
-    private suspend fun messageCount(bufferId: Long): Int = db.messageDao().countForBuffer(bufferId)
-
     private suspend fun hasStoredChat(bufferId: Long): Boolean = db.messageDao().hasStoredChat(bufferId)
 
     private fun Boundary.selector(source: HistorySource, msgidAllowed: Boolean): Selector? =
@@ -1241,9 +1332,18 @@ class HistoryResyncCoordinator @Inject constructor(
 
     private suspend fun ingest(
         networkId: Long,
+        expectedRoomId: RoomId,
         request: ChatHistoryRequest,
         page: ChatHistoryResponse.Messages,
-    ) = processor.persistHistoryPage(networkId, request, page)
+    ): Int {
+        if (db.bufferDao().rawById(expectedRoomId) == null) throw StaleConnectionException()
+        return processor.persistHistoryPageResult(
+            networkId,
+            request,
+            page,
+            expectedRoomId = expectedRoomId,
+        ).inserted
+    }
 
     private fun manualCancellationGeneration(bufferId: Long): Long =
         manualCancellationGenerations.computeIfAbsent(bufferId) { AtomicLong() }.get()
@@ -1277,7 +1377,11 @@ class HistoryResyncCoordinator @Inject constructor(
     private fun WorkStatus.toState(inserted: Int): HistoryResyncState = when (this) {
         WorkStatus.Complete ->
             if (inserted > 0) HistoryResyncState.Updated(inserted) else HistoryResyncState.UpToDate
-        is WorkStatus.Incomplete -> HistoryResyncState.Incomplete(inserted, reason)
+        is WorkStatus.Incomplete -> HistoryResyncState.Incomplete(
+            inserted,
+            reason,
+            awaitsTargetClassification,
+        )
         is WorkStatus.Capped -> HistoryResyncState.Capped(inserted, limit, reason)
     }
 
@@ -1337,7 +1441,12 @@ class HistoryResyncCoordinator @Inject constructor(
 
         override fun flightIdentity(): Any = client
 
+        override fun canClassifyTargets(): Boolean = client.targetClassificationReady.value
+
         override fun normalizeTarget(target: String): String = client.isupport.identityRules.normalize(target)
+
+        override fun isChannelTarget(target: String): Boolean =
+            client.isupport.identityRules.isChannel(target)
 
         override suspend fun chathistory(request: ChatHistoryRequest): ChatHistoryResponse =
             client.chathistory(request)
@@ -1359,6 +1468,7 @@ class HistoryResyncCoordinator @Inject constructor(
         const val TARGETS_FUZZ_MS = 10_000L
         const val HISTORY_TIE_OVERLAP_MS = 1L
         const val CAPABILITY_WAIT_TIMEOUT_MS = 30_000L
+        const val TARGET_CLASSIFICATION_WAIT_TIMEOUT_MS = 10_000L
         const val ALL_HISTORY_LIMIT = 5_000
         const val PAGINATION_REQUEST_LIMIT = 100
         const val TARGETS_REQUEST_LIMIT = 100

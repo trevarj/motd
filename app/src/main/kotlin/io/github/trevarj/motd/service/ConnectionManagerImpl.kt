@@ -776,7 +776,8 @@ class ConnectionManagerImpl @Inject constructor(
         when (event) {
             is IrcEvent.Joined -> if (event.isSelf) {
                 bufferForChannel(networkId, event.channel)?.let { buffer ->
-                    val ready = clientFor(networkId)?.state?.value as? IrcClientState.Ready
+                    val client = clientFor(networkId)
+                    val ready = client?.state?.value as? IrcClientState.Ready
                     setRosterState(
                         buffer.id,
                         if (ready != null && preferredNoImplicitNames(ready.caps) != null) {
@@ -785,6 +786,7 @@ class ConnectionManagerImpl @Inject constructor(
                             RosterLoadState.LOADING
                         },
                     )
+                    if (client != null) seedJoinedChannelHistory(buffer, client)
                 }
             }
             is IrcEvent.NamesStarted -> bufferForChannel(networkId, event.channel)?.let {
@@ -1159,6 +1161,25 @@ class ConnectionManagerImpl @Inject constructor(
                 isCurrent = { clientFor(networkId) === client },
             )) {
                 is HistoryResyncState.Failed -> {
+                    if (result is HistoryResyncState.Incomplete && result.awaitsTargetClassification) {
+                        if (!client.targetClassificationReady.value) {
+                            client.targetClassificationReady.first { it }
+                        }
+                        if (clientFor(networkId) === client) continue
+                        return
+                    }
+                    if (result is HistoryResyncState.Incomplete || result is HistoryResyncState.Capped) {
+                        diagnostics.record("history", "catch_up_incomplete") {
+                            mapOf(
+                                "network_id" to networkId,
+                                "result" to result::class.simpleName,
+                                "error_fp" to diagnostics.fingerprint(result.reason),
+                            )
+                        }
+                        // The pass imported everything it could prove. Retry on the next connection
+                        // instead of looping forever against servers without end-of-history tags.
+                        return
+                    }
                     diagnostics.record("history", "catch_up_failed") {
                         mapOf(
                             "network_id" to networkId,
@@ -1181,6 +1202,17 @@ class ConnectionManagerImpl @Inject constructor(
                     }
                     return
                 }
+            }
+        }
+    }
+
+    /** A registration JOIN can race the network target snapshot; seed history if that pass missed it. */
+    private fun seedJoinedChannelHistory(buffer: BufferEntity, client: IrcClient) {
+        scope.launch {
+            if (clientFor(buffer.networkId) !== client) return@launch
+            if (db.historyCursorDao().byRoom(buffer.id) != null) return@launch
+            historyResyncCoordinator.reconcileBuffer(buffer, client) {
+                clientFor(buffer.networkId) === client
             }
         }
     }
@@ -1647,7 +1679,12 @@ class ConnectionManagerImpl @Inject constructor(
 
     override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long {
         val norm = normalize(networkId, nick)
-        return bufferStore.getOrCreate(networkId, norm, nick, BufferType.QUERY).id
+        return db.withTransaction {
+            val room = bufferStore.getOrCreate(networkId, norm, nick, BufferType.QUERY)
+            val canonical = requireNotNull(bufferDao.observeById(room.id))
+            bufferDao.reviveQuery(canonical.id)
+            canonical.id
+        }
     }
 
     override suspend fun ensureServerBuffer(networkId: Long): Long {

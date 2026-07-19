@@ -294,6 +294,25 @@ class IrcClientTest {
     }
 
     @Test
+    fun `target classification waits for CHANTYPES or end of registration burst`() = runTest {
+        val explicitTransport = FakeTransport()
+        val explicit = registered(explicitTransport)
+        assertFalse(explicit.targetClassificationReady.value)
+
+        explicitTransport.feed(":srv 005 motd CHANTYPES=+ :are supported")
+        runCurrent()
+        assertTrue(explicit.targetClassificationReady.value)
+
+        val defaultTransport = FakeTransport()
+        val defaults = registered(defaultTransport)
+        assertFalse(defaults.targetClassificationReady.value)
+
+        defaultTransport.feed(":srv 376 motd :End of MOTD")
+        runCurrent()
+        assertTrue(defaults.targetClassificationReady.value)
+    }
+
+    @Test
     fun `history availability defaults references and honors zero as unlimited`() = runTest {
         val defaultTransport = FakeTransport()
         val defaultClient = registeredWithIsupport(defaultTransport, "CHATHISTORY=25")
@@ -605,6 +624,7 @@ class IrcClientTest {
         runCurrent()
 
         assertTrue(client.state.value is IrcClientState.Ready)
+        assertTrue(client.targetClassificationReady.value)
         advanceTimeBy(RegistrationStateMachine.FALLBACK_FEATURE_CAP_DELAY_MS)
         runCurrent()
         val deferredCaps = ft.sent

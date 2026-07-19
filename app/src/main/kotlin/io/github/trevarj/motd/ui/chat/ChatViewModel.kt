@@ -1063,7 +1063,8 @@ class ChatViewModel @Inject constructor(
     private val resolver = ChatJumpResolver(
         messages = messageRepository,
         fetchAround = fetch@ { name, msgid, timeMs, limit ->
-            val networkId = state.value.buffer?.networkId ?: return@fetch false
+            val buffer = state.value.buffer ?: return@fetch false
+            val networkId = buffer.networkId
             val client = connectionManager.clientFor(networkId) ?: return@fetch false
             val availability = client.historyAvailability as? HistoryAvailability.Ready
                 ?: return@fetch false
@@ -1076,7 +1077,12 @@ class ChatViewModel @Inject constructor(
                     availability = availability,
                     requestPage = client::chathistory,
                     persistPage = { request, response ->
-                        eventSink.persistHistoryPage(networkId, request, response)
+                        eventSink.persistHistoryPage(
+                            networkId,
+                            request,
+                            response,
+                            expectedRoomId = buffer.id,
+                        )
                     },
                 )
             } catch (cancelled: CancellationException) {

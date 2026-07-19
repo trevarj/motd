@@ -32,8 +32,8 @@ interface BufferRepository {
     fun observeMembers(bufferId: Long): Flow<List<MemberEntity>>
     suspend fun setPinned(id: Long, pinned: Boolean)
     suspend fun setMuted(id: Long, muted: Boolean)
-    /** Remove a buffer and all of its content (messages/members/reactions). Destructive: the
-     *  parting of a joined CHANNEL is handled upstream by the caller (ChatListViewModel). */
+    /** Remove local content. QUERY identity/cursor state remains as a hidden reconnect tombstone;
+     *  the parting of a joined CHANNEL is handled upstream by the caller (ChatListViewModel). */
     suspend fun deleteBuffer(id: Long)
     // NOTE: mark-read goes through ConnectionManager.markRead (single entry point): it advances the
     // exact local tuple and selects an authoritative timestamp for wire MARKREAD when supported.

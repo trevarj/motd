@@ -165,6 +165,7 @@ interface IrcEventSink {
         networkId: Long,
         request: io.github.trevarj.motd.irc.client.ChatHistoryRequest,
         response: io.github.trevarj.motd.irc.client.ChatHistoryResponse.Messages,
+        expectedRoomId: Long? = null,
     ): Long
 }
 

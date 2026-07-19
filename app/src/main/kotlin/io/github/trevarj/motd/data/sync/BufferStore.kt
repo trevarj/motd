@@ -25,6 +25,7 @@ class BufferStore @Inject constructor(
         normalizedName: String,
         displayName: String,
         type: BufferType,
+        initiallyDismissed: Boolean = false,
     ): BufferEntity = db.withTransaction {
         val dao = db.bufferDao()
         val aliasDao = db.roomAliasDao()
@@ -50,8 +51,22 @@ class BufferStore @Inject constructor(
             val hasAccountIdentity = aliasDao.forRoom(nameCollision.id)
                 .any { it.namespace == RoomAliasNamespace.ACCOUNT }
             if (!hasAccountIdentity) {
-                val promoted = nameCollision.copy(displayName = displayName, type = BufferType.CHANNEL)
+                val promoted = nameCollision.copy(
+                    displayName = displayName,
+                    type = BufferType.CHANNEL,
+                    readMarkerTime = if (nameCollision.dismissed) null else nameCollision.readMarkerTime,
+                    localReadAnchorTime = if (nameCollision.dismissed) null else nameCollision.localReadAnchorTime,
+                    localReadAnchorEventId = if (nameCollision.dismissed) null else nameCollision.localReadAnchorEventId,
+                    localUnreadFloorTime = if (nameCollision.dismissed) null else nameCollision.localUnreadFloorTime,
+                    oldestFetchedTime = if (nameCollision.dismissed) null else nameCollision.oldestFetchedTime,
+                    historyComplete = if (nameCollision.dismissed) false else nameCollision.historyComplete,
+                    dismissed = false,
+                    historyDiscardedThroughMsgid = null,
+                    historyDiscardedThroughTime = null,
+                )
                 dao.update(promoted)
+                dao.deleteDiscardedMessageIds(promoted.id)
+                if (nameCollision.dismissed) db.historyCursorDao().delete(promoted.id)
                 aliasDao.deleteQueryAliases(promoted.id)
                 aliasDao.insertIgnore(
                     RoomAliasEntity(
@@ -75,6 +90,7 @@ class BufferStore @Inject constructor(
             name = storedName,
             displayName = displayName,
             type = type,
+            dismissed = initiallyDismissed,
         )
         val insertedId = dao.insertIgnore(candidate)
         val room = if (insertedId > 0L) candidate.copy(id = insertedId) else {
@@ -223,14 +239,18 @@ class BufferStore @Inject constructor(
             if (first.id == second.id) return@withTransaction first
             val winner = if (first.id < second.id) first else second
             val loser = if (winner.id == first.id) second else first
-            val localReadAnchor = listOfNotNull(
-                winner.localReadAnchorTime?.let {
-                    TimelineAnchor(it, winner.localReadAnchorEventId ?: 0L)
-                },
-                loser.localReadAnchorTime?.let {
-                    TimelineAnchor(it, loser.localReadAnchorEventId ?: 0L)
-                },
-            ).minOrNull()
+            val rooms = listOf(winner, loser)
+            val visibleRooms = rooms.filterNot { it.dismissed }
+            val readStateRooms = visibleRooms.ifEmpty { rooms }
+            val localReadAnchor = readStateRooms.mapNotNull { room ->
+                room.localReadAnchorTime?.let {
+                    TimelineAnchor(it, room.localReadAnchorEventId ?: 0L)
+                }
+            }.minOrNull()
+            val discardedBoundary = rooms.maxWithOrNull(
+                compareBy<BufferEntity> { it.historyDiscardedThroughTime ?: Long.MIN_VALUE }
+                    .thenBy { it.historyDiscardedThroughMsgid != null },
+            )
             val result = winner.copy(
                 displayName = if (second.displayName.isNotBlank()) second.displayName else winner.displayName,
                 topic = winner.topic ?: loser.topic,
@@ -239,15 +259,15 @@ class BufferStore @Inject constructor(
                 membershipCycle = maxOf(winner.membershipCycle, loser.membershipCycle),
                 pinned = winner.pinned || loser.pinned,
                 muted = winner.muted || loser.muted,
-                readMarkerTime = maxNullable(winner.readMarkerTime, loser.readMarkerTime),
+                readMarkerTime = readStateRooms.mapNotNull { it.readMarkerTime }.maxOrNull(),
                 localReadAnchorTime = localReadAnchor?.serverTime,
                 localReadAnchorEventId = localReadAnchor?.eventId,
-                localUnreadFloorTime = maxNullable(
-                    winner.localUnreadFloorTime,
-                    loser.localUnreadFloorTime,
-                ),
+                localUnreadFloorTime = readStateRooms.mapNotNull { it.localUnreadFloorTime }.maxOrNull(),
                 oldestFetchedTime = minNullable(winner.oldestFetchedTime, loser.oldestFetchedTime),
                 historyComplete = winner.historyComplete && loser.historyComplete,
+                dismissed = winner.dismissed && loser.dismissed,
+                historyDiscardedThroughMsgid = discardedBoundary?.historyDiscardedThroughMsgid,
+                historyDiscardedThroughTime = discardedBoundary?.historyDiscardedThroughTime,
             )
             bufferDao.update(result)
             aliasDao.repoint(loser.id, winner.id)
@@ -258,6 +278,8 @@ class BufferStore @Inject constructor(
             aliasDao.deleteReactions(loser.id)
             mergeComposerDrafts(winner.id, loser.id)
             mergeHistoryCursors(winner.id, loser.id, result.historyComplete)
+            bufferDao.copyDiscardedMessageIds(loser.id, winner.id)
+            bufferDao.deleteDiscardedMessageIds(loser.id)
             aliasDao.repointRedirects(loser.id, winner.id)
             aliasDao.markRedirect(loser.id, winner.id)
             db.appStateDao().insert(

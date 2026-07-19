@@ -104,4 +104,15 @@ class ComposerDraftStoreTest {
         assertTrue(store.clearIfUnchanged(submitted))
         assertNull(store.loadDraft(roomId))
     }
+
+    @Test
+    fun `stale save cannot recreate draft in dismissed query`() = runTest {
+        val networkId = db.bufferDao().rawById(roomId)!!.networkId
+        val queryId = db.bufferDao().insert(buffer(networkId, "alice", BufferType.QUERY))
+        store.saveDraft(queryId, "before delete", replyToEventId = null)
+        db.bufferDao().deleteBuffer(queryId)
+
+        assertNull(store.saveDraft(queryId, "stale edit", replyToEventId = null))
+        assertNull(store.loadDraft(queryId))
+    }
 }

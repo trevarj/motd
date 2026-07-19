@@ -124,6 +124,9 @@ class IrcClient(
 ) {
     private val _state = MutableStateFlow<IrcClientState>(IrcClientState.Disconnected)
     val state: StateFlow<IrcClientState> = _state.asStateFlow()
+    private val _targetClassificationReady = MutableStateFlow(false)
+    /** True once CHANTYPES is explicit or the registration burst confirms protocol defaults. */
+    val targetClassificationReady: StateFlow<Boolean> = _targetClassificationReady.asStateFlow()
 
     private val _events = MutableSharedFlow<IrcEvent>(
         replay = 0,
@@ -175,6 +178,7 @@ class IrcClient(
         val criticalEvents = Channel<IrcEvent>(CRITICAL_EVENT_CAPACITY)
         criticalEventChannel = criticalEvents
         registered = false
+        _targetClassificationReady.value = false
         _bouncerNetworks.value = emptyMap()   // drop any stale networks from a prior connection
         _state.value = IrcClientState.Connecting
         runJob = scope.launch { run(criticalEvents) }
@@ -193,6 +197,7 @@ class IrcClient(
         val t = transport
         transport = null
         registered = false
+        _targetClassificationReady.value = false
         ackedCaps.set(emptySet())
         runtimeAdvertisedCaps.clear()
         if (t != null) scope.launch { runCatching { t.close() } }
@@ -338,6 +343,8 @@ class IrcClient(
             is RegistrationStateMachine.Action.Complete -> {
                 selfNick.set(a.nick)
                 _isupport.set(a.isupport)
+                _targetClassificationReady.value =
+                    a.isupport["CHANTYPES"] != null || a.assumeDefaultTargetClassification
                 ackedCaps.set(a.caps)
                 registered = true
                 val isupportMap = isupportToMap(a.isupport)
@@ -372,6 +379,9 @@ class IrcClient(
         // 005 normally arrives after 001. Keep Ready's snapshot current so app-owned feature
         // gates (notably CLIENTTAGDENY) do not operate on the empty registration-time map.
         if (msg.command == "005") updateRuntimeIsupport(msg, criticalEvents)
+        if (msg.command == "376" || msg.command == "422") {
+            _targetClassificationReady.value = true
+        }
 
         when (val outcome = batches.route(msg)) {
             BatchAssembler.Outcome.Buffered -> return
@@ -541,6 +551,7 @@ class IrcClient(
     ) {
         val isupport = _isupport.get()
         isupport.update(msg.params.drop(1).dropLast(1))
+        if (isupport["CHANTYPES"] != null) _targetClassificationReady.value = true
         val current = _state.value as? IrcClientState.Ready ?: return
         val snapshot = isupportToMap(isupport)
         _state.value = current.copy(isupport = snapshot)

@@ -50,6 +50,8 @@ data class DurableOutgoingEvent(
     val label: String,
 )
 
+internal data class PersistedHistoryPage(val roomId: RoomId, val inserted: Int)
+
 /**
  * The sole IRC→Room writer (plans/04 mapping table). Implements [IrcEventSink]: every per-network
  * collector, the catch-up path, the RemoteMediator, the pending-send insert, and the push path
@@ -87,6 +89,7 @@ class EventProcessor @Inject constructor(
         ConcurrentHashMap<Long, MutableMap<CanonicalBatchKey, Int>>()
     private val activeHistoryChatRoutes =
         ConcurrentHashMap<Long, ArrayDeque<ChatRoute>>()
+    private val activeHistoryTargets = ConcurrentHashMap<Long, ActiveHistoryTarget>()
     private val activeProtocolPageCursorWrites = ConcurrentHashMap.newKeySet<Long>()
 
     private data class RosterKey(val networkId: Long, val bufferId: Long)
@@ -120,10 +123,18 @@ class EventProcessor @Inject constructor(
         val sourceIsSelf: Boolean,
     )
 
+    private data class ActiveHistoryTarget(
+        val target: String,
+        val roomId: RoomId,
+        val type: BufferType,
+        val normalizedName: String,
+    )
+
     private data class ReactionRoute(
         val bufferName: String,
         val type: BufferType,
         val sourceIsSelf: Boolean,
+        val roomId: RoomId? = null,
     )
 
     private sealed interface RosterDelta {
@@ -235,6 +246,7 @@ class EventProcessor @Inject constructor(
         event: IrcEvent,
         origin: EventOrigin,
         historyTarget: String? = null,
+        expectedHistoryRoomId: RoomId? = null,
     ) {
         diagnostics.record("event_processor", "event_received") {
             mapOf(
@@ -255,7 +267,7 @@ class EventProcessor @Inject constructor(
             }
             is IrcEvent.ChatMessage -> onChat(networkId, event, origin, historyTarget)
             is IrcEvent.TagMessage -> onTag(networkId, event, origin, historyTarget)
-            is IrcEvent.HistoryBatch -> onHistoryBatch(networkId, event)
+            is IrcEvent.HistoryBatch -> onHistoryBatch(networkId, event, expectedHistoryRoomId)
             is IrcEvent.NetworkBatch -> onNetworkBatch(networkId, event, origin, historyTarget)
             is IrcEvent.Joined -> if (origin == EventOrigin.LIVE) onJoined(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalJoined(networkId, event)
             is IrcEvent.Parted -> if (origin == EventOrigin.LIVE) onParted(networkId, event) else if (origin == EventOrigin.HISTORY) onHistoricalParted(networkId, event)
@@ -330,6 +342,12 @@ class EventProcessor @Inject constructor(
         val storedText = route.storedText
         val sourceIsSelf = route.sourceIsSelf
         val isDm = type == BufferType.QUERY
+        if (isDm && origin == EventOrigin.HISTORY && shouldDiscardHistoricalEvent(bufferId, e)) {
+            return
+        }
+        if (isDm && origin != EventOrigin.HISTORY && isExactDiscardedEvent(bufferId, e.ctx)) {
+            return
+        }
         val isBouncerServQuery = isDm && bufferName.equals("BouncerServ", ignoreCase = true)
         val isRootServiceReply = isBouncerServQuery && !sourceIsSelf &&
             e.kind == IrcEvent.ChatKind.PRIVMSG && networkDao.byId(networkId)?.role == NetworkRole.BOUNCER_ROOT
@@ -379,21 +397,24 @@ class EventProcessor @Inject constructor(
                 row.serverTime,
             )
             val multiplicity = activeHistoryMultiplicities[networkId]?.get(batchKey)
-            val result = canonicalTimeline.ingest(
-                TimelineObservation(
-                    networkId = networkId,
-                    event = row,
-                    origin = origin.toObservationOrigin(),
-                    connectionGeneration = connectionGenerations[networkId],
-                    label = e.ctx.label,
-                    batchId = e.ctx.batchId,
-                    timeProvenance = e.ctx.serverTimeSource.toTimeProvenance(),
-                    batchSemanticMultiplicity = multiplicity?.semantic ?: 1,
-                    batchExactMultiplicity = multiplicity?.exact ?: 1,
-                    batchExactOrdinal = nextHistoryExactOrdinal(networkId, batchKey),
-                    persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
-                ),
-            )
+            val result = db.withTransaction {
+                if (isDm) bufferDao.reviveQuery(bufferId)
+                canonicalTimeline.ingest(
+                    TimelineObservation(
+                        networkId = networkId,
+                        event = row,
+                        origin = origin.toObservationOrigin(),
+                        connectionGeneration = connectionGenerations[networkId],
+                        label = e.ctx.label,
+                        batchId = e.ctx.batchId,
+                        timeProvenance = e.ctx.serverTimeSource.toTimeProvenance(),
+                        batchSemanticMultiplicity = multiplicity?.semantic ?: 1,
+                        batchExactMultiplicity = multiplicity?.exact ?: 1,
+                        batchExactOrdinal = nextHistoryExactOrdinal(networkId, batchKey),
+                        persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
+                    ),
+                )
+            }
             val canonical = result.event
             traceMessageWrite(
                 when (result) {
@@ -467,7 +488,7 @@ class EventProcessor @Inject constructor(
         historyTarget: String?,
     ) {
         val st = stateFor(networkId)
-        val route = resolveReactionRoute(e.source.nick, e.target, historyTarget, st)
+        val route = resolveReactionRoute(networkId, e.source.nick, e.target, historyTarget, st)
         // Peer typing is routed to the tracker, never persisted.
         if (origin == EventOrigin.LIVE && !route.sourceIsSelf) e.typing?.let { typingState ->
             val bufferId = ensureBuffer(networkId, route.bufferName, route.type, st)
@@ -518,7 +539,11 @@ class EventProcessor @Inject constructor(
         }
     }
 
-    private suspend fun onHistoryBatch(networkId: Long, batch: IrcEvent.HistoryBatch) {
+    private suspend fun onHistoryBatch(
+        networkId: Long,
+        batch: IrcEvent.HistoryBatch,
+        expectedRoomId: RoomId? = null,
+    ) {
         // All events for one target are applied in a single Room transaction (idempotent by
         // dedupKey). They are historical replay, never live arrivals: persist them without posting
         // notifications even when a previously-missing row is a DM or mention.
@@ -529,17 +554,63 @@ class EventProcessor @Inject constructor(
                 "events" to batch.events.size,
             )
         }
+        val targetRoom = expectedRoomId?.let { roomId ->
+            val room = bufferDao.observeById(roomId)
+                ?: error("history target $roomId no longer exists")
+            check(room.networkId == networkId) { "history target $roomId belongs to another network" }
+            room
+        } ?: existingRoom(networkId, batch.target, stateFor(networkId))
+        targetRoom?.let { room ->
+            activeHistoryTargets[networkId] = ActiveHistoryTarget(
+                batch.target,
+                room.id,
+                room.type,
+                room.name,
+            )
+        }
         try {
             db.withTransaction {
                 activeHistoryChatRoutes[networkId] = ArrayDeque()
-                activeHistoryMultiplicities[networkId] = canonicalBatchMultiplicities(networkId, batch)
+                activeHistoryMultiplicities[networkId] = canonicalBatchMultiplicities(
+                    networkId,
+                    batch,
+                )
+                val routedRoomIds = linkedSetOf<RoomId>()
+                activeHistoryChatRoutes[networkId].orEmpty().forEach { route ->
+                    if (targetRoom == null || route.type == targetRoom.type) {
+                        routedRoomIds += bufferDao.canonicalId(route.bufferId) ?: route.bufferId
+                    }
+                }
+                val contextAmbiguous = routedRoomIds.size > 1
+                val contextRoomId = routedRoomIds.singleOrNull()
+                    ?: targetRoom?.id?.let { bufferDao.canonicalId(it) ?: it }
+                contextRoomId?.let { roomId ->
+                    bufferDao.observeById(roomId)?.let { room ->
+                        activeHistoryTargets[networkId] = ActiveHistoryTarget(
+                            batch.target,
+                            room.id,
+                            room.type,
+                            room.name,
+                        )
+                    }
+                }
+                val events = when {
+                    contextAmbiguous -> batch.events.filterIsInstance<IrcEvent.ChatMessage>()
+                    contextRoomId == null -> batch.events
+                    else ->
+                    batch.events.filterNot { event ->
+                        event !is IrcEvent.ChatMessage &&
+                            shouldDiscardHistoricalEvent(contextRoomId, event)
+                    }
+                }
                 activeHistoryOccurrences[networkId] = mutableMapOf()
-                for (ev in batch.events) processEvent(networkId, ev, EventOrigin.HISTORY, batch.target)
+                for (ev in events) processEvent(networkId, ev, EventOrigin.HISTORY, batch.target)
             }
         } finally {
             activeHistoryMultiplicities.remove(networkId)
             activeHistoryOccurrences.remove(networkId)
             activeHistoryChatRoutes.remove(networkId)
+            activeHistoryTargets.remove(networkId)
         }
         diagnostics.record("history", "batch_finished") {
             mapOf(
@@ -550,6 +621,43 @@ class EventProcessor @Inject constructor(
         }
     }
 
+    /** Keep discarded history out permanently; ambiguous equal-time events are retained. */
+    private suspend fun shouldDiscardHistoricalEvent(roomId: RoomId, event: IrcEvent): Boolean {
+        val room = bufferDao.observeById(roomId)?.takeIf { it.type == BufferType.QUERY }
+            ?: return false
+        val context = when (event) {
+            is IrcEvent.ChatMessage -> event.ctx
+            is IrcEvent.TagMessage -> event.ctx
+            is IrcEvent.Joined -> event.ctx
+            is IrcEvent.Parted -> event.ctx
+            is IrcEvent.Quit -> event.ctx
+            is IrcEvent.Kicked -> event.ctx
+            is IrcEvent.NickChanged -> event.ctx
+            is IrcEvent.TopicChanged -> event.ctx
+            is IrcEvent.ModeChanged -> event.ctx
+            is IrcEvent.Invited -> event.ctx
+            else -> null
+        } ?: return false
+        val msgid = context.msgid
+        if (msgid != null && (
+                msgid == room.historyDiscardedThroughMsgid ||
+                    bufferDao.isDiscardedMessageId(room.id, msgid)
+            )
+        ) {
+            return true
+        }
+        val floor = room.historyDiscardedThroughTime ?: return false
+        return context.serverTimeSource == ServerTimeSource.TAG && context.serverTime < floor
+    }
+
+    private suspend fun isExactDiscardedEvent(roomId: RoomId, context: MessageContext): Boolean {
+        val msgid = context.msgid ?: return false
+        val room = bufferDao.observeById(roomId)?.takeIf { it.type == BufferType.QUERY }
+            ?: return false
+        return msgid == room.historyDiscardedThroughMsgid ||
+            bufferDao.isDiscardedMessageId(room.id, msgid)
+    }
+
     /**
      * Persist one completed CHATHISTORY page and its protocol boundary in the same writer-owned
      * transaction. Context events remain ingestible but cannot become the next page cursor.
@@ -558,12 +666,26 @@ class EventProcessor @Inject constructor(
         networkId: Long,
         request: ChatHistoryRequest,
         response: ChatHistoryResponse.Messages,
-    ): RoomId = sequencer.withNetwork(networkId) {
+        expectedRoomId: RoomId?,
+    ): RoomId = persistHistoryPageResult(networkId, request, response, expectedRoomId).roomId
+
+    internal suspend fun persistHistoryPageResult(
+        networkId: Long,
+        request: ChatHistoryRequest,
+        response: ChatHistoryResponse.Messages,
+        expectedRoomId: RoomId?,
+    ): PersistedHistoryPage = sequencer.withNetwork(networkId) {
         require(request.subcommand != ChatHistoryRequest.Subcommand.TARGETS) {
             "TARGETS is not a message page"
         }
-        val roomId = db.withTransaction {
-            val initialRoomId = historicalTargetBuffer(networkId, request.target)
+        val persisted = db.withTransaction {
+            val messageCountBefore = messageDao.countForNetwork(networkId)
+            val initialRoomId = expectedRoomId?.let { roomId ->
+                val room = bufferDao.observeById(roomId)
+                    ?: error("history target $roomId no longer exists")
+                check(room.networkId == networkId) { "history target $roomId belongs to another network" }
+                room.id
+            } ?: historicalTargetBuffer(networkId, request.target)
                 ?: error("missing history target ${request.target}")
             val initialCanonicalId = bufferDao.canonicalId(initialRoomId) ?: initialRoomId
             val before = db.historyCursorDao().byRoom(initialCanonicalId)
@@ -575,6 +697,7 @@ class EventProcessor @Inject constructor(
                         networkId,
                         IrcEvent.HistoryBatch(request.target, response.events),
                         EventOrigin.LIVE,
+                        expectedHistoryRoomId = initialCanonicalId,
                     )
                 } finally {
                     activeProtocolPageCursorWrites -= networkId
@@ -617,10 +740,14 @@ class EventProcessor @Inject constructor(
             )
             bufferDao.setOldestFetchedTime(canonicalRoomId, oldest?.serverTime)
             if (complete) bufferDao.markHistoryComplete(canonicalRoomId)
-            canonicalRoomId
+            PersistedHistoryPage(
+                roomId = canonicalRoomId,
+                inserted = (messageDao.countForNetwork(networkId) - messageCountBefore)
+                    .coerceAtLeast(0),
+            )
         }
         bufferStore.drainCommittedRoomMerges()
-        roomId
+        persisted
     }
 
     private suspend fun canonicalBatchMultiplicities(
@@ -628,17 +755,47 @@ class EventProcessor @Inject constructor(
         batch: IrcEvent.HistoryBatch,
     ): Map<CanonicalBatchKey, CanonicalBatchMultiplicity> {
         val st = stateFor(networkId)
-        val keys = batch.events.mapNotNull { historyBatchKey(networkId, batch.target, it, st) }
-            .map { key ->
-                key.copy(roomId = bufferDao.canonicalId(key.roomId) ?: key.roomId)
-            }
-        activeHistoryChatRoutes[networkId]?.let { routes ->
-            activeHistoryChatRoutes[networkId] = ArrayDeque(
-                routes.map { route ->
-                    route.copy(bufferId = bufferDao.canonicalId(route.bufferId) ?: route.bufferId)
-                },
-            )
+        val chatEvents = batch.events.filterIsInstance<IrcEvent.ChatMessage>()
+        var chatRoutes = chatEvents.map { event ->
+            resolveChatRoute(networkId, event, st, batch.target, EventOrigin.HISTORY)
+        }.map { route ->
+            route.copy(bufferId = bufferDao.canonicalId(route.bufferId) ?: route.bufferId)
         }
+        val strongQueryRooms = chatEvents.zip(chatRoutes)
+            .filter { (event, route) ->
+                route.type == BufferType.QUERY && !route.sourceIsSelf &&
+                    event.ctx.account?.takeUnless { it.isEmpty() || it == "*" } != null
+            }
+            .mapTo(linkedSetOf()) { (_, route) -> route.bufferId }
+        strongQueryRooms.singleOrNull()?.let { roomId ->
+            chatRoutes = chatRoutes.map { route ->
+                if (route.type == BufferType.QUERY) route.copy(bufferId = roomId) else route
+            }
+        }
+        activeHistoryChatRoutes[networkId] = ArrayDeque(chatRoutes)
+        val routedTargetRooms = chatRoutes.asSequence()
+            .filter { route -> activeHistoryTargets[networkId]?.type == route.type }
+            .mapTo(linkedSetOf()) { it.bufferId }
+        routedTargetRooms.singleOrNull()?.let { roomId ->
+            bufferDao.observeById(roomId)?.let { room ->
+                activeHistoryTargets[networkId] = ActiveHistoryTarget(
+                    batch.target,
+                    room.id,
+                    room.type,
+                    room.name,
+                )
+            }
+        }
+        val routeIterator = chatRoutes.iterator()
+        val keys = batch.events.mapNotNull { event ->
+            historyBatchKey(
+                networkId,
+                batch.target,
+                event,
+                st,
+                if (event is IrcEvent.ChatMessage) routeIterator.next() else null,
+            )
+        }.map { key -> key.copy(roomId = bufferDao.canonicalId(key.roomId) ?: key.roomId) }
         val exactCounts = keys.groupingBy { it }.eachCount()
         val semanticCounts = keys.groupingBy {
             CanonicalSemanticBatchKey(it.roomId, it.kind, it.normalizedActor, it.text)
@@ -663,14 +820,15 @@ class EventProcessor @Inject constructor(
         target: String,
         event: IrcEvent,
         st: NetworkState,
+        preflightChatRoute: ChatRoute? = null,
     ): CanonicalBatchKey? {
         suspend fun channelRoom(name: String) = ensureBuffer(networkId, name, BufferType.CHANNEL, st)
         fun key(roomId: Long, kind: MessageKind, actor: String, text: String, time: Long) =
             CanonicalBatchKey(roomId, kind, st.normalize(actor), text, time)
         return when (event) {
             is IrcEvent.ChatMessage -> {
-                val route = resolveChatRoute(networkId, event, st, target, EventOrigin.HISTORY)
-                activeHistoryChatRoutes[networkId]?.addLast(route)
+                val route = preflightChatRoute
+                    ?: resolveChatRoute(networkId, event, st, target, EventOrigin.HISTORY)
                 key(
                     route.bufferId,
                     kindOf(event.kind),
@@ -711,7 +869,7 @@ class EventProcessor @Inject constructor(
                 channelRoom(event.channel), MessageKind.TOPIC, event.setBy ?: "",
                 "topic: ${event.topic}", event.ctx.serverTime,
             )
-            is IrcEvent.ModeChanged -> if (isChannel(event.target, st)) {
+            is IrcEvent.ModeChanged -> if (isChannel(networkId, event.target, st)) {
                 key(
                     channelRoom(event.target), MessageKind.MODE, "",
                     "mode ${event.modes} ${event.args.joinToString(" ")}".trim(),
@@ -722,7 +880,7 @@ class EventProcessor @Inject constructor(
             }
             is IrcEvent.Invited -> {
                 val selfInvite = st.normalize(event.nick) == st.normalize(st.selfNick)
-                val validChannel = isChannel(event.channel, st)
+                val validChannel = isChannel(networkId, event.channel, st)
                 val existingChannel = if (validChannel) {
                     existingChannelBuffer(networkId, event.channel, st)
                 } else {
@@ -878,7 +1036,7 @@ class EventProcessor @Inject constructor(
     private suspend fun onInvited(networkId: Long, e: IrcEvent.Invited, origin: EventOrigin) {
         val st = stateFor(networkId)
         val selfInvite = st.normalize(e.nick) == st.normalize(st.selfNick)
-        val validChannel = isChannel(e.channel, st)
+        val validChannel = isChannel(networkId, e.channel, st)
         val existingChannel = if (validChannel) {
             existingChannelBuffer(networkId, e.channel, st)
         } else {
@@ -1233,7 +1391,7 @@ class EventProcessor @Inject constructor(
 
     private suspend fun onModeChanged(networkId: Long, e: IrcEvent.ModeChanged) {
         val st = stateFor(networkId)
-        if (!isChannel(e.target, st)) return
+        if (!isChannel(networkId, e.target, st)) return
         val bufferId = existingChannelBuffer(networkId, e.target, st)?.id ?: return
         applyPrefixModes(networkId, bufferId, e, st)
         insertSystem(bufferId, e.ctx, MessageKind.MODE, "", "mode ${e.modes} ${e.args.joinToString(" ")}".trim())
@@ -1241,7 +1399,7 @@ class EventProcessor @Inject constructor(
 
     private suspend fun onHistoricalModeChanged(networkId: Long, e: IrcEvent.ModeChanged) {
         val st = stateFor(networkId)
-        if (!isChannel(e.target, st)) return
+        if (!isChannel(networkId, e.target, st)) return
         val bufferId = ensureBuffer(networkId, e.target, BufferType.CHANNEL, st)
         insertSystem(bufferId, e.ctx, MessageKind.MODE, "", "mode ${e.modes} ${e.args.joinToString(" ")}".trim())
     }
@@ -1433,7 +1591,7 @@ class EventProcessor @Inject constructor(
     private suspend fun onServerError(networkId: Long, e: IrcEvent.ServerError) {
         val st = stateFor(networkId)
         if (e.code in PART_ALREADY_CLOSED_NUMERICS) {
-            val channel = e.params.firstOrNull { isChannel(it, st) }
+            val channel = e.params.firstOrNull { isChannel(networkId, it, st) }
             val buffer = channel?.let { existingChannelBuffer(networkId, it, st) }
             if (buffer?.pendingCloseAt != null) {
                 // 403/442 confirms the server has no membership to leave. Treat that as the same
@@ -1443,7 +1601,7 @@ class EventProcessor @Inject constructor(
             }
         }
         if (e.code in JOIN_ERROR_NUMERICS) {
-            val channel = e.params.firstOrNull { isChannel(it, st) }
+            val channel = e.params.firstOrNull { isChannel(networkId, it, st) }
             val inviteBufferId = channel?.let { existingChannelBuffer(networkId, it, st)?.id }
             if (inviteBufferId != null) {
                 messageDao.failJoiningInvites(inviteBufferId, e.text.ifBlank { e.code })
@@ -1484,7 +1642,7 @@ class EventProcessor @Inject constructor(
         val source = message.source?.nick ?: return true
         val target = message.params.firstOrNull() ?: return true
         val st = stateFor(networkId)
-        val route = resolveReactionRoute(source, target, historyTarget, st)
+        val route = resolveReactionRoute(networkId, source, target, historyTarget, st)
         val account = message.tags["account"] ?: if (origin == EventOrigin.LIVE) {
             userDao.byNick(networkId, st.normalize(source))?.account
         } else {
@@ -1542,16 +1700,19 @@ class EventProcessor @Inject constructor(
 
     // -- pending-send insert path (delegated by ConnectionManagerImpl.sendMessage) --
 
-    /** Recreate a TARGETS-discovered room even when its newest history page is empty. */
-    suspend fun ensureHistoryRoom(networkId: Long, target: String): RoomId =
+    /** TARGETS has already classified and normalized this query using the live connection rules. */
+    suspend fun ensureHistoryQuery(
+        networkId: Long,
+        target: String,
+        normalizedTarget: String,
+    ): RoomId =
         sequencer.withNetwork(networkId) {
-            val state = stateFor(networkId)
-            val type = if (isChannel(target, state)) BufferType.CHANNEL else BufferType.QUERY
             bufferStore.getOrCreate(
                 networkId = networkId,
-                normalizedName = state.normalize(target),
+                normalizedName = normalizedTarget,
                 displayName = target,
-                type = type,
+                type = BufferType.QUERY,
+                initiallyDismissed = true,
             ).id
         }
 
@@ -1569,10 +1730,14 @@ class EventProcessor @Inject constructor(
         }
         return sequencer.withNetwork(networkId) {
             db.withTransaction {
-                val canonicalBuffer = requireNotNull(bufferDao.observeById(bufferId)) {
+                var canonicalBuffer = requireNotNull(bufferDao.observeById(bufferId)) {
                     "missing buffer $bufferId"
                 }
                 check(canonicalBuffer.networkId == networkId) { "buffer network changed" }
+                if (canonicalBuffer.type == BufferType.QUERY && canonicalBuffer.dismissed) {
+                    bufferDao.reviveQuery(canonicalBuffer.id)
+                    canonicalBuffer = requireNotNull(bufferDao.observeById(canonicalBuffer.id))
+                }
                 val now = System.currentTimeMillis()
                 val normalizedSender = stateFor(networkId).normalize(sender)
                 val observations = events.map { event ->
@@ -1710,6 +1875,7 @@ class EventProcessor @Inject constructor(
             activeHistoryMultiplicities.remove(networkId)
             activeHistoryOccurrences.remove(networkId)
             activeHistoryChatRoutes.remove(networkId)
+            activeHistoryTargets.remove(networkId)
             activeProtocolPageCursorWrites.remove(networkId)
             connectionGenerations.remove(networkId)
         }
@@ -1721,6 +1887,7 @@ class EventProcessor @Inject constructor(
         states.clear()
         rosterSnapshots.clear()
         activeHistoryChatRoutes.clear()
+        activeHistoryTargets.clear()
         activeProtocolPageCursorWrites.clear()
     }
 
@@ -1749,27 +1916,43 @@ class EventProcessor @Inject constructor(
         )
     }
 
-    private fun isChannel(target: String, st: NetworkState): Boolean =
-        st.isChannel(target)
+    private fun isChannel(networkId: Long, target: String, st: NetworkState): Boolean {
+        val active = activeHistoryTargets[networkId]
+        if (active != null && (
+                target == active.target || st.normalize(target) == st.normalize(active.target)
+            )
+        ) {
+            return active.type == BufferType.CHANNEL
+        }
+        return st.isChannel(target)
+    }
 
     /** Route TAGMSG mutations through the enclosing query batch across historical nick changes. */
     private fun resolveReactionRoute(
+        networkId: Long,
         source: String,
         target: String,
         historyTarget: String?,
         st: NetworkState,
     ): ReactionRoute {
-        val isDm = !isChannel(target, st)
-        val historyPeer = historyTarget?.takeIf { isDm && !isChannel(it, st) }
+        val active = historyTarget?.let { activeHistoryTargets[networkId] }
+        val isDm = active?.type == BufferType.QUERY ||
+            (active == null && !isChannel(networkId, target, st))
+        val historyPeer = when {
+            active?.type == BufferType.QUERY -> active.target
+            else -> historyTarget?.takeIf { isDm && !isChannel(networkId, it, st) }
+        }
         val sourceIsSelf = if (historyPeer != null) {
             st.normalize(target) == st.normalize(historyPeer)
         } else {
             st.isSelfNick(source)
         }
         return ReactionRoute(
-            bufferName = if (isDm) historyPeer ?: if (sourceIsSelf) target else source else target,
-            type = if (isDm) BufferType.QUERY else BufferType.CHANNEL,
+            bufferName = active?.target
+                ?: if (isDm) historyPeer ?: if (sourceIsSelf) target else source else target,
+            type = active?.type ?: if (isDm) BufferType.QUERY else BufferType.CHANNEL,
             sourceIsSelf = sourceIsSelf,
+            roomId = active?.roomId,
         )
     }
 
@@ -1778,7 +1961,7 @@ class EventProcessor @Inject constructor(
         route: ReactionRoute,
         st: NetworkState,
         account: String?,
-    ): RoomId? = if (route.type == BufferType.QUERY) {
+    ): RoomId? = route.roomId?.let { bufferDao.canonicalId(it) ?: it } ?: if (route.type == BufferType.QUERY) {
         val peerAccount = account
             ?.takeUnless { it.isEmpty() || it == "*" || route.sourceIsSelf }
         bufferStore.resolveQueryRoom(networkId, st.normalize(route.bufferName), peerAccount)?.id
@@ -1801,7 +1984,13 @@ class EventProcessor @Inject constructor(
         historyTarget: String?,
         origin: EventOrigin,
     ): ChatRoute {
-        val isDm = !isChannel(event.target, st)
+        val active = historyTarget?.let { activeHistoryTargets[networkId] }
+        val type = active?.type ?: if (isChannel(networkId, event.target, st)) {
+            BufferType.CHANNEL
+        } else {
+            BufferType.QUERY
+        }
+        val isDm = type == BufferType.QUERY
         // Server-sourced NOTICEs never create query rooms.
         if (isDm && event.kind == IrcEvent.ChatKind.NOTICE && isServerSource(event.source.nick)) {
             return ChatRoute(
@@ -1813,7 +2002,10 @@ class EventProcessor @Inject constructor(
                 sourceIsSelf = false,
             )
         }
-        val historyPeer = historyTarget?.takeIf { isDm && !isChannel(it, st) }
+        val historyPeer = when {
+            active?.type == BufferType.QUERY -> active.target
+            else -> historyTarget?.takeIf { isDm && !isChannel(networkId, it, st) }
+        }
         // In a query CHATHISTORY batch the wire target disambiguates direction across nick
         // changes: outgoing rows target the peer; incoming rows target any historical self nick.
         val sourceIsSelf = event.isSelf || when (origin) {
@@ -1821,14 +2013,14 @@ class EventProcessor @Inject constructor(
                 historyPeer != null && st.normalize(event.target) == st.normalize(historyPeer)
             EventOrigin.LIVE, EventOrigin.PUSH -> st.isSelfNick(event.source.nick)
         }
-        val bufferName = if (isDm) {
+        val bufferName = active?.target ?: if (isDm) {
             historyPeer ?: if (sourceIsSelf) event.target else event.source.nick
         } else {
             event.target
         }
-        val type = if (isDm) BufferType.QUERY else BufferType.CHANNEL
-        var bufferId = if (type == BufferType.QUERY) {
-            val normalizedNick = st.normalize(bufferName)
+        val normalizedName = active?.normalizedName ?: st.normalize(bufferName)
+        var bufferId = active?.roomId ?: if (type == BufferType.QUERY) {
+            val normalizedNick = normalizedName
             bufferStore.resolveQueryRoom(networkId, normalizedNick, account = null)?.id
                 ?: bufferStore.resolveQueryRoom(
                     networkId,
@@ -1843,7 +2035,7 @@ class EventProcessor @Inject constructor(
             bufferId = bufferStore.bindQueryIdentity(
                 roomId = bufferId,
                 networkId = networkId,
-                normalizedNick = st.normalize(bufferName),
+                normalizedNick = normalizedName,
                 displayNick = bufferName,
                 account = event.ctx.account.takeUnless { sourceIsSelf },
             ).id
@@ -1888,7 +2080,7 @@ class EventProcessor @Inject constructor(
         networkId: Long,
         target: String,
         st: NetworkState,
-    ): BufferEntity? = if (st.isChannel(target)) {
+    ): BufferEntity? = if (isChannel(networkId, target, st)) {
         existingChannelBuffer(networkId, target, st)
     } else {
         bufferStore.resolveQueryRoom(networkId, st.normalize(target), account = null)
@@ -1897,7 +2089,12 @@ class EventProcessor @Inject constructor(
     private suspend fun historicalTargetBuffer(networkId: Long, target: String?): Long? {
         if (target == null) return null
         val st = stateFor(networkId)
-        val type = if (isChannel(target, st)) BufferType.CHANNEL else BufferType.QUERY
+        activeHistoryTargets[networkId]
+            ?.takeIf {
+                it.target == target || st.normalize(it.target) == st.normalize(target)
+            }
+            ?.let { return bufferDao.canonicalId(it.roomId) ?: it.roomId }
+        val type = if (isChannel(networkId, target, st)) BufferType.CHANNEL else BufferType.QUERY
         return ensureBuffer(networkId, target, type, st)
     }
 
