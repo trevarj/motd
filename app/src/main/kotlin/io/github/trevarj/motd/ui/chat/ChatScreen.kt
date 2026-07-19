@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
@@ -73,6 +75,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -909,6 +912,12 @@ fun ChatContent(
             }
     }
     val buffer = state.buffer
+    val titleTarget = chatTitleTarget(buffer?.type)
+    val titleClickLabel = when (titleTarget) {
+        ChatTitleTarget.CHANNEL_INFO -> stringResource(R.string.chat_open_channel_info)
+        ChatTitleTarget.NICK_DETAILS -> stringResource(R.string.chat_open_nick_details)
+        ChatTitleTarget.NONE -> null
+    }
     // Mark read on new-message-while-at-bottom only (plans/07/15 #2): syncing while scrolled up
     // reading history would clear unread on other clients and destroy the local unread UX.
     LaunchedEffect(rawNewestAnchor, atBottom, initialPositionSettled) {
@@ -936,9 +945,17 @@ fun ChatContent(
                 title = {
                     Row(
                         modifier = Modifier
-                            .clickable(enabled = buffer != null) {
-                                buffer?.let { onOpenChannelInfo(it.id) }
-                            }
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .then(
+                                if (titleClickLabel != null) {
+                                    Modifier.clickable(onClickLabel = titleClickLabel) {
+                                        buffer?.let { onOpenChannelInfo(it.id) }
+                                    }
+                                } else {
+                                    Modifier
+                                },
+                            )
                             .testTag("chat_title"),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -948,10 +965,12 @@ fun ChatContent(
                             isChannel = buffer?.type == BufferType.CHANNEL,
                             networkId = buffer?.networkId,
                         )
-                        Column(modifier = Modifier.padding(start = 10.dp)) {
+                        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
                             Text(
                                 text = buffer?.displayName ?: "",
                                 style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             AnimatedContent(
                                 targetState = chatSubtitle(state, ctx),
@@ -966,9 +985,19 @@ fun ChatContent(
                                         text = subtitle,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                             }
+                        }
+                        if (titleTarget != ChatTitleTarget.NONE) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 },
