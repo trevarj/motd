@@ -57,6 +57,7 @@ import androidx.paging.compose.itemKey
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
@@ -132,6 +133,8 @@ internal fun messageContentType(message: MessageEntity): MessageContentType = wh
 /** Stable per-message testTag id: server msgid when present, else the local entity id (pending). */
 private fun messageTag(msg: MessageEntity): String = "chat_message_${msg.msgid ?: msg.id}"
 
+private fun MessageEntity.timelineAnchor(): TimelineAnchor = TimelineAnchor(serverTime, id)
+
 /**
  * True when [current] should show its sender header: it opens a new same-sender ≤3-min group.
  * [olderNeighbor] is the message immediately older in time (index+1 in a reversed list).
@@ -152,7 +155,7 @@ fun MessageList(
     items: LazyPagingItems<MessageEntity>,
     listState: LazyListState,
     networkId: Long?,
-    readMarkerTime: Long?,
+    readMarkerTime: TimelineAnchor?,
     onLongPress: (MessageEntity) -> Unit,
     onReply: (MessageEntity) -> Unit,
     // React to a message; the whole entity is passed so a still-pending own row (msgid == null) is
@@ -160,6 +163,7 @@ fun MessageList(
     onReact: (MessageEntity, String) -> Unit,
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
+    canRetry: (MessageEntity) -> Boolean = { true },
     loadPreview: suspend (String) -> LinkPreview?,
     richContentReady: Boolean,
     showImages: Boolean,
@@ -308,6 +312,7 @@ fun MessageList(
                         onReact = onReact,
                         onImageClick = onImageClick,
                         onRetry = onRetry,
+                        canRetry = canRetry(msg),
                         onDelete = onDelete,
                         loadPreview = loadPreview,
                         showImages = showImages,
@@ -482,7 +487,7 @@ private fun SystemEventRun(
     items: LazyPagingItems<MessageEntity>,
     index: Int,
     newest: MessageEntity,
-    readMarkerTime: Long?,
+    readMarkerTime: TimelineAnchor?,
 ) {
     // Gather at most one chunk: newest first (index), then older neighbors while still system events.
     val run = ArrayList<MessageEntity>()
@@ -502,8 +507,8 @@ private fun SystemEventRun(
 
     // Divider below the run when the run's newest crosses the marker and its older neighbor doesn't.
     val showNewDivider = readMarkerTime != null &&
-        newest.serverTime > readMarkerTime &&
-        (olderThanRun == null || olderThanRun.serverTime <= readMarkerTime)
+        newest.timelineAnchor() > readMarkerTime &&
+        (olderThanRun == null || olderThanRun.timelineAnchor() <= readMarkerTime)
     val showDay = remember(oldest.serverTime, olderThanRun?.serverTime) {
         olderThanRun == null || dayStart(oldest.serverTime) != dayStart(olderThanRun.serverTime)
     }
@@ -573,7 +578,7 @@ private fun MessageRow(
     networkId: Long?,
     older: MessageEntity?,
     formatTime: (Long) -> String,
-    readMarkerTime: Long?,
+    readMarkerTime: TimelineAnchor?,
     senderIsFriend: Boolean,
     reactions: List<ReactionChip>,
     knownNicks: Set<String>,
@@ -582,6 +587,7 @@ private fun MessageRow(
     onReact: (MessageEntity, String) -> Unit,
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
+    canRetry: Boolean,
     onDelete: (MessageEntity) -> Unit,
     loadPreview: suspend (String) -> LinkPreview?,
     showImages: Boolean,
@@ -598,8 +604,8 @@ private fun MessageRow(
     // Read-marker divider sits below the first message newer than the marker (drawn after the
     // bubble because the list is reversed => "above" the newer message visually).
     val showNewDivider = readMarkerTime != null &&
-        msg.serverTime > readMarkerTime &&
-        (older == null || older.serverTime <= readMarkerTime)
+        msg.timelineAnchor() > readMarkerTime &&
+        (older == null || older.timelineAnchor() <= readMarkerTime)
 
     // Day separator when this message starts a new day relative to the older neighbor.
     val showDay = remember(msg.serverTime, older?.serverTime) {
@@ -740,7 +746,10 @@ private fun MessageRow(
         )
     }
     if (msg.failed) {
-        RetryRow(onRetry = { onRetry(msg) }, onDelete = { onDelete(msg) })
+        RetryRow(
+            onRetry = if (canRetry) ({ onRetry(msg) }) else null,
+            onDelete = { onDelete(msg) },
+        )
     }
 
     if (showNewDivider) {
@@ -762,12 +771,12 @@ private fun MessageRow(
 private fun FoolPlaceholderRow(
     msg: MessageEntity,
     older: MessageEntity?,
-    readMarkerTime: Long?,
+    readMarkerTime: TimelineAnchor?,
     onExpand: () -> Unit,
 ) {
     val showNewDivider = readMarkerTime != null &&
-        msg.serverTime > readMarkerTime &&
-        (older == null || older.serverTime <= readMarkerTime)
+        msg.timelineAnchor() > readMarkerTime &&
+        (older == null || older.timelineAnchor() <= readMarkerTime)
     val showDay = remember(msg.serverTime, older?.serverTime) {
         older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)
     }
@@ -876,9 +885,9 @@ private fun LoadStateFooter(append: LoadState) {
     }
 }
 
-/** Right-aligned "Tap to retry" + delete affordance under a failed own-message bubble (>=48dp). */
+/** Right-aligned retry (when safe) and delete affordances under a failed message bubble. */
 @Composable
-private fun RetryRow(onRetry: () -> Unit, onDelete: () -> Unit) {
+private fun RetryRow(onRetry: (() -> Unit)?, onDelete: () -> Unit) {
     androidx.compose.foundation.layout.Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -886,12 +895,14 @@ private fun RetryRow(onRetry: () -> Unit, onDelete: () -> Unit) {
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
     ) {
-        RetryRowAction(
-            icon = Icons.Filled.Refresh,
-            label = stringResource(R.string.chat_retry),
-            onClick = onRetry,
-        )
-        androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+        if (onRetry != null) {
+            RetryRowAction(
+                icon = Icons.Filled.Refresh,
+                label = stringResource(R.string.chat_retry),
+                onClick = onRetry,
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+        }
         RetryRowAction(
             icon = Icons.Filled.DeleteOutline,
             label = stringResource(R.string.chat_delete_failed),

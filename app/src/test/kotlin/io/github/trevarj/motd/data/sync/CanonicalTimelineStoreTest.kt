@@ -384,13 +384,13 @@ class CanonicalTimelineStoreTest {
     }
 
     @Test
-    fun connectionGenerationSurvivesReopenAndScopesReusedLabels() = runTest {
+    fun connectionGenerationSurvivesReopenWithGloballyUniqueLabels() = runTest {
         val name = "canonical-generation-reopen.db"
         val setup = openSetup(name)
         val firstProcessor = EventProcessor(setup.db, TypingTrackerImpl(), MessageNotifier.Noop)
         firstProcessor.onRegistered(setup.networkId, "me", emptyMap())
         val firstId = firstProcessor.insertPending(
-            setup.roomId, "motd-1", "me", "first attempt", null, MessageKind.PRIVMSG,
+            setup.roomId, "motd-first-unique", "me", "first attempt", null, MessageKind.PRIVMSG,
         )
         setup.db.close()
 
@@ -398,7 +398,7 @@ class CanonicalTimelineStoreTest {
         val secondProcessor = EventProcessor(reopened, TypingTrackerImpl(), MessageNotifier.Noop)
         secondProcessor.onRegistered(setup.networkId, "me", emptyMap())
         val secondId = secondProcessor.insertPending(
-            setup.roomId, "motd-1", "me", "second attempt", null, MessageKind.PRIVMSG,
+            setup.roomId, "motd-second-unique", "me", "second attempt", null, MessageKind.PRIVMSG,
         )
 
         assertNotEquals(firstId, secondId)

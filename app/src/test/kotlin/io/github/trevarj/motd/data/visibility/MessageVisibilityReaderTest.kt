@@ -8,8 +8,11 @@ import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -116,8 +119,37 @@ class MessageVisibilityReaderTest {
         val anchor = reader.resolveSavedAnchor(bufferId, null, 200, ids[1], spec)
 
         assertEquals(ids[0], anchor?.id)
-        assertEquals(100L, reader.firstVisibleUnreadTime(bufferId, 50, spec))
-        assertEquals(300L, reader.latestRawTime(bufferId))
+        assertEquals(
+            100L,
+            reader.firstVisibleUnreadAnchor(
+                bufferId,
+                io.github.trevarj.motd.data.db.TimelineAnchor(50, 0),
+                spec,
+            )?.serverTime,
+        )
+        assertEquals(
+            io.github.trevarj.motd.data.db.TimelineAnchor(300L, ids[2]),
+            reader.latestRawAnchor(bufferId),
+        )
+    }
+
+    @Test
+    fun rawTailObserverFollowsRedirectChangedWithoutMessageInvalidation() = runTest {
+        val networkId = db.bufferDao().observeById(bufferId)!!.networkId
+        val winnerId = db.bufferDao().insert(buffer(networkId, "#winner"))
+        val eventId = db.messageDao().insertAll(
+            listOf(message(winnerId, "winner tail", serverTime = 700, dedupKey = "winner-tail")),
+        ).single()
+        val redirected = async(start = CoroutineStart.UNDISPATCHED) {
+            reader.observeLatestRawAnchor(bufferId).first { it?.eventId == eventId }
+        }
+
+        db.roomAliasDao().markRedirect(bufferId, winnerId)
+
+        assertEquals(
+            io.github.trevarj.motd.data.db.TimelineAnchor(700, eventId),
+            withTimeout(5_000) { redirected.await() },
+        )
     }
 
     @Test
@@ -168,7 +200,13 @@ class MessageVisibilityReaderTest {
         val resolved = reader.resolveChatList(db.bufferDao().observeChatList().first(), spec).single()
 
         assertNull(reader.resolveSavedAnchor(bufferId, null, 100, id, spec))
-        assertNull(reader.firstVisibleUnreadTime(bufferId, 50, spec))
+        assertNull(
+            reader.firstVisibleUnreadAnchor(
+                bufferId,
+                io.github.trevarj.motd.data.db.TimelineAnchor(50, 0),
+                spec,
+            ),
+        )
         assertNull(resolved.lastMessageText)
         assertNull(resolved.lastMessageTime)
         assertEquals(0, resolved.unreadCount)

@@ -5,14 +5,18 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.InviteState
+import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -25,6 +29,7 @@ import io.github.trevarj.motd.data.sync.ChatSoundPlayer
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.MessageNotifier
+import io.github.trevarj.motd.data.sync.OutgoingEventPlan
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.avatar.AvatarCoordinator
 import io.github.trevarj.motd.bouncer.redactBouncerServCommand
@@ -51,6 +56,7 @@ import io.github.trevarj.motd.push.pushSuspendedNetworkIds
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -72,6 +78,10 @@ import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
@@ -161,6 +171,168 @@ internal fun splitUtf8(text: String, maxBytes: Int): List<String> {
     return out
 }
 
+/** Attempt an already-durable ordered plan and fail the current plus every unattempted event. */
+internal suspend fun transmitDurableOutgoingPlan(
+    eventIds: List<Long>,
+    write: suspend (Int) -> ImmediateWireAcceptance,
+    onWritten: suspend (Int) -> Unit,
+    failRemaining: suspend (List<Long>) -> Unit,
+): ImmediateWireAcceptance {
+    for (index in eventIds.indices) {
+        val wireAcceptance = try {
+            write(index)
+        } catch (_: Exception) {
+            ImmediateWireAcceptance.FAILED
+        }
+        if (wireAcceptance != ImmediateWireAcceptance.ACCEPTED) {
+            withContext(NonCancellable) { failRemaining(eventIds.drop(index)) }
+            return wireAcceptance
+        }
+        try {
+            onWritten(index)
+        } catch (_: Exception) {
+            withContext(NonCancellable) { failRemaining(eventIds.drop(index)) }
+            return ImmediateWireAcceptance.FAILED
+        }
+    }
+    return ImmediateWireAcceptance.ACCEPTED
+}
+
+/** Keep lifecycle teardown exclusive without serializing sends from different networks. */
+internal class DurableSendLifecycle {
+    private val stateLock = Mutex()
+    private val quiesceLock = Mutex()
+    private var activeSends = 0
+    private var blocked: CompletableDeferred<Unit>? = null
+    private var drained: CompletableDeferred<Unit>? = null
+
+    suspend fun <T> sending(block: suspend () -> T): T {
+        while (true) {
+            val waitForQuiesce = stateLock.withLock {
+                blocked ?: run {
+                    activeSends++
+                    null
+                }
+            }
+            if (waitForQuiesce == null) break
+            waitForQuiesce.await()
+        }
+        try {
+            return block()
+        } finally {
+            withContext(NonCancellable) {
+                stateLock.withLock {
+                    activeSends--
+                    if (activeSends == 0) drained?.complete(Unit)
+                }
+            }
+        }
+    }
+
+    suspend fun <T> quiesce(
+        onBlocked: suspend () -> Unit = {},
+        block: suspend () -> T,
+    ): T = quiesceLock.withLock {
+        val completion = CompletableDeferred<Unit>()
+        val waitForDrain = stateLock.withLock {
+            check(blocked == null)
+            blocked = completion
+            if (activeSends == 0) {
+                null
+            } else {
+                CompletableDeferred<Unit>().also { drained = it }
+            }
+        }
+        try {
+            onBlocked()
+            waitForDrain?.await()
+            block()
+        } finally {
+            withContext(NonCancellable) {
+                stateLock.withLock {
+                    drained = null
+                    blocked = null
+                    completion.complete(Unit)
+                }
+            }
+        }
+    }
+}
+
+internal fun isGenericRetryEligible(buffer: BufferEntity, message: MessageEntity): Boolean =
+    message.isSelf && message.failed && message.msgid == null &&
+        buffer.type != BufferType.SERVER &&
+        !buffer.ircTarget.equals("BouncerServ", ignoreCase = true) &&
+        !message.text.contains("<redacted>")
+
+internal data class CurrentReadTarget(
+    val buffer: BufferEntity,
+    val anchor: TimelineAnchor,
+    val authoritative: io.github.trevarj.motd.data.db.TimelineBoundaryRow?,
+)
+
+/** Resolve stale notification/viewport tuples through current event and room identity. */
+internal suspend fun resolveCurrentReadTarget(
+    db: MotdDatabase,
+    bufferId: Long,
+    requested: TimelineAnchor,
+): CurrentReadTarget? {
+    if (requested.serverTime <= 0 || requested.eventId <= 0) return null
+    val buffer = db.bufferDao().observeById(bufferId) ?: return null
+    val canonicalEventId = db.canonicalTimelineDao().canonicalEventId(requested.eventId)
+    if (canonicalEventId <= 0) return null
+    val event = db.messageDao().byId(canonicalEventId) ?: return null
+    val eventRoomId = db.bufferDao().canonicalId(event.bufferId) ?: return null
+    if (eventRoomId != buffer.id || event.serverTime <= 0) return null
+    val current = TimelineAnchor(event.serverTime, event.id)
+    val stored = buffer.localReadAnchorTime?.let {
+        TimelineAnchor(it, buffer.localReadAnchorEventId ?: 0L)
+    }
+    if (stored != null && current < stored) return null
+    return CurrentReadTarget(
+        buffer = buffer,
+        anchor = current,
+        authoritative = db.messageDao().authoritativeChatAtOrBefore(
+            buffer.id,
+            current.serverTime,
+            current.eventId,
+        ),
+    )
+}
+
+internal suspend fun resolveAndAdvanceCurrentReadTarget(
+    db: MotdDatabase,
+    bufferId: Long,
+    requested: TimelineAnchor,
+): CurrentReadTarget? = db.withTransaction {
+    val target = resolveCurrentReadTarget(db, bufferId, requested) ?: return@withTransaction null
+    db.bufferDao().advanceLocalReadAnchor(
+        target.buffer.id,
+        target.anchor.serverTime,
+        target.anchor.eventId,
+    )
+    target
+}
+
+/** Return durable acceptance even if the caller is cancelled after the transaction commits. */
+internal suspend fun completeDurableAcceptance(
+    eventIds: List<Long>,
+    transition: suspend () -> ImmediateWireAcceptance,
+    secondaryEffect: suspend () -> Unit,
+): SendAcceptance.Accepted = withContext(NonCancellable) {
+    val wireAcceptance = try {
+        transition()
+    } catch (_: Exception) {
+        ImmediateWireAcceptance.FAILED
+    }
+    try {
+        secondaryEffect()
+    } catch (_: Exception) {
+        // The durable timeline state is authoritative; presentation effects are best effort.
+    }
+    SendAcceptance.Accepted(eventIds, wireAcceptance)
+}
+
 private const val ACTION_OVERHEAD_BYTES = 9 // SOH + "ACTION " + SOH
 
 /**
@@ -225,6 +397,10 @@ class ConnectionManagerImpl @Inject constructor(
     private val monitoredTargets = java.util.concurrent.ConcurrentHashMap<Long, Map<String, String>>()
     private val monitorInitialized = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
     private val monitorLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
+    private val sendLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
+    private val sendLifecycle = DurableSendLifecycle()
+    private val pendingRecoveryLock = Mutex()
+    private var pendingRecovered = false
 
     private val stsStore = StsPolicyStore(settings)
 
@@ -249,8 +425,18 @@ class ConnectionManagerImpl @Inject constructor(
     // -- lifecycle ----------------------------------------------------------
 
     override suspend fun startAll() {
-        if (!registry.beginStart()) return
+        var startBegan = false
         try {
+            val shouldStart = sendLifecycle.quiesce {
+                if (!registry.beginStart()) {
+                    false
+                } else {
+                    startBegan = true
+                    ensurePendingRecovered(force = true)
+                    true
+                }
+            }
+            if (!shouldStart) return
             // Seed actors from the current full set (reconcile applies autoConnect + sticky intent),
             // then keep reconciling on every DB change. The collector no longer pre-filters: reconcile
             // owns the wanted-set computation so manual connect/disconnect intents survive DB writes.
@@ -295,8 +481,17 @@ class ConnectionManagerImpl @Inject constructor(
                 listOf(connectivityObserverJob(), reconcileJob, deliveryModeJob, monitorDesiredJob),
             )
         } catch (failure: Throwable) {
-            registry.stop()
+            if (startBegan) registry.stop()
             throw failure
+        }
+    }
+
+    private suspend fun ensurePendingRecovered(force: Boolean = false) {
+        pendingRecoveryLock.withLock {
+            if (force || !pendingRecovered) {
+                eventProcessor.recoverInterruptedPending()
+                pendingRecovered = true
+            }
         }
     }
 
@@ -427,21 +622,30 @@ class ConnectionManagerImpl @Inject constructor(
         appContext.stopService(stopIntent)
     }
 
-    override suspend fun stopAll() {
-        backgroundRetention.cancel()
-        registry.stop()
-        localSocksProvider.stop()
-        // Service teardown resets sticky user intent (in-memory only).
-        userIntents.clear()
-        pushSuspendedIds.clear()
-        rosterRequests.values.forEach { it.cancel() }
-        rosterRequests.clear()
-        _rosterStates.value = emptyMap()
-        monitoredTargets.clear()
-        monitorInitialized.clear()
-        monitorLocks.clear()
-        _presenceStates.value = emptyMap()
-        eventProcessor.shutdown()
+    override suspend fun stopAll() = withContext(NonCancellable) {
+        sendLifecycle.quiesce(
+            onBlocked = {
+                backgroundRetention.cancel()
+                // Disconnect first so in-flight writes cannot keep producing pending rows. This
+                // also cancels and joins every echo timeout before recovery scans Room.
+                registry.stop()
+            },
+        ) {
+            eventProcessor.recoverInterruptedPending()
+            pendingRecoveryLock.withLock { pendingRecovered = false }
+            localSocksProvider.stop()
+            // Service teardown resets sticky user intent (in-memory only).
+            userIntents.clear()
+            pushSuspendedIds.clear()
+            rosterRequests.values.forEach { it.cancel() }
+            rosterRequests.clear()
+            _rosterStates.value = emptyMap()
+            monitoredTargets.clear()
+            monitorInitialized.clear()
+            monitorLocks.clear()
+            _presenceStates.value = emptyMap()
+            eventProcessor.shutdown()
+        }
     }
 
     override suspend fun connect(networkId: Long) {
@@ -1050,102 +1254,182 @@ class ConnectionManagerImpl @Inject constructor(
 
     // -- send paths ---------------------------------------------------------
 
-    override suspend fun sendMessage(bufferId: Long, text: String, replyToMsgid: String?) {
-        sendMessageAttempt(bufferId, text, replyToMsgid, captureFailure = false)
+    override suspend fun sendMessage(
+        bufferId: Long,
+        text: String,
+        replyToEventId: Long?,
+    ): SendAcceptance = sendLifecycle.sending {
+        ensurePendingRecovered()
+        val buffer = bufferDao.observeById(bufferId)
+            ?: return@sending SendAcceptance.Rejected(SendRejectionReason.BUFFER_NOT_FOUND)
+        if (buffer.type == BufferType.SERVER) {
+            return@sending SendAcceptance.Rejected(SendRejectionReason.UNSUPPORTED_BUFFER)
+        }
+        sendLocks.getOrPut(buffer.networkId) { Mutex() }.withLock {
+            val client = clientFor(buffer.networkId)
+            val ready = client?.state?.value as? IrcClientState.Ready
+            val parent = replyToEventId?.let(messageDao::byCanonicalId)
+                ?.takeIf { it.bufferId == buffer.id }
+            val replyTagAllowed = parent?.msgid != null && ready != null &&
+                canSendClientTag(ready.caps, ready.isupport, "+reply")
+            val delivery = prepareReplyDelivery(
+                text = text,
+                replyToMsgid = parent?.msgid,
+                parentSender = parent?.sender,
+                bufferType = buffer.type,
+                visibleChannelPrefix = parent?.let { replyPrefs.config.first().visibleChannelPrefix } == true,
+                replyTagAllowed = replyTagAllowed,
+            )
+            val chunks = prepareOutgoingMessageChunks(
+                delivery.text,
+                buffer.ircTarget.equals("BouncerServ", ignoreCase = true),
+            )
+            if (chunks.isEmpty()) {
+                return@withLock SendAcceptance.Rejected(SendRejectionReason.INVALID_CONTENT)
+            }
+            val planned = chunks.map { chunk ->
+                PlannedOutgoingChunk(chunk, newOutgoingLabel())
+            }
+            currentCoroutineContext().ensureActive()
+            val durable = try {
+                withContext(NonCancellable) {
+                    eventProcessor.persistOutgoingPlan(
+                        bufferId = buffer.id,
+                        sender = ready?.nick ?: client?.config?.nick
+                            ?: networkDao.byId(buffer.networkId)?.nick.orEmpty(),
+                        events = planned.map { OutgoingEventPlan(it.label, it.chunk.displayText, it.chunk.kind) },
+                        replyToEventId = parent?.id,
+                        replyToMsgid = parent?.msgid,
+                    )
+                }
+            } catch (_: Exception) {
+                return@withLock SendAcceptance.Rejected(SendRejectionReason.PERSISTENCE_FAILED)
+            }
+            val eventIds = durable.map { it.eventId }
+            completeDurableAcceptance(
+                eventIds = eventIds,
+                transition = {
+                    writeDurablePlan(
+                        buffer = bufferDao.observeById(bufferId) ?: buffer,
+                        client = client,
+                        ready = ready,
+                        planned = planned,
+                        eventIds = eventIds,
+                        replyToMsgid = delivery.wireReplyToMsgid,
+                    )
+                },
+                secondaryEffect = { notifyOutgoingAccepted(buffer.id) },
+            )
+        }
     }
 
-    override suspend fun sendMessageForRetry(
-        bufferId: Long,
-        text: String,
-        replyToMsgid: String?,
-    ): RetrySendResult = sendMessageAttempt(bufferId, text, replyToMsgid, captureFailure = true)
-
-    private suspend fun sendMessageAttempt(
-        bufferId: Long,
-        text: String,
-        replyToMsgid: String?,
-        captureFailure: Boolean,
-    ): RetrySendResult {
-        val buffer = bufferDao.observeById(bufferId) ?: return RetrySendResult.NO_ATTEMPT
-        val canonicalBufferId = buffer.id
-        val client = clientFor(buffer.networkId) ?: return RetrySendResult.NO_ATTEMPT
-        val target = buffer.ircTarget
-        val isBouncerServ = target.equals("BouncerServ", ignoreCase = true)
-        val ready = client.state.value as? IrcClientState.Ready
-        val replyTagAllowed = ready != null && canSendClientTag(ready.caps, ready.isupport, "+reply")
-        val parentSender = replyToMsgid?.let { messageDao.byMsgid(canonicalBufferId, it)?.sender }
-        val replyConfig = if (replyToMsgid != null) replyPrefs.config.first() else null
-        val delivery = prepareReplyDelivery(
-            text = text,
-            replyToMsgid = replyToMsgid,
-            parentSender = parentSender,
-            bufferType = buffer.type,
-            visibleChannelPrefix = replyConfig?.visibleChannelPrefix == true,
-            replyTagAllowed = replyTagAllowed,
-        )
-        val outgoingText = delivery.text
-
-        val chunks = prepareOutgoingMessageChunks(outgoingText, isBouncerServ)
-        var replacementPersisted = false
-        for (chunk in chunks) {
-            val displayChunk = chunk.displayText
-            val localAttemptLabel = "local-${UUID.randomUUID()}"
-            var pendingLabel = localAttemptLabel
-            // Persist the pending row in beforeSend — BEFORE the PRIVMSG hits the wire — so a
-            // fast echo can't be processed ahead of the insert and duplicate the send. Networks
-            // without labeled-response retain a local attempt label; their unlabeled echoes are
-            // correlated monotonically by pending order in CanonicalTimelineStore.
-            try {
-                client.sendMessage(target, chunk.wireText, delivery.wireReplyToMsgid) { serverLabel ->
-                    pendingLabel = serverLabel.ifEmpty { localAttemptLabel }
-                    eventProcessor.insertPending(
-                        canonicalBufferId,
-                        pendingLabel,
-                        buffer_meNick(client),
-                        displayChunk,
-                        replyToMsgid,
-                        chunk.kind,
-                    )
-                    replacementPersisted = true
-                }
-            } catch (error: Exception) {
-                // beforeSend may already have persisted the attempt. Make a transport failure
-                // immediately retryable instead of leaving it pending without an armed timeout.
-                eventProcessor.failIfStillPending(canonicalBufferId, pendingLabel)
-                if (captureFailure) {
-                    return if (replacementPersisted) {
-                        RetrySendResult.REPLACEMENT_FAILED
-                    } else {
-                        RetrySendResult.NO_ATTEMPT
-                    }
-                }
-                throw error
+    override suspend fun retryMessage(eventId: Long): SendAcceptance = sendLifecycle.sending {
+        ensurePendingRecovered()
+        val original = messageDao.byCanonicalId(eventId)
+            ?: return@sending SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
+        val buffer = bufferDao.observeById(original.bufferId)
+            ?: return@sending SendAcceptance.Rejected(SendRejectionReason.BUFFER_NOT_FOUND)
+        if (!isGenericRetryEligible(buffer, original)) {
+            return@sending SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
+        }
+        sendLocks.getOrPut(buffer.networkId) { Mutex() }.withLock {
+            val current = messageDao.byCanonicalId(eventId)
+                ?: return@withLock SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
+            val currentBuffer = bufferDao.observeById(current.bufferId)
+                ?: return@withLock SendAcceptance.Rejected(SendRejectionReason.BUFFER_NOT_FOUND)
+            if (!isGenericRetryEligible(currentBuffer, current)) {
+                return@withLock SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
             }
-            if (client.hasCap("echo-message")) {
-                armEchoTimeout(canonicalBufferId, pendingLabel)
+            val label = newOutgoingLabel()
+            currentCoroutineContext().ensureActive()
+            val retry = try {
+                withContext(NonCancellable) { eventProcessor.beginRetry(current.id, label) }
+            } catch (_: Exception) {
+                return@withLock SendAcceptance.Rejected(SendRejectionReason.PERSISTENCE_FAILED)
+            } ?: return@withLock SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
+            val wireText = if (retry.kind == MessageKind.ACTION) {
+                "\u0001ACTION ${retry.text}\u0001"
             } else {
-                eventProcessor.confirmIfStillPending(canonicalBufferId, pendingLabel)
+                retry.text
             }
+            val planned = listOf(
+                PlannedOutgoingChunk(
+                    OutgoingMessageChunk(wireText, retry.text, retry.kind),
+                    label,
+                ),
+            )
+            completeDurableAcceptance(
+                eventIds = listOf(retry.id),
+                transition = transition@{
+                    val retryBuffer = bufferDao.observeById(retry.bufferId)
+                        ?: return@transition ImmediateWireAcceptance.DISCONNECTED
+                    val client = clientFor(retryBuffer.networkId)
+                    val ready = client?.state?.value as? IrcClientState.Ready
+                    val parent = retry.replyToEventId?.let(messageDao::byCanonicalId)
+                    val wireReply = parent?.msgid?.takeIf {
+                        ready != null && canSendClientTag(ready.caps, ready.isupport, "+reply")
+                    }
+                    writeDurablePlan(retryBuffer, client, ready, planned, listOf(retry.id), wireReply)
+                },
+                secondaryEffect = { notifyOutgoingAccepted(currentBuffer.id) },
+            )
         }
-        if (chunks.isNotEmpty()) {
-            try {
-                chatSoundPlayer.onOutgoingAccepted(canonicalBufferId)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                diagnostics.record("chat_sound", "outgoing_failed") {
-                    mapOf(
-                        "buffer_id" to canonicalBufferId,
-                        "error" to error::class.simpleName,
-                    )
-                }
-            }
-        }
-        return if (replacementPersisted) RetrySendResult.ACCEPTED else RetrySendResult.NO_ATTEMPT
     }
 
-    private fun buffer_meNick(client: IrcClient): String =
-        (client.state.value as? IrcClientState.Ready)?.nick ?: client.config.nick
+    private data class PlannedOutgoingChunk(
+        val chunk: OutgoingMessageChunk,
+        val label: String,
+    )
+
+    private fun newOutgoingLabel(): String = "motd-${UUID.randomUUID()}"
+
+    private suspend fun writeDurablePlan(
+        buffer: BufferEntity,
+        client: IrcClient?,
+        ready: IrcClientState.Ready?,
+        planned: List<PlannedOutgoingChunk>,
+        eventIds: List<Long>,
+        replyToMsgid: String?,
+    ): ImmediateWireAcceptance {
+        if (planned.size != eventIds.size) {
+            eventProcessor.failPendingEvents(eventIds)
+            return ImmediateWireAcceptance.FAILED
+        }
+        if (client == null || ready == null || clientFor(buffer.networkId) !== client) {
+            eventProcessor.failPendingEvents(eventIds)
+            return ImmediateWireAcceptance.DISCONNECTED
+        }
+        return transmitDurableOutgoingPlan(
+            eventIds = eventIds,
+            write = { index ->
+                val item = planned[index]
+                if (client.sendMessage(buffer.ircTarget, item.chunk.wireText, replyToMsgid, item.label)) {
+                    ImmediateWireAcceptance.ACCEPTED
+                } else {
+                    ImmediateWireAcceptance.DISCONNECTED
+                }
+            },
+            onWritten = { index ->
+                val item = planned[index]
+                if (client.hasCap("echo-message")) {
+                    armEchoTimeout(buffer.id, item.label)
+                } else {
+                    eventProcessor.confirmIfStillPending(buffer.id, item.label)
+                }
+            },
+            failRemaining = eventProcessor::failPendingEvents,
+        )
+    }
+
+    private suspend fun notifyOutgoingAccepted(bufferId: Long) {
+        try {
+            chatSoundPlayer.onOutgoingAccepted(bufferId)
+        } catch (error: Exception) {
+            diagnostics.record("chat_sound", "outgoing_failed") {
+                mapOf("buffer_id" to bufferId, "error" to error::class.simpleName)
+            }
+        }
+    }
 
     private fun armEchoTimeout(bufferId: Long, label: String) {
         val key = "$bufferId:$label"
@@ -1348,20 +1632,26 @@ class ConnectionManagerImpl @Inject constructor(
         ).id
     }
 
-    override suspend fun markRead(bufferId: Long, upToTime: Long) {
-        val buffer = bufferDao.observeById(bufferId) ?: return
+    override suspend fun markRead(bufferId: Long, anchor: TimelineAnchor) {
+        val target = resolveAndAdvanceCurrentReadTarget(db, bufferId, anchor) ?: return
+        val buffer = target.buffer
         val canonicalBufferId = buffer.id
-        bufferDao.advanceReadMarker(canonicalBufferId, upToTime)
-        messageNotifier.onRead(canonicalBufferId, upToTime)
-        AutoFollowTrace.record("local_markread", canonicalBufferId) { "marker=$upToTime" }
+        messageNotifier.onRead(canonicalBufferId, target.anchor)
+        AutoFollowTrace.record("local_markread", canonicalBufferId) {
+            "marker=${target.anchor.serverTime}:${target.anchor.eventId}"
+        }
         // SERVER buffers use "*" as their name, which is not a valid MARKREAD target; the Room
         // read-marker advance above still runs. Skip the wire send for them (plans/16 §4).
         if (buffer.type == BufferType.SERVER) return
+        val authoritative = target.authoritative ?: return
+        val currentRemote = bufferDao.observeById(canonicalBufferId)?.readMarkerTime
+        if (currentRemote != null && authoritative.timestamp <= currentRemote) return
         val client = clientFor(buffer.networkId)
         AutoFollowTrace.record("wire_markread_out", canonicalBufferId) {
-            "marker=$upToTime connected=${client != null} supported=${client?.hasCap("draft/read-marker") == true}"
+            "marker=${authoritative.timestamp} connected=${client != null} " +
+                "supported=${client?.hasCap("draft/read-marker") == true}"
         }
-        client?.markRead(buffer.ircTarget, upToTime)
+        client?.markRead(buffer.ircTarget, authoritative.timestamp)
     }
 
     override suspend fun evaluatePushMode() {

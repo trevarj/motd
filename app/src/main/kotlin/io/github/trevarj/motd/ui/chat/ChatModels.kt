@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.prefs.normalizeNick
@@ -71,10 +72,11 @@ data class UnreadViewportRow(val index: Int, val serverTime: Long, val isSelf: B
 class UnreadViewportIndex {
     private var rowIndices = IntArray(0)
     private var serverTimes = LongArray(0)
+    private var eventIds = LongArray(0)
     private var size = 0
     private var loadedCount = 0
     private var firstRowId: Long? = null
-    private var stoppedAtMarker: Long? = null
+    private var stoppedAtMarker: TimelineAnchor? = null
 
     /**
      * Incorporate a Paging window without re-reading its already-indexed prefix. Paging appends
@@ -85,7 +87,7 @@ class UnreadViewportIndex {
     fun update(
         itemCount: Int,
         maxNonSelf: Int = Int.MAX_VALUE,
-        stopAtOrBefore: Long? = null,
+        stopAtOrBefore: TimelineAnchor? = null,
         include: (MessageEntity) -> Boolean = { !it.isSelf },
         peek: (Int) -> MessageEntity?,
     ) {
@@ -114,7 +116,7 @@ class UnreadViewportIndex {
                     index++
                     continue
                 }
-                if (stopAtOrBefore != null && row.serverTime <= stopAtOrBefore) {
+                if (stopAtOrBefore != null && TimelineAnchor(row.serverTime, row.id) <= stopAtOrBefore) {
                     stoppedAtMarker = stopAtOrBefore
                     break
                 }
@@ -122,6 +124,7 @@ class UnreadViewportIndex {
                     ensureCapacity(size + 1)
                     rowIndices[size] = index
                     serverTimes[size] = row.serverTime
+                    eventIds[size] = row.id
                     size++
                 }
                 index++
@@ -133,15 +136,22 @@ class UnreadViewportIndex {
     private fun clear() {
         rowIndices = IntArray(0)
         serverTimes = LongArray(0)
+        eventIds = LongArray(0)
         size = 0
         loadedCount = 0
         firstRowId = null
         stoppedAtMarker = null
     }
 
-    fun count(firstVisibleIndex: Int, marker: Long): Int {
+    fun count(firstVisibleIndex: Int, marker: TimelineAnchor): Int {
         val inViewport = lowerBound(rowIndices, firstVisibleIndex)
-        val newerThanMarker = upperBound(serverTimes, marker)
+        var newerThanMarker = 0
+        while (
+            newerThanMarker < size &&
+            TimelineAnchor(serverTimes[newerThanMarker], eventIds[newerThanMarker]) > marker
+        ) {
+            newerThanMarker++
+        }
         return minOf(inViewport, newerThanMarker)
     }
 
@@ -155,22 +165,12 @@ class UnreadViewportIndex {
         return low
     }
 
-    // Descending values: number strictly greater than target.
-    private fun upperBound(values: LongArray, target: Long): Int {
-        var low = 0
-        var high = size
-        while (low < high) {
-            val middle = (low + high) ushr 1
-            if (values[middle] > target) low = middle + 1 else high = middle
-        }
-        return low
-    }
-
     private fun ensureCapacity(required: Int) {
         if (required <= rowIndices.size) return
         val capacity = maxOf(required, rowIndices.size.coerceAtLeast(16) * 2)
         rowIndices = rowIndices.copyOf(capacity)
         serverTimes = serverTimes.copyOf(capacity)
+        eventIds = eventIds.copyOf(capacity)
     }
 
 }

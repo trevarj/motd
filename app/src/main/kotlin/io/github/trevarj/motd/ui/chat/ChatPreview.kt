@@ -65,7 +65,10 @@ fun ChatContentPreviewBody(
         state = ChatState(
             buffer = BufferEntity(
                 id = 1, networkId = 1, name = "#kotlin", displayName = "#kotlin",
-                type = BufferType.CHANNEL, readMarkerTime = now - 100_000,
+                type = BufferType.CHANNEL,
+                readMarkerTime = now - 100_000,
+                localReadAnchorTime = now - 100_000,
+                localReadAnchorEventId = Long.MAX_VALUE,
             ),
             memberCount = 3,
             typingNicks = listOf("alice"),

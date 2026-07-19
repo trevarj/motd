@@ -74,7 +74,7 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun firstUnreadOtherTime(bufferId: Long, after: Long): Long? =
         messageDao.firstUnreadOtherTime(resolveRoomId(bufferId), after)
 
-    override suspend fun deleteMessage(id: Long) = messageDao.deleteById(id)
+    override suspend fun deleteMessage(id: Long) = messageDao.deleteWithAnchorFallback(id)
 
     private fun canonicalRoomIdFlow(bufferId: Long): Flow<Long> = bufferDao.observe(bufferId)
         .map { it?.id ?: bufferId }

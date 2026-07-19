@@ -158,17 +158,89 @@ class MotdNotificationsFoolTest {
         BufferStore(db, notifications).mergeRooms(bufferId, loserId)
 
         assertEquals(0, manager.activeNotifications.size)
-        notifications.onIncoming(
+        val afterMerge = chat("other", "after merge")
+        val eventId = db.messageDao().insertAll(
+            listOf(
+                MessageEntity(
+                    bufferId = bufferId,
+                    msgid = "after-merge",
+                    serverTime = afterMerge.ctx.serverTime,
+                    sender = "other",
+                    kind = MessageKind.PRIVMSG,
+                    text = afterMerge.text,
+                    dedupKey = "after-merge",
+                ),
+            ),
+        ).single()
+        notifications.onCanonicalIncoming(
             networkId,
             bufferId,
             BufferType.QUERY,
             false,
-            chat("other", "after merge"),
+            eventId,
+            afterMerge,
         )
         assertEquals(listOf(bufferId.toInt()), manager.activeNotifications.map { it.id })
 
-        notifications.onRead(bufferId, 1_000)
+        notifications.onRead(
+            bufferId,
+            io.github.trevarj.motd.data.db.TimelineAnchor(1_000, eventId),
+        )
         assertEquals(0, manager.activeNotifications.size)
+    }
+
+    @Test
+    fun canonicalNotificationReadResolvesCoalescedAndRetimedEventIdentity() = runTest {
+        val delivered = chat("troll", "retimed")
+        val loserId = db.messageDao().insertAll(
+            listOf(
+                MessageEntity(
+                    bufferId = bufferId,
+                    msgid = null,
+                    serverTime = delivered.ctx.serverTime,
+                    sender = "troll",
+                    kind = MessageKind.PRIVMSG,
+                    text = delivered.text,
+                    dedupKey = "notification-loser",
+                ),
+            ),
+        ).single()
+        notifications.onCanonicalIncoming(
+            networkId,
+            bufferId,
+            BufferType.QUERY,
+            false,
+            loserId,
+            delivered,
+        )
+        val winnerId = db.messageDao().insertAll(
+            listOf(
+                MessageEntity(
+                    bufferId = bufferId,
+                    msgid = "notification-winner",
+                    serverTime = 2_000,
+                    sender = "troll",
+                    kind = MessageKind.PRIVMSG,
+                    text = delivered.text,
+                    dedupKey = "notification-winner",
+                ),
+            ),
+        ).single()
+        db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
+        db.messageDao().deleteById(loserId)
+        val recreated = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+
+        recreated.onRead(
+            bufferId,
+            io.github.trevarj.motd.data.db.TimelineAnchor(1_999, winnerId),
+        )
+        assertEquals(1, postedCount())
+
+        recreated.onRead(
+            bufferId,
+            io.github.trevarj.motd.data.db.TimelineAnchor(2_000, winnerId),
+        )
+        assertEquals(0, postedCount())
     }
 
     @Test

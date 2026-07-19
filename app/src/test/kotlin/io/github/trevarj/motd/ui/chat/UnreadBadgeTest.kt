@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.util.AbstractList
@@ -75,10 +76,10 @@ class UnreadBadgeTest {
             row(0, 140, true), row(1, 130, false), row(2, 120, true), row(3, 100, false),
         )
         val index = UnreadViewportIndex().also { it.update(rows.size) { rows[it] } }
-        assertEquals(1, index.count(firstVisibleIndex = 3, marker = 100))
+        assertEquals(1, index.count(firstVisibleIndex = 3, marker = anchor(100)))
         // Equality is read, and the newest self row never inflates the badge.
-        assertEquals(0, index.count(firstVisibleIndex = 4, marker = 130))
-        assertEquals(1, index.count(firstVisibleIndex = 2, marker = 100))
+        assertEquals(0, index.count(firstVisibleIndex = 4, marker = anchor(130)))
+        assertEquals(1, index.count(firstVisibleIndex = 2, marker = anchor(100)))
     }
 
     @Test fun `append only growth reads only the appended page`() {
@@ -90,7 +91,7 @@ class UnreadBadgeTest {
         index.update(100) { position -> reads += position; rows[position] }
         // One index-zero identity probe detects a refresh; the old prefix is otherwise untouched.
         assertEquals(listOf(0) + (50 until 100).toList(), reads)
-        assertEquals(42, index.count(50, 900))
+        assertEquals(42, index.count(50, anchor(900)))
     }
 
     @Test fun `index zero replacement rebuilds the compact window`() {
@@ -99,17 +100,17 @@ class UnreadBadgeTest {
         val index = UnreadViewportIndex()
         index.update(2) { initial[it] }
         index.update(2) { refreshed[it] }
-        assertEquals(1, index.count(1, 100))
+        assertEquals(1, index.count(1, anchor(100)))
     }
 
     @Test fun `empty Paging emission clears without probing index zero then accepts a new window`() {
         val index = UnreadViewportIndex()
         index.update(1) { row(0, 120, false) }
         index.update(0) { error("empty Paging emission must not call peek") }
-        assertEquals(0, index.count(1, 0))
+        assertEquals(0, index.count(1, anchor(0)))
 
         index.update(2) { position -> row(position, 200L - position, false) }
-        assertEquals(1, index.count(1, 100))
+        assertEquals(1, index.count(1, anchor(100)))
     }
 
     @Test fun `badge cap avoids indexing the entire loaded history`() {
@@ -118,7 +119,7 @@ class UnreadBadgeTest {
         val index = UnreadViewportIndex()
         index.update(rows.size, maxNonSelf = 100) { position -> reads++; rows[position] }
 
-        assertEquals(100, index.count(firstVisibleIndex = rows.size, marker = 0))
+        assertEquals(100, index.count(firstVisibleIndex = rows.size, marker = anchor(0)))
         assertEquals(true, reads <= 101) // index-zero refresh probe + the capped prefix
     }
 
@@ -129,10 +130,10 @@ class UnreadBadgeTest {
         index.update(
             itemCount = rows.size,
             maxNonSelf = 100,
-            stopAtOrBefore = 9_990,
+            stopAtOrBefore = anchor(9_990),
         ) { position -> reads++; rows[position] }
 
-        assertEquals(10, index.count(firstVisibleIndex = rows.size, marker = 9_990))
+        assertEquals(10, index.count(firstVisibleIndex = rows.size, marker = anchor(9_990)))
         assertEquals(true, reads <= 12)
     }
 
@@ -147,8 +148,10 @@ class UnreadBadgeTest {
             include = { it.sender != "fool" },
         ) { rows[it] }
 
-        assertEquals(1, index.count(firstVisibleIndex = 2, marker = 100))
+        assertEquals(1, index.count(firstVisibleIndex = 2, marker = anchor(100)))
     }
+
+    private fun anchor(time: Long) = TimelineAnchor(time, Long.MAX_VALUE)
 
     private fun row(index: Int, time: Long, isSelf: Boolean, sender: String = "nick") =
         io.github.trevarj.motd.data.db.MessageEntity(

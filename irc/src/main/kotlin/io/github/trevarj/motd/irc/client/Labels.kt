@@ -22,6 +22,13 @@ class IrcDisconnectedException(val ircCommand: String, val reason: String?) :
 class IrcProtocolException(val ircCommand: String, detail: String) :
     Exception("$ircCommand returned an invalid response: $detail")
 
+/** Conservative IRCv3 label subset: opaque ASCII, non-empty, and bounded before wire escaping. */
+internal fun requireValidChatLabel(label: String) {
+    require(label.length in 1..64 && label.all { it.isLetterOrDigit() || it in "-_." }) {
+        "invalid chat label"
+    }
+}
+
 /**
  * Correlates labeled requests with their responses (IRCv3 `labeled-response`).
  *

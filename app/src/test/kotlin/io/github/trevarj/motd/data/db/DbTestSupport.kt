@@ -36,6 +36,8 @@ internal fun buffer(
         displayName = name,
         type = type,
         readMarkerTime = readMarkerTime,
+        localReadAnchorTime = readMarkerTime,
+        localReadAnchorEventId = readMarkerTime?.let { 0L },
         pinned = pinned,
     )
 

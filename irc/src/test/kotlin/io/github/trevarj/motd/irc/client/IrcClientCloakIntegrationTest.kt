@@ -85,7 +85,7 @@ class IrcClientCloakIntegrationTest {
                     cloaked.broadcastEvents.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == inboundText }
                 }
             }
-            direct.sendMessage(CHANNEL, inboundText, null)
+            direct.sendMessage(CHANNEL, inboundText, null, "motd-cloak-inbound")
             inbound.await()
 
             val outboundText = "cloak-outbound-$suffix"
@@ -94,14 +94,14 @@ class IrcClientCloakIntegrationTest {
                     direct.broadcastEvents.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == outboundText }
                 }
             }
-            cloaked.sendMessage(CHANNEL, outboundText, null)
+            cloaked.sendMessage(CHANNEL, outboundText, null, "motd-cloak-outbound")
             outbound.await()
 
             cloaked.stop()
             delay(DETACH_GRACE_MS)
             val gapText = "cloak-gap-$suffix"
             val gapSentAt = System.currentTimeMillis()
-            direct.sendMessage(CHANNEL, gapText, null)
+            direct.sendMessage(CHANNEL, gapText, null, "motd-cloak-gap")
             delay(BUFFER_GRACE_MS)
 
             val replay = async(start = CoroutineStart.UNDISPATCHED) {

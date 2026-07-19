@@ -18,7 +18,8 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
-import io.github.trevarj.motd.data.db.effectiveReadFloorTime
+import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.db.effectiveLocalReadAnchor
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.Settings
@@ -78,7 +79,6 @@ class MotdNotifications @Inject constructor(
     // Per-buffer message history for MessagingStyle threading (notificationId = bufferId).
     private val history = HashMap<Long, NotificationCompat.MessagingStyle>()
     private val historyKeys = HashMap<Long, MutableList<NotificationMessageKey>>()
-    private val latestNotifiedTimes = java.util.concurrent.ConcurrentHashMap<Long, Long>()
 
     init {
         ensureChannels()
@@ -251,6 +251,13 @@ class MotdNotifications @Inject constructor(
         // events collector runs on Dispatchers.Main, so the previous runBlocking { suspend query }
         // blocked the main thread and crashed once a (freshly-added) fool's message arrived.
         val buffer = runCatching { db.bufferDao().observeById(bufferId) }.getOrNull()
+        val canonicalEvent = eventId?.let { id ->
+            db.messageDao().byCanonicalId(id)?.takeIf { event ->
+                buffer != null && db.bufferDao().canonicalId(event.bufferId) == buffer.id
+            }
+        }
+        val canonicalEventId = canonicalEvent?.id
+        val canonicalEventTime = canonicalEvent?.serverTime ?: message.ctx.serverTime
         // Friends/fools sets (single bounded DataStore read; null settings ⇒ empty sets).
         val settings = runCatching { settingsRepository.settings.first() }.getOrNull() ?: Settings()
         val sender = normalizeNick(message.source.nick)
@@ -260,7 +267,9 @@ class MotdNotifications @Inject constructor(
         val muted = buffer?.muted == true
         val senderIsFriend = sender in settings.friends
         val senderIsFool = sender in settings.fools
-        val alreadyRead = buffer?.effectiveReadFloorTime?.let { message.ctx.serverTime <= it } == true
+        val incomingAnchor = canonicalEvent?.let { TimelineAnchor(it.serverTime, it.id) }
+            ?: TimelineAnchor(message.ctx.serverTime, 0L)
+        val alreadyRead = buffer?.effectiveLocalReadAnchor?.let { incomingAnchor <= it } == true
         val decision = shouldPostNotification(foreground, muted, senderIsFriend, senderIsFool, alreadyRead)
         diagnostics.record("notifications", "message_evaluated") {
             mapOf(
@@ -287,9 +296,10 @@ class MotdNotifications @Inject constructor(
             runCatching {
                 db.messageDao().recentNotifiable(
                     bufferId = bufferId,
-                    after = buffer?.effectiveReadFloorTime ?: Long.MIN_VALUE,
+                    afterTime = buffer?.effectiveLocalReadAnchor?.serverTime ?: Long.MIN_VALUE,
+                    afterEventId = buffer?.effectiveLocalReadAnchor?.eventId ?: Long.MIN_VALUE,
                     queryRoom = type == BufferType.QUERY,
-                    excludeEventId = eventId ?: -1L,
+                    excludeEventId = canonicalEventId ?: -1L,
                     limit = MAX_NOTIFICATION_MESSAGES - 1,
                 )
             }.getOrDefault(emptyList()).asReversed()
@@ -314,7 +324,7 @@ class MotdNotifications @Inject constructor(
                     )
                 }
             }
-            val key = NotificationMessageKey.from(eventId, message)
+            val key = NotificationMessageKey.from(canonicalEventId, message)
             val existingIndex = keys.indexOfFirst { it.matches(key) }
             if (existingIndex >= 0) {
                 // A transient msgid-less push can notify before CHATHISTORY inserts the canonical
@@ -329,15 +339,16 @@ class MotdNotifications @Inject constructor(
                         "existing_index" to existingIndex,
                     )
                 }
-                return
+                conversation
+            } else {
+                keys += key
+                if (keys.size > MAX_NOTIFICATION_MESSAGES) keys.removeAt(0)
+                conversation.also { it.addMessage(message.text, message.ctx.serverTime, person) }
             }
-            keys += key
-            if (keys.size > MAX_NOTIFICATION_MESSAGES) keys.removeAt(0)
-            conversation.also { it.addMessage(message.text, message.ctx.serverTime, person) }
         }
-        restored.maxOfOrNull { it.serverTime }
-            ?.let { latestNotifiedTimes.merge(bufferId, it, ::maxOf) }
-        latestNotifiedTimes.merge(bufferId, message.ctx.serverTime, ::maxOf)
+        val notificationEventIds = synchronized(history) {
+            historyKeys[bufferId].orEmpty().mapNotNull { it.eventId }.distinct().toLongArray()
+        }
 
         val replyIntent = PendingIntent.getBroadcast(
             context, bufferId.toInt(),
@@ -356,7 +367,8 @@ class MotdNotifications @Inject constructor(
             Intent(context, ReplyReceiver::class.java)
                 .setAction(ReplyReceiver.ACTION_MARK_READ)
                 .putExtra(ReplyReceiver.EXTRA_BUFFER_ID, bufferId)
-                .putExtra(ReplyReceiver.EXTRA_UP_TO_TIME, message.ctx.serverTime),
+                .putExtra(ReplyReceiver.EXTRA_UP_TO_TIME, canonicalEventTime)
+                .putExtra(ReplyReceiver.EXTRA_UP_TO_EVENT_ID, canonicalEventId ?: 0L),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val markReadAction = NotificationCompat.Action.Builder(
@@ -375,8 +387,8 @@ class MotdNotifications @Inject constructor(
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra(EXTRA_BUFFER_ID, bufferId)
                 .putExtra(EXTRA_JUMP_MSGID, message.ctx.msgid)
-                .putExtra(EXTRA_JUMP_TIME, message.ctx.serverTime)
-                .putExtra(EXTRA_EVENT_ID, eventId),
+                .putExtra(EXTRA_JUMP_TIME, canonicalEventTime)
+                .putExtra(EXTRA_EVENT_ID, canonicalEventId),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
@@ -390,6 +402,9 @@ class MotdNotifications @Inject constructor(
             .setSilent(true)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
+            .addExtras(android.os.Bundle().apply {
+                putLongArray(EXTRA_NOTIFICATION_EVENT_IDS, notificationEventIds)
+            })
             .addAction(replyAction)
             .addAction(markReadAction)
             .build()
@@ -420,26 +435,34 @@ class MotdNotifications @Inject constructor(
             .setIcon(notificationAvatarIcon(context, name, style))
             .build()
 
-    override suspend fun onRead(bufferId: Long, upToTime: Long) {
-        val activeLatest = runCatching {
-            val notification = manager.activeNotifications
+    override suspend fun onRead(bufferId: Long, anchor: TimelineAnchor) {
+        val inMemoryIds = synchronized(history) {
+            historyKeys[bufferId].orEmpty().mapNotNull { it.eventId }
+        }
+        val activeIds = runCatching {
+            manager.activeNotifications
                 .firstOrNull { it.id == bufferId.toInt() }
                 ?.notification
-                ?: return@runCatching null
-            NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification)
-                ?.messages
-                ?.maxOfOrNull { it.timestamp }
-        }.getOrNull()
-        val latest = listOfNotNull(latestNotifiedTimes[bufferId], activeLatest).maxOrNull() ?: return
-        if (!readMarkerCoversNotification(upToTime, latest)) return
+                ?.extras
+                ?.getLongArray(EXTRA_NOTIFICATION_EVENT_IDS)
+                ?.toList()
+                .orEmpty()
+        }.getOrDefault(emptyList())
+        val trackedIds = (inMemoryIds + activeIds).distinct()
+        if (trackedIds.isEmpty()) return
+        val latest = resolveLatestNotificationAnchor(db, bufferId, trackedIds)
+        if (latest != null && !readMarkerCoversNotification(anchor, latest)) return
         synchronized(history) {
             history.remove(bufferId)
             historyKeys.remove(bufferId)
         }
-        latestNotifiedTimes.remove(bufferId)
         manager.cancel(bufferId.toInt())
         diagnostics.record("notifications", "message_notification_cleared") {
-            mapOf("buffer_id" to bufferId, "up_to_time" to upToTime)
+            mapOf(
+                "buffer_id" to bufferId,
+                "up_to_time" to anchor.serverTime,
+                "up_to_event_id" to anchor.eventId,
+            )
         }
     }
 
@@ -448,7 +471,6 @@ class MotdNotifications @Inject constructor(
             history.remove(loserId)
             historyKeys.remove(loserId)
         }
-        latestNotifiedTimes.remove(loserId)
         manager.cancel(loserId.toInt())
         diagnostics.record("notifications", "room_notification_retired") {
             mapOf("winner_id" to winnerId, "loser_id" to loserId)
@@ -585,8 +607,10 @@ private data class NotificationMessageKey(
             serverTime == other.serverTime && sender == other.sender && text == other.text
         }
 
-    fun withDurableIdentityFrom(other: NotificationMessageKey): NotificationMessageKey =
-        if (msgid == null && other.msgid != null) copy(msgid = other.msgid) else this
+    fun withDurableIdentityFrom(other: NotificationMessageKey): NotificationMessageKey = copy(
+        eventId = eventId ?: other.eventId,
+        msgid = msgid ?: other.msgid,
+    )
 
     companion object {
         fun from(eventId: Long?, message: IrcEvent.ChatMessage): NotificationMessageKey =
@@ -609,5 +633,25 @@ private data class NotificationMessageKey(
     }
 }
 
-internal fun readMarkerCoversNotification(markerTime: Long, latestNotifiedTime: Long): Boolean =
-    markerTime >= latestNotifiedTime
+internal fun readMarkerCoversNotification(
+    marker: TimelineAnchor,
+    latestNotified: TimelineAnchor,
+): Boolean = marker >= latestNotified
+
+internal suspend fun resolveLatestNotificationAnchor(
+    db: MotdDatabase,
+    bufferId: Long,
+    eventIds: Collection<Long>,
+): TimelineAnchor? {
+    val canonicalRoomId = db.bufferDao().canonicalId(bufferId) ?: return null
+    var latest: TimelineAnchor? = null
+    for (eventId in eventIds) {
+        val event = db.messageDao().byCanonicalId(eventId) ?: continue
+        if (db.bufferDao().canonicalId(event.bufferId) != canonicalRoomId) continue
+        val current = TimelineAnchor(event.serverTime, event.id)
+        if (latest == null || current > latest) latest = current
+    }
+    return latest
+}
+
+private const val EXTRA_NOTIFICATION_EVENT_IDS = "motd.notificationEventIds"

@@ -96,16 +96,24 @@ interface BufferDao {
             lm.sender AS lastMessageSender,
             lm.serverTime AS lastMessageTime,
             (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
-                AND m.serverTime > MAX(
-                    COALESCE(b.readMarkerTime, 0),
-                    COALESCE(b.localUnreadFloorTime, 0)
+                AND (
+                    m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), COALESCE(b.localUnreadFloorTime, 0))
+                    OR (
+                        m.serverTime = b.localReadAnchorTime
+                        AND COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime
+                        AND m.id > COALESCE(b.localReadAnchorEventId, 0)
+                    )
                 )
                 AND m.isSelf = 0
                 AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS unreadCount,
             (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
-                AND m.serverTime > MAX(
-                    COALESCE(b.readMarkerTime, 0),
-                    COALESCE(b.localUnreadFloorTime, 0)
+                AND (
+                    m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), COALESCE(b.localUnreadFloorTime, 0))
+                    OR (
+                        m.serverTime = b.localReadAnchorTime
+                        AND COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime
+                        AND m.id > COALESCE(b.localReadAnchorEventId, 0)
+                    )
                 )
                 AND m.isSelf = 0
                 AND m.hasMention = 1
@@ -141,6 +149,9 @@ interface BufferDao {
            WHERE requested.id = :id""",
     )
     suspend fun observeById(id: Long): BufferEntity?
+
+    @Query("SELECT * FROM buffers WHERE id = :id")
+    suspend fun rawById(id: RoomId): BufferEntity?
 
     @Query("SELECT COALESCE(redirectToRoomId, id) FROM buffers WHERE id = :id")
     suspend fun canonicalId(id: RoomId): RoomId?
@@ -182,10 +193,28 @@ interface BufferDao {
     suspend fun markPendingClose(id: Long, timestamp: Long): Int
 
     @Query(
-        """SELECT id AS bufferId, CASE WHEN type = 'QUERY' THEN displayName ELSE name END AS target,
-                  readMarkerTime AS timestamp
-           FROM buffers WHERE networkId = :networkId AND type != 'SERVER'
-             AND pendingCloseAt IS NULL AND redirectToRoomId IS NULL ORDER BY id""",
+        """SELECT b.id AS bufferId,
+                  CASE WHEN b.type = 'QUERY' THEN b.displayName ELSE b.name END AS target,
+                  CASE
+                    WHEN b.readMarkerTime IS NULL THEN candidate.serverTime
+                    WHEN candidate.serverTime IS NULL THEN b.readMarkerTime
+                    ELSE MAX(b.readMarkerTime, candidate.serverTime)
+                  END AS timestamp,
+                  candidate.id AS eventId
+           FROM buffers b
+           LEFT JOIN messages candidate ON candidate.id = (
+               SELECT m.id FROM messages m
+               WHERE m.bufferId = b.id AND m.serverTimeAuthoritative = 1
+                 AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+                 AND b.localReadAnchorTime IS NOT NULL AND (
+                     m.serverTime < b.localReadAnchorTime OR
+                     (m.serverTime = b.localReadAnchorTime AND
+                      m.id <= COALESCE(b.localReadAnchorEventId, 0))
+                 )
+               ORDER BY m.serverTime DESC, m.id DESC LIMIT 1
+           )
+           WHERE b.networkId = :networkId AND b.type != 'SERVER'
+             AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL ORDER BY b.id""",
     )
     suspend fun storedReadMarkers(networkId: Long): List<BufferReadMarkerRow>
 
@@ -244,6 +273,31 @@ interface BufferDao {
     @Query("UPDATE buffers SET readMarkerTime = :ts WHERE id = :id AND (readMarkerTime IS NULL OR readMarkerTime < :ts)")
     suspend fun advanceReadMarker(id: Long, ts: Long)
 
+    @Query(
+        """UPDATE buffers SET localReadAnchorTime = :serverTime, localReadAnchorEventId = :eventId
+           WHERE id = :id AND (
+               localReadAnchorTime IS NULL OR localReadAnchorTime < :serverTime OR
+               (localReadAnchorTime = :serverTime AND COALESCE(localReadAnchorEventId, 0) < :eventId)
+           )""",
+    )
+    suspend fun advanceLocalReadAnchor(id: RoomId, serverTime: Long, eventId: TimelineEventId)
+
+    @Query(
+        """UPDATE buffers SET localReadAnchorTime = :serverTime
+           WHERE localReadAnchorEventId = :eventId""",
+    )
+    suspend fun retimeLocalReadAnchor(eventId: TimelineEventId, serverTime: Long)
+
+    @Query(
+        """UPDATE buffers SET localReadAnchorTime = :serverTime, localReadAnchorEventId = :winnerId
+           WHERE localReadAnchorEventId = :loserId OR localReadAnchorEventId = :winnerId""",
+    )
+    suspend fun repointLocalReadAnchors(
+        loserId: TimelineEventId,
+        winnerId: TimelineEventId,
+        serverTime: Long,
+    )
+
     // Delete a buffer and all of its content. messages (and their messages_fts rows via Room's
     // FTS sync triggers) cascade off the buffers->messages FK ON DELETE CASCADE. members and
     // reactions have no FK to buffers, so they are cleared explicitly here in one transaction to
@@ -280,7 +334,12 @@ data class ChatListRow(
 
 data class BufferTargetRow(val id: Long, val name: String)
 
-data class BufferReadMarkerRow(val bufferId: Long, val target: String, val timestamp: Long?)
+data class BufferReadMarkerRow(
+    val bufferId: Long,
+    val target: String,
+    val timestamp: Long?,
+    val eventId: TimelineEventId? = null,
+)
 
 @Dao
 interface MessageDao {
@@ -304,7 +363,9 @@ interface MessageDao {
     @Query(
         """SELECT * FROM messages
            WHERE bufferId = :bufferId AND id != :excludeEventId
-             AND isSelf = 0 AND failed = 0 AND serverTime > :after
+              AND isSelf = 0 AND failed = 0 AND (
+                  serverTime > :afterTime OR (serverTime = :afterTime AND id > :afterEventId)
+              )
              AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
              AND (:queryRoom = 1 OR hasMention = 1)
            ORDER BY serverTime DESC, id DESC
@@ -312,7 +373,8 @@ interface MessageDao {
     )
     suspend fun recentNotifiable(
         bufferId: Long,
-        after: Long,
+        afterTime: Long,
+        afterEventId: TimelineEventId,
         queryRoom: Boolean,
         excludeEventId: Long,
         limit: Int,
@@ -371,11 +433,41 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND pendingLabel = :label")
     suspend fun byPendingLabel(bufferId: Long, label: String): MessageEntity?
 
+    @Query("SELECT * FROM messages WHERE id IN (:eventIds) ORDER BY id")
+    suspend fun byIds(eventIds: List<TimelineEventId>): List<MessageEntity>
+
     @Query(
         """UPDATE messages SET failed = 1
            WHERE bufferId = :bufferId AND pendingLabel = :label AND msgid IS NULL""",
     )
     suspend fun failIfStillPending(bufferId: Long, label: String): Int
+
+    @Query(
+        """UPDATE messages SET failed = 1
+           WHERE id IN (:eventIds) AND pendingLabel IS NOT NULL AND msgid IS NULL""",
+    )
+    suspend fun failPending(eventIds: List<TimelineEventId>): Int
+
+    @Query(
+        """UPDATE messages SET pendingLabel = :label, failed = 0
+           WHERE id = :eventId AND isSelf = 1 AND failed = 1 AND msgid IS NULL""",
+    )
+    suspend fun beginRetry(eventId: TimelineEventId, label: String): Int
+
+    @Query(
+        """SELECT DISTINCT b.networkId FROM messages m
+           JOIN buffers b ON b.id = m.bufferId
+           WHERE m.pendingLabel IS NOT NULL AND m.msgid IS NULL AND m.failed = 0
+           ORDER BY b.networkId""",
+    )
+    suspend fun pendingNetworkIds(): List<Long>
+
+    @Query(
+        """UPDATE messages SET failed = 1
+           WHERE pendingLabel IS NOT NULL AND msgid IS NULL AND failed = 0
+             AND bufferId IN (SELECT id FROM buffers WHERE networkId = :networkId)""",
+    )
+    suspend fun recoverInterruptedPending(networkId: Long): Int
 
     @Query(
         """UPDATE messages SET pendingLabel = NULL, failed = 0
@@ -388,6 +480,9 @@ interface MessageDao {
 
     @Query("SELECT MAX(serverTime) FROM messages WHERE bufferId = :bufferId")
     suspend fun newestTime(bufferId: Long): Long?
+
+    @Query("SELECT * FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, id DESC LIMIT 1")
+    suspend fun newestMessage(bufferId: RoomId): MessageEntity?
 
     @Query("SELECT MIN(serverTime) FROM messages WHERE bufferId = :bufferId")
     suspend fun oldestTime(bufferId: Long): Long?
@@ -425,13 +520,31 @@ interface MessageDao {
     suspend fun hasStoredChat(bufferId: Long): Boolean
 
     @Query(
-        """SELECT b.id AS bufferId, b.name AS target, MAX(m.serverTime) AS timestamp
-           FROM buffers b JOIN messages m ON m.bufferId = b.id
-           WHERE b.id IN (:bufferIds) AND b.type != 'SERVER' AND m.isSelf = 0
-             AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
-           GROUP BY b.id, b.name""",
+        """SELECT b.id AS bufferId,
+                  CASE WHEN b.type = 'QUERY' THEN b.displayName ELSE b.name END AS target,
+                  m.serverTime AS timestamp, m.id AS eventId
+           FROM buffers b JOIN messages m ON m.id = (
+               SELECT newest.id FROM messages newest
+               WHERE newest.bufferId = b.id AND newest.isSelf = 0
+                 AND newest.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+               ORDER BY newest.serverTime DESC, newest.id DESC LIMIT 1
+           )
+           WHERE b.id IN (:bufferIds) AND b.type != 'SERVER'""",
     )
     suspend fun latestIncomingMarkers(bufferIds: List<Long>): List<BufferReadMarkerRow>
+
+    @Query(
+        """SELECT id AS eventId, serverTime AS timestamp
+           FROM messages WHERE bufferId = :bufferId AND serverTimeAuthoritative = 1
+             AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+             AND (serverTime < :serverTime OR (serverTime = :serverTime AND id <= :eventId))
+           ORDER BY serverTime DESC, id DESC LIMIT 1""",
+    )
+    suspend fun authoritativeChatAtOrBefore(
+        bufferId: RoomId,
+        serverTime: Long,
+        eventId: TimelineEventId,
+    ): TimelineBoundaryRow?
 
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND msgid = :msgid LIMIT 1")
     suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity?
@@ -528,10 +641,29 @@ interface MessageDao {
     )
     suspend fun findSelfMsgidlessCandidate(bufferId: Long, text: String): MessageEntity?
 
-    // Delete a single row by primary key. Used to drop a failed local-echo row on retry/delete so
-    // the resend does not leave a permanent duplicate "failed" bubble (plans/15 #10).
+    @Query(
+        """UPDATE buffers SET
+               localReadAnchorTime = (SELECT serverTime FROM messages
+                   WHERE bufferId = buffers.id AND id != :id AND
+                     (serverTime < :serverTime OR (serverTime = :serverTime AND id < :id))
+                   ORDER BY serverTime DESC, id DESC LIMIT 1),
+               localReadAnchorEventId = (SELECT id FROM messages
+                   WHERE bufferId = buffers.id AND id != :id AND
+                     (serverTime < :serverTime OR (serverTime = :serverTime AND id < :id))
+                   ORDER BY serverTime DESC, id DESC LIMIT 1)
+           WHERE localReadAnchorEventId = :id""",
+    )
+    suspend fun fallbackReadAnchorBeforeDelete(id: TimelineEventId, serverTime: Long)
+
     @Query("DELETE FROM messages WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Transaction
+    suspend fun deleteWithAnchorFallback(id: TimelineEventId) {
+        val event = byCanonicalId(id) ?: return
+        fallbackReadAnchorBeforeDelete(event.id, event.serverTime)
+        deleteById(event.id)
+    }
 
     /** 0-based reverse-list index: strict complement of pagingSource ORDER BY serverTime DESC, id DESC. */
     @Query(
@@ -581,12 +713,49 @@ data class SearchHit(@Embedded val message: MessageEntity, val bufferDisplayName
 
 data class MessageBoundaryRow(val msgid: String?, val serverTime: Long?)
 
+data class TimelineBoundaryRow(val eventId: TimelineEventId, val timestamp: Long)
+
 data class BouncerTranscriptRow(
     val sender: String,
     val text: String,
     val serverTime: Long,
     val isSelf: Boolean,
 )
+
+@Dao
+interface ComposerDraftDao {
+    @Query("SELECT * FROM composer_drafts WHERE roomId = :roomId")
+    fun observe(roomId: RoomId): Flow<ComposerDraftEntity?>
+
+    @Query("SELECT * FROM composer_drafts WHERE roomId = :roomId")
+    suspend fun byRoom(roomId: RoomId): ComposerDraftEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(draft: ComposerDraftEntity)
+
+    @Query("DELETE FROM composer_drafts WHERE roomId = :roomId")
+    suspend fun delete(roomId: RoomId): Int
+
+    @Query(
+        """DELETE FROM composer_drafts WHERE roomId = :roomId AND text = :text
+           AND updatedAt = :updatedAt AND (
+               replyToEventId = :replyToEventId OR
+               (replyToEventId IS NULL AND :replyToEventId IS NULL)
+           )""",
+    )
+    suspend fun deleteIfUnchanged(
+        roomId: RoomId,
+        text: String,
+        replyToEventId: TimelineEventId?,
+        updatedAt: Long,
+    ): Int
+
+    @Query(
+        """UPDATE composer_drafts SET replyToEventId = :winnerId
+           WHERE replyToEventId = :loserId""",
+    )
+    suspend fun repointReplies(loserId: TimelineEventId, winnerId: TimelineEventId)
+}
 
 @Dao
 interface MemberDao {
@@ -909,13 +1078,16 @@ interface CanonicalTimelineDao {
     @Query(
         """SELECT * FROM messages
            WHERE bufferId = :roomId AND kind = :kind AND isSelf = 1
+             AND normalizedActor = :sender AND text = :text
              AND msgid IS NULL AND pendingLabel IS NOT NULL
-           ORDER BY id
+           ORDER BY failed, id
            LIMIT 2""",
     )
     suspend fun orderedSelfCandidates(
         roomId: RoomId,
         kind: MessageKind,
+        sender: String,
+        text: String,
     ): List<TimelineEventEntity>
 
     @Query(

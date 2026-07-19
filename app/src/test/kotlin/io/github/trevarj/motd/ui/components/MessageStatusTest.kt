@@ -33,7 +33,7 @@ class MessageStatusTest {
     @Test fun incoming_never_shows_a_check_even_if_flagged() {
         // Incoming messages are never pending/failed in practice, but the isSelf guard must hold
         // regardless of the other flags so a check can never appear on another user's line.
-        assertEquals(MsgStatus.PENDING, messageStatus(isSelf = false, pending = true, failed = false))
-        assertEquals(MsgStatus.FAILED, messageStatus(isSelf = false, pending = false, failed = true))
+        assertEquals(MsgStatus.NONE, messageStatus(isSelf = false, pending = true, failed = false))
+        assertEquals(MsgStatus.NONE, messageStatus(isSelf = false, pending = false, failed = true))
     }
 }

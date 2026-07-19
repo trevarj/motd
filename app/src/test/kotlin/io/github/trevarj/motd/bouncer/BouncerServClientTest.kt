@@ -74,6 +74,38 @@ class BouncerServClientTest {
         assertEquals(BouncerServResult.Success("server debug true", emptyList()), result)
     }
 
+    @Test fun durable_but_disconnected_command_does_not_report_success_or_timeout() = runTest {
+        val events = MutableSharedFlow<IrcEvent>()
+        val provider = FakeSessions(
+            events = events,
+            acceptance = io.github.trevarj.motd.service.SendAcceptance.Accepted(
+                emptyList(),
+                io.github.trevarj.motd.service.ImmediateWireAcceptance.DISCONNECTED,
+            ),
+        ) { }
+
+        val result = BouncerServClientImpl(provider)
+            .execute(1, BouncerServCommands.serverDebug(true))
+
+        assertEquals(BouncerServResult.Disconnected("server debug true"), result)
+    }
+
+    @Test fun durable_but_failed_wire_command_reports_failure_immediately() = runTest {
+        val events = MutableSharedFlow<IrcEvent>()
+        val provider = FakeSessions(
+            events = events,
+            acceptance = io.github.trevarj.motd.service.SendAcceptance.Accepted(
+                emptyList(),
+                io.github.trevarj.motd.service.ImmediateWireAcceptance.FAILED,
+            ),
+        ) { }
+
+        val result = BouncerServClientImpl(provider)
+            .execute(1, BouncerServCommand("network status"))
+
+        assertTrue(result is BouncerServResult.Failed)
+    }
+
     @Test fun probe_expands_advertised_command_families() = runTest {
         val events = MutableSharedFlow<IrcEvent>(extraBufferCapacity = 16)
         val provider = FakeSessions(events) { wire ->
@@ -105,12 +137,17 @@ class BouncerServClientTest {
     private class FakeSessions(
         private val events: MutableSharedFlow<IrcEvent>,
         private val isCurrent: () -> Boolean = { true },
+        private val acceptance: io.github.trevarj.motd.service.SendAcceptance =
+            io.github.trevarj.motd.service.SendAcceptance.Accepted(emptyList()),
         private val sender: suspend (String) -> Unit,
     ) : BouncerServSessionProvider {
         override suspend fun session(rootNetworkId: Long) = BouncerServSession(
             token = this,
             events = events,
-            send = sender,
+            send = {
+                sender(it)
+                acceptance
+            },
             isCurrent = isCurrent,
         )
     }

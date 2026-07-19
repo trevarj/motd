@@ -1,67 +1,107 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.EventRedirectEntity
+import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.buffer
+import io.github.trevarj.motd.data.db.inMemoryDb
+import io.github.trevarj.motd.data.db.message
+import io.github.trevarj.motd.data.db.network
+import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class ComposerDraftStoreTest {
+    private lateinit var db: MotdDatabase
+    private lateinit var store: ComposerDraftStore
+    private var roomId = 0L
 
-    @Test fun consume_returns_pushed_then_null_second_time() {
-        val store = ComposerDraftStore()
-        store.push(1L, "alice: ")
-        assertEquals("alice: ", store.consume(1L))
-        assertNull(store.consume(1L))
+    @Before
+    fun setUp() = runTest {
+        db = inMemoryDb()
+        val networkId = db.networkDao().insert(network())
+        roomId = db.bufferDao().insert(buffer(networkId, "#room", BufferType.CHANNEL))
+        store = ComposerDraftStore(db)
     }
 
-    @Test fun empty_buffer_consumes_null() {
-        assertNull(ComposerDraftStore().consume(42L))
+    @After
+    fun tearDown() = db.close()
+
+    @Test
+    fun `prefills remain consume once`() {
+        store.push(roomId, "alice: ")
+        store.push(roomId, "bob: ")
+        assertEquals("alice: bob: ", store.consume(roomId))
+        assertNull(store.consume(roomId))
     }
 
-    @Test fun double_push_concatenates() {
-        val store = ComposerDraftStore()
-        store.push(1L, "alice: ")
-        store.push(1L, "bob: ")
-        assertEquals("alice: bob: ", store.consume(1L))
+    @Test
+    fun `draft text and reply survive store recreation`() = runTest {
+        store.saveDraft(roomId, "hello", replyToEventId = 77L)
+
+        val restored = ComposerDraftStore(db).loadDraft(roomId)
+
+        assertEquals("hello", restored?.text)
+        assertEquals(77L, restored?.replyToEventId)
     }
 
-    @Test fun buffers_are_isolated() {
-        val store = ComposerDraftStore()
-        store.push(1L, "alice: ")
-        store.push(2L, "bob: ")
-        assertEquals("bob: ", store.consume(2L))
-        assertEquals("alice: ", store.consume(1L))
-        assertNull(store.consume(1L))
-        assertNull(store.consume(2L))
+    @Test
+    fun `accepted version clears only while unchanged`() = runTest {
+        val submitted = store.saveDraft(roomId, "first", replyToEventId = 7L)!!
+        store.saveDraft(roomId, "new text", replyToEventId = 7L)
+
+        assertFalse(store.clearIfUnchanged(submitted))
+        assertEquals("new text", store.loadDraft(roomId)?.text)
+
+        val latest = store.loadDraft(roomId)!!
+        assertTrue(store.clearIfUnchanged(latest))
+        assertNull(store.loadDraft(roomId))
     }
 
-    @Test fun drafts_are_saved_and_loaded_without_consuming() {
-        val store = ComposerDraftStore()
+    @Test
+    fun `reply-only draft is durable and blank without reply removes row`() = runTest {
+        store.saveDraft(roomId, "", replyToEventId = 9L)
+        assertEquals(9L, store.loadDraft(roomId)?.replyToEventId)
 
-        store.saveDraft(1L, "hello")
-
-        assertEquals("hello", store.loadDraft(1L))
-        assertEquals("hello", store.loadDraft(1L))
-        assertNull(store.loadDraft(2L))
+        store.saveDraft(roomId, "", replyToEventId = null)
+        assertNull(store.loadDraft(roomId))
     }
 
-    @Test fun drafts_are_independent_across_channel_and_query_buffers() {
-        val store = ComposerDraftStore()
-        store.saveDraft(10L, "channel draft")
-        store.saveDraft(11L, "query draft")
+    @Test
+    fun `reply deletion does not delete draft`() = runTest {
+        val eventId = db.messageDao().insertAll(
+            listOf(message(roomId, "reply", serverTime = 100, dedupKey = "reply-delete")),
+        ).single()
+        store.saveDraft(roomId, "keep me", eventId)
 
-        assertEquals("channel draft", store.loadDraft(10L))
-        assertEquals("query draft", store.loadDraft(11L))
+        db.messageDao().deleteWithAnchorFallback(eventId)
+
+        assertEquals("keep me", store.loadDraft(roomId)?.text)
+        assertEquals(eventId, store.loadDraft(roomId)?.replyToEventId)
     }
 
-    @Test fun blank_draft_is_removed_and_clear_is_idempotent() {
-        val store = ComposerDraftStore()
-        store.saveDraft(1L, "hello")
+    @Test
+    fun `unchanged submitted draft clears after reply coalesces`() = runTest {
+        val loserId = db.messageDao().insertAll(
+            listOf(message(roomId, "reply", serverTime = 100, dedupKey = "reply-loser")),
+        ).single()
+        val winnerId = db.messageDao().insertAll(
+            listOf(message(roomId, "reply", serverTime = 200, dedupKey = "reply-winner")),
+        ).single()
+        val submitted = store.saveDraft(roomId, "answer", loserId)!!
+        db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
+        db.composerDraftDao().repointReplies(loserId, winnerId)
+        db.messageDao().deleteById(loserId)
 
-        store.saveDraft(1L, "   ")
-        assertNull(store.loadDraft(1L))
-        store.saveDraft(1L, "again")
-        store.clearDraft(1L)
-        store.clearDraft(1L)
-        assertNull(store.loadDraft(1L))
+        assertTrue(store.clearIfUnchanged(submitted))
+        assertNull(store.loadDraft(roomId))
     }
 }

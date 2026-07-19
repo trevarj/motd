@@ -11,7 +11,9 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
-import io.github.trevarj.motd.data.db.effectiveReadFloorTime
+import io.github.trevarj.motd.data.db.ComposerDraftEntity
+import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.db.effectiveLocalReadAnchor
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.repo.BufferRepository
@@ -43,6 +45,7 @@ import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistoryRefreshRange
 import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.IrcEventSink
+import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import androidx.navigation.toRoute
@@ -63,9 +66,11 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -89,6 +94,37 @@ data class ChatState(
     // loading sentinel: it briefly paints a false status while entering an already-connected chat.
     val connState: IrcClientState? = null,
     val presence: Map<PresenceKey, PresenceState> = emptyMap(),
+)
+
+data class ComposerDraftState(
+    val text: String = "",
+    val hydrated: Boolean = false,
+    val revision: Long = 0,
+)
+
+private data class DraftSnapshot(
+    val roomId: Long,
+    val text: String,
+    val replyToEventId: Long?,
+    val revision: Long,
+)
+
+private sealed interface DraftCommand {
+    data class Persist(val snapshot: DraftSnapshot) : DraftCommand
+    data class PrepareSubmission(
+        val snapshot: DraftSnapshot,
+        val result: CompletableDeferred<ComposerDraftEntity?>,
+    ) : DraftCommand
+    data class ClearSubmission(
+        val snapshot: DraftSnapshot,
+        val persisted: ComposerDraftEntity,
+        val result: CompletableDeferred<Boolean>,
+    ) : DraftCommand
+}
+
+private data class PreparedDraftSubmission(
+    val snapshot: DraftSnapshot,
+    val persisted: ComposerDraftEntity?,
 )
 
 internal fun MessageEntity.toReplyPreviewData(): ReplyPreviewData = ReplyPreviewData(sender, text)
@@ -170,7 +206,7 @@ class ChatViewModel @Inject constructor(
             .cachedIn(viewModelScope)
 
     /** Newest stored wire row, including ignored tails; effective bottom may acknowledge it. */
-    val rawNewestTime: StateFlow<Long?> = visibilityReader.observeLatestRawTime(bufferId)
+    val rawNewestAnchor: StateFlow<TimelineAnchor?> = visibilityReader.observeLatestRawAnchor(bufferId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Full settings for the timeline (friends/fools/foolsMode/nick styling); collected in the screen. */
@@ -182,6 +218,16 @@ class ChatViewModel @Inject constructor(
     }
 
     private val replyTo = MutableStateFlow<MessageEntity?>(null)
+    private val draftStateLock = Any()
+    private val draftCommands = Channel<DraftCommand>(Channel.UNLIMITED)
+    private val draftHydrated = CompletableDeferred<Unit>()
+    private val _composerDraft = MutableStateFlow(ComposerDraftState())
+    val composerDraft: StateFlow<ComposerDraftState> = _composerDraft.asStateFlow()
+    private var currentDraftText = ""
+    private var currentReplyToEventId: Long? = null
+    private var nextDraftRevision = 0L
+    private var draftTextEdited = false
+    private var draftReplyEdited = false
     private val _members = MutableStateFlow<List<MemberEntity>>(emptyList())
     private val _memberNicks = MutableStateFlow<List<String>>(emptyList())
     val memberNicks: StateFlow<List<String>> = _memberNicks.asStateFlow()
@@ -216,6 +262,7 @@ class ChatViewModel @Inject constructor(
     )
 
     init {
+        viewModelScope.launch { runDraftWriter() }
         viewModelScope.launch {
             combine(buffer, connState, visibleSession) { currentBuffer, connection, session ->
                 val eligible = currentBuffer?.takeIf { it.type != BufferType.SERVER }
@@ -360,15 +407,15 @@ class ChatViewModel @Inject constructor(
 
     // Frozen on buffer entry so the "— New messages —" divider keeps a stable boundary instead of
     // flashing/vanishing as markRead advances the live marker. Used ONLY for the divider now.
-    private val _readMarkerSnapshot = MutableStateFlow<Long?>(null)
-    val readMarkerSnapshot: StateFlow<Long?> = _readMarkerSnapshot.asStateFlow()
+    private val _readMarkerSnapshot = MutableStateFlow<TimelineAnchor?>(null)
+    val readMarkerSnapshot: StateFlow<TimelineAnchor?> = _readMarkerSnapshot.asStateFlow()
 
     // Live read marker for the scroll-to-bottom FAB badge: unlike the frozen snapshot, this tracks
     // the buffer's real read marker, so once markRead advances it (at bottom) the badge count drops
     // to 0 and stays 0 when scrolling back up — instead of counting already-read messages until
     // re-entry (bug: badge doesn't clear until leaving the chat).
-    val readMarkerTime: StateFlow<Long?> = buffer
-        .map { it?.effectiveReadFloorTime }
+    val localReadAnchor: StateFlow<TimelineAnchor?> = buffer
+        .map { it?.effectiveLocalReadAnchor }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -391,11 +438,13 @@ class ChatViewModel @Inject constructor(
      * newest loaded message and whenever a new message lands while the list is at the bottom
      * (plans/07). [time] <= 0 is treated as "nothing to mark" and skipped.
      */
-    fun markRead(time: Long) {
-        if (time <= 0) return
+    fun markRead(anchor: TimelineAnchor) {
+        if (anchor.serverTime <= 0 || anchor.eventId <= 0) return
         val roomId = operationalBufferId.value
-        AutoFollowTrace.record("markread_request", roomId) { "marker=$time" }
-        viewModelScope.launch { connectionManager.markRead(roomId, time) }
+        AutoFollowTrace.record("markread_request", roomId) {
+            "marker=${anchor.serverTime}:${anchor.eventId}"
+        }
+        viewModelScope.launch { connectionManager.markRead(roomId, anchor) }
     }
 
     fun acceptInvite(messageId: Long) = viewModelScope.launch {
@@ -421,7 +470,12 @@ class ChatViewModel @Inject constructor(
                 }
             }
         }
-        replyTo.value = message
+        synchronized(draftStateLock) {
+            draftReplyEdited = true
+            replyTo.value = message
+            currentReplyToEventId = message?.id
+            draftCommands.trySend(DraftCommand.Persist(advanceDraftRevisionLocked()))
+        }
     }
 
     fun sendTyping(active: Boolean) = viewModelScope.launch {
@@ -488,14 +542,11 @@ class ChatViewModel @Inject constructor(
             }
         }
 
-    /** Retry only retires the failed row after a replacement attempt is accepted. */
+    /** Retry mutates the same durable row; no replacement deletion is involved. */
     fun retry(message: MessageEntity) = viewModelScope.launch {
-        val result = connectionManager.sendMessageForRetry(
-            operationalBufferId.value,
-            resendText(message.kind, message.text),
-            message.replyToMsgid,
-        )
-        if (result.replacementPersisted) messageRepository.deleteMessage(message.id)
+        if (connectionManager.retryMessage(message.id) is SendAcceptance.Rejected) {
+            _snackbar.value = "send_rejected"
+        }
     }
 
     /** Delete a failed local row without resending (action-sheet delete affordance, plans/15 #10). */
@@ -553,16 +604,32 @@ class ChatViewModel @Inject constructor(
         when (val cmd = parseCommand(raw)) {
             is ChatCommand.None -> Unit
             is ChatCommand.Message -> {
-                connectionManager.sendMessage(operationalBufferId.value, cmd.text, replyTo.value?.msgid)
-                replyTo.value = null
-                connectionManager.sendTyping(operationalBufferId.value, "done")
+                val roomId = operationalBufferId.value
+                val submission = prepareDraftSubmission(raw)
+                val result = connectionManager.sendMessage(
+                    roomId,
+                    cmd.text,
+                    submission.snapshot.replyToEventId,
+                )
+                if (result is SendAcceptance.Accepted) {
+                    clearDraftSubmission(submission)
+                    connectionManager.sendTyping(roomId, "done")
+                } else if (result is SendAcceptance.Rejected) {
+                    _snackbar.value = "send_rejected"
+                }
             }
             is ChatCommand.Join -> networkId?.let { connectionManager.joinChannel(it, cmd.channel) }
             is ChatCommand.Part -> connectionManager.partChannel(operationalBufferId.value, cmd.reason)
             is ChatCommand.Msg -> networkId?.let { nid ->
                 val target = connectionManager.ensureQueryBuffer(nid, cmd.nick)
-                connectionManager.sendMessage(target, cmd.text)
-                onOpenBuffer(target)
+                val submission = prepareDraftSubmission(raw)
+                when (connectionManager.sendMessage(target, cmd.text)) {
+                    is SendAcceptance.Accepted -> {
+                        clearDraftSubmission(submission)
+                        onOpenBuffer(target)
+                    }
+                    is SendAcceptance.Rejected -> _snackbar.value = "send_rejected"
+                }
             }
             is ChatCommand.Query -> networkId?.let { nid ->
                 onOpenBuffer(connectionManager.ensureQueryBuffer(nid, cmd.nick))
@@ -602,8 +669,10 @@ class ChatViewModel @Inject constructor(
             _snackbar.value = "invalid" // sentinel; the screen maps to chat_server_invalid_command
             return
         }
-        connectionManager.clientFor(nid)?.send(msg)
-        replyTo.value = null
+        val client = connectionManager.clientFor(nid) ?: return
+        val submission = prepareDraftSubmission(raw)
+        client.send(msg)
+        clearDraftSubmission(submission)
     }
 
     // --- nick sheet + whois (plans/16 §5.8) ---
@@ -719,11 +788,135 @@ class ChatViewModel @Inject constructor(
     /** Consume-once composer prefill queued by ChannelInfo before popping back; null when none. */
     fun consumePrefill(): String? = draftStore.consume(operationalBufferId.value)
 
-    fun loadDraft(): String? = draftStore.loadDraft(operationalBufferId.value)
+    fun saveDraft(text: String) {
+        synchronized(draftStateLock) {
+            draftTextEdited = true
+            currentDraftText = text
+            draftCommands.trySend(DraftCommand.Persist(advanceDraftRevisionLocked()))
+        }
+    }
 
-    fun saveDraft(text: String) = draftStore.saveDraft(operationalBufferId.value, text)
+    private suspend fun runDraftWriter() {
+        val loaded = runCatching { draftStore.loadDraft(operationalBufferId.value) }.getOrNull()
+        val loadedReply = loaded?.replyToEventId?.let {
+            runCatching { messageRepository.byId(it) }.getOrNull()
+        }
+        val editedBeforeHydration: DraftSnapshot? = synchronized(draftStateLock) {
+            val wasEdited = draftTextEdited || draftReplyEdited
+            if (!draftTextEdited) currentDraftText = loaded?.text.orEmpty()
+            if (!draftReplyEdited) {
+                currentReplyToEventId = loadedReply?.id ?: loaded?.replyToEventId
+                replyTo.value = loadedReply
+            }
+            val snapshot = advanceDraftRevisionLocked(hydrated = true)
+            snapshot.takeIf { wasEdited }
+        }
+        editedBeforeHydration?.let {
+            runCatching { draftStore.saveDraft(it.roomId, it.text, it.replyToEventId) }
+        }
+        draftHydrated.complete(Unit)
 
-    fun clearDraft() = draftStore.clearDraft(operationalBufferId.value)
+        for (command in draftCommands) {
+            when (command) {
+                is DraftCommand.Persist -> {
+                    val current = synchronized(draftStateLock) {
+                        _composerDraft.value.revision == command.snapshot.revision
+                    }
+                    if (current) {
+                        runCatching {
+                            draftStore.saveDraft(
+                                command.snapshot.roomId,
+                                command.snapshot.text,
+                                command.snapshot.replyToEventId,
+                            )
+                        }
+                    }
+                }
+                is DraftCommand.PrepareSubmission -> {
+                    val unchanged = synchronized(draftStateLock) {
+                        _composerDraft.value.revision == command.snapshot.revision
+                    }
+                    val persisted = if (unchanged) {
+                        runCatching {
+                            draftStore.saveDraft(
+                                command.snapshot.roomId,
+                                command.snapshot.text,
+                                command.snapshot.replyToEventId,
+                            )
+                        }.getOrNull()
+                    } else {
+                        null
+                    }
+                    command.result.complete(persisted)
+                }
+                is DraftCommand.ClearSubmission -> {
+                    val unchangedBeforeDelete = synchronized(draftStateLock) {
+                        _composerDraft.value.revision == command.snapshot.revision
+                    }
+                    val deleted = unchangedBeforeDelete && runCatching {
+                        draftStore.clearIfUnchanged(command.persisted)
+                    }.getOrDefault(false)
+                    val cleared = if (deleted) {
+                        synchronized(draftStateLock) {
+                            if (_composerDraft.value.revision != command.snapshot.revision) {
+                                false
+                            } else {
+                                currentDraftText = ""
+                                currentReplyToEventId = null
+                                replyTo.value = null
+                                advanceDraftRevisionLocked(hydrated = true)
+                                true
+                            }
+                        }
+                    } else {
+                        false
+                    }
+                    command.result.complete(cleared)
+                }
+            }
+        }
+    }
+
+    private fun advanceDraftRevisionLocked(hydrated: Boolean = _composerDraft.value.hydrated): DraftSnapshot {
+        val revision = ++nextDraftRevision
+        _composerDraft.value = ComposerDraftState(currentDraftText, hydrated, revision)
+        return DraftSnapshot(
+            roomId = operationalBufferId.value,
+            text = currentDraftText,
+            replyToEventId = currentReplyToEventId,
+            revision = revision,
+        )
+    }
+
+    private suspend fun prepareDraftSubmission(raw: String): PreparedDraftSubmission {
+        draftHydrated.await()
+        val result = CompletableDeferred<ComposerDraftEntity?>()
+        val snapshot = synchronized(draftStateLock) {
+            if (currentDraftText != raw) {
+                draftTextEdited = true
+                currentDraftText = raw
+                draftCommands.trySend(DraftCommand.Persist(advanceDraftRevisionLocked()))
+            }
+            DraftSnapshot(
+                roomId = operationalBufferId.value,
+                text = currentDraftText,
+                replyToEventId = currentReplyToEventId,
+                revision = _composerDraft.value.revision,
+            ).also { draftCommands.trySend(DraftCommand.PrepareSubmission(it, result)) }
+        }
+        return PreparedDraftSubmission(snapshot, result.await())
+    }
+
+    private suspend fun clearDraftSubmission(submission: PreparedDraftSubmission): Boolean {
+        val persisted = submission.persisted ?: return false
+        val result = CompletableDeferred<Boolean>()
+        synchronized(draftStateLock) {
+            draftCommands.trySend(
+                DraftCommand.ClearSubmission(submission.snapshot, persisted, result),
+            )
+        }
+        return result.await()
+    }
 
     // --- search deep-jump (plans/11 §C) ---
 
@@ -837,12 +1030,12 @@ class ChatViewModel @Inject constructor(
         // you just sent. Null (no real marker, or nothing unread from others) hides both.
         viewModelScope.launch {
             val entrySpec = MessageVisibilitySpec.from(settingsRepository.settings.first())
-            val realMarker = bufferRepository.observeBuffer(bufferId).firstOrNull()?.effectiveReadFloorTime
+            val realMarker = bufferRepository.observeBuffer(bufferId).firstOrNull()?.effectiveLocalReadAnchor
             _readMarkerSnapshot.value = if (realMarker == null) {
                 null
             } else {
-                visibilityReader.firstVisibleUnreadTime(bufferId, realMarker, entrySpec)
-                    ?.let { it - 1 }
+                visibilityReader.firstVisibleUnreadAnchor(bufferId, realMarker, entrySpec)
+                    ?.let { TimelineAnchor(it.serverTime, it.eventId - 1L) }
             }
             // A deep-link owns positioning. A normal open first restores this buffer's last
             // in-memory viewport, then falls back to oldest unread incoming, then newest.
@@ -927,13 +1120,19 @@ class ChatViewModel @Inject constructor(
     }
 
     private suspend fun unreadEntryPosition(
-        realMarker: Long?,
+        realMarker: TimelineAnchor?,
         spec: MessageVisibilitySpec,
     ): ChatInitialPosition? {
-        val targetTime = realMarker?.let {
-            visibilityReader.firstVisibleUnreadTime(bufferId, it, spec)
+        val target = realMarker?.let {
+            visibilityReader.firstVisibleUnreadAnchor(bufferId, it, spec)
         } ?: return null
-        return when (val result = resolver.resolve(bufferId, null, targetTime, null)) {
+        return when (val result = resolver.resolve(
+            bufferId,
+            null,
+            target.serverTime,
+            null,
+            eventId = target.eventId,
+        )) {
             is ChatJumpResolver.Result.Target -> ChatInitialPosition(index = result.index)
             ChatJumpResolver.Result.NotFound -> null
         }

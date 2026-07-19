@@ -6,6 +6,7 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -29,8 +30,8 @@ class MessageVisibilityReader @Inject constructor(
 ) {
     private val chatListCache = LinkedHashMap<ChatListCacheKey, ChatListRow>()
 
-    fun observeLatestRawTime(bufferId: Long): Flow<Long?> = callbackFlow {
-        val observer = object : InvalidationTracker.Observer("messages") {
+    fun observeLatestRawAnchor(bufferId: Long): Flow<TimelineAnchor?> = callbackFlow {
+        val observer = object : InvalidationTracker.Observer("messages", "buffers") {
             override fun onInvalidated(tables: Set<String>) {
                 trySend(Unit)
             }
@@ -38,7 +39,7 @@ class MessageVisibilityReader @Inject constructor(
         db.invalidationTracker.addObserver(observer)
         trySend(Unit)
         awaitClose { db.invalidationTracker.removeObserver(observer) }
-    }.map { latestRawTime(bufferId) }.distinctUntilChanged()
+    }.map { latestRawAnchor(bufferId) }.distinctUntilChanged()
 
     /** Emits only when event-id coalescence may require a live viewport re-anchor. */
     fun observeEventRedirects(): Flow<Unit> = callbackFlow {
@@ -51,8 +52,10 @@ class MessageVisibilityReader @Inject constructor(
         awaitClose { db.invalidationTracker.removeObserver(observer) }
     }
 
-    suspend fun latestRawTime(bufferId: Long): Long? =
-        db.messageDao().newestTime(canonicalRoomId(bufferId))
+    suspend fun latestRawAnchor(bufferId: Long): TimelineAnchor? =
+        db.messageDao().newestMessage(canonicalRoomId(bufferId))?.let {
+            TimelineAnchor(it.serverTime, it.id)
+        }
 
     suspend fun countTimelineNewer(
         bufferId: Long,
@@ -66,19 +69,19 @@ class MessageVisibilityReader @Inject constructor(
         predicate = MessageVisibilityPolicy(spec)::timeline,
     )
 
-    suspend fun firstVisibleUnreadTime(
+    suspend fun firstVisibleUnreadAnchor(
         bufferId: Long,
-        after: Long,
+        after: TimelineAnchor,
         spec: MessageVisibilitySpec,
-    ): Long? {
+    ): TimelineAnchor? {
         val roomId = canonicalRoomId(bufferId)
         val policy = MessageVisibilityPolicy(spec)
         return firstMatchingRow(
-            where = "bufferId = ? AND serverTime > ?",
-            args = listOf(roomId, after),
+            where = "bufferId = ? AND (serverTime > ? OR (serverTime = ? AND id > ?))",
+            args = listOf(roomId, after.serverTime, after.serverTime, after.eventId),
             order = "serverTime ASC, id ASC",
             predicate = policy::visibleUnread,
-        )?.serverTime
+        )?.let { TimelineAnchor(it.serverTime, it.id) }
     }
 
     suspend fun resolveSavedAnchor(
@@ -172,10 +175,14 @@ class MessageVisibilityReader @Inject constructor(
         forEachMatchingRow(
             where = "bufferId = ? AND isSelf = 0 " +
                 "AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION') " +
-                "AND serverTime > (SELECT MAX(" +
-                "COALESCE(readMarkerTime, 0), COALESCE(localUnreadFloorTime, 0)" +
-                ") FROM buffers WHERE id = ?)",
-            args = listOf(row.bufferId, row.bufferId),
+                "AND (" +
+                "serverTime > (SELECT MAX(COALESCE(localReadAnchorTime, 0), " +
+                "COALESCE(localUnreadFloorTime, 0)) FROM buffers WHERE id = ?) OR (" +
+                "serverTime = (SELECT localReadAnchorTime FROM buffers WHERE id = ?) AND " +
+                "(SELECT COALESCE(localUnreadFloorTime, -9223372036854775808) FROM buffers WHERE id = ?) " +
+                "< (SELECT localReadAnchorTime FROM buffers WHERE id = ?) AND " +
+                "id > (SELECT COALESCE(localReadAnchorEventId, 0) FROM buffers WHERE id = ?)))",
+            args = listOf(row.bufferId, row.bufferId, row.bufferId, row.bufferId, row.bufferId, row.bufferId),
             order = "serverTime DESC, id DESC",
             predicate = policy::visibleUnread,
         ) { message ->

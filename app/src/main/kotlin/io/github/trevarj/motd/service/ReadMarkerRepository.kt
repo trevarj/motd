@@ -21,12 +21,12 @@ class ReadMarkerRepository @Inject constructor(
         bufferIds.distinct().takeIf { it.isNotEmpty() }
             ?.let { messageDao.latestIncomingMarkers(it) }
             .orEmpty()
-            .map { BufferReadMarker(it.bufferId, it.target, it.timestamp) }
+            .map { BufferReadMarker(it.bufferId, it.target, it.timestamp, it.eventId) }
 
     /** Snapshot every non-SERVER target and its durable local marker for one network. */
     suspend fun storedForNetwork(networkId: Long): List<BufferReadMarker> =
         bufferDao.storedReadMarkers(networkId)
-            .map { BufferReadMarker(it.bufferId, it.target, it.timestamp) }
+            .map { BufferReadMarker(it.bufferId, it.target, it.timestamp, it.eventId) }
 }
 
 interface ReadMarkerSnapshotter {
@@ -37,4 +37,5 @@ data class BufferReadMarker(
     val bufferId: Long,
     val target: String,
     val timestamp: Long?,
+    val eventId: Long? = null,
 )

@@ -65,8 +65,19 @@ class NotificationDecisionTest {
 
     @Test
     fun `read marker dismisses only when it covers the newest notification`() {
-        assertFalse(readMarkerCoversNotification(markerTime = 99, latestNotifiedTime = 100))
-        assertTrue(readMarkerCoversNotification(markerTime = 100, latestNotifiedTime = 100))
-        assertTrue(readMarkerCoversNotification(markerTime = 101, latestNotifiedTime = 100))
+        val latest = io.github.trevarj.motd.data.db.TimelineAnchor(100, 2)
+        assertFalse(
+            readMarkerCoversNotification(
+                io.github.trevarj.motd.data.db.TimelineAnchor(100, 1),
+                latest,
+            ),
+        )
+        assertTrue(readMarkerCoversNotification(latest, latest))
+        assertTrue(
+            readMarkerCoversNotification(
+                io.github.trevarj.motd.data.db.TimelineAnchor(101, 1),
+                latest,
+            ),
+        )
     }
 }

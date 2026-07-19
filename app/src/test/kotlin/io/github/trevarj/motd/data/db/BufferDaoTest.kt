@@ -58,6 +58,41 @@ class BufferDaoTest {
     }
 
     @Test
+    fun `same millisecond local anchor uses event id ordering`() = runTest {
+        val room = db.bufferDao().insert(buffer(networkId, "#same-ms"))
+        val ids = db.messageDao().insertAll(
+            listOf(
+                message(room, "first", serverTime = 100, dedupKey = "same-1"),
+                message(room, "second", serverTime = 100, dedupKey = "same-2"),
+            ),
+        )
+
+        db.bufferDao().advanceLocalReadAnchor(room, 100, ids.first())
+
+        val row = db.bufferDao().observeChatList().first().single()
+        assertEquals(1, row.unreadCount)
+        assertEquals(ids.first(), db.bufferDao().observeById(room)?.localReadAnchorEventId)
+    }
+
+    @Test
+    fun `deleting anchored event falls back to prior exact timeline row`() = runTest {
+        val room = db.bufferDao().insert(buffer(networkId, "#fallback"))
+        val ids = db.messageDao().insertAll(
+            listOf(
+                message(room, "first", serverTime = 100, dedupKey = "fallback-1"),
+                message(room, "second", serverTime = 100, dedupKey = "fallback-2"),
+            ),
+        )
+        db.bufferDao().advanceLocalReadAnchor(room, 100, ids.last())
+
+        db.messageDao().deleteWithAnchorFallback(ids.last())
+
+        val buffer = db.bufferDao().observeById(room)
+        assertEquals(100L, buffer?.localReadAnchorTime)
+        assertEquals(ids.first(), buffer?.localReadAnchorEventId)
+    }
+
+    @Test
     fun chatList_joinPartQuitNeverReplacePreviewOrActivity() = runTest {
         val bufDao = db.bufferDao()
         val msgDao = db.messageDao()

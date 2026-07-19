@@ -89,14 +89,15 @@ class AddNetworkViewModelTest {
         override suspend fun connect(networkId: Long) { connected += networkId }
         override suspend fun disconnect(networkId: Long) = Unit
         override suspend fun reconnectStale() = Unit
-        override suspend fun sendMessage(bufferId: Long, text: String, replyToMsgid: String?) = Unit
+        override suspend fun sendMessage(bufferId: Long, text: String, replyToEventId: Long?) =
+            io.github.trevarj.motd.service.SendAcceptance.Accepted(emptyList())
         override suspend fun sendTyping(bufferId: Long, state: String) = Unit
         override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) = Unit
         override suspend fun joinChannel(networkId: Long, channel: String) = Unit
         override suspend fun partChannel(bufferId: Long, reason: String?) = Unit
         override suspend fun ensureQueryBuffer(networkId: Long, nick: String): Long = 0
         override suspend fun ensureServerBuffer(networkId: Long): Long = 0
-        override suspend fun markRead(bufferId: Long, upToTime: Long) = Unit
+        override suspend fun markRead(bufferId: Long, anchor: io.github.trevarj.motd.data.db.TimelineAnchor) = Unit
         override suspend fun evaluatePushMode() = Unit
         override val certPrompts = MutableStateFlow<List<CertPrompt>>(emptyList())
         override suspend fun trustCert(prompt: CertPrompt) = Unit

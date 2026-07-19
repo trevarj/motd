@@ -2,18 +2,33 @@ package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.db.TimelineEventId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 
 enum class DeliveryMode { PERSISTENT_SOCKET, UNIFIED_PUSH }
-enum class RetrySendResult {
-    NO_ATTEMPT,
-    REPLACEMENT_FAILED,
-    ACCEPTED;
+enum class SendRejectionReason {
+    BUFFER_NOT_FOUND,
+    INVALID_CONTENT,
+    UNSUPPORTED_BUFFER,
+    EVENT_NOT_RETRYABLE,
+    PERSISTENCE_FAILED,
+}
 
-    val replacementPersisted: Boolean
-        get() = this != NO_ATTEMPT
+enum class ImmediateWireAcceptance {
+    ACCEPTED,
+    DISCONNECTED,
+    FAILED,
+}
+
+sealed interface SendAcceptance {
+    data class Accepted(
+        val eventIds: List<TimelineEventId>,
+        val immediateWireAcceptance: ImmediateWireAcceptance = ImmediateWireAcceptance.ACCEPTED,
+    ) : SendAcceptance
+    data class Rejected(val reason: SendRejectionReason) : SendAcceptance
 }
 enum class RosterLoadState { NOT_LOADED, LOADING, LOADED, FAILED }
 enum class PresenceState { UNKNOWN, ONLINE, OFFLINE }
@@ -70,18 +85,16 @@ interface ConnectionManager {
      */
     suspend fun reconnectStale()
 
-    /** High-level send: resolves buffer -> network/target, handles pending insert + echo. */
-    suspend fun sendMessage(bufferId: Long, text: String, replyToMsgid: String? = null)
-
-    /** Retry seam that reports whether a replacement attempt was actually accepted. */
-    suspend fun sendMessageForRetry(
+    /** Accepted means every chunk is durably represented, not necessarily written to the wire. */
+    suspend fun sendMessage(
         bufferId: Long,
         text: String,
-        replyToMsgid: String? = null,
-    ): RetrySendResult {
-        sendMessage(bufferId, text, replyToMsgid)
-        return RetrySendResult.ACCEPTED
-    }
+        replyToEventId: TimelineEventId? = null,
+    ): SendAcceptance
+
+    /** Retry the same durable row with a new attempt label. */
+    suspend fun retryMessage(eventId: TimelineEventId): SendAcceptance =
+        SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
     suspend fun sendTyping(bufferId: Long, state: String)
     suspend fun sendReact(bufferId: Long, msgid: String, emoji: String)
     suspend fun joinChannel(networkId: Long, channel: String)
@@ -120,8 +133,8 @@ interface ConnectionManager {
      *  returns bufferId. UI entry for the server-messages timeline (plans/16). */
     suspend fun ensureServerBuffer(networkId: Long): Long
 
-    /** THE mark-read entry point: advances Room (max-only) and sends MARKREAD when supported. */
-    suspend fun markRead(bufferId: Long, upToTime: Long)
+    /** Advance the exact local anchor; wire MARKREAD uses an authoritative boundary at/before it. */
+    suspend fun markRead(bufferId: Long, anchor: TimelineAnchor)
 
     /** Re-evaluate push-mode socket teardown after per-network endpoint changes.
      *  No-op unless deliveryMode == UNIFIED_PUSH. Called by MotdPushReceiver.onNewEndpoint. */

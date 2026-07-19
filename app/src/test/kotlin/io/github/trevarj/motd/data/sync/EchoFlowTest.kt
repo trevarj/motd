@@ -17,6 +17,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -58,8 +59,8 @@ class EchoFlowTest {
 
     @After fun tearDown() { db.close() }
 
-    private suspend fun rows() =
-        db.messageDao().pagingSource(bufferId).load(
+    private suspend fun rows(roomId: Long = bufferId) =
+        db.messageDao().pagingSource(roomId).load(
             androidx.paging.PagingSource.LoadParams.Refresh(null, 100, false),
         ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data }
 
@@ -71,6 +72,7 @@ class EchoFlowTest {
         assert(id > 0)
         assertEquals(1, rows().size)
         assertEquals(label, rows().single().pendingLabel)
+        db.bufferDao().advanceLocalReadAnchor(bufferId, rows().single().serverTime, id)
 
         // 2. labeled echo arrives → update in place.
         processor.process(networkId, IrcEvent.ChatMessage(
@@ -82,6 +84,8 @@ class EchoFlowTest {
         assertEquals(1, rows().size)
         assertEquals("real-1", rows().single().msgid)
         assertNull(rows().single().pendingLabel)
+        assertEquals(600L, db.bufferDao().observeById(bufferId)?.localReadAnchorTime)
+        assertEquals(id, db.bufferDao().observeById(bufferId)?.localReadAnchorEventId)
 
         // 3. same msgid via CHATHISTORY later → INSERT IGNORE no-op.
         processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(
@@ -549,5 +553,137 @@ class EchoFlowTest {
             assertNull(it.pendingLabel)
             assertEquals(false, it.failed)
         }
+    }
+
+    @Test
+    fun `outgoing plan persists every chunk alias and observation in one call`() = runTest {
+        val durable = processor.persistOutgoingPlan(
+            bufferId = bufferId,
+            sender = "me",
+            events = listOf(
+                OutgoingEventPlan("motd-plan-1", "one", MessageKind.PRIVMSG),
+                OutgoingEventPlan("motd-plan-2", "two", MessageKind.PRIVMSG),
+                OutgoingEventPlan("motd-plan-3", "three", MessageKind.PRIVMSG),
+            ),
+            replyToEventId = null,
+            replyToMsgid = null,
+        )
+
+        assertEquals(3, durable.map { it.eventId }.distinct().size)
+        assertEquals(setOf("one", "two", "three"), rows().map { it.text }.toSet())
+        durable.forEach { event ->
+            assertTrue(
+                db.canonicalTimelineDao().aliasesFor(event.eventId).any {
+                    it.namespace == io.github.trevarj.motd.data.db.EventAliasNamespace.LABEL
+                },
+            )
+        }
+        db.openHelper.readableDatabase.query(
+            "SELECT COUNT(*) FROM event_observations WHERE origin = 'LOCAL_SEND'",
+        ).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(3, cursor.getInt(0))
+        }
+    }
+
+    @Test
+    fun `retry keeps event id and old label accepts a late echo`() = runTest {
+        val eventId = processor.insertPending(
+            bufferId,
+            "motd-old-attempt",
+            "me",
+            "retry me",
+            null,
+            MessageKind.PRIVMSG,
+        )
+        processor.failPendingEvents(listOf(eventId))
+
+        val retry = processor.beginRetry(eventId, "motd-new-attempt")
+
+        assertEquals(eventId, retry?.id)
+        assertEquals("motd-new-attempt", retry?.pendingLabel)
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx = MessageContext("late-msgid", 700, null, null, "motd-old-attempt"),
+                kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix("me"),
+                target = "#chan",
+                text = "retry me",
+                isSelf = true,
+                replyToMsgid = null,
+            ),
+        )
+        val confirmed = rows().single()
+        assertEquals(eventId, confirmed.id)
+        assertEquals("late-msgid", confirmed.msgid)
+        assertNull(confirmed.pendingLabel)
+    }
+
+    @Test
+    fun `outgoing transitions resolve a redirect room inside the network sequence`() = runTest {
+        val canonicalId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "canonical-room",
+                displayName = "canonical-room",
+                type = BufferType.QUERY,
+            ),
+        )
+        val redirectId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "old-room",
+                displayName = "old-room",
+                type = BufferType.QUERY,
+            ),
+        )
+        BufferStore(db).mergeRooms(canonicalId, redirectId)
+
+        val durable = processor.persistOutgoingPlan(
+            bufferId = redirectId,
+            sender = "me",
+            events = listOf(
+                OutgoingEventPlan("motd-redirect-fail", "fail then retry", MessageKind.PRIVMSG),
+                OutgoingEventPlan("motd-redirect-confirm", "timeout", MessageKind.PRIVMSG),
+            ),
+            replyToEventId = null,
+            replyToMsgid = null,
+        )
+        assertTrue(db.messageDao().byIds(durable.map { it.eventId }).all { it.bufferId == canonicalId })
+        assertTrue(rows(redirectId).isEmpty())
+
+        processor.failPendingEvents(listOf(durable.first().eventId))
+        val retry = processor.beginRetry(durable.first().eventId, "motd-redirect-retry")
+        processor.confirmIfStillPending(redirectId, "motd-redirect-retry")
+        processor.failIfStillPending(redirectId, "motd-redirect-confirm")
+
+        assertEquals(canonicalId, retry?.bufferId)
+        val transitioned = db.messageDao().byIds(durable.map { it.eventId }).associateBy { it.id }
+        assertNull(transitioned.getValue(durable.first().eventId).pendingLabel)
+        assertEquals(false, transitioned.getValue(durable.first().eventId).failed)
+        assertEquals(true, transitioned.getValue(durable.last().eventId).failed)
+        assertEquals(canonicalId, db.bufferDao().rawById(redirectId)?.redirectToRoomId)
+    }
+
+    @Test
+    fun `pending recovery can run again after the same row is retried`() = runTest {
+        val eventId = processor.insertPending(
+            bufferId,
+            "motd-interrupted",
+            "me",
+            "recover me",
+            null,
+            MessageKind.PRIVMSG,
+        )
+
+        assertEquals(1, processor.recoverInterruptedPending())
+        assertEquals(true, db.messageDao().byId(eventId)?.failed)
+        assertEquals("motd-interrupted", db.messageDao().byId(eventId)?.pendingLabel)
+
+        assertEquals(eventId, processor.beginRetry(eventId, "motd-interrupted-again")?.id)
+        assertEquals(1, processor.recoverInterruptedPending())
+        assertEquals(true, db.messageDao().byId(eventId)?.failed)
+        assertEquals("motd-interrupted-again", db.messageDao().byId(eventId)?.pendingLabel)
     }
 }

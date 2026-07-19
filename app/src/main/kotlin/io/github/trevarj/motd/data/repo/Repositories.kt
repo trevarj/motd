@@ -34,8 +34,8 @@ interface BufferRepository {
     /** Remove a buffer and all of its content (messages/members/reactions). Destructive: the
      *  parting of a joined CHANNEL is handled upstream by the caller (ChatListViewModel). */
     suspend fun deleteBuffer(id: Long)
-    // NOTE: mark-read goes through ConnectionManager.markRead (single entry point) —
-    // it advances Room via BufferDao.advanceReadMarker AND sends MARKREAD when supported.
+    // NOTE: mark-read goes through ConnectionManager.markRead (single entry point): it advances the
+    // exact local tuple and selects an authoritative timestamp for wire MARKREAD when supported.
 }
 
 interface MessageRepository {
@@ -61,7 +61,7 @@ interface MessageRepository {
     suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int
     /** Oldest non-self message time past [after], or null; anchors the unread divider/badge. */
     suspend fun firstUnreadOtherTime(bufferId: Long, after: Long): Long?
-    /** Delete a locally-stored row by id (failed-echo cleanup on retry/delete, plans/15 #10). */
+    /** Delete a locally-stored failed row by id, repairing any exact local read anchor. */
     suspend fun deleteMessage(id: Long)
 }
 

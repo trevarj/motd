@@ -65,7 +65,7 @@ class IrcInteroperabilityIntegrationTest {
                     b.broadcastEvents.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == parentText }
                 }
             }
-            a.sendMessage(CHANNEL, parentText, null)
+            a.sendMessage(CHANNEL, parentText, null, "motd-interoperability-parent")
             val parent = parentArrival.await()
             val parentMsgid = parent.ctx.msgid
             assertNotNull(parentMsgid)
@@ -76,7 +76,7 @@ class IrcInteroperabilityIntegrationTest {
                     a.broadcastEvents.filterIsInstance<IrcEvent.ChatMessage>().first { it.text == replyText }
                 }
             }
-            b.sendMessage(CHANNEL, replyText, parentMsgid)
+            b.sendMessage(CHANNEL, replyText, parentMsgid, "motd-interoperability-reply")
             val receivedReply = replyArrival.await()
             assertNotNull("A events=$aEvents; B events=$bEvents", receivedReply)
             assertEquals(parentMsgid, checkNotNull(receivedReply).replyToMsgid)

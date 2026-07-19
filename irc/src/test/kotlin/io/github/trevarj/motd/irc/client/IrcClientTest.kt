@@ -64,14 +64,12 @@ class IrcClientTest {
             .groupValues[1]
 
     @Test
-    fun `disconnected send does not invoke persistence callback`() = runTest {
+    fun `disconnected chat send reports no transport acceptance`() = runTest {
         val client = IrcClient(config(), FakeTransport().factory(), clientScope())
-        var persisted = false
 
-        val label = client.sendMessage("#chan", "not sent", null) { persisted = true }
+        val accepted = client.sendMessage("#chan", "not sent", null, "motd-disconnected")
 
-        assertEquals("", label)
-        assertFalse(persisted)
+        assertFalse(accepted)
     }
 
     @Test
@@ -197,9 +195,9 @@ class IrcClientTest {
         val ft = FakeTransport()
         val client = registered(ft)
 
-        val label = client.sendMessage("#chan", "hello", null)
+        val label = "motd-exact-label"
+        assertTrue(client.sendMessage("#chan", "hello", null, label))
         runCurrent()
-        assertTrue(label.startsWith("motd-"))
         val sent = ft.sent.last()
         assertTrue(sent.contains("label=$label"))
         assertTrue(sent.contains("PRIVMSG #chan"))
@@ -225,13 +223,26 @@ class IrcClientTest {
         val ft = FakeTransport()
         val client = registered(ft)
 
-        client.sendMessage("#chan", "child", "parent-1")
+        client.sendMessage("#chan", "child", "parent-1", "motd-reply")
         runCurrent()
         assertTrue(ft.sent.last().startsWith("@+reply=parent-1;label="))
 
         client.sendReact("#chan", "parent-1", "👍")
         runCurrent()
         assertEquals("@+draft/react=👍;+reply=parent-1 TAGMSG #chan", ft.sent.last())
+    }
+
+    @Test
+    fun `chat labels reject values outside the wire-safe contract`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+
+        val failure = runCatching {
+            client.sendMessage("#chan", "hello", null, "bad label")
+        }
+
+        assertTrue(failure.exceptionOrNull() is IllegalArgumentException)
+        assertFalse(ft.sent.last().contains("PRIVMSG #chan"))
     }
 
     @Test

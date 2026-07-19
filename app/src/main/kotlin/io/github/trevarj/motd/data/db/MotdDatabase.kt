@@ -16,6 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         RoomAliasEntity::class,
         TimelineEventEntity::class,
         TimelineEventFtsEntity::class,
+        ComposerDraftEntity::class,
         EventAliasEntity::class,
         EventRedirectEntity::class,
         EventObservationEntity::class,
@@ -27,7 +28,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -35,6 +36,7 @@ abstract class MotdDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao
     abstract fun bufferDao(): BufferDao
     abstract fun messageDao(): MessageDao
+    abstract fun composerDraftDao(): ComposerDraftDao
     abstract fun memberDao(): MemberDao
     abstract fun reactionDao(): ReactionDao
     abstract fun userDao(): UserDao
@@ -411,6 +413,78 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS `index_reactions_bufferId_targetMsgid_targetEventId` " +
                 "ON `reactions` (`bufferId`, `targetMsgid`, `targetEventId`)",
+        )
+    }
+}
+
+/**
+ * v11 -> v12 adds durable composer state and separates exact local read position from the remote
+ * IRC read marker. Existing marker values seed the nearest retained timeline tuple, preserving the
+ * old unread floor without treating future local pending timestamps as valid MARKREAD values.
+ */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE buffers ADD COLUMN localReadAnchorTime INTEGER")
+        db.execSQL("ALTER TABLE buffers ADD COLUMN localReadAnchorEventId INTEGER")
+        db.execSQL(
+            """CREATE TEMP TABLE migration_11_12_read_anchors(
+                   bufferId INTEGER PRIMARY KEY NOT NULL,
+                   serverTime INTEGER NOT NULL,
+                   eventId INTEGER NOT NULL
+               )""",
+        )
+        db.execSQL(
+            """INSERT INTO migration_11_12_read_anchors(bufferId, serverTime, eventId)
+               SELECT b.id, m.serverTime, m.id
+               FROM buffers b
+               JOIN messages m ON m.id = (
+                   SELECT candidate.id FROM messages candidate
+                   WHERE candidate.bufferId = b.id
+                     AND candidate.serverTimeAuthoritative = 1
+                     AND candidate.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+                     AND candidate.serverTime <= b.readMarkerTime
+                   ORDER BY candidate.serverTime DESC, candidate.id DESC LIMIT 1
+               )
+               WHERE b.readMarkerTime IS NOT NULL""",
+        )
+        db.execSQL(
+            """UPDATE buffers SET
+                   readMarkerTime = (
+                       SELECT serverTime FROM migration_11_12_read_anchors
+                       WHERE bufferId = buffers.id
+                   ),
+                   localReadAnchorTime = (
+                       SELECT serverTime FROM migration_11_12_read_anchors
+                       WHERE bufferId = buffers.id
+                   ),
+                   localReadAnchorEventId = (
+                       SELECT eventId FROM migration_11_12_read_anchors
+                       WHERE bufferId = buffers.id
+                   )
+               WHERE readMarkerTime IS NOT NULL""",
+        )
+        db.execSQL("DROP TABLE migration_11_12_read_anchors")
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `composer_drafts` (
+                `roomId` INTEGER NOT NULL,
+                `text` TEXT NOT NULL,
+                `replyToEventId` INTEGER,
+                `updatedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`roomId`),
+                FOREIGN KEY(`roomId`) REFERENCES `buffers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_pendingLabel` " +
+                "ON `messages` (`bufferId`, `pendingLabel`)",
+        )
+        // v11 scoped LABEL aliases as "generation<NUL>label". Preserve raw aliases for rows that
+        // can still receive an echo after upgrade; v12 labels are globally unique opaque values.
+        db.execSQL(
+            """INSERT OR IGNORE INTO event_aliases(networkId, namespace, value, timelineEventId)
+               SELECT b.networkId, 'LABEL', CAST(m.pendingLabel AS BLOB), m.id
+               FROM messages m JOIN buffers b ON b.id = m.bufferId
+               WHERE m.pendingLabel IS NOT NULL AND m.msgid IS NULL AND m.failed = 0""",
         )
     }
 }

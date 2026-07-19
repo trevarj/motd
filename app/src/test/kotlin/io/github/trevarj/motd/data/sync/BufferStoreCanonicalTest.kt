@@ -308,8 +308,30 @@ class BufferStoreCanonicalTest {
     fun uncertainRoomsDoNotMerge_butNickEvidenceMergesOldestAndLeavesRedirect() = runTest {
         val old = store.getOrCreate(networkId, "oldnick", "OldNick", BufferType.QUERY)
         val next = store.getOrCreate(networkId, "newnick", "NewNick", BufferType.QUERY)
-        db.bufferDao().update(old.copy(pinned = true, historyComplete = true, readMarkerTime = 10))
-        db.bufferDao().update(next.copy(muted = true, historyComplete = false, readMarkerTime = 20))
+        db.bufferDao().update(
+            old.copy(
+                pinned = true,
+                historyComplete = true,
+                readMarkerTime = 10,
+                localReadAnchorTime = 100,
+                localReadAnchorEventId = 5,
+            ),
+        )
+        db.bufferDao().update(
+            next.copy(
+                muted = true,
+                historyComplete = false,
+                readMarkerTime = 20,
+                localReadAnchorTime = 100,
+                localReadAnchorEventId = 6,
+            ),
+        )
+        db.composerDraftDao().upsert(
+            io.github.trevarj.motd.data.db.ComposerDraftEntity(old.id, "older", 40, 1_000),
+        )
+        db.composerDraftDao().upsert(
+            io.github.trevarj.motd.data.db.ComposerDraftEntity(next.id, "newer", 41, 2_000),
+        )
         db.historyCursorDao().upsert(
             HistoryCursorEntity(
                 roomId = old.id,
@@ -341,6 +363,10 @@ class BufferStoreCanonicalTest {
         assertTrue(merged.pinned)
         assertTrue(merged.muted)
         assertEquals(20L, merged.readMarkerTime)
+        assertEquals(100L, merged.localReadAnchorTime)
+        assertEquals(5L, merged.localReadAnchorEventId)
+        assertEquals("newer", db.composerDraftDao().byRoom(merged.id)?.text)
+        assertEquals(41L, db.composerDraftDao().byRoom(merged.id)?.replyToEventId)
         assertFalse(merged.historyComplete)
         assertEquals(merged.id, db.bufferDao().observeById(next.id)?.id)
         assertEquals(listOf(merged.id), db.bufferDao().observeChatList().first().map { it.bufferId })

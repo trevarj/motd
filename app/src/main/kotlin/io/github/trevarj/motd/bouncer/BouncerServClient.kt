@@ -13,6 +13,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import io.github.trevarj.motd.service.ImmediateWireAcceptance
+import io.github.trevarj.motd.service.SendAcceptance
 
 private const val SERVICE_NICK = "BouncerServ"
 
@@ -40,7 +42,7 @@ interface BouncerServClient {
 data class BouncerServSession(
     val token: Any,
     val events: Flow<IrcEvent>,
-    val send: suspend (String) -> Unit,
+    val send: suspend (String) -> SendAcceptance,
     val isCurrent: () -> Boolean,
 )
 
@@ -92,7 +94,27 @@ class BouncerServClientImpl @Inject constructor(
                     try {
                         // The normal send path persists only the redacted display command and
                         // deduplicates its echo against that same safe text.
-                        session.send(command.wire)
+                        val acceptance = session.send(command.wire)
+                        when (acceptance) {
+                            is SendAcceptance.Rejected -> {
+                                return@coroutineScope BouncerServResult.Failed(
+                                    command.display,
+                                    "BouncerServ command was not accepted: ${acceptance.reason}",
+                                )
+                            }
+                            is SendAcceptance.Accepted -> when (acceptance.immediateWireAcceptance) {
+                                ImmediateWireAcceptance.ACCEPTED -> Unit
+                                ImmediateWireAcceptance.DISCONNECTED -> {
+                                    return@coroutineScope BouncerServResult.Disconnected(command.display)
+                                }
+                                ImmediateWireAcceptance.FAILED -> {
+                                    return@coroutineScope BouncerServResult.Failed(
+                                        command.display,
+                                        "BouncerServ command wire write failed",
+                                    )
+                                }
+                            }
+                        }
                         val lines = mutableListOf<String>()
                         if (!command.expectsReply) {
                             return@coroutineScope BouncerServResult.Success(command.display, lines)

@@ -989,8 +989,8 @@ class EventProcessorTest {
     }
 
     @Test
-    fun readMarker_advancesMaxOnly() = runTest {
-        db.bufferDao().insert(
+    fun readMarker_advancesInclusiveLocalAnchorBeforeHistoryAndMaxOnly() = runTest {
+        val bufferId = db.bufferDao().insert(
             io.github.trevarj.motd.data.db.BufferEntity(
                 networkId = networkId, name = "#chan", displayName = "#chan", type = BufferType.CHANNEL,
             ),
@@ -999,11 +999,37 @@ class EventProcessorTest {
         processor.process(networkId, IrcEvent.ReadMarker("#chan", 3000)) // lower → ignored
         val buffer = db.bufferDao().byName(networkId, "#chan")!!
         assertEquals(5000L, buffer.readMarkerTime)
+        assertEquals(5000L, buffer.localReadAnchorTime)
+        assertEquals(Long.MAX_VALUE, buffer.localReadAnchorEventId)
+
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "before-marker", time = 4999), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "before",
+            isSelf = false, replyToMsgid = null,
+        ))
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "same-ms", time = 5000), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "same millisecond",
+            isSelf = false, replyToMsgid = null,
+        ))
+
+        val row = db.bufferDao().observeChatList().first().single { it.bufferId == bufferId }
+        assertEquals(0, row.unreadCount)
+
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "after-marker", time = 5001), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "after",
+            isSelf = false, replyToMsgid = null,
+        ))
+        assertEquals(
+            1,
+            db.bufferDao().observeChatList().first().single { it.bufferId == bufferId }.unreadCount,
+        )
     }
 
     @Test
     fun readMarker_notifiesOnlyForKnownTimestampedTarget() = runTest {
-        val observed = mutableListOf<Pair<Long, Long>>()
+        val observed = mutableListOf<Pair<Long, io.github.trevarj.motd.data.db.TimelineAnchor>>()
         val notifying = EventProcessor(db, TypingTrackerImpl(), object : MessageNotifier {
             override suspend fun onIncoming(
                 networkId: Long,
@@ -1013,8 +1039,11 @@ class EventProcessorTest {
                 message: IrcEvent.ChatMessage,
             ) = Unit
 
-            override suspend fun onRead(bufferId: Long, upToTime: Long) {
-                observed += bufferId to upToTime
+            override suspend fun onRead(
+                bufferId: Long,
+                anchor: io.github.trevarj.motd.data.db.TimelineAnchor,
+            ) {
+                observed += bufferId to anchor
             }
         })
         notifying.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
@@ -1031,7 +1060,12 @@ class EventProcessorTest {
         notifying.process(networkId, IrcEvent.ReadMarker("#missing", 6000))
         notifying.process(networkId, IrcEvent.ReadMarker("#chan", null))
 
-        assertEquals(listOf(bufferId to 5000L), observed)
+        assertEquals(
+            listOf(
+                bufferId to io.github.trevarj.motd.data.db.TimelineAnchor(5000, Long.MAX_VALUE),
+            ),
+            observed,
+        )
     }
 
     @Test
@@ -1285,7 +1319,8 @@ class EventProcessorTest {
             isSelf = false, replyToMsgid = null,
         ))
         val buffer = db.bufferDao().byName(networkId, "bouncerserv")!!
-        assertEquals(2_000L, db.bufferDao().observeById(buffer.id)!!.readMarkerTime)
+        assertEquals(2_000L, db.bufferDao().observeById(buffer.id)!!.localReadAnchorTime)
+        assertEquals(null, db.bufferDao().observeById(buffer.id)!!.readMarkerTime)
         assertTrue(notifiedKinds.isEmpty())
 
         recording.process(networkId, IrcEvent.ChatMessage(
@@ -2325,8 +2360,11 @@ class EventProcessorTest {
                 notifications += message.text
             }
 
-            override suspend fun onRead(bufferId: Long, upToTime: Long) {
-                reads += bufferId to upToTime
+            override suspend fun onRead(
+                bufferId: Long,
+                anchor: io.github.trevarj.motd.data.db.TimelineAnchor,
+            ) {
+                reads += bufferId to anchor.serverTime
             }
 
             override suspend fun onInvitation(networkId: Long, bufferId: Long, messageId: Long) {

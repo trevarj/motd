@@ -97,6 +97,41 @@ class CanonicalTimelineStore @Inject constructor(
             }
         }
 
+    /** Attach a new durable attempt label/observation to the same failed canonical event. */
+    suspend fun beginRetry(
+        networkId: Long,
+        eventId: TimelineEventId,
+        label: String,
+        connectionGeneration: Long?,
+    ): TimelineEventEntity? = db.withTransaction {
+        val canonicalId = dao.canonicalEventId(eventId)
+        val event = dao.eventById(canonicalId) ?: return@withTransaction null
+        if (db.messageDao().beginRetry(canonicalId, label) != 1) return@withTransaction null
+        dao.insertAliasIgnore(
+            EventAliasEntity(
+                networkId = networkId,
+                namespace = EventAliasNamespace.LABEL,
+                value = bytes(label),
+                timelineEventId = canonicalId,
+            ),
+        )
+        dao.insertObservation(
+            EventObservationEntity(
+                networkId = networkId,
+                timelineEventId = canonicalId,
+                origin = ObservationOrigin.LOCAL_SEND,
+                connectionGeneration = connectionGeneration,
+                receiveOrder = dao.nextReceiveOrder(networkId),
+                batchId = null,
+                timeProvenance = TimeProvenance.LOCAL_CLOCK,
+                semanticFingerprint = digest(event.kind.name, event.normalizedActor, event.text),
+                batchExactOrdinal = null,
+                observedAt = System.currentTimeMillis(),
+            ),
+        )
+        event.copy(pendingLabel = label, failed = false)
+    }
+
     suspend fun claimSound(eventId: TimelineEventId): Boolean =
         dao.claimSound(eventId) == 1
 
@@ -274,6 +309,8 @@ class CanonicalTimelineStore @Inject constructor(
             candidate = dao.orderedSelfCandidates(
                 incoming.bufferId,
                 incoming.kind,
+                incoming.normalizedActor,
+                incoming.text,
             ).firstOrNull()?.takeIf { compatible(it, incoming) != null }
         }
 
@@ -313,6 +350,7 @@ class CanonicalTimelineStore @Inject constructor(
         val enriched = enrich(canonical, incoming, observation.timeProvenance)
         if (enriched != canonical) {
             dao.updateEvent(enriched)
+            db.bufferDao().retimeLocalReadAnchor(enriched.id, enriched.serverTime)
             canonical = enriched
         }
 
@@ -408,9 +446,11 @@ class CanonicalTimelineStore @Inject constructor(
         if (compatible(winner, loser) == null) return first
         val merged = enrich(enrich(winner, loser, provenanceOf(loser)), incoming, provenanceOf(incoming))
         if (merged != winner) dao.updateEvent(merged)
+        db.bufferDao().repointLocalReadAnchors(loser.id, winner.id, merged.serverTime)
         dao.repointAliases(loser.id, winner.id)
         dao.repointObservations(loser.id, winner.id)
         dao.repointReplies(loser.id, winner.id)
+        db.composerDraftDao().repointReplies(loser.id, winner.id)
         dao.repointReactions(loser.id, winner.id)
         dao.repointEventRedirects(loser.id, winner.id)
         dao.upsertEventRedirect(EventRedirectEntity(loser.id, winner.id))
@@ -472,7 +512,7 @@ class CanonicalTimelineStore @Inject constructor(
         event: TimelineEventEntity,
     ): List<Pair<EventAliasNamespace, ByteArray>> = buildList {
         event.msgid?.let { add(EventAliasNamespace.MSGID to bytes(it)) }
-        observation.label?.let { add(EventAliasNamespace.LABEL to labelBytes(observation, it)) }
+        observation.label?.let { add(EventAliasNamespace.LABEL to labelBytes(it)) }
         if (observation.timeProvenance == TimeProvenance.SERVER_TAG) {
             val ordinal = observation.batchExactOrdinal ?: 0
             if (ordinal == 0) {
@@ -494,8 +534,8 @@ class CanonicalTimelineStore @Inject constructor(
         }
     }
 
-    private fun labelBytes(observation: TimelineObservation, label: String): ByteArray =
-        bytes("${observation.connectionGeneration ?: 0}\u0000$label")
+    // Caller-owned labels are globally unique opaque values and survive process/connection changes.
+    private fun labelBytes(label: String): ByteArray = bytes(label)
 
     private fun exactFingerprint(event: TimelineEventEntity, semanticPayload: String): ByteArray = digest(
         event.bufferId.toString(),

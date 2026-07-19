@@ -195,8 +195,9 @@ fun ChatScreen(
     // Read marker frozen on entry so the "— New messages —" divider doesn't flash away (plans/15 #2).
     val readMarkerSnapshot by viewModel.readMarkerSnapshot.collectAsStateWithLifecycle()
     // Live read marker drives the FAB unread badge so it clears as messages are read (not on exit).
-    val readMarkerTime by viewModel.readMarkerTime.collectAsStateWithLifecycle()
-    val rawNewestTime by viewModel.rawNewestTime.collectAsStateWithLifecycle()
+    val localReadAnchor by viewModel.localReadAnchor.collectAsStateWithLifecycle()
+    val rawNewestAnchor by viewModel.rawNewestAnchor.collectAsStateWithLifecycle()
+    val composerDraft by viewModel.composerDraft.collectAsStateWithLifecycle()
     // Timeline behavioral settings collected separately from ChatState (plans/13 §2.5).
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
@@ -215,7 +216,7 @@ fun ChatScreen(
     ChatContent(
         state = state,
         items = items,
-        composerEnabled = state.connState is IrcClientState.Ready,
+        composerEnabled = !isServerBuffer || state.connState is IrcClientState.Ready,
         friends = settings.friends,
         fools = settings.fools,
         foolsMode = settings.foolsMode,
@@ -234,8 +235,8 @@ fun ChatScreen(
         memberNicks = memberNicks,
         knownNicks = knownNicks,
         readMarkerSnapshot = readMarkerSnapshot,
-        readMarkerLive = readMarkerTime,
-        rawNewestTime = rawNewestTime,
+        readMarkerLive = localReadAnchor,
+        rawNewestAnchor = rawNewestAnchor,
         onMarkRead = viewModel::markRead,
         onBack = onBack,
         // Channel titles open Channel Info; query titles describe the other user. SERVER buffers
@@ -261,9 +262,8 @@ fun ChatScreen(
         loadPreview = viewModel::linkPreview,
         cachedPreview = viewModel::cachedLinkPreview,
         consumePrefill = viewModel::consumePrefill,
-        loadDraft = viewModel::loadDraft,
+        composerDraft = composerDraft,
         onDraftChanged = viewModel::saveDraft,
-        onDraftCleared = viewModel::clearDraft,
         mentionPrefill = mentionRequest,
         jumpTarget = jumpTarget,
         initialTarget = initialTarget,
@@ -365,18 +365,17 @@ fun ChatContent(
     visibleReplyPrefix: Boolean = false,
     showImages: Boolean = true,
     showLinkPreviews: Boolean = true,
-    readMarkerSnapshot: Long? = null,
+    readMarkerSnapshot: io.github.trevarj.motd.data.db.TimelineAnchor? = null,
     // Live buffer read marker (advances with markRead); drives the FAB unread badge count.
-    readMarkerLive: Long? = null,
-    rawNewestTime: Long? = null,
-    onMarkRead: (Long) -> Unit = {},
+    readMarkerLive: io.github.trevarj.motd.data.db.TimelineAnchor? = null,
+    rawNewestAnchor: io.github.trevarj.motd.data.db.TimelineAnchor? = null,
+    onMarkRead: (io.github.trevarj.motd.data.db.TimelineAnchor) -> Unit = {},
     onDelete: (MessageEntity) -> Unit = {},
     onAcceptInvite: (Long) -> Unit = {},
     onDismissInvite: (Long) -> Unit = {},
     consumePrefill: () -> String? = { null },
-    loadDraft: () -> String? = { null },
+    composerDraft: ComposerDraftState = ComposerDraftState(),
     onDraftChanged: (String) -> Unit = {},
-    onDraftCleared: () -> Unit = {},
     // Immediate nick-sheet mention request. The nonce permits mentioning the same nick repeatedly.
     mentionPrefill: Pair<Long, String>? = null,
     jumpTarget: ChatJumpResolver.Result.Target? = null,
@@ -421,8 +420,8 @@ fun ChatContent(
     val clipboard: Clipboard = LocalClipboard.current
     val ctx = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-    // rememberSaveable survives ChannelInfo round-trips + config changes (fixes v1 draft loss).
-    var composerText by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+    // The ViewModel owns the durable value; this local state only retains cursor/selection details.
+    var composerText by remember(traceBufferId) {
         mutableStateOf(TextFieldValue(""))
     }
     var attachmentSheetOpen by rememberSaveable { mutableStateOf(false) }
@@ -463,25 +462,35 @@ fun ChatContent(
     // live arrival. Consume it without auto-follow so an unread target remains on screen.
     var suppressNextAutoFollow by remember { mutableStateOf(!entryPositionInitiallySettled) }
 
-    var draftLoaded by remember(traceBufferId) { mutableStateOf(false) }
+    var prefillConsumed by remember(traceBufferId) { mutableStateOf(false) }
 
-    // Restore the per-buffer draft before consuming a one-shot mention prefill. This preserves an
-    // existing draft when a user selects a nick from ChannelInfo and returns to the chat.
-    LaunchedEffect(traceBufferId) {
-        if (traceBufferId == null) return@LaunchedEffect
-        composerText = restoreComposerDraft(loadDraft(), consumePrefill())
-        draftLoaded = true
-    }
-    LaunchedEffect(traceBufferId, composerText.text, draftLoaded) {
-        if (traceBufferId != null && draftLoaded) onDraftChanged(composerText.text)
+    // Apply hydration/accepted-send clears without re-saving the same value from the screen.
+    LaunchedEffect(traceBufferId, composerDraft.hydrated, composerDraft.revision) {
+        if (traceBufferId == null || !composerDraft.hydrated) return@LaunchedEffect
+        if (composerText.text != composerDraft.text) {
+            composerText = TextFieldValue(
+                composerDraft.text,
+                TextRange(composerDraft.text.length),
+            )
+        }
+        if (!prefillConsumed) {
+            prefillConsumed = true
+            consumePrefill()?.let { prefill ->
+                composerText = appendPrefill(composerText, prefill)
+                onDraftChanged(composerText.text)
+            }
+        }
     }
     LaunchedEffect(mentionPrefill) {
-        mentionPrefill?.second?.let { composerText = appendPrefill(composerText, it) }
+        mentionPrefill?.second?.let {
+            composerText = appendPrefill(composerText, it)
+            onDraftChanged(composerText.text)
+        }
     }
     val latestComposerText by rememberUpdatedState(composerText)
     val latestBufferType by rememberUpdatedState(state.buffer?.type)
     val latestVisibleReplyPrefix by rememberUpdatedState(visibleReplyPrefix)
-    val timelineReply = remember(onSetReply) {
+    val timelineReply = remember(onSetReply, onDraftChanged) {
         { target: MessageEntity ->
             onSetReply(target)
             composerText = composerTextForReply(
@@ -490,6 +499,7 @@ fun ChatContent(
                 bufferType = latestBufferType,
                 visibleReplyPrefix = latestVisibleReplyPrefix,
             )
+            onDraftChanged(composerText.text)
         }
     }
 
@@ -518,6 +528,7 @@ fun ChatContent(
     val reactionBlocked = stringResource(R.string.chat_reaction_blocked)
     val reactionSendFailed = stringResource(R.string.chat_reaction_send_failed)
     val historyOffline = stringResource(R.string.chat_history_offline)
+    val sendRejected = stringResource(R.string.chat_send_rejected)
     LaunchedEffect(rawSendSnackbar) {
         val sentinel = rawSendSnackbar ?: return@LaunchedEffect
         val text = when (sentinel) {
@@ -525,6 +536,7 @@ fun ChatContent(
             "reaction_blocked" -> reactionBlocked
             "reaction_send_failed" -> reactionSendFailed
             "history_offline" -> historyOffline
+            "send_rejected" -> sendRejected
             else -> invalidCommand
         }
         snackbarHostState.showSnackbar(text)
@@ -863,13 +875,13 @@ fun ChatContent(
     val buffer = state.buffer
     // Mark read on new-message-while-at-bottom only (plans/07/15 #2): syncing while scrolled up
     // reading history would clear unread on other clients and destroy the local unread UX.
-    LaunchedEffect(rawNewestTime, atBottom, initialPositionSettled) {
-        val newestTime = rawNewestTime ?: return@LaunchedEffect
-        if (initialPositionSettled && atBottom && newestTime > 0) {
+    LaunchedEffect(rawNewestAnchor, atBottom, initialPositionSettled) {
+        val newest = rawNewestAnchor ?: return@LaunchedEffect
+        if (initialPositionSettled && atBottom && newest.serverTime > 0) {
             AutoFollowTrace.record("viewport_markread", traceBufferId, traceSessionId) {
-                "marker=$newestTime item_count=${items.itemCount}"
+                "marker=${newest.serverTime}:${newest.eventId} item_count=${items.itemCount}"
             }
-            onMarkRead(newestTime)
+            onMarkRead(newest)
         }
     }
     val recentSpeakers = remember(items.itemCount) {
@@ -1056,6 +1068,11 @@ fun ChatContent(
                         onReact = onReact,
                         onImageClick = onOpenImage,
                         onRetry = onRetry,
+                        canRetry = { message ->
+                            state.buffer?.let { buffer ->
+                                io.github.trevarj.motd.service.isGenericRetryEligible(buffer, message)
+                            } == true
+                        },
                         onDelete = onDelete,
                         onAcceptInvite = onAcceptInvite,
                         onDismissInvite = onDismissInvite,
@@ -1142,6 +1159,7 @@ fun ChatContent(
                     onValueChange = {
                         val wasBlank = composerText.text.isBlank()
                         composerText = it
+                        onDraftChanged(it.text)
                         if (it.text.isNotBlank()) onTyping(true)
                         else if (!wasBlank) onTyping(false)
                     },
@@ -1156,8 +1174,6 @@ fun ChatContent(
                                     "long_draft=false"
                                 }
                                 onSubmit(text)
-                                composerText = TextFieldValue("")
-                                onDraftCleared()
                                 scope.launch {
                                     scrollToNewest(animate = true, reason = "composer_send_action")
                                 }
@@ -1184,6 +1200,7 @@ fun ChatContent(
                                 networkId = state.buffer?.networkId,
                                 onPick = { picked ->
                                     composerText = applyPick(composerText, picked)
+                                    onDraftChanged(composerText.text)
                                 },
                             )
                         }
@@ -1199,8 +1216,14 @@ fun ChatContent(
         currentDraft = composerText.text,
         startWithCurrentDraft = uploadCurrentDraftDirectly,
         onDismiss = { attachmentSheetOpen = false; uploadCurrentDraftDirectly = false },
-        onInsertUrl = { composerText = io.github.trevarj.motd.ui.components.insertAtCursor(composerText, it) },
-        onReplaceDraft = { composerText = TextFieldValue(it, androidx.compose.ui.text.TextRange(it.length)) },
+        onInsertUrl = {
+            composerText = io.github.trevarj.motd.ui.components.insertAtCursor(composerText, it)
+            onDraftChanged(composerText.text)
+        },
+        onReplaceDraft = {
+            composerText = TextFieldValue(it, androidx.compose.ui.text.TextRange(it.length))
+            onDraftChanged(composerText.text)
+        },
     )
     if (historyRefreshSheetOpen) {
         HistoryRefreshSheet(
@@ -1231,8 +1254,6 @@ fun ChatContent(
                     AutoFollowTrace.record("long_draft_send_messages", traceBufferId, traceSessionId)
                     longDraftPrompt = false
                     onSubmit(composerText.text)
-                    composerText = TextFieldValue("")
-                    onDraftCleared()
                     scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
                 }) { Text("Send as messages") }
                 androidx.compose.material3.TextButton(onClick = {
@@ -1264,6 +1285,7 @@ fun ChatContent(
                         bufferType = state.buffer?.type,
                         visibleReplyPrefix = visibleReplyPrefix,
                     )
+                    onDraftChanged(composerText.text)
                 }
             },
             // Pass the whole target: the VM queues the react when target.msgid is still null (own
@@ -1285,7 +1307,10 @@ fun ChatContent(
             },
             onQuote = {
                 // Append the quote to the existing draft with the cursor at the end (plans/15 #19).
-                hideThen { composerText = appendPrefill(composerText, "> ${target.text}\n") }
+                hideThen {
+                    composerText = appendPrefill(composerText, "> ${target.text}\n")
+                    onDraftChanged(composerText.text)
+                }
             },
         )
     }
@@ -1538,7 +1563,7 @@ private fun ScrollToBottomFab(
 private fun ViewportScrollToBottomFab(
     items: LazyPagingItems<MessageEntity>,
     listState: androidx.compose.foundation.lazy.LazyListState,
-    readMarker: Long?,
+    readMarker: io.github.trevarj.motd.data.db.TimelineAnchor?,
     visibilityPolicy: MessageVisibilityPolicy,
     visible: Boolean,
     onClick: () -> Unit,

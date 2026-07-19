@@ -60,7 +60,7 @@ class ReadMarkerRepositoryTest {
         )
 
         assertEquals(
-            listOf(BufferReadMarker(channel, "#motd", 100)),
+            listOf(BufferReadMarker(channel, "#motd", 100, 1L)),
             repository.latestIncoming(listOf(channel, server)),
         )
     }
@@ -78,6 +78,49 @@ class ReadMarkerRepositoryTest {
             ),
             repository.storedForNetwork(networkId),
         )
+    }
+
+    @Test
+    fun `reconnect candidate comes from local anchor and never lowers known remote marker`() = runTest {
+        val room = db.bufferDao().insert(buffer(networkId, "#motd"))
+        val ids = db.messageDao().insertAll(
+            listOf(
+                message(room, "first", serverTime = 100, dedupKey = "first"),
+                message(room, "second", serverTime = 200, dedupKey = "second"),
+            ),
+        )
+        db.bufferDao().advanceLocalReadAnchor(room, 100, ids.first())
+        db.bufferDao().advanceReadMarker(room, 150)
+
+        assertEquals(
+            listOf(BufferReadMarker(room, "#motd", 150, ids.first())),
+            repository.storedForNetwork(networkId),
+        )
+    }
+
+    @Test
+    fun `future pending anchor resolves wire marker to newest authoritative chat`() = runTest {
+        val room = db.bufferDao().insert(buffer(networkId, "#motd"))
+        val authoritativeId = db.messageDao().insertAll(
+            listOf(message(room, "safe", serverTime = 100, dedupKey = "safe")),
+        ).single()
+        val pendingId = db.messageDao().insertAll(
+            listOf(
+                message(
+                    room,
+                    "future",
+                    serverTime = 10_000,
+                    dedupKey = "future",
+                    isSelf = true,
+                    pendingLabel = "attempt",
+                ).copy(serverTimeAuthoritative = false),
+            ),
+        ).single()
+
+        val boundary = db.messageDao().authoritativeChatAtOrBefore(room, 10_000, pendingId)
+
+        assertEquals(authoritativeId, boundary?.eventId)
+        assertEquals(100L, boundary?.timestamp)
     }
 
     @Test

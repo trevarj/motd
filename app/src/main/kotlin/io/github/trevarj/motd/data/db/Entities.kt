@@ -21,6 +21,14 @@ enum class BufferType { CHANNEL, QUERY, SERVER }
 typealias RoomId = Long
 typealias TimelineEventId = Long
 
+data class TimelineAnchor(
+    val serverTime: Long,
+    val eventId: TimelineEventId,
+) : Comparable<TimelineAnchor> {
+    override fun compareTo(other: TimelineAnchor): Int =
+        compareValuesBy(this, other, TimelineAnchor::serverTime, TimelineAnchor::eventId)
+}
+
 enum class RoomAliasNamespace { CHANNEL, ACCOUNT, VERIFIED_NICK, PROVISIONAL_NICK, LEGACY_NAME }
 enum class EventAliasNamespace { MSGID, LABEL, EXACT_FINGERPRINT, BATCH_POSITION, TYPED_EVENT }
 enum class ObservationOrigin { LIVE, PUSH, HISTORY, LOCAL_SEND }
@@ -91,7 +99,9 @@ data class RoomEntity(
     val membershipCycle: Long = 0,
     val pinned: Boolean = false, val muted: Boolean = false,
     val ordering: Int = 0,
-    val readMarkerTime: Long? = null,    // epoch ms, synced via draft/read-marker
+    val readMarkerTime: Long? = null,    // last known remote draft/read-marker timestamp
+    val localReadAnchorTime: Long? = null,
+    val localReadAnchorEventId: TimelineEventId? = null,
     val localUnreadFloorTime: Long? = null, // local-only mute backlog floor; never synced
     val oldestFetchedTime: Long? = null, // CHATHISTORY paging bookkeeping
     val historyComplete: Boolean = false,
@@ -104,9 +114,13 @@ data class RoomEntity(
 /** Compatibility name retained while callers migrate to the canonical room vocabulary. */
 typealias BufferEntity = RoomEntity
 
-/** Local presentation/count floor; remote MARKREAD continues to use [RoomEntity.readMarkerTime]. */
-val RoomEntity.effectiveReadFloorTime: Long?
-    get() = listOfNotNull(readMarkerTime, localUnreadFloorTime).maxOrNull()
+/** Exact local presentation/count floor. The mute floor intentionally includes its whole ms. */
+val RoomEntity.effectiveLocalReadAnchor: TimelineAnchor?
+    get() {
+        val local = localReadAnchorTime?.let { TimelineAnchor(it, localReadAnchorEventId ?: 0L) }
+        val mute = localUnreadFloorTime?.let { TimelineAnchor(it, Long.MAX_VALUE) }
+        return listOfNotNull(local, mute).maxOrNull()
+    }
 
 /** IRC target spelling is presentation-backed for account-disambiguated query rows. */
 val RoomEntity.ircTarget: String
@@ -149,6 +163,7 @@ data class RoomAliasEntity(
         Index(value = ["replyToEventId"]),
         Index(value = ["bufferId", "msgid"]),
         Index(value = ["bufferId", "replyToMsgid", "replyToEventId"]),
+        Index(value = ["bufferId", "pendingLabel"]),
     ],
     foreignKeys = [ForeignKey(
         entity = BufferEntity::class, parentColumns = ["id"],
@@ -193,6 +208,23 @@ typealias MessageEntity = TimelineEventEntity
 data class TimelineEventFtsEntity(val text: String, val sender: String)
 
 typealias MessageFtsEntity = TimelineEventFtsEntity
+
+@Entity(
+    tableName = "composer_drafts",
+    foreignKeys = [ForeignKey(
+        entity = RoomEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["roomId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+)
+data class ComposerDraftEntity(
+    @PrimaryKey val roomId: RoomId,
+    val text: String,
+    /** Canonical local id only. Deliberately not an FK so deleting history cannot erase a draft. */
+    val replyToEventId: TimelineEventId? = null,
+    val updatedAt: Long,
+)
 
 @Entity(
     tableName = "event_aliases",

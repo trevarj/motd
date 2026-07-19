@@ -18,6 +18,7 @@
     <string name="chat_history_unsupported">History refresh is not supported by this server</string>
     <string name="chat_history_failed">History refresh failed</string>
     <string name="chat_history_offline">Reconnect before refreshing history</string>
+    <string name="chat_send_rejected">Couldn\'t save this message</string>
     <string name="chat_history_refresh_title">Refresh history</string>
     <string name="chat_history_refresh_description">Choose how much history to load for this chat.</string>
     <string name="chat_history_range_missing">Missing messages</string>

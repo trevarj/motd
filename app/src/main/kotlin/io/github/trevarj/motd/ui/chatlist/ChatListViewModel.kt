@@ -177,7 +177,13 @@ class ChatListViewModel @Inject constructor(
         viewModelScope.launch {
             readMarkerRepository.latestIncoming(bufferIds).forEach { marker ->
                 val timestamp = marker.timestamp ?: return@forEach
-                runCatching { connectionManager.markRead(marker.bufferId, timestamp) }
+                val eventId = marker.eventId ?: return@forEach
+                runCatching {
+                    connectionManager.markRead(
+                        marker.bufferId,
+                        io.github.trevarj.motd.data.db.TimelineAnchor(timestamp, eventId),
+                    )
+                }
             }
         }
     }

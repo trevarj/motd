@@ -869,6 +869,7 @@ internal enum class MsgStatus { NONE, PENDING, FAILED, SENT }
  * [NONE]; they're never pending/failed and must not show a check.
  */
 internal fun messageStatus(isSelf: Boolean, pending: Boolean, failed: Boolean): MsgStatus = when {
+    !isSelf -> MsgStatus.NONE
     failed -> MsgStatus.FAILED
     pending -> MsgStatus.PENDING
     isSelf -> MsgStatus.SENT

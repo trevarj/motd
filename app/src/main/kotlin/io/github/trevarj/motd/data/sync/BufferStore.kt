@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.RoomAliasEntity
 import io.github.trevarj.motd.data.db.RoomAliasNamespace
 import io.github.trevarj.motd.data.db.RoomId
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -184,6 +185,14 @@ class BufferStore @Inject constructor(
             if (first.id == second.id) return@withTransaction first
             val winner = if (first.id < second.id) first else second
             val loser = if (winner.id == first.id) second else first
+            val localReadAnchor = listOfNotNull(
+                winner.localReadAnchorTime?.let {
+                    TimelineAnchor(it, winner.localReadAnchorEventId ?: 0L)
+                },
+                loser.localReadAnchorTime?.let {
+                    TimelineAnchor(it, loser.localReadAnchorEventId ?: 0L)
+                },
+            ).minOrNull()
             val result = winner.copy(
                 displayName = if (second.displayName.isNotBlank()) second.displayName else winner.displayName,
                 topic = winner.topic ?: loser.topic,
@@ -193,6 +202,8 @@ class BufferStore @Inject constructor(
                 pinned = winner.pinned || loser.pinned,
                 muted = winner.muted || loser.muted,
                 readMarkerTime = maxNullable(winner.readMarkerTime, loser.readMarkerTime),
+                localReadAnchorTime = localReadAnchor?.serverTime,
+                localReadAnchorEventId = localReadAnchor?.eventId,
                 localUnreadFloorTime = maxNullable(
                     winner.localUnreadFloorTime,
                     loser.localUnreadFloorTime,
@@ -207,6 +218,7 @@ class BufferStore @Inject constructor(
             aliasDao.deleteMembers(loser.id)
             aliasDao.copyReactions(loser.id, winner.id)
             aliasDao.deleteReactions(loser.id)
+            mergeComposerDrafts(winner.id, loser.id)
             mergeHistoryCursors(winner.id, loser.id, result.historyComplete)
             aliasDao.repointRedirects(loser.id, winner.id)
             aliasDao.markRedirect(loser.id, winner.id)
@@ -217,6 +229,21 @@ class BufferStore @Inject constructor(
         }
         if (!nestedTransaction) drainCommittedRoomMerges()
         return merged
+    }
+
+    /** Newest draft version wins a room merge; reply ids are opaque local references, not FKs. */
+    private suspend fun mergeComposerDrafts(winnerId: RoomId, loserId: RoomId) {
+        val drafts = db.composerDraftDao()
+        val winner = drafts.byRoom(winnerId)
+        val loser = drafts.byRoom(loserId)
+        val selected = listOfNotNull(winner, loser).maxWithOrNull(
+            compareBy<io.github.trevarj.motd.data.db.ComposerDraftEntity> { it.updatedAt }
+                .thenBy { it.roomId },
+        )
+        if (selected != null && selected.roomId != winnerId) {
+            drafts.upsert(selected.copy(roomId = winnerId))
+        }
+        drafts.delete(loserId)
     }
 
     /** Present only durable room merges; nested callers drain after their outer transaction commits. */

@@ -37,6 +37,17 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 
+data class OutgoingEventPlan(
+    val label: String,
+    val text: String,
+    val kind: MessageKind,
+)
+
+data class DurableOutgoingEvent(
+    val eventId: TimelineEventId,
+    val label: String,
+)
+
 /**
  * The sole IRC→Room writer (plans/04 mapping table). Implements [IrcEventSink]: every per-network
  * collector, the catch-up path, the RemoteMediator, the pending-send insert, and the push path
@@ -373,7 +384,7 @@ class EventProcessor @Inject constructor(
                 origin == EventOrigin.HISTORY,
             )
             if (isRootServiceReply && origin == EventOrigin.LIVE) {
-                bufferDao.advanceReadMarker(canonical.bufferId, canonical.serverTime)
+                bufferDao.advanceLocalReadAnchor(canonical.bufferId, canonical.serverTime, canonical.id)
                 return
             }
             if (origin == EventOrigin.LIVE && !sourceIsSelf && canonicalTimeline.claimSound(canonical.id)) {
@@ -1322,7 +1333,9 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         val bufferId = bufferDao.byName(networkId, st.normalize(e.target))?.id ?: return
         bufferDao.advanceReadMarker(bufferId, ts)
-        notifier.onRead(bufferId, ts)
+        val localAnchor = io.github.trevarj.motd.data.db.TimelineAnchor(ts, Long.MAX_VALUE)
+        bufferDao.advanceLocalReadAnchor(bufferId, localAnchor.serverTime, localAnchor.eventId)
+        notifier.onRead(bufferId, localAnchor)
         AutoFollowTrace.record("wire_markread_in", bufferId) { "marker=$ts" }
     }
 
@@ -1487,55 +1500,132 @@ class EventProcessor @Inject constructor(
             ).id
         }
 
-    /**
-     * Insert a locally-sent pending row so the "sole writer" rule holds. Returns the row id.
-     * The echo (labeled ChatMessage) later updates it in place; a 30s timeout marks it failed.
-     */
-    suspend fun insertPending(bufferId: Long, label: String, sender: String, text: String, replyToMsgid: String?, kind: MessageKind): Long {
-        val canonicalBuffer = requireNotNull(bufferDao.observeById(bufferId)) { "missing buffer $bufferId" }
-        val networkId = canonicalBuffer.networkId
-        return sequencer.withNetwork(networkId) {
-            val now = System.currentTimeMillis()
-            val row = MessageEntity(
-                bufferId = canonicalBuffer.id,
-                msgid = null,
-                serverTime = now,
-                sender = sender,
-                normalizedActor = stateFor(networkId).normalize(sender),
-                kind = kind,
-                text = text,
-                isSelf = true,
-                hasMention = false,
-                replyToMsgid = replyToMsgid,
-                pendingLabel = label,
-                dedupKey = SemanticIdentity.pendingKey(label),
-                serverTimeAuthoritative = false,
-            )
-            val result = canonicalTimeline.ingest(
-                TimelineObservation(
-                    networkId = networkId,
-                    event = row,
-                    origin = ObservationOrigin.LOCAL_SEND,
-                    connectionGeneration = connectionGenerations[networkId],
-                    label = label,
-                    batchId = null,
-                    timeProvenance = TimeProvenance.LOCAL_CLOCK,
-                    persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
-                ),
-            )
-            traceMessageWrite("canonical_pending_insert", result.event, fromHistory = false)
-            result.event.id
+    /** Persist the complete outgoing plan, aliases, and LOCAL_SEND observations before any write. */
+    suspend fun persistOutgoingPlan(
+        bufferId: Long,
+        sender: String,
+        events: List<OutgoingEventPlan>,
+        replyToEventId: TimelineEventId?,
+        replyToMsgid: String?,
+    ): List<DurableOutgoingEvent> {
+        require(events.isNotEmpty()) { "outgoing plan is empty" }
+        val networkId = requireNotNull(bufferDao.rawById(bufferId)?.networkId) {
+            "missing buffer $bufferId"
         }
+        return sequencer.withNetwork(networkId) {
+            db.withTransaction {
+                val canonicalBuffer = requireNotNull(bufferDao.observeById(bufferId)) {
+                    "missing buffer $bufferId"
+                }
+                check(canonicalBuffer.networkId == networkId) { "buffer network changed" }
+                val now = System.currentTimeMillis()
+                val normalizedSender = stateFor(networkId).normalize(sender)
+                val observations = events.map { event ->
+                    TimelineObservation(
+                        networkId = networkId,
+                        event = MessageEntity(
+                            bufferId = canonicalBuffer.id,
+                            msgid = null,
+                            serverTime = now,
+                            sender = sender,
+                            normalizedActor = normalizedSender,
+                            kind = event.kind,
+                            text = event.text,
+                            isSelf = true,
+                            hasMention = false,
+                            replyToMsgid = replyToMsgid,
+                            replyToEventId = replyToEventId,
+                            pendingLabel = event.label,
+                            dedupKey = SemanticIdentity.pendingKey(event.label),
+                            serverTimeAuthoritative = false,
+                        ),
+                        origin = ObservationOrigin.LOCAL_SEND,
+                        connectionGeneration = connectionGenerations[networkId],
+                        label = event.label,
+                        batchId = null,
+                        timeProvenance = TimeProvenance.LOCAL_CLOCK,
+                        persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
+                    )
+                }
+                canonicalTimeline.ingestBatch(observations).mapIndexed { index, result ->
+                    traceMessageWrite("canonical_pending_insert", result.event, fromHistory = false)
+                    DurableOutgoingEvent(result.event.id, events[index].label)
+                }
+            }
+        }
+    }
+
+    /** Compatibility helper for single-event internal/test setup. */
+    suspend fun insertPending(
+        bufferId: Long,
+        label: String,
+        sender: String,
+        text: String,
+        replyToMsgid: String?,
+        kind: MessageKind,
+    ): Long = persistOutgoingPlan(
+        bufferId = bufferId,
+        sender = sender,
+        events = listOf(OutgoingEventPlan(label, text, kind)),
+        replyToEventId = null,
+        replyToMsgid = replyToMsgid,
+    ).single().eventId
+
+    suspend fun beginRetry(eventId: TimelineEventId, label: String): MessageEntity? {
+        val networkId = networkIdForEvent(eventId) ?: return null
+        return sequencer.withNetwork(networkId) {
+            db.withTransaction {
+                val event = messageDao.byCanonicalId(eventId) ?: return@withTransaction null
+                val canonicalBuffer = bufferDao.observeById(event.bufferId)
+                    ?: return@withTransaction null
+                if (canonicalBuffer.networkId != networkId) return@withTransaction null
+                canonicalTimeline.beginRetry(
+                    networkId = networkId,
+                    eventId = event.id,
+                    label = label,
+                    connectionGeneration = connectionGenerations[networkId],
+                )
+            }
+        }
+    }
+
+    suspend fun failPendingEvents(eventIds: List<TimelineEventId>) {
+        if (eventIds.isEmpty()) return
+        val networkId = networkIdForEvent(eventIds.first()) ?: return
+        sequencer.withNetwork(networkId) {
+            db.withTransaction {
+                val first = messageDao.byCanonicalId(eventIds.first()) ?: return@withTransaction
+                val canonicalBuffer = bufferDao.observeById(first.bufferId) ?: return@withTransaction
+                if (canonicalBuffer.networkId != networkId) return@withTransaction
+                val canonicalIds = messageDao.byIds(eventIds).filter { event ->
+                    bufferDao.observeById(event.bufferId)?.id == canonicalBuffer.id
+                }.map { it.id }
+                if (canonicalIds.isNotEmpty()) messageDao.failPending(canonicalIds)
+            }
+        }
+    }
+
+    suspend fun recoverInterruptedPending(): Int {
+        var recovered = 0
+        for (networkId in messageDao.pendingNetworkIds()) {
+            recovered += sequencer.withNetwork(networkId) {
+                db.withTransaction { messageDao.recoverInterruptedPending(networkId) }
+            }
+        }
+        return recovered
     }
 
     /** Mark a pending row failed if it is still pending after the echo timeout. */
     suspend fun failIfStillPending(bufferId: Long, label: String) {
-        val canonicalBuffer = bufferDao.observeById(bufferId) ?: return
-        val networkId = canonicalBuffer.networkId
+        val networkId = bufferDao.rawById(bufferId)?.networkId ?: return
         sequencer.withNetwork(networkId) {
-            if (messageDao.failIfStillPending(canonicalBuffer.id, label) > 0) {
-                messageDao.byPendingLabel(canonicalBuffer.id, label)?.let { failed ->
-                    traceMessageWrite("room_pending_failed", failed, fromHistory = false)
+            db.withTransaction {
+                val canonicalBuffer = bufferDao.observeById(bufferId) ?: return@withTransaction
+                if (canonicalBuffer.networkId != networkId) return@withTransaction
+                if (messageDao.failIfStillPending(canonicalBuffer.id, label) > 0) {
+                    messageDao.byPendingLabel(canonicalBuffer.id, label)?.let { failed ->
+                        traceMessageWrite("room_pending_failed", failed, fromHistory = false)
+                    }
                 }
             }
         }
@@ -1543,10 +1633,19 @@ class EventProcessor @Inject constructor(
 
     /** A successful write on a server without echo-message is final local confirmation. */
     suspend fun confirmIfStillPending(bufferId: Long, label: String) {
-        val canonicalBuffer = bufferDao.observeById(bufferId) ?: return
-        sequencer.withNetwork(canonicalBuffer.networkId) {
-            messageDao.confirmIfStillPending(canonicalBuffer.id, label)
+        val networkId = bufferDao.rawById(bufferId)?.networkId ?: return
+        sequencer.withNetwork(networkId) {
+            db.withTransaction {
+                val canonicalBuffer = bufferDao.observeById(bufferId) ?: return@withTransaction
+                if (canonicalBuffer.networkId != networkId) return@withTransaction
+                messageDao.confirmIfStillPending(canonicalBuffer.id, label)
+            }
         }
+    }
+
+    private suspend fun networkIdForEvent(eventId: TimelineEventId): Long? {
+        val event = messageDao.byCanonicalId(eventId) ?: return null
+        return bufferDao.rawById(event.bufferId)?.networkId
     }
 
     suspend fun evictNetwork(networkId: Long) {
@@ -1962,8 +2061,8 @@ interface MessageNotifier {
         message: IrcEvent.ChatMessage,
     ) = onIncoming(networkId, bufferId, type, hasMention, message)
 
-    /** A local or synchronized marker advanced through [upToTime]. */
-    suspend fun onRead(bufferId: Long, upToTime: Long) = Unit
+    /** A local or synchronized marker advanced through this exact timeline tuple. */
+    suspend fun onRead(bufferId: Long, anchor: io.github.trevarj.motd.data.db.TimelineAnchor) = Unit
 
     /** Retire presentation state keyed by a losing room id after canonical room coalescing. */
     suspend fun onRoomsMerged(winnerId: RoomId, loserId: RoomId) = Unit
