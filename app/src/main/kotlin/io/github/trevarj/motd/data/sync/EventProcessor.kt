@@ -468,8 +468,8 @@ class EventProcessor @Inject constructor(
     ) {
         val st = stateFor(networkId)
         val route = resolveReactionRoute(e.source.nick, e.target, historyTarget, st)
-        // typing: routed to tracker, never persisted.
-        if (origin == EventOrigin.LIVE) e.typing?.let { typingState ->
+        // Peer typing is routed to the tracker, never persisted.
+        if (origin == EventOrigin.LIVE && !route.sourceIsSelf) e.typing?.let { typingState ->
             val bufferId = ensureBuffer(networkId, route.bufferName, route.type, st)
             typing.onTyping(bufferId, e.source.nick, typingState)
         }

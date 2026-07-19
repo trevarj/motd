@@ -444,6 +444,27 @@ class EventProcessorTest {
     }
 
     @Test
+    fun liveTypingTracksPeersButIgnoresSelfUsingServerCaseMapping() = runTest {
+        val typing = TypingTrackerImpl()
+        val recording = EventProcessor(db, typing, MessageNotifier.Noop)
+        recording.onRegistered(networkId, "Me[", mapOf("CASEMAPPING" to "rfc1459"))
+
+        recording.process(
+            networkId,
+            IrcEvent.TagMessage(ctx(), Prefix("Alice"), "#chan", "active", null, null),
+        )
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        assertEquals(listOf("Alice"), typing.typingNicks(buffer.id).value)
+
+        recording.process(
+            networkId,
+            IrcEvent.TagMessage(ctx(), Prefix("ME{"), "#chan", "active", null, null),
+        )
+
+        assertEquals(listOf("Alice"), typing.typingNicks(buffer.id).value)
+    }
+
+    @Test
     fun selfPmEchoAccountTagDoesNotIdentifyDifferentRecipientsAsOneRoom() = runTest {
         suspend fun echo(target: String, msgid: String) {
             processor.process(
