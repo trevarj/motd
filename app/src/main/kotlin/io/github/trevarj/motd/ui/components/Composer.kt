@@ -349,7 +349,7 @@ fun Composer(
                 Row(
                     modifier = Modifier
                         .testTag("chat_composer_input_row")
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.Bottom,
                 ) {
@@ -372,7 +372,7 @@ fun Composer(
                                     }
                                 },
                                 modifier = Modifier
-                                    .size(52.dp)
+                                    .size(48.dp)
                                     .testTag("chat_composer_emoji")
                                     .semantics { selected = emojiPickerSession?.phase == EmojiPickerPhase.OPEN },
                             ) {
@@ -422,7 +422,7 @@ fun Composer(
                                     focusManager.clearFocus(force = true)
                                     action()
                                 },
-                                modifier = Modifier.size(52.dp).testTag("chat_composer_attachment"),
+                                modifier = Modifier.size(48.dp).testTag("chat_composer_attachment"),
                             ) {
                                 Icon(
                                     Icons.Outlined.AttachFile,
@@ -441,7 +441,7 @@ fun Composer(
                         onSend()
                     },
                     enabled = canSend,
-                    modifier = Modifier.size(52.dp).testTag("chat_composer_send"),
+                    modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
                     shape = CircleShape,
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
@@ -556,7 +556,7 @@ private fun ComposerTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = modifier
-            .heightIn(min = 52.dp, max = 148.dp)
+            .heightIn(min = 48.dp, max = 148.dp)
             .onFocusChanged {
                 onFocusChanged(it.isFocused)
                 if (it.isFocused) onFocused()
@@ -572,7 +572,7 @@ private fun ComposerTextField(
         interactionSource = interactions,
         decorationBox = { inner ->
             Box(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 14.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 12.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 if (value.text.isEmpty()) {
