@@ -190,7 +190,9 @@ showcase() {
   # before producing tracked assets. The release installation is never touched.
   down
   up
-  build_test_apks
+  log "building showcase E2E APK"
+  nix develop "$REPO" -c ./gradlew :app:assembleFossE2e \
+    --stacktrace --no-daemon --max-workers=1
   log "capturing public showcase screenshots into $screenshot_dir"
   ANDROID_SERIAL="$SERIAL" SERIAL="$SERIAL" \
     MOTD_PKG=io.github.trevarj.motd.debug \

@@ -1296,13 +1296,12 @@ phase_s() {
     sleep 1
   done
   wait_for_text "Appearance" 6 || true
-  scroll_forward_to_tag settings_density_comfortable 10 || true
-  tap_tag settings_density_comfortable
-  scroll_forward_to_tag settings_avatar_style_irc_sprite 10 || true
-  tap_tag settings_avatar_style_irc_sprite
-  ok "selected Modus Vivendi, comfortable bubbles, and IRC sprite avatars"
-  adb_shell input keyevent 4             # Settings root
-  adb_shell input keyevent 4             # chat list
+  # Phase A cleared app data, so the production defaults already pin comfortable bubbles and IRC
+  # sprites. Restarting avoids racing two navigation pops while the theme sheet is disappearing.
+  ok "selected Modus Vivendi with the showcase presentation defaults"
+  sleep 1
+  adb_shell am force-stop "$MOTD_PKG"
+  reset_to_chatlist || { fail "could not return to chat list after applying showcase theme"; return 1; }
   wait_for_desc "New conversation" 8 || true
   assert_no_crash
 
