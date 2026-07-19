@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,7 +25,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -34,6 +34,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.R
@@ -47,6 +48,7 @@ import io.github.trevarj.motd.ui.components.NetworkChip
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.components.isAppliedThemeDark
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.presenceOnlineColor
 
@@ -67,8 +69,8 @@ internal fun chatListBadgeState(row: ChatListRow): ChatListBadgeState =
     }
 
 /**
- * One chat-list row: avatar, display name (+ network chip when multi-network), last-message
- * one-liner, relative time, unread/mention badges. Muted rows render dimmed with a bell-off glyph.
+ * One chat-list row: avatar, display name, supporting network/last-message line, relative time, and
+ * unread/mention badges. Muted rows use subdued semantic colors with a bell-off glyph.
  * Pinned rows carry a small inline [Icons.Outlined.PushPin] beside the name (there is no separate
  * "Pinned" section; pinning gives the row global list priority).
  *
@@ -88,8 +90,10 @@ fun ChatListRowItem(
 ) {
     // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
     val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
+    val spacing = LocalSpacing.current
     val queryPresence = presence.takeIf { row.type == BufferType.QUERY }
     val badges = chatListBadgeState(row)
+    val isUnread = !row.muted && row.unreadCount > 0
     val presenceDescription = queryPresence?.let {
         stringResource(
             when (it) {
@@ -105,6 +109,7 @@ fun ChatListRowItem(
             // Per-buffer handle so the harness selects a specific row (display names collide).
             .testTag("chatlist_row_${row.bufferId}")
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .defaultMinSize(minHeight = 48.dp)
             .then(
                 if (presenceDescription != null) {
                     Modifier.semantics { stateDescription = presenceDescription }
@@ -112,8 +117,7 @@ fun ChatListRowItem(
                     Modifier
                 },
             )
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-            .alpha(if (row.muted) 0.55f else 1f),
+            .padding(horizontal = 16.dp, vertical = spacing.chatListVPad),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PresenceAvatar(
@@ -121,12 +125,13 @@ fun ChatListRowItem(
             isChannel = row.type == BufferType.CHANNEL,
             networkId = row.networkId,
             presence = queryPresence,
+            size = spacing.chatListAvatar,
         )
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Subtle theme-aware primary tint behind a friend's name (Confirmed decision #4).
-                val nameModifier = if (isFriend) {
+                // Subtle theme-aware primary tint behind a non-muted friend's name.
+                val nameModifier = if (isFriend && !row.muted) {
                     Modifier
                         .weight(1f, fill = false)
                         .clip(RoundedCornerShape(4.dp))
@@ -137,9 +142,13 @@ fun ChatListRowItem(
                 }
                 Text(
                     text = row.displayName,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isFriend) nickColor else MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = if (isUnread) FontWeight.Bold else FontWeight.Medium,
+                    color = when {
+                        row.muted -> MaterialTheme.colorScheme.onSurfaceVariant
+                        isFriend -> nickColor
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = nameModifier,
@@ -151,7 +160,7 @@ fun ChatListRowItem(
                         modifier = Modifier
                             .padding(start = 4.dp)
                             .size(14.dp),
-                        tint = nickColor,
+                        tint = if (row.muted) MaterialTheme.colorScheme.onSurfaceVariant else nickColor,
                     )
                 }
                 if (row.pinned) {
@@ -176,19 +185,30 @@ fun ChatListRowItem(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (showNetworkChip) {
-                    Spacer(Modifier.width(6.dp))
-                    NetworkChip(name = row.networkName)
-                }
             }
             Spacer(Modifier.size(2.dp))
-            Text(
-                text = lastMessageLine(row),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (showNetworkChip) {
+                    NetworkChip(name = row.networkName)
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    text = lastMessageLine(row),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (isUnread) FontWeight.Medium else FontWeight.Normal,
+                    color = if (isUnread) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
         Spacer(Modifier.width(8.dp))
         Column(
@@ -234,12 +254,14 @@ private fun PresenceAvatar(
     isChannel: Boolean,
     networkId: Long,
     presence: PresenceState?,
+    size: Dp,
 ) {
-    Box(modifier = Modifier.size(44.dp)) {
+    Box(modifier = Modifier.size(size)) {
         Avatar(
             name = name,
             isChannel = isChannel,
             networkId = networkId,
+            size = size,
             modifier = Modifier.align(Alignment.Center),
         )
         presence?.let { state ->
@@ -349,12 +371,12 @@ private fun ChatListPresencePreview() {
                 row = ChatListRow(
                     bufferId = 3, networkId = 1, networkName = "Libera",
                     displayName = "carol", type = BufferType.QUERY,
-                    pinned = false, muted = false,
+                    pinned = false, muted = true,
                     lastMessageText = "reconnecting", lastMessageSender = "carol",
                     lastMessageTime = System.currentTimeMillis() - 60_000,
-                    unreadCount = 0, mentionCount = 0,
+                    unreadCount = 7, mentionCount = 1,
                 ),
-                showNetworkChip = false,
+                showNetworkChip = true,
                 onClick = {}, onLongClick = {},
                 presence = PresenceState.UNKNOWN,
             )

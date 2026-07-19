@@ -9,7 +9,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,6 +22,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
@@ -66,14 +69,15 @@ fun MutedActivityBadge(count: Int, modifier: Modifier = Modifier) {
     )
 }
 
-/** Small outlined chip naming the network; shown when more than one network is present. */
+/** Quiet metadata naming the network; shown when more than one network is present. */
 @Composable
 fun NetworkChip(name: String, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
+            .widthIn(max = 92.dp)
             .background(
-                MaterialTheme.colorScheme.surfaceContainerHighest,
-                CircleShape,
+                MaterialTheme.colorScheme.surfaceContainerHigh,
+                RoundedCornerShape(6.dp),
             )
             .padding(horizontal = 6.dp, vertical = 1.dp),
     ) {
@@ -81,6 +85,8 @@ fun NetworkChip(name: String, modifier: Modifier = Modifier) {
             text = name,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
