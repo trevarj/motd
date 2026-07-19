@@ -21,20 +21,24 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.effectiveLocalReadAnchor
 import io.github.trevarj.motd.data.db.ircTarget
+import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
-import io.github.trevarj.motd.data.prefs.normalizeNick
+import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.NotificationClaimSession
 import io.github.trevarj.motd.data.sync.ROOM_MERGE_PRESENTATION_PREFIX
 import io.github.trevarj.motd.data.sync.parseRoomMergePresentationKey
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.Prefix
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
@@ -260,13 +264,21 @@ class MotdNotifications @Inject constructor(
         val canonicalEventTime = canonicalEvent?.serverTime ?: message.ctx.serverTime
         // Friends/fools sets (single bounded DataStore read; null settings ⇒ empty sets).
         val settings = runCatching { settingsRepository.settings.first() }.getOrNull() ?: Settings()
-        val sender = normalizeNick(message.source.nick)
+        val identityRules = db.networkIdentityDao().byNetwork(networkId)?.identityRules
+            ?: IrcIdentityRules()
+        val foolPolicy = MessageVisibilityPolicy(
+            MessageVisibilitySpec(fools = settings.fools),
+            identityRules,
+        )
 
         // Fools and explicit buffer mute are fully silent. Foreground suppression also applies.
         val foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId
         val muted = buffer?.muted == true
-        val senderIsFriend = sender in settings.friends
-        val senderIsFool = sender in settings.fools
+        val senderIsFriend = identityRules.matchesConfiguredNick(message.source.nick, settings.friends)
+        val senderIsFool = foolPolicy.matchesFoolIdentity(
+            canonicalEvent?.senderAccount ?: message.ctx.account,
+            canonicalEvent?.normalizedActor ?: identityRules.normalize(message.source.nick),
+        )
         val incomingAnchor = canonicalEvent?.let { TimelineAnchor(it.serverTime, it.id) }
             ?: TimelineAnchor(message.ctx.serverTime, 0L)
         val alreadyRead = buffer?.effectiveLocalReadAnchor?.let { incomingAnchor <= it } == true
@@ -291,7 +303,12 @@ class MotdNotifications @Inject constructor(
 
         val channel = if (hasMention) CHANNEL_MENTIONS else CHANNEL_MESSAGES
         val title = buffer?.displayName ?: message.target
-        val person = notificationPerson(networkId, message.source.nick, settings.avatarStyle)
+        val person = notificationPerson(
+            networkId,
+            message.source.nick,
+            settings.avatarStyle,
+            identityRules,
+        )
         val restored = if (synchronized(history) { bufferId !in history }) {
             runCatching {
                 db.messageDao().recentNotifiable(
@@ -302,7 +319,9 @@ class MotdNotifications @Inject constructor(
                     excludeEventId = canonicalEventId ?: -1L,
                     limit = MAX_NOTIFICATION_MESSAGES - 1,
                 )
-            }.getOrDefault(emptyList()).asReversed()
+            }.getOrDefault(emptyList())
+                .filterNot(foolPolicy::isFool)
+                .asReversed()
         } else {
             emptyList()
         }
@@ -320,7 +339,12 @@ class MotdNotifications @Inject constructor(
                     conversation.addMessage(
                         row.text,
                         row.serverTime,
-                        notificationPerson(networkId, row.sender, settings.avatarStyle),
+                        notificationPerson(
+                            networkId,
+                            row.sender,
+                            settings.avatarStyle,
+                            identityRules,
+                        ),
                     )
                 }
             }
@@ -428,10 +452,15 @@ class MotdNotifications @Inject constructor(
         }
     }
 
-    private fun notificationPerson(networkId: Long, name: String, style: AvatarStyle): Person =
+    private fun notificationPerson(
+        networkId: Long,
+        name: String,
+        style: AvatarStyle,
+        identityRules: IrcIdentityRules,
+    ): Person =
         Person.Builder()
             .setName(name)
-            .setKey("irc:$networkId:${normalizeNick(name)}")
+            .setKey("irc:$networkId:${identityRules.normalize(name)}")
             .setIcon(notificationAvatarIcon(context, name, style))
             .build()
 

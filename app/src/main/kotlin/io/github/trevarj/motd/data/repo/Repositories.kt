@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import kotlinx.coroutines.flow.Flow
 
 interface NetworkRepository {
@@ -39,12 +40,9 @@ interface BufferRepository {
 }
 
 interface MessageRepository {
-    /** Paging 3 stream wired to ChatHistoryRemoteMediator (WP5 supplies mediator via factory). */
-    fun messages(bufferId: Long): Flow<PagingData<MessageEntity>>
+    /** Each visibility spec creates a distinct, positionally correct Pager generation. */
+    fun messages(bufferId: Long, visibility: MessageVisibilitySpec): Flow<PagingData<MessageEntity>>
     fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>>
-    /** Buffer-scoped reactions (no per-msgid IN list); callers filter to the visible window
-     *  in memory to avoid SQLite's bind-variable overflow on large windows (plans/15 #5, #18). */
-    fun reactionsForBuffer(bufferId: Long): Flow<List<ReactionEntity>>
     /** Canonical event-id lookup used by notification and restored-scroll anchors. */
     suspend fun byId(id: Long): MessageEntity? = null
     /** Resolve durable losing room redirects before validating an event-scoped deep link. */
@@ -58,9 +56,12 @@ interface MessageRepository {
      * still-pending own message until its echo lands (plans/15 reactions).
      */
     suspend fun awaitMsgid(id: Long, timeoutMs: Long): String?
-    suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int
-    /** Oldest non-self message time past [after], or null; anchors the unread divider/badge. */
-    suspend fun firstUnreadOtherTime(bufferId: Long, after: Long): Long?
+    suspend fun countNewerThan(
+        bufferId: Long,
+        serverTime: Long,
+        id: Long,
+        visibility: MessageVisibilitySpec,
+    ): Int
     /** Delete a locally-stored failed row by id, repairing any exact local read anchor. */
     suspend fun deleteMessage(id: Long)
 }

@@ -1,7 +1,8 @@
 package io.github.trevarj.motd.ui.channelinfo
 
 import io.github.trevarj.motd.data.db.MemberEntity
-import io.github.trevarj.motd.data.prefs.normalizeNick
+import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 
 /**
  * Pure member-list sectioning by highest channel prefix. Fully unit-testable; no Android deps.
@@ -28,6 +29,7 @@ data class MemberSection(
 fun sectionMembers(
     members: List<MemberEntity>,
     prefixOrder: String = DEFAULT_PREFIX_ORDER,
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
 ): List<MemberSection> {
     val order = prefixOrder.ifEmpty { DEFAULT_PREFIX_ORDER }
     val rank: (Char) -> Int = { c -> order.indexOf(c).let { if (it < 0) Int.MAX_VALUE else it } }
@@ -42,11 +44,11 @@ fun sectionMembers(
     val prefixSections = order
         .mapNotNull { glyph ->
             grouped[glyph]?.let { list ->
-                MemberSection(glyph, list.sortedBy { it.nick.lowercase() })
+                MemberSection(glyph, list.sortedWith(identityRules.memberComparator()))
             }
         }
     val regular = grouped[null]?.let { list ->
-        MemberSection(null, list.sortedBy { it.nick.lowercase() })
+        MemberSection(null, list.sortedWith(identityRules.memberComparator()))
     }
 
     return prefixSections + listOfNotNull(regular)
@@ -62,7 +64,7 @@ fun prefixOrderFrom(prefixModes: List<Pair<Char, Char>>): String =
 
 /**
  * Prefix sections with fools pulled out into a trailing bucket (plans/13 §3.6). Fool members
- * (by `normalizeNick(nick)`) are removed from every prefix section and returned separately,
+ * using the network's IRC casemapping are removed from every prefix section and returned separately,
  * sorted case-insensitively. Friends are NOT moved — they stay in their prefix section (they
  * only gain a star on the row). Empty [fools] reproduces the plain [sectionMembers] result.
  */
@@ -75,10 +77,16 @@ fun sectionMembersSocial(
     members: List<MemberEntity>,
     prefixOrder: String = DEFAULT_PREFIX_ORDER,
     fools: Set<String> = emptySet(),
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
 ): SocialSections {
-    val (foolMembers, rest) = members.partition { normalizeNick(it.nick) in fools }
+    val (foolMembers, rest) = members.partition {
+        identityRules.matchesConfiguredNick(it.nick, fools)
+    }
     return SocialSections(
-        sections = sectionMembers(rest, prefixOrder),
-        fools = foolMembers.sortedBy { it.nick.lowercase() },
+        sections = sectionMembers(rest, prefixOrder, identityRules),
+        fools = foolMembers.sortedWith(identityRules.memberComparator()),
     )
 }
+
+private fun IrcIdentityRules.memberComparator(): Comparator<MemberEntity> =
+    compareBy<MemberEntity> { normalize(it.nick) }.thenBy { it.nick }

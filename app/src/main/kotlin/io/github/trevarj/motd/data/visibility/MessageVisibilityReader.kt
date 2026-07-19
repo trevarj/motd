@@ -4,18 +4,17 @@ import androidx.room.InvalidationTracker
 import androidx.sqlite.db.SimpleSQLiteQuery
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MessageEntity
-import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.withContext
 
 data class VisibleMessageAnchor(
     val id: Long,
@@ -23,13 +22,11 @@ data class VisibleMessageAnchor(
     val serverTime: Long,
 )
 
-/** Policy-backed one-shot reads kept outside the frozen Room DAO and repository contracts. */
+/** Policy-backed targeted reads sharing the Room paging predicate. */
 @Singleton
 class MessageVisibilityReader @Inject constructor(
     private val db: MotdDatabase,
 ) {
-    private val chatListCache = LinkedHashMap<ChatListCacheKey, ChatListRow>()
-
     fun observeLatestRawAnchor(bufferId: Long): Flow<TimelineAnchor?> = callbackFlow {
         val observer = object : InvalidationTracker.Observer("messages", "buffers") {
             override fun onInvalidated(tables: Set<String>) {
@@ -62,26 +59,44 @@ class MessageVisibilityReader @Inject constructor(
         serverTime: Long,
         id: Long,
         spec: MessageVisibilitySpec,
-    ): Int = countMatchingRows(
-        where = "bufferId = ? AND (serverTime > ? OR (serverTime = ? AND id > ?))",
-        args = listOf(canonicalRoomId(bufferId), serverTime, serverTime, id),
-        order = "serverTime DESC, id DESC",
-        predicate = MessageVisibilityPolicy(spec)::timeline,
-    )
+    ): Int {
+        val context = visibilityContext(bufferId)
+        return db.messageDao().rawCount(
+            countTimelineNewerQuery(context.roomId, serverTime, id, spec, context.identityRules),
+        )
+    }
+
+    suspend fun countVisibleUnreadInTimelinePrefix(
+        bufferId: Long,
+        beforeIndex: Int,
+        after: TimelineAnchor,
+        maxCount: Int,
+        spec: MessageVisibilitySpec,
+    ): Int {
+        if (beforeIndex <= 0 || maxCount <= 0) return 0
+        val context = visibilityContext(bufferId)
+        return db.messageDao().rawCount(
+            countVisibleUnreadInTimelinePrefixQuery(
+                context.roomId,
+                beforeIndex,
+                after,
+                maxCount,
+                spec,
+                context.identityRules,
+            ),
+        )
+    }
 
     suspend fun firstVisibleUnreadAnchor(
         bufferId: Long,
         after: TimelineAnchor,
         spec: MessageVisibilitySpec,
     ): TimelineAnchor? {
-        val roomId = canonicalRoomId(bufferId)
-        val policy = MessageVisibilityPolicy(spec)
-        return firstMatchingRow(
-            where = "bufferId = ? AND (serverTime > ? OR (serverTime = ? AND id > ?))",
-            args = listOf(roomId, after.serverTime, after.serverTime, after.eventId),
-            order = "serverTime ASC, id ASC",
-            predicate = policy::visibleUnread,
-        )?.let { TimelineAnchor(it.serverTime, it.id) }
+        val context = visibilityContext(bufferId)
+        return db.messageDao().rawMessage(
+            firstVisibleUnreadQuery(context.roomId, after, spec, context.identityRules),
+        )
+            ?.let { TimelineAnchor(it.serverTime, it.id) }
     }
 
     suspend fun resolveSavedAnchor(
@@ -91,45 +106,70 @@ class MessageVisibilityReader @Inject constructor(
         id: Long,
         spec: MessageVisibilitySpec,
     ): VisibleMessageAnchor? {
-        val roomId = canonicalRoomId(bufferId)
-        val policy = MessageVisibilityPolicy(spec)
+        val context = visibilityContext(bufferId)
+        val visibility = MessageVisibilitySql(spec, context.identityRules)
         val canonicalEventId = resolveCanonicalEventId(id)
-        val exact = queryRows(
+        val exact = queryMessage(
             where = when {
-                msgid != null -> "bufferId = ? AND msgid = ?"
-                canonicalEventId != id -> "bufferId = ? AND id = ?"
-                else -> "bufferId = ? AND serverTime = ? AND id = ?"
+                msgid != null -> "m.msgid = ?"
+                canonicalEventId != id -> "m.id = ?"
+                else -> "m.serverTime = ? AND m.id = ?"
             },
             args = when {
-                msgid != null -> listOf(roomId, msgid)
-                canonicalEventId != id -> listOf(roomId, canonicalEventId)
-                else -> listOf(roomId, serverTime, id)
+                msgid != null -> listOf(msgid)
+                canonicalEventId != id -> listOf(canonicalEventId)
+                else -> listOf(serverTime, id)
             },
-            order = "serverTime DESC, id DESC",
-            limit = 1,
-            offset = 0,
-        ).firstOrNull()
-        if (exact != null && policy.anchor(exact)) return exact.toAnchor()
+            bufferId = context.roomId,
+            visibility = visibility.anchor(),
+            order = "m.serverTime DESC, m.id DESC",
+        )
+        if (exact != null) return exact.toAnchor()
 
         // Prefer the first meaningful row at or behind the old viewport, then the nearest newer
         // row. This avoids surprising forward jumps while history is being read.
-        val older = firstMatchingRow(
-            where = "bufferId = ? AND (serverTime < ? OR (serverTime = ? AND id < ?))",
-            args = listOf(roomId, serverTime, serverTime, id),
-            order = "serverTime DESC, id DESC",
-            predicate = policy::anchor,
+        val older = queryMessage(
+            where = "m.serverTime < ? OR (m.serverTime = ? AND m.id < ?)",
+            args = listOf(serverTime, serverTime, id),
+            bufferId = context.roomId,
+            visibility = visibility.anchor(),
+            order = "m.serverTime DESC, m.id DESC",
         )
         if (older != null) return older.toAnchor()
-        return firstMatchingRow(
-            where = "bufferId = ? AND (serverTime > ? OR (serverTime = ? AND id > ?))",
-            args = listOf(roomId, serverTime, serverTime, id),
-            order = "serverTime ASC, id ASC",
-            predicate = policy::anchor,
+        return queryMessage(
+            where = "m.serverTime > ? OR (m.serverTime = ? AND m.id > ?)",
+            args = listOf(serverTime, serverTime, id),
+            bufferId = context.roomId,
+            visibility = visibility.anchor(),
+            order = "m.serverTime ASC, m.id ASC",
+        )?.toAnchor()
+    }
+
+    /** Newest row that can define effective bottom; ignored raw tails remain separately observed. */
+    suspend fun latestEffectiveAnchor(
+        bufferId: Long,
+        spec: MessageVisibilitySpec,
+    ): VisibleMessageAnchor? {
+        val context = visibilityContext(bufferId)
+        return queryMessage(
+            where = "1",
+            args = emptyList(),
+            bufferId = context.roomId,
+            visibility = MessageVisibilitySql(spec, context.identityRules).anchor(),
+            order = "m.serverTime DESC, m.id DESC",
         )?.toAnchor()
     }
 
     private suspend fun canonicalRoomId(bufferId: Long): Long =
         db.bufferDao().canonicalId(bufferId) ?: bufferId
+
+    private suspend fun visibilityContext(bufferId: Long): VisibilityContext {
+        val room = db.bufferDao().observeById(bufferId)
+            ?: return VisibilityContext(bufferId, IrcIdentityRules())
+        val identityRules = db.networkIdentityDao().byNetwork(room.networkId)?.identityRules
+            ?: IrcIdentityRules()
+        return VisibilityContext(room.id, identityRules)
+    }
 
     suspend fun resolveCanonicalEventId(eventId: Long): Long =
         db.canonicalTimelineDao().canonicalEventId(eventId)
@@ -140,17 +180,7 @@ class MessageVisibilityReader @Inject constructor(
         spec: MessageVisibilitySpec,
     ): List<ChatListRow> {
         if (spec.fools.isEmpty()) return rows
-        val resolved = rows.map { row ->
-            val key = ChatListCacheKey(row, spec)
-            synchronized(chatListCache) { chatListCache[key] } ?: resolveChatListRow(row, spec).also {
-                synchronized(chatListCache) {
-                    chatListCache[key] = it
-                    while (chatListCache.size > CHAT_LIST_CACHE_SIZE) {
-                        chatListCache.remove(chatListCache.keys.first())
-                    }
-                }
-            }
-        }
+        val resolved = rows.map { row -> resolveChatListRow(row, spec) }
         return resolved.sortedWith(
             compareByDescending<ChatListRow> { it.pinned }
                 .thenBy { it.lastMessageTime == null }
@@ -163,32 +193,19 @@ class MessageVisibilityReader @Inject constructor(
         row: ChatListRow,
         spec: MessageVisibilitySpec,
     ): ChatListRow {
-        val policy = MessageVisibilityPolicy(spec)
-        val preview = firstMatchingRow(
-            where = "bufferId = ? AND kind NOT IN ('JOIN', 'PART', 'QUIT', 'NETSPLIT', 'NETJOIN')",
-            args = listOf(row.bufferId),
-            order = "serverTime DESC, id DESC",
-            predicate = policy::preview,
+        val visibility = MessageVisibilitySql(
+            spec,
+            IrcIdentityRules.from(row.caseMapping, row.chanTypes),
         )
-        var unreadCount = 0
-        var mentionCount = 0
-        forEachMatchingRow(
-            where = "bufferId = ? AND isSelf = 0 " +
-                "AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION') " +
-                "AND (" +
-                "serverTime > (SELECT MAX(COALESCE(localReadAnchorTime, 0), " +
-                "COALESCE(localUnreadFloorTime, 0)) FROM buffers WHERE id = ?) OR (" +
-                "serverTime = (SELECT localReadAnchorTime FROM buffers WHERE id = ?) AND " +
-                "(SELECT COALESCE(localUnreadFloorTime, -9223372036854775808) FROM buffers WHERE id = ?) " +
-                "< (SELECT localReadAnchorTime FROM buffers WHERE id = ?) AND " +
-                "id > (SELECT COALESCE(localReadAnchorEventId, 0) FROM buffers WHERE id = ?)))",
-            args = listOf(row.bufferId, row.bufferId, row.bufferId, row.bufferId, row.bufferId, row.bufferId),
-            order = "serverTime DESC, id DESC",
-            predicate = policy::visibleUnread,
-        ) { message ->
-            unreadCount++
-            if (message.hasMention) mentionCount++
-        }
+        val preview = queryMessage(
+            where = "1",
+            args = emptyList(),
+            bufferId = row.bufferId,
+            visibility = visibility.preview(),
+            order = "m.serverTime DESC, m.id DESC",
+        )
+        val unreadCount = chatListCount(row.bufferId, visibility.visibleUnread(), mentionsOnly = false)
+        val mentionCount = chatListCount(row.bufferId, visibility.visibleUnread(), mentionsOnly = true)
         return row.copy(
             lastMessageText = preview?.text,
             lastMessageSender = preview?.sender,
@@ -198,91 +215,42 @@ class MessageVisibilityReader @Inject constructor(
         )
     }
 
-    private suspend fun firstMatchingRow(
+    private suspend fun queryMessage(
         where: String,
         args: List<Any>,
+        bufferId: Long,
+        visibility: String,
         order: String,
-        predicate: (MessageEntity) -> Boolean,
-    ): MessageEntity? {
-        var offset = 0
-        while (true) {
-            val page = queryRows(where, args, order, READ_CHUNK_SIZE, offset)
-            page.firstOrNull(predicate)?.let { return it }
-            if (page.size < READ_CHUNK_SIZE) return null
-            offset += page.size
-        }
-    }
+    ): MessageEntity? = db.messageDao().rawMessage(
+        SimpleSQLiteQuery(
+            "SELECT m.* FROM messages m WHERE m.bufferId = ? AND ($where) " +
+                "AND $visibility ORDER BY $order LIMIT 1",
+            (listOf(bufferId) + args).toTypedArray(),
+        ),
+    )
 
-    private suspend fun countMatchingRows(
-        where: String,
-        args: List<Any>,
-        order: String,
-        predicate: (MessageEntity) -> Boolean,
-    ): Int {
-        var count = 0
-        forEachMatchingRow(where, args, order, predicate) { count++ }
-        return count
-    }
-
-    /** Sequence pages keep every SQL statement and allocation bounded on long-lived buffers. */
-    private suspend fun forEachMatchingRow(
-        where: String,
-        args: List<Any>,
-        order: String,
-        predicate: (MessageEntity) -> Boolean,
-        block: (MessageEntity) -> Unit,
-    ) {
-        var offset = 0
-        while (true) {
-            val page = queryRows(where, args, order, READ_CHUNK_SIZE, offset)
-            page.filter(predicate).forEach(block)
-            if (page.size < READ_CHUNK_SIZE) return
-            offset += page.size
-        }
-    }
-
-    private suspend fun queryRows(
-        where: String,
-        args: List<Any>,
-        order: String,
-        limit: Int,
-        offset: Int,
-    ): List<MessageEntity> = withContext(Dispatchers.IO) {
-        val sql = """
-            SELECT id, bufferId, msgid, serverTime, sender, kind, text, isSelf, hasMention
-            FROM messages WHERE $where ORDER BY $order LIMIT $limit OFFSET $offset
-        """.trimIndent()
-        db.query(SimpleSQLiteQuery(sql, args.toTypedArray())).use { cursor ->
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        MessageEntity(
-                            id = cursor.getLong(0),
-                            bufferId = cursor.getLong(1),
-                            msgid = cursor.getString(2),
-                            serverTime = cursor.getLong(3),
-                            sender = cursor.getString(4),
-                            kind = MessageKind.valueOf(cursor.getString(5)),
-                            text = cursor.getString(6),
-                            isSelf = cursor.getInt(7) != 0,
-                            hasMention = cursor.getInt(8) != 0,
-                            dedupKey = "visibility:${cursor.getLong(0)}",
-                        ),
-                    )
-                }
-            }
-        }
-    }
+    private suspend fun chatListCount(
+        bufferId: Long,
+        visibility: String,
+        mentionsOnly: Boolean,
+    ): Int = db.messageDao().rawCount(
+        SimpleSQLiteQuery(
+            "SELECT COUNT(*) FROM buffers b JOIN messages m ON m.bufferId = b.id " +
+                "WHERE b.id = ? AND (" +
+                "m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), " +
+                "COALESCE(b.localUnreadFloorTime, 0)) OR (" +
+                "m.serverTime = b.localReadAnchorTime AND " +
+                "COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime " +
+                "AND m.id > COALESCE(b.localReadAnchorEventId, 0))) " +
+                "AND $visibility" + if (mentionsOnly) " AND m.hasMention = 1" else "",
+            arrayOf(bufferId),
+        ),
+    )
 
     private fun MessageEntity.toAnchor() = VisibleMessageAnchor(id, msgid, serverTime)
 
-    private data class ChatListCacheKey(
-        val row: ChatListRow,
-        val spec: MessageVisibilitySpec,
+    private data class VisibilityContext(
+        val roomId: Long,
+        val identityRules: IrcIdentityRules,
     )
-
-    private companion object {
-        const val READ_CHUNK_SIZE = 128
-        const val CHAT_LIST_CACHE_SIZE = 256
-    }
 }

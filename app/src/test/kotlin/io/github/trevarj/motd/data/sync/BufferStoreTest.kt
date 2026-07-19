@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ircTarget
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
@@ -79,5 +80,33 @@ class BufferStoreTest {
         assertEquals(4_000L, updated.readMarkerTime)
         assertEquals(1_000L, updated.oldestFetchedTime)
         assertEquals(true, updated.historyComplete)
+    }
+
+    @Test
+    fun provisionalQueryPromotesToChannelWithoutReplacingItsRoom() = runTest {
+        val store = BufferStore(db)
+        val provisional = store.getOrCreate(networkId, "+room", "+Room", BufferType.QUERY)
+
+        val promoted = store.getOrCreate(networkId, "+room", "+Room", BufferType.CHANNEL)
+
+        assertEquals(provisional.id, promoted.id)
+        assertEquals(BufferType.CHANNEL, promoted.type)
+        assertEquals(promoted.id, store.resolveChannelRoom(networkId, "+room")?.id)
+        assertEquals(null, store.resolveQueryRoom(networkId, "+room", account = null))
+    }
+
+    @Test
+    fun accountBoundQueryIsNotPromotedWhenChantypesLaterClassifiesItsNameAsChannel() = runTest {
+        val store = BufferStore(db)
+        val query = store.getOrCreate(networkId, "+room", "+Room", BufferType.QUERY)
+        store.bindQueryIdentity(query.id, networkId, "+room", "+Room", "account")
+
+        val channel = store.getOrCreate(networkId, "+room", "+Room", BufferType.CHANNEL)
+
+        assertEquals(BufferType.QUERY, db.bufferDao().observeById(query.id)?.type)
+        assertEquals(BufferType.CHANNEL, channel.type)
+        assertEquals("+Room", channel.ircTarget)
+        assertEquals(channel.id, store.resolveChannelRoom(networkId, "+room")?.id)
+        assertEquals(query.id, store.resolveQueryRoom(networkId, "+room", "account")?.id)
     }
 }

@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.DeliveryMode
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -184,6 +185,41 @@ class DataStoreSettingsRepository @Inject constructor(
                 friends.remove(key)
             } else {
                 fools.remove(key)
+            }
+            writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
+            writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)
+        }
+    }
+
+    override suspend fun setFriend(
+        nick: String,
+        isFriend: Boolean,
+        identityRules: IrcIdentityRules,
+    ) = setSocialIdentity(nick, isFriend, identityRules, friend = true)
+
+    override suspend fun setFool(
+        nick: String,
+        isFool: Boolean,
+        identityRules: IrcIdentityRules,
+    ) = setSocialIdentity(nick, isFool, identityRules, friend = false)
+
+    private suspend fun setSocialIdentity(
+        nick: String,
+        enabled: Boolean,
+        identityRules: IrcIdentityRules,
+        friend: Boolean,
+    ) {
+        val key = normalizeNick(nick)
+        val actor = identityRules.normalize(nick.trim())
+        store.edit { prefs ->
+            val friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]).toMutableSet()
+            val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]).toMutableSet()
+            val target = if (friend) friends else fools
+            target.removeAll { identityRules.normalize(it.trim()) == actor }
+            if (enabled) {
+                val other = if (friend) fools else friends
+                other.removeAll { identityRules.normalize(it.trim()) == actor }
+                target.add(key)
             }
             writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
             writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)

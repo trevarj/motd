@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
 import io.github.trevarj.motd.data.repo.MessageRepository
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.client.HistoryAvailability
@@ -24,7 +25,9 @@ import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 class ChatJumpResolver(
     private val messages: MessageRepository,
     private val countNewer: suspend (bufferId: Long, serverTime: Long, id: Long) -> Int =
-        { bufferId, serverTime, id -> messages.countNewerThan(bufferId, serverTime, id) },
+        { bufferId, serverTime, id ->
+            messages.countNewerThan(bufferId, serverTime, id, MessageVisibilitySpec())
+        },
     private val fetchAround: suspend (
         bufferName: String,
         msgid: String,
@@ -33,7 +36,7 @@ class ChatJumpResolver(
     ) -> Boolean,
 ) {
     sealed interface Result {
-        data class Target(val index: Int, val highlightMsgid: String?) : Result
+        data class Resolved(val target: ChatPositionTarget) : Result
         data object NotFound : Result
     }
 
@@ -55,9 +58,12 @@ class ChatJumpResolver(
         eventId?.let { id ->
             val canonicalRoomId = messages.canonicalRoomId(bufferId)
             messages.byId(id)?.takeIf { it.bufferId == canonicalRoomId }?.let { row ->
-                return Result.Target(
-                    countNewer(bufferId, row.serverTime, row.id),
-                    highlightMsgid = row.msgid,
+                return Result.Resolved(
+                    row.toPositionTarget(
+                        index = countNewer(bufferId, row.serverTime, row.id),
+                        expectedMsgid = msgid ?: row.msgid,
+                        highlightMsgid = msgid ?: row.msgid,
+                    ),
                 )
             }
         }
@@ -66,24 +72,48 @@ class ChatJumpResolver(
             // every row at the same serverTime, landing at (or just above) the time boundary.
             if (timeMs <= 0) return Result.NotFound
             val index = countNewer(bufferId, timeMs, Long.MAX_VALUE)
-            return Result.Target(index, highlightMsgid = null)
+            return Result.Resolved(ChatPositionTarget(index = index, serverTime = timeMs))
         }
 
         // 1. Local hit → its index is the count of strictly-newer rows.
         messages.byMsgid(bufferId, msgid)?.let { row ->
-            return Result.Target(countNewer(bufferId, row.serverTime, row.id), msgid)
+            return Result.Resolved(
+                row.toPositionTarget(
+                    index = countNewer(bufferId, row.serverTime, row.id),
+                    expectedMsgid = msgid,
+                    highlightMsgid = msgid,
+                ),
+            )
         }
 
         // 2. Miss + a name → fetch AROUND by exact msgid (or timestamp), then retry once.
         if (bufferName != null && fetchAround(bufferName, msgid, timeMs, 100)) {
             messages.byMsgid(bufferId, msgid)?.let { row ->
-                return Result.Target(countNewer(bufferId, row.serverTime, row.id), msgid)
+                return Result.Resolved(
+                    row.toPositionTarget(
+                        index = countNewer(bufferId, row.serverTime, row.id),
+                        expectedMsgid = msgid,
+                        highlightMsgid = msgid,
+                    ),
+                )
             }
         }
 
         return Result.NotFound
     }
 }
+
+private fun io.github.trevarj.motd.data.db.MessageEntity.toPositionTarget(
+    index: Int,
+    expectedMsgid: String?,
+    highlightMsgid: String?,
+): ChatPositionTarget = ChatPositionTarget(
+    index = index,
+    expectedEventId = id,
+    expectedMsgid = expectedMsgid,
+    serverTime = serverTime,
+    highlightMsgid = highlightMsgid,
+)
 
 /** Fetch and persist one completed AROUND page using only selectors the server advertised. */
 internal suspend fun fetchAroundHistoryPage(
@@ -123,12 +153,5 @@ internal suspend fun fetchAroundHistoryPage(
     persistPage(request, page)
     return true
 }
-
-/**
- * A deep jump may settle (and therefore open the mark-read gate) only after the row at its
- * resolved index is still the exact msgid requested. A time-only jump has no identity to check.
- */
-internal fun deepJumpTargetMatches(expectedMsgid: String?, actualMsgid: String?): Boolean =
-    expectedMsgid == null || expectedMsgid == actualMsgid
 
 private const val INVALID_MSGREFTYPE = "INVALID_MSGREFTYPE"

@@ -12,11 +12,12 @@ import io.github.trevarj.motd.data.db.EventRedirectEntity
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
-import io.github.trevarj.motd.data.db.UserDao
+import io.github.trevarj.motd.data.db.UserEntity
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.AvatarStyle
@@ -39,9 +40,13 @@ import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.irc.transport.IrcTransport
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
@@ -54,11 +59,9 @@ import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
-import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
-import io.github.trevarj.motd.ui.nav.ChatRoute
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -72,6 +75,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.consumeAsFlow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -80,6 +85,7 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -261,6 +267,36 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `channel commands use wire target instead of collision-safe internal name`() = runTest {
+        val transport = RecordingTransport()
+        val client = testClient(transport)
+        client.start()
+        advanceUntilIdle()
+        transport.sent.clear()
+        val collisionRoom = channel.copy(
+            name = "#room\u0000account:stable",
+            displayName = "!WireRoom",
+        )
+        val vm = viewModel(
+            collisionRoom,
+            FakeConnectionManager(network.id, client = client),
+        )
+        vm.state.first { it.buffer != null }
+
+        vm.submit("/topic reviewed topic", {}, {})
+        vm.setMemberMode("alice", 'o', grant = true)
+        vm.kick("bob", "reason")
+        vm.ban("carol")
+        advanceUntilIdle()
+
+        val commands = transport.sent.map { IrcMessage.parse(it) }
+        assertEquals(listOf("TOPIC", "MODE", "KICK", "MODE"), commands.map { it.command })
+        assertTrue(commands.all { it.params.firstOrNull() == "!WireRoom" })
+        assertTrue(transport.sent.none { '\u0000' in it })
+        client.stop()
+    }
+
+    @Test
     fun `server buffer invalid raw command surfaces snackbar without sending`() = runTest {
         val server = BufferEntity(
             networkId = network.id,
@@ -275,7 +311,7 @@ class ChatViewModelTest {
         vm.submit("/", {}, {})
         advanceUntilIdle()
 
-        assertEquals("invalid", vm.snackbar.value)
+        assertEquals(ChatUiEvent.InvalidCommand, vm.uiEvents.value.single().value)
         assertTrue(manager.sentLines.isEmpty())
     }
 
@@ -458,6 +494,43 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `reaction failures enqueue typed replay-safe events`() = runTest {
+        val blocked = viewModel(channel, FakeConnectionManager(network.id))
+        blocked.state.first { it.buffer != null }
+        blocked.react(message(channel.id, "confirmed", "m1", "alice"), "👍")
+        advanceUntilIdle()
+        assertEquals(ChatUiEvent.ReactionBlocked, blocked.uiEvents.value.single().value)
+
+        val unconfirmed = viewModel(
+            channel,
+            FakeConnectionManager(
+                networkId = network.id,
+                state = IrcClientState.Ready("me", setOf("message-tags"), emptyMap()),
+            ),
+        )
+        unconfirmed.state.first { it.buffer != null }
+        unconfirmed.react(message(channel.id, "pending", null, "me", id = 91), "👍")
+        advanceUntilIdle()
+        assertEquals(
+            ChatUiEvent.ReactionTargetUnavailable,
+            unconfirmed.uiEvents.value.single().value,
+        )
+
+        val sendFailure = viewModel(
+            channel,
+            FakeConnectionManager(
+                networkId = network.id,
+                state = IrcClientState.Ready("me", setOf("message-tags"), emptyMap()),
+                reactionError = true,
+            ),
+        )
+        sendFailure.state.first { it.buffer != null }
+        sendFailure.react(message(channel.id, "confirmed", "m2", "alice"), "👍")
+        advanceUntilIdle()
+        assertEquals(ChatUiEvent.ReactionSendFailed, sendFailure.uiEvents.value.single().value)
+    }
+
+    @Test
     fun `retry preserves failed row when no replacement is accepted`() = runTest {
         val messages = FakeMessageRepository()
         val manager = FakeConnectionManager(network.id, retryAccepted = false)
@@ -470,7 +543,131 @@ class ChatViewModelTest {
 
         assertTrue(messages.deletedIds.isEmpty())
         assertTrue(manager.messages.isEmpty())
-        assertEquals("send_rejected", vm.snackbar.value)
+        assertEquals(ChatUiEvent.SendRejected, vm.uiEvents.value.single().value)
+    }
+
+    @Test
+    fun `reply jump failure queues exact retry and retry reissues opaque msgid`() = runTest {
+        val messages = FakeMessageRepository()
+        val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
+        vm.state.first { it.buffer != null }
+        vm.onInitialPositionHandled()
+        val exact = "MiXeD/opaque=Reply"
+
+        vm.jumpToRepliedMessage(exact)
+        advanceUntilIdle()
+
+        val queued = vm.uiEvents.value.single()
+        val failure = queued.value as ChatUiEvent.ReplyJumpUnavailable
+        assertEquals(exact, failure.request.msgid)
+        vm.acknowledgeUiEvent(queued.id)
+        assertTrue(vm.uiEvents.value.isEmpty())
+
+        messages.resolvedByMsgid = message(channel.id, "parent", exact, "alice", id = 90)
+        vm.retryReplyJump(failure.request)
+        advanceUntilIdle()
+
+        assertEquals(listOf(exact, exact), messages.requestedMsgids)
+        assertEquals(exact, vm.jumpTarget.value?.expectedMsgid)
+        assertEquals(90L, vm.jumpTarget.value?.expectedEventId)
+    }
+
+    @Test
+    fun `newer reply jump supersedes older target and ignores stale acknowledgment`() = runTest {
+        val messages = FakeMessageRepository()
+        val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
+        vm.state.first { it.buffer != null }
+        vm.onInitialPositionHandled()
+        messages.resolvedByMsgid = message(channel.id, "first", "first", "alice", id = 90)
+
+        vm.jumpToRepliedMessage("first")
+        advanceUntilIdle()
+        val first = vm.jumpTarget.value!!
+
+        messages.resolvedByMsgid = message(channel.id, "second", "second", "alice", id = 91)
+        vm.jumpToRepliedMessage("second")
+        advanceUntilIdle()
+        val second = vm.jumpTarget.value!!
+
+        assertTrue(second.requestToken > first.requestToken)
+        assertEquals("second", second.expectedMsgid)
+        vm.onJumpHandled(first.requestToken)
+        assertEquals(second, vm.jumpTarget.value)
+        vm.onJumpHandled(second.requestToken)
+        assertNull(vm.jumpTarget.value)
+    }
+
+    @Test
+    fun `rapid reply taps cancel an in-flight older resolve`() = runTest {
+        val messages = FakeMessageRepository().apply { blockedMsgid = "slow" }
+        val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
+        vm.state.first { it.buffer != null }
+        vm.onInitialPositionHandled()
+
+        vm.jumpToRepliedMessage("slow")
+        advanceUntilIdle()
+        assertTrue(messages.blockedResolutionStarted.isCompleted)
+
+        messages.resolvedByMsgid = message(channel.id, "newer", "fast", "alice", id = 92)
+        vm.jumpToRepliedMessage("fast")
+        advanceUntilIdle()
+
+        assertEquals("fast", vm.jumpTarget.value?.expectedMsgid)
+        assertTrue(vm.uiEvents.value.isEmpty())
+    }
+
+    @Test
+    fun `persisted current identity keeps account reaction ownership while disconnected`() = runTest {
+        db.networkIdentityDao().upsert(NetworkIdentityEntity(network.id, selfNick = "newNick"))
+        db.userDao().upsert(
+            UserEntity(
+                networkId = network.id,
+                nick = IrcIdentityRules().normalize("newNick"),
+                account = "stable-account",
+            ),
+        )
+        val messages = FakeMessageRepository().apply {
+            reactionRows = listOf(
+                ReactionEntity(
+                    bufferId = channel.id,
+                    targetMsgid = "target",
+                    actorKey = "account:stable-account",
+                    sender = "oldNick",
+                    emoji = "👍",
+                    serverTime = 1,
+                ),
+            )
+        }
+        val vm = viewModel(
+            channel,
+            FakeConnectionManager(network.id, state = IrcClientState.Disconnected),
+            messages = messages,
+        )
+        vm.setVisibleMsgids(listOf("target"))
+
+        val chips = vm.reactionChips.first { it["target"]?.singleOrNull()?.mine == true }
+        assertTrue(chips.getValue("target").single().mine)
+    }
+
+    @Test
+    fun `social toggles use rules-aware atomic preference mutation`() = runTest {
+        val settings = FakeSettingsRepository()
+        settings.settings.value = Settings(friends = setOf("Nick[", "nick{"))
+        val vm = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            settings = settings,
+        )
+        vm.state.first { it.buffer != null }
+
+        vm.toggleFool("NICK{")
+        advanceUntilIdle()
+
+        val mutation = settings.foolMutations.single()
+        assertEquals("NICK{", mutation.nick)
+        assertTrue(mutation.enabled)
+        assertTrue(mutation.rules.normalize("Nick[") == mutation.rules.normalize("nick{"))
+        assertFalse(settings.legacyFoolMutationCalled)
     }
 
     @Test
@@ -499,20 +696,22 @@ class ChatViewModelTest {
             scrollPositions = positions,
         )
         vm.state.first { it.buffer != null }
-        assertEquals(
-            ChatInitialPosition(index = 1, offset = 37, fromSavedPosition = true),
-            vm.initialTarget.first { it != null },
-        )
+        val restored = vm.initialTarget.first { it != null }
+        assertEquals(1, restored?.index)
+        assertEquals(37, restored?.offset)
+        assertEquals(loserId, restored?.expectedEventId)
+        assertTrue(restored?.fromSavedPosition == true)
         vm.onInitialPositionHandled()
         assertEquals(null, vm.initialTarget.value)
 
         db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
         db.messageDao().deleteById(loserId)
 
-        assertEquals(
-            ChatInitialPosition(index = 0, offset = 37, fromSavedPosition = true),
-            vm.initialTarget.first { it != null },
-        )
+        val redirected = vm.initialTarget.first { it != null }
+        assertEquals(0, redirected?.index)
+        assertEquals(37, redirected?.offset)
+        assertEquals(winnerId, redirected?.expectedEventId)
+        assertTrue(redirected?.fromSavedPosition == true)
         assertEquals(winnerId, positions.get(channel.id)?.rowId)
         assertEquals(500L, positions.get(channel.id)?.serverTime)
         assertEquals(37, positions.get(channel.id)?.offset)
@@ -530,13 +729,14 @@ class ChatViewModelTest {
         routeBufferId: Long = buffer.id,
         foreground: FakeForegroundBufferTracker = FakeForegroundBufferTracker(),
         scrollPositions: ChatScrollPositionStore = ChatScrollPositionStore(),
+        settings: FakeSettingsRepository = FakeSettingsRepository(),
     ): ChatViewModel {
-        val settings = FakeSettingsRepository()
         val eventSink: IrcEventSink = processor
         return ChatViewModel(
             savedStateHandle = SavedStateHandle(mapOf("bufferId" to routeBufferId)),
             messageRepository = messages,
             bufferRepository = FakeBufferRepository(buffer, routeBufferId),
+            networkIdentityDao = db.networkIdentityDao(),
             connectionManager = manager,
             typingTracker = FakeTypingTracker(),
             foregroundBufferTracker = foreground,
@@ -556,9 +756,9 @@ class ChatViewModelTest {
         )
     }
 
-    private fun testClient() = IrcClient(
+    private fun testClient(transport: IrcTransport? = null) = IrcClient(
         config = IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
-        factory = TransportFactory { _, _, _, _, _ -> error("transport is not used") },
+        factory = TransportFactory { _, _, _, _, _ -> transport ?: error("transport is not used") },
         scope = CoroutineScope(SupervisorJob() + dispatcher),
     )
 
@@ -589,6 +789,7 @@ class ChatViewModelTest {
         private val retryAccepted: Boolean = true,
         private val sendAccepted: Boolean = true,
         private val sendGate: CompletableDeferred<Unit>? = null,
+        private val reactionError: Boolean = false,
     ) : ConnectionManager {
         override val connectionStates = MutableStateFlow(mapOf(networkId to state))
         override val presenceStates: StateFlow<Map<PresenceKey, PresenceState>> =
@@ -625,6 +826,7 @@ class ChatViewModelTest {
                 )
         override suspend fun sendTyping(bufferId: Long, state: String) { typing += bufferId to state }
         override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) {
+            if (reactionError) error("reaction rejected")
             reactions += SentReaction(bufferId, msgid, emoji)
         }
         override suspend fun joinChannel(networkId: Long, channel: String) = Unit
@@ -698,18 +900,48 @@ class ChatViewModelTest {
     ) : MessageRepository {
         val msgid = MutableStateFlow<String?>(null)
         val deletedIds = mutableListOf<Long>()
+        val requestedMsgids = mutableListOf<String>()
+        var resolvedByMsgid: MessageEntity? = null
+        var reactionRows: List<ReactionEntity> = emptyList()
+        var blockedMsgid: String? = null
+        val blockedResolutionStarted = CompletableDeferred<Unit>()
+        private val blockedResolutionRelease = CompletableDeferred<Unit>()
 
-        override fun messages(bufferId: Long): Flow<PagingData<MessageEntity>> = flowOf(PagingData.empty())
-        override fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>> = flowOf(emptyList())
-        override fun reactionsForBuffer(bufferId: Long): Flow<List<ReactionEntity>> = flowOf(emptyList())
+        override fun messages(
+            bufferId: Long,
+            visibility: MessageVisibilitySpec,
+        ): Flow<PagingData<MessageEntity>> = flowOf(PagingData.empty())
+        override fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>> =
+            flowOf(reactionRows.filter { it.bufferId == bufferId && it.targetMsgid in msgids })
         override suspend fun byId(id: Long): MessageEntity? = events[id]
-        override suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity? = null
+        override suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity? {
+            requestedMsgids += msgid
+            if (msgid == blockedMsgid) {
+                blockedResolutionStarted.complete(Unit)
+                blockedResolutionRelease.await()
+            }
+            return resolvedByMsgid?.takeIf { it.bufferId == bufferId && it.msgid == msgid }
+        }
         override fun observeByMsgid(bufferId: Long, msgid: String): Flow<MessageEntity?> = flowOf(null)
         override suspend fun awaitMsgid(id: Long, timeoutMs: Long): String? =
             withTimeoutOrNull(timeoutMs) { msgid.filterNotNull().first() }
-        override suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int = 0
-        override suspend fun firstUnreadOtherTime(bufferId: Long, after: Long): Long? = null
+        override suspend fun countNewerThan(
+            bufferId: Long,
+            serverTime: Long,
+            id: Long,
+            visibility: MessageVisibilitySpec,
+        ): Int = 0
         override suspend fun deleteMessage(id: Long) { deletedIds += id }
+    }
+
+    private class RecordingTransport : IrcTransport {
+        private val inbound = Channel<String>(Channel.UNLIMITED)
+        val sent = mutableListOf<String>()
+
+        override suspend fun connect() = Unit
+        override val incoming: Flow<String> = inbound.consumeAsFlow()
+        override suspend fun send(line: String) { sent += line }
+        override suspend fun close() { inbound.close() }
     }
 
     private class FakeTypingTracker : TypingTracker {
@@ -723,6 +955,13 @@ class ChatViewModelTest {
 
     private class FakeSettingsRepository : SettingsRepository {
         override val settings = MutableStateFlow(Settings())
+        data class SocialMutation(
+            val nick: String,
+            val enabled: Boolean,
+            val rules: IrcIdentityRules,
+        )
+        val foolMutations = mutableListOf<SocialMutation>()
+        var legacyFoolMutationCalled = false
         override suspend fun setThemeMode(m: ThemeMode) = Unit
         override suspend fun setDynamicColor(enabled: Boolean) = Unit
         override suspend fun setDeliveryMode(m: DeliveryMode) = Unit
@@ -731,7 +970,12 @@ class ChatViewModelTest {
         override suspend fun setNickColorPalette(p: NickColorPalette) = Unit
         override suspend fun setNickColorOverride(nick: String, hue: Int?) = Unit
         override suspend fun setFriend(nick: String, isFriend: Boolean) = Unit
-        override suspend fun setFool(nick: String, isFool: Boolean) = Unit
+        override suspend fun setFool(nick: String, isFool: Boolean) {
+            legacyFoolMutationCalled = true
+        }
+        override suspend fun setFool(nick: String, isFool: Boolean, identityRules: IrcIdentityRules) {
+            foolMutations += SocialMutation(nick, isFool, identityRules)
+        }
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
         override suspend fun setShowJoinPartQuit(show: Boolean) = Unit
         override suspend fun setAvatarStyle(style: AvatarStyle) = Unit

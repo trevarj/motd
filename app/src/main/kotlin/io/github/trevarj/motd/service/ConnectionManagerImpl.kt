@@ -14,10 +14,12 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.ircTarget
+import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.data.prefs.CertTrustStore
@@ -46,6 +48,7 @@ import io.github.trevarj.motd.irc.client.preferredNoImplicitNames
 import io.github.trevarj.motd.irc.client.preferredExtendedMonitor
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.ext.MonitorCommands
 import io.github.trevarj.motd.irc.ext.MonitorSupport
 import io.github.trevarj.motd.irc.ext.monitorSupport
@@ -334,6 +337,12 @@ internal suspend fun completeDurableAcceptance(
 }
 
 private const val ACTION_OVERHEAD_BYTES = 9 // SOH + "ACTION " + SOH
+
+internal fun identityRulesFallback(
+    live: IrcIdentityRules?,
+    liveReady: Boolean,
+    persisted: NetworkIdentityEntity?,
+): IrcIdentityRules = live.takeIf { liveReady } ?: persisted?.identityRules ?: IrcIdentityRules()
 
 /**
  * Hilt @Singleton connection subsystem (plans/05). Outlives the foreground service — the service
@@ -862,10 +871,7 @@ class ConnectionManagerImpl @Inject constructor(
     }
 
     private suspend fun bufferForChannel(networkId: Long, channel: String) =
-        bufferDao.byName(
-            networkId,
-            clientFor(networkId)?.isupport?.normalize(channel) ?: normalize(networkId, channel),
-        )
+        bufferStore.resolveChannelRoom(networkId, normalize(networkId, channel))
 
     private fun setRosterState(bufferId: Long, state: RosterLoadState) {
         _rosterStates.update { it + (bufferId to state) }
@@ -1247,9 +1253,16 @@ class ConnectionManagerImpl @Inject constructor(
         bufferDao.openTargets(networkId).map { it.id to it.name }
 
     private suspend fun normalize(networkId: Long, name: String): String {
-        // Delegate normalization to the live client's isupport when available; else lowercase.
+        return identityRules(networkId).normalize(name)
+    }
+
+    private suspend fun identityRules(networkId: Long): IrcIdentityRules {
         val client = clientFor(networkId)
-        return client?.isupport?.normalize(name) ?: name.lowercase()
+        return identityRulesFallback(
+            live = client?.isupport?.identityRules,
+            liveReady = client?.state?.value is IrcClientState.Ready,
+            persisted = db.networkIdentityDao().byNetwork(networkId),
+        )
     }
 
     // -- send paths ---------------------------------------------------------
@@ -1492,7 +1505,7 @@ class ConnectionManagerImpl @Inject constructor(
         val payload = InvitePayloadV1.decode(initial.eventPayload) ?: return
         val buffer = bufferDao.observeById(initial.bufferId) ?: return
         if (buffer.type != BufferType.CHANNEL ||
-            buffer.name != normalize(buffer.networkId, payload.channel)
+            normalize(buffer.networkId, buffer.ircTarget) != normalize(buffer.networkId, payload.channel)
         ) return
         performInviteJoin(
             initialState = initial.inviteState,
@@ -1555,7 +1568,7 @@ class ConnectionManagerImpl @Inject constructor(
                 coroutineScope {
                     val names = async(start = CoroutineStart.UNDISPATCHED) {
                         client.broadcastEvents.filterIsInstance<IrcEvent.Names>().first {
-                            client.isupport.normalize(it.channel) == buffer.name
+                            client.isupport.normalize(it.channel) == client.isupport.normalize(buffer.ircTarget)
                         }
                     }
                     val whox = async { client.whox(buffer.displayName) }
@@ -1611,7 +1624,11 @@ class ConnectionManagerImpl @Inject constructor(
         val client = clientFor(buffer.networkId) ?: return false
         if (client.state.value !is IrcClientState.Ready) return false
         // Append the reason as the PART trailing param when the user supplied one (/part <reason>).
-        val params = if (reason.isNullOrBlank()) listOf(buffer.name) else listOf(buffer.name, reason)
+        val params = if (reason.isNullOrBlank()) {
+            listOf(buffer.ircTarget)
+        } else {
+            listOf(buffer.ircTarget, reason)
+        }
         return client.sendIfConnected(
             io.github.trevarj.motd.irc.proto.IrcMessage(command = "PART", params = params),
         )

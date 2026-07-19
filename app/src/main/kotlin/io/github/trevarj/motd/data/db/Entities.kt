@@ -6,6 +6,7 @@ import androidx.room.ForeignKey
 import androidx.room.Fts4
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 
 enum class NetworkRole { DIRECT, BOUNCER_ROOT, BOUNCER_CHILD }
 
@@ -76,6 +77,29 @@ data class NetworkEntity(
     override fun toString() = "NetworkEntity(id=$id, name=$name, role=$role, host=$host:$port)"
 }
 
+/** Latest identity-related ISUPPORT values advertised by one network. */
+@Entity(
+    tableName = "network_identity",
+    foreignKeys = [ForeignKey(
+        entity = NetworkEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["networkId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+)
+data class NetworkIdentityEntity(
+    @PrimaryKey val networkId: Long,
+    /** Null means CASEMAPPING was absent and the protocol default applies. */
+    val caseMapping: String? = null,
+    /** Null means absent/default; empty is an explicit empty CHANTYPES advertisement. */
+    val chanTypes: String? = null,
+    /** Last registered/current session nick; null means fall back to the configured network nick. */
+    val selfNick: String? = null,
+)
+
+val NetworkIdentityEntity.identityRules: IrcIdentityRules
+    get() = IrcIdentityRules.from(caseMapping, chanTypes)
+
 @Entity(
     tableName = "buffers",
     indices = [
@@ -122,9 +146,9 @@ val RoomEntity.effectiveLocalReadAnchor: TimelineAnchor?
         return listOfNotNull(local, mute).maxOrNull()
     }
 
-/** IRC target spelling is presentation-backed for account-disambiguated query rows. */
+/** Internal room keys may be disambiguated; wire targets always retain server spelling. */
 val RoomEntity.ircTarget: String
-    get() = if (type == BufferType.QUERY) displayName else name
+    get() = if (type == BufferType.SERVER) name else displayName
 
 @Entity(
     tableName = "room_aliases",

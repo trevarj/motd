@@ -2,6 +2,7 @@ package io.github.trevarj.motd.data.repo
 
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
@@ -98,6 +99,47 @@ class SearchRepositoryTest {
 
         settings.state.value = settings.state.value.copy(foolsMode = FoolsMode.HIDE)
         assertTrue(repo.search("fool", null).first().isEmpty())
+    }
+
+    @Test
+    fun foolFilteringUsesEachHitsPersistedAsciiOrStrictRules() = runTest {
+        val asciiNetwork = db.networkDao().insert(network("ascii"))
+        val strictNetwork = db.networkDao().insert(network("strict"))
+        db.networkIdentityDao().upsert(
+            NetworkIdentityEntity(asciiNetwork, caseMapping = "ascii"),
+        )
+        db.networkIdentityDao().upsert(
+            NetworkIdentityEntity(strictNetwork, caseMapping = "rfc1459-strict"),
+        )
+        val asciiBuffer = db.bufferDao().insert(buffer(asciiNetwork, "#ascii"))
+        val strictBuffer = db.bufferDao().insert(buffer(strictNetwork, "#strict"))
+        db.messageDao().insertAll(
+            listOf(
+                message(
+                    asciiBuffer,
+                    "network-policy-hit",
+                    sender = "[Alice",
+                    serverTime = 10,
+                    dedupKey = "ascii-policy",
+                ).copy(normalizedActor = "[alice"),
+                message(
+                    strictBuffer,
+                    "network-policy-hit",
+                    sender = "listener^",
+                    serverTime = 11,
+                    dedupKey = "strict-policy",
+                ).copy(normalizedActor = "listener^"),
+            ),
+        )
+        settings.state.value = Settings(
+            fools = setOf("[alice", "listener~"),
+            foolsMode = FoolsMode.HIDE,
+        )
+
+        val hits = repo.search("network", null).first()
+
+        assertEquals(listOf("listener^"), hits.map { it.message.sender })
+        assertEquals("rfc1459-strict", hits.single().caseMapping)
     }
 
     private class FakeSettingsRepository : SettingsRepository {

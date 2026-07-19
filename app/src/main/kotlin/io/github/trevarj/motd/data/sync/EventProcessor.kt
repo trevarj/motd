@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.ObservationOrigin
 import io.github.trevarj.motd.data.db.EventAliasNamespace
 import io.github.trevarj.motd.data.db.HistoryCursorEntity
@@ -17,6 +18,7 @@ import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.TimelineEventId
 import io.github.trevarj.motd.data.db.UserEntity
+import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.bouncer.redactBouncerServReply
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
@@ -68,6 +70,7 @@ class EventProcessor @Inject constructor(
 ) : IrcEventSink {
 
     private val networkDao get() = db.networkDao()
+    private val networkIdentityDao get() = db.networkIdentityDao()
     private val bufferDao get() = db.bufferDao()
     private val messageDao get() = db.messageDao()
     private val memberDao get() = db.memberDao()
@@ -154,6 +157,9 @@ class EventProcessor @Inject constructor(
             selfNick = nick
         }
 
+        fun isSelfNick(nick: String): Boolean =
+            selfNick.isNotBlank() && normalize(nick) == normalize(selfNick)
+
         fun normalize(name: String): String = identityRules.normalize(name)
 
         fun isChannel(target: String): Boolean = identityRules.isChannel(target)
@@ -163,11 +169,18 @@ class EventProcessor @Inject constructor(
         fun containsSelfMention(text: String): Boolean = identityRules.containsMention(text, selfNick)
     }
 
-    private suspend fun stateFor(networkId: Long): NetworkState =
-        states.getOrPut(networkId) {
-            val n = networkDao.byId(networkId)
-            NetworkState(selfNick = n?.nick ?: "", identityRules = IrcIdentityRules())
-        }
+    private suspend fun stateFor(networkId: Long): NetworkState {
+        states[networkId]?.let { return it }
+        val network = networkDao.byId(networkId)
+        val identity = networkIdentityDao.byNetwork(networkId)
+        val identityRules = identity?.identityRules ?: IrcIdentityRules()
+        recordIdentityDiagnostic(networkId, identityRules)
+        val restored = NetworkState(
+            selfNick = identity?.selfNick ?: network?.nick.orEmpty(),
+            identityRules = identityRules,
+        )
+        return states.putIfAbsent(networkId, restored) ?: restored
+    }
 
     /** Test/setup seam; production registration enters through [process]. */
     internal suspend fun onRegistered(networkId: Long, nick: String, isupport: Map<String, String>) {
@@ -176,16 +189,24 @@ class EventProcessor @Inject constructor(
 
     private suspend fun applyRegistered(networkId: Long, nick: String, isupport: Map<String, String>) {
         connectionGenerations[networkId] = db.connectionGenerationDao().next(networkId)
-        val identityRules = IrcIdentityRules.from(
-            rawCaseMapping = isupport["CASEMAPPING"],
-            advertisedChanTypes = isupport["CHANTYPES"],
+        val identity = NetworkIdentityEntity(
+            networkId = networkId,
+            caseMapping = isupport["CASEMAPPING"],
+            chanTypes = isupport["CHANTYPES"],
+            selfNick = nick,
         )
+        networkIdentityDao.upsert(identity)
+        val identityRules = identity.identityRules
         states[networkId] = NetworkState(
             selfNick = nick,
             identityRules = identityRules,
             prefixModes = parsePrefixModes(isupport["PREFIX"]),
             chanModes = isupport["CHANMODES"]?.split(',')?.map(String::toSet).orEmpty(),
         )
+        recordIdentityDiagnostic(networkId, identityRules)
+    }
+
+    private fun recordIdentityDiagnostic(networkId: Long, identityRules: IrcIdentityRules) {
         identityRules.caseMapping.diagnostic?.let { diagnostic ->
             diagnostics.record("irc_protocol", "unsupported_casemapping") {
                 mapOf("network_id" to networkId, "diagnostic" to diagnostic)
@@ -287,9 +308,9 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         val route = if (origin == EventOrigin.HISTORY) {
             activeHistoryChatRoutes[networkId]?.removeFirstOrNull()
-                ?: resolveChatRoute(networkId, e, st, historyTarget)
+                ?: resolveChatRoute(networkId, e, st, historyTarget, origin)
         } else {
-            resolveChatRoute(networkId, e, st, historyTarget = null)
+            resolveChatRoute(networkId, e, st, historyTarget = null, origin = origin)
         }
         if (route.serverNotice) {
             insertSystem(
@@ -389,7 +410,12 @@ class EventProcessor @Inject constructor(
             }
             if (origin == EventOrigin.LIVE && !sourceIsSelf && canonicalTimeline.claimSound(canonical.id)) {
                 try {
-                    chatSoundPlayer.onIncoming(canonical.bufferId, type, e.copy(text = canonical.text))
+                    chatSoundPlayer.onCanonicalIncoming(
+                        canonical.bufferId,
+                        type,
+                        e.copy(text = canonical.text),
+                        canonical,
+                    )
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -461,7 +487,7 @@ class EventProcessor @Inject constructor(
             }
             val actorKey = st.actorKey(e.source.nick, account)
             val nickKey = st.actorKey(e.source.nick, account = null)
-            deleteLegacyReactionAliases(bufferId, targetMsgid, e.source.nick, emoji)
+            deleteLegacyReactionAliases(bufferId, targetMsgid, e.source.nick, nickKey, emoji)
             if (actorKey != nickKey) {
                 reactionDao.delete(bufferId, targetMsgid, nickKey, emoji)
             }
@@ -634,7 +660,7 @@ class EventProcessor @Inject constructor(
             CanonicalBatchKey(roomId, kind, st.normalize(actor), text, time)
         return when (event) {
             is IrcEvent.ChatMessage -> {
-                val route = resolveChatRoute(networkId, event, st, target)
+                val route = resolveChatRoute(networkId, event, st, target, EventOrigin.HISTORY)
                 activeHistoryChatRoutes[networkId]?.addLast(route)
                 key(
                     route.bufferId,
@@ -689,7 +715,7 @@ class EventProcessor @Inject constructor(
                 val selfInvite = st.normalize(event.nick) == st.normalize(st.selfNick)
                 val validChannel = isChannel(event.channel, st)
                 val existingChannel = if (validChannel) {
-                    bufferDao.byName(networkId, st.normalize(event.channel))
+                    existingChannelBuffer(networkId, event.channel, st)
                 } else {
                     null
                 }
@@ -751,7 +777,7 @@ class EventProcessor @Inject constructor(
                 IrcEvent.NetworkBatchKind.NETSPLIT -> batch.events.forEach { child ->
                     val quit = child as IrcEvent.Quit
                     val targetBufferId = batch.target?.let { target ->
-                        bufferDao.byName(networkId, st.normalize(target))?.id
+                        existingChannelBuffer(networkId, target, st)?.id
                     }
                     (buffersOfNick(networkId, quit.nick) + listOfNotNull(targetBufferId)).distinct().forEach { bufferId ->
                         memberDao.remove(bufferId, quit.nick)
@@ -761,7 +787,7 @@ class EventProcessor @Inject constructor(
                 }
                 IrcEvent.NetworkBatchKind.NETJOIN -> batch.events.forEach { child ->
                     val join = child as IrcEvent.Joined
-                    val buffer = bufferDao.byName(networkId, st.normalize(join.channel))
+                    val buffer = existingChannelBuffer(networkId, join.channel, st)
                         ?: return@forEach
                     memberDao.upsert(MemberEntity(buffer.id, join.nick))
                     journal(networkId, buffer.id, RosterDelta.Upsert(join.nick))
@@ -845,7 +871,7 @@ class EventProcessor @Inject constructor(
         val selfInvite = st.normalize(e.nick) == st.normalize(st.selfNick)
         val validChannel = isChannel(e.channel, st)
         val existingChannel = if (validChannel) {
-            bufferDao.byName(networkId, st.normalize(e.channel))
+            existingChannelBuffer(networkId, e.channel, st)
         } else {
             null
         }
@@ -968,7 +994,7 @@ class EventProcessor @Inject constructor(
 
     private suspend fun onParted(networkId: Long, e: IrcEvent.Parted) {
         val st = stateFor(networkId)
-        val buffer = bufferDao.byName(networkId, st.normalize(e.channel)) ?: return
+        val buffer = existingChannelBuffer(networkId, e.channel, st) ?: return
         if (e.isSelf && buffer.pendingCloseAt != null) {
             // A self-PART is the direct/ZNC server acknowledgement for a queued close. Only now is
             // it safe to cascade-delete local history; the row stayed hidden while awaiting this.
@@ -1016,7 +1042,7 @@ class EventProcessor @Inject constructor(
 
     private suspend fun onKicked(networkId: Long, e: IrcEvent.Kicked) {
         val st = stateFor(networkId)
-        val bufferId = bufferDao.byName(networkId, st.normalize(e.channel))?.id ?: return
+        val bufferId = existingChannelBuffer(networkId, e.channel, st)?.id ?: return
         db.withTransaction {
             memberDao.remove(bufferId, e.nick)
             if (e.isSelf) {
@@ -1039,11 +1065,18 @@ class EventProcessor @Inject constructor(
 
     private suspend fun onNickChanged(networkId: Long, e: IrcEvent.NickChanged) {
         val st = stateFor(networkId)
-        if (e.isSelf) st.setNick(e.to)
+        val selfChange = e.isSelf || st.isSelfNick(e.from)
+        val normalizedOldNick = st.normalize(e.from)
+        val normalizedNewNick = st.normalize(e.to)
+        db.withTransaction {
+            userDao.rekey(networkId, normalizedOldNick, normalizedNewNick)
+            if (selfChange) networkIdentityDao.setSelfNick(networkId, e.to)
+        }
+        if (selfChange) st.setNick(e.to)
         bufferStore.bindNickChange(
             networkId = networkId,
-            normalizedOldNick = st.normalize(e.from),
-            normalizedNewNick = st.normalize(e.to),
+            normalizedOldNick = normalizedOldNick,
+            normalizedNewNick = normalizedNewNick,
             displayNewNick = e.to,
         )
         // Rename member rows across every buffer that had the old nick.
@@ -1169,7 +1202,7 @@ class EventProcessor @Inject constructor(
 
     private suspend fun onTopicChanged(networkId: Long, e: IrcEvent.TopicChanged) {
         val st = stateFor(networkId)
-        val buffer = bufferDao.byName(networkId, st.normalize(e.channel))
+        val buffer = existingChannelBuffer(networkId, e.channel, st)
             ?: ensureBufferEntity(networkId, e.channel, BufferType.CHANNEL, st)
         bufferDao.setTopic(buffer.id, e.topic, e.setBy)
         insertSystem(buffer.id, e.ctx, MessageKind.TOPIC, e.setBy ?: "", "topic: ${e.topic}")
@@ -1178,7 +1211,7 @@ class EventProcessor @Inject constructor(
     /** Persist the 331/332 topic state received during JOIN without adding a fake topic change. */
     private suspend fun onTopicSnapshot(networkId: Long, e: IrcEvent.TopicSnapshot) {
         val st = stateFor(networkId)
-        val buffer = bufferDao.byName(networkId, st.normalize(e.channel))
+        val buffer = existingChannelBuffer(networkId, e.channel, st)
             ?: ensureBufferEntity(networkId, e.channel, BufferType.CHANNEL, st)
         bufferDao.setTopic(buffer.id, e.topic, setBy = null)
     }
@@ -1192,7 +1225,7 @@ class EventProcessor @Inject constructor(
     private suspend fun onModeChanged(networkId: Long, e: IrcEvent.ModeChanged) {
         val st = stateFor(networkId)
         if (!isChannel(e.target, st)) return
-        val bufferId = bufferDao.byName(networkId, st.normalize(e.target))?.id ?: return
+        val bufferId = existingChannelBuffer(networkId, e.target, st)?.id ?: return
         applyPrefixModes(networkId, bufferId, e, st)
         insertSystem(bufferId, e.ctx, MessageKind.MODE, "", "mode ${e.modes} ${e.args.joinToString(" ")}".trim())
     }
@@ -1331,7 +1364,7 @@ class EventProcessor @Inject constructor(
     private suspend fun onReadMarker(networkId: Long, e: IrcEvent.ReadMarker) {
         val ts = e.timestamp ?: return
         val st = stateFor(networkId)
-        val bufferId = bufferDao.byName(networkId, st.normalize(e.target))?.id ?: return
+        val bufferId = existingRoom(networkId, e.target, st)?.id ?: return
         bufferDao.advanceReadMarker(bufferId, ts)
         val localAnchor = io.github.trevarj.motd.data.db.TimelineAnchor(ts, Long.MAX_VALUE)
         bufferDao.advanceLocalReadAnchor(bufferId, localAnchor.serverTime, localAnchor.eventId)
@@ -1392,7 +1425,7 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         if (e.code in PART_ALREADY_CLOSED_NUMERICS) {
             val channel = e.params.firstOrNull { isChannel(it, st) }
-            val buffer = channel?.let { bufferDao.byName(networkId, st.normalize(it)) }
+            val buffer = channel?.let { existingChannelBuffer(networkId, it, st) }
             if (buffer?.pendingCloseAt != null) {
                 // 403/442 confirms the server has no membership to leave. Treat that as the same
                 // terminal acknowledgement as our echoed PART.
@@ -1402,7 +1435,7 @@ class EventProcessor @Inject constructor(
         }
         if (e.code in JOIN_ERROR_NUMERICS) {
             val channel = e.params.firstOrNull { isChannel(it, st) }
-            val inviteBufferId = channel?.let { bufferDao.byName(networkId, st.normalize(it))?.id }
+            val inviteBufferId = channel?.let { existingChannelBuffer(networkId, it, st)?.id }
             if (inviteBufferId != null) {
                 messageDao.failJoiningInvites(inviteBufferId, e.text.ifBlank { e.code })
             }
@@ -1451,7 +1484,7 @@ class EventProcessor @Inject constructor(
         }
         val actorKey = st.actorKey(source, account)
         val nickKey = st.actorKey(source, account = null)
-        deleteLegacyReactionAliases(bufferId, targetMsgid, source, emoji)
+        deleteLegacyReactionAliases(bufferId, targetMsgid, source, nickKey, emoji)
         reactionDao.delete(bufferId, targetMsgid, actorKey, emoji)
         if (actorKey != nickKey) reactionDao.delete(bufferId, targetMsgid, nickKey, emoji)
         return true
@@ -1677,14 +1710,17 @@ class EventProcessor @Inject constructor(
         bufferId: RoomId,
         targetMsgid: String,
         sender: String,
+        currentNickActorKey: String,
         emoji: String,
     ) {
-        val baseActorKey = "nick:${IrcCaseMapping.Rfc1459.normalize(sender)}"
+        // v10 reactions were irreversibly keyed with RFC1459, independent of current rules.
+        val baseActorKey = IrcIdentityRules(IrcCaseMapping.Rfc1459).actorKey(sender, account = null)
         val legacyPrefix = "$baseActorKey\u0000legacy:"
         reactionDao.deleteActorAliases(
             bufferId,
             targetMsgid,
             baseActorKey,
+            currentNickActorKey == baseActorKey,
             legacyPrefix,
             "$legacyPrefix\uFFFF",
             emoji,
@@ -1706,7 +1742,7 @@ class EventProcessor @Inject constructor(
         val sourceIsSelf = if (historyPeer != null) {
             st.normalize(target) == st.normalize(historyPeer)
         } else {
-            st.normalize(source) == st.normalize(st.selfNick)
+            st.isSelfNick(source)
         }
         return ReactionRoute(
             bufferName = if (isDm) historyPeer ?: if (sourceIsSelf) target else source else target,
@@ -1721,7 +1757,7 @@ class EventProcessor @Inject constructor(
     ): RoomId? = if (route.type == BufferType.QUERY) {
         bufferStore.resolveQueryRoom(networkId, st.normalize(route.bufferName), account = null)?.id
     } else {
-        bufferDao.byName(networkId, st.normalize(route.bufferName))?.id
+        existingChannelBuffer(networkId, route.bufferName, st)?.id
     }
 
     /**
@@ -1737,6 +1773,7 @@ class EventProcessor @Inject constructor(
         event: IrcEvent.ChatMessage,
         st: NetworkState,
         historyTarget: String?,
+        origin: EventOrigin,
     ): ChatRoute {
         val isDm = !isChannel(event.target, st)
         // Server-sourced NOTICEs never create query rooms.
@@ -1753,9 +1790,11 @@ class EventProcessor @Inject constructor(
         val historyPeer = historyTarget?.takeIf { isDm && !isChannel(it, st) }
         // In a query CHATHISTORY batch the wire target disambiguates direction across nick
         // changes: outgoing rows target the peer; incoming rows target any historical self nick.
-        val sourceIsSelf = event.isSelf || (
-            historyPeer != null && st.normalize(event.target) == st.normalize(historyPeer)
-        )
+        val sourceIsSelf = event.isSelf || when (origin) {
+            EventOrigin.HISTORY ->
+                historyPeer != null && st.normalize(event.target) == st.normalize(historyPeer)
+            EventOrigin.LIVE, EventOrigin.PUSH -> st.isSelfNick(event.source.nick)
+        }
         val bufferName = if (isDm) {
             historyPeer ?: if (sourceIsSelf) event.target else event.source.nick
         } else {
@@ -1807,8 +1846,26 @@ class EventProcessor @Inject constructor(
             bufferStore.resolveQueryRoom(networkId, norm, account = null)?.let { return it }
             return bufferStore.getOrCreate(networkId, norm, name, type)
         }
-        bufferDao.byName(networkId, norm)?.let { return it }
+        if (type == BufferType.CHANNEL) {
+            bufferStore.resolveChannelRoom(networkId, norm)?.let { return it }
+        }
         return bufferStore.getOrCreate(networkId, norm, name, type)
+    }
+
+    private suspend fun existingChannelBuffer(
+        networkId: Long,
+        target: String,
+        st: NetworkState,
+    ): BufferEntity? = bufferStore.resolveChannelRoom(networkId, st.normalize(target))
+
+    private suspend fun existingRoom(
+        networkId: Long,
+        target: String,
+        st: NetworkState,
+    ): BufferEntity? = if (st.isChannel(target)) {
+        existingChannelBuffer(networkId, target, st)
+    } else {
+        bufferStore.resolveQueryRoom(networkId, st.normalize(target), account = null)
     }
 
     private suspend fun historicalTargetBuffer(networkId: Long, target: String?): Long? {

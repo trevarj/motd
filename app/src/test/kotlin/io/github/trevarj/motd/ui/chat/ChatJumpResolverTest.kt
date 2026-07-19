@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.repo.MessageRepository
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.client.HistoryAvailability
@@ -15,7 +16,9 @@ import io.github.trevarj.motd.irc.client.IrcCommandException
 import io.github.trevarj.motd.irc.client.IrcDisconnectedException
 import io.github.trevarj.motd.irc.client.IrcTimeoutException
 import java.io.IOException
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -28,11 +31,11 @@ private class FakeMessageRepository(
 ) : MessageRepository {
     val store = rows.toMutableList()
 
-    override fun messages(bufferId: Long): Flow<PagingData<MessageEntity>> = flowOf(PagingData.empty())
+    override fun messages(
+        bufferId: Long,
+        visibility: MessageVisibilitySpec,
+    ): Flow<PagingData<MessageEntity>> = flowOf(PagingData.empty())
     override fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>> =
-        flowOf(emptyList())
-
-    override fun reactionsForBuffer(bufferId: Long): Flow<List<ReactionEntity>> =
         flowOf(emptyList())
 
     override suspend fun byId(id: Long): MessageEntity? = store.firstOrNull { it.id == id }
@@ -51,15 +54,17 @@ private class FakeMessageRepository(
         store.firstOrNull { it.id == id }?.msgid
 
     // Strict complement of (serverTime DESC, id DESC).
-    override suspend fun countNewerThan(bufferId: Long, serverTime: Long, id: Long): Int =
+    override suspend fun countNewerThan(
+        bufferId: Long,
+        serverTime: Long,
+        id: Long,
+        visibility: MessageVisibilitySpec,
+    ): Int =
         store.count {
             it.bufferId == bufferId &&
                 (it.serverTime > serverTime || (it.serverTime == serverTime && it.id > id))
         }
 
-    override suspend fun firstUnreadOtherTime(bufferId: Long, after: Long): Long? =
-        store.filter { it.bufferId == bufferId && !it.isSelf && it.serverTime > after }
-            .minOfOrNull { it.serverTime }
 }
 
 private fun msg(id: Long, bufferId: Long, serverTime: Long, msgid: String?): MessageEntity =
@@ -88,7 +93,9 @@ class ChatJumpResolverTest {
             eventId = 2,
         )
 
-        assertEquals(ChatJumpResolver.Result.Target(index = 1, highlightMsgid = null), result)
+        val target = (result as ChatJumpResolver.Result.Resolved).target
+        assertEquals(1, target.index)
+        assertEquals(2L, target.expectedEventId)
     }
 
     @Test fun `canonical event id accepts a losing room redirect`() = runTest {
@@ -106,7 +113,9 @@ class ChatJumpResolverTest {
             eventId = 2,
         )
 
-        assertEquals(ChatJumpResolver.Result.Target(index = 0, highlightMsgid = null), result)
+        val target = (result as ChatJumpResolver.Result.Resolved).target
+        assertEquals(0, target.index)
+        assertEquals(2L, target.expectedEventId)
     }
 
     @Test fun `only durable unresolved entry state presents the not-loaded snackbar`() {
@@ -165,8 +174,115 @@ class ChatJumpResolverTest {
     @Test fun `deep jump cannot settle when its resolved index has a different msgid`() {
         // The screen must re-resolve this case and leave the mark-read gate closed until a later
         // target matches; a subsequent NotFound then takes the durable unresolved path.
-        assertTrue(!deepJumpTargetMatches(expectedMsgid = "wanted", actualMsgid = "shifted"))
-        assertTrue(deepJumpTargetMatches(expectedMsgid = "wanted", actualMsgid = "wanted"))
+        val target = ChatPositionTarget(index = 1, expectedEventId = 7, expectedMsgid = "wanted")
+        assertTrue(!positionTargetMatches(target, msg(7, 1, 1, "shifted")))
+        assertTrue(positionTargetMatches(target, msg(7, 1, 1, "wanted")))
+        assertTrue(!positionTargetMatches(target, msg(8, 1, 1, "wanted")))
+    }
+
+    @Test fun `deep placeholder requests only target and waits for materialization at 50k`() = runTest {
+        val requested = mutableListOf<Int>()
+        val expected = msg(50_000, 7, 1, "Opaque/Exact")
+
+        val loaded = requestAndAwaitTarget(
+            index = 49_999,
+            request = { requested += it; true },
+            snapshots = flow {
+                emit(TargetMaterialization<MessageEntity>(null, loading = false))
+                emit(TargetMaterialization<MessageEntity>(null, loading = true))
+                emit(TargetMaterialization(expected, loading = false))
+            },
+        )
+
+        assertEquals(listOf(49_999), requested)
+        assertEquals(expected, loaded)
+    }
+
+    @Test fun `target snapshot replacement terminates unresolved without scanning`() = runTest {
+        val requested = mutableListOf<Int>()
+
+        val loaded = requestAndAwaitTarget<MessageEntity>(
+            index = 49_999,
+            request = { requested += it; true },
+            snapshots = flow {
+                emit(TargetMaterialization(null, loading = false, generation = "old"))
+                emit(TargetMaterialization(null, loading = false, generation = "replacement"))
+            },
+        )
+
+        assertEquals(listOf(49_999), requested)
+        assertEquals(null, loaded)
+    }
+
+    @Test fun `target materialization waits for its load and reports its error`() = runTest {
+        val requested = mutableListOf<Int>()
+
+        val loaded = requestAndAwaitTarget<MessageEntity>(
+            index = 7,
+            request = { requested += it; true },
+            snapshots = flow {
+                emit(TargetMaterialization(null, loading = false, generation = 1))
+                emit(TargetMaterialization(null, loading = true, generation = 1))
+                emit(TargetMaterialization(null, loading = false, failed = true, generation = 1))
+            },
+        )
+
+        assertEquals(listOf(7), requested)
+        assertEquals(null, loaded)
+    }
+
+    @Test fun `target load state ignores an unrelated preexisting paging error`() {
+        val prependError = LoadState.Error(IllegalStateException("unrelated prepend"))
+        val appendIdle = LoadState.NotLoading(endOfPaginationReached = false)
+
+        assertEquals(
+            appendIdle,
+            relevantTargetLoadState(
+                index = 90,
+                loadedStart = 40,
+                loadedEnd = 80,
+                prepend = prependError,
+                append = appendIdle,
+            ),
+        )
+        assertEquals(
+            null,
+            relevantTargetLoadState(
+                index = 60,
+                loadedStart = 40,
+                loadedEnd = 80,
+                prepend = prependError,
+                append = appendIdle,
+            ),
+        )
+    }
+
+    @Test fun `preexisting target-direction error does not hide later materialization`() = runTest {
+        val expected = msg(8, 7, 1, "target")
+
+        val loaded = requestAndAwaitTarget(
+            index = 7,
+            request = { true },
+            snapshots = flow {
+                emit(TargetMaterialization<MessageEntity>(null, loading = false, failed = true, generation = 1))
+                emit(TargetMaterialization(expected, loading = false, failed = true, generation = 1))
+            },
+        )
+
+        assertEquals(expected, loaded)
+    }
+
+    @Test fun `target materialization timeout reports unresolved`() = runTest {
+        val loaded = requestAndAwaitTarget<MessageEntity>(
+            index = 7,
+            request = { true },
+            snapshots = flow {
+                emit(TargetMaterialization(null, loading = false, generation = 1))
+                awaitCancellation()
+            },
+        )
+
+        assertEquals(null, loaded)
     }
 
     @Test fun local_hit_returns_index_and_highlight() = runTest {
@@ -179,10 +295,12 @@ class ChatJumpResolverTest {
         )
         val resolver = ChatJumpResolver(repo) { _, _, _, _ -> false }
         val r = resolver.resolve(bufferId = 7, msgid = "m-b", timeMs = 200, bufferName = "#chan")
-        assertTrue(r is ChatJumpResolver.Result.Target)
-        r as ChatJumpResolver.Result.Target
-        assertEquals(1, r.index)
-        assertEquals("m-b", r.highlightMsgid)
+        assertTrue(r is ChatJumpResolver.Result.Resolved)
+        val target = (r as ChatJumpResolver.Result.Resolved).target
+        assertEquals(1, target.index)
+        assertEquals("m-b", target.highlightMsgid)
+        assertEquals("m-b", target.expectedMsgid)
+        assertEquals(2L, target.expectedEventId)
     }
 
     @Test fun around_fallback_inserts_then_resolves() = runTest {
@@ -194,11 +312,11 @@ class ChatJumpResolverTest {
             true
         }
         val r = resolver.resolve(bufferId = 7, msgid = "m-b", timeMs = 200, bufferName = "#chan")
-        assertTrue(r is ChatJumpResolver.Result.Target)
-        r as ChatJumpResolver.Result.Target
+        assertTrue(r is ChatJumpResolver.Result.Resolved)
+        val target = (r as ChatJumpResolver.Result.Resolved).target
         // m-b at t=200 is older than m-c at t=300 → index 1.
-        assertEquals(1, r.index)
-        assertEquals("m-b", r.highlightMsgid)
+        assertEquals(1, target.index)
+        assertEquals("m-b", target.highlightMsgid)
     }
 
     @Test fun timeout_or_absent_is_not_found() = runTest {
@@ -219,10 +337,10 @@ class ChatJumpResolverTest {
         )
         val resolver = ChatJumpResolver(repo) { _, _, _, _ -> false }
         val r = resolver.resolve(bufferId = 7, msgid = null, timeMs = 200, bufferName = "#chan")
-        assertTrue(r is ChatJumpResolver.Result.Target)
-        r as ChatJumpResolver.Result.Target
-        assertEquals(1, r.index) // one row (t=300) is strictly newer than t=200
-        assertEquals(null, r.highlightMsgid)
+        assertTrue(r is ChatJumpResolver.Result.Resolved)
+        val target = (r as ChatJumpResolver.Result.Resolved).target
+        assertEquals(1, target.index) // one row (t=300) is strictly newer than t=200
+        assertEquals(null, target.highlightMsgid)
     }
 
     @Test fun `unread time target lands at its reverse-list boundary`() = runTest {
@@ -237,8 +355,8 @@ class ChatJumpResolverTest {
         ) { _, _, _, _ -> false }
 
         val result = resolver.resolve(bufferId = 7, msgid = null, timeMs = 200, bufferName = null)
-        assertTrue(result is ChatJumpResolver.Result.Target)
-        assertEquals(1, (result as ChatJumpResolver.Result.Target).index)
+        assertTrue(result is ChatJumpResolver.Result.Resolved)
+        assertEquals(1, (result as ChatJumpResolver.Result.Resolved).target.index)
     }
 
     @Test fun `time target lands at the newest row of a tied timestamp`() = runTest {
@@ -254,7 +372,7 @@ class ChatJumpResolverTest {
         ) { _, _, _, _ -> false }
 
         val result = resolver.resolve(bufferId = 7, msgid = null, timeMs = 200, bufferName = null)
-        assertEquals(1, (result as ChatJumpResolver.Result.Target).index)
+        assertEquals(1, (result as ChatJumpResolver.Result.Resolved).target.index)
     }
 
     @Test fun `policy-backed count controls the presented timeline index`() = runTest {
@@ -271,7 +389,7 @@ class ChatJumpResolverTest {
         )
 
         val result = resolver.resolve(7, "target", 100, "#chan")
-        assertEquals(0, (result as ChatJumpResolver.Result.Target).index)
+        assertEquals(0, (result as ChatJumpResolver.Result.Resolved).target.index)
     }
 
     @Test fun `around fetch prefers and preserves opaque msgid then persists exact request`() = runTest {

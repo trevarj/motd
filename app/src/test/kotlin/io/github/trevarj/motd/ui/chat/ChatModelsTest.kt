@@ -2,6 +2,8 @@ package io.github.trevarj.motd.ui.chat
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.paging.LoadState
+import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
@@ -9,6 +11,13 @@ import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.irc.client.HistoryAvailability
+import io.github.trevarj.motd.irc.client.HistoryReferenceType
+import io.github.trevarj.motd.irc.client.IrcDisconnectedException
+import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.service.HistoryResyncState
 import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -18,11 +27,16 @@ import org.junit.Test
 
 class ChatModelsTest {
 
-    private fun react(msgid: String, sender: String, emoji: String) =
+    private fun react(
+        msgid: String,
+        sender: String,
+        emoji: String,
+        actorKey: String = IrcIdentityRules().actorKey(sender, null),
+    ) =
         ReactionEntity(
             bufferId = 1L,
             targetMsgid = msgid,
-            actorKey = "nick:${sender.lowercase()}",
+            actorKey = actorKey,
             sender = sender,
             emoji = emoji,
             serverTime = 0L,
@@ -34,12 +48,17 @@ class ChatModelsTest {
         failed: Boolean = false,
         id: Long = 1L,
         sender: String = "nick",
+        normalizedActor: String = IrcIdentityRules().normalize(sender),
+        senderAccount: String? = null,
+        serverTime: Long = 1L,
     ) =
         MessageEntity(
             id = id,
             bufferId = 1L,
-            serverTime = 1L,
+            serverTime = serverTime,
             sender = sender,
+            normalizedActor = normalizedActor,
+            senderAccount = senderAccount,
             kind = kind,
             text = "text",
             isSelf = self,
@@ -68,12 +87,30 @@ class ChatModelsTest {
         assertFalse(chips.getValue("m1").single().mine)
     }
 
-    @Test fun `custom normalizer is honored`() {
-        // An isupport-style normalizer that folds trailing digits away would make nick1 == nick.
+    @Test fun `strict casemap does not merge tilde and caret reaction actors`() {
+        val strict = IrcIdentityRules(IrcCaseMapping.Rfc1459Strict)
         val chips = aggregateReactions(
-            listOf(react("m1", "Alice1", "👍")),
-            myNick = "alice2",
-            normalizer = { it.lowercase().trimEnd('1', '2') },
+            listOf(react("m1", "nick~", "👍", strict.actorKey("nick~", null))),
+            myNick = "nick^",
+            identityRules = strict,
+        )
+        assertFalse(chips.getValue("m1").single().mine)
+    }
+
+    @Test fun `reaction ownership prefers exact account actor`() {
+        val chips = aggregateReactions(
+            listOf(react("m1", "oldNick", "👍", actorKey = "account:alice")),
+            myNick = "newNick",
+            myAccount = "alice",
+        )
+        assertTrue(chips.getValue("m1").single().mine)
+    }
+
+    @Test fun `persisted account owns reaction without a live nick`() {
+        val chips = aggregateReactions(
+            listOf(react("m1", "oldNick", "👍", actorKey = "account:alice")),
+            myNick = null,
+            myAccount = "alice",
         )
         assertTrue(chips.getValue("m1").single().mine)
     }
@@ -279,20 +316,37 @@ class ChatModelsTest {
         assertFalse(isAtEffectiveBottom(1, 0, rows.size, rows::getOrNull, policy))
     }
 
+    @Test fun `placeholder-aware helpers never scan a 50k unloaded timeline`() {
+        var probes = 0
+        val peek: (Int) -> MessageEntity? = {
+            probes++
+            null
+        }
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec())
+
+        assertNull(newestEffectiveMessageId(50_000, peek, policy))
+        assertTrue(probes <= MAX_PLACEHOLDER_PROBES)
+        probes = 0
+        assertFalse(isAtEffectiveBottom(49_999, 0, 50_000, peek, policy))
+        assertEquals(0, probes)
+        assertNull(nearestAnchorRow(25_000, 50_000, peek, policy))
+        assertTrue(probes <= MAX_PLACEHOLDER_PROBES * 2)
+    }
+
     @Test fun `normal entry scrolls newest only when retained state is off bottom`() {
-        assertFalse(shouldScrollToInitialTarget(ChatInitialPosition(index = 0), atBottom = true))
-        assertTrue(shouldScrollToInitialTarget(ChatInitialPosition(index = 0), atBottom = false))
+        assertFalse(shouldScrollToInitialTarget(ChatPositionTarget(index = 0), atBottom = true))
+        assertTrue(shouldScrollToInitialTarget(ChatPositionTarget(index = 0), atBottom = false))
     }
 
     @Test fun `normal entry always scrolls to older unread target`() {
-        assertTrue(shouldScrollToInitialTarget(ChatInitialPosition(index = 7), atBottom = true))
-        assertTrue(shouldScrollToInitialTarget(ChatInitialPosition(index = 7), atBottom = false))
+        assertTrue(shouldScrollToInitialTarget(ChatPositionTarget(index = 7), atBottom = true))
+        assertTrue(shouldScrollToInitialTarget(ChatPositionTarget(index = 7), atBottom = false))
     }
 
     @Test fun `saved scroll position always restores`() {
         assertTrue(
             shouldScrollToInitialTarget(
-                ChatInitialPosition(index = 0, offset = 20, fromSavedPosition = true),
+                ChatPositionTarget(index = 0, offset = 20, fromSavedPosition = true),
                 atBottom = true,
             ),
         )
@@ -317,5 +371,191 @@ class ChatModelsTest {
         assertEquals(MessageContentType.SYSTEM, messageContentType(message(kind = MessageKind.JOIN)))
         assertEquals(MessageContentType.NETWORK_BATCH, messageContentType(message(kind = MessageKind.NETSPLIT)))
         assertEquals(MessageContentType.NETWORK_BATCH, messageContentType(message(kind = MessageKind.NETJOIN)))
+    }
+
+    @Test fun `grouping uses account then casemapped actor and always separates direction`() {
+        val accountOlder = message(
+            id = 1,
+            sender = "OldNick",
+            senderAccount = "alice",
+            serverTime = 100,
+        )
+        val accountCurrent = message(
+            id = 2,
+            sender = "NewNick",
+            senderAccount = "alice",
+            serverTime = 200,
+        )
+        assertFalse(showsSender(accountCurrent, accountOlder))
+        assertTrue(showsSender(accountCurrent.copy(senderAccount = "other"), accountOlder))
+
+        val mappedOlder = message(id = 3, sender = "nick[]", normalizedActor = "nick{}", serverTime = 300)
+        val mappedCurrent = message(id = 4, sender = "nick{}", normalizedActor = "nick{}", serverTime = 400)
+        assertFalse(showsSender(mappedCurrent, mappedOlder))
+        assertTrue(showsSender(mappedCurrent.copy(isSelf = true), mappedOlder))
+
+        val partiallyEnriched = mappedCurrent.copy(senderAccount = "late-account")
+        assertFalse(showsSender(partiallyEnriched, mappedOlder))
+    }
+
+    @Test fun `typed UI queue replays in order and acknowledges by stable id`() {
+        val queue = ChatUiEventQueue()
+        val first = queue.enqueue(ChatUiEvent.InvalidCommand)
+        val second = queue.enqueue(ChatUiEvent.SendRejected)
+
+        assertEquals(listOf(first, second), queue.pending.value)
+        queue.acknowledge(first.id)
+        assertEquals(listOf(second), queue.pending.value)
+        queue.acknowledge(first.id)
+        assertEquals(listOf(second), queue.pending.value)
+    }
+
+    @Test fun `typed snackbar handles retry before acknowledging and preserves exact reply request`() {
+        val historyEvent = QueuedChatUiEvent(7, ChatUiEvent.HistoryIncomplete(3))
+        val historyOrder = mutableListOf<String>()
+        handleChatUiEventResult(
+            event = historyEvent,
+            actionPerformed = true,
+            retryReplyJump = { historyOrder += "unexpected" },
+            retryMissingHistory = { historyOrder += "retry" },
+            acknowledge = { historyOrder += "ack:$it" },
+        )
+        assertEquals(listOf("retry", "ack:7"), historyOrder)
+
+        val request = ReplyJumpRequest("MiXeD/opaque=Reply")
+        var retried: ReplyJumpRequest? = null
+        handleChatUiEventResult(
+            event = QueuedChatUiEvent(8, ChatUiEvent.ReplyJumpUnavailable(request)),
+            actionPerformed = true,
+            retryReplyJump = { retried = it },
+            retryMissingHistory = {},
+            acknowledge = {},
+        )
+        assertEquals(request, retried)
+    }
+
+    @Test fun `history footer requires persisted completion and preserves partial outcomes`() {
+        val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.MSGID), pageLimit = 50)
+        val ended = LoadState.NotLoading(endOfPaginationReached = true)
+
+        assertEquals(
+            ChatHistoryUiState.Incomplete(),
+            chatHistoryUiState(
+                BufferType.CHANNEL,
+                IrcClientState.Ready("me", emptySet(), emptyMap()),
+                ready,
+                ended,
+                historyComplete = false,
+                resync = HistoryResyncState.Idle,
+            ),
+        )
+        assertEquals(
+            ChatHistoryUiState.ConfirmedStart,
+            chatHistoryUiState(
+                BufferType.CHANNEL,
+                IrcClientState.Ready("me", emptySet(), emptyMap()),
+                ready,
+                ended,
+                historyComplete = true,
+                resync = HistoryResyncState.Idle,
+            ),
+        )
+        assertEquals(
+            ChatHistoryUiState.Capped(inserted = 17, limit = 50),
+            chatHistoryUiState(
+                BufferType.CHANNEL,
+                IrcClientState.Ready("me", emptySet(), emptyMap()),
+                ready,
+                ended,
+                historyComplete = true,
+                resync = HistoryResyncState.Capped(17, 50, "partial"),
+            ),
+        )
+        assertEquals(
+            ChatHistoryUiState.Incomplete(inserted = 9),
+            chatHistoryUiState(
+                BufferType.CHANNEL,
+                IrcClientState.Ready("me", emptySet(), emptyMap()),
+                ready,
+                ended,
+                historyComplete = true,
+                resync = HistoryResyncState.Incomplete(9, "partial"),
+            ),
+        )
+    }
+
+    @Test fun `history footer distinguishes hidden loading availability and error states`() {
+        val idle = LoadState.NotLoading(endOfPaginationReached = false)
+        val failed = LoadState.Error(IllegalStateException("offline"))
+        val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), pageLimit = 50)
+
+        fun state(
+            connection: IrcClientState?,
+            availability: HistoryAvailability,
+            append: LoadState = idle,
+            bufferType: BufferType = BufferType.CHANNEL,
+            resync: HistoryResyncState = HistoryResyncState.Idle,
+        ) = chatHistoryUiState(
+            bufferType,
+            connection,
+            availability,
+            append,
+            historyComplete = false,
+            resync = resync,
+        )
+
+        assertEquals(
+            ChatHistoryUiState.Hidden,
+            state(IrcClientState.Disconnected, ready, bufferType = BufferType.SERVER),
+        )
+        assertEquals(
+            ChatHistoryUiState.Loading,
+            state(IrcClientState.Connecting, ready, append = LoadState.Loading),
+        )
+        assertEquals(
+            ChatHistoryUiState.Offline,
+            state(IrcClientState.Disconnected, HistoryAvailability.NegotiatingOrOffline, failed),
+        )
+        assertEquals(
+            ChatHistoryUiState.Negotiating,
+            state(IrcClientState.Registering, HistoryAvailability.NegotiatingOrOffline, failed),
+        )
+        assertEquals(
+            ChatHistoryUiState.Unsupported,
+            state(IrcClientState.Ready("me", emptySet(), emptyMap()), HistoryAvailability.Unsupported),
+        )
+        assertEquals(
+            ChatHistoryUiState.Unsupported,
+            state(
+                IrcClientState.Ready("me", emptySet(), emptyMap()),
+                HistoryAvailability.Unsupported,
+                append = failed,
+                resync = HistoryResyncState.Failed("stale"),
+            ),
+        )
+        assertEquals(
+            ChatHistoryUiState.Error,
+            state(
+                IrcClientState.Ready("me", emptySet(), emptyMap()),
+                ready,
+                resync = HistoryResyncState.Failed("failed"),
+            ),
+        )
+    }
+
+    @Test fun `offline failure retries once when Ready is first observed with the error`() {
+        val gate = HistoryReadyRetryGate()
+        val ready = HistoryAvailability.Ready(setOf(HistoryReferenceType.MSGID), pageLimit = 50)
+        val offline = LoadState.Error(IrcDisconnectedException("CHATHISTORY", "offline"))
+
+        assertTrue(gate.update(ready, offline))
+        assertFalse(gate.update(ready, offline))
+        assertFalse(gate.update(HistoryAvailability.Unsupported, offline))
+        assertFalse(gate.update(ready, LoadState.Error(IllegalStateException("not offline"))))
+
+        val nextGeneration = LoadState.Error(IrcDisconnectedException("CHATHISTORY", "offline again"))
+        assertFalse(gate.update(HistoryAvailability.NegotiatingOrOffline, nextGeneration))
+        assertTrue(gate.update(ready, nextGeneration))
+        assertFalse(gate.update(ready, nextGeneration))
     }
 }

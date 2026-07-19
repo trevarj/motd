@@ -44,6 +44,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -87,11 +88,14 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.canSendReactionTags
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.HistoryRefreshRange
 import io.github.trevarj.motd.ui.components.Avatar
@@ -105,6 +109,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Pause after the last keystroke before the nick-autocomplete panel becomes visible, so fast
  *  typing doesn't flash suggestions on every character. */
@@ -177,21 +182,19 @@ fun ChatScreen(
     }
 
     val chipsByMsgid by viewModel.reactionChips.collectAsStateWithLifecycle()
+    val identityRules by viewModel.identityRules.collectAsStateWithLifecycle()
     val reactionChipsForMessage = remember(chipsByMsgid) {
         { msgid: String -> chipsByMsgid[msgid].orEmpty() }
     }
     // The VM resolves the live ISUPPORT normalizer. Memoize the returned lambda so unrelated
     // header/composer state changes do not invalidate every lazy-list row through a new function
     // identity.
-    val nickNormalizer = remember(state.buffer?.networkId, state.connState) {
-        viewModel.nickNormalizer()
-    }
+    val nickNormalizer = remember(identityRules) { identityRules::normalize }
 
     val jumpTarget by viewModel.jumpTarget.collectAsStateWithLifecycle()
     val initialTarget by viewModel.initialTarget.collectAsStateWithLifecycle()
     val entryPositionSettled by viewModel.entryPositionSettled.collectAsStateWithLifecycle()
     val entryPositionUnresolved by viewModel.entryPositionUnresolved.collectAsStateWithLifecycle()
-    val jumpFailed by viewModel.jumpFailed.collectAsStateWithLifecycle()
     // Read marker frozen on entry so the "— New messages —" divider doesn't flash away (plans/15 #2).
     val readMarkerSnapshot by viewModel.readMarkerSnapshot.collectAsStateWithLifecycle()
     // Live read marker drives the FAB unread badge so it clears as messages are read (not on exit).
@@ -206,9 +209,10 @@ fun ChatScreen(
     )
     val contentPreviews by viewModel.contentPreviews.collectAsStateWithLifecycle()
     val replyConfig by viewModel.replyConfig.collectAsStateWithLifecycle()
-    // Round 5: nick sheet + raw-send snackbar (plans/16 §5.6/§5.8).
+    val historyAvailability by viewModel.historyAvailability.collectAsStateWithLifecycle()
+    // Round 5: nick sheet + replay-safe UI events (plans/16 §5.6/§5.8).
     val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
-    val snackbarMessage by viewModel.snackbar.collectAsStateWithLifecycle()
+    val uiEvents by viewModel.uiEvents.collectAsStateWithLifecycle()
     val historyResyncState by viewModel.historyResyncState.collectAsStateWithLifecycle()
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
     val titleTarget = chatTitleTarget(state.buffer?.type)
@@ -234,10 +238,12 @@ fun ChatScreen(
         onReplyPreviewClick = viewModel::jumpToRepliedMessage,
         memberNicks = memberNicks,
         knownNicks = knownNicks,
+        identityRules = identityRules,
         readMarkerSnapshot = readMarkerSnapshot,
         readMarkerLive = localReadAnchor,
         rawNewestAnchor = rawNewestAnchor,
         onMarkRead = viewModel::markRead,
+        countUnreadBelowViewport = viewModel::countUnreadBelowViewport,
         onBack = onBack,
         // Channel titles open Channel Info; query titles describe the other user. SERVER buffers
         // have neither channel nor peer details, so their title remains inert.
@@ -269,8 +275,6 @@ fun ChatScreen(
         initialTarget = initialTarget,
         entryPositionInitiallySettled = entryPositionSettled,
         entryPositionUnresolved = entryPositionUnresolved,
-        jumpFailed = jumpFailed,
-        onJumpFailedShown = viewModel::onJumpFailedShown,
         onJumpHandled = viewModel::onJumpHandled,
         onInitialPositionHandled = viewModel::onInitialPositionHandled,
         onInitialPositionUnresolved = viewModel::onInitialPositionUnresolved,
@@ -280,11 +284,14 @@ fun ChatScreen(
         onNeedMembers = viewModel::ensureMembersObserved,
         onJumpUnresolved = viewModel::onJumpUnresolved,
         onReresolveJump = viewModel::reresolveJumpOnce,
+        onReresolveInitial = viewModel::reresolveInitialOnce,
         isServerBuffer = isServerBuffer,
         onSenderClick = viewModel::openNickSheet,
-        rawSendSnackbar = snackbarMessage,
-        onSnackbarShown = viewModel::consumeSnackbar,
+        uiEvent = uiEvents.firstOrNull(),
+        onUiEventAcknowledged = viewModel::acknowledgeUiEvent,
+        onRetryReplyJump = viewModel::retryReplyJump,
         historyResyncState = historyResyncState,
+        historyAvailability = historyAvailability,
         onRefreshHistory = viewModel::refreshHistory,
         onCancelHistoryRefresh = viewModel::cancelHistoryRefresh,
         onHistoryResyncShown = viewModel::consumeHistoryResyncState,
@@ -292,16 +299,15 @@ fun ChatScreen(
 
     // Nick sheet (plans/16 §5.8): actions render immediately; whois fills in when it lands.
     nickSheet?.let { sheet ->
-        val norm = viewModel.nickNormalizer()
+        val norm = identityRules::normalize
         val myNick = (state.connState as? IrcClientState.Ready)?.nick
         val isSelf = myNick != null && norm(sheet.nick) == norm(myNick)
-        val normSelf = io.github.trevarj.motd.data.prefs.normalizeNick(sheet.nick)
         NickActionSheet(
             nick = sheet.nick,
             networkId = state.buffer?.networkId,
             isSelf = isSelf,
-            isFriend = normSelf in settings.friends,
-            isFool = normSelf in settings.fools,
+            isFriend = identityRules.matchesConfiguredNick(sheet.nick, settings.friends),
+            isFool = identityRules.matchesConfiguredNick(sheet.nick, settings.fools),
             canModerate = viewModel.canModerate(),
             whois = sheet.details,
             presence = state.buffer?.networkId?.let { networkId ->
@@ -353,6 +359,7 @@ fun ChatContent(
     onReplyPreviewClick: (String) -> Unit = {},
     memberNicks: List<String> = emptyList(),
     knownNicks: Set<String> = emptySet(),
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
@@ -378,36 +385,66 @@ fun ChatContent(
     onDraftChanged: (String) -> Unit = {},
     // Immediate nick-sheet mention request. The nonce permits mentioning the same nick repeatedly.
     mentionPrefill: Pair<Long, String>? = null,
-    jumpTarget: ChatJumpResolver.Result.Target? = null,
-    initialTarget: ChatInitialPosition? = null,
+    jumpTarget: ChatPositionTarget? = null,
+    initialTarget: ChatPositionTarget? = null,
     entryPositionInitiallySettled: Boolean = false,
     entryPositionUnresolved: Boolean = false,
-    jumpFailed: Boolean = false,
-    onJumpFailedShown: () -> Unit = {},
-    onJumpHandled: () -> Unit = {},
+    onJumpHandled: (Long) -> Unit = {},
     onInitialPositionHandled: () -> Unit = {},
     onInitialPositionUnresolved: () -> Unit = {},
     onScrollPositionChanged: (ChatScrollPosition) -> Unit = {},
     onClearScrollPosition: () -> Unit = {},
     onVisibleMsgidsChanged: (List<String>) -> Unit = {},
     onNeedMembers: () -> Unit = {},
-    onJumpUnresolved: () -> Unit = {},
-    onReresolveJump: () -> Unit = {},
+    onJumpUnresolved: (Long) -> Unit = {},
+    onReresolveJump: (Long) -> Unit = {},
+    onReresolveInitial: (ChatPositionTarget) -> Unit = {},
     // Round 5 (plans/16 §5.6/§5.8): SERVER-buffer raw-send + nick sheet plumbing.
     isServerBuffer: Boolean = false,
     onSenderClick: (String) -> Unit = {},
-    rawSendSnackbar: String? = null,
-    onSnackbarShown: () -> Unit = {},
+    uiEvent: QueuedChatUiEvent? = null,
+    onUiEventAcknowledged: (Long) -> Unit = {},
+    onRetryReplyJump: (ReplyJumpRequest) -> Unit = {},
     historyResyncState: HistoryResyncState = HistoryResyncState.Idle,
+    historyAvailability: HistoryAvailability = HistoryAvailability.NegotiatingOrOffline,
     onRefreshHistory: (HistoryRefreshRange) -> Unit = {},
     onCancelHistoryRefresh: () -> Unit = {},
     onHistoryResyncShown: () -> Unit = {},
+    countUnreadBelowViewport: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int = { _, _ -> 0 },
 ) {
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
     var liveEntryId by remember { mutableStateOf<Long?>(null) }
-    val visibilityPolicy = remember(showJoinPartQuit, fools, foolsMode) {
-        MessageVisibilityPolicy(MessageVisibilitySpec(showJoinPartQuit, fools, foolsMode))
+    val visibilityPolicy = remember(
+        showJoinPartQuit,
+        fools,
+        foolsMode,
+        hiddenFoolsRevealed,
+        identityRules,
+    ) {
+        MessageVisibilityPolicy(
+            MessageVisibilitySpec(
+                showJoinPartQuit,
+                fools,
+                foolsMode,
+                revealHiddenFools = hiddenFoolsRevealed,
+            ),
+            identityRules,
+        )
+    }
+    val historyUiState = chatHistoryUiState(
+        bufferType = state.buffer?.type,
+        connectionState = state.connState,
+        availability = historyAvailability,
+        append = items.loadState.append,
+        historyComplete = state.buffer?.historyComplete == true,
+        resync = historyResyncState,
+    )
+    val readyRetryGate = remember(items) { HistoryReadyRetryGate() }
+    LaunchedEffect(historyAvailability, items.loadState.append) {
+        if (readyRetryGate.update(historyAvailability, items.loadState.append)) {
+            items.retry()
+        }
     }
     val traceBufferId = state.buffer?.id
     val traceSessionId = remember(traceBufferId) {
@@ -503,127 +540,122 @@ fun ChatContent(
         }
     }
 
-    // Cap-miss / not-loaded → transient snackbar. jumpFailed is a latch StateFlow (replay-safe), so
-    // a NotFound resolved before this collector subscribed is not lost (plans/15 #13).
     val jumpNotLoaded = stringResource(R.string.chat_jump_not_loaded)
-    LaunchedEffect(jumpFailed) {
-        if (jumpFailed) {
-            onJumpFailedShown()
-            onJumpUnresolved()
-        }
-    }
-
-    // This survives configuration recreation, unlike the one-shot jump failure StateFlow. The
-    // target is deliberately not acknowledged, so make the remaining read gate understandable.
+    // Entry failure is durable because the read gate remains closed until this destination exits.
     LaunchedEffect(entryPositionUnresolved) {
         if (shouldPresentUnresolvedEntrySnackbar(entryPositionUnresolved)) {
             snackbarHostState.showSnackbar(jumpNotLoaded)
         }
     }
 
-    // Transient snackbars off the VM's one-shot sentinel channel: raw-send parse failure on a SERVER
-    // buffer (plans/16 §5.6), or a queued reaction whose message never confirmed (plans/15 reactions).
-    val invalidCommand = stringResource(R.string.chat_server_invalid_command)
-    val reactFailed = stringResource(R.string.chat_react_failed)
-    val reactionBlocked = stringResource(R.string.chat_reaction_blocked)
-    val reactionSendFailed = stringResource(R.string.chat_reaction_send_failed)
-    val historyOffline = stringResource(R.string.chat_history_offline)
-    val sendRejected = stringResource(R.string.chat_send_rejected)
-    LaunchedEffect(rawSendSnackbar) {
-        val sentinel = rawSendSnackbar ?: return@LaunchedEffect
-        val text = when (sentinel) {
-            "react_failed" -> reactFailed
-            "reaction_blocked" -> reactionBlocked
-            "reaction_send_failed" -> reactionSendFailed
-            "history_offline" -> historyOffline
-            "send_rejected" -> sendRejected
-            else -> invalidCommand
+    val eventText = uiEvent?.value?.let { event ->
+        when (event) {
+            ChatUiEvent.InvalidCommand -> stringResource(R.string.chat_server_invalid_command)
+            ChatUiEvent.ReactionBlocked -> stringResource(R.string.chat_reaction_blocked)
+            ChatUiEvent.ReactionTargetUnavailable -> stringResource(R.string.chat_react_failed)
+            ChatUiEvent.ReactionSendFailed -> stringResource(R.string.chat_reaction_send_failed)
+            ChatUiEvent.SendRejected -> stringResource(R.string.chat_send_rejected)
+            ChatUiEvent.HistoryOffline -> stringResource(R.string.chat_history_offline)
+            is ChatUiEvent.HistoryUpdated -> pluralStringResource(
+                R.plurals.chat_history_updated,
+                event.inserted,
+                event.inserted,
+            )
+            ChatUiEvent.HistoryUpToDate -> stringResource(R.string.chat_history_up_to_date)
+            ChatUiEvent.HistoryUnsupported -> stringResource(R.string.chat_history_unsupported)
+            ChatUiEvent.HistoryFailed -> stringResource(R.string.chat_history_failed)
+            is ChatUiEvent.HistoryIncomplete -> stringResource(
+                R.string.chat_history_resync_incomplete,
+                event.inserted,
+            )
+            is ChatUiEvent.HistoryCapped -> stringResource(
+                R.string.chat_history_resync_capped,
+                event.inserted,
+                event.limit,
+            )
+            is ChatUiEvent.ReplyJumpUnavailable -> jumpNotLoaded
         }
-        snackbarHostState.showSnackbar(text)
-        onSnackbarShown()
+    }
+    val retryLabel = stringResource(R.string.chat_retry)
+    LaunchedEffect(uiEvent?.id) {
+        val pending = uiEvent ?: return@LaunchedEffect
+        val text = eventText ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = text,
+            actionLabel = retryLabel.takeIf { pending.value.hasRetryAction() },
+        )
+        handleChatUiEventResult(
+            event = pending,
+            actionPerformed = result == SnackbarResult.ActionPerformed,
+            retryReplyJump = onRetryReplyJump,
+            retryMissingHistory = { onRefreshHistory(HistoryRefreshRange.MISSING) },
+            acknowledge = onUiEventAcknowledged,
+        )
     }
 
-    val historyUpdatedCount = (historyResyncState as? HistoryResyncState.Updated)?.inserted ?: 0
-    val historyUpdated = pluralStringResource(
-        R.plurals.chat_history_updated,
-        historyUpdatedCount,
-        historyUpdatedCount,
-    )
-    val historyUpToDate = stringResource(R.string.chat_history_up_to_date)
-    val historyUnsupported = stringResource(R.string.chat_history_unsupported)
-    val historyFailed = stringResource(R.string.chat_history_failed)
-    LaunchedEffect(historyResyncState) {
-        val text = when (val result = historyResyncState) {
-            is HistoryResyncState.Updated -> historyUpdated
-            HistoryResyncState.UpToDate -> historyUpToDate
-            HistoryResyncState.Unsupported -> historyUnsupported
-            is HistoryResyncState.Failed -> result.reason.ifBlank { historyFailed }
-            HistoryResyncState.Idle,
-            HistoryResyncState.WaitingForCapability,
-            is HistoryResyncState.Running,
-            -> return@LaunchedEffect
-        }
-        snackbarHostState.showSnackbar(text)
-        onHistoryResyncShown()
+    suspend fun materializeTarget(target: ChatPositionTarget, scroll: Boolean): MessageEntity? {
+        // itemCount is used only to establish that the position is addressable. A non-null peek is
+        // the sole proof that the target placeholder has materialized.
+        val pageReady = withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+            snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
+                .first { (refresh, append, count) ->
+                    refresh is LoadState.NotLoading &&
+                        initialPagingPage(count, append) != InitialPagingPage.Pending
+                }
+        } != null
+        if (!pageReady) return null
+        if (target.index !in 0 until items.itemCount) return null
+        return requestAndAwaitTarget(
+            index = target.index,
+            request = { index ->
+                val count = items.itemCount
+                if (index !in 0 until count) {
+                    false
+                } else {
+                    try {
+                        if (scroll) listState.scrollToItem(index, target.offset)
+                        // This is the only item access: it sends Paging a load hint for the exact target.
+                        items[index]
+                        true
+                    } catch (_: IndexOutOfBoundsException) {
+                        // A new Paging generation replaced the snapshot between the bound and access.
+                        false
+                    }
+                }
+            },
+            snapshots = snapshotFlow {
+                targetMaterialization(items, target.index)
+            },
+        )
     }
 
-    // Deep-jump scroll: bounded APPEND loop (placeholders OFF, so tail loads never shift indices).
+    // Deep jumps request one resolved placeholder, then validate both of its exact identities.
     LaunchedEffect(jumpTarget) {
         val j = jumpTarget ?: return@LaunchedEffect
         AutoFollowTrace.record("deep_jump_start", traceBufferId, traceSessionId) {
             "target_index=${j.index} item_count=${items.itemCount}"
         }
-        // Guard #1: the jump resolves in VM init, often before the first paging emission. Touching
-        // items[itemCount-1] with itemCount == 0 throws IndexOutOfBounds; wait for the first page.
-        snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
-            .first { (refresh, append, count) ->
-                refresh is LoadState.NotLoading &&
-                    initialPagingPage(count, append) != InitialPagingPage.Pending
-            }
-        if (initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty) {
-            onJumpUnresolved()
-            return@LaunchedEffect
+        val targetRow = try {
+            materializeTarget(j, scroll = true)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: RuntimeException) {
+            null
         }
-
-        var rounds = 0
-        while (items.itemCount <= j.index &&
-            rounds++ < 64 &&
-            items.itemCount > 0 &&
-            !items.loadState.append.endOfPaginationReached
-        ) {
-            val before = items.itemCount
-            items[items.itemCount - 1] // touch tail → triggers APPEND
-            // Wait for the triggered load to complete: first the Loading edge, then back to
-            // NotLoading (or the row count to actually grow). Matching the current NotLoading would
-            // spin through all 64 rounds without ever waiting for a load (plans/15 #14).
-            snapshotFlow { items.loadState.append to items.itemCount }
-                .first { (append, count) ->
-                    (append is LoadState.NotLoading && count > before) ||
-                        append.endOfPaginationReached ||
-                        append is LoadState.Error
-                }
-        }
-        if (items.itemCount > j.index) {
-            listState.scrollToItem(j.index)
-            // A live message may have shifted indices between resolve and scroll; re-resolve once.
-            if (!deepJumpTargetMatches(j.highlightMsgid, items.peek(j.index)?.msgid)) {
-                onReresolveJump()
-            } else {
-                AutoFollowTrace.record("deep_jump_settled", traceBufferId, traceSessionId) {
-                    "target_index=${j.index} item_count=${items.itemCount} rounds=$rounds"
-                }
-                val targetRow = items.peek(j.index)
-                if (targetRow != null && visibilityPolicy.isFool(targetRow)) {
-                    expandedFools += targetRow.id
-                }
-                highlightMsgid = j.highlightMsgid
-                initialPositionSettled = true
-                suppressNextAutoFollow = true
-                onJumpHandled()
-            }
+        if (targetRow == null) {
+            if (j.expectedEventId != null || j.expectedMsgid != null) onReresolveJump(j.requestToken)
+            else onJumpUnresolved(j.requestToken)
+        } else if (!positionTargetMatches(j, targetRow)) {
+            onReresolveJump(j.requestToken)
         } else {
-            // Ran past the cap / end of pagination without reaching the target.
-            onJumpUnresolved()
+            AutoFollowTrace.record("deep_jump_settled", traceBufferId, traceSessionId) {
+                "target_index=${j.index} item_count=${items.itemCount}"
+            }
+            if (visibilityPolicy.isFool(targetRow)) expandedFools += targetRow.id
+            highlightMsgid = j.highlightMsgid
+            initialPositionSettled = true
+            suppressNextAutoFollow = true
+            onJumpHandled(j.requestToken)
         }
     }
 
@@ -635,53 +667,55 @@ fun ChatContent(
             "target_index=${target.index} target_offset=${target.offset} " +
                 "saved=${target.fromSavedPosition} item_count=${items.itemCount}"
         }
-        snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
-            .first { (refresh, append, count) ->
-                refresh is LoadState.NotLoading &&
-                    initialPagingPage(count, append) != InitialPagingPage.Pending
-            }
-
-        var rounds = 0
-        while (items.itemCount <= target.index &&
-            target.index > 0 &&
-            rounds++ < 64 &&
-            items.itemCount > 0 &&
-            !items.loadState.append.endOfPaginationReached
-        ) {
-            val before = items.itemCount
-            items[items.itemCount - 1]
-            snapshotFlow { items.loadState.append to items.itemCount }
-                .first { (append, count) ->
-                    (append is LoadState.NotLoading && count > before) ||
-                        append.endOfPaginationReached || append is LoadState.Error
+        val pageReady = withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+            snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
+                .first { (refresh, append, count) ->
+                    refresh is LoadState.NotLoading &&
+                        initialPagingPage(count, append) != InitialPagingPage.Pending
                 }
+        } != null
+        if (!pageReady) {
+            onInitialPositionUnresolved()
+            return@LaunchedEffect
         }
-        if (items.itemCount > target.index) {
-            // A fresh reverse list is already at index 0. If this destination retained a previous
-            // off-bottom list state, explicitly restore newest; older unread targets also position.
-            val currentlyAtBottom = listState.firstVisibleItemIndex == 0 &&
-                listState.firstVisibleItemScrollOffset <= AUTOSCROLL_BOTTOM_TOLERANCE_PX
-            if (shouldScrollToInitialTarget(target, currentlyAtBottom)) {
-                listState.scrollToItem(target.index, target.offset)
+        val currentlyAtBottom = listState.firstVisibleItemIndex == 0 &&
+            listState.firstVisibleItemScrollOffset <= AUTOSCROLL_BOTTOM_TOLERANCE_PX
+        val terminalEmpty = target.index == 0 && target.expectedEventId == null &&
+            target.expectedMsgid == null &&
+            initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty
+        val targetRow = if (terminalEmpty) {
+            null
+        } else {
+            try {
+                materializeTarget(
+                    target,
+                    scroll = shouldScrollToInitialTarget(target, currentlyAtBottom),
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: RuntimeException) {
+                null
             }
+        }
+        if (terminalEmpty) {
+            initialPositionSettled = true
+            suppressNextAutoFollow = true
+            onInitialPositionHandled()
+        } else if (targetRow != null && positionTargetMatches(target, targetRow)) {
             AutoFollowTrace.record("initial_position_settled", traceBufferId, traceSessionId) {
                 "target_index=${target.index} index=${listState.firstVisibleItemIndex} " +
-                    "offset=${listState.firstVisibleItemScrollOffset} at_bottom=$currentlyAtBottom rounds=$rounds"
+                    "offset=${listState.firstVisibleItemScrollOffset} at_bottom=$currentlyAtBottom"
             }
             initialPositionSettled = true
             suppressNextAutoFollow = true
             onInitialPositionHandled()
-        } else if (target.index == 0 &&
-            initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty
-        ) {
-            // A newest-row target may settle on an empty buffer only after its append is terminal.
-            initialPositionSettled = true
-            suppressNextAutoFollow = true
-            onInitialPositionHandled()
+        } else if (targetRow != null) {
+            onReresolveInitial(target)
+        } else if (target.expectedEventId != null || target.expectedMsgid != null) {
+            onReresolveInitial(target)
         } else {
-            // An APPEND cap/error must not turn an unread target into a read acknowledgement.
             AutoFollowTrace.record("initial_position_unresolved", traceBufferId, traceSessionId) {
-                "target_index=${target.index} item_count=${items.itemCount} rounds=$rounds " +
+                "target_index=${target.index} item_count=${items.itemCount} " +
                     "append=${loadStateName(items.loadState.append)}"
             }
             onInitialPositionUnresolved()
@@ -1088,6 +1122,15 @@ fun ChatContent(
                         friends = friends,
                         fools = fools,
                         foolsMode = foolsMode,
+                        identityRules = identityRules,
+                        historyUiState = historyUiState,
+                        onHistoryRetry = {
+                            val retryResync = historyResyncState is HistoryResyncState.Failed ||
+                                historyResyncState is HistoryResyncState.Incomplete ||
+                                historyResyncState is HistoryResyncState.Capped
+                            onHistoryResyncShown()
+                            if (retryResync) onRefreshHistory(HistoryRefreshRange.MISSING)
+                        },
                         // Effective expansion: global expand-all default, minus rows the user
                         // re-collapsed; otherwise only individually expanded rows show (bug #9).
                         foolExpanded = { id ->
@@ -1123,10 +1166,10 @@ fun ChatContent(
                     // Keep the hot firstVisibleItemIndex read inside the FAB subtree. Reading it in
                     // ChatContent made every row boundary re-run the entire Scaffold/list/composer.
                     ViewportScrollToBottomFab(
-                        items = items,
                         listState = listState,
                         readMarker = readMarkerLive,
                         visibilityPolicy = visibilityPolicy,
+                        countUnreadBelowViewport = countUnreadBelowViewport,
                         visible = initialPositionSettled && !atBottom && !autoScrolling,
                         onClick = { scope.launch { scrollToNewest(animate = true, reason = "jump_fab") } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
@@ -1325,6 +1368,58 @@ internal fun chatTitleTarget(type: BufferType?): ChatTitleTarget = when (type) {
     BufferType.SERVER, null -> ChatTitleTarget.NONE
 }
 
+internal data class PagingTargetGeneration(
+    val itemCount: Int,
+    val placeholdersBefore: Int,
+    val placeholdersAfter: Int,
+    val firstLoadedId: Long?,
+    val lastLoadedId: Long?,
+)
+
+internal fun relevantTargetLoadState(
+    index: Int,
+    loadedStart: Int,
+    loadedEnd: Int,
+    prepend: LoadState,
+    append: LoadState,
+): LoadState? = when {
+    index < loadedStart -> prepend
+    index >= loadedEnd -> append
+    else -> null
+}
+
+/** Snapshot only the requested position and the load direction capable of materializing it. */
+internal fun targetMaterialization(
+    items: LazyPagingItems<MessageEntity>,
+    index: Int,
+): TargetMaterialization<MessageEntity> {
+    val itemCount = items.itemCount
+    val snapshot = items.itemSnapshotList
+    val loadedStart = snapshot.placeholdersBefore
+    val loadedEnd = loadedStart + snapshot.items.size
+    val directionalState = relevantTargetLoadState(
+        index,
+        loadedStart,
+        loadedEnd,
+        items.loadState.prepend,
+        items.loadState.append,
+    )
+    val refresh = items.loadState.refresh
+    return TargetMaterialization(
+        item = pagingSnapshotItemOrNull(index, itemCount, items::peek),
+        loading = refresh is LoadState.Loading || directionalState is LoadState.Loading,
+        addressable = index in 0 until itemCount,
+        failed = refresh is LoadState.Error || directionalState is LoadState.Error,
+        generation = PagingTargetGeneration(
+            itemCount = itemCount,
+            placeholdersBefore = snapshot.placeholdersBefore,
+            placeholdersAfter = snapshot.placeholdersAfter,
+            firstLoadedId = snapshot.items.firstOrNull()?.id,
+            lastLoadedId = snapshot.items.lastOrNull()?.id,
+        ),
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HistoryRefreshSheet(
@@ -1521,14 +1616,6 @@ internal fun chatSubtitle(state: ChatState, context: android.content.Context): S
     }
 }
 
-/**
- * Unread count for the FAB badge, viewport-aware. In the reversed list, rows with index <
- * [firstVisibleIndex] are below the fold (newer than the topmost visible row, scrolled off toward
- * the bottom). We count those that are also newer than the frozen read [marker]. At the bottom
- * (firstVisibleIndex == 0) this is 0, and it shrinks as the user scrolls down toward the newest
- * message — never a monotonic "arrived since entry" tally. Delegates to the pure
- * [unreadBelowViewport] helper for unit testing.
- */
 @Composable
 private fun ScrollToBottomFab(
     visible: Boolean,
@@ -1561,10 +1648,10 @@ private fun ScrollToBottomFab(
  */
 @Composable
 private fun ViewportScrollToBottomFab(
-    items: LazyPagingItems<MessageEntity>,
     listState: androidx.compose.foundation.lazy.LazyListState,
     readMarker: io.github.trevarj.motd.data.db.TimelineAnchor?,
     visibilityPolicy: MessageVisibilityPolicy,
+    countUnreadBelowViewport: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int,
     visible: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1572,19 +1659,15 @@ private fun ViewportScrollToBottomFab(
     val firstVisible by remember(listState) {
         derivedStateOf { listState.firstVisibleItemIndex }
     }
-    val unreadIndex = remember(visibilityPolicy) { UnreadViewportIndex() }
-    val unread = readMarker?.let { marker ->
-        // History growth appends older Paging rows. The compact index reads only the unread prefix
-        // (and never more than the displayed 99+ cap); index-zero identity detects refreshes.
-        unreadIndex.update(
-            itemCount = items.itemCount,
-            peek = items::peek,
-            maxNonSelf = MAX_UNREAD_BADGE_COUNT,
-            stopAtOrBefore = marker,
-            include = visibilityPolicy::visibleUnread,
-        )
-        unreadIndex.count(firstVisible, marker)
-    } ?: 0
+    val latestCounter by rememberUpdatedState(countUnreadBelowViewport)
+    var unread by remember(readMarker, visibilityPolicy) { mutableIntStateOf(0) }
+    LaunchedEffect(firstVisible, readMarker, visibilityPolicy) {
+        unread = if (readMarker == null || firstVisible <= 0) {
+            0
+        } else {
+            latestCounter(firstVisible, readMarker).coerceIn(0, MAX_UNREAD_BADGE_COUNT)
+        }
+    }
     ScrollToBottomFab(
         visible = visible,
         unread = unread,

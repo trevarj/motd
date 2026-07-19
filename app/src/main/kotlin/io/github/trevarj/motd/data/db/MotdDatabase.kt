@@ -12,6 +12,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [
         NetworkEntity::class,
+        NetworkIdentityEntity::class,
         RoomEntity::class,
         RoomAliasEntity::class,
         TimelineEventEntity::class,
@@ -28,12 +29,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
 abstract class MotdDatabase : RoomDatabase() {
     abstract fun networkDao(): NetworkDao
+    abstract fun networkIdentityDao(): NetworkIdentityDao
     abstract fun bufferDao(): BufferDao
     abstract fun messageDao(): MessageDao
     abstract fun composerDraftDao(): ComposerDraftDao
@@ -485,6 +487,23 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
                SELECT b.networkId, 'LABEL', CAST(m.pendingLabel AS BLOB), m.id
                FROM messages m JOIN buffers b ON b.id = m.bufferId
                WHERE m.pendingLabel IS NOT NULL AND m.msgid IS NULL AND m.failed = 0""",
+        )
+    }
+}
+
+/** v12 -> v13 persists identity-related ISUPPORT and the current session nick. */
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `network_identity` (
+                `networkId` INTEGER NOT NULL,
+                `caseMapping` TEXT,
+                `chanTypes` TEXT,
+                `selfNick` TEXT,
+                PRIMARY KEY(`networkId`),
+                FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`)
+                    ON UPDATE NO ACTION ON DELETE CASCADE
+            )""",
         )
     }
 }

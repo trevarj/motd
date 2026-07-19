@@ -5,22 +5,22 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
-import androidx.paging.filter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.ComposerDraftEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.effectiveLocalReadAnchor
+import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
-import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
@@ -33,6 +33,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.canSendReactionTags
@@ -142,12 +143,10 @@ fun resendText(kind: io.github.trevarj.motd.data.db.MessageKind, text: String): 
  * same PagingData from `combine` would emit its single-collector pageEventFlow a second time.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-internal fun filteredMessagePages(
-    source: () -> Flow<PagingData<MessageEntity>>,
+internal fun repositoryMessagePages(
+    source: (MessageVisibilitySpec) -> Flow<PagingData<MessageEntity>>,
     specs: Flow<MessageVisibilitySpec>,
-): Flow<PagingData<MessageEntity>> = specs.flatMapLatest { spec ->
-    source().map { paging -> paging.filter { keepMessage(it, spec) } }
-}
+): Flow<PagingData<MessageEntity>> = specs.flatMapLatest(source)
 
 @HiltViewModel
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -155,6 +154,7 @@ class ChatViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val messageRepository: MessageRepository,
     private val bufferRepository: BufferRepository,
+    private val networkIdentityDao: NetworkIdentityDao,
     private val connectionManager: ConnectionManager,
     private val typingTracker: TypingTracker,
     private val foregroundBufferTracker: ForegroundBufferTracker,
@@ -190,18 +190,19 @@ class ChatViewModel @Inject constructor(
     private val _hiddenFoolsRevealed = MutableStateFlow(false)
     val hiddenFoolsRevealed: StateFlow<Boolean> = _hiddenFoolsRevealed.asStateFlow()
 
-    private val filterSpec = settingsRepository.settings
+    private val filterSpecs = settingsRepository.settings
         .combine(_hiddenFoolsRevealed) { settings, revealHiddenFools ->
             MessageVisibilitySpec.from(settings).copy(revealHiddenFools = revealHiddenFools)
         }
         .distinctUntilChanged()
+    private val filterSpec = filterSpecs
         .stateIn(viewModelScope, SharingStarted.Eagerly, MessageVisibilitySpec())
 
-    /** Cached Paging stream filtered per [MessageFilterSpec]; collected once in the screen. */
+    /** Every visibility change cancels the old generation and creates a positionally exact Pager. */
     val messages: Flow<PagingData<MessageEntity>> =
-        filteredMessagePages(
-            source = { messageRepository.messages(bufferId) },
-            specs = filterSpec,
+        repositoryMessagePages(
+            source = { visibility -> messageRepository.messages(bufferId, visibility) },
+            specs = filterSpecs,
         )
             .cachedIn(viewModelScope)
 
@@ -216,6 +217,11 @@ class ChatViewModel @Inject constructor(
     fun setHiddenFoolsRevealed(revealed: Boolean) {
         _hiddenFoolsRevealed.value = revealed
     }
+
+    private val uiEventQueue = ChatUiEventQueue()
+    val uiEvents: StateFlow<List<QueuedChatUiEvent>> = uiEventQueue.pending
+
+    fun acknowledgeUiEvent(id: Long) = uiEventQueue.acknowledge(id)
 
     private val replyTo = MutableStateFlow<MessageEntity?>(null)
     private val draftStateLock = Any()
@@ -251,6 +257,70 @@ class ChatViewModel @Inject constructor(
             buffer?.let { states[it.networkId] ?: IrcClientState.Disconnected }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val persistedIdentity = buffer
+        .flatMapLatest { current ->
+            current?.let { room ->
+                networkIdentityDao.observe(room.networkId)
+            } ?: flowOf(null)
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** Live ISUPPORT wins while connected; persisted rules keep offline rendering deterministic. */
+    val identityRules: StateFlow<IrcIdentityRules> = combine(
+        buffer,
+        connState,
+        persistedIdentity,
+    ) { current, connection, persisted ->
+        if (current != null && connection is IrcClientState.Ready) {
+            connectionManager.clientFor(current.networkId)?.isupport?.identityRules
+                ?: persisted?.identityRules
+                ?: IrcIdentityRules()
+        } else {
+            persisted?.identityRules ?: IrcIdentityRules()
+        }
+    }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), IrcIdentityRules())
+
+    val historyAvailability: StateFlow<HistoryAvailability> = combine(buffer, connState) { current, connection ->
+        when {
+            current == null || current.type == BufferType.SERVER -> HistoryAvailability.Unsupported
+            connection !is IrcClientState.Ready -> HistoryAvailability.NegotiatingOrOffline
+            else -> connectionManager.clientFor(current.networkId)?.historyAvailability
+                ?: HistoryAvailability.NegotiatingOrOffline
+        }
+    }.distinctUntilChanged().stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        HistoryAvailability.NegotiatingOrOffline,
+    )
+
+    private data class OwnIdentityLookup(
+        val networkId: Long,
+        val nick: String,
+        val normalizedNick: String,
+    )
+
+    private data class OwnIdentity(val nick: String?, val account: String?)
+
+    private val ownIdentity = combine(
+        buffer,
+        connState,
+        identityRules,
+        persistedIdentity,
+    ) { current, connection, rules, persisted ->
+        val nick = (connection as? IrcClientState.Ready)?.nick ?: persisted?.selfNick
+        if (current == null || nick == null) null else OwnIdentityLookup(
+            current.networkId,
+            nick,
+            rules.normalize(nick),
+        )
+    }.distinctUntilChanged().flatMapLatest { lookup ->
+        lookup?.let {
+            userDao.observeByNick(it.networkId, it.normalizedNick)
+                .map { user -> OwnIdentity(it.nick, user?.account) }
+        } ?: flowOf(OwnIdentity(null, null))
+    }
 
     private var nextVisibleSession = 0L
     private val visibleSession = MutableStateFlow<Long?>(null)
@@ -301,6 +371,36 @@ class ChatViewModel @Inject constructor(
         .flatMapLatest(historyResyncCoordinator::state)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryResyncState.Idle)
 
+    init {
+        viewModelScope.launch {
+            var lastTerminal: HistoryResyncState? = null
+            historyResyncState.collect { result ->
+                val event = when (result) {
+                    is HistoryResyncState.Updated -> ChatUiEvent.HistoryUpdated(result.inserted)
+                    HistoryResyncState.UpToDate -> ChatUiEvent.HistoryUpToDate
+                    HistoryResyncState.Unsupported -> ChatUiEvent.HistoryUnsupported
+                    is HistoryResyncState.Incomplete -> ChatUiEvent.HistoryIncomplete(result.inserted)
+                    is HistoryResyncState.Capped -> ChatUiEvent.HistoryCapped(result.inserted, result.limit)
+                    is HistoryResyncState.Failed -> ChatUiEvent.HistoryFailed
+                    else -> null
+                }
+                if (event == null) {
+                    lastTerminal = null
+                } else if (lastTerminal != result) {
+                    lastTerminal = result
+                    uiEventQueue.enqueue(event)
+                    if (
+                        result is HistoryResyncState.Updated ||
+                        result == HistoryResyncState.UpToDate ||
+                        result == HistoryResyncState.Unsupported
+                    ) {
+                        historyResyncCoordinator.consumeState(operationalBufferId.value)
+                    }
+                }
+            }
+        }
+    }
+
     private val typingNicks = operationalBufferId
         .flatMapLatest(typingTracker::typingNicks)
 
@@ -335,13 +435,14 @@ class ChatViewModel @Inject constructor(
                     bufferRepository.observeMembers(bufferId).distinctUntilChanged(),
                     connectionManager.rosterStates,
                     operationalBufferId,
-                ) { members, rosterStates, roomId -> members to rosterStates[roomId] }
+                    identityRules,
+                ) { members, rosterStates, roomId, rules -> Triple(members, rosterStates[roomId], rules) }
                 .distinctUntilChanged()
-                .collect { (members, rosterState) ->
+                .collect { (members, rosterState, rules) ->
                     val authoritative = rosterState == RosterLoadState.LOADED
                     val (nicks, known) = withContext(Dispatchers.Default) {
                         val nicks = if (authoritative) members.map { it.nick } else emptyList()
-                        nicks to nicks.map(::normalizeNick).toSet()
+                        nicks to nicks.map(rules::normalize).toSet()
                     }
                     _members.value = if (authoritative) members else emptyList()
                     _memberNicks.value = nicks
@@ -365,9 +466,8 @@ class ChatViewModel @Inject constructor(
     /**
      * Reaction chips keyed by msgid, aggregated in the VM so the value survives across message
      * arrivals (no blank frame from an emptyList re-seed) and picks up echo-confirm msgid swaps as
-     * as reactions arrive. Buffer-scoped reactions avoid the SQLite IN(...) overflow; filtering
-     * the result to a bounded loaded window prevents historical reaction rows from being
-     * re-aggregated on the main thread when a populated chat opens.
+     * reactions arrive. The bounded loaded-window msgid list stays below SQLite's bind-variable
+     * limit and avoids aggregating historical reaction rows when a populated chat opens.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val reactionChips: StateFlow<Map<String, List<ReactionChip>>> = combine(
@@ -376,11 +476,11 @@ class ChatViewModel @Inject constructor(
             .distinctUntilChanged()
             .flatMapLatest { ids ->
                 if (ids.isEmpty()) flowOf(emptyList()) else messageRepository.reactions(bufferId, ids)
-            },
-        connState,
-    ) { visibleReactions, conn ->
-        val myNick = (conn as? IrcClientState.Ready)?.nick
-        aggregateReactions(visibleReactions, myNick, nickNormalizer())
+        },
+        ownIdentity,
+        identityRules,
+    ) { visibleReactions, identity, rules ->
+        aggregateReactions(visibleReactions, identity.nick, identity.account, rules)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     // Reply previews are requested only by composed rows. The bounded cache shares an in-flight
@@ -418,6 +518,15 @@ class ChatViewModel @Inject constructor(
         .map { it?.effectiveLocalReadAnchor }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    suspend fun countUnreadBelowViewport(firstVisibleIndex: Int, marker: TimelineAnchor): Int =
+        visibilityReader.countVisibleUnreadInTimelinePrefix(
+            bufferId = bufferId,
+            beforeIndex = firstVisibleIndex,
+            after = marker,
+            maxCount = 100,
+            spec = filterSpec.value,
+        )
 
     // --- lifecycle: foreground tracker + mark-read (plans/07) ---
 
@@ -496,12 +605,12 @@ class ChatViewModel @Inject constructor(
             reactionChips.value[msgid]?.firstOrNull { it.emoji == emoji }?.mine
         } == true
         if (ready == null || !canSendReactionTags(ready.caps, ready.isupport, removing)) {
-            _snackbar.value = "reaction_blocked"
+            uiEventQueue.enqueue(ChatUiEvent.ReactionBlocked)
             return@launch
         }
         val msgid = message.msgid ?: resolveReactionMsgid(message.id)
         if (msgid == null) {
-            _snackbar.value = "react_failed" // sentinel; screen maps to chat_react_failed
+            uiEventQueue.enqueue(ChatUiEvent.ReactionTargetUnavailable)
             return@launch
         }
         try {
@@ -509,7 +618,7 @@ class ChatViewModel @Inject constructor(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {
-            _snackbar.value = "reaction_send_failed"
+            uiEventQueue.enqueue(ChatUiEvent.ReactionSendFailed)
         }
     }
 
@@ -545,7 +654,7 @@ class ChatViewModel @Inject constructor(
     /** Retry mutates the same durable row; no replacement deletion is involved. */
     fun retry(message: MessageEntity) = viewModelScope.launch {
         if (connectionManager.retryMessage(message.id) is SendAcceptance.Rejected) {
-            _snackbar.value = "send_rejected"
+            uiEventQueue.enqueue(ChatUiEvent.SendRejected)
         }
     }
 
@@ -560,17 +669,11 @@ class ChatViewModel @Inject constructor(
     fun cachedLinkPreview(url: String) =
         if (contentPreviews.value.showLinkPreviews) linkPreviewRepository.cachedPreview(url) else null
 
-    /** Transient one-shot messages surfaced as a snackbar by the screen (plans/16 §5.6). */
-    private val _snackbar = MutableStateFlow<String?>(null)
-    val snackbar: StateFlow<String?> = _snackbar.asStateFlow()
-
-    fun consumeSnackbar() { _snackbar.value = null }
-
     fun refreshHistory(range: HistoryRefreshRange = HistoryRefreshRange.MISSING) {
         val currentBuffer = buffer.value ?: return
         val client = connectionManager.clientFor(currentBuffer.networkId)
         if (client == null || connState.value !is IrcClientState.Ready) {
-            _snackbar.value = "history_offline"
+            uiEventQueue.enqueue(ChatUiEvent.HistoryOffline)
             return
         }
         viewModelScope.launch {
@@ -615,7 +718,7 @@ class ChatViewModel @Inject constructor(
                     clearDraftSubmission(submission)
                     connectionManager.sendTyping(roomId, "done")
                 } else if (result is SendAcceptance.Rejected) {
-                    _snackbar.value = "send_rejected"
+                    uiEventQueue.enqueue(ChatUiEvent.SendRejected)
                 }
             }
             is ChatCommand.Join -> networkId?.let { connectionManager.joinChannel(it, cmd.channel) }
@@ -628,7 +731,7 @@ class ChatViewModel @Inject constructor(
                         clearDraftSubmission(submission)
                         onOpenBuffer(target)
                     }
-                    is SendAcceptance.Rejected -> _snackbar.value = "send_rejected"
+                    is SendAcceptance.Rejected -> uiEventQueue.enqueue(ChatUiEvent.SendRejected)
                 }
             }
             is ChatCommand.Query -> networkId?.let { nid ->
@@ -638,7 +741,7 @@ class ChatViewModel @Inject constructor(
                 connectionManager.clientFor(nid)?.send(IrcMessage(command = "NICK", params = listOf(cmd.nick)))
             }
             is ChatCommand.Topic -> networkId?.let { nid ->
-                val channel = state.value.buffer?.name ?: return@launch
+                val channel = state.value.buffer?.ircTarget ?: return@launch
                 connectionManager.clientFor(nid)
                     ?.send(IrcMessage(command = "TOPIC", params = listOf(channel, cmd.topic)))
             }
@@ -666,7 +769,7 @@ class ChatViewModel @Inject constructor(
         val line = if (trimmed.startsWith("/")) trimmed.substring(1) else trimmed
         val msg = runCatching { IrcMessage.parse(line) }.getOrNull()
         if (msg == null || msg.command.isBlank()) {
-            _snackbar.value = "invalid" // sentinel; the screen maps to chat_server_invalid_command
+            uiEventQueue.enqueue(ChatUiEvent.InvalidCommand)
             return
         }
         val client = connectionManager.clientFor(nid) ?: return
@@ -695,7 +798,7 @@ class ChatViewModel @Inject constructor(
         _nickSheet.value = NickSheetState(nick = nick)
         val networkId = state.value.buffer?.networkId ?: return
         val client = connectionManager.clientFor(networkId)
-        val normalizedNick = client?.isupport?.normalize(nick) ?: normalizeNick(nick)
+        val normalizedNick = identityRules.value.normalize(nick)
         nickDetailsJob?.cancel()
         nickDetailsJob = viewModelScope.launch {
             userDao.observeByNick(networkId, normalizedNick).collect { cached ->
@@ -735,7 +838,7 @@ class ChatViewModel @Inject constructor(
     /** MODE <channel> +o/-o/+v/-v <nick>. */
     fun setMemberMode(nick: String, mode: Char, grant: Boolean) = viewModelScope.launch {
         val nid = state.value.buffer?.networkId ?: return@launch
-        val channel = state.value.buffer?.name ?: return@launch
+        val channel = state.value.buffer?.ircTarget ?: return@launch
         val flag = (if (grant) "+" else "-") + mode
         connectionManager.clientFor(nid)?.send(IrcMessage(command = "MODE", params = listOf(channel, flag, nick)))
     }
@@ -743,7 +846,7 @@ class ChatViewModel @Inject constructor(
     /** KICK <channel> <nick> [:reason]. */
     fun kick(nick: String, reason: String?) = viewModelScope.launch {
         val nid = state.value.buffer?.networkId ?: return@launch
-        val channel = state.value.buffer?.name ?: return@launch
+        val channel = state.value.buffer?.ircTarget ?: return@launch
         val params = if (reason.isNullOrBlank()) listOf(channel, nick) else listOf(channel, nick, reason)
         connectionManager.clientFor(nid)?.send(IrcMessage(command = "KICK", params = params))
     }
@@ -751,7 +854,7 @@ class ChatViewModel @Inject constructor(
     /** MODE <channel> +b <banMask(nick)>. */
     fun ban(nick: String) = viewModelScope.launch {
         val nid = state.value.buffer?.networkId ?: return@launch
-        val channel = state.value.buffer?.name ?: return@launch
+        val channel = state.value.buffer?.ircTarget ?: return@launch
         connectionManager.clientFor(nid)
             ?.send(IrcMessage(command = "MODE", params = listOf(channel, "+b", io.github.trevarj.motd.ui.channelinfo.banMask(nick))))
     }
@@ -759,12 +862,20 @@ class ChatViewModel @Inject constructor(
     /** Toggle [nick]'s friend/fool membership (reuses SettingsRepository semantics). */
     fun toggleFriend(nick: String) = viewModelScope.launch {
         val settings = settingsRepository.settings.firstOrNull() ?: return@launch
-        settingsRepository.setFriend(nick, io.github.trevarj.motd.data.prefs.normalizeNick(nick) !in settings.friends)
+        val rules = identityRules.value
+        val exists = settings.friends.any {
+            rules.normalize(it.trim()) == rules.normalize(nick.trim())
+        }
+        settingsRepository.setFriend(nick, !exists, rules)
     }
 
     fun toggleFool(nick: String) = viewModelScope.launch {
         val settings = settingsRepository.settings.firstOrNull() ?: return@launch
-        settingsRepository.setFool(nick, io.github.trevarj.motd.data.prefs.normalizeNick(nick) !in settings.fools)
+        val rules = identityRules.value
+        val exists = settings.fools.any {
+            rules.normalize(it.trim()) == rules.normalize(nick.trim())
+        }
+        settingsRepository.setFool(nick, !exists, rules)
     }
 
     /**
@@ -923,18 +1034,26 @@ class ChatViewModel @Inject constructor(
     private val jumpMsgid: String? = route.jumpToMsgid
     private val jumpTime: Long = route.jumpToTime
     private val jumpEventId: Long? = route.jumpToEventId
-    private data class JumpRequest(
+    private class JumpRequest(
+        val token: Long,
         val msgid: String?,
         val time: Long,
         val eventId: Long?,
         val settlesEntryPosition: Boolean,
-    )
+    ) {
+        var reresolveUsed: Boolean = false
+    }
 
-    private var activeJumpRequest: JumpRequest? = if (jumpTime > 0 || jumpEventId != null) {
-        JumpRequest(jumpMsgid, jumpTime, jumpEventId, settlesEntryPosition = true)
+    private var nextJumpToken = 0L
+
+    private var activeJumpRequest: JumpRequest? = if (
+        jumpTime > 0 || jumpEventId != null || jumpMsgid != null
+    ) {
+        JumpRequest(++nextJumpToken, jumpMsgid, jumpTime, jumpEventId, settlesEntryPosition = true)
     } else {
         null
     }
+    private var jumpResolveJob: Job? = null
 
     /**
      * CHATHISTORY AROUND fetch used by [ChatJumpResolver] when a msgid target is not yet local:
@@ -967,23 +1086,23 @@ class ChatViewModel @Inject constructor(
             }
         },
         countNewer = { targetBufferId, serverTime, id ->
-            visibilityReader.countTimelineNewer(
+            messageRepository.countNewerThan(
                 targetBufferId,
                 serverTime,
                 id,
-                MessageVisibilitySpec.from(settingsRepository.settings.first()),
+                filterSpecs.first(),
             )
         },
     )
 
-    private val _jumpTarget = MutableStateFlow<ChatJumpResolver.Result.Target?>(null)
-    /** Resolved jump target (index + optional highlight msgid); null when nothing to jump to. */
-    val jumpTarget: StateFlow<ChatJumpResolver.Result.Target?> = _jumpTarget.asStateFlow()
+    private val _jumpTarget = MutableStateFlow<ChatPositionTarget?>(null)
+    /** Identity-bearing target; the screen acknowledges it only after placeholder validation. */
+    val jumpTarget: StateFlow<ChatPositionTarget?> = _jumpTarget.asStateFlow()
 
     // Normal channel entry is also a one-shot position operation. Unlike a search deep-link it
     // has no highlight, but it must settle before read state can advance.
-    private val _initialTarget = MutableStateFlow<ChatInitialPosition?>(null)
-    val initialTarget: StateFlow<ChatInitialPosition?> = _initialTarget.asStateFlow()
+    private val _initialTarget = MutableStateFlow<ChatPositionTarget?>(null)
+    val initialTarget: StateFlow<ChatPositionTarget?> = _initialTarget.asStateFlow()
 
     private val _entryPositionSettled = MutableStateFlow(
         savedStateHandle.get<Boolean>(ENTRY_POSITION_SETTLED_KEY) == true,
@@ -997,18 +1116,12 @@ class ChatViewModel @Inject constructor(
     /** Durable explicit failure state: entry remains read-gated until the user navigates away. */
     val entryPositionUnresolved: StateFlow<Boolean> = _entryPositionUnresolved.asStateFlow()
 
-    // Nullable-event StateFlow instead of a replay-less SharedFlow so a NotFound resolved in init
-    // (before the screen subscribes) is not dropped; the UI clears it via [onJumpFailedShown]
-    // (plans/15 #13).
-    private val _jumpFailed = MutableStateFlow(false)
-    val jumpFailed: StateFlow<Boolean> = _jumpFailed.asStateFlow()
-
-    // Re-resolve is allowed exactly once per navigation; a second index shift falls through to the
-    // not-loaded snackbar rather than looping (plans/15 #12).
-    private var reresolveUsed = false
+    // Re-resolve is allowed exactly once per normal-entry target; explicit jump requests carry
+    // their own guard so a superseded request cannot spend the newer request's retry.
+    private var initialReresolveUsed = false
 
     init {
-        val hasDeepJump = jumpTime > 0
+        val hasDeepJump = jumpTime > 0 || jumpEventId != null || jumpMsgid != null
         // `jump_consumed` only prevents duplicate work after a completed jump. If Android kills
         // the process while the first resolve/scroll is in flight, the restored handle has it set
         // but neither terminal entry-position state; re-publish the target/failure for the new UI.
@@ -1042,7 +1155,7 @@ class ChatViewModel @Inject constructor(
             if (!hasDeepJump && !_entryPositionSettled.value) {
                 _initialTarget.value = restoredScrollPosition(entrySpec)
                     ?: unreadEntryPosition(realMarker, entrySpec)
-                    ?: ChatInitialPosition(index = 0)
+                    ?: ChatPositionTarget(index = 0)
             }
         }
         viewModelScope.launch {
@@ -1052,7 +1165,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private suspend fun restoredScrollPosition(spec: MessageVisibilitySpec): ChatInitialPosition? {
+    private suspend fun restoredScrollPosition(spec: MessageVisibilitySpec): ChatPositionTarget? {
         val roomId = operationalBufferId.value
         val saved = scrollPositionStore.get(roomId)
             ?: bufferId.takeIf { it != roomId }?.let(scrollPositionStore::get)
@@ -1074,9 +1187,12 @@ class ChatViewModel @Inject constructor(
             spec,
         )
         val canonicalSavedId = visibilityReader.resolveCanonicalEventId(saved.rowId)
-        return ChatInitialPosition(
+        return ChatPositionTarget(
             index = index,
             offset = saved.offset.takeIf { anchor.id == canonicalSavedId } ?: 0,
+            expectedEventId = anchor.id,
+            expectedMsgid = anchor.msgid,
+            serverTime = anchor.serverTime,
             fromSavedPosition = true,
         )
     }
@@ -1112,9 +1228,13 @@ class ChatViewModel @Inject constructor(
                 rowId = anchor.id,
             ),
         )
-        _initialTarget.value = ChatInitialPosition(
+        initialReresolveUsed = false
+        _initialTarget.value = ChatPositionTarget(
             index = index,
             offset = saved.offset,
+            expectedEventId = anchor.id,
+            expectedMsgid = anchor.msgid,
+            serverTime = anchor.serverTime,
             fromSavedPosition = true,
         )
     }
@@ -1122,7 +1242,7 @@ class ChatViewModel @Inject constructor(
     private suspend fun unreadEntryPosition(
         realMarker: TimelineAnchor?,
         spec: MessageVisibilitySpec,
-    ): ChatInitialPosition? {
+    ): ChatPositionTarget? {
         val target = realMarker?.let {
             visibilityReader.firstVisibleUnreadAnchor(bufferId, it, spec)
         } ?: return null
@@ -1133,20 +1253,24 @@ class ChatViewModel @Inject constructor(
             null,
             eventId = target.eventId,
         )) {
-            is ChatJumpResolver.Result.Target -> ChatInitialPosition(index = result.index)
+            is ChatJumpResolver.Result.Resolved -> result.target.copy(highlightMsgid = null)
             ChatJumpResolver.Result.NotFound -> null
         }
     }
 
-    private fun resolveJump() = viewModelScope.launch {
+    private fun resolveJump() {
+        val request = activeJumpRequest ?: return
+        jumpResolveJob?.cancel()
         // The buffer name (chathistory target) may not be in `state` yet on first composition;
         // read it directly from the repo so the AROUND fallback has a target.
-        val name = bufferRepository.observeBuffer(bufferId).firstOrNull()?.ircTarget
-        publishResolve(name)
+        jumpResolveJob = viewModelScope.launch {
+            val name = bufferRepository.observeBuffer(bufferId).firstOrNull()?.ircTarget
+            publishResolve(name, request)
+        }
     }
 
-    private suspend fun publishResolve(name: String?) {
-        val request = activeJumpRequest ?: return
+    private suspend fun publishResolve(name: String?, request: JumpRequest) {
+        if (activeJumpRequest?.token != request.token) return
         when (val r = resolver.resolve(
             bufferId,
             request.msgid,
@@ -1154,22 +1278,27 @@ class ChatViewModel @Inject constructor(
             name,
             eventId = request.eventId,
         )) {
-            is ChatJumpResolver.Result.Target -> {
+            is ChatJumpResolver.Result.Resolved -> {
+                if (activeJumpRequest?.token != request.token) return
                 // Force a distinct emission so the screen's LaunchedEffect(jumpTarget) always
                 // re-runs, even when the re-resolved index equals the previous one (plans/15 #12).
                 _jumpTarget.value = null
-                _jumpTarget.value = r
+                _jumpTarget.value = r.target.copy(requestToken = request.token)
             }
             ChatJumpResolver.Result.NotFound -> {
+                if (activeJumpRequest?.token != request.token) return
                 _jumpTarget.value = null
-                _jumpFailed.value = true
+                failActiveJump(request)
             }
         }
     }
 
     /** Screen calls this after it has scrolled to (or given up on) the current target. */
-    fun onJumpHandled() {
-        val settlesEntryPosition = activeJumpRequest?.settlesEntryPosition == true
+    fun onJumpHandled(token: Long) {
+        val request = activeJumpRequest?.takeIf { it.token == token } ?: return
+        val settlesEntryPosition = request.settlesEntryPosition
+        jumpResolveJob?.cancel()
+        jumpResolveJob = null
         activeJumpRequest = null
         _jumpTarget.value = null
         if (settlesEntryPosition) markEntryPositionSettled()
@@ -1192,14 +1321,13 @@ class ChatViewModel @Inject constructor(
     /** A target could not be loaded safely; retain the read gate rather than marking it read. */
     fun onInitialPositionUnresolved() {
         _initialTarget.value = null
-        markEntryPositionUnresolved()
+        if (!_entryPositionSettled.value) markEntryPositionUnresolved()
     }
 
-    fun onJumpUnresolved() {
-        val settlesEntryPosition = activeJumpRequest?.settlesEntryPosition == true
-        activeJumpRequest = null
+    fun onJumpUnresolved(token: Long) {
+        val request = activeJumpRequest?.takeIf { it.token == token } ?: return
         _jumpTarget.value = null
-        if (settlesEntryPosition) markEntryPositionUnresolved()
+        failActiveJump(request)
     }
 
     /**
@@ -1208,16 +1336,37 @@ class ChatViewModel @Inject constructor(
      * shared jump pipeline still supplies bounded paging, index-shift recovery, and highlighting.
      */
     fun jumpToRepliedMessage(msgid: String) {
-        activeJumpRequest = JumpRequest(
-            msgid,
+        val settlesEntryPosition = !_entryPositionSettled.value && !_entryPositionUnresolved.value
+        val request = JumpRequest(
+            token = ++nextJumpToken,
+            msgid = msgid,
             time = 0,
             eventId = null,
-            settlesEntryPosition = false,
+            settlesEntryPosition = settlesEntryPosition,
         )
-        reresolveUsed = false
-        _jumpFailed.value = false
-        viewModelScope.launch {
-            publishResolve(state.value.buffer?.name)
+        jumpResolveJob?.cancel()
+        if (settlesEntryPosition) _initialTarget.value = null
+        activeJumpRequest = request
+        _jumpTarget.value = null
+        jumpResolveJob = viewModelScope.launch {
+            publishResolve(state.value.buffer?.ircTarget, request)
+        }
+    }
+
+    fun retryReplyJump(request: ReplyJumpRequest) {
+        jumpToRepliedMessage(request.msgid)
+    }
+
+    private fun failActiveJump(request: JumpRequest) {
+        if (activeJumpRequest?.token != request.token) return
+        jumpResolveJob = null
+        activeJumpRequest = null
+        if (request.settlesEntryPosition) {
+            markEntryPositionUnresolved()
+        } else {
+            request.msgid?.let { msgid ->
+                uiEventQueue.enqueue(ChatUiEvent.ReplyJumpUnavailable(ReplyJumpRequest(msgid)))
+            }
         }
     }
 
@@ -1231,33 +1380,57 @@ class ChatViewModel @Inject constructor(
         _entryPositionUnresolved.value = true
     }
 
-    /** Screen calls this after showing the not-loaded snackbar so it does not re-fire. */
-    fun onJumpFailedShown() {
-        _jumpFailed.value = false
-    }
-
     /**
      * Re-resolve the same target once when a live message shifted indices mid-jump. The single-shot
      * guard means the screen can always call [onJumpHandled] after it; a repeat request just clears
      * the target so the not-loaded path takes over (plans/15 #12).
      */
-    fun reresolveJumpOnce() = viewModelScope.launch {
-        if (reresolveUsed) {
+    fun reresolveJumpOnce(token: Long) {
+        val request = activeJumpRequest?.takeIf { it.token == token } ?: return
+        if (request.reresolveUsed) {
             _jumpTarget.value = null
-            _jumpFailed.value = true
+            failActiveJump(request)
+            return
+        }
+        request.reresolveUsed = true
+        jumpResolveJob?.cancel()
+        jumpResolveJob = viewModelScope.launch {
+            publishResolve(state.value.buffer?.ircTarget, request)
+        }
+    }
+
+    /** Saved/unread positions use the same exact one-shot index repair as explicit jumps. */
+    fun reresolveInitialOnce(target: ChatPositionTarget) = viewModelScope.launch {
+        if (initialReresolveUsed) {
+            onInitialPositionUnresolved()
             return@launch
         }
-        reresolveUsed = true
-        publishResolve(state.value.buffer?.name)
+        initialReresolveUsed = true
+        when (val result = resolver.resolve(
+            bufferId = bufferId,
+            msgid = target.expectedMsgid,
+            timeMs = target.serverTime,
+            bufferName = null,
+            eventId = target.expectedEventId,
+        )) {
+            is ChatJumpResolver.Result.Resolved -> {
+                _initialTarget.value = null
+                _initialTarget.value = result.target.copy(
+                    offset = target.offset,
+                    highlightMsgid = null,
+                    fromSavedPosition = target.fromSavedPosition,
+                )
+            }
+            ChatJumpResolver.Result.NotFound -> onInitialPositionUnresolved()
+        }
     }
 
     /**
      * Isupport-normalized nick folding for autocomplete; lowercase fallback when no live client.
      */
     fun nickNormalizer(): (String) -> String {
-        val nid = state.value.buffer?.networkId
-        val isupport = nid?.let { connectionManager.clientFor(it)?.isupport }
-        return isupport?.let { { name: String -> it.normalize(name) } } ?: { it.lowercase() }
+        val rules = identityRules.value
+        return rules::normalize
     }
 
     private companion object {

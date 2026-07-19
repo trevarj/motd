@@ -6,8 +6,10 @@ import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RawQuery
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 
 // Room is the authoritative boundary for fixed persistence queries. Prefer typed entity or
@@ -76,6 +78,32 @@ interface NetworkDao {
 }
 
 @Dao
+interface NetworkIdentityDao {
+    @Query("SELECT * FROM network_identity ORDER BY networkId")
+    fun observeAll(): Flow<List<NetworkIdentityEntity>>
+
+    @Query("SELECT * FROM network_identity WHERE networkId = :networkId")
+    fun observe(networkId: Long): Flow<NetworkIdentityEntity?>
+
+    @Query("SELECT * FROM network_identity WHERE networkId = :networkId")
+    suspend fun byNetwork(networkId: Long): NetworkIdentityEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(identity: NetworkIdentityEntity)
+
+    @Query("UPDATE network_identity SET selfNick = :selfNick WHERE networkId = :networkId")
+    suspend fun updateSelfNick(networkId: Long, selfNick: String): Int
+
+    /** Registration normally creates the row; retain a durable fallback for an orphan self-NICK. */
+    @Transaction
+    suspend fun setSelfNick(networkId: Long, selfNick: String) {
+        if (updateSelfNick(networkId, selfNick) == 0) {
+            upsert(NetworkIdentityEntity(networkId = networkId, selfNick = selfNick))
+        }
+    }
+}
+
+@Dao
 interface BufferDao {
     // Chat-list projection: each non-SERVER buffer joins one newest preview-eligible message by
     // identity. JOIN/PART/QUIT are timeline-only events and never become previews or activity.
@@ -88,6 +116,8 @@ interface BufferDao {
             b.id AS bufferId,
             b.networkId AS networkId,
             n.name AS networkName,
+            ni.caseMapping AS caseMapping,
+            ni.chanTypes AS chanTypes,
             b.displayName AS displayName,
             b.type AS type,
             b.pinned AS pinned,
@@ -120,6 +150,7 @@ interface BufferDao {
                 AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')) AS mentionCount
         FROM buffers b
         JOIN networks n ON n.id = b.networkId
+        LEFT JOIN network_identity ni ON ni.networkId = b.networkId
         LEFT JOIN messages lm ON lm.id = (
             SELECT m.id FROM messages m
             WHERE m.bufferId = b.id AND m.kind NOT IN ('JOIN', 'PART', 'QUIT', 'NETSPLIT', 'NETJOIN')
@@ -170,7 +201,7 @@ interface BufferDao {
     suspend fun joinedChannelNames(networkId: Long): List<String>
 
     @Query(
-        """SELECT id, CASE WHEN type = 'QUERY' THEN displayName ELSE name END AS name
+        """SELECT id, CASE WHEN type = 'SERVER' THEN name ELSE displayName END AS name
            FROM buffers WHERE networkId = :networkId AND type != 'SERVER'
              AND pendingCloseAt IS NULL AND redirectToRoomId IS NULL ORDER BY id""",
     )
@@ -194,7 +225,7 @@ interface BufferDao {
 
     @Query(
         """SELECT b.id AS bufferId,
-                  CASE WHEN b.type = 'QUERY' THEN b.displayName ELSE b.name END AS target,
+                   CASE WHEN b.type = 'SERVER' THEN b.name ELSE b.displayName END AS target,
                   CASE
                     WHEN b.readMarkerTime IS NULL THEN candidate.serverTime
                     WHEN candidate.serverTime IS NULL THEN b.readMarkerTime
@@ -330,6 +361,8 @@ data class ChatListRow(
     val pinned: Boolean, val muted: Boolean,
     val lastMessageText: String?, val lastMessageSender: String?, val lastMessageTime: Long?,
     val unreadCount: Int, val mentionCount: Int,
+    val caseMapping: String? = null,
+    val chanTypes: String? = null,
 )
 
 data class BufferTargetRow(val id: Long, val name: String)
@@ -345,6 +378,16 @@ data class BufferReadMarkerRow(
 interface MessageDao {
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, id DESC")
     fun pagingSource(bufferId: Long): PagingSource<Int, MessageEntity>
+
+    /** Dynamic visibility predicates must run inside Room so placeholder counts match page rows. */
+    @RawQuery(observedEntities = [MessageEntity::class])
+    fun pagingSource(query: SupportSQLiteQuery): PagingSource<Int, MessageEntity>
+
+    @RawQuery
+    suspend fun rawMessage(query: SupportSQLiteQuery): MessageEntity?
+
+    @RawQuery
+    suspend fun rawCount(query: SupportSQLiteQuery): Int
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(msgs: List<MessageEntity>): List<Long>
@@ -521,7 +564,7 @@ interface MessageDao {
 
     @Query(
         """SELECT b.id AS bufferId,
-                  CASE WHEN b.type = 'QUERY' THEN b.displayName ELSE b.name END AS target,
+                   CASE WHEN b.type = 'SERVER' THEN b.name ELSE b.displayName END AS target,
                   m.serverTime AS timestamp, m.id AS eventId
            FROM buffers b JOIN messages m ON m.id = (
                SELECT newest.id FROM messages newest
@@ -684,11 +727,13 @@ interface MessageDao {
     // quoted + prefixed with *) by SearchRepository. Chat kinds only; optional buffer scope.
     @Query(
         """
-        SELECT m.*, b.displayName AS bufferDisplayName, n.name AS networkName
+        SELECT m.*, b.displayName AS bufferDisplayName, n.name AS networkName,
+               ni.caseMapping AS caseMapping, ni.chanTypes AS chanTypes
         FROM messages m
         JOIN messages_fts f ON m.id = f.rowid
         JOIN buffers b ON b.id = m.bufferId
         JOIN networks n ON n.id = b.networkId
+        LEFT JOIN network_identity ni ON ni.networkId = b.networkId
         WHERE f.messages_fts MATCH :query
           AND (:bufferId IS NULL OR m.bufferId = COALESCE(
               (SELECT COALESCE(redirectToRoomId, id) FROM buffers WHERE id = :bufferId),
@@ -709,7 +754,13 @@ interface MessageDao {
     fun observeBouncerTranscript(networkId: Long): Flow<List<BouncerTranscriptRow>>
 }
 
-data class SearchHit(@Embedded val message: MessageEntity, val bufferDisplayName: String, val networkName: String)
+data class SearchHit(
+    @Embedded val message: MessageEntity,
+    val bufferDisplayName: String,
+    val networkName: String,
+    val caseMapping: String? = null,
+    val chanTypes: String? = null,
+)
 
 data class MessageBoundaryRow(val msgid: String?, val serverTime: Long?)
 
@@ -835,15 +886,16 @@ interface ReactionDao {
     @Query(
         """DELETE FROM reactions
            WHERE bufferId = :bufferId AND targetMsgid = :targetMsgid AND emoji = :emoji
-             AND (
-                 actorKey = :baseActorKey OR
-                 (actorKey >= :legacyPrefix AND actorKey < :legacyUpperBound)
-             )""",
+              AND (
+                  (:deleteBaseActor = 1 AND actorKey = :baseActorKey) OR
+                  (actorKey >= :legacyPrefix AND actorKey < :legacyUpperBound)
+              )""",
     )
     suspend fun deleteActorAliases(
         bufferId: Long,
         targetMsgid: String,
         baseActorKey: String,
+        deleteBaseActor: Boolean,
         legacyPrefix: String,
         legacyUpperBound: String,
         emoji: String,
@@ -860,6 +912,27 @@ interface UserDao {
 
     @Query("SELECT * FROM users WHERE networkId = :nid AND nick = :nick")
     fun observeByNick(nid: Long, nick: String): Flow<UserEntity?>
+
+    @Query("DELETE FROM users WHERE networkId = :nid AND nick = :nick")
+    suspend fun delete(nid: Long, nick: String)
+
+    /** Carry the cached identity attached to a nick while retaining any richer destination fields. */
+    @Transaction
+    suspend fun rekey(nid: Long, from: String, to: String) {
+        if (from == to) return
+        val source = byNick(nid, from) ?: return
+        val destination = byNick(nid, to)
+        upsert(
+            source.copy(
+                nick = to,
+                username = source.username ?: destination?.username,
+                account = source.account ?: destination?.account,
+                hostmask = source.hostmask ?: destination?.hostmask,
+                realname = source.realname ?: destination?.realname,
+            ),
+        )
+        delete(nid, from)
+    }
 }
 
 @Dao
@@ -879,6 +952,12 @@ interface RoomAliasDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnore(alias: RoomAliasEntity): Long
+
+    @Query(
+        """DELETE FROM room_aliases WHERE roomId = :roomId
+           AND namespace IN ('VERIFIED_NICK', 'PROVISIONAL_NICK')""",
+    )
+    suspend fun deleteQueryAliases(roomId: RoomId)
 
     @Query("UPDATE room_aliases SET roomId = :winnerId WHERE roomId = :loserId")
     suspend fun repoint(loserId: RoomId, winnerId: RoomId)

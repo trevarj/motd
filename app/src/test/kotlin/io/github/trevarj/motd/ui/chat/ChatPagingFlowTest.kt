@@ -5,7 +5,9 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -21,7 +23,7 @@ class ChatPagingFlowTest {
     fun changingFools_recreatesPagingGeneration_insteadOfRecollectingIt() = runTest {
         val specs = MutableStateFlow(MessageVisibilitySpec())
         var sourceGenerations = 0
-        val flow = filteredMessagePages(
+        val flow = repositoryMessagePages(
             source = {
                 sourceGenerations++
                 flowOf(PagingData.empty<MessageEntity>())
@@ -41,6 +43,33 @@ class ChatPagingFlowTest {
         runCurrent()
 
         assertEquals(2, sourceGenerations)
+        job.cancel()
+    }
+
+    @Test
+    fun changingVisibility_cancelsPreviousPagerGeneration() = runTest {
+        val specs = MutableStateFlow(MessageVisibilitySpec())
+        var cancelledGenerations = 0
+        val pages = repositoryMessagePages(
+            source = {
+                flow {
+                    emit(PagingData.empty<MessageEntity>())
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        cancelledGenerations++
+                    }
+                }
+            },
+            specs = specs,
+        )
+        val job = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { pages.collect() }
+        runCurrent()
+
+        specs.value = MessageVisibilitySpec(showJoinPartQuit = false)
+        runCurrent()
+
+        assertEquals(1, cancelledGenerations)
         job.cancel()
     }
 }

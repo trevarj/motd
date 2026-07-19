@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.sync.EventProcessor
@@ -83,6 +84,8 @@ class MotdNotificationsFoolTest {
         // The application-scoped DataStore outlives this Robolectric class; do not leak the fool
         // fixture into another test class or make this class depend on JUnit method order.
         repo.setFool("troll", false)
+        repo.setFool("troll~", false)
+        repo.setFool("stable-account", false)
         db.close()
     }
 
@@ -133,6 +136,71 @@ class MotdNotificationsFoolTest {
         assertSilent(posted)
         val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted)
         assertNotNull(style?.messages?.single()?.person?.icon)
+    }
+
+    @Test
+    fun rfc1459FoolEquivalenceSuppressesNotification() = runTest {
+        repo.setFool("troll~", true)
+
+        notifications.onIncoming(
+            networkId = networkId,
+            bufferId = bufferId,
+            type = BufferType.QUERY,
+            hasMention = false,
+            message = chat("troll^", "folded fool"),
+        )
+
+        assertEquals(0, postedCount())
+    }
+
+    @Test
+    fun strictRfc1459KeepsTildeAndCaretDistinctForNotificationSuppression() = runTest {
+        db.networkIdentityDao().upsert(
+            NetworkIdentityEntity(networkId, caseMapping = "rfc1459-strict"),
+        )
+        repo.setFool("troll~", true)
+
+        notifications.onIncoming(
+            networkId = networkId,
+            bufferId = bufferId,
+            type = BufferType.QUERY,
+            hasMention = false,
+            message = chat("troll^", "distinct sender"),
+        )
+
+        assertEquals(1, postedCount())
+    }
+
+    @Test
+    fun canonicalAccountSuppressesNotificationAfterNickChange() = runTest {
+        repo.setFool("stable-account", true)
+        val delivered = chat("new-nick", "same account after rename")
+        val eventId = db.messageDao().insertAll(
+            listOf(
+                MessageEntity(
+                    bufferId = bufferId,
+                    msgid = "account-continuity",
+                    serverTime = delivered.ctx.serverTime,
+                    sender = "new-nick",
+                    normalizedActor = "new-nick",
+                    senderAccount = "stable-account",
+                    kind = MessageKind.PRIVMSG,
+                    text = delivered.text,
+                    dedupKey = "account-continuity",
+                ),
+            ),
+        ).single()
+
+        notifications.onCanonicalIncoming(
+            networkId,
+            bufferId,
+            BufferType.QUERY,
+            false,
+            eventId,
+            delivered,
+        )
+
+        assertEquals(0, postedCount())
     }
 
     @Test

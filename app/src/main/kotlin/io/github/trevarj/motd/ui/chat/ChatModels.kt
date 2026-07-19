@@ -1,14 +1,25 @@
 package io.github.trevarj.motd.ui.chat
 
 import io.github.trevarj.motd.data.db.MessageEntity
-import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
-import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.visibility.JOIN_PART_QUIT_KINDS
+import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.irc.client.HistoryAvailability
+import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.ui.components.ReactionChip
+import androidx.paging.LoadState
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.withTimeoutOrNull
 
 // --- timeline message filtering (plans/13 §2.4/§2.5) ---
 
@@ -16,23 +27,41 @@ import io.github.trevarj.motd.ui.components.ReactionChip
 val JPQ_KINDS: Set<MessageKind> = JOIN_PART_QUIT_KINDS
 
 /**
- * Behavioral filter spec fed into [keepMessage]. Derived from the observed Settings in
- * [ChatViewModel]; passed to `PagingData.filter` so grouping/day-separator/read-marker math only
- * sees visible rows.
+ * Behavioral filter spec derived from observed Settings and passed into each repository Pager.
  */
 typealias MessageFilterSpec = MessageVisibilitySpec
 
-/** True when [sender] is a fool (never for own messages). Normalized, case-insensitive compare. */
-fun isFoolSender(sender: String, isSelf: Boolean, fools: Set<String>): Boolean =
-    !isSelf && normalizeNick(sender) in fools
+/** Match a stored actor using its persisted account/casemapped identity, never display spelling. */
+fun MessageEntity.matchesConfiguredActor(
+    configured: Set<String>,
+    identityRules: IrcIdentityRules,
+): Boolean {
+    if (configured.isEmpty()) return false
+    val normalized = configured.mapTo(hashSetOf()) { identityRules.normalize(it.trim()) }
+    val accounts = configured.mapTo(hashSetOf()) { it.trim() }
+    return normalizedActor in normalized ||
+        senderAccount?.let { it in accounts } == true
+}
+
+/** Fool treatment is limited to incoming conversation rows. */
+fun isFoolMessage(
+    message: MessageEntity,
+    fools: Set<String>,
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
+): Boolean = message.kind in CONVERSATION_KINDS &&
+    !message.isSelf &&
+    message.matchesConfiguredActor(fools, identityRules)
 
 /**
- * `PagingData.filter` predicate: drops JPQ rows when hidden, and drops fool rows only in HIDE mode.
+ * Policy predicate: drops JPQ rows when hidden, and drops fool rows only in HIDE mode.
  * System-event kinds are never fool-treated (JPQ visibility governs those). COLLAPSE keeps the row
  * so it can render as a tap-to-expand placeholder in the timeline.
  */
-fun keepMessage(msg: MessageEntity, spec: MessageFilterSpec): Boolean =
-    MessageVisibilityPolicy(spec).timeline(msg)
+fun keepMessage(
+    msg: MessageEntity,
+    spec: MessageFilterSpec,
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
+): Boolean = MessageVisibilityPolicy(spec, identityRules).timeline(msg)
 
 /** Grouping window: consecutive same-sender messages within this span share one header. */
 const val GROUP_WINDOW_MS: Long = 3 * 60 * 1000
@@ -43,137 +72,8 @@ const val GROUP_WINDOW_MS: Long = 3 * 60 * 1000
  * deliberately scroll up. Compose scroll offsets are in raw pixels.
  */
 const val AUTOSCROLL_BOTTOM_TOLERANCE_PX: Int = 64
-
-/**
- * Count how many of the below-the-fold [serverTimes] are newer than the frozen read [marker].
- * [serverTimes] are the reverse-list rows scrolled off toward the bottom (indices `0 until
- * firstVisibleIndex`, newest first). Returns the FAB unread badge value: 0 at the bottom, shrinking
- * as the user scrolls down — viewport/read aware rather than a monotonic arrival tally (bug #7).
- */
-fun unreadBelowViewport(serverTimes: List<Long>, marker: Long): Int {
-    // The reverse list is newest-first. Find the first row that is not strictly newer than the
-    // marker instead of walking (and, at the Compose call-site, copying) every below-fold row.
-    var low = 0
-    var high = serverTimes.size
-    while (low < high) {
-        val middle = (low + high) ushr 1
-        if (serverTimes[middle] > marker) low = middle + 1 else high = middle
-    }
-    return low
-}
-
-/** A non-self timeline row captured once per Paging window, not once per scroll frame. */
-data class UnreadViewportRow(val index: Int, val serverTime: Long, val isSelf: Boolean)
-
-/**
- * Allocation-free-at-scroll-time unread index. Both arrays are sorted by reverse-list index and
- * server time respectively, so the viewport and marker bounds can each be found in O(log n).
- */
-class UnreadViewportIndex {
-    private var rowIndices = IntArray(0)
-    private var serverTimes = LongArray(0)
-    private var eventIds = LongArray(0)
-    private var size = 0
-    private var loadedCount = 0
-    private var firstRowId: Long? = null
-    private var stoppedAtMarker: TimelineAnchor? = null
-
-    /**
-     * Incorporate a Paging window without re-reading its already-indexed prefix. Paging appends
-     * older rows at the end during history traversal, so that hot path only visits the new page.
-     * A refresh, shrink, or replacement of index zero invalidates positional assumptions and
-     * rebuilds the compact non-self index.
-     */
-    fun update(
-        itemCount: Int,
-        maxNonSelf: Int = Int.MAX_VALUE,
-        stopAtOrBefore: TimelineAnchor? = null,
-        include: (MessageEntity) -> Boolean = { !it.isSelf },
-        peek: (Int) -> MessageEntity?,
-    ) {
-        // Paging emits an empty snapshot while invalidating/refreshing. Never probe index zero for
-        // that transient state: requesting it can synchronously re-enter Paging on the UI thread.
-        if (itemCount == 0) {
-            clear()
-            return
-        }
-        val currentFirstId = peek(0)?.id
-        val rebuild = itemCount < loadedCount ||
-            (loadedCount > 0 && currentFirstId != firstRowId)
-        if (rebuild) clear()
-
-        // The FAB renders 99+ at 100, so its caller can cap [maxNonSelf] and avoid rebuilding a
-        // multi-thousand-row Paging window when a live message is prepended at index zero. A read
-        // marker is an even stronger terminal boundary because server times are descending.
-        val markerAlreadyCovered = stopAtOrBefore != null &&
-            stoppedAtMarker?.let { stopAtOrBefore >= it } == true
-        if (!markerAlreadyCovered && size < maxNonSelf && itemCount > loadedCount) {
-            var index = loadedCount
-            while (index < itemCount && size < maxNonSelf) {
-                val row = peek(index)
-                loadedCount = index + 1
-                if (row == null) {
-                    index++
-                    continue
-                }
-                if (stopAtOrBefore != null && TimelineAnchor(row.serverTime, row.id) <= stopAtOrBefore) {
-                    stoppedAtMarker = stopAtOrBefore
-                    break
-                }
-                if (include(row)) {
-                    ensureCapacity(size + 1)
-                    rowIndices[size] = index
-                    serverTimes[size] = row.serverTime
-                    eventIds[size] = row.id
-                    size++
-                }
-                index++
-            }
-        }
-        firstRowId = currentFirstId
-    }
-
-    private fun clear() {
-        rowIndices = IntArray(0)
-        serverTimes = LongArray(0)
-        eventIds = LongArray(0)
-        size = 0
-        loadedCount = 0
-        firstRowId = null
-        stoppedAtMarker = null
-    }
-
-    fun count(firstVisibleIndex: Int, marker: TimelineAnchor): Int {
-        val inViewport = lowerBound(rowIndices, firstVisibleIndex)
-        var newerThanMarker = 0
-        while (
-            newerThanMarker < size &&
-            TimelineAnchor(serverTimes[newerThanMarker], eventIds[newerThanMarker]) > marker
-        ) {
-            newerThanMarker++
-        }
-        return minOf(inViewport, newerThanMarker)
-    }
-
-    private fun lowerBound(values: IntArray, target: Int): Int {
-        var low = 0
-        var high = size
-        while (low < high) {
-            val middle = (low + high) ushr 1
-            if (values[middle] < target) low = middle + 1 else high = middle
-        }
-        return low
-    }
-
-    private fun ensureCapacity(required: Int) {
-        if (required <= rowIndices.size) return
-        val capacity = maxOf(required, rowIndices.size.coerceAtLeast(16) * 2)
-        rowIndices = rowIndices.copyOf(capacity)
-        serverTimes = serverTimes.copyOf(capacity)
-        eventIds = eventIds.copyOf(capacity)
-    }
-
-}
+internal const val MAX_PLACEHOLDER_PROBES: Int = 500
+internal const val TARGET_MATERIALIZATION_TIMEOUT_MS = 30_000L
 
 /**
  * Decide whether an incoming message should pin the reverse list to the newest row (index 0). Only
@@ -282,7 +182,7 @@ fun newestEffectiveMessageId(
     itemCount: Int,
     peek: (Int) -> MessageEntity?,
     policy: MessageVisibilityPolicy,
-): Long? = (0 until itemCount).firstNotNullOfOrNull { index ->
+): Long? = (0 until minOf(itemCount, MAX_PLACEHOLDER_PROBES)).firstNotNullOfOrNull { index ->
     peek(index)?.takeIf(policy::effectiveBottom)?.id
 }
 
@@ -296,6 +196,7 @@ fun isAtEffectiveBottom(
 ): Boolean {
     if (firstVisibleOffset > AUTOSCROLL_BOTTOM_TOLERANCE_PX) return false
     val belowViewport = minOf(firstVisibleIndex, itemCount)
+    if (belowViewport > MAX_PLACEHOLDER_PROBES) return false
     return (0 until belowViewport).none { index ->
         peek(index)?.let(policy::effectiveBottom) == true
     }
@@ -308,21 +209,30 @@ fun nearestAnchorRow(
     peek: (Int) -> MessageEntity?,
     policy: MessageVisibilityPolicy,
 ): Pair<Int, MessageEntity>? {
-    for (index in firstVisibleIndex until itemCount) {
+    val olderEnd = minOf(itemCount, firstVisibleIndex + MAX_PLACEHOLDER_PROBES)
+    for (index in firstVisibleIndex until olderEnd) {
         val row = peek(index) ?: continue
         if (policy.anchor(row)) return index to row
     }
-    for (index in minOf(firstVisibleIndex - 1, itemCount - 1) downTo 0) {
+    val newerEnd = maxOf(0, firstVisibleIndex - MAX_PLACEHOLDER_PROBES)
+    for (index in minOf(firstVisibleIndex - 1, itemCount - 1) downTo newerEnd) {
         val row = peek(index) ?: continue
         if (policy.anchor(row)) return index to row
     }
     return null
 }
 
-data class ChatInitialPosition(
+/** One exact destination model shared by deep links, saved positions, and unread entry. */
+data class ChatPositionTarget(
     val index: Int,
     val offset: Int = 0,
+    val expectedEventId: Long? = null,
+    val expectedMsgid: String? = null,
+    val serverTime: Long = 0,
+    val highlightMsgid: String? = null,
     val fromSavedPosition: Boolean = false,
+    /** Opaque ViewModel request identity; stale UI completions must not consume a newer jump. */
+    val requestToken: Long = 0,
 )
 
 data class ChatScrollPosition(
@@ -337,57 +247,229 @@ data class ChatScrollPosition(
  * Normal entry scroll: saved viewports and older unread targets need explicit positioning; a fresh
  * newest target only scrolls if the list state was retained off-bottom.
  */
-fun shouldScrollToInitialTarget(target: ChatInitialPosition, atBottom: Boolean): Boolean =
+fun shouldScrollToInitialTarget(target: ChatPositionTarget, atBottom: Boolean): Boolean =
     target.fromSavedPosition || target.index > 0 || !atBottom
+
+/** Canonical local identity is checked before the case-sensitive opaque wire msgid. */
+fun positionTargetMatches(target: ChatPositionTarget, actual: MessageEntity?): Boolean {
+    actual ?: return false
+    if (target.expectedEventId != null && actual.id != target.expectedEventId) return false
+    if (target.expectedMsgid != null && actual.msgid != target.expectedMsgid) return false
+    return true
+}
+
+internal data class TargetMaterialization<T>(
+    val item: T?,
+    val loading: Boolean,
+    val addressable: Boolean = true,
+    val failed: Boolean = false,
+    /** Changes when Paging replaces or materially shifts the loaded snapshot. */
+    val generation: Any? = null,
+)
+
+/** Request exactly one placeholder and wait for that position, without scanning the dataset. */
+internal suspend fun <T> requestAndAwaitTarget(
+    index: Int,
+    request: suspend (Int) -> Boolean,
+    snapshots: Flow<TargetMaterialization<T>>,
+): T? {
+    val before = snapshots.first()
+    if (!request(index)) return null
+    var observedLoading = before.loading
+    return withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+        snapshots.firstOrNull { snapshot ->
+            observedLoading = observedLoading || snapshot.loading
+            val replaced = snapshot.generation != before.generation
+            val newFailure = snapshot.failed && (!before.failed || observedLoading || replaced)
+            snapshot.item != null || newFailure ||
+                (!snapshot.addressable && !snapshot.loading) ||
+                ((observedLoading || replaced) && !snapshot.loading)
+        }
+    }?.item
+}
+
+data class ReplyJumpRequest(val msgid: String)
+
+sealed interface ChatUiEvent {
+    data object InvalidCommand : ChatUiEvent
+    data object ReactionBlocked : ChatUiEvent
+    data object ReactionTargetUnavailable : ChatUiEvent
+    data object ReactionSendFailed : ChatUiEvent
+    data object SendRejected : ChatUiEvent
+    data object HistoryOffline : ChatUiEvent
+    data class HistoryUpdated(val inserted: Int) : ChatUiEvent
+    data object HistoryUpToDate : ChatUiEvent
+    data object HistoryUnsupported : ChatUiEvent
+    data object HistoryFailed : ChatUiEvent
+    data class HistoryIncomplete(val inserted: Int) : ChatUiEvent
+    data class HistoryCapped(val inserted: Int, val limit: Int) : ChatUiEvent
+    data class ReplyJumpUnavailable(val request: ReplyJumpRequest) : ChatUiEvent
+}
+
+data class QueuedChatUiEvent(val id: Long, val value: ChatUiEvent)
+
+/** StateFlow-backed FIFO so recreation replays every unacknowledged event exactly once. */
+internal class ChatUiEventQueue {
+    private val lock = Any()
+    private var nextId = 0L
+    private val _pending = MutableStateFlow<List<QueuedChatUiEvent>>(emptyList())
+    val pending = _pending.asStateFlow()
+
+    fun enqueue(value: ChatUiEvent): QueuedChatUiEvent = synchronized(lock) {
+        QueuedChatUiEvent(++nextId, value).also { event ->
+            _pending.value = _pending.value + event
+        }
+    }
+
+    fun acknowledge(id: Long) = synchronized(lock) {
+        _pending.value = _pending.value.filterNot { it.id == id }
+    }
+}
+
+internal fun ChatUiEvent.hasRetryAction(): Boolean =
+    this is ChatUiEvent.ReplyJumpUnavailable ||
+        this is ChatUiEvent.HistoryFailed ||
+        this is ChatUiEvent.HistoryIncomplete ||
+        this is ChatUiEvent.HistoryCapped
+
+/** Run a snackbar action before acknowledging its replay-safe queued event. */
+internal fun handleChatUiEventResult(
+    event: QueuedChatUiEvent,
+    actionPerformed: Boolean,
+    retryReplyJump: (ReplyJumpRequest) -> Unit,
+    retryMissingHistory: () -> Unit,
+    acknowledge: (Long) -> Unit,
+) {
+    if (actionPerformed) {
+        when (val value = event.value) {
+            is ChatUiEvent.ReplyJumpUnavailable -> retryReplyJump(value.request)
+            ChatUiEvent.HistoryFailed,
+            is ChatUiEvent.HistoryIncomplete,
+            is ChatUiEvent.HistoryCapped,
+            -> retryMissingHistory()
+            else -> Unit
+        }
+    }
+    acknowledge(event.id)
+}
+
+sealed interface ChatHistoryUiState {
+    data object Hidden : ChatHistoryUiState
+    data object Loading : ChatHistoryUiState
+    data object Offline : ChatHistoryUiState
+    data object Negotiating : ChatHistoryUiState
+    data object Unsupported : ChatHistoryUiState
+    data class Incomplete(val inserted: Int = 0) : ChatHistoryUiState
+    data class Capped(val inserted: Int, val limit: Int) : ChatHistoryUiState
+    data object Error : ChatHistoryUiState
+    data object ConfirmedStart : ChatHistoryUiState
+}
+
+internal fun chatHistoryUiState(
+    bufferType: BufferType?,
+    connectionState: IrcClientState?,
+    availability: HistoryAvailability,
+    append: LoadState,
+    historyComplete: Boolean,
+    resync: HistoryResyncState,
+): ChatHistoryUiState {
+    if (bufferType == null || bufferType == BufferType.SERVER) return ChatHistoryUiState.Hidden
+    when (resync) {
+        is HistoryResyncState.Incomplete -> return ChatHistoryUiState.Incomplete(resync.inserted)
+        is HistoryResyncState.Capped -> return ChatHistoryUiState.Capped(resync.inserted, resync.limit)
+        is HistoryResyncState.Failed -> return if (availability == HistoryAvailability.Unsupported) {
+            ChatHistoryUiState.Unsupported
+        } else {
+            ChatHistoryUiState.Error
+        }
+        else -> Unit
+    }
+    // A final capability decision supersedes a stale mediator error/loading state.
+    if (availability == HistoryAvailability.Unsupported) return ChatHistoryUiState.Unsupported
+    if (append is LoadState.Loading) return ChatHistoryUiState.Loading
+    if (append is LoadState.Error) {
+        return when (availability) {
+            HistoryAvailability.NegotiatingOrOffline -> historyUnavailableState(connectionState)
+            else -> ChatHistoryUiState.Error
+        }
+    }
+    if (append.endOfPaginationReached && historyComplete) {
+        return ChatHistoryUiState.ConfirmedStart
+    }
+    return when (availability) {
+        HistoryAvailability.Unsupported -> ChatHistoryUiState.Unsupported
+        HistoryAvailability.NegotiatingOrOffline -> historyUnavailableState(connectionState)
+        is HistoryAvailability.Ready -> if (append.endOfPaginationReached) {
+            ChatHistoryUiState.Incomplete()
+        } else {
+            ChatHistoryUiState.Hidden
+        }
+    }
+}
+
+private fun historyUnavailableState(connectionState: IrcClientState?): ChatHistoryUiState =
+    when (connectionState) {
+        IrcClientState.Disconnected -> ChatHistoryUiState.Offline
+        is IrcClientState.Failed -> if (connectionState.fatal) {
+            ChatHistoryUiState.Offline
+        } else {
+            ChatHistoryUiState.Negotiating
+        }
+        else -> ChatHistoryUiState.Negotiating
+    }
+
+/** Retries each offline mediator failure once when its connection generation is Ready. */
+internal class HistoryReadyRetryGate {
+    private var retriedError: Throwable? = null
+
+    fun update(availability: HistoryAvailability, append: LoadState): Boolean {
+        if (availability == HistoryAvailability.Unsupported) return false
+        val error = (append as? LoadState.Error)?.error ?: return false
+        if (error !is io.github.trevarj.motd.irc.client.IrcDisconnectedException) return false
+        if (availability !is HistoryAvailability.Ready || retriedError === error) return false
+        retriedError = error
+        return true
+    }
+}
 
 /**
  * Aggregate raw [ReactionEntity] rows into per-msgid chip lists: one chip per emoji with its count
  * and whether [myNick] is among the reactors. Ordered by first appearance for stability.
  *
- * Own-nick matching uses IRC casefolding ([normalizer]), not plain ASCII case-insensitivity, so
- * the `[]{}|~` equivalence (`nick[]` == `nick{}` under rfc1459) is honored. Callers should pass the
- * live client's isupport normalizer; the default applies rfc1459 folding, which is the safe
- * superset used elsewhere when no live client is reachable.
+ * Ownership compares persisted actor keys. The authenticated account wins when known; otherwise
+ * the supplied network rules produce the same casemapped nick key as EventProcessor.
  */
 fun aggregateReactions(
     reactions: List<ReactionEntity>,
     myNick: String?,
-    normalizer: (String) -> String = ::foldNickRfc1459,
+    myAccount: String? = null,
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
 ): Map<String, List<ReactionChip>> {
-    val myNormalized = myNick?.let(normalizer)
+    val myActorKeys = buildSet {
+        myAccount?.takeUnless { it.isEmpty() || it == "*" }?.let { add("account:$it") }
+        myNick?.let { nick ->
+            add(identityRules.actorKey(nick, account = null))
+            if (myAccount != null) add(identityRules.actorKey(nick, myAccount))
+        }
+    }
+    val myNormalizedNick = myNick?.let(identityRules::normalize)
     // msgid -> emoji -> (count, mine)
     val byMsg = LinkedHashMap<String, LinkedHashMap<String, MutableReactionAgg>>()
     for (r in reactions) {
         val emojiMap = byMsg.getOrPut(r.targetMsgid) { LinkedHashMap() }
         val agg = emojiMap.getOrPut(r.emoji) { MutableReactionAgg() }
         agg.count++
-        if (myNormalized != null && normalizer(r.sender) == myNormalized) agg.mine = true
+        if (
+            r.actorKey in myActorKeys ||
+            (myAccount == null && myNormalizedNick != null &&
+                identityRules.normalize(r.sender) == myNormalizedNick)
+        ) {
+            agg.mine = true
+        }
     }
     return byMsg.mapValues { (_, emojiMap) ->
         emojiMap.map { (emoji, agg) -> ReactionChip(emoji, agg.count, agg.mine) }
     }
-}
-
-/**
- * Pure rfc1459 nick casefolding fallback (uppercase → lowercase plus the `[]\~` → `{}|^` mapping).
- * Mirrors `Isupport.normalize` for the rfc1459 case; used when no live client normalizer is
- * available so own-nick reaction matching still folds the IRC-equivalence characters.
- */
-fun foldNickRfc1459(name: String): String {
-    val sb = StringBuilder(name.length)
-    for (c in name) {
-        sb.append(
-            when {
-                c in 'A'..'Z' -> c + 32
-                c == '[' -> '{'
-                c == ']' -> '}'
-                c == '\\' -> '|'
-                c == '~' -> '^'
-                else -> c
-            },
-        )
-    }
-    return sb.toString()
 }
 
 private class MutableReactionAgg(var count: Int = 0, var mine: Boolean = false)

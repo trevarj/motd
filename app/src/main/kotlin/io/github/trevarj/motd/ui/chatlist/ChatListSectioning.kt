@@ -2,7 +2,8 @@ package io.github.trevarj.motd.ui.chatlist
 
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
-import io.github.trevarj.motd.data.prefs.normalizeNick
+import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 
 /**
  * Chat-list priority sectioning. Pure and unit-tested.
@@ -28,7 +29,7 @@ data class ChatListSections(
 
 /** Whether [row] keeps the friend presentation, including when it is globally pinned. */
 internal fun isFriendQuery(row: ChatListRow, friends: Set<String>): Boolean =
-    row.type == BufferType.QUERY && normalizeNick(row.displayName) in friends
+    row.type == BufferType.QUERY && row.identityRules.matchesConfiguredNick(row.displayName, friends)
 
 fun sectionChatList(
     rows: List<ChatListRow>,
@@ -44,7 +45,8 @@ fun sectionChatList(
         when {
             row.pinned -> pinnedRows.add(row)
             isFriendQuery(row, friends) -> friendRows.add(row)
-            row.type == BufferType.QUERY && normalizeNick(row.displayName) in fools -> foolRows.add(row)
+            row.type == BufferType.QUERY &&
+                row.identityRules.matchesConfiguredNick(row.displayName, fools) -> foolRows.add(row)
             else -> regular.add(row)
         }
     }
@@ -56,3 +58,6 @@ fun sectionChatList(
         fools = foolRows,
     )
 }
+
+private val ChatListRow.identityRules: IrcIdentityRules
+    get() = IrcIdentityRules.from(caseMapping, chanTypes)

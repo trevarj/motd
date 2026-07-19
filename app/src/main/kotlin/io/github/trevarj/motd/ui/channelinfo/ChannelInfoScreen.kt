@@ -52,7 +52,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
-import io.github.trevarj.motd.data.prefs.normalizeNick
+import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.ui.chat.NickActionSheet
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -83,12 +83,11 @@ fun ChannelInfoScreen(
 
     // Nick sheet (plans/16 §5.8): shared with the chat timeline. Moderation shown only when op.
     nickSheet?.let { sheet ->
-        val norm = io.github.trevarj.motd.data.prefs.normalizeNick(sheet.nick)
         NickActionSheet(
             nick = sheet.nick,
             isSelf = false,
-            isFriend = norm in state.friends,
-            isFool = norm in state.fools,
+            isFriend = state.identityRules.matchesConfiguredNick(sheet.nick, state.friends),
+            isFool = state.identityRules.matchesConfiguredNick(sheet.nick, state.fools),
             canModerate = state.canModerate,
             whois = sheet.details,
             presence = sheet.presence,
@@ -168,7 +167,7 @@ fun ChannelInfoContent(
                     MemberRow(
                         member = member,
                         networkId = buffer?.networkId,
-                        isFriend = normalizeNick(member.nick) in state.friends,
+                        isFriend = state.identityRules.matchesConfiguredNick(member.nick, state.friends),
                         onClick = { onMemberClick(member.nick) },
                     )
                 }

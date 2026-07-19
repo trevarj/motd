@@ -14,11 +14,14 @@ class ChatListSectioningTest {
         name: String,
         type: BufferType = BufferType.QUERY,
         pinned: Boolean = false,
+        networkId: Long = 1,
+        caseMapping: String? = null,
     ) = ChatListRow(
-        bufferId = id, networkId = 1, networkName = "net",
+        bufferId = id, networkId = networkId, networkName = "net",
         displayName = name, type = type, pinned = pinned, muted = false,
         lastMessageText = null, lastMessageSender = null, lastMessageTime = null,
         unreadCount = 0, mentionCount = 0,
+        caseMapping = caseMapping,
     )
 
     @Test
@@ -134,5 +137,24 @@ class ChatListSectioningTest {
                 fools = emptySet(),
             ).showRecentHeader,
         )
+    }
+
+    @Test
+    fun `sectioning applies each rows casemapping conservatively and keeps tier order`() {
+        val rows = listOf(
+            row(1, "friend^", networkId = 1, caseMapping = "rfc1459-strict"),
+            row(2, "friend^", networkId = 2, caseMapping = "rfc1459"),
+            row(3, "{helper}", networkId = 3, caseMapping = "vendor-unicode"),
+            row(4, "[helper]", networkId = 3, caseMapping = "vendor-unicode"),
+        )
+
+        val sections = sectionChatList(
+            rows,
+            friends = linkedSetOf("friend~", "[helper]"),
+            fools = emptySet(),
+        )
+
+        assertEquals(listOf(2L, 4L), sections.friends.map { it.bufferId })
+        assertEquals(listOf(1L, 3L), sections.regular.map { it.bufferId })
     }
 }

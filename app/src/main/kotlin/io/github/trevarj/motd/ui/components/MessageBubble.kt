@@ -67,6 +67,7 @@ import coil.compose.AsyncImage
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.parseInlineCode
@@ -138,6 +139,7 @@ fun MessageBubble(
     // Normalized nicks known in the current buffer; @mentions of these in the body are colored with
     // the nick's own color (plans/17). Empty = no mention coloring.
     knownNicks: Set<String> = emptySet(),
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
     onLongPress: () -> Unit = {},
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
@@ -183,6 +185,7 @@ fun MessageBubble(
             linkPreviewResolved = linkPreviewResolved,
             reactions = reactions,
             knownNicks = knownNicks,
+            identityRules = identityRules,
             onLongPress = onLongPress,
             onReact = onReact,
             onImageClick = onImageClick,
@@ -215,6 +218,7 @@ fun MessageBubble(
             linkPreviewResolved = linkPreviewResolved,
             reactions = reactions,
             knownNicks = knownNicks,
+            identityRules = identityRules,
             showSender = showSender,
             onLongPress = onLongPress,
             onReact = onReact,
@@ -251,6 +255,7 @@ fun MessageBubble(
             linkPreviewResolved = linkPreviewResolved,
             reactions = reactions,
             knownNicks = knownNicks,
+            identityRules = identityRules,
             showSender = showSender,
             onLongPress = onLongPress,
             onReact = onReact,
@@ -386,7 +391,7 @@ fun MessageBubble(
                 // @mentions are colored with the nick's own color. Body build is memoized per
                 // (text, mention inputs) so it doesn't re-run every recomposition/scroll frame.
                 val linkColor = MaterialTheme.colorScheme.primary
-                val mentionColor = rememberMentionColor(knownNicks, nickColors)
+                val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
                 val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
                 val body = remember(
                     text, linkColor, mentionsActive, mentionColor, codeBackground, codeColor,
@@ -458,6 +463,7 @@ private fun ActionMessageRow(
     linkPreviewResolved: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
     knownNicks: Set<String> = emptySet(),
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
     onLongPress: () -> Unit = {},
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
@@ -487,7 +493,7 @@ private fun ActionMessageRow(
     } else {
         Color.Unspecified
     }
-    val mentionColor = rememberMentionColor(knownNicks, nickColors)
+    val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
     val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
     val senderLink = remember(onSenderClick) {
         onSenderClick?.let { callback ->
@@ -696,6 +702,7 @@ private fun TwoLineMessageRow(
     linkPreviewResolved: Boolean = false,
     reactions: List<ReactionChip> = emptyList(),
     knownNicks: Set<String> = emptySet(),
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
     onLongPress: () -> Unit = {},
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
@@ -816,7 +823,7 @@ private fun TwoLineMessageRow(
 
             if (text.isNotBlank()) {
                 val linkColor = MaterialTheme.colorScheme.primary
-                val mentionColor = rememberMentionColor(knownNicks, nickColors)
+                val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
                 val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
                 // Memoized body build (linkify + mention coloring) so it doesn't re-run per frame.
                 val richBody = remember(
@@ -949,7 +956,7 @@ internal fun FailedIcon() {
  * (plans/15 #11) and each @mention of a known nick is colored with that nick's own color. URL
  * boundaries come from [extractUrls], matched left-to-right in the raw text; the runs between URLs
  * get mention coloring via [appendMentionColored]. [mentionColor] returns the nick's color for a
- * known token (matched case-insensitively via [normalizeNick]) or null for a plain word; when null
+ * known token (matched with the active IRC identity rules) or null for a plain word; when null
  * for everything (no known nicks) the body is a single unstyled run.
  */
 internal fun linkifiedBody(
@@ -1036,15 +1043,16 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendPlainLinksAnd
 internal fun rememberMentionColor(
     knownNicks: Set<String>,
     nickColors: NickColorScheme,
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
 ): (String) -> androidx.compose.ui.graphics.Color? {
-    return remember(knownNicks, nickColors) {
+    return remember(knownNicks, nickColors, identityRules) {
         if (knownNicks.isEmpty() || !nickColors.enabled) {
             { null }
         } else {
             { token ->
                 // Mentions always resolve to the nick's own color; Unspecified fallback is never
                 // hit because membership is checked first.
-                if (io.github.trevarj.motd.data.prefs.normalizeNick(token) in knownNicks) {
+                if (matchesKnownMention(token, knownNicks, identityRules)) {
                     nickColors.nick(token, androidx.compose.ui.graphics.Color.Unspecified)
                 } else {
                     null
@@ -1053,6 +1061,12 @@ internal fun rememberMentionColor(
         }
     }
 }
+
+internal fun matchesKnownMention(
+    token: String,
+    knownNicks: Set<String>,
+    identityRules: IrcIdentityRules,
+): Boolean = identityRules.normalize(token) in knownNicks
 
 // Chars that can be part of an IRC nick token. Mentions are matched on runs of these, so trailing
 // punctuation (`:`, `,`, `!`) and a leading `@` fall outside the token and don't break the match.

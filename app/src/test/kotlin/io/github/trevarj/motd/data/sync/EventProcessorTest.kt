@@ -12,6 +12,9 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.data.db.RoomAliasNamespace
+import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
@@ -19,7 +22,10 @@ import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.push.PushEventHandler
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -35,9 +41,21 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.OutputStream
 
 @RunWith(RobolectricTestRunner::class)
 class EventProcessorTest {
+    private class RecordingDiagnostics : DiagnosticLogger {
+        override val enabled: StateFlow<Boolean> = MutableStateFlow(true)
+        val events = mutableListOf<Pair<String, Map<String, Any?>>>()
+        override fun setEnabled(enabled: Boolean) = Unit
+        override fun record(component: String, event: String, fields: () -> Map<String, Any?>) {
+            events += event to fields()
+        }
+        override fun fingerprint(value: String?): String? = value
+        override suspend fun exportTo(output: OutputStream) = Unit
+    }
+
     private enum class InviteDeliveryOrder {
         HISTORY_LIVE,
         LIVE_HISTORY,
@@ -144,6 +162,171 @@ class EventProcessorTest {
     }
 
     @Test
+    fun customChantypesRestoreAfterProcessDeathForPushRouting() = runTest {
+        processor.onRegistered(
+            networkId,
+            "me",
+            mapOf("CASEMAPPING" to "rfc1459", "CHANTYPES" to "+!"),
+        )
+        val persisted = db.networkIdentityDao().byNetwork(networkId)!!
+        assertEquals("rfc1459", persisted.caseMapping)
+        assertEquals("+!", persisted.chanTypes)
+        assertEquals("me", persisted.selfNick)
+
+        val restarted = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
+        restarted.processPush(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "custom-after-restart"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "+room", text = "channel after restart",
+            isSelf = false, replyToMsgid = null,
+        ))
+
+        assertEquals(BufferType.CHANNEL, db.bufferDao().byName(networkId, "+room")?.type)
+    }
+
+    @Test
+    fun mapperLimitedPushedOutgoingPmUsesPersistedCurrentSelfNick() = runTest {
+        processor.onRegistered(networkId, "OldSelf", mapOf("CASEMAPPING" to "rfc1459"))
+        assertEquals("me", db.networkDao().byId(networkId)?.nick)
+        assertEquals("OldSelf", db.networkIdentityDao().byNetwork(networkId)?.selfNick)
+        processor.process(
+            networkId,
+            IrcEvent.NickChanged(
+                ctx = ctx(msgid = "self-nick"),
+                from = "OldSelf",
+                to = "Me[",
+                isSelf = false,
+            ),
+        )
+        assertEquals("me", db.networkDao().byId(networkId)?.nick)
+        assertEquals("Me[", db.networkIdentityDao().byNetwork(networkId)?.selfNick)
+
+        var notifications = 0
+        val restarted = EventProcessor(
+            db,
+            TypingTrackerImpl(),
+            object : MessageNotifier {
+                override suspend fun onIncoming(
+                    networkId: Long,
+                    bufferId: Long,
+                    type: BufferType,
+                    hasMention: Boolean,
+                    message: IrcEvent.ChatMessage,
+                ) {
+                    notifications++
+                }
+            },
+        )
+        val pushed = PushEventHandler.mapToEvent(
+            IrcMessage.parse(":ME{!user@host PRIVMSG Bob :pushed outgoing"),
+        ) as IrcEvent.ChatMessage
+        assertFalse(pushed.isSelf)
+
+        restarted.processPush(networkId, pushed)
+
+        val peer = db.bufferDao().byName(networkId, "bob")!!
+        val row = pagingList(peer.id).single()
+        assertTrue(row.isSelf)
+        assertEquals("pushed outgoing", row.text)
+        assertNull(db.bufferDao().byName(networkId, "me{"))
+        assertEquals(0, notifications)
+    }
+
+    @Test
+    fun missingPersistedSelfNickFallsBackToConfiguredNickForPush() = runTest {
+        db.networkIdentityDao().upsert(
+            io.github.trevarj.motd.data.db.NetworkIdentityEntity(
+                networkId = networkId,
+                caseMapping = "rfc1459",
+                chanTypes = "",
+                selfNick = null,
+            ),
+        )
+        val restarted = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
+        val pushed = PushEventHandler.mapToEvent(
+            IrcMessage.parse(":ME!user@host PRIVMSG Bob :configured fallback"),
+        ) as IrcEvent.ChatMessage
+
+        restarted.processPush(networkId, pushed)
+
+        val peer = db.roomAliasDao().byValue(
+            networkId,
+            RoomAliasNamespace.PROVISIONAL_NICK,
+            "bob",
+        )!!
+        assertTrue(pagingList(peer.roomId).single().isSelf)
+        assertEquals("me", db.networkDao().byId(networkId)?.nick)
+        assertNull(db.networkIdentityDao().byNetwork(networkId)?.selfNick)
+    }
+
+    @Test
+    fun emptyChantypesRestoreForPushAndPreserveLegacyChannelRoom() = runTest {
+        val legacyId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "#peer",
+                displayName = "#peer",
+                type = BufferType.CHANNEL,
+            ),
+        )
+        processor.onRegistered(
+            networkId,
+            "me",
+            mapOf("CASEMAPPING" to "rfc1459", "CHANTYPES" to ""),
+        )
+
+        val restarted = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
+        restarted.processPush(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "empty-after-restart"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("me"), target = "#peer", text = "query after restart",
+            isSelf = true, replyToMsgid = null,
+        ))
+
+        assertEquals("", db.networkIdentityDao().byNetwork(networkId)?.chanTypes)
+        assertEquals(BufferType.CHANNEL, db.bufferDao().rawById(legacyId)?.type)
+        val queryAlias = db.roomAliasDao().byValue(
+            networkId,
+            RoomAliasNamespace.PROVISIONAL_NICK,
+            "#peer",
+        )!!
+        val query = db.bufferDao().observeById(queryAlias.roomId)!!
+        assertEquals(BufferType.QUERY, query.type)
+        assertNotEquals(legacyId, query.id)
+        assertEquals("empty-after-restart", pagingList(query.id).single().msgid)
+    }
+
+    @Test
+    fun restoredUnknownCasemappingUsesAsciiAndEmitsDiagnostic() = runTest {
+        processor.onRegistered(
+            networkId,
+            "me",
+            mapOf("CASEMAPPING" to "vendor-unicode", "CHANTYPES" to "+"),
+        )
+        val diagnostics = RecordingDiagnostics()
+        val restarted = EventProcessor(
+            db = db,
+            typing = TypingTrackerImpl(),
+            notifier = MessageNotifier.Noop,
+            diagnostics = diagnostics,
+        )
+        listOf("+[room]", "+{room}").forEachIndexed { index, target ->
+            restarted.processPush(networkId, IrcEvent.ChatMessage(
+                ctx = ctx(msgid = "unknown-$index", time = 1000L + index),
+                kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix("alice"), target = target, text = target,
+                isSelf = false, replyToMsgid = null,
+            ))
+        }
+
+        val persisted = db.networkIdentityDao().byNetwork(networkId)!!
+        assertEquals("vendor-unicode", persisted.caseMapping)
+        assertNotEquals(
+            db.bufferDao().byName(networkId, "+[room]")?.id,
+            db.bufferDao().byName(networkId, "+{room}")?.id,
+        )
+        assertTrue(diagnostics.events.any { (event, _) -> event == "unsupported_casemapping" })
+    }
+
+    @Test
     fun strictRfc1459KeepsTildeAndCaretRoomsDistinctForFutureEvents() = runTest {
         processor.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459-strict"))
         listOf("#room~", "#room^").forEachIndexed { index, target ->
@@ -163,6 +346,74 @@ class EventProcessorTest {
         assertNotNull(tilde)
         assertNotNull(caret)
         assertNotEquals(tilde?.id, caret?.id)
+    }
+
+    @Test
+    fun strictReactionActorsRemainDistinctAfterRestart() = runTest {
+        processor.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459-strict"))
+        val restarted = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
+        restarted.processPush(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "Opaque-Target"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "parent",
+            isSelf = false, replyToMsgid = null,
+        ))
+        listOf("bot~", "bot^").forEachIndexed { index, actor ->
+            restarted.processPush(networkId, IrcEvent.TagMessage(
+                ctx = ctx(time = 2000L + index), source = Prefix(actor), target = "#chan",
+                typing = null, reactEmoji = "+1", reactTargetMsgid = "Opaque-Target",
+            ))
+        }
+        restarted.processPush(networkId, IrcEvent.TagMessage(
+            ctx = ctx(time = 2002), source = Prefix("BOT~"), target = "#chan",
+            typing = null, reactEmoji = "+1", reactTargetMsgid = "Opaque-Target",
+        ))
+
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        val reactions = db.reactionDao().observeFor(buffer.id, listOf("Opaque-Target")).first()
+        assertEquals(setOf("nick:bot~", "nick:bot^"), reactions.map { it.actorKey }.toSet())
+        assertTrue(reactions.all { it.targetMsgid == "Opaque-Target" })
+        assertEquals("rfc1459-strict", db.networkIdentityDao().byNetwork(networkId)?.identityRules?.caseMapping?.rawName)
+    }
+
+    @Test
+    fun nickChangeRekeysCachedAccountForOwnReactionIdentity() = runTest {
+        processor.process(networkId, IrcEvent.AccountChanged("me", "stable-self-account"))
+        processor.process(
+            networkId,
+            IrcEvent.NickChanged(ctx(msgid = "nick-rekey"), "me", "NewMe", isSelf = true),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.ChatMessage(
+                ctx = ctx(msgid = "reaction-parent", time = 2_000),
+                kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix("alice"),
+                target = "#chan",
+                text = "parent",
+                isSelf = false,
+                replyToMsgid = null,
+            ),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.TagMessage(
+                ctx = ctx(time = 2_001),
+                source = Prefix("NewMe"),
+                target = "#chan",
+                typing = null,
+                reactEmoji = "+1",
+                reactTargetMsgid = "reaction-parent",
+            ),
+        )
+
+        assertNull(db.userDao().byNick(networkId, "me"))
+        assertEquals("stable-self-account", db.userDao().byNick(networkId, "newme")?.account)
+        val room = db.bufferDao().byName(networkId, "#chan")!!
+        assertEquals(
+            setOf("account:stable-self-account"),
+            db.reactionDao().observeFor(room.id, listOf("reaction-parent")).first()
+                .mapTo(mutableSetOf()) { it.actorKey },
+        )
     }
 
     @Test

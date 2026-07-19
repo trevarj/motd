@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -26,6 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,10 +49,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTag as semanticsTestTag
 import androidx.compose.ui.unit.dp
-import androidx.paging.LoadState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
@@ -62,9 +65,9 @@ import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
 import io.github.trevarj.motd.data.prefs.FoolsMode
-import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.repo.CachedLinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.NewMessagesDivider
 import io.github.trevarj.motd.ui.components.ReactionChip
@@ -141,7 +144,12 @@ private fun MessageEntity.timelineAnchor(): TimelineAnchor = TimelineAnchor(serv
  */
 fun showsSender(current: MessageEntity, olderNeighbor: MessageEntity?): Boolean {
     if (olderNeighbor == null) return true
-    if (olderNeighbor.sender != current.sender) return true
+    val sameActor = if (current.senderAccount != null && olderNeighbor.senderAccount != null) {
+        current.senderAccount == olderNeighbor.senderAccount
+    } else {
+        current.normalizedActor == olderNeighbor.normalizedActor
+    }
+    if (!sameActor || olderNeighbor.isSelf != current.isSelf) return true
     if (isSystemKind(olderNeighbor.kind) != isSystemKind(current.kind)) return true
     return current.serverTime - olderNeighbor.serverTime > GROUP_WINDOW_MS
 }
@@ -186,6 +194,9 @@ fun MessageList(
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
+    historyUiState: ChatHistoryUiState = ChatHistoryUiState.Hidden,
+    onHistoryRetry: () -> Unit = {},
     // Effective per-row expansion (global expand-all + per-row overrides live in the caller); toggle
     // flips a single fool row either way so expand/re-collapse is bidirectional (bug #9).
     foolExpanded: (Long) -> Boolean = { false },
@@ -220,7 +231,11 @@ fun MessageList(
             // previously produced hitches when a fling crossed own messages.
             contentType = items.itemContentType(::messageContentType),
         ) { index ->
-            val msg = items[index] ?: return@items
+            val msg = items[index]
+            if (msg == null) {
+                MessagePlaceholderRow()
+                return@items
+            }
             val older = if (index + 1 < items.itemCount) items.peek(index + 1) else null
             val newer = if (index - 1 >= 0) items.peek(index - 1) else null
 
@@ -261,7 +276,8 @@ fun MessageList(
             // Fool COLLAPSE (plans/13 §2.4): render a tap-to-expand placeholder in place of the
             // bubble until its id is expanded. HIDE mode is filtered upstream so it never reaches
             // here; system-kind rows are handled above and never fool-treated.
-            val isFool = foolsMode == FoolsMode.COLLAPSE && isFoolSender(msg.sender, msg.isSelf, fools)
+            val isFool = foolsMode == FoolsMode.COLLAPSE &&
+                isFoolMessage(msg, fools, identityRules)
             if (isFool && !foolExpanded(msg.id)) {
                 LiveTimelineEntry(liveEntryId, msg.id, onLiveEntryConsumed) {
                     FoolPlaceholderRow(
@@ -304,9 +320,10 @@ fun MessageList(
                         // An expanded fool row shows a small tap-to-re-collapse chip above its bubble so the
                         // toggle is bidirectional without stealing the bubble's long-press/link taps (#9).
                         onCollapseFool = if (isFool) ({ onToggleFool(msg.id) }) else null,
-                        senderIsFriend = !msg.isSelf && normalizeNick(msg.sender) in friends,
+                        senderIsFriend = !msg.isSelf && msg.matchesConfiguredActor(friends, identityRules),
                         reactions = msg.msgid?.let(reactionChips).orEmpty(),
                         knownNicks = knownNicks,
+                        identityRules = identityRules,
                         onLongPress = onLongPress,
                         onReply = onReply,
                         onReact = onReact,
@@ -332,8 +349,34 @@ fun MessageList(
         // Append spinner / end-of-history / error affordances (plans/15 #27). This item sits at the
         // top of the reversed list, i.e. visually above the oldest message where APPEND loads more.
         item(key = "append-state", contentType = "loadstate") {
-            LoadStateFooter(items.loadState.append)
+            ChatHistoryFooter(historyUiState) {
+                onHistoryRetry()
+                items.retry()
+            }
         }
+    }
+}
+
+/** A quiet, stable-height skeleton prevents placeholder-only pages from measuring as zero rows. */
+@Composable
+internal fun MessagePlaceholderRow() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clearAndSetSemantics {},
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Spacer(
+            Modifier
+                .padding(horizontal = LocalSpacing.current.messageOuterHPad)
+                .fillMaxWidth(0.38f)
+                .height(10.dp)
+                .background(
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                    RoundedCornerShape(5.dp),
+                ),
+        )
     }
 }
 
@@ -582,6 +625,7 @@ private fun MessageRow(
     senderIsFriend: Boolean,
     reactions: List<ReactionChip>,
     knownNicks: Set<String>,
+    identityRules: IrcIdentityRules,
     onLongPress: (MessageEntity) -> Unit,
     onReply: (MessageEntity) -> Unit,
     onReact: (MessageEntity, String) -> Unit,
@@ -736,6 +780,7 @@ private fun MessageRow(
             linkPreviewResolved = previewResolved,
             reactions = reactions,
             knownNicks = knownNicks,
+            identityRules = identityRules,
             onLongPress = { onLongPress(msg) },
             // Pass the entity, not just msgid: the VM also handles a pending reaction uniformly.
             onReact = { emoji -> onReact(msg, emoji) },
@@ -847,11 +892,14 @@ private fun FoolCollapseChip(sender: String, onCollapse: () -> Unit) {
     }
 }
 
-/** Append-load footer: spinner while loading older history, error, or end-of-history (plans/15 #27). */
+const val CHAT_HISTORY_RETRY_TAG = "chat_history_retry"
+
+/** Only persisted protocol completion may render the beginning-of-history claim. */
 @Composable
-private fun LoadStateFooter(append: LoadState) {
-    when (append) {
-        is LoadState.Loading -> androidx.compose.foundation.layout.Box(
+fun ChatHistoryFooter(state: ChatHistoryUiState, onRetry: () -> Unit) {
+    when (state) {
+        ChatHistoryUiState.Hidden -> Unit
+        ChatHistoryUiState.Loading -> androidx.compose.foundation.layout.Box(
             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
             contentAlignment = androidx.compose.ui.Alignment.Center,
         ) {
@@ -860,27 +908,55 @@ private fun LoadStateFooter(append: LoadState) {
                 strokeWidth = 2.dp,
             )
         }
-        is LoadState.Error -> androidx.compose.foundation.layout.Box(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-            contentAlignment = androidx.compose.ui.Alignment.Center,
+        ChatHistoryUiState.Offline -> HistoryStatusText(R.string.chat_history_footer_offline)
+        ChatHistoryUiState.Negotiating -> HistoryStatusText(R.string.chat_history_footer_negotiating)
+        ChatHistoryUiState.Unsupported -> HistoryStatusText(R.string.chat_history_footer_unsupported)
+        ChatHistoryUiState.ConfirmedStart -> HistoryStatusText(R.string.chat_history_start)
+        is ChatHistoryUiState.Incomplete -> HistoryRetryFooter(
+            text = stringResource(R.string.chat_history_incomplete),
+            onRetry = onRetry,
+        )
+        is ChatHistoryUiState.Capped -> HistoryRetryFooter(
+            text = stringResource(R.string.chat_history_capped, state.limit),
+            onRetry = onRetry,
+        )
+        ChatHistoryUiState.Error -> HistoryRetryFooter(
+            text = stringResource(R.string.chat_history_error),
+            onRetry = onRetry,
+        )
+    }
+}
+
+@Composable
+private fun HistoryStatusText(textRes: Int) {
+    Box(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = stringResource(textRes),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun HistoryRetryFooter(text: String, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+        TextButton(
+            onClick = onRetry,
+            modifier = Modifier.heightIn(min = 48.dp).testTag(CHAT_HISTORY_RETRY_TAG),
         ) {
-            androidx.compose.material3.Text(
-                text = stringResource(R.string.chat_history_error),
-                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
-                color = androidx.compose.material3.MaterialTheme.colorScheme.error,
-            )
-        }
-        is LoadState.NotLoading -> if (append.endOfPaginationReached) {
-            androidx.compose.foundation.layout.Box(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                contentAlignment = androidx.compose.ui.Alignment.Center,
-            ) {
-                androidx.compose.material3.Text(
-                    text = stringResource(R.string.chat_history_start),
-                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(stringResource(R.string.chat_retry))
         }
     }
 }

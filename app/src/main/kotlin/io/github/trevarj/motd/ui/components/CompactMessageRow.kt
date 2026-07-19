@@ -35,6 +35,7 @@ import coil.compose.AsyncImage
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -80,6 +81,7 @@ internal fun CompactMessageRow(
     reactions: List<ReactionChip> = emptyList(),
     // Normalized nicks known in the current buffer; @mentions of these are colored (plans/17).
     knownNicks: Set<String> = emptySet(),
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
     onLongPress: () -> Unit = {},
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
@@ -109,7 +111,7 @@ internal fun CompactMessageRow(
     // like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
     // Continuation lines (showSender == false) drop the `nick:` prefix so a run reads as one speaker.
     // Known-nick @mentions in the body are colored via the memoized resolver.
-    val mentionColor = rememberMentionColor(knownNicks, nickColors)
+    val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
     val line = remember(
         sender, text, kind, nameColor, bodyColor, linkColor, senderIsFriend, showSender,
         mentionColor, codeBackground, codeColor, nickFontSize,

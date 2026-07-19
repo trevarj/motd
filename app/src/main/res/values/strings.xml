@@ -369,6 +369,13 @@
     <string name="chat_empty_title">No messages yet</string>
     <string name="chat_empty_message">Say hello to start the conversation.</string>
     <string name="chat_history_error">Couldn\'t load older messages</string>
+    <string name="chat_history_incomplete">Older history may be incomplete</string>
+    <string name="chat_history_capped">Stopped after %1$d messages; older history may remain</string>
+    <string name="chat_history_footer_offline">Reconnect to load older messages</string>
+    <string name="chat_history_footer_negotiating">Waiting for history support…</string>
+    <string name="chat_history_footer_unsupported">This server does not provide older history</string>
+    <string name="chat_history_resync_incomplete">History refresh added %1$d messages but could not verify the full range</string>
+    <string name="chat_history_resync_capped">History refresh added %1$d messages and stopped at the %2$d-message safety limit</string>
     <string name="chat_history_start">Beginning of history</string>
     <plurals name="chat_member_count">
         <item quantity="one">%1$d member</item>

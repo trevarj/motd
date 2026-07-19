@@ -23,8 +23,10 @@ import io.github.trevarj.motd.data.db.MIGRATION_8_9
 import io.github.trevarj.motd.data.db.MIGRATION_9_10
 import io.github.trevarj.motd.data.db.MIGRATION_10_11
 import io.github.trevarj.motd.data.db.MIGRATION_11_12
+import io.github.trevarj.motd.data.db.MIGRATION_12_13
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkDao
+import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.ReactionDao
 import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.db.HistoryCursorDao
@@ -59,6 +61,7 @@ internal object DbModule {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             // Downgrades only happen in dev when switching between branches with different schema
             // versions (e.g. the obfs branch's v3 vs main's v2); released builds only ever move the
@@ -67,6 +70,7 @@ internal object DbModule {
             .build()
 
     @Provides fun provideNetworkDao(db: MotdDatabase): NetworkDao = db.networkDao()
+    @Provides fun provideNetworkIdentityDao(db: MotdDatabase): NetworkIdentityDao = db.networkIdentityDao()
     @Provides fun provideBufferDao(db: MotdDatabase): BufferDao = db.bufferDao()
     @Provides fun provideMessageDao(db: MotdDatabase): MessageDao = db.messageDao()
     @Provides fun provideMemberDao(db: MotdDatabase): MemberDao = db.memberDao()

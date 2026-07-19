@@ -3,6 +3,8 @@ package io.github.trevarj.motd.data.visibility
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -88,6 +90,34 @@ class MessageVisibilityPolicyTest {
         assertTrue(policy.preview(topic))
     }
 
+    @Test
+    fun `configured fools use the network casemap used by normalized actors`() {
+        val stored = message(sender = "[Alice").copy(normalizedActor = "{alice")
+        val spec = MessageVisibilitySpec(fools = setOf("[alice"), foolsMode = FoolsMode.HIDE)
+
+        assertTrue(
+            MessageVisibilityPolicy(spec, IrcIdentityRules(IrcCaseMapping.Rfc1459)).isFool(stored),
+        )
+        assertFalse(
+            MessageVisibilityPolicy(spec, IrcIdentityRules(IrcCaseMapping.Ascii)).isFool(stored),
+        )
+    }
+
+    @Test
+    fun `account identity keeps fool status across nick changes`() {
+        val policy = MessageVisibilityPolicy(
+            MessageVisibilitySpec(fools = setOf("stable-account")),
+        )
+        val before = message(sender = "old-nick").copy(senderAccount = "stable-account")
+        val after = message(sender = "new-nick").copy(
+            senderAccount = "stable-account",
+            normalizedActor = "new-nick",
+        )
+
+        assertTrue(policy.isFool(before))
+        assertTrue(policy.isFool(after))
+    }
+
     private fun policy(mode: FoolsMode) = MessageVisibilityPolicy(
         MessageVisibilitySpec(fools = setOf("alice"), foolsMode = mode),
     )
@@ -101,6 +131,7 @@ class MessageVisibilityPolicyTest {
         bufferId = 1,
         serverTime = 1,
         sender = sender,
+        normalizedActor = sender.lowercase(),
         kind = kind,
         text = "text",
         isSelf = isSelf,

@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.prefs
 
 import io.github.trevarj.motd.service.DeliveryMode
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.flow.Flow
 
 enum class ThemeMode {
@@ -66,6 +67,13 @@ data class Settings(
  *  Deliberate simplification of RFC 1459 casemapping (see plans/13 Risks). */
 fun normalizeNick(nick: String): String = nick.trim().lowercase()
 
+/** Compare stored preference entries using one network's advertised IRC identity rules. */
+fun IrcIdentityRules.matchesConfiguredNick(nick: String, configuredNicks: Set<String>): Boolean {
+    if (configuredNicks.isEmpty()) return false
+    val normalizedNick = normalize(nick.trim())
+    return configuredNicks.any { normalize(it.trim()) == normalizedNick }
+}
+
 interface SettingsRepository {
     val settings: Flow<Settings>
     suspend fun setThemeMode(m: ThemeMode)
@@ -80,6 +88,13 @@ interface SettingsRepository {
     /** Adding a friend removes the nick from fools, and vice versa. */
     suspend fun setFriend(nick: String, isFriend: Boolean)
     suspend fun setFool(nick: String, isFool: Boolean)
+    /** Rules-aware variants remove the actual equivalent stored entries in one transaction. */
+    suspend fun setFriend(nick: String, isFriend: Boolean, identityRules: IrcIdentityRules) {
+        setFriend(nick, isFriend)
+    }
+    suspend fun setFool(nick: String, isFool: Boolean, identityRules: IrcIdentityRules) {
+        setFool(nick, isFool)
+    }
     suspend fun setFoolsMode(m: FoolsMode)
     suspend fun setShowJoinPartQuit(show: Boolean)
     suspend fun setAvatarStyle(style: AvatarStyle)

@@ -6,6 +6,7 @@ import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import javax.inject.Inject
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -40,8 +41,17 @@ class SearchRepositoryImpl @Inject constructor(
             hits,
             settings.settings.map(MessageVisibilitySpec::from).distinctUntilChanged(),
         ) { hits, spec ->
-            val policy = MessageVisibilityPolicy(spec)
-            hits.filter { policy.search(it.message) }
+            val policies = mutableMapOf<Pair<String?, String?>, MessageVisibilityPolicy>()
+            hits.filter { hit ->
+                val identity = hit.caseMapping to hit.chanTypes
+                val policy = policies.getOrPut(identity) {
+                    MessageVisibilityPolicy(
+                        spec,
+                        IrcIdentityRules.from(hit.caseMapping, hit.chanTypes),
+                    )
+                }
+                policy.search(hit.message)
+            }
         }
     }
 

@@ -2,6 +2,8 @@ package io.github.trevarj.motd.data.prefs
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -64,5 +66,28 @@ class FoolsRepositoryTest {
     fun removeMissingFool_isNoop() = runTest {
         repo.setFool("ghost", false)
         assertFalse("ghost" in repo.settings.first().fools)
+    }
+
+    @Test
+    fun rulesAwareMutationRemovesEquivalentStoredEntryAndKeepsSetsDisjoint() = runTest {
+        val rfc = IrcIdentityRules(IrcCaseMapping.Rfc1459)
+        val strict = IrcIdentityRules(IrcCaseMapping.Rfc1459Strict)
+        repo.setFriend("Social[Fixture", true)
+        repo.setFriend("Social{Fixture", true)
+
+        repo.setFool("social{fixture", true, rfc)
+
+        val moved = repo.settings.first()
+        assertFalse(moved.friends.any { rfc.normalize(it) == rfc.normalize("social[fixture") })
+        assertTrue(rfc.matchesConfiguredNick("social[fixture", moved.fools))
+
+        repo.setFool("SOCIAL[FIXTURE", false, rfc)
+        assertFalse(rfc.matchesConfiguredNick("social{fixture", repo.settings.first().fools))
+
+        repo.setFriend("Strict~Fixture", true, strict)
+        repo.setFool("strict^fixture", true, strict)
+        val distinct = repo.settings.first()
+        assertTrue(strict.matchesConfiguredNick("strict~fixture", distinct.friends))
+        assertTrue(strict.matchesConfiguredNick("strict^fixture", distinct.fools))
     }
 }

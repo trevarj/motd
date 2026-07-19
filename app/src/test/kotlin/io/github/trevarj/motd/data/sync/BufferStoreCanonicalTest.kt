@@ -400,6 +400,7 @@ class BufferStoreCanonicalTest {
         var mediatorRoomId: Long? = null
         val repository = MessageRepositoryImpl(
             db.bufferDao(),
+            db.networkIdentityDao(),
             db.messageDao(),
             db.reactionDao(),
             ChatHistoryMediatorFactory { roomId ->
@@ -414,7 +415,7 @@ class BufferStoreCanonicalTest {
         )
 
         assertEquals(eventId, repository.byMsgid(loser.id, "redirected-message")?.id)
-        repository.messages(loser.id).first()
+        repository.messages(loser.id, io.github.trevarj.motd.data.visibility.MessageVisibilitySpec()).first()
         assertEquals(merged.id, mediatorRoomId)
     }
 

@@ -8,12 +8,16 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.BuildConfig
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.prefs.SettingsRepository
-import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.data.sync.ChatSoundPlayer
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import java.util.EnumMap
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -44,6 +48,16 @@ internal fun shouldPlayOutgoingChatSound(
     bufferId: Long,
     muted: Boolean,
 ): Boolean = enabled && foregroundBufferId == bufferId && !muted
+
+internal fun isFoolForChatSound(
+    fools: Set<String>,
+    identityRules: IrcIdentityRules,
+    senderAccount: String?,
+    normalizedActor: String,
+): Boolean = MessageVisibilityPolicy(
+    MessageVisibilitySpec(fools = fools),
+    identityRules,
+).matchesFoolIdentity(senderAccount, normalizedActor)
 
 internal fun incomingChatSoundCue(
     enabled: Boolean,
@@ -205,16 +219,50 @@ class AndroidChatSoundPlayer @Inject internal constructor(
         bufferId: Long,
         type: BufferType,
         message: IrcEvent.ChatMessage,
+    ) = playIncoming(
+        bufferId = bufferId,
+        type = type,
+        senderAccount = message.ctx.account,
+        senderNick = message.source.nick,
+        normalizedActor = null,
+    )
+
+    override suspend fun onCanonicalIncoming(
+        bufferId: Long,
+        type: BufferType,
+        message: IrcEvent.ChatMessage,
+        canonical: MessageEntity,
+    ) = playIncoming(
+        bufferId = bufferId,
+        type = type,
+        senderAccount = canonical.senderAccount,
+        senderNick = null,
+        normalizedActor = canonical.normalizedActor,
+    )
+
+    private suspend fun playIncoming(
+        bufferId: Long,
+        type: BufferType,
+        senderAccount: String?,
+        senderNick: String?,
+        normalizedActor: String?,
     ) {
         val buffer = db.bufferDao().observeById(bufferId) ?: return
         val settings = settingsRepository.settings.first()
+        val identityRules = db.networkIdentityDao().byNetwork(buffer.networkId)?.identityRules
+            ?: IrcIdentityRules()
         val cue = incomingChatSoundCue(
             enabled = settings.chatSoundsEnabled,
             foregroundBufferId = foregroundBufferTracker.foregroundBufferId.value,
             bufferId = bufferId,
             type = type,
             muted = buffer.muted,
-            senderIsFool = normalizeNick(message.source.nick) in settings.fools,
+            senderIsFool = isFoolForChatSound(
+                settings.fools,
+                identityRules,
+                senderAccount,
+                normalizedActor ?: identityRules.normalize(senderNick.orEmpty()),
+            ),
         ) ?: return
         backend.play(cue)
     }

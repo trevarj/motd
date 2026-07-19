@@ -3,6 +3,8 @@ package io.github.trevarj.motd.ui.chat
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,29 +16,33 @@ class MessageFilterTest {
         sender: String = "alice",
         kind: MessageKind = MessageKind.PRIVMSG,
         isSelf: Boolean = false,
+        normalizedActor: String = IrcIdentityRules().normalize(sender),
+        senderAccount: String? = null,
     ) = MessageEntity(
         id = 1,
         bufferId = 1,
         serverTime = 1_000L,
         sender = sender,
+        normalizedActor = normalizedActor,
+        senderAccount = senderAccount,
         kind = kind,
         text = "hi",
         isSelf = isSelf,
         dedupKey = "k",
     )
 
-    // --- isFoolSender ---
+    // --- isFoolMessage ---
 
     @Test fun `fool sender matches case-insensitively`() {
-        assertTrue(isFoolSender("Alice", isSelf = false, fools = setOf("alice")))
+        assertTrue(isFoolMessage(msg(sender = "Alice"), fools = setOf("alice")))
     }
 
     @Test fun `own messages are never fools`() {
-        assertFalse(isFoolSender("alice", isSelf = true, fools = setOf("alice")))
+        assertFalse(isFoolMessage(msg(sender = "alice", isSelf = true), fools = setOf("alice")))
     }
 
     @Test fun `non-listed sender is not a fool`() {
-        assertFalse(isFoolSender("bob", isSelf = false, fools = setOf("alice")))
+        assertFalse(isFoolMessage(msg(sender = "bob"), fools = setOf("alice")))
     }
 
     // --- keepMessage: JPQ ---
@@ -98,5 +104,29 @@ class MessageFilterTest {
     @Test fun `non-fool message kept under HIDE`() {
         val spec = MessageFilterSpec(fools = setOf("alice"), foolsMode = FoolsMode.HIDE)
         assertTrue(keepMessage(msg(sender = "bob"), spec))
+    }
+
+    @Test fun `friend and fool matching obey strict casemap without merging tilde`() {
+        val strict = IrcIdentityRules(IrcCaseMapping.Rfc1459Strict)
+        val message = msg(sender = "nick~", normalizedActor = strict.normalize("nick~"))
+
+        assertFalse(message.matchesConfiguredActor(setOf("nick^"), strict))
+        assertTrue(message.matchesConfiguredActor(setOf("NICK~"), strict))
+        assertFalse(isFoolMessage(message, setOf("nick^"), strict))
+    }
+
+    @Test fun `unknown custom casemap uses conservative ASCII actor matching`() {
+        val custom = IrcIdentityRules(IrcCaseMapping.Unknown("custom-map"))
+        val message = msg(sender = "User[", normalizedActor = custom.normalize("User["))
+
+        assertTrue(message.matchesConfiguredActor(setOf("user["), custom))
+        assertFalse(message.matchesConfiguredActor(setOf("user{"), custom))
+    }
+
+    @Test fun `configured account matches after a nick change`() {
+        val message = msg(sender = "newNick", senderAccount = "stable-account")
+
+        assertTrue(message.matchesConfiguredActor(setOf("stable-account"), IrcIdentityRules()))
+        assertTrue(isFoolMessage(message, setOf("stable-account")))
     }
 }

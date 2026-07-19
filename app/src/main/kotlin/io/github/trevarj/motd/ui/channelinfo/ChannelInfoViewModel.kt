@@ -6,11 +6,16 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.UserDao
+import io.github.trevarj.motd.data.db.NetworkIdentityDao
+import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
@@ -24,6 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
@@ -39,6 +45,7 @@ data class ChannelInfoUiState(
     val foolMembers: List<MemberEntity> = emptyList(),
     val friends: Set<String> = emptySet(),
     val fools: Set<String> = emptySet(),
+    val identityRules: IrcIdentityRules = IrcIdentityRules(),
     // Round 5 (plans/16 §5.8): true when the viewer holds op in this channel (moderation gate).
     val canModerate: Boolean = false,
 )
@@ -59,6 +66,7 @@ class ChannelInfoViewModel @Inject constructor(
     private val draftStore: ComposerDraftStore,
     private val settingsRepository: SettingsRepository,
     private val userDao: UserDao,
+    private val networkIdentityDao: NetworkIdentityDao,
 ) : ViewModel() {
 
     private val bufferIdFlow = MutableStateFlow<Long?>(null)
@@ -76,15 +84,24 @@ class ChannelInfoViewModel @Inject constructor(
         if (id == null) flowOf(emptyList<MemberEntity>()) else bufferRepository.observeMembers(id)
     }
 
+    private val identityRulesFlow = bufferFlow.flatMapLatest { buffer ->
+        if (buffer == null) {
+            flowOf(IrcIdentityRules())
+        } else {
+            networkIdentityDao.observe(buffer.networkId).map { it?.identityRules ?: IrcIdentityRules() }
+        }
+    }
+
     val state: StateFlow<ChannelInfoUiState> =
         combine(
             bufferFlow,
             membersFlow,
             settingsRepository.settings,
             connectionManager.rosterStates,
-        ) { buffer, members, settings, rosterStates ->
+            identityRulesFlow,
+        ) { buffer, members, settings, rosterStates, identityRules ->
             val order = prefixOrderForBuffer(buffer)
-            val social = sectionMembersSocial(members, order, settings.fools)
+            val social = sectionMembersSocial(members, order, settings.fools, identityRules)
             val rosterState = buffer?.let { rosterStates[it.id] } ?: RosterLoadState.NOT_LOADED
             val presentation = rosterPresentation(members.size, rosterState)
             ChannelInfoUiState(
@@ -96,6 +113,7 @@ class ChannelInfoViewModel @Inject constructor(
                 foolMembers = social.fools,
                 friends = settings.friends,
                 fools = settings.fools,
+                identityRules = identityRules,
                 canModerate = viewerCanModerate(buffer, members, order),
             )
         }.stateIn(
@@ -146,12 +164,22 @@ class ChannelInfoViewModel @Inject constructor(
 
     /** Toggle [nick]'s friend membership (adding removes it from fools; see SettingsRepository). */
     fun toggleFriend(nick: String) = viewModelScope.launch {
-        settingsRepository.setFriend(nick, io.github.trevarj.motd.data.prefs.normalizeNick(nick) !in state.value.friends)
+        val current = state.value
+        settingsRepository.setFriend(
+            nick,
+            !current.identityRules.matchesConfiguredNick(nick, current.friends),
+            current.identityRules,
+        )
     }
 
     /** Toggle [nick]'s fool membership (adding removes it from friends). */
     fun toggleFool(nick: String) = viewModelScope.launch {
-        settingsRepository.setFool(nick, io.github.trevarj.motd.data.prefs.normalizeNick(nick) !in state.value.fools)
+        val current = state.value
+        settingsRepository.setFool(
+            nick,
+            !current.identityRules.matchesConfiguredNick(nick, current.fools),
+            current.identityRules,
+        )
     }
 
     // --- nick sheet + whois (plans/16 §5.8) ---
@@ -166,7 +194,7 @@ class ChannelInfoViewModel @Inject constructor(
         val networkId = state.value.buffer?.networkId ?: return
         viewModelScope.launch { state.value.buffer?.let { connectionManager.requestMembers(it.id) } }
         val client = connectionManager.clientFor(networkId)
-        val normalized = client?.isupport?.normalize(nick) ?: io.github.trevarj.motd.data.prefs.normalizeNick(nick)
+        val normalized = client?.isupport?.normalize(nick) ?: state.value.identityRules.normalize(nick)
         nickDetailsJob?.cancel()
         nickDetailsJob = viewModelScope.launch {
             combine(
@@ -207,13 +235,17 @@ class ChannelInfoViewModel @Inject constructor(
         val buffer = state.value.buffer ?: return@launch
         val flag = (if (grant) "+" else "-") + mode
         connectionManager.clientFor(buffer.networkId)
-            ?.send(IrcMessage(command = "MODE", params = listOf(buffer.name, flag, nick)))
+            ?.send(IrcMessage(command = "MODE", params = listOf(buffer.ircTarget, flag, nick)))
     }
 
     /** KICK <channel> <nick> [:reason]. */
     fun kick(nick: String, reason: String?) = viewModelScope.launch {
         val buffer = state.value.buffer ?: return@launch
-        val params = if (reason.isNullOrBlank()) listOf(buffer.name, nick) else listOf(buffer.name, nick, reason)
+        val params = if (reason.isNullOrBlank()) {
+            listOf(buffer.ircTarget, nick)
+        } else {
+            listOf(buffer.ircTarget, nick, reason)
+        }
         connectionManager.clientFor(buffer.networkId)?.send(IrcMessage(command = "KICK", params = params))
     }
 
@@ -221,7 +253,7 @@ class ChannelInfoViewModel @Inject constructor(
     fun ban(nick: String) = viewModelScope.launch {
         val buffer = state.value.buffer ?: return@launch
         connectionManager.clientFor(buffer.networkId)
-            ?.send(IrcMessage(command = "MODE", params = listOf(buffer.name, "+b", banMask(nick))))
+            ?.send(IrcMessage(command = "MODE", params = listOf(buffer.ircTarget, "+b", banMask(nick))))
     }
 
     /**
@@ -231,7 +263,7 @@ class ChannelInfoViewModel @Inject constructor(
     fun setTopic(topic: String) = viewModelScope.launch {
         val buffer = state.value.buffer ?: return@launch
         connectionManager.clientFor(buffer.networkId)
-            ?.send(IrcMessage(command = "TOPIC", params = listOf(buffer.name, topic)))
+            ?.send(IrcMessage(command = "TOPIC", params = listOf(buffer.ircTarget, topic)))
     }
 
     /**

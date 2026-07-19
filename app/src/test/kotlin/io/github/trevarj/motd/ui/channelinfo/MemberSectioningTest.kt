@@ -1,6 +1,8 @@
 package io.github.trevarj.motd.ui.channelinfo
 
 import io.github.trevarj.motd.data.db.MemberEntity
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -123,5 +125,34 @@ class MemberSectioningTest {
         val members = listOf(member("op", "@"), member("alice"))
         val social = sectionMembersSocial(members, fools = emptySet())
         assertEquals(sectionMembers(members), social.sections)
+    }
+
+    @Test
+    fun `strict and unknown casemaps keep conservative fool identities distinct`() {
+        val members = listOf(member("bot~"), member("bot^"), member("[helper]"), member("{helper}"))
+        val strict = sectionMembersSocial(
+            members,
+            fools = setOf("bot~"),
+            identityRules = IrcIdentityRules(caseMapping = IrcCaseMapping.Rfc1459Strict),
+        )
+        assertEquals(listOf("bot~"), strict.fools.map { it.nick })
+
+        val unknown = sectionMembersSocial(
+            members,
+            fools = setOf("[helper]"),
+            identityRules = IrcIdentityRules(caseMapping = IrcCaseMapping.Unknown("vendor")),
+        )
+        assertEquals(listOf("[helper]"), unknown.fools.map { it.nick })
+    }
+
+    @Test
+    fun `casemapped sort ties have stable raw nick ordering`() {
+        val members = listOf(member("{Nick}"), member("[Nick]"))
+        val sorted = sectionMembers(
+            members,
+            identityRules = IrcIdentityRules(caseMapping = IrcCaseMapping.Rfc1459),
+        ).single().members
+
+        assertEquals(listOf("[Nick]", "{Nick}"), sorted.map { it.nick })
     }
 }

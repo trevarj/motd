@@ -103,6 +103,7 @@ class AllMigrationsTest {
                 "network_history_cursors",
                 "connection_generations",
                 "composer_drafts",
+                "network_identity",
             ).forEach { table ->
                 sqlite.query("SELECT COUNT(*) FROM $table").use { cursor ->
                     check(cursor.moveToFirst())
@@ -154,6 +155,7 @@ class AllMigrationsTest {
             MIGRATION_9_10,
             MIGRATION_10_11,
             MIGRATION_11_12,
+            MIGRATION_12_13,
         )
     }
 }

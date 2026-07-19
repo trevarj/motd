@@ -5,11 +5,23 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MessageBubbleTextTest {
+    @Test
+    fun mention_membership_uses_active_irc_casemapping() {
+        val rfc = IrcIdentityRules(IrcCaseMapping.Rfc1459)
+        val strict = IrcIdentityRules(IrcCaseMapping.Rfc1459Strict)
+        val known = setOf(rfc.normalize("nick^"))
+
+        assertTrue(matchesKnownMention("nick~", known, rfc))
+        assertTrue(!matchesKnownMention("nick~", known, strict))
+    }
+
     @Test
     fun inactive_mentions_and_no_url_return_plain_body() {
         val body = linkifiedBody(

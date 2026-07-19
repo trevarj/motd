@@ -39,20 +39,47 @@ class BufferStore @Inject constructor(
             }
         } else {
             aliasDao.byValue(networkId, namespace, normalizedName)?.let { alias ->
-                dao.observeById(alias.roomId)?.let { return@withTransaction it }
+                dao.observeById(alias.roomId)?.takeIf { it.type == type }?.let {
+                    return@withTransaction it
+                }
             }
         }
-        dao.byName(networkId, normalizedName)?.let { return@withTransaction it }
+        val nameCollision = dao.byName(networkId, normalizedName)
+        if (nameCollision?.type == type) return@withTransaction nameCollision
+        if (type == BufferType.CHANNEL && nameCollision?.type == BufferType.QUERY) {
+            val hasAccountIdentity = aliasDao.forRoom(nameCollision.id)
+                .any { it.namespace == RoomAliasNamespace.ACCOUNT }
+            if (!hasAccountIdentity) {
+                val promoted = nameCollision.copy(displayName = displayName, type = BufferType.CHANNEL)
+                dao.update(promoted)
+                aliasDao.deleteQueryAliases(promoted.id)
+                aliasDao.insertIgnore(
+                    RoomAliasEntity(
+                        networkId = networkId,
+                        namespace = RoomAliasNamespace.CHANNEL,
+                        value = normalizedName,
+                        roomId = promoted.id,
+                        verified = true,
+                    ),
+                )
+                return@withTransaction promoted
+            }
+        }
+        val storedName = if (nameCollision == null) {
+            normalizedName
+        } else {
+            "$normalizedName\u0000${type.name.lowercase()}"
+        }
         val candidate = BufferEntity(
             networkId = networkId,
-            name = normalizedName,
+            name = storedName,
             displayName = displayName,
             type = type,
         )
         val insertedId = dao.insertIgnore(candidate)
         val room = if (insertedId > 0L) candidate.copy(id = insertedId) else {
-            checkNotNull(dao.byName(networkId, normalizedName)) {
-                "buffer insert conflict did not leave a row for $networkId/$normalizedName"
+            checkNotNull(dao.byName(networkId, storedName)) {
+                "buffer insert conflict did not leave a row for $networkId/$storedName"
             }
         }
         aliasDao.insertIgnore(
@@ -173,6 +200,17 @@ class BufferStore @Inject constructor(
         } ?: aliases.byValue(networkId, RoomAliasNamespace.VERIFIED_NICK, normalizedNick)
             ?: aliases.byValue(networkId, RoomAliasNamespace.PROVISIONAL_NICK, normalizedNick)
         return alias?.let { db.bufferDao().observeById(it.roomId) }
+            ?.takeIf { it.type == BufferType.QUERY }
+    }
+
+    /** Resolve a channel through its durable alias, then a compatible legacy room key. */
+    suspend fun resolveChannelRoom(networkId: Long, normalizedName: String): BufferEntity? {
+        val aliased = db.roomAliasDao()
+            .byValue(networkId, RoomAliasNamespace.CHANNEL, normalizedName)
+            ?.let { db.bufferDao().observeById(it.roomId) }
+            ?.takeIf { it.type == BufferType.CHANNEL }
+        return aliased ?: db.bufferDao().byName(networkId, normalizedName)
+            ?.takeIf { it.type == BufferType.CHANNEL }
     }
 
     suspend fun mergeRooms(firstId: RoomId, secondId: RoomId): BufferEntity {

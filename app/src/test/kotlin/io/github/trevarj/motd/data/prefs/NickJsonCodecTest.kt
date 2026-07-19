@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.data.prefs
 
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -58,5 +60,20 @@ class NickJsonCodecTest {
         assertEquals("alice", normalizeNick("  Alice  "))
         assertEquals("bob", normalizeNick("BOB"))
         assertTrue(normalizeNick("Alice") == normalizeNick("alice"))
+    }
+
+    @Test
+    fun configuredNicksAreComparedPerNetworkWithoutRewritingSerializedValues() {
+        val configured = linkedSetOf("  Friend~  ", "[Helper]")
+        val encoded = encodeNickSet(configured)
+        assertEquals(configured, decodeNickSet(encoded))
+
+        val rfc = IrcIdentityRules(caseMapping = IrcCaseMapping.Rfc1459)
+        assertTrue(rfc.matchesConfiguredNick("friend^", configured))
+        assertTrue(rfc.matchesConfiguredNick("{helper}", configured))
+
+        val strict = IrcIdentityRules(caseMapping = IrcCaseMapping.Rfc1459Strict)
+        assertTrue(strict.matchesConfiguredNick("FRIEND~", configured))
+        assertTrue(!strict.matchesConfiguredNick("friend^", configured))
     }
 }
