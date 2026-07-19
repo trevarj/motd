@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.repo
 
 import androidx.paging.PagingSource
+import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.buffer
@@ -8,6 +9,7 @@ import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
@@ -80,7 +82,7 @@ class MessageRepositoryPagingTest {
                 loadSize = MESSAGE_PAGING_CONFIG.pageSize,
                 placeholdersEnabled = true,
             ),
-        ) as PagingSource.LoadResult.Page
+        ).requirePage()
 
         val localTargetIndex = targetIndex - result.itemsBefore
         assertTrue(localTargetIndex in result.data.indices)
@@ -121,7 +123,7 @@ class MessageRepositoryPagingTest {
                     sender = "fool-' OR 1=1 --",
                     serverTime = 4,
                     dedupKey = "quoted-fool",
-                ),
+                ).copy(normalizedActor = "fool-' or 1=1 --"),
             ),
         )
         val largeSpec = MessageVisibilitySpec(
@@ -137,7 +139,7 @@ class MessageRepositoryPagingTest {
         assertFalse(query.sql.contains("OR 1=1"))
         val largePage = db.messageDao().pagingSource(query).load(
             PagingSource.LoadParams.Refresh(null, 50, true),
-        ) as PagingSource.LoadResult.Page
+        ).requirePage()
         assertEquals(listOf("own", "good"), largePage.data.map { it.text })
 
         val emptyQuery = messagePagingQuery(
@@ -147,29 +149,48 @@ class MessageRepositoryPagingTest {
         assertFalse(emptyQuery.sql.contains("IN ()"))
         val emptyPage = db.messageDao().pagingSource(emptyQuery).load(
             PagingSource.LoadParams.Refresh(null, 50, true),
-        ) as PagingSource.LoadResult.Page
+        ).requirePage()
         assertEquals(4, emptyPage.data.size)
     }
 
     @Test
-    fun accountFoolFilteringDoesNotHideUnmatchedNullAccounts() = runTest {
-        db.messageDao().insertAll(
-            listOf(
-                message(bufferId, "account fool", "new-nick", 2, "account")
-                    .copy(senderAccount = "stable-account"),
-                message(bufferId, "ordinary", "person", 1, "ordinary"),
-            ),
+    fun pagingSqlMatchesPolicyForNickAccountOwnSystemAndNullAccountRows() = runTest {
+        val rows = listOf(
+            message(bufferId, "ordinary", "person", 1, "ordinary"),
+            message(bufferId, "nick fool", "[Alice", 2, "nick")
+                .copy(normalizedActor = "{alice"),
+            message(bufferId, "account fool", "new-nick", 3, "account")
+                .copy(senderAccount = "stable-account"),
+            message(bufferId, "own", "[Alice", 4, "own", isSelf = true)
+                .copy(normalizedActor = "{alice"),
+            message(bufferId, "join", "person", 5, "join", kind = MessageKind.JOIN),
+            message(bufferId, "system", "[Alice", 6, "system", kind = MessageKind.TOPIC)
+                .copy(normalizedActor = "{alice"),
+        )
+        db.messageDao().insertAll(rows)
+        val spec = MessageVisibilitySpec(
+            showJoinPartQuit = false,
+            fools = setOf("[alice", "stable-account"),
+            foolsMode = FoolsMode.HIDE,
         )
         val page = db.messageDao().pagingSource(
-            messagePagingQuery(
-                bufferId,
-                MessageVisibilitySpec(
-                    fools = setOf("stable-account"),
-                    foolsMode = FoolsMode.HIDE,
-                ),
-            ),
-        ).load(PagingSource.LoadParams.Refresh(null, 50, true)) as PagingSource.LoadResult.Page
+            messagePagingQuery(bufferId, spec),
+        ).load(PagingSource.LoadParams.Refresh(null, 50, true)).requirePage()
 
-        assertEquals(listOf("ordinary"), page.data.map { it.text })
+        val expected = rows.asSequence()
+            .filter(MessageVisibilityPolicy(spec)::timeline)
+            .sortedByDescending { it.serverTime }
+            .map { it.text }
+            .toList()
+        assertEquals(listOf("system", "own", "ordinary"), expected)
+        assertEquals(expected, page.data.map { it.text })
     }
+
+    private fun PagingSource.LoadResult<Int, MessageEntity>.requirePage() =
+        when (this) {
+            is PagingSource.LoadResult.Page -> this
+            is PagingSource.LoadResult.Error ->
+                throw AssertionError("Paging load failed: ${throwable.message}", throwable)
+            is PagingSource.LoadResult.Invalid -> throw AssertionError("Paging source invalidated before load")
+        }
 }

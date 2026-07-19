@@ -1281,8 +1281,14 @@ class ConnectionManagerImpl @Inject constructor(
         sendLocks.getOrPut(buffer.networkId) { Mutex() }.withLock {
             val client = clientFor(buffer.networkId)
             val ready = client?.state?.value as? IrcClientState.Ready
-            val parent = replyToEventId?.let(messageDao::byCanonicalId)
-                ?.takeIf { it.bufferId == buffer.id }
+            val parentId: Long? = replyToEventId
+            val canonicalParent: MessageEntity? = if (parentId != null) {
+                messageDao.byCanonicalId(parentId)
+            } else {
+                null
+            }
+            val parent: MessageEntity? = canonicalParent
+                ?.takeIf { candidate: MessageEntity -> candidate.bufferId == buffer.id }
             val replyTagAllowed = parent?.msgid != null && ready != null &&
                 canSendClientTag(ready.caps, ready.isupport, "+reply")
             val delivery = prepareReplyDelivery(
@@ -1378,7 +1384,12 @@ class ConnectionManagerImpl @Inject constructor(
                         ?: return@transition ImmediateWireAcceptance.DISCONNECTED
                     val client = clientFor(retryBuffer.networkId)
                     val ready = client?.state?.value as? IrcClientState.Ready
-                    val parent = retry.replyToEventId?.let(messageDao::byCanonicalId)
+                    val parentId: Long? = retry.replyToEventId
+                    val parent: MessageEntity? = if (parentId != null) {
+                        messageDao.byCanonicalId(parentId)
+                    } else {
+                        null
+                    }
                     val wireReply = parent?.msgid?.takeIf {
                         ready != null && canSendClientTag(ready.caps, ready.isupport, "+reply")
                     }

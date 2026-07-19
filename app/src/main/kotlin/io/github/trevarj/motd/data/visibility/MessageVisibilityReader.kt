@@ -1,6 +1,5 @@
 package io.github.trevarj.motd.data.visibility
 
-import androidx.room.InvalidationTracker
 import androidx.sqlite.db.SimpleSQLiteQuery
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -10,9 +9,7 @@ import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
@@ -27,27 +24,19 @@ data class VisibleMessageAnchor(
 class MessageVisibilityReader @Inject constructor(
     private val db: MotdDatabase,
 ) {
-    fun observeLatestRawAnchor(bufferId: Long): Flow<TimelineAnchor?> = callbackFlow {
-        val observer = object : InvalidationTracker.Observer("messages", "buffers") {
-            override fun onInvalidated(tables: Set<String>) {
-                trySend(Unit)
-            }
-        }
-        db.invalidationTracker.addObserver(observer)
-        trySend(Unit)
-        awaitClose { db.invalidationTracker.removeObserver(observer) }
-    }.map { latestRawAnchor(bufferId) }.distinctUntilChanged()
+    fun observeLatestRawAnchor(bufferId: Long): Flow<TimelineAnchor?> =
+        db.invalidationTracker.createFlow(
+            "messages",
+            "buffers",
+            emitInitialState = true,
+        ).map { latestRawAnchor(bufferId) }.distinctUntilChanged()
 
     /** Emits only when event-id coalescence may require a live viewport re-anchor. */
-    fun observeEventRedirects(): Flow<Unit> = callbackFlow {
-        val observer = object : InvalidationTracker.Observer("event_redirects") {
-            override fun onInvalidated(tables: Set<String>) {
-                trySend(Unit)
-            }
-        }
-        db.invalidationTracker.addObserver(observer)
-        awaitClose { db.invalidationTracker.removeObserver(observer) }
-    }
+    fun observeEventRedirects(): Flow<Unit> =
+        db.invalidationTracker.createFlow(
+            "event_redirects",
+            emitInitialState = false,
+        ).map { Unit }
 
     suspend fun latestRawAnchor(bufferId: Long): TimelineAnchor? =
         db.messageDao().newestMessage(canonicalRoomId(bufferId))?.let {

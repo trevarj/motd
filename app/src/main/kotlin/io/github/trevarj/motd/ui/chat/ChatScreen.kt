@@ -564,12 +564,14 @@ fun ChatContent(
             ChatUiEvent.HistoryUpToDate -> stringResource(R.string.chat_history_up_to_date)
             ChatUiEvent.HistoryUnsupported -> stringResource(R.string.chat_history_unsupported)
             ChatUiEvent.HistoryFailed -> stringResource(R.string.chat_history_failed)
-            is ChatUiEvent.HistoryIncomplete -> stringResource(
-                R.string.chat_history_resync_incomplete,
+            is ChatUiEvent.HistoryIncomplete -> pluralStringResource(
+                R.plurals.chat_history_resync_incomplete,
+                event.inserted,
                 event.inserted,
             )
-            is ChatUiEvent.HistoryCapped -> stringResource(
-                R.string.chat_history_resync_capped,
+            is ChatUiEvent.HistoryCapped -> pluralStringResource(
+                R.plurals.chat_history_resync_capped,
+                event.inserted,
                 event.inserted,
                 event.limit,
             )

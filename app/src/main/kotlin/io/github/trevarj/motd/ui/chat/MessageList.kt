@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -171,13 +172,13 @@ fun MessageList(
     onReact: (MessageEntity, String) -> Unit,
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
+    modifier: Modifier = Modifier,
     canRetry: (MessageEntity) -> Boolean = { true },
     loadPreview: suspend (String) -> LinkPreview?,
     richContentReady: Boolean,
     showImages: Boolean,
     showLinkPreviews: Boolean,
     onOpenLink: (String) -> Unit,
-    modifier: Modifier = Modifier,
     cachedPreview: (String) -> CachedLinkPreview? = { null },
     liveEntryId: Long? = null,
     onLiveEntryConsumed: (Long) -> Unit = {},
@@ -917,7 +918,7 @@ fun ChatHistoryFooter(state: ChatHistoryUiState, onRetry: () -> Unit) {
             onRetry = onRetry,
         )
         is ChatHistoryUiState.Capped -> HistoryRetryFooter(
-            text = stringResource(R.string.chat_history_capped, state.limit),
+            text = pluralStringResource(R.plurals.chat_history_capped, state.limit, state.limit),
             onRetry = onRetry,
         )
         ChatHistoryUiState.Error -> HistoryRetryFooter(

@@ -35,6 +35,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
@@ -1472,22 +1473,50 @@ class HistoryResyncCoordinatorTest {
 
     @Test
     fun immediateCancellationDoesNotCancelNextManualGeneration() = runTest {
-        coordinator.cancelBufferResync(bufferId)
-        val source = FakeSource { FakeResponse(primaryMessageCount = 0) }
+        coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope)
+        val firstEntered = CompletableDeferred<Unit>()
+        val firstCancelled = CompletableDeferred<Unit>()
+        val secondEntered = CompletableDeferred<Unit>()
+        val holdFirst = CompletableDeferred<Unit>()
+        var calls = 0
+        val source = FakeSource {
+            calls++
+            if (calls == 1) {
+                firstEntered.complete(Unit)
+                try {
+                    holdFirst.await()
+                } finally {
+                    firstCancelled.complete(Unit)
+                }
+            } else {
+                secondEntered.complete(Unit)
+            }
+            FakeResponse(primaryMessageCount = 0)
+        }
+        val first = async { coordinator.resyncBuffer(networkId, bufferId, "#chan", source) }
+        runCurrent()
+        firstEntered.await()
 
-        assertEquals(
-            HistoryResyncState.UpToDate,
-            withTimeout(1_000) {
-                coordinator.resyncBuffer(networkId, bufferId, "#chan", source)
-            },
-        )
-        assertEquals(1, source.requests.size)
+        coordinator.cancelBufferResync(bufferId)
+        val second = async(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.resyncBuffer(networkId, bufferId, "#chan", source)
+        }
+        runCurrent()
+        firstCancelled.await()
+        secondEntered.await()
+
+        assertTrue(runCatching { first.await() }.isFailure)
+        assertTrue(firstCancelled.isCompleted)
+        assertEquals(2, source.requests.size)
+        assertEquals(HistoryResyncState.UpToDate, second.await())
     }
 
     @Test
     fun automaticWaiterRestartsWhenJoinedManualFlightIsCancelled() = runTest {
+        coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope)
         val manualEntered = CompletableDeferred<Unit>()
         val manualCancelled = CompletableDeferred<Unit>()
+        val automaticRestarted = CompletableDeferred<Unit>()
         val neverRelease = CompletableDeferred<Unit>()
         var calls = 0
         val source = FakeSource {
@@ -1499,24 +1528,32 @@ class HistoryResyncCoordinatorTest {
                 } finally {
                     manualCancelled.complete(Unit)
                 }
+            } else {
+                automaticRestarted.complete(Unit)
             }
             FakeResponse(endOfHistory = true)
         }
 
         val manual = async { coordinator.resyncBuffer(networkId, bufferId, "#chan", source) }
         manualEntered.await()
-        val automatic = async { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source) }
-        delay(20)
+        val automatic = async(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.reconcileBuffer(networkId, bufferId, "#chan", source)
+        }
+        assertEquals(1, source.requests.size)
+
         coordinator.cancelBufferResync(bufferId)
-        withTimeout(1_000) { manualCancelled.await() }
+        runCurrent()
+        manualCancelled.await()
+        automaticRestarted.await()
 
         assertTrue(runCatching { manual.await() }.isFailure)
-        assertEquals(HistoryResyncState.UpToDate, withTimeout(1_000) { automatic.await() })
         assertEquals(2, calls)
+        assertEquals(HistoryResyncState.UpToDate, automatic.await())
     }
 
     @Test
     fun uiCancellationDoesNotCancelAutomaticFlight() = runTest {
+        coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope)
         val automaticEntered = CompletableDeferred<Unit>()
         val releaseAutomatic = CompletableDeferred<Unit>()
         val source = FakeSource {
@@ -1528,10 +1565,14 @@ class HistoryResyncCoordinatorTest {
         val automatic = async { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source) }
         automaticEntered.await()
         coordinator.cancelBufferResync(bufferId)
-        delay(50)
-        releaseAutomatic.complete(Unit)
+        runCurrent()
 
-        assertEquals(HistoryResyncState.UpToDate, withTimeout(1_000) { automatic.await() })
+        assertTrue(automatic.isActive)
+        assertEquals(1, source.requests.size)
+        releaseAutomatic.complete(Unit)
+        runCurrent()
+
+        assertEquals(HistoryResyncState.UpToDate, automatic.await())
     }
 
     @Test

@@ -123,6 +123,7 @@ class EventProcessor @Inject constructor(
     private data class ReactionRoute(
         val bufferName: String,
         val type: BufferType,
+        val sourceIsSelf: Boolean,
     )
 
     private sealed interface RosterDelta {
@@ -476,14 +477,26 @@ class EventProcessor @Inject constructor(
         val emoji = e.reactEmoji
         val targetMsgid = e.reactTargetMsgid
         if (emoji != null && targetMsgid != null) {
-            val bufferId = existingReactionRoomId(networkId, route, st) ?: return
-            // Keep an orphan temporarily when the target's echo/history row is still in flight.
-            // Reaction queries are scoped to visible msgids, so it becomes visible atomically when
-            // the parent arrives and remains inert if the reference never resolves.
             val account = e.ctx.account ?: if (origin == EventOrigin.LIVE) {
                 userDao.byNick(networkId, st.normalize(e.source.nick))?.account
             } else {
                 null
+            }
+            val targetEvent = db.canonicalTimelineDao().eventByAlias(
+                networkId,
+                EventAliasNamespace.MSGID,
+                targetMsgid.toByteArray(Charsets.UTF_8),
+            )
+            val bufferId = targetEvent?.bufferId ?: existingReactionRoomId(
+                networkId,
+                route,
+                st,
+                account,
+            ) ?: return
+            // Keep an orphan temporarily when the target's echo/history row is still in flight.
+            // Once exact target identity exists, resolution also repairs an ambiguous query route.
+            if (targetEvent != null) {
+                db.canonicalTimelineDao().resolveReactions(bufferId, targetMsgid, targetEvent.id)
             }
             val actorKey = st.actorKey(e.source.nick, account)
             val nickKey = st.actorKey(e.source.nick, account = null)
@@ -499,11 +512,7 @@ class EventProcessor @Inject constructor(
                     sender = e.source.nick,
                     emoji = emoji,
                     serverTime = e.ctx.serverTime,
-                    targetEventId = db.canonicalTimelineDao().eventByAlias(
-                        networkId,
-                        EventAliasNamespace.MSGID,
-                        targetMsgid.toByteArray(Charsets.UTF_8),
-                    )?.id,
+                    targetEventId = targetEvent?.id,
                 ),
             )
         }
@@ -1476,11 +1485,24 @@ class EventProcessor @Inject constructor(
         val target = message.params.firstOrNull() ?: return true
         val st = stateFor(networkId)
         val route = resolveReactionRoute(source, target, historyTarget, st)
-        val bufferId = existingReactionRoomId(networkId, route, st) ?: return true
         val account = message.tags["account"] ?: if (origin == EventOrigin.LIVE) {
             userDao.byNick(networkId, st.normalize(source))?.account
         } else {
             null
+        }
+        val targetEvent = db.canonicalTimelineDao().eventByAlias(
+            networkId,
+            EventAliasNamespace.MSGID,
+            targetMsgid.toByteArray(Charsets.UTF_8),
+        )
+        val bufferId = targetEvent?.bufferId ?: existingReactionRoomId(
+            networkId,
+            route,
+            st,
+            account,
+        ) ?: return true
+        if (targetEvent != null) {
+            db.canonicalTimelineDao().resolveReactions(bufferId, targetMsgid, targetEvent.id)
         }
         val actorKey = st.actorKey(source, account)
         val nickKey = st.actorKey(source, account = null)
@@ -1747,6 +1769,7 @@ class EventProcessor @Inject constructor(
         return ReactionRoute(
             bufferName = if (isDm) historyPeer ?: if (sourceIsSelf) target else source else target,
             type = if (isDm) BufferType.QUERY else BufferType.CHANNEL,
+            sourceIsSelf = sourceIsSelf,
         )
     }
 
@@ -1754,8 +1777,11 @@ class EventProcessor @Inject constructor(
         networkId: Long,
         route: ReactionRoute,
         st: NetworkState,
+        account: String?,
     ): RoomId? = if (route.type == BufferType.QUERY) {
-        bufferStore.resolveQueryRoom(networkId, st.normalize(route.bufferName), account = null)?.id
+        val peerAccount = account
+            ?.takeUnless { it.isEmpty() || it == "*" || route.sourceIsSelf }
+        bufferStore.resolveQueryRoom(networkId, st.normalize(route.bufferName), peerAccount)?.id
     } else {
         existingChannelBuffer(networkId, route.bufferName, st)?.id
     }

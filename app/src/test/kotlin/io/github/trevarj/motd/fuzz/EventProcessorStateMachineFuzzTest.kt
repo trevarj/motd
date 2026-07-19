@@ -182,6 +182,7 @@ class EventProcessorStateMachineFuzzTest {
             operation()
         }
         val parentId = scalarLong(db, "SELECT id FROM messages WHERE msgid = ?", parentMsgid)
+        val parentBufferId = scalarLong(db, "SELECT bufferId FROM messages WHERE msgid = ?", parentMsgid)
         assertEquals(
             parentId,
             scalarLong(db, "SELECT replyToEventId FROM messages WHERE msgid = ?", childMsgid),
@@ -190,7 +191,20 @@ class EventProcessorStateMachineFuzzTest {
             parentId,
             scalarLong(db, "SELECT targetEventId FROM reactions WHERE targetMsgid = ?", parentMsgid),
         )
-        assertEquals(1, scalar(db, "SELECT COUNT(*) FROM reactions WHERE targetMsgid = ?", parentMsgid))
+        assertEquals(
+            parentBufferId,
+            scalarLong(db, "SELECT bufferId FROM reactions WHERE targetMsgid = ?", parentMsgid),
+        )
+        assertEquals(
+            1,
+            scalar(
+                db,
+                "SELECT COUNT(*) FROM reactions WHERE targetMsgid = ? AND actorKey = ? AND emoji = ?",
+                parentMsgid,
+                "nick:bob",
+                "👍",
+            ),
+        )
     }
 
     private suspend fun exerciseProcessorRollback(

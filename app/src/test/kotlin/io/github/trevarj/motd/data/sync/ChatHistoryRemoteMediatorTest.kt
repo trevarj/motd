@@ -337,7 +337,7 @@ class ChatHistoryRemoteMediatorTest {
             events = listOf(chatMsg("unbounded", 100)),
             oldest = null,
             newest = null,
-            endOfHistory = true,
+            endOfHistory = false,
             primaryMessageCount = 1,
         )
         val history = FakeHistory(responseFor = { malformed })
@@ -345,6 +345,7 @@ class ChatHistoryRemoteMediatorTest {
         val result = load(mediator(history), LoadType.APPEND)
 
         assertTrue(result is RemoteMediator.MediatorResult.Error)
+        assertEquals(listOf(ChatHistoryRequest.Subcommand.BEFORE), history.calls)
         assertEquals(1, rowCount())
         assertFalse(db.bufferDao().observeById(bufferId)!!.historyComplete)
     }

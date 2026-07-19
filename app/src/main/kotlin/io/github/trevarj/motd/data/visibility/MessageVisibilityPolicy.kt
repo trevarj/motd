@@ -127,7 +127,7 @@ internal class MessageVisibilitySql(
             "WHERE fool.column1 = CAST(${column(alias, "normalizedActor")} AS BLOB) " +
             "OR (${column(alias, "senderAccount")} IS NOT NULL " +
             "AND COALESCE(fool.column2, fool.column1) = " +
-            "CAST(${column(alias, "senderAccount")} AS BLOB)))"
+            "CAST(${column(alias, "senderAccount")} AS BLOB))))"
     }
 }
 
@@ -171,13 +171,15 @@ internal fun countVisibleUnreadInTimelinePrefixQuery(
 ): SimpleSQLiteQuery {
     val visibility = MessageVisibilitySql(spec, identityRules)
     return SimpleSQLiteQuery(
-        "SELECT COUNT(*) FROM (SELECT 1 FROM (" +
+        "SELECT COUNT(*) FROM (" +
+            "SELECT 1 FROM (" +
             "SELECT m.* FROM messages m WHERE m.bufferId = ? " +
             "AND ${visibility.timeline()} ORDER BY m.serverTime DESC, m.id DESC LIMIT ?" +
-            ") viewport WHERE (viewport.serverTime > ? OR " +
+            ") AS viewport WHERE (viewport.serverTime > ? OR " +
             "(viewport.serverTime = ? AND viewport.id > ?)) " +
-            "AND ${visibility.visibleUnread("viewport")} LIMIT ?)",
-        arrayOf(
+            "AND ${visibility.visibleUnread("viewport")} LIMIT ?" +
+            ") AS capped",
+        arrayOf<Any?>(
             bufferId,
             beforeIndex.coerceAtLeast(0),
             after.serverTime,

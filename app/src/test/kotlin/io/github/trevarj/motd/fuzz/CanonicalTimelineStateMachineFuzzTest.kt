@@ -146,7 +146,7 @@ class CanonicalTimelineStateMachineFuzzTest {
                 }
 
                 exerciseCaseSensitiveMsgids(fuzz, activeDb, store, networkId, roomId)
-                exerciseGenerationScopedLabels(fuzz, activeDb, store, networkId, roomId)
+                exerciseOpaqueLabelsAcrossGenerations(fuzz, activeDb, store, networkId, roomId)
                 exerciseIdentityFreeOverlaps(fuzz, activeDb, store, networkId, roomId)
                 exercisePresentationRollback(fuzz, activeDb, store, networkId, roomId)
                 assertUnreadProjection(activeDb, roomId)
@@ -184,25 +184,31 @@ class CanonicalTimelineStateMachineFuzzTest {
         assertEquals(3, scalar(db, "SELECT COUNT(*) FROM messages WHERE text = ?", text))
     }
 
-    private suspend fun exerciseGenerationScopedLabels(
+    private suspend fun exerciseOpaqueLabelsAcrossGenerations(
         fuzz: FuzzCase,
         db: MotdDatabase,
         store: CanonicalTimelineStore,
         networkId: Long,
         roomId: Long,
     ) {
-        suspend fun attempt(generation: Long, msgid: String, text: String): Pair<Long, Long> {
-            val label = "same-label-${fuzz.index}"
+        suspend fun attempt(
+            ordinal: Int,
+            sendGeneration: Long,
+            echoGeneration: Long,
+            msgid: String,
+            text: String,
+        ): Pair<Long, Long> {
+            val label = "opaque-label-${fuzz.index}-$ordinal"
             val pending = store.ingest(
                 TimelineObservation(
                     networkId,
-                    message(roomId, null, 110_000 + generation, text).copy(
+                    message(roomId, null, 110_000 + sendGeneration, text).copy(
                         isSelf = true,
                         pendingLabel = label,
                         serverTimeAuthoritative = false,
                     ),
                     ObservationOrigin.LOCAL_SEND,
-                    generation,
+                    sendGeneration,
                     label = label,
                     batchId = null,
                     timeProvenance = TimeProvenance.LOCAL_CLOCK,
@@ -211,9 +217,9 @@ class CanonicalTimelineStateMachineFuzzTest {
             val echo = store.ingest(
                 TimelineObservation(
                     networkId,
-                    message(roomId, msgid, 111_000 + generation, text).copy(isSelf = true),
+                    message(roomId, msgid, 111_000 + echoGeneration, text).copy(isSelf = true),
                     ObservationOrigin.LIVE,
-                    generation,
+                    echoGeneration,
                     label = label,
                     batchId = null,
                     timeProvenance = TimeProvenance.SERVER_TAG,
@@ -221,8 +227,8 @@ class CanonicalTimelineStateMachineFuzzTest {
             )
             return pending.event.id to echo.event.id
         }
-        val first = attempt(7, "label-msgid-${fuzz.index}-a", "labelattempt${fuzz.index}a")
-        val second = attempt(8, "label-msgid-${fuzz.index}-b", "labelattempt${fuzz.index}b")
+        val first = attempt(0, 7, 8, "label-msgid-${fuzz.index}-a", "labelattempt${fuzz.index}a")
+        val second = attempt(1, 8, 9, "label-msgid-${fuzz.index}-b", "labelattempt${fuzz.index}b")
         fuzz.record("labels first=$first second=$second")
         assertEquals(first.first, first.second)
         assertEquals(second.first, second.second)

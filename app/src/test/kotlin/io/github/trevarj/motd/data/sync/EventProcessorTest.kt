@@ -1211,6 +1211,51 @@ class EventProcessorTest {
     }
 
     @Test
+    fun lateQueryReactionTargetRepairsAmbiguousNickRouteAfterAccountReuse() = runTest {
+        suspend fun incoming(msgid: String, account: String, text: String) {
+            processor.process(networkId, IrcEvent.ChatMessage(
+                ctx = ctx(msgid = msgid, account = account),
+                kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix("Bob"),
+                target = "me",
+                text = text,
+                isSelf = false,
+                replyToMsgid = null,
+            ))
+        }
+
+        incoming("account-a-seed", "account-a", "first Bob")
+        incoming("account-b-seed", "account-b", "reused Bob")
+        val accountARoom = checkNotNull(BufferStore(db).resolveQueryRoom(networkId, "bob", "account-a"))
+        val accountBRoom = checkNotNull(BufferStore(db).resolveQueryRoom(networkId, "bob", "account-b"))
+        assertNotEquals(accountARoom.id, accountBRoom.id)
+
+        processor.process(networkId, IrcEvent.TagMessage(
+            ctx = ctx(time = 2_000),
+            source = Prefix("Bob"),
+            target = "me",
+            typing = null,
+            reactEmoji = "👍",
+            reactTargetMsgid = "account-a-parent",
+        ))
+        assertEquals(
+            "nick:bob",
+            db.reactionDao().observeFor(accountBRoom.id, listOf("account-a-parent")).first()
+                .single().actorKey,
+        )
+
+        incoming("account-a-parent", "account-a", "late parent")
+
+        val parent = checkNotNull(db.messageDao().byMsgid(accountARoom.id, "account-a-parent"))
+        val reaction = db.reactionDao().observeFor(accountARoom.id, listOf("account-a-parent"))
+            .first().single()
+        assertEquals(parent.id, reaction.targetEventId)
+        assertTrue(
+            db.reactionDao().observeFor(accountBRoom.id, listOf("account-a-parent")).first().isEmpty(),
+        )
+    }
+
+    @Test
     fun ownReactionEcho_reconcilesOntoOptimisticRow_withoutDuplicating() = runTest {
         // Auto-create the buffer and seed the optimistic own-reaction row the way sendReact does
         // (upsert keyed by bufferId+targetMsgid+actorKey+emoji) before the server echo arrives.
@@ -2802,15 +2847,16 @@ class EventProcessorTest {
             primaryMessageCount = 0,
         )
         val incompleteRequests = listOf(
-            ChatHistoryRequest(ChatHistoryRequest.Subcommand.AFTER, "#after", bound1 = "msgid=x"),
-            ChatHistoryRequest(ChatHistoryRequest.Subcommand.AROUND, "#around", bound1 = "msgid=x"),
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.AFTER, "#after", bound1 = "msgid=x", limit = 50),
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.AROUND, "#around", bound1 = "msgid=x", limit = 50),
             ChatHistoryRequest(
                 ChatHistoryRequest.Subcommand.BETWEEN,
                 "#between",
                 bound1 = "msgid=x",
                 bound2 = "msgid=y",
+                limit = 50,
             ),
-            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#bounded", bound1 = "msgid=x"),
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#bounded", bound1 = "msgid=x", limit = 50),
         )
 
         incompleteRequests.forEach { request ->
@@ -2820,8 +2866,8 @@ class EventProcessorTest {
         }
 
         listOf(
-            ChatHistoryRequest(ChatHistoryRequest.Subcommand.BEFORE, "#before", bound1 = "msgid=x"),
-            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#latest"),
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.BEFORE, "#before", bound1 = "msgid=x", limit = 50),
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#latest", limit = 50),
         ).forEach { request ->
             val roomId = processor.persistHistoryPage(networkId, request, empty)
             assertTrue(db.bufferDao().observeById(roomId)!!.historyComplete)
@@ -2869,6 +2915,7 @@ class EventProcessorTest {
                 ChatHistoryRequest.Subcommand.BEFORE,
                 "bob",
                 bound1 = "msgid=loser-oldest",
+                limit = 50,
             ),
             ChatHistoryResponse.Messages(
                 events = listOf(historyMessage),

@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.HistoryCursorDao
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
+import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.client.HistoryAvailability
@@ -230,12 +231,16 @@ class ChatHistoryRemoteMediator(
     private fun ChatHistoryReference.selector(
         referenceTypes: Set<HistoryReferenceType>,
         allowMsgid: Boolean,
-    ): BoundarySelector? = when {
-        allowMsgid && HistoryReferenceType.MSGID in referenceTypes && !msgid.isNullOrEmpty() ->
-            BoundarySelector(ChatHistorySelectors.msgid(msgid), HistoryReferenceType.MSGID)
-        HistoryReferenceType.TIMESTAMP in referenceTypes && serverTime != null ->
-            BoundarySelector(ChatHistorySelectors.timestamp(serverTime), HistoryReferenceType.TIMESTAMP)
-        else -> null
+    ): BoundarySelector? {
+        val exactMsgid = msgid
+        val exactServerTime = serverTime
+        return when {
+            allowMsgid && HistoryReferenceType.MSGID in referenceTypes && !exactMsgid.isNullOrEmpty() ->
+                BoundarySelector(ChatHistorySelectors.msgid(exactMsgid), HistoryReferenceType.MSGID)
+            HistoryReferenceType.TIMESTAMP in referenceTypes && exactServerTime != null ->
+                BoundarySelector(ChatHistorySelectors.timestamp(exactServerTime), HistoryReferenceType.TIMESTAMP)
+            else -> null
+        }
     }
 
     private data class BoundarySelector(

@@ -13,11 +13,11 @@ import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import java.util.Collections
 import java.util.concurrent.Executor
-import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -275,15 +275,19 @@ class MessageVisibilityReaderTest {
         val eventId = db.messageDao().insertAll(
             listOf(message(winnerId, "winner tail", serverTime = 700, dedupKey = "winner-tail")),
         ).single()
-        val redirected = async(start = CoroutineStart.UNDISPATCHED) {
-            reader.observeLatestRawAnchor(bufferId).first { it?.eventId == eventId }
+        val observedInitialState = CompletableDeferred<Unit>()
+        val redirected = async {
+            reader.observeLatestRawAnchor(bufferId)
+                .onEach { if (it == null) observedInitialState.complete(Unit) }
+                .first { it?.eventId == eventId }
         }
 
+        observedInitialState.await()
         db.roomAliasDao().markRedirect(bufferId, winnerId)
 
         assertEquals(
             io.github.trevarj.motd.data.db.TimelineAnchor(700, eventId),
-            withTimeout(5_000) { redirected.await() },
+            redirected.await(),
         )
     }
 

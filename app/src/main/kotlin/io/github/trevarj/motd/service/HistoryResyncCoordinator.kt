@@ -27,6 +27,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
@@ -39,9 +40,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.filterIsInstance
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -132,9 +130,13 @@ class HistoryResyncCoordinator @Inject constructor(
         val sourceIdentity: Any,
         val cancellationGeneration: Long? = null,
     )
-    private data class ActiveRequest(
+    private data class ActiveFlight(
         val spec: RequestSpec,
         val deferred: Deferred<HistoryResyncState>,
+    )
+    private data class FlightRegistration(
+        val flight: ActiveFlight,
+        val ownsFlight: Boolean,
     )
     private data class Boundary(val msgid: String?, val serverTime: Long?)
     private data class Selector(val value: String, val type: HistoryReferenceType)
@@ -168,8 +170,9 @@ class HistoryResyncCoordinator @Inject constructor(
         val highWater: Long?,
     )
 
-    private val activeGuard = Mutex()
-    private val active = LinkedHashMap<RequestSpec, Deferred<HistoryResyncState>>()
+    // Cancellation is non-suspending, so registration and removal share a synchronous monitor.
+    private val activeGuard = Any()
+    private val activeFlights = LinkedHashMap<RequestSpec, ActiveFlight>()
     private val manualCancellationGenerations = ConcurrentHashMap<Long, AtomicLong>()
     private val states = MutableStateFlow<Map<Long, HistoryResyncState>>(emptyMap())
     internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
@@ -382,15 +385,22 @@ class HistoryResyncCoordinator @Inject constructor(
             .computeIfAbsent(bufferId) { AtomicLong() }
             .incrementAndGet()
         states.update { it - bufferId }
-        scope.launch {
-            val requests = activeGuard.withLock {
-                active.filterKeys { spec ->
-                    spec.key.bufferId == bufferId &&
-                        spec.intent == RequestIntent.MANUAL &&
-                        spec.cancellationGeneration?.let { it < cancellationGeneration } == true
-                }.values.toList()
-            }
-            requests.forEach { it.cancel() }
+        synchronized(activeGuard) {
+            activeFlights.values
+                .filter { flight ->
+                    flight.spec.key.bufferId == bufferId &&
+                        flight.spec.intent == RequestIntent.MANUAL &&
+                        flight.spec.cancellationGeneration
+                            ?.let { it < cancellationGeneration } == true
+                }
+                .forEach { flight ->
+                    if (activeFlights[flight.spec] === flight) {
+                        activeFlights.remove(flight.spec)
+                    }
+                    flight.deferred.cancel(
+                        CancellationException("manual history refresh cancelled"),
+                    )
+                }
         }
     }
 
@@ -1097,53 +1107,60 @@ class HistoryResyncCoordinator @Inject constructor(
         block: suspend () -> HistoryResyncState,
     ): HistoryResyncState {
         while (true) {
-            val flight = activeGuard.withLock {
+            val registration = synchronized(activeGuard) {
                 spec.ensureNotManuallyCancelled()
                 val joined = when (spec.intent) {
-                    RequestIntent.MANUAL -> active[spec]?.let { ActiveRequest(spec, it) }
-                    RequestIntent.AUTOMATIC -> active.entries
-                        .firstOrNull { (candidate) ->
-                            candidate.key == spec.key &&
-                                candidate.intent == RequestIntent.MANUAL &&
-                                candidate.sourceIdentity == spec.sourceIdentity
+                    RequestIntent.MANUAL -> activeFlights[spec]
+                    RequestIntent.AUTOMATIC -> activeFlights.values
+                        .firstOrNull { candidate ->
+                            candidate.spec.key == spec.key &&
+                                candidate.spec.intent == RequestIntent.MANUAL &&
+                                candidate.spec.sourceIdentity == spec.sourceIdentity
                         }
-                        ?.let { (candidate, deferred) -> ActiveRequest(candidate, deferred) }
-                        ?: active[spec]?.let { ActiveRequest(spec, it) }
+                        ?: activeFlights[spec]
                 }
-                joined ?: scope.async {
-                    spec.ensureNotManuallyCancelled()
-                    withNetworkLock(spec.key.networkId) {
+                if (joined != null) {
+                    FlightRegistration(joined, ownsFlight = false)
+                } else {
+                    val deferred = scope.async(start = CoroutineStart.LAZY) {
                         spec.ensureNotManuallyCancelled()
-                        block()
-                    }
-                }
-                    .let { created ->
-                        active[spec] = created
-                        created.invokeOnCompletion {
-                            scope.launch {
-                                activeGuard.withLock {
-                                    if (active[spec] === created) active.remove(spec)
-                                }
-                            }
+                        withNetworkLock(spec.key.networkId) {
+                            spec.ensureNotManuallyCancelled()
+                            block()
                         }
-                        ActiveRequest(spec, created)
                     }
+                    val created = ActiveFlight(spec, deferred)
+                    activeFlights[spec] = created
+                    deferred.invokeOnCompletion {
+                        removeActiveFlight(created)
+                    }
+                    FlightRegistration(created, ownsFlight = true)
+                }
             }
+            val flight = registration.flight
+            if (registration.ownsFlight) flight.deferred.start()
             try {
                 return flight.deferred.await()
             } catch (cancelled: CancellationException) {
                 currentCoroutineContext().ensureActive()
-                val cancelledJoinedManual =
+                val shouldRetryAsAutomaticOwner =
                     spec.intent == RequestIntent.AUTOMATIC &&
                         flight.spec.intent == RequestIntent.MANUAL &&
                         flight.deferred.isCancelled
-                if (!cancelledJoinedManual) throw cancelled
+                if (!shouldRetryAsAutomaticOwner) throw cancelled
+                continue
             } finally {
-                activeGuard.withLock {
-                    if (flight.deferred.isCompleted && active[flight.spec] === flight.deferred) {
-                        active.remove(flight.spec)
-                    }
+                if (flight.deferred.isCompleted) {
+                    removeActiveFlight(flight)
                 }
+            }
+        }
+    }
+
+    private fun removeActiveFlight(flight: ActiveFlight) {
+        synchronized(activeGuard) {
+            if (activeFlights[flight.spec] === flight) {
+                activeFlights.remove(flight.spec)
             }
         }
     }

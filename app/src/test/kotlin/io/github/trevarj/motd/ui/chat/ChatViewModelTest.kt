@@ -72,6 +72,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
@@ -80,6 +81,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeoutOrNull
@@ -149,14 +151,20 @@ class ChatViewModelTest {
         vm.setReply(parent)
         vm.state.first { it.replyTo?.msgid == "parent-1" }
 
-        vm.submit("answer", {}, {})
-        advanceUntilIdle()
+        val revisionBeforeSubmit = vm.composerDraft.value.revision
+        val submission = vm.submit("answer", {}, {})
+        val (clearedState, clearedDraft) = combine(vm.state, vm.composerDraft) { state, draft ->
+            state to draft
+        }.first { (state, draft) ->
+            state.replyTo == null && draft.text.isEmpty() && draft.revision > revisionBeforeSubmit
+        }
+        submission.join()
 
         assertEquals(listOf(SentMessage(channel.id, "answer", parent.id)), manager.messages)
         assertEquals(listOf(channel.id to "done"), manager.typing)
-        assertTrue(vm.state.value.replyTo == null)
+        assertNull(clearedState.replyTo)
         assertNull(db.composerDraftDao().byRoom(channel.id))
-        assertEquals("", vm.composerDraft.value.text)
+        assertEquals("", clearedDraft.text)
     }
 
     @Test
@@ -181,7 +189,7 @@ class ChatViewModelTest {
     fun `late hydration keeps fresh text and restores persisted reply`() = runTest {
         val parent = message(channel.id, "parent", msgid = "parent-1", sender = "alice", id = 88)
         ComposerDraftStore(db).saveDraft(channel.id, "old text", parent.id)
-        val messages = FakeMessageRepository(mapOf(parent.id to parent))
+        val messages = FakeMessageRepository(listOf(parent))
         val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
 
         vm.saveDraft("fresh text")
@@ -197,8 +205,7 @@ class ChatViewModelTest {
             FakeConnectionManager(network.id),
             messages = messages,
         )
-        advanceUntilIdle()
-        assertEquals("fresh text", recreated.composerDraft.value.text)
+        assertEquals("fresh text", recreated.composerDraft.first { it.hydrated }.text)
         assertEquals(parent, recreated.state.first { it.replyTo != null }.replyTo)
     }
 
@@ -209,21 +216,19 @@ class ChatViewModelTest {
         val vm = viewModel(channel, manager)
         vm.state.first { it.buffer != null }
         vm.saveDraft("answer")
-        advanceUntilIdle()
 
         vm.submit("answer", {}, {})
-        advanceUntilIdle()
+        manager.messageStarted.await()
         vm.saveDraft("answer")
         sendGate.complete(Unit)
-        advanceUntilIdle()
+        manager.typingSent.await()
 
         assertEquals("answer", vm.composerDraft.value.text)
         assertEquals("answer", db.composerDraftDao().byRoom(channel.id)?.text)
 
         val recreated = viewModel(channel, FakeConnectionManager(network.id))
-        advanceUntilIdle()
-        assertTrue(recreated.composerDraft.value.hydrated)
-        assertEquals("answer", recreated.composerDraft.value.text)
+        val restored = recreated.composerDraft.first { it.hydrated }
+        assertEquals("answer", restored.text)
     }
 
     @Test
@@ -244,13 +249,13 @@ class ChatViewModelTest {
         val manager = FakeConnectionManager(network.id)
         val vm = viewModel(channel, manager)
         vm.state.first { it.buffer != null }
-        val opened = mutableListOf<Long>()
+        val opened = CompletableDeferred<Long>()
 
-        vm.submit("/msg alice hello there", opened::add)
-        advanceUntilIdle()
+        vm.submit("/msg alice hello there", { opened.complete(it) })
+        val openedBuffer = opened.await()
 
         assertEquals(listOf(SentMessage(query.id, "hello there", null)), manager.messages)
-        assertEquals(listOf(query.id), opened)
+        assertEquals(query.id, openedBuffer)
     }
 
     @Test
@@ -271,7 +276,8 @@ class ChatViewModelTest {
         val transport = RecordingTransport()
         val client = testClient(transport)
         client.start()
-        advanceUntilIdle()
+        // Advancing virtual time here would fire the client's watchdog and close the transport.
+        runCurrent()
         transport.sent.clear()
         val collisionRoom = channel.copy(
             name = "#room\u0000account:stable",
@@ -287,13 +293,14 @@ class ChatViewModelTest {
         vm.setMemberMode("alice", 'o', grant = true)
         vm.kick("bob", "reason")
         vm.ban("carol")
-        advanceUntilIdle()
+        runCurrent()
 
         val commands = transport.sent.map { IrcMessage.parse(it) }
         assertEquals(listOf("TOPIC", "MODE", "KICK", "MODE"), commands.map { it.command })
         assertTrue(commands.all { it.params.firstOrNull() == "!WireRoom" })
         assertTrue(transport.sent.none { '\u0000' in it })
         client.stop()
+        runCurrent()
     }
 
     @Test
@@ -800,6 +807,8 @@ class ChatViewModelTest {
         val reactions = mutableListOf<SentReaction>()
         val typing = mutableListOf<Pair<Long, String>>()
         val sentLines = mutableListOf<String>()
+        val messageStarted = CompletableDeferred<Unit>()
+        val typingSent = CompletableDeferred<Unit>()
 
         override fun clientFor(networkId: Long): IrcClient? = client
         override suspend fun startAll() = Unit
@@ -814,6 +823,7 @@ class ChatViewModelTest {
                 )
             }
             messages += SentMessage(bufferId, text, replyToEventId)
+            messageStarted.complete(Unit)
             sendGate?.await()
             return io.github.trevarj.motd.service.SendAcceptance.Accepted(listOf(1L))
         }
@@ -824,7 +834,11 @@ class ChatViewModelTest {
                 io.github.trevarj.motd.service.SendAcceptance.Rejected(
                     io.github.trevarj.motd.service.SendRejectionReason.EVENT_NOT_RETRYABLE,
                 )
-        override suspend fun sendTyping(bufferId: Long, state: String) { typing += bufferId to state }
+            }
+        override suspend fun sendTyping(bufferId: Long, state: String) {
+            typing += bufferId to state
+            typingSent.complete(Unit)
+        }
         override suspend fun sendReact(bufferId: Long, msgid: String, emoji: String) {
             if (reactionError) error("reaction rejected")
             reactions += SentReaction(bufferId, msgid, emoji)
@@ -896,7 +910,7 @@ class ChatViewModelTest {
     }
 
     private class FakeMessageRepository(
-        private val events: Map<Long, MessageEntity> = emptyMap(),
+        private val events: List<MessageEntity> = emptyList(),
     ) : MessageRepository {
         val msgid = MutableStateFlow<String?>(null)
         val deletedIds = mutableListOf<Long>()
@@ -913,7 +927,7 @@ class ChatViewModelTest {
         ): Flow<PagingData<MessageEntity>> = flowOf(PagingData.empty())
         override fun reactions(bufferId: Long, msgids: List<String>): Flow<List<ReactionEntity>> =
             flowOf(reactionRows.filter { it.bufferId == bufferId && it.targetMsgid in msgids })
-        override suspend fun byId(id: Long): MessageEntity? = events[id]
+        override suspend fun byId(id: Long): MessageEntity? = events.firstOrNull { it.id == id }
         override suspend fun byMsgid(bufferId: Long, msgid: String): MessageEntity? {
             requestedMsgids += msgid
             if (msgid == blockedMsgid) {

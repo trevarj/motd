@@ -1208,8 +1208,14 @@ interface CanonicalTimelineDao {
     suspend fun resolveReplies(bufferId: RoomId, msgid: String, parentId: TimelineEventId)
 
     @Query(
-        """UPDATE reactions SET targetEventId = :parentId
-           WHERE bufferId = :bufferId AND targetMsgid = :msgid AND targetEventId IS NULL""",
+        """UPDATE OR REPLACE reactions SET bufferId = :bufferId, targetEventId = :parentId
+           WHERE targetMsgid = :msgid
+             AND (targetEventId IS NULL OR (targetEventId = :parentId AND bufferId != :bufferId))
+             AND bufferId IN (
+                 SELECT candidate.id FROM buffers candidate
+                 JOIN buffers parent ON parent.id = :bufferId
+                 WHERE candidate.networkId = parent.networkId
+             )""",
     )
     suspend fun resolveReactions(bufferId: RoomId, msgid: String, parentId: TimelineEventId)
 
