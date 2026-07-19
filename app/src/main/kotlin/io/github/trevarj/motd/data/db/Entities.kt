@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Fts4
@@ -146,6 +147,8 @@ data class RoomAliasEntity(
     indices = [
         Index(value = ["bufferId", "serverTime", "id"]),
         Index(value = ["replyToEventId"]),
+        Index(value = ["bufferId", "msgid"]),
+        Index(value = ["bufferId", "replyToMsgid", "replyToEventId"]),
     ],
     foreignKeys = [ForeignKey(
         entity = BufferEntity::class, parentColumns = ["id"],
@@ -303,6 +306,8 @@ data class HistoryCursorEntity(
 data class NetworkHistoryCursorEntity(
     @PrimaryKey val networkId: Long,
     val lastSuccessfulSync: Long,
+    /** False for quarantined v10 device-clock watermarks; true only for proven server boundaries. */
+    @ColumnInfo(defaultValue = "0") val serverDerived: Boolean = false,
 )
 
 /** Monotonic process-independent connection identity used to scope outgoing label aliases. */
@@ -328,12 +333,19 @@ data class AppStateEntity(
 
 @Entity(
     tableName = "reactions",
-    indices = [Index(value = ["bufferId", "targetMsgid", "sender"], unique = true)]
+    indices = [
+        Index(value = ["bufferId", "targetMsgid", "actorKey", "emoji"], unique = true),
+        Index(value = ["bufferId", "targetMsgid", "targetEventId"]),
+    ],
 )
 data class ReactionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val bufferId: Long, val targetMsgid: String,
-    val sender: String, val emoji: String, val serverTime: Long,
+    /** Account identity when advertised, otherwise an IRC-casemapped nick identity. */
+    val actorKey: String,
+    /** Display spelling retained independently from [actorKey]. */
+    val sender: String,
+    val emoji: String, val serverTime: Long,
     val targetEventId: TimelineEventId? = null,
 )
 

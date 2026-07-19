@@ -45,8 +45,8 @@ class DeleteBufferDaoTest {
         msgDao.insertAll(listOf(message(sibling, "stays", serverTime = 1, dedupKey = "k1", msgid = "m2")))
         memberDao.upsert(MemberEntity(victim, "alice", "@"))
         memberDao.upsert(MemberEntity(sibling, "bob", ""))
-        reactionDao.upsert(ReactionEntity(bufferId = victim, targetMsgid = "m1", sender = "x", emoji = "👍", serverTime = 1))
-        reactionDao.upsert(ReactionEntity(bufferId = sibling, targetMsgid = "m2", sender = "y", emoji = "🎉", serverTime = 1))
+        reactionDao.upsert(ReactionEntity(bufferId = victim, targetMsgid = "m1", actorKey = "nick:x", sender = "x", emoji = "👍", serverTime = 1))
+        reactionDao.upsert(ReactionEntity(bufferId = sibling, targetMsgid = "m2", actorKey = "nick:y", sender = "y", emoji = "🎉", serverTime = 1))
 
         bufDao.deleteBuffer(victim)
 

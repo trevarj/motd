@@ -30,14 +30,10 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.event.IrcClientState
-import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.IrcMessage
-import io.github.trevarj.motd.irc.client.ChatHistoryRequest
-import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.canSendReactionTags
-import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.PresenceKey
@@ -749,29 +745,33 @@ class ChatViewModel @Inject constructor(
 
     /**
      * CHATHISTORY AROUND fetch used by [ChatJumpResolver] when a msgid target is not yet local:
-     * requires a live client with `draft/chathistory`, fetches ~100 messages around [timeMs], and
-     * feeds them through the sole IRC→Room writer. Returns true when events were persisted.
+     * requires a live client with `draft/chathistory`, prefers the opaque msgid selector, and
+     * persists the completed response and exact fallback request through the sole IRC→Room writer.
      */
     private val resolver = ChatJumpResolver(
         messages = messageRepository,
-        fetchAround = fetch@ { name, timeMs, limit ->
+        fetchAround = fetch@ { name, msgid, timeMs, limit ->
             val networkId = state.value.buffer?.networkId ?: return@fetch false
             val client = connectionManager.clientFor(networkId) ?: return@fetch false
             val availability = client.historyAvailability as? HistoryAvailability.Ready
                 ?: return@fetch false
-            val result = runCatching {
-                client.chathistory(
-                    ChatHistoryRequest(
-                        subcommand = ChatHistoryRequest.Subcommand.AROUND,
-                        target = name,
-                        bound1 = ChatHistorySelectors.timestamp(timeMs),
-                        limit = minOf(limit, availability.pageLimit),
-                    ),
+            try {
+                fetchAroundHistoryPage(
+                    target = name,
+                    msgid = msgid,
+                    timeMs = timeMs,
+                    limit = limit,
+                    availability = availability,
+                    requestPage = client::chathistory,
+                    persistPage = { request, response ->
+                        eventSink.persistHistoryPage(networkId, request, response)
+                    },
                 )
-            }.getOrNull() as? ChatHistoryResponse.Messages ?: return@fetch false
-            if (result.events.isEmpty()) return@fetch false
-            eventSink.process(networkId, IrcEvent.HistoryBatch(name, result.events))
-            true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
         },
         countNewer = { targetBufferId, serverTime, id ->
             visibilityReader.countTimelineNewer(

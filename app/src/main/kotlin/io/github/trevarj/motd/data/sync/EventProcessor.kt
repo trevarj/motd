@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObservationOrigin
 import io.github.trevarj.motd.data.db.EventAliasNamespace
+import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.TimeProvenance
@@ -20,25 +21,28 @@ import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.bouncer.redactBouncerServReply
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.irc.client.ChatHistoryReference
+import io.github.trevarj.motd.irc.client.ChatHistoryRequest
+import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.ServerTimeSource
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.replyReference
 import io.github.trevarj.motd.irc.proto.unreactionValue
 import io.github.trevarj.motd.service.IrcEventSink
-import io.github.trevarj.motd.service.RoomReactionMutationStore
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.first
 
 /**
  * The sole IRC→Room writer (plans/04 mapping table). Implements [IrcEventSink]: every per-network
  * collector, the catch-up path, the RemoteMediator, the pending-send insert, and the push path
- * all funnel through [process]. Never writes state from anywhere else.
+ * funnel through [process] or [persistHistoryPage]. Never writes state from anywhere else.
  *
- * Per-network mutable helpers (self nick, mention regex, Isupport-normalizer) are kept in a small
+ * Per-network mutable helpers (self nick and immutable ISUPPORT identity rules) are kept in a small
  * [NetworkState] cache keyed by network id and rebuilt on Registered / NickChanged.
  */
 @Singleton
@@ -58,7 +62,6 @@ class EventProcessor @Inject constructor(
     private val memberDao get() = db.memberDao()
     private val reactionDao get() = db.reactionDao()
     private val userDao get() = db.userDao()
-    private val reactionMutations = RoomReactionMutationStore(db)
     private val sequencer = NetworkEventSequencer()
 
     private val states = ConcurrentHashMap<Long, NetworkState>()
@@ -70,6 +73,7 @@ class EventProcessor @Inject constructor(
         ConcurrentHashMap<Long, MutableMap<CanonicalBatchKey, Int>>()
     private val activeHistoryChatRoutes =
         ConcurrentHashMap<Long, ArrayDeque<ChatRoute>>()
+    private val activeProtocolPageCursorWrites = ConcurrentHashMap.newKeySet<Long>()
 
     private data class RosterKey(val networkId: Long, val bufferId: Long)
 
@@ -128,49 +132,30 @@ class EventProcessor @Inject constructor(
         val presentations: List<DeferredRosterPresentation>,
     )
 
-    /** Per-network state for self-nick tracking, mention regex and case normalization. */
+    /** Per-network state for self-nick tracking and the server's exact identity rules. */
     private class NetworkState(
         @Volatile var selfNick: String,
-        @Volatile var caseMapping: String,
+        val identityRules: IrcIdentityRules,
         @Volatile var prefixModes: Map<Char, Char> = emptyMap(),
         @Volatile var chanModes: List<Set<Char>> = emptyList(),
     ) {
-        @Volatile var mentionRegex: Regex = buildMentionRegex(selfNick)
-
         fun setNick(nick: String) {
             selfNick = nick
-            mentionRegex = buildMentionRegex(nick)
         }
 
-        /** RFC1459-ish case-insensitive normalization for buffer/member keys. */
-        fun normalize(name: String): String {
-            val map = when (caseMapping.lowercase()) {
-                "ascii" -> { c: Char -> if (c in 'A'..'Z') c + 32 else c }
-                else -> { c: Char ->
-                    // rfc1459: additionally []\~ fold to {}|^
-                    when (c) {
-                        in 'A'..'Z' -> c + 32
-                        '[' -> '{'
-                        ']' -> '}'
-                        '\\' -> '|'
-                        '~' -> '^'
-                        else -> c
-                    }
-                }
-            }
-            return buildString(name.length) { for (ch in name) append(map(ch)) }
-        }
+        fun normalize(name: String): String = identityRules.normalize(name)
 
-        companion object {
-            fun buildMentionRegex(nick: String): Regex =
-                Regex("(?<![\\w])" + Regex.escape(nick) + "(?![\\w])", RegexOption.IGNORE_CASE)
-        }
+        fun isChannel(target: String): Boolean = identityRules.isChannel(target)
+
+        fun actorKey(nick: String, account: String?): String = identityRules.actorKey(nick, account)
+
+        fun containsSelfMention(text: String): Boolean = identityRules.containsMention(text, selfNick)
     }
 
     private suspend fun stateFor(networkId: Long): NetworkState =
         states.getOrPut(networkId) {
             val n = networkDao.byId(networkId)
-            NetworkState(selfNick = n?.nick ?: "", caseMapping = "rfc1459")
+            NetworkState(selfNick = n?.nick ?: "", identityRules = IrcIdentityRules())
         }
 
     /** Test/setup seam; production registration enters through [process]. */
@@ -180,13 +165,21 @@ class EventProcessor @Inject constructor(
 
     private suspend fun applyRegistered(networkId: Long, nick: String, isupport: Map<String, String>) {
         connectionGenerations[networkId] = db.connectionGenerationDao().next(networkId)
-        val cm = isupport["CASEMAPPING"] ?: "rfc1459"
+        val identityRules = IrcIdentityRules.from(
+            rawCaseMapping = isupport["CASEMAPPING"],
+            advertisedChanTypes = isupport["CHANTYPES"],
+        )
         states[networkId] = NetworkState(
             selfNick = nick,
-            caseMapping = cm,
+            identityRules = identityRules,
             prefixModes = parsePrefixModes(isupport["PREFIX"]),
             chanModes = isupport["CHANMODES"]?.split(',')?.map(String::toSet).orEmpty(),
         )
+        identityRules.caseMapping.diagnostic?.let { diagnostic ->
+            diagnostics.record("irc_protocol", "unsupported_casemapping") {
+                mapOf("network_id" to networkId, "diagnostic" to diagnostic)
+            }
+        }
     }
 
     override suspend fun process(networkId: Long, event: IrcEvent) {
@@ -317,7 +310,7 @@ class EventProcessor @Inject constructor(
             false
         }
         val hasMention = !sourceIsSelf && !isRootServiceReply &&
-            (replyMentionsSelf || st.mentionRegex.containsMatchIn(storedText))
+            (replyMentionsSelf || st.containsSelfMention(storedText))
         val identitySender = st.normalize(e.source.nick)
 
         traceMessageDecision("message_classified", networkId, bufferId, e, origin) {
@@ -365,6 +358,7 @@ class EventProcessor @Inject constructor(
                     batchSemanticMultiplicity = multiplicity?.semantic ?: 1,
                     batchExactMultiplicity = multiplicity?.exact ?: 1,
                     batchExactOrdinal = nextHistoryExactOrdinal(networkId, batchKey),
+                    persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
                 ),
             )
             val canonical = result.event
@@ -441,7 +435,7 @@ class EventProcessor @Inject constructor(
             val bufferId = ensureBuffer(networkId, route.bufferName, route.type, st)
             typing.onTyping(bufferId, e.source.nick, typingState)
         }
-        // react: upsert reaction row (keyed by target msgid).
+        // React rows are emoji-specific; an account-tag echo also removes the optimistic nick key.
         val emoji = e.reactEmoji
         val targetMsgid = e.reactTargetMsgid
         if (emoji != null && targetMsgid != null) {
@@ -449,17 +443,22 @@ class EventProcessor @Inject constructor(
             // Keep an orphan temporarily when the target's echo/history row is still in flight.
             // Reaction queries are scoped to visible msgids, so it becomes visible atomically when
             // the parent arrives and remains inert if the reference never resolves.
-            // Room's uniqueness constraint retains the historical raw-sender key for compatibility,
-            // so remove any IRC-casefolded equivalent before inserting the display spelling from
-            // this event. This reconciles optimistic "me" with an echo such as "Me" without
-            // throwing away the casing users see in the timeline.
-            reactionDao.observeForBuffer(bufferId).first()
-                .filter { it.targetMsgid == targetMsgid && st.normalize(it.sender) == st.normalize(e.source.nick) }
-                .forEach { reactionMutations.remove(it) }
+            val account = e.ctx.account ?: if (origin == EventOrigin.LIVE) {
+                userDao.byNick(networkId, st.normalize(e.source.nick))?.account
+            } else {
+                null
+            }
+            val actorKey = st.actorKey(e.source.nick, account)
+            val nickKey = st.actorKey(e.source.nick, account = null)
+            deleteLegacyReactionAliases(bufferId, targetMsgid, e.source.nick, emoji)
+            if (actorKey != nickKey) {
+                reactionDao.delete(bufferId, targetMsgid, nickKey, emoji)
+            }
             reactionDao.upsert(
                 ReactionEntity(
                     bufferId = bufferId,
                     targetMsgid = targetMsgid,
+                    actorKey = actorKey,
                     sender = e.source.nick,
                     emoji = emoji,
                     serverTime = e.ctx.serverTime,
@@ -503,6 +502,79 @@ class EventProcessor @Inject constructor(
                 "events" to batch.events.size,
             )
         }
+    }
+
+    /**
+     * Persist one completed CHATHISTORY page and its protocol boundary in the same writer-owned
+     * transaction. Context events remain ingestible but cannot become the next page cursor.
+     */
+    override suspend fun persistHistoryPage(
+        networkId: Long,
+        request: ChatHistoryRequest,
+        response: ChatHistoryResponse.Messages,
+    ): RoomId = sequencer.withNetwork(networkId) {
+        require(request.subcommand != ChatHistoryRequest.Subcommand.TARGETS) {
+            "TARGETS is not a message page"
+        }
+        val roomId = db.withTransaction {
+            val initialRoomId = historicalTargetBuffer(networkId, request.target)
+                ?: error("missing history target ${request.target}")
+            val initialCanonicalId = bufferDao.canonicalId(initialRoomId) ?: initialRoomId
+            val before = db.historyCursorDao().byRoom(initialCanonicalId)
+
+            if (response.events.isNotEmpty()) {
+                activeProtocolPageCursorWrites += networkId
+                try {
+                    processEvent(
+                        networkId,
+                        IrcEvent.HistoryBatch(request.target, response.events),
+                        EventOrigin.LIVE,
+                    )
+                } finally {
+                    activeProtocolPageCursorWrites -= networkId
+                }
+            }
+
+            val canonicalRoomId = bufferDao.canonicalId(initialCanonicalId) ?: initialCanonicalId
+            val after = db.historyCursorDao().byRoom(canonicalRoomId)
+            val base = after ?: before
+            val baseOldest = base?.let {
+                ChatHistoryReference(
+                    it.oldestMsgid,
+                    it.oldestServerTime,
+                )
+            }?.takeIf { it.msgid != null || it.serverTime != null }
+            val baseNewest = base?.let {
+                ChatHistoryReference(
+                    it.newestMsgid,
+                    it.newestServerTime,
+                )
+            }?.takeIf { it.msgid != null || it.serverTime != null }
+            // Union page metadata with the post-ingest cursor. The latter may now belong to a
+            // lower-id room winner and can contain extents that predate this request target.
+            val oldest = olderBoundary(baseOldest, response.oldest)
+            val newest = newerBoundary(baseNewest, response.newest)
+            val provesStart = request.subcommand == ChatHistoryRequest.Subcommand.BEFORE ||
+                (request.subcommand == ChatHistoryRequest.Subcommand.LATEST &&
+                    request.bound1 == null && request.bound2 == null)
+            val complete = provesStart &&
+                (response.endOfHistory || response.primaryMessageCount == 0)
+            db.historyCursorDao().upsert(
+                HistoryCursorEntity(
+                    roomId = canonicalRoomId,
+                    newestMsgid = newest?.msgid,
+                    newestServerTime = newest?.serverTime,
+                    oldestMsgid = oldest?.msgid,
+                    oldestServerTime = oldest?.serverTime,
+                    historyComplete = complete || base?.historyComplete == true,
+                ),
+            )
+            bufferDao.setOldestFetchedTime(canonicalRoomId, oldest?.serverTime)
+            if (complete) bufferDao.markHistoryComplete(canonicalRoomId)
+            canonicalRoomId
+        }
+        bufferStore.drainCommittedRoomMerges()
+        roomId
     }
 
     private suspend fun canonicalBatchMultiplicities(
@@ -749,6 +821,7 @@ class EventProcessor @Inject constructor(
                 } else {
                     TimeProvenance.LOCAL_CLOCK
                 },
+                persistHistoryCursor = buffer.networkId !in activeProtocolPageCursorWrites,
             ),
         )
         traceMessageWrite("canonical_network_batch", result.event, fromHistory)
@@ -831,6 +904,7 @@ class EventProcessor @Inject constructor(
                 batchSemanticMultiplicity = multiplicity?.semantic ?: 1,
                 batchExactMultiplicity = multiplicity?.exact ?: 1,
                 batchExactOrdinal = nextHistoryExactOrdinal(networkId, batchKey),
+                persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
             ),
         )
         traceMessageWrite("canonical_invite", result.event, historical)
@@ -1332,7 +1406,7 @@ class EventProcessor @Inject constructor(
         origin: EventOrigin,
         historyTarget: String?,
     ) {
-        if (removeReaction(networkId, e.message, historyTarget)) return
+        if (removeReaction(networkId, e.message, origin, historyTarget)) return
         if (origin != EventOrigin.LIVE) return
         if (e.message.command !in SERVER_INFO_NUMERICS) return
         val st = stateFor(networkId)
@@ -1346,6 +1420,7 @@ class EventProcessor @Inject constructor(
     private suspend fun removeReaction(
         networkId: Long,
         message: io.github.trevarj.motd.irc.proto.IrcMessage,
+        origin: EventOrigin,
         historyTarget: String?,
     ): Boolean {
         if (message.command != "TAGMSG") return false
@@ -1356,9 +1431,16 @@ class EventProcessor @Inject constructor(
         val st = stateFor(networkId)
         val route = resolveReactionRoute(source, target, historyTarget, st)
         val bufferId = existingReactionRoomId(networkId, route, st) ?: return true
-        reactionDao.observeForBuffer(bufferId).first()
-            .filter { it.targetMsgid == targetMsgid && it.emoji == emoji && st.normalize(it.sender) == st.normalize(source) }
-            .forEach { reactionMutations.remove(it) }
+        val account = message.tags["account"] ?: if (origin == EventOrigin.LIVE) {
+            userDao.byNick(networkId, st.normalize(source))?.account
+        } else {
+            null
+        }
+        val actorKey = st.actorKey(source, account)
+        val nickKey = st.actorKey(source, account = null)
+        deleteLegacyReactionAliases(bufferId, targetMsgid, source, emoji)
+        reactionDao.delete(bufferId, targetMsgid, actorKey, emoji)
+        if (actorKey != nickKey) reactionDao.delete(bufferId, targetMsgid, nickKey, emoji)
         return true
     }
 
@@ -1438,6 +1520,7 @@ class EventProcessor @Inject constructor(
                     label = label,
                     batchId = null,
                     timeProvenance = TimeProvenance.LOCAL_CLOCK,
+                    persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
                 ),
             )
             traceMessageWrite("canonical_pending_insert", result.event, fromHistory = false)
@@ -1473,6 +1556,7 @@ class EventProcessor @Inject constructor(
             activeHistoryMultiplicities.remove(networkId)
             activeHistoryOccurrences.remove(networkId)
             activeHistoryChatRoutes.remove(networkId)
+            activeProtocolPageCursorWrites.remove(networkId)
             connectionGenerations.remove(networkId)
         }
         sequencer.evict(networkId)
@@ -1483,14 +1567,33 @@ class EventProcessor @Inject constructor(
         states.clear()
         rosterSnapshots.clear()
         activeHistoryChatRoutes.clear()
+        activeProtocolPageCursorWrites.clear()
     }
 
     internal fun sequencerSize(): Int = sequencer.size()
 
     // -- helpers ------------------------------------------------------------
 
+    private suspend fun deleteLegacyReactionAliases(
+        bufferId: RoomId,
+        targetMsgid: String,
+        sender: String,
+        emoji: String,
+    ) {
+        val baseActorKey = "nick:${IrcCaseMapping.Rfc1459.normalize(sender)}"
+        val legacyPrefix = "$baseActorKey\u0000legacy:"
+        reactionDao.deleteActorAliases(
+            bufferId,
+            targetMsgid,
+            baseActorKey,
+            legacyPrefix,
+            "$legacyPrefix\uFFFF",
+            emoji,
+        )
+    }
+
     private fun isChannel(target: String, st: NetworkState): Boolean =
-        target.isNotEmpty() && target[0] in CHANTYPES
+        st.isChannel(target)
 
     /** Route TAGMSG mutations through the enclosing query batch across historical nick changes. */
     private fun resolveReactionRoute(
@@ -1662,6 +1765,7 @@ class EventProcessor @Inject constructor(
                 batchSemanticMultiplicity = multiplicity?.semantic ?: 1,
                 batchExactMultiplicity = multiplicity?.exact ?: 1,
                 batchExactOrdinal = nextHistoryExactOrdinal(networkId, batchKey),
+                persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
             ),
         )
         traceMessageWrite("canonical_system_${result::class.simpleName}", result.event, ctx.batchId != null)
@@ -1782,10 +1886,6 @@ class EventProcessor @Inject constructor(
     }
 
     private companion object {
-        // Isupport CHANTYPES default; DM detection uses the first-char rule.
-        const val CHANTYPES = "#&"
-
-
         /**
          * Informational numerics persisted to the SERVER buffer as SERVER_INFO (plans/16 §5.6.3):
          * welcome (001..004), lusers (251..255, 265, 266), MOTD (375, 372, 376), away toggled
@@ -1816,6 +1916,28 @@ private fun parsePrefixModes(value: String?): Map<Char, Char> {
     val prefixes = raw.substring(close + 1)
     if (modes.length != prefixes.length) return emptyMap()
     return modes.indices.associate { modes[it] to prefixes[it] }
+}
+
+private fun olderBoundary(
+    existing: ChatHistoryReference?,
+    candidate: ChatHistoryReference?,
+): ChatHistoryReference? {
+    existing ?: return candidate
+    candidate ?: return existing
+    val existingTime = existing.serverTime ?: return existing
+    val candidateTime = candidate.serverTime ?: return existing
+    return if (candidateTime < existingTime) candidate else existing
+}
+
+private fun newerBoundary(
+    existing: ChatHistoryReference?,
+    candidate: ChatHistoryReference?,
+): ChatHistoryReference? {
+    existing ?: return candidate
+    candidate ?: return existing
+    val existingTime = existing.serverTime ?: return existing
+    val candidateTime = candidate.serverTime ?: return existing
+    return if (candidateTime > existingTime) candidate else existing
 }
 
 /**

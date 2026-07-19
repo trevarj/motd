@@ -41,7 +41,13 @@ sealed interface ChatHistoryResponse {
         /** Last usable non-context event reference in the server's response order. */
         val newest: ChatHistoryReference?,
         override val endOfHistory: Boolean,
-    ) : ChatHistoryResponse
+        /** Number of mapped ingestible primary events, independent of reference availability. */
+        val primaryMessageCount: Int = 0,
+    ) : ChatHistoryResponse {
+        init {
+            require(primaryMessageCount >= 0) { "primaryMessageCount must not be negative" }
+        }
+    }
 
     data class Targets(
         val targets: List<ChatHistoryTarget>,

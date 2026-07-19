@@ -2,6 +2,8 @@ package io.github.trevarj.motd.push
 
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.irc.client.ChatHistoryRequest
+import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.service.IrcEventSink
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.flow.Flow
@@ -43,6 +45,12 @@ class PushEventHandlerTest {
         override suspend fun processPush(networkId: Long, event: IrcEvent) {
             pushEvents.add(networkId to event)
         }
+
+        override suspend fun persistHistoryPage(
+            networkId: Long,
+            request: ChatHistoryRequest,
+            response: ChatHistoryResponse.Messages,
+        ): Long = error("push tests do not persist history pages")
     }
 
     // --- pure mapper -------------------------------------------------------

@@ -14,13 +14,14 @@ import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.HistoryReferenceType
+import io.github.trevarj.motd.irc.client.IrcCommandException
 import io.github.trevarj.motd.irc.client.IrcDisconnectedException
-import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.service.ConnectionManager
 import javax.inject.Inject
 import javax.inject.Singleton
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -39,8 +40,8 @@ object CanonicalHistorySingleFlight {
  * REFRESH → if the buffer is empty and the network advertises chathistory, pull LATEST once.
  * APPEND  → older boundary; stop when historyComplete/no cap; when the buffer is empty (no oldest
  *           boundary yet) pull LATEST once to backfill on first open; otherwise BEFORE the oldest
- *           local serverTime, insert (IGNORE), set historyComplete when the server returns nothing,
- *           and advance oldestFetchedTime bookkeeping.
+ *           protocol page boundary. Completed empty pages and explicit end markers persist the
+ *           confirmed start-of-history state through EventProcessor.
  *
  * We use SKIP_INITIAL_REFRESH so the cached DB paints instantly, which means Paging never calls
  * load(REFRESH) on open. On an empty store the local PagingSource yields an empty page and Paging
@@ -92,69 +93,105 @@ class ChatHistoryRemoteMediator(
                 val requestLimit = minOf(pageSize, availability.pageLimit).coerceAtLeast(1)
                 CanonicalHistorySingleFlight.withNetwork(networkId) {
                     when (loadType) {
-                        LoadType.REFRESH -> refresh(networkId, buffer.ircTarget, requestLimit)
+                        LoadType.REFRESH -> refresh(
+                            networkId,
+                            buffer.id,
+                            buffer.ircTarget,
+                            requestLimit,
+                            availability.referenceTypes,
+                        )
                         LoadType.PREPEND -> MediatorResult.Success(endOfPaginationReached = true)
                         LoadType.APPEND -> append(
                             networkId,
+                            buffer.id,
                             buffer.ircTarget,
                             buffer.historyComplete,
                             requestLimit,
-                            HistoryReferenceType.MSGID in availability.referenceTypes,
+                            availability.referenceTypes,
                         )
                     }
                 }
-            } catch (e: Throwable) {
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
                 MediatorResult.Error(e)
             }
         }
     }
 
-    private suspend fun refresh(networkId: Long, target: String, requestLimit: Int): MediatorResult {
-        val newest = messageDao.newestTime(bufferId)
+    private suspend fun refresh(
+        networkId: Long,
+        roomId: Long,
+        target: String,
+        requestLimit: Int,
+        referenceTypes: Set<HistoryReferenceType>,
+    ): MediatorResult {
+        val newest = messageDao.newestTime(roomId)
         if (newest != null) {
             // Already have local history; the local PagingSource paints it. APPEND drives older.
             return MediatorResult.Success(endOfPaginationReached = false)
         }
-        fetchLatest(networkId, target, requestLimit)
-        return MediatorResult.Success(endOfPaginationReached = false)
+        val response = fetchLatest(networkId, target, requestLimit, referenceTypes)
+        return MediatorResult.Success(endOfPaginationReached = response.isComplete)
     }
 
     private suspend fun append(
         networkId: Long,
+        roomId: Long,
         target: String,
         historyComplete: Boolean,
         requestLimit: Int,
-        msgidSupported: Boolean,
+        referenceTypes: Set<HistoryReferenceType>,
     ): MediatorResult {
         if (historyComplete) return MediatorResult.Success(endOfPaginationReached = true)
-        val cursor = historyCursorDao?.byRoom(bufferId)
-        val oldest = cursor?.oldestServerTime ?: messageDao.oldestTime(bufferId)
+        val cursor = historyCursorDao?.byRoom(roomId)
+        val oldest = cursor?.let { ChatHistoryReference(it.oldestMsgid, it.oldestServerTime) }
+            ?.takeIf { it.msgid != null || it.serverTime != null }
+            ?: messageDao.oldestBoundary(roomId)?.let {
+                ChatHistoryReference(it.msgid, it.serverTime)
+            }
         if (oldest == null) {
             // Empty local store hit the end boundary on first open. With SKIP_INITIAL_REFRESH the
             // REFRESH backfill never fires, so seed the newest page here via LATEST. If the server
             // has history the inserted rows re-run the PagingSource; a later APPEND then pages older.
-            val response = fetchLatest(networkId, target, requestLimit)
-            val seeded = messageDao.oldestTime(bufferId) != null
-            return MediatorResult.Success(endOfPaginationReached = !seeded || response.endOfHistory)
+            val response = fetchLatest(networkId, target, requestLimit, referenceTypes)
+            return MediatorResult.Success(endOfPaginationReached = response.isComplete)
         }
-        val bound = cursor?.oldestMsgid?.takeIf { msgidSupported }?.let(ChatHistorySelectors::msgid)
-            ?: ChatHistorySelectors.timestamp(oldest)
-        val result = messages(
-            ChatHistoryRequest(ChatHistoryRequest.Subcommand.BEFORE, target, bound1 = bound, limit = requestLimit),
+        val selected = oldest.selector(referenceTypes, allowMsgid = true)
+            ?: return MediatorResult.Error(
+                IllegalStateException("CHATHISTORY BEFORE has no advertised local boundary selector"),
+            )
+        var request = ChatHistoryRequest(
+            ChatHistoryRequest.Subcommand.BEFORE,
+            target,
+            bound1 = selected.value,
+            limit = requestLimit,
         )
+        var responseMsgidAllowed = selected.type == HistoryReferenceType.MSGID
+        val result = try {
+            messages(request)
+        } catch (error: IrcCommandException) {
+            if (selected.type != HistoryReferenceType.MSGID || error.code != INVALID_MSGREFTYPE) {
+                throw error
+            }
+            val timestamp = oldest.selector(referenceTypes, allowMsgid = false) ?: throw error
+            request = request.copy(bound1 = timestamp.value)
+            responseMsgidAllowed = false
+            messages(request)
+        }
+        if (
+            !result.isComplete &&
+            !result.hasUsableOldest(referenceTypes, responseMsgidAllowed)
+        ) {
+            return MediatorResult.Error(
+                IllegalStateException("CHATHISTORY BEFORE returned no advertised primary-message boundary"),
+            )
+        }
         // Apply the page as one IRC history batch. EventProcessor wraps HistoryBatch in a single
         // Room transaction, so Paging sees one invalidation instead of up to 50 row-by-row refreshes
         // while the user is entering or flinging through a channel.
-        if (result.events.isNotEmpty()) {
-            processor.process(networkId, IrcEvent.HistoryBatch(target, result.events))
-        }
-        if (result.events.isEmpty() || result.endOfHistory) {
-            bufferDao.markHistoryComplete(bufferId)
-            historyCursorDao?.markComplete(bufferId)
-            return MediatorResult.Success(endOfPaginationReached = true)
-        }
-        val newOldest = messageDao.oldestTime(bufferId)
-        bufferDao.setOldestFetchedTime(bufferId, newOldest)
+        processor.persistHistoryPage(networkId, request, result)
+        if (result.isComplete) return MediatorResult.Success(endOfPaginationReached = true)
         return MediatorResult.Success(endOfPaginationReached = false)
     }
 
@@ -163,13 +200,18 @@ class ChatHistoryRemoteMediator(
         networkId: Long,
         target: String,
         requestLimit: Int,
+        referenceTypes: Set<HistoryReferenceType>,
     ): ChatHistoryResponse.Messages {
-        val result = messages(
-            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = requestLimit),
+        val request = ChatHistoryRequest(
+            ChatHistoryRequest.Subcommand.LATEST,
+            target,
+            limit = requestLimit,
         )
-        if (result.events.isNotEmpty()) {
-            processor.process(networkId, IrcEvent.HistoryBatch(target, result.events))
+        val result = messages(request)
+        if (!result.isComplete && !result.hasUsableOldest(referenceTypes, true)) {
+            error("CHATHISTORY LATEST returned no advertised primary-message boundary")
         }
+        processor.persistHistoryPage(networkId, request, result)
         return result
     }
 
@@ -177,7 +219,32 @@ class ChatHistoryRemoteMediator(
         history.chathistory(request) as? ChatHistoryResponse.Messages
             ?: error("CHATHISTORY ${request.subcommand} returned a TARGETS response")
 
+    private val ChatHistoryResponse.Messages.isComplete: Boolean
+        get() = endOfHistory || primaryMessageCount == 0
+
+    private fun ChatHistoryResponse.Messages.hasUsableOldest(
+        referenceTypes: Set<HistoryReferenceType>,
+        allowMsgid: Boolean,
+    ): Boolean = oldest?.selector(referenceTypes, allowMsgid) != null
+
+    private fun ChatHistoryReference.selector(
+        referenceTypes: Set<HistoryReferenceType>,
+        allowMsgid: Boolean,
+    ): BoundarySelector? = when {
+        allowMsgid && HistoryReferenceType.MSGID in referenceTypes && !msgid.isNullOrEmpty() ->
+            BoundarySelector(ChatHistorySelectors.msgid(msgid), HistoryReferenceType.MSGID)
+        HistoryReferenceType.TIMESTAMP in referenceTypes && serverTime != null ->
+            BoundarySelector(ChatHistorySelectors.timestamp(serverTime), HistoryReferenceType.TIMESTAMP)
+        else -> null
+    }
+
+    private data class BoundarySelector(
+        val value: String,
+        val type: HistoryReferenceType,
+    )
+
     companion object {
+        private const val INVALID_MSGREFTYPE = "INVALID_MSGREFTYPE"
         private val locks = ConcurrentHashMap<Long, Mutex>()
     }
 }

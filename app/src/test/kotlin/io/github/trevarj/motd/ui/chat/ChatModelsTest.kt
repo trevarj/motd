@@ -19,7 +19,14 @@ import org.junit.Test
 class ChatModelsTest {
 
     private fun react(msgid: String, sender: String, emoji: String) =
-        ReactionEntity(bufferId = 1L, targetMsgid = msgid, sender = sender, emoji = emoji, serverTime = 0L)
+        ReactionEntity(
+            bufferId = 1L,
+            targetMsgid = msgid,
+            actorKey = "nick:${sender.lowercase()}",
+            sender = sender,
+            emoji = emoji,
+            serverTime = 0L,
+        )
 
     private fun message(
         kind: MessageKind = MessageKind.PRIVMSG,

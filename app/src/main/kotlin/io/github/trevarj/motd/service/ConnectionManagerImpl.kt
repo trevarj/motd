@@ -1164,10 +1164,18 @@ class ConnectionManagerImpl @Inject constructor(
         val client = clientFor(buffer.networkId) ?: return
         val ready = client.state.value as? IrcClientState.Ready ?: return
         val canonicalBufferId = buffer.id
-        val normalize: (String) -> String = client.isupport::normalize
         val sender = ready.nick
-        val previous = reactionMutations.findOwn(canonicalBufferId, msgid, ready.nick, normalize)
-        val removing = previous?.emoji == emoji
+        val identityRules = client.isupport.identityRules
+        val nickKey = identityRules.actorKey(sender, account = null)
+        val account = db.userDao().byNick(buffer.networkId, identityRules.normalize(sender))?.account
+        val actorKey = identityRules.actorKey(sender, account)
+        val previous = reactionMutations.findOwn(
+            canonicalBufferId,
+            msgid,
+            listOf(actorKey, nickKey).distinct(),
+            emoji,
+        )
+        val removing = previous != null
         // Recheck at the mutation boundary so a stale sheet cannot create local-only state after a
         // capability or CLIENTTAGDENY change.
         if (!canSendReactionTags(ready.caps, ready.isupport, removing)) return
@@ -1175,6 +1183,7 @@ class ConnectionManagerImpl @Inject constructor(
         val reaction = ReactionEntity(
             bufferId = canonicalBufferId,
             targetMsgid = msgid,
+            actorKey = actorKey,
             sender = sender,
             emoji = emoji,
             serverTime = System.currentTimeMillis(),

@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObservationOrigin
+import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
@@ -214,6 +215,51 @@ class BufferStoreCanonicalTest {
 
         assertEquals(1, db.messageDao().countForBuffer(merged.id))
         assertEquals("source-msgid", db.messageDao().byMsgid(merged.id, "source-msgid")?.msgid)
+    }
+
+    @Test
+    fun roomMergeCopiesLoserOnlyReactionsWithoutIdsAndDedupesActorEmojiCollisions() = runTest {
+        val winner = store.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
+        val loser = store.getOrCreate(networkId, "bob", "Bob", BufferType.QUERY)
+        db.reactionDao().upsert(
+            ReactionEntity(
+                bufferId = winner.id,
+                targetMsgid = "parent",
+                actorKey = "account:shared",
+                sender = "Winner spelling",
+                emoji = "same",
+                serverTime = 100,
+            ),
+        )
+        db.reactionDao().upsert(
+            ReactionEntity(
+                bufferId = loser.id,
+                targetMsgid = "parent",
+                actorKey = "account:shared",
+                sender = "Loser duplicate",
+                emoji = "same",
+                serverTime = 200,
+            ),
+        )
+        db.reactionDao().upsert(
+            ReactionEntity(
+                bufferId = loser.id,
+                targetMsgid = "parent",
+                actorKey = "nick:loser-only",
+                sender = "Loser only",
+                emoji = "unique",
+                serverTime = 300,
+            ),
+        )
+
+        val merged = store.mergeRooms(winner.id, loser.id)
+        val rows = db.reactionDao().observeForBuffer(merged.id).first()
+
+        assertEquals(2, rows.size)
+        assertEquals("Winner spelling", rows.single { it.emoji == "same" }.sender)
+        assertEquals("Loser only", rows.single { it.emoji == "unique" }.sender)
+        assertTrue(rows.all { it.id > 0 })
+        assertTrue(db.reactionDao().observeForBuffer(loser.id).first().isEmpty())
     }
 
     @Test

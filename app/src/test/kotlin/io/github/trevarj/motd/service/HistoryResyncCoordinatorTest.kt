@@ -17,15 +17,20 @@ import io.github.trevarj.motd.data.sync.CanonicalHistorySingleFlight
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
+import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.client.ChatHistoryTarget
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.HistoryReferenceType
+import io.github.trevarj.motd.irc.client.IrcCommandException
+import io.github.trevarj.motd.irc.client.IrcDisconnectedException
+import io.github.trevarj.motd.irc.client.IrcProtocolException
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.Prefix
 import java.io.IOException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -36,6 +41,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -120,7 +126,29 @@ class HistoryResyncCoordinatorTest {
         val events: List<IrcEvent> = emptyList(),
         val targets: List<Pair<String, Long>> = emptyList(),
         val endOfHistory: Boolean = false,
+        val oldest: ChatHistoryReference? = events.references().minByOrNull { it.serverTime ?: Long.MAX_VALUE },
+        val newest: ChatHistoryReference? = events.references().maxByOrNull { it.serverTime ?: Long.MIN_VALUE },
+        val primaryMessageCount: Int = events.size,
     )
+
+    private companion object {
+        fun List<IrcEvent>.references(): List<ChatHistoryReference> = mapNotNull { event ->
+            val context = when (event) {
+                is IrcEvent.ChatMessage -> event.ctx
+                is IrcEvent.TagMessage -> event.ctx
+                is IrcEvent.Joined -> event.ctx
+                is IrcEvent.Parted -> event.ctx
+                is IrcEvent.Quit -> event.ctx
+                is IrcEvent.Kicked -> event.ctx
+                is IrcEvent.NickChanged -> event.ctx
+                is IrcEvent.TopicChanged -> event.ctx
+                is IrcEvent.ModeChanged -> event.ctx
+                is IrcEvent.Invited -> event.ctx
+                else -> null
+            }
+            context?.let { ChatHistoryReference(it.msgid, it.serverTime) }
+        }
+    }
 
     private class FakeSource(
         var supported: Boolean = true,
@@ -151,8 +179,9 @@ class HistoryResyncCoordinatorTest {
             } else {
                 ChatHistoryResponse.Messages(
                     events = response.events,
-                    oldest = null,
-                    newest = null,
+                    oldest = response.oldest,
+                    newest = response.newest,
+                    primaryMessageCount = response.primaryMessageCount,
                     endOfHistory = response.endOfHistory,
                 )
             }
@@ -164,10 +193,13 @@ class HistoryResyncCoordinatorTest {
         processor.process(networkId, message("seed", 100))
         val source = FakeSource { request ->
             when (request.subcommand) {
-                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(listOf(message("tail", 200)), emptyList())
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(
+                    listOf(message("tail", 200)),
+                    endOfHistory = true,
+                )
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
                     listOf(message("seed", 100), message("tail", 200)),
-                    emptyList(),
+                    endOfHistory = true,
                 )
                 else -> FakeResponse(emptyList(), emptyList())
             }
@@ -240,7 +272,7 @@ class HistoryResyncCoordinatorTest {
         val source = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS ->
-                    FakeResponse(emptyList(), listOf(target to 400L))
+                    FakeResponse(targets = listOf(target to 400L), endOfHistory = true)
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
                     events = if (request.target == target) {
                         listOf(
@@ -276,19 +308,16 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
-    fun rejectedAfterFallsBackToLatestOverlap() = runTest {
+    fun ioFailureDuringAfterDoesNotFallBackToLatest() = runTest {
         processor.process(networkId, message("seed", 100))
         val source = FakeSource { request ->
             if (request.subcommand == ChatHistoryRequest.Subcommand.AFTER) throw IOException("bad selector")
-            FakeResponse(listOf(message("recovered", 150)), emptyList())
+            FakeResponse(listOf(message("recovered", 150)), endOfHistory = true)
         }
 
+        assertTrue(coordinator.resyncBuffer(networkId, bufferId, "#chan", source) is HistoryResyncState.Failed)
         assertEquals(
-            HistoryResyncState.Updated(1),
-            coordinator.resyncBuffer(networkId, bufferId, "#chan", source),
-        )
-        assertEquals(
-            listOf(ChatHistoryRequest.Subcommand.AFTER, ChatHistoryRequest.Subcommand.LATEST),
+            listOf(ChatHistoryRequest.Subcommand.AFTER),
             source.requests.map { it.subcommand },
         )
     }
@@ -364,6 +393,10 @@ class HistoryResyncCoordinatorTest {
                 coordinator.reconcilePendingMessage(networkId, bufferId, "#chan", source),
             )
             assertEquals("durable-react-target", db.messageDao().byCanonicalId(pendingId)?.msgid)
+            assertEquals(
+                "durable-react-target",
+                db.historyCursorDao().byRoom(bufferId)?.newestMsgid,
+            )
         } finally {
             releaseLock.complete(Unit)
             holder.join()
@@ -378,14 +411,18 @@ class HistoryResyncCoordinatorTest {
             val events = when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.AFTER -> emptyList()
                 ChatHistoryRequest.Subcommand.LATEST -> (103L..202L).map { message("m$it", it) }
-                ChatHistoryRequest.Subcommand.BEFORE -> when (request.bound1) {
+                ChatHistoryRequest.Subcommand.BETWEEN -> when (request.bound1) {
                     "msgid=m103" -> (3L..102L).map { message("m$it", it) }
                     "msgid=m3" -> (1L..2L).map { message("m$it", it) }
                     else -> emptyList()
                 }
                 else -> emptyList()
             }
-            FakeResponse(events, emptyList())
+            FakeResponse(
+                events,
+                endOfHistory = request.subcommand == ChatHistoryRequest.Subcommand.BETWEEN &&
+                    request.bound1 == "msgid=m3",
+            )
         }
 
         assertEquals(
@@ -394,7 +431,7 @@ class HistoryResyncCoordinatorTest {
         )
         val msgids = rows().mapNotNull { it.msgid }.toSet()
         assertTrue((2L..102L).all { "m$it" in msgids })
-        assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BEFORE })
+        assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BETWEEN })
     }
 
     @Test
@@ -405,7 +442,7 @@ class HistoryResyncCoordinatorTest {
             val events = when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.AFTER -> emptyList()
                 ChatHistoryRequest.Subcommand.LATEST -> (103L..202L).map { message("m$it", it) }
-                ChatHistoryRequest.Subcommand.BEFORE -> (3L..102L).map { message("m$it", it) }
+                ChatHistoryRequest.Subcommand.BETWEEN -> (3L..102L).map { message("m$it", it) }
                 else -> emptyList()
             }
             FakeResponse(events, emptyList())
@@ -430,7 +467,8 @@ class HistoryResyncCoordinatorTest {
         processor.process(networkId, message("seed", 100))
         val source = FakeSource { request ->
             when (request.subcommand) {
-                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(emptyList(), listOf("#new" to 500L))
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#new" to 500L), endOfHistory = true)
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
                     if (request.target == "#new") listOf(message("found", 500, "#new")) else emptyList(),
                     emptyList(),
@@ -451,7 +489,8 @@ class HistoryResyncCoordinatorTest {
         db.bufferDao().deleteBuffer(bufferId)
         val source = FakeSource { request ->
             when (request.subcommand) {
-                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(emptyList(), listOf("#old" to 500L))
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#old" to 500L), endOfHistory = true)
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
                     if (request.target == "#old") listOf(message("retained", 500, "#old")) else emptyList(),
                     emptyList(),
@@ -467,22 +506,23 @@ class HistoryResyncCoordinatorTest {
         assertEquals("timestamp=1970-01-01T00:00:00.000Z", targets.bound2)
         assertTrue(targets.bound1!!.matches(Regex("timestamp=.*\\.\\d{3}Z")))
         assertTrue(db.bufferDao().byName(networkId, "#old") != null)
-        assertTrue(syncPrefs.lastSuccessfulSync(networkId) != null)
+        assertEquals(500L, syncPrefs.lastSuccessfulSync(networkId))
     }
 
     @Test
     fun freshNetworkPagesTargetsToExhaustionBeforeStoringCursor() = runTest {
         db.bufferDao().deleteBuffer(bufferId)
-        val secondPageUpper = ChatHistorySelectors.timestamp(200)
+        val secondPageUpper = ChatHistorySelectors.timestamp(201)
         val source = FakeSource(pageLimit = 2) { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(
                     emptyList(),
                     if (request.bound1 == secondPageUpper) {
-                        listOf("#oldest" to 100L)
+                        listOf("#middle" to 200L, "#oldest" to 100L)
                     } else {
                         listOf("#newest" to 300L, "#middle" to 200L)
                     },
+                    endOfHistory = request.bound1 == secondPageUpper,
                 )
                 ChatHistoryRequest.Subcommand.LATEST -> {
                     // Discovery must finish before any per-room sync can make the pass successful.
@@ -518,7 +558,7 @@ class HistoryResyncCoordinatorTest {
         assertTrue(db.bufferDao().byName(networkId, "#newest") != null)
         assertTrue(db.bufferDao().byName(networkId, "#middle") != null)
         assertTrue(db.bufferDao().byName(networkId, "#oldest") != null)
-        assertTrue(syncPrefs.lastSuccessfulSync(networkId) != null)
+        assertEquals(300L, syncPrefs.lastSuccessfulSync(networkId))
     }
 
     @Test
@@ -542,7 +582,7 @@ class HistoryResyncCoordinatorTest {
         val source = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS ->
-                    FakeResponse(emptyList(), listOf("#chan" to 1_000L))
+                    FakeResponse(targets = listOf("#chan" to 1_000L), endOfHistory = true)
                 ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(emptyList(), emptyList())
                 ChatHistoryRequest.Subcommand.LATEST ->
                     FakeResponse(listOf(message("retained", 500)), emptyList())
@@ -575,7 +615,7 @@ class HistoryResyncCoordinatorTest {
         val source = FakeSource { request ->
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.TARGETS ->
-                    FakeResponse(emptyList(), listOf("#chan" to (base + 300)))
+                    FakeResponse(targets = listOf("#chan" to (base + 300)), endOfHistory = true)
                 ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(
                     events = if (request.bound1?.startsWith("timestamp=") == true) {
                         // Soju may overlap the already-delivered live line. Room must insert only
@@ -585,6 +625,7 @@ class HistoryResyncCoordinatorTest {
                         emptyList()
                     },
                     targets = emptyList(),
+                    endOfHistory = true,
                 )
                 else -> FakeResponse(emptyList(), emptyList())
             }
@@ -606,7 +647,7 @@ class HistoryResyncCoordinatorTest {
         val now = System.currentTimeMillis()
         val source = FakeSource { request ->
             assertEquals(ChatHistoryRequest.Subcommand.AFTER, request.subcommand)
-            FakeResponse(listOf(message("recent", now - 1_000)), emptyList())
+            FakeResponse(listOf(message("recent", now - 1_000)), endOfHistory = true)
         }
 
         val result = coordinator.resyncBuffer(
@@ -642,7 +683,7 @@ class HistoryResyncCoordinatorTest {
                     listOf(message("m1", 1))
                 }
             }
-            FakeResponse(response, emptyList())
+            FakeResponse(response, endOfHistory = page >= 3)
         }
 
         val result = coordinator.resyncBuffer(
@@ -667,6 +708,7 @@ class HistoryResyncCoordinatorTest {
         )
         assertTrue(unsupported.requests.isEmpty())
 
+        processor.process(networkId, message("seed", 100))
         coordinator.requestTimeoutMs = 5
         val slow = FakeSource {
             delay(100)
@@ -674,7 +716,8 @@ class HistoryResyncCoordinatorTest {
         }
         val result = coordinator.resyncBuffer(networkId, bufferId, "#chan", slow)
         assertTrue(result is HistoryResyncState.Failed)
-        assertTrue(rows().isEmpty())
+        assertEquals(listOf(ChatHistoryRequest.Subcommand.AFTER), slow.requests.map { it.subcommand })
+        assertEquals(listOf("seed"), rows().mapNotNull { it.msgid })
     }
 
     @Test
@@ -726,7 +769,10 @@ class HistoryResyncCoordinatorTest {
             when (request.subcommand) {
                 ChatHistoryRequest.Subcommand.AFTER -> {
                     afterPage++
-                    FakeResponse(if (afterPage == 1) full else listOf(message("last", 102)), emptyList())
+                    FakeResponse(
+                        if (afterPage == 1) full else listOf(message("last", 102)),
+                        endOfHistory = afterPage > 1,
+                    )
                 }
                 ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(listOf(message("last", 102)), emptyList())
                 else -> FakeResponse(emptyList(), emptyList())
@@ -740,6 +786,752 @@ class HistoryResyncCoordinatorTest {
         assertEquals(102, rows().size)
         assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.AFTER })
         assertTrue(source.requests.any { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
+    }
+
+    @Test
+    fun shortNonTerminalAfterPageContinuesFromResponseNewest() = runTest {
+        var afterPage = 0
+        val source = FakeSource(pageLimit = 10) { request ->
+            assertEquals(ChatHistoryRequest.Subcommand.AFTER, request.subcommand)
+            when (afterPage++) {
+                0 -> FakeResponse(listOf(message("first", 100)))
+                else -> {
+                    assertEquals("msgid=first", request.bound1)
+                    FakeResponse(listOf(message("second", 200)), endOfHistory = true)
+                }
+            }
+        }
+
+        val result = coordinator.resyncBuffer(
+            networkId,
+            bufferId,
+            "#chan",
+            source,
+            range = HistoryRefreshRange.HOURS_24,
+        )
+
+        assertEquals(HistoryResyncState.Updated(2), result)
+        assertEquals(2, source.requests.size)
+    }
+
+    @Test
+    fun liveInsertionCannotMoveAfterCursorPastResponseBoundary() = runTest {
+        processor.process(networkId, message("seed", 100))
+        var afterPage = 0
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.AFTER -> when (afterPage++) {
+                    0 -> {
+                        processor.process(networkId, message("live", 1_000))
+                        FakeResponse(listOf(message("page-boundary", 200)))
+                    }
+                    else -> {
+                        assertEquals("msgid=page-boundary", request.bound1)
+                        FakeResponse(listOf(message("missed", 300)), endOfHistory = true)
+                    }
+                }
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(endOfHistory = true)
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(3),
+            coordinator.resyncBuffer(networkId, bufferId, "#chan", source),
+        )
+        assertEquals(
+            listOf("msgid=seed", "msgid=page-boundary"),
+            source.requests.filter { it.subcommand == ChatHistoryRequest.Subcommand.AFTER }
+                .map { it.bound1 },
+        )
+    }
+
+    @Test
+    fun responseBoundaryExcludesNewerContextEvent() = runTest {
+        var afterPage = 0
+        val primary = message("primary", 100)
+        val context = message("context", 999)
+        val source = FakeSource { request ->
+            when (afterPage++) {
+                0 -> FakeResponse(
+                    events = listOf(primary, context),
+                    oldest = ChatHistoryReference("primary", 100),
+                    newest = ChatHistoryReference("primary", 100),
+                    primaryMessageCount = 1,
+                )
+                else -> {
+                    assertEquals("msgid=primary", request.bound1)
+                    FakeResponse(endOfHistory = true)
+                }
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(2),
+            coordinator.resyncBuffer(
+                networkId,
+                bufferId,
+                "#chan",
+                source,
+                range = HistoryRefreshRange.HOURS_24,
+            ),
+        )
+        assertEquals(2, source.requests.size)
+        val cursor = requireNotNull(db.historyCursorDao().byRoom(bufferId))
+        assertEquals("primary", cursor.newestMsgid)
+        assertEquals(100L, cursor.newestServerTime)
+    }
+
+    @Test
+    fun opaqueMsgidBoundaryAdvancesWithoutAuthoritativeTimestamp() = runTest {
+        val opaque = "CaseSensitive/opaque=="
+        var afterPage = 0
+        val source = FakeSource { request ->
+            when (afterPage++) {
+                0 -> FakeResponse(
+                    events = listOf(message(opaque, 100)),
+                    oldest = ChatHistoryReference(opaque, null),
+                    newest = ChatHistoryReference(opaque, null),
+                )
+                else -> {
+                    assertEquals("msgid=$opaque", request.bound1)
+                    FakeResponse(endOfHistory = true)
+                }
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(1),
+            coordinator.resyncBuffer(
+                networkId,
+                bufferId,
+                "#chan",
+                source,
+                range = HistoryRefreshRange.HOURS_24,
+            ),
+        )
+        assertEquals("msgid=$opaque", source.requests[1].bound1)
+    }
+
+    @Test
+    fun completedContextOnlyBatchStopsWithoutBeingIncomplete() = runTest {
+        val source = FakeSource {
+            FakeResponse(
+                events = listOf(message("context-only", 100)),
+                oldest = null,
+                newest = null,
+                primaryMessageCount = 0,
+            )
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(1),
+            coordinator.resyncBuffer(
+                networkId,
+                bufferId,
+                "#chan",
+                source,
+                range = HistoryRefreshRange.HOURS_24,
+            ),
+        )
+        assertEquals(1, source.requests.size)
+        val cursor = requireNotNull(db.historyCursorDao().byRoom(bufferId))
+        assertEquals(null, cursor.newestMsgid)
+        assertEquals(null, cursor.newestServerTime)
+    }
+
+    @Test
+    fun primaryCountPreventsEmptyEventsFromMasqueradingAsCompletedPage() = runTest {
+        val source = FakeSource {
+            FakeResponse(
+                events = emptyList(),
+                oldest = ChatHistoryReference("primary", 100),
+                newest = null,
+                primaryMessageCount = 1,
+            )
+        }
+
+        val result = coordinator.resyncBuffer(
+            networkId,
+            bufferId,
+            "#chan",
+            source,
+            range = HistoryRefreshRange.HOURS_24,
+        )
+
+        assertTrue(result is HistoryResyncState.Incomplete)
+        assertEquals(0, (result as HistoryResyncState.Incomplete).inserted)
+    }
+
+    @Test
+    fun secondPassAfterUsesPrimaryCursorInsteadOfNewerContextRow() = runTest {
+        var latestPage = 0
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.LATEST -> if (latestPage++ == 0) {
+                    FakeResponse(
+                        events = listOf(
+                            message("primary", 100),
+                            message("newer-context", 10_000),
+                        ),
+                        oldest = ChatHistoryReference("primary", 100),
+                        newest = ChatHistoryReference("primary", 100),
+                        primaryMessageCount = 1,
+                    )
+                } else {
+                    FakeResponse(primaryMessageCount = 0)
+                }
+                ChatHistoryRequest.Subcommand.AFTER -> {
+                    assertEquals("msgid=primary", request.bound1)
+                    FakeResponse(primaryMessageCount = 0)
+                }
+                else -> error("unexpected ${request.subcommand}")
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(2),
+            coordinator.resyncBuffer(networkId, bufferId, "#chan", source),
+        )
+        assertEquals(
+            HistoryResyncState.UpToDate,
+            coordinator.resyncBuffer(networkId, bufferId, "#chan", source),
+        )
+
+        assertEquals(ChatHistoryRequest.Subcommand.AFTER, source.requests[1].subcommand)
+        assertEquals("msgid=primary", source.requests[1].bound1)
+        val cursor = requireNotNull(db.historyCursorDao().byRoom(bufferId))
+        assertEquals("primary", cursor.newestMsgid)
+        assertEquals(100L, cursor.newestServerTime)
+    }
+
+    @Test
+    fun futurePendingRowCannotReplaceAuthoritativeRoomFallbackBoundary() = runTest {
+        processor.process(networkId, message("authoritative", 100))
+        processor.insertPending(
+            bufferId = bufferId,
+            label = "future-pending",
+            sender = "me",
+            text = "local clock row",
+            replyToMsgid = null,
+            kind = MessageKind.PRIVMSG,
+        )
+        assertEquals(null, db.historyCursorDao().byRoom(bufferId))
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.AFTER -> {
+                    assertEquals("msgid=authoritative", request.bound1)
+                    FakeResponse(primaryMessageCount = 0)
+                }
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(primaryMessageCount = 0)
+                else -> error("unexpected ${request.subcommand}")
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.UpToDate,
+            coordinator.resyncBuffer(networkId, bufferId, "#chan", source),
+        )
+        assertEquals("msgid=authoritative", source.requests.first().bound1)
+    }
+
+    @Test
+    fun missingDirectionalBoundaryReturnsIncompleteNotUpToDate() = runTest {
+        val source = FakeSource {
+            FakeResponse(
+                events = listOf(message("partial", 100)),
+                oldest = ChatHistoryReference("partial", 100),
+                newest = null,
+            )
+        }
+
+        val result = coordinator.resyncBuffer(
+            networkId,
+            bufferId,
+            "#chan",
+            source,
+            range = HistoryRefreshRange.HOURS_24,
+        )
+
+        assertTrue(result is HistoryResyncState.Incomplete)
+        assertEquals(1, (result as HistoryResyncState.Incomplete).inserted)
+    }
+
+    @Test
+    fun unchangedBoundaryReturnsIncomplete() = runTest {
+        processor.process(networkId, message("seed", 100))
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(listOf(message("seed", 100)))
+                else -> error("LATEST must not hide an incomplete AFTER traversal")
+            }
+        }
+
+        val result = coordinator.resyncBuffer(networkId, bufferId, "#chan", source)
+
+        assertTrue(result is HistoryResyncState.Incomplete)
+        assertEquals(listOf(ChatHistoryRequest.Subcommand.AFTER), source.requests.map { it.subcommand })
+    }
+
+    @Test
+    fun nonTerminalTraversalAtSafetyLimitReturnsCapped() = runTest {
+        processor.process(networkId, message("seed", 100))
+        coordinator.paginationRequestLimit = 2
+        val source = FakeSource { request ->
+            val next = when (request.bound1) {
+                "msgid=seed" -> message("m2", 200)
+                "msgid=m2" -> message("m3", 300)
+                else -> error("unexpected boundary ${request.bound1}")
+            }
+            FakeResponse(listOf(next))
+        }
+
+        val result = coordinator.resyncBuffer(networkId, bufferId, "#chan", source)
+
+        val capped = result as HistoryResyncState.Capped
+        assertEquals(2, capped.inserted)
+        assertEquals(2, capped.limit)
+        assertEquals(2, source.requests.size)
+    }
+
+    @Test
+    fun shortNonTerminalBeforePageContinuesFromResponseOldest() = runTest {
+        var page = 0
+        val source = FakeSource(pageLimit = 10) { request ->
+            when (page++) {
+                0 -> {
+                    assertEquals(ChatHistoryRequest.Subcommand.LATEST, request.subcommand)
+                    FakeResponse(listOf(message("m3", 300)))
+                }
+                1 -> {
+                    assertEquals(ChatHistoryRequest.Subcommand.BEFORE, request.subcommand)
+                    assertEquals("msgid=m3", request.bound1)
+                    FakeResponse(listOf(message("m2", 200)))
+                }
+                else -> {
+                    assertEquals(ChatHistoryRequest.Subcommand.BEFORE, request.subcommand)
+                    assertEquals("msgid=m2", request.bound1)
+                    FakeResponse(listOf(message("m1", 100)), endOfHistory = true)
+                }
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(3),
+            coordinator.resyncBuffer(
+                networkId,
+                bufferId,
+                "#chan",
+                source,
+                range = HistoryRefreshRange.ALL_AVAILABLE,
+            ),
+        )
+        assertEquals(3, source.requests.size)
+    }
+
+    @Test
+    fun shortNonTerminalBetweenPageContinuesFromResponseOldest() = runTest {
+        processor.process(networkId, message("known-oldest", 100))
+        processor.process(networkId, message("known-newest", 1_000))
+        var betweenPage = 0
+        val source = FakeSource(pageLimit = 10) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(endOfHistory = true)
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = listOf(message("latest-overlap", 900)),
+                )
+                ChatHistoryRequest.Subcommand.BETWEEN -> when (betweenPage++) {
+                    0 -> {
+                        assertEquals("msgid=latest-overlap", request.bound1)
+                        FakeResponse(listOf(message("middle", 500)))
+                    }
+                    else -> {
+                        assertEquals("msgid=middle", request.bound1)
+                        FakeResponse(listOf(message("old-gap", 200)), endOfHistory = true)
+                    }
+                }
+                else -> error("unexpected ${request.subcommand}")
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(3),
+            coordinator.resyncBuffer(networkId, bufferId, "#chan", source),
+        )
+        assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BETWEEN })
+    }
+
+    @Test
+    fun invalidMsgrefTypeRetriesSameAfterBoundaryAsTimestampOnly() = runTest {
+        processor.process(networkId, message("seed", 100))
+        val source = FakeSource { request ->
+            when {
+                request.subcommand == ChatHistoryRequest.Subcommand.AFTER &&
+                    request.bound1 == "msgid=seed" -> throw IrcCommandException(
+                    "CHATHISTORY",
+                    "INVALID_MSGREFTYPE",
+                    "msgid unsupported",
+                )
+                request.subcommand == ChatHistoryRequest.Subcommand.AFTER ->
+                    FakeResponse(listOf(message("tail", 200)), endOfHistory = true)
+                request.subcommand == ChatHistoryRequest.Subcommand.LATEST ->
+                    FakeResponse(endOfHistory = true)
+                else -> error("unexpected ${request.subcommand}")
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(1),
+            coordinator.resyncBuffer(networkId, bufferId, "#chan", source),
+        )
+        assertEquals(
+            listOf("msgid=seed", "timestamp=1970-01-01T00:00:00.100Z"),
+            source.requests.filter { it.subcommand == ChatHistoryRequest.Subcommand.AFTER }
+                .map { it.bound1 },
+        )
+    }
+
+    @Test
+    fun disconnectAndProtocolFailuresDoNotFallBackToLatest() = runTest {
+        processor.process(networkId, message("seed", 100))
+        val failures = listOf<Exception>(
+            IrcDisconnectedException("CHATHISTORY", "gone"),
+            IrcProtocolException("CHATHISTORY", "bad batch"),
+            IrcCommandException("CHATHISTORY", "MESSAGE_ERROR", "failed"),
+        )
+        failures.forEach { failure ->
+            val source = FakeSource { request ->
+                assertEquals(ChatHistoryRequest.Subcommand.AFTER, request.subcommand)
+                throw failure
+            }
+
+            assertTrue(coordinator.resyncBuffer(networkId, bufferId, "#chan", source) is HistoryResyncState.Failed)
+            assertEquals(listOf(ChatHistoryRequest.Subcommand.AFTER), source.requests.map { it.subcommand })
+        }
+    }
+
+    @Test
+    fun targetsShortPageContinuesAndDeduplicatesTimestampOverlap() = runTest {
+        db.bufferDao().deleteBuffer(bufferId)
+        var targetsPage = 0
+        val source = FakeSource(pageLimit = 5) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> when (targetsPage++) {
+                    0 -> FakeResponse(targets = listOf("#new" to 300L))
+                    else -> {
+                        assertEquals(ChatHistorySelectors.timestamp(301), request.bound1)
+                        FakeResponse(
+                            targets = listOf("#NEW" to 300L, "#old" to 200L),
+                            endOfHistory = true,
+                        )
+                    }
+                }
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(endOfHistory = true)
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        assertEquals(HistoryResyncState.UpToDate, coordinator.resyncNetwork(networkId, emptyList(), source))
+        assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
+        assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
+        assertEquals(300L, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
+    fun saturatedTargetsTimestampTieReturnsIncompleteWithoutWatermark() = runTest {
+        db.bufferDao().deleteBuffer(bufferId)
+        val source = FakeSource(pageLimit = 2) { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#a" to 100L, "#b" to 100L))
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(endOfHistory = true)
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, emptyList(), source)
+
+        assertTrue(result is HistoryResyncState.Incomplete)
+        assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
+        assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
+    }
+
+    @Test
+    fun completeNetworkPassPersistsNewestServerPageBoundary() = runTest {
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 500L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = listOf(message("server-high-water", 700)),
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(1),
+            coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source),
+        )
+        assertEquals(700L, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
+    fun completeNetworkPassCannotMoveWatermarkBackward() = runTest {
+        syncPrefs.setLastSuccessfulSync(networkId, 1_000)
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 500L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(primaryMessageCount = 0)
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = listOf(message("older-server-boundary", 700)),
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(primaryMessageCount = 0)
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.Updated(1),
+            coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source),
+        )
+        assertEquals(1_000L, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
+    fun incompleteTargetPassPreservesPreviousNetworkWatermark() = runTest {
+        processor.process(networkId, message("seed", 100))
+        syncPrefs.setLastSuccessfulSync(networkId, 1_000)
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 2_000L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(
+                    events = emptyList(),
+                    oldest = ChatHistoryReference("partial", 1_500),
+                    newest = null,
+                    primaryMessageCount = 1,
+                )
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+
+        assertTrue(result is HistoryResyncState.Incomplete)
+        assertEquals(1_000L, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
+    fun transientTargetFailurePreservesWatermarkAndDoesNotRequestLatest() = runTest {
+        processor.process(networkId, message("seed", 100))
+        syncPrefs.setLastSuccessfulSync(networkId, 1_000)
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("#chan" to 2_000L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.AFTER -> throw IOException("temporary transport failure")
+                ChatHistoryRequest.Subcommand.LATEST -> error("transient AFTER failure must not fall back")
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, listOf(bufferId to "#chan"), source)
+
+        assertTrue(result is HistoryResyncState.Failed)
+        assertEquals(1_000L, syncPrefs.lastSuccessfulSync(networkId))
+        assertEquals(
+            listOf(ChatHistoryRequest.Subcommand.TARGETS, ChatHistoryRequest.Subcommand.AFTER),
+            source.requests.map { it.subcommand },
+        )
+    }
+
+    @Test
+    fun cappedTargetsPassDoesNotPersistWatermark() = runTest {
+        db.bufferDao().deleteBuffer(bufferId)
+        coordinator.targetsRequestLimit = 1
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS -> FakeResponse(targets = listOf("#a" to 100L))
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(endOfHistory = true)
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        val result = coordinator.resyncNetwork(networkId, emptyList(), source)
+
+        assertTrue(result is HistoryResyncState.Capped)
+        assertEquals(null, syncPrefs.lastSuccessfulSync(networkId))
+    }
+
+    @Test
+    fun equivalentAutomaticRequestsCoalesce() = runTest {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var calls = 0
+        val source = FakeSource {
+            calls++
+            entered.complete(Unit)
+            release.await()
+            FakeResponse(endOfHistory = true)
+        }
+
+        val first = async { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source) }
+        entered.await()
+        val second = async { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source) }
+        delay(20)
+        release.complete(Unit)
+
+        assertEquals(HistoryResyncState.UpToDate, first.await())
+        assertEquals(HistoryResyncState.UpToDate, second.await())
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun manualRangeDoesNotJoinWeakerAutomaticFlight() = runTest {
+        val automaticEntered = CompletableDeferred<Unit>()
+        val releaseAutomatic = CompletableDeferred<Unit>()
+        var calls = 0
+        val source = FakeSource {
+            calls++
+            if (calls == 1) {
+                automaticEntered.complete(Unit)
+                releaseAutomatic.await()
+            }
+            FakeResponse(endOfHistory = true)
+        }
+
+        val automatic = async { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source) }
+        automaticEntered.await()
+        val manual = async {
+            coordinator.resyncBuffer(
+                networkId,
+                bufferId,
+                "#chan",
+                source,
+                range = HistoryRefreshRange.DAYS_30,
+            )
+        }
+        delay(20)
+        assertEquals(1, calls)
+        releaseAutomatic.complete(Unit)
+
+        assertEquals(HistoryResyncState.UpToDate, automatic.await())
+        assertEquals(HistoryResyncState.UpToDate, manual.await())
+        assertEquals(2, calls)
+    }
+
+    @Test
+    fun automaticRequestMayJoinActiveManualFlight() = runTest {
+        val manualEntered = CompletableDeferred<Unit>()
+        val releaseManual = CompletableDeferred<Unit>()
+        var calls = 0
+        val source = FakeSource {
+            calls++
+            manualEntered.complete(Unit)
+            releaseManual.await()
+            FakeResponse(endOfHistory = true)
+        }
+
+        val manual = async { coordinator.resyncBuffer(networkId, bufferId, "#chan", source) }
+        manualEntered.await()
+        val automatic = async { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source) }
+        delay(20)
+        releaseManual.complete(Unit)
+
+        assertEquals(HistoryResyncState.UpToDate, manual.await())
+        assertEquals(HistoryResyncState.UpToDate, automatic.await())
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun immediateManualCancellationCannotMissQueuedRegistration() = runTest {
+        val lockHeld = CompletableDeferred<Unit>()
+        val releaseLock = CompletableDeferred<Unit>()
+        val holder = backgroundScope.launch {
+            CanonicalHistorySingleFlight.withNetwork(networkId) {
+                lockHeld.complete(Unit)
+                releaseLock.await()
+            }
+        }
+        lockHeld.await()
+        val source = FakeSource { FakeResponse(primaryMessageCount = 0) }
+        val manual = async(start = CoroutineStart.UNDISPATCHED) {
+            coordinator.resyncBuffer(networkId, bufferId, "#chan", source)
+        }
+
+        coordinator.cancelBufferResync(bufferId)
+        releaseLock.complete(Unit)
+
+        assertTrue(runCatching { withTimeout(1_000) { manual.await() } }.isFailure)
+        assertTrue(source.requests.isEmpty())
+        holder.join()
+    }
+
+    @Test
+    fun immediateCancellationDoesNotCancelNextManualGeneration() = runTest {
+        coordinator.cancelBufferResync(bufferId)
+        val source = FakeSource { FakeResponse(primaryMessageCount = 0) }
+
+        assertEquals(
+            HistoryResyncState.UpToDate,
+            withTimeout(1_000) {
+                coordinator.resyncBuffer(networkId, bufferId, "#chan", source)
+            },
+        )
+        assertEquals(1, source.requests.size)
+    }
+
+    @Test
+    fun automaticWaiterRestartsWhenJoinedManualFlightIsCancelled() = runTest {
+        val manualEntered = CompletableDeferred<Unit>()
+        val manualCancelled = CompletableDeferred<Unit>()
+        val neverRelease = CompletableDeferred<Unit>()
+        var calls = 0
+        val source = FakeSource {
+            calls++
+            if (calls == 1) {
+                manualEntered.complete(Unit)
+                try {
+                    neverRelease.await()
+                } finally {
+                    manualCancelled.complete(Unit)
+                }
+            }
+            FakeResponse(endOfHistory = true)
+        }
+
+        val manual = async { coordinator.resyncBuffer(networkId, bufferId, "#chan", source) }
+        manualEntered.await()
+        val automatic = async { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source) }
+        delay(20)
+        coordinator.cancelBufferResync(bufferId)
+        withTimeout(1_000) { manualCancelled.await() }
+
+        assertTrue(runCatching { manual.await() }.isFailure)
+        assertEquals(HistoryResyncState.UpToDate, withTimeout(1_000) { automatic.await() })
+        assertEquals(2, calls)
+    }
+
+    @Test
+    fun uiCancellationDoesNotCancelAutomaticFlight() = runTest {
+        val automaticEntered = CompletableDeferred<Unit>()
+        val releaseAutomatic = CompletableDeferred<Unit>()
+        val source = FakeSource {
+            automaticEntered.complete(Unit)
+            releaseAutomatic.await()
+            FakeResponse(endOfHistory = true)
+        }
+
+        val automatic = async { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source) }
+        automaticEntered.await()
+        coordinator.cancelBufferResync(bufferId)
+        delay(50)
+        releaseAutomatic.complete(Unit)
+
+        assertEquals(HistoryResyncState.UpToDate, withTimeout(1_000) { automatic.await() })
     }
 
     @Test

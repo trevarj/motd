@@ -27,7 +27,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -336,6 +336,87 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
         db.execSQL("CREATE TABLE IF NOT EXISTS `members` (`bufferId` INTEGER NOT NULL, `nick` TEXT NOT NULL, `prefixes` TEXT NOT NULL, PRIMARY KEY(`bufferId`, `nick`))")
     }
 }
+
+/**
+ * v10 -> v11 preserves timeline/history rows, quarantines device-clock network cursors, and resets
+ * completion claims for protocol revalidation. Reaction storage is rebuilt because legacy actors
+ * use the v10 RFC1459-folded nick and did not retain account tags. If folding causes a unique-key
+ * collision, the lowest id keeps the canonical key and later rows receive deterministic suffixes.
+ */
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "ALTER TABLE network_history_cursors ADD COLUMN " +
+                "serverDerived INTEGER NOT NULL DEFAULT 0",
+        )
+        // v10 completion was inferred from response shape and must be proven again under v11.
+        db.execSQL("UPDATE buffers SET historyComplete = 0")
+        db.execSQL("UPDATE history_cursors SET historyComplete = 0")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_msgid` " +
+                "ON `messages` (`bufferId`, `msgid`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_messages_bufferId_replyToMsgid_replyToEventId` " +
+                "ON `messages` (`bufferId`, `replyToMsgid`, `replyToEventId`)",
+        )
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS `reactions_v11` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `bufferId` INTEGER NOT NULL,
+                `targetMsgid` TEXT NOT NULL,
+                `actorKey` TEXT NOT NULL,
+                `sender` TEXT NOT NULL,
+                `emoji` TEXT NOT NULL,
+                `serverTime` INTEGER NOT NULL,
+                `targetEventId` INTEGER
+            )""",
+        )
+        db.execSQL(
+            """CREATE UNIQUE INDEX IF NOT EXISTS
+               `index_reactions_bufferId_targetMsgid_actorKey_emoji`
+               ON `reactions_v11` (`bufferId`, `targetMsgid`, `actorKey`, `emoji`)""",
+        )
+        db.execSQL(
+            """WITH migrated AS (
+                   SELECT r.*,
+                       'nick:' || ${legacyReactionNormalizedSender("r.sender")} AS migratedActorKey
+                   FROM reactions r
+               )
+               INSERT OR IGNORE INTO reactions_v11(
+                   id, bufferId, targetMsgid, actorKey, sender, emoji, serverTime, targetEventId
+               )
+               SELECT id, bufferId, targetMsgid, migratedActorKey, sender, emoji, serverTime,
+                      targetEventId
+               FROM migrated ORDER BY id""",
+        )
+        db.execSQL(
+            """WITH migrated AS (
+                   SELECT r.*,
+                       'nick:' || ${legacyReactionNormalizedSender("r.sender")} AS migratedActorKey
+                   FROM reactions r
+               )
+               INSERT INTO reactions_v11(
+                   id, bufferId, targetMsgid, actorKey, sender, emoji, serverTime, targetEventId
+               )
+               SELECT id, bufferId, targetMsgid,
+                      migratedActorKey || char(0) || 'legacy:' || id,
+                      sender, emoji, serverTime, targetEventId
+               FROM migrated
+               WHERE NOT EXISTS (SELECT 1 FROM reactions_v11 n WHERE n.id = migrated.id)
+               ORDER BY id""",
+        )
+        db.execSQL("DROP TABLE reactions")
+        db.execSQL("ALTER TABLE reactions_v11 RENAME TO reactions")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_reactions_bufferId_targetMsgid_targetEventId` " +
+                "ON `reactions` (`bufferId`, `targetMsgid`, `targetEventId`)",
+        )
+    }
+}
+
+private fun legacyReactionNormalizedSender(column: String): String =
+    "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"
 
 private fun SupportSQLiteDatabase.addNetworkColumnsIfMissing(vararg columns: Pair<String, String>) {
     val existing = buildSet {

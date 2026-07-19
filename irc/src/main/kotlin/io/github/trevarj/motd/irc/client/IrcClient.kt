@@ -690,10 +690,10 @@ class IrcClient(
                 .mapNotNull { message ->
                     eventMapper.map(message, batchId = message.tags["batch"])?.let { message to it }
                 }
-            val primaryReferences = mapped.mapNotNull { (message, _) ->
-                if ("draft/chathistory-context" in message.tags) null
-                else historyReference(message)
+            val primaryMessages = mapped.filter { (message, _) ->
+                "draft/chathistory-context" !in message.tags
             }
+            val primaryReferences = primaryMessages.mapNotNull { (message, _) -> historyReference(message) }
             ChatHistoryResponse.Messages(
                 events = mapped.map { it.second },
                 // Message IDs are opaque and may be the only exact selector. Keep the server's
@@ -701,6 +701,7 @@ class IrcClient(
                 oldest = primaryReferences.firstOrNull(),
                 newest = primaryReferences.lastOrNull(),
                 endOfHistory = endOfHistory,
+                primaryMessageCount = primaryMessages.size,
             )
         }
     }

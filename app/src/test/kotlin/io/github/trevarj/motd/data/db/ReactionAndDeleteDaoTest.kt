@@ -32,9 +32,9 @@ class ReactionAndDeleteDaoTest {
     @Test
     fun observeForBuffer_returnsAllReactionsWithoutAnInList() = runTest {
         val dao = db.reactionDao()
-        dao.upsert(ReactionEntity(bufferId = bufferId, targetMsgid = "m1", sender = "a", emoji = "👍", serverTime = 1))
-        dao.upsert(ReactionEntity(bufferId = bufferId, targetMsgid = "m2", sender = "b", emoji = "🎉", serverTime = 2))
-        dao.upsert(ReactionEntity(bufferId = bufferId + 999, targetMsgid = "x", sender = "c", emoji = "❤️", serverTime = 3))
+        dao.upsert(ReactionEntity(bufferId = bufferId, targetMsgid = "m1", actorKey = "nick:a", sender = "a", emoji = "👍", serverTime = 1))
+        dao.upsert(ReactionEntity(bufferId = bufferId, targetMsgid = "m2", actorKey = "nick:b", sender = "b", emoji = "🎉", serverTime = 2))
+        dao.upsert(ReactionEntity(bufferId = bufferId + 999, targetMsgid = "x", actorKey = "nick:c", sender = "c", emoji = "❤️", serverTime = 3))
 
         val rows = dao.observeForBuffer(bufferId).first()
         assertEquals(2, rows.size)
@@ -45,14 +45,29 @@ class ReactionAndDeleteDaoTest {
     fun optimisticOwnReaction_reconcilesWithServerEcho_withoutDuplicating() = runTest {
         val dao = db.reactionDao()
         // Optimistic own react (upserted locally on tap, before the TAGMSG round-trips).
-        dao.upsert(ReactionEntity(bufferId = bufferId, targetMsgid = "m1", sender = "me", emoji = "👍", serverTime = 1))
-        // Server echoes our own react back with a later server time; the UNIQUE(bufferId, targetMsgid,
-        // sender) + REPLACE conflict collapses it onto the optimistic row instead of adding a second.
-        dao.upsert(ReactionEntity(bufferId = bufferId, targetMsgid = "m1", sender = "me", emoji = "👍", serverTime = 2))
+        dao.upsert(ReactionEntity(bufferId = bufferId, targetMsgid = "m1", actorKey = "nick:me", sender = "me", emoji = "👍", serverTime = 1))
+        // Server echoes our own react back with a later server time; the actor+emoji key collapses it.
+        dao.upsert(ReactionEntity(bufferId = bufferId, targetMsgid = "m1", actorKey = "nick:me", sender = "me", emoji = "👍", serverTime = 2))
 
         val rows = dao.observeForBuffer(bufferId).first()
         assertEquals(1, rows.size)
         assertEquals(2, rows.single().serverTime) // reconciled to the server-echoed row
+    }
+
+    @Test
+    fun actorCanRetainMultipleEmojis_andDeleteIsReactionSpecific() = runTest {
+        val dao = db.reactionDao()
+        dao.upsert(ReactionEntity(bufferId = bufferId, targetMsgid = "m1", actorKey = "nick:me", sender = "me", emoji = "👍", serverTime = 1))
+        dao.upsert(ReactionEntity(bufferId = bufferId, targetMsgid = "m1", actorKey = "nick:me", sender = "me", emoji = "🎉", serverTime = 2))
+
+        assertEquals(
+            "👍",
+            dao.find(bufferId, "m1", listOf("account:me", "nick:me"), "👍")?.emoji,
+        )
+        dao.delete(bufferId, "m1", "nick:me", "👍")
+
+        val rows = dao.observeForBuffer(bufferId).first()
+        assertEquals(listOf("🎉"), rows.map { it.emoji })
     }
 
     @Test

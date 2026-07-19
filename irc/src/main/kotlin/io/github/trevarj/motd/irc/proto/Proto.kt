@@ -263,13 +263,17 @@ class Isupport {
     /** e.g. get("CHATHISTORY") -> "1000" */
     operator fun get(key: String): String? = tokens[key.uppercase()]
 
+    /** Current immutable IRC identity and channel-classification rules. */
+    val identityRules: IrcIdentityRules
+        get() = IrcIdentityRules.from(tokens["CASEMAPPING"], tokens["CHANTYPES"])
+
     /** default "rfc1459" */
     val caseMapping: String
-        get() = tokens["CASEMAPPING"]?.lowercase() ?: "rfc1459"
+        get() = identityRules.caseMapping.rawName.lowercase()
 
     /** default "#&" */
     val chanTypes: String
-        get() = tokens["CHANTYPES"] ?: "#&"
+        get() = identityRules.chanTypes
 
     /** mode->prefix pairs, e.g. (o,'@'), (v,'+') */
     val prefixModes: List<Pair<Char, Char>>
@@ -285,23 +289,10 @@ class Isupport {
         }
 
     /** Case-normalize a nick/channel per CASEMAPPING for map keys and comparisons. */
-    fun normalize(name: String): String {
-        val sb = StringBuilder(name.length)
-        val rfc = caseMapping == "rfc1459" || caseMapping == "rfc1459-strict"
-        for (c in name) {
-            sb.append(
-                when {
-                    c in 'A'..'Z' -> c + 32
-                    rfc && c == '[' -> '{'
-                    rfc && c == ']' -> '}'
-                    rfc && c == '\\' -> '|'
-                    rfc && c == '~' -> '^'
-                    else -> c
-                }
-            )
-        }
-        return sb.toString()
-    }
+    fun normalize(name: String): String = identityRules.normalize(name)
+
+    /** True when [target] starts with a channel type advertised by the server. */
+    fun isChannel(target: String): Boolean = identityRules.isChannel(target)
 
     /** ISUPPORT values use the same backslash escaping as tags for a few characters. */
     private fun unescapeIsupportValue(value: String): String {

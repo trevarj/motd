@@ -1,17 +1,15 @@
 package io.github.trevarj.motd.service
 
-import androidx.room.withTransaction
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.irc.proto.IrcMessage
-import kotlinx.coroutines.flow.first
 
 internal interface ReactionMutationStore {
     suspend fun findOwn(
         bufferId: Long,
         targetMsgid: String,
-        sender: String,
-        normalizeNick: (String) -> String,
+        actorKeys: List<String>,
+        emoji: String,
     ): ReactionEntity?
 
     suspend fun upsert(reaction: ReactionEntity)
@@ -24,28 +22,21 @@ internal class RoomReactionMutationStore(
     override suspend fun findOwn(
         bufferId: Long,
         targetMsgid: String,
-        sender: String,
-        normalizeNick: (String) -> String,
-    ): ReactionEntity? {
-        val normalizedSender = normalizeNick(sender)
-        return db.reactionDao().observeForBuffer(bufferId).first().firstOrNull {
-            it.targetMsgid == targetMsgid && normalizeNick(it.sender) == normalizedSender
-        }
-    }
+        actorKeys: List<String>,
+        emoji: String,
+    ): ReactionEntity? = db.reactionDao().find(bufferId, targetMsgid, actorKeys, emoji)
 
     override suspend fun upsert(reaction: ReactionEntity) {
         db.reactionDao().upsert(reaction)
     }
 
     override suspend fun remove(reaction: ReactionEntity) {
-        // Keep mutation methods outside the frozen DAO contract. Running through Room's
-        // transaction still drives invalidation for the reaction Flow observed by chat.
-        db.withTransaction {
-            db.openHelper.writableDatabase.execSQL(
-                "DELETE FROM reactions WHERE bufferId = ? AND targetMsgid = ? AND sender = ?",
-                arrayOf<Any>(reaction.bufferId, reaction.targetMsgid, reaction.sender),
-            )
-        }
+        db.reactionDao().delete(
+            reaction.bufferId,
+            reaction.targetMsgid,
+            reaction.actorKey,
+            reaction.emoji,
+        )
     }
 }
 
@@ -72,14 +63,10 @@ internal suspend fun mutateReaction(
     reaction: ReactionEntity,
     send: suspend (ReactionMutationKind) -> Unit,
 ): ReactionMutationKind {
-    val kind = if (previous?.emoji == reaction.emoji) {
+    val kind = if (previous != null) {
         store.remove(previous)
         ReactionMutationKind.REMOVE
     } else {
-        // Reactions are uniquely keyed by their raw sender spelling for compatibility with the
-        // existing Room schema, while IRC nick matching is casefolded. Remove a prior case-variant
-        // row before replacing its emoji so a server-side nick-case change cannot leave two rows.
-        previous?.let { store.remove(it) }
         store.upsert(reaction)
         ReactionMutationKind.ADD
     }
@@ -91,7 +78,6 @@ internal suspend fun mutateReaction(
             store.upsert(previous)
         } else {
             store.remove(reaction)
-            previous?.let { store.upsert(it) }
         }
         throw failure
     }

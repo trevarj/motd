@@ -37,6 +37,8 @@ data class TimelineObservation(
     val batchExactMultiplicity: Int = 1,
     /** Stable zero-based occurrence among identical exact representations in one ordered batch. */
     val batchExactOrdinal: Int? = null,
+    /** Protocol page writers persist exact primary boundaries after ingesting all context events. */
+    val persistHistoryCursor: Boolean = true,
 )
 
 sealed interface IngestResult {
@@ -330,11 +332,11 @@ class CanonicalTimelineStore @Inject constructor(
             ),
         )
 
-        updateHistoryCursor(observation, canonical)
+        if (observation.persistHistoryCursor) updateHistoryCursor(observation, canonical)
 
         incoming.msgid?.let { msgid ->
-            dao.resolveReplies(observation.networkId, msgid, canonical.id)
-            dao.resolveReactions(observation.networkId, msgid, canonical.id)
+            dao.resolveReplies(canonical.bufferId, msgid, canonical.id)
+            dao.resolveReactions(canonical.bufferId, msgid, canonical.id)
         }
         val replyId = incoming.replyToMsgid?.let { replyMsgid ->
             dao.eventByAlias(

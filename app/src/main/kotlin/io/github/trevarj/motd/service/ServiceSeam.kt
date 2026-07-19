@@ -146,6 +146,13 @@ interface IrcEventSink {
 
     /** Persist a push-delivered event without treating it as live IRC session state. */
     suspend fun processPush(networkId: Long, event: io.github.trevarj.motd.irc.event.IrcEvent)
+
+    /** Persist one completed protocol page together with its exact primary-message boundaries. */
+    suspend fun persistHistoryPage(
+        networkId: Long,
+        request: io.github.trevarj.motd.irc.client.ChatHistoryRequest,
+        response: io.github.trevarj.motd.irc.client.ChatHistoryResponse.Messages,
+    ): Long
 }
 
 /** In-memory typing state. Written by EventProcessor (WP5), read by ChatViewModel (WP7). */

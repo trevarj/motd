@@ -392,8 +392,31 @@ interface MessageDao {
     @Query("SELECT MIN(serverTime) FROM messages WHERE bufferId = :bufferId")
     suspend fun oldestTime(bufferId: Long): Long?
 
-    @Query("SELECT msgid, serverTime FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, id DESC LIMIT 1")
+    @Query(
+        """SELECT m.msgid,
+                  CASE WHEN m.serverTimeAuthoritative = 1 THEN m.serverTime ELSE (
+                      SELECT MAX(a.serverTime) FROM messages a
+                      WHERE a.bufferId = :bufferId AND a.serverTimeAuthoritative = 1
+                  ) END AS serverTime
+           FROM messages m
+           WHERE m.bufferId = :bufferId
+             AND (m.msgid IS NOT NULL OR m.serverTimeAuthoritative = 1)
+           ORDER BY m.serverTime DESC, m.id DESC LIMIT 1""",
+    )
     suspend fun latestBoundary(bufferId: Long): MessageBoundaryRow?
+
+    @Query(
+        """SELECT m.msgid,
+                  CASE WHEN m.serverTimeAuthoritative = 1 THEN m.serverTime ELSE (
+                      SELECT MIN(a.serverTime) FROM messages a
+                      WHERE a.bufferId = :bufferId AND a.serverTimeAuthoritative = 1
+                  ) END AS serverTime
+           FROM messages m
+           WHERE m.bufferId = :bufferId
+             AND (m.msgid IS NOT NULL OR m.serverTimeAuthoritative = 1)
+           ORDER BY m.serverTime ASC, m.id ASC LIMIT 1""",
+    )
+    suspend fun oldestBoundary(bufferId: Long): MessageBoundaryRow?
 
     @Query("SELECT COUNT(*) FROM messages WHERE bufferId = :bufferId")
     suspend fun countForBuffer(bufferId: Long): Int
@@ -556,7 +579,7 @@ interface MessageDao {
 
 data class SearchHit(@Embedded val message: MessageEntity, val bufferDisplayName: String, val networkName: String)
 
-data class MessageBoundaryRow(val msgid: String?, val serverTime: Long)
+data class MessageBoundaryRow(val msgid: String?, val serverTime: Long?)
 
 data class BouncerTranscriptRow(
     val sender: String,
@@ -612,8 +635,50 @@ interface ReactionDao {
     @Query("SELECT * FROM reactions WHERE bufferId = :bufferId")
     fun observeForBuffer(bufferId: Long): Flow<List<ReactionEntity>>
 
+    @Query(
+        """SELECT * FROM reactions
+           WHERE bufferId = :bufferId AND targetMsgid = :targetMsgid
+             AND actorKey IN (:actorKeys) AND emoji = :emoji
+           ORDER BY id LIMIT 1""",
+    )
+    suspend fun find(
+        bufferId: Long,
+        targetMsgid: String,
+        actorKeys: List<String>,
+        emoji: String,
+    ): ReactionEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(r: ReactionEntity)
+
+    @Query(
+        """DELETE FROM reactions
+           WHERE bufferId = :bufferId AND targetMsgid = :targetMsgid
+             AND actorKey = :actorKey AND emoji = :emoji""",
+    )
+    suspend fun delete(
+        bufferId: Long,
+        targetMsgid: String,
+        actorKey: String,
+        emoji: String,
+    ): Int
+
+    @Query(
+        """DELETE FROM reactions
+           WHERE bufferId = :bufferId AND targetMsgid = :targetMsgid AND emoji = :emoji
+             AND (
+                 actorKey = :baseActorKey OR
+                 (actorKey >= :legacyPrefix AND actorKey < :legacyUpperBound)
+             )""",
+    )
+    suspend fun deleteActorAliases(
+        bufferId: Long,
+        targetMsgid: String,
+        baseActorKey: String,
+        legacyPrefix: String,
+        legacyUpperBound: String,
+        emoji: String,
+    ): Int
 }
 
 @Dao
@@ -662,8 +727,10 @@ interface RoomAliasDao {
     suspend fun deleteMembers(loserId: RoomId)
 
     @Query(
-        """INSERT OR REPLACE INTO reactions(id, bufferId, targetMsgid, sender, emoji, serverTime, targetEventId)
-           SELECT id, :winnerId, targetMsgid, sender, emoji, serverTime, targetEventId
+        """INSERT OR IGNORE INTO reactions(
+               bufferId, targetMsgid, actorKey, sender, emoji, serverTime, targetEventId
+           )
+           SELECT :winnerId, targetMsgid, actorKey, sender, emoji, serverTime, targetEventId
            FROM reactions WHERE bufferId = :loserId""",
     )
     suspend fun copyReactions(loserId: RoomId, winnerId: RoomId)
@@ -885,17 +952,15 @@ interface CanonicalTimelineDao {
 
     @Query(
         """UPDATE messages SET replyToEventId = :parentId
-           WHERE replyToMsgid = :msgid AND replyToEventId IS NULL
-             AND bufferId IN (SELECT id FROM buffers WHERE networkId = :networkId)""",
+           WHERE bufferId = :bufferId AND replyToMsgid = :msgid AND replyToEventId IS NULL""",
     )
-    suspend fun resolveReplies(networkId: Long, msgid: String, parentId: TimelineEventId)
+    suspend fun resolveReplies(bufferId: RoomId, msgid: String, parentId: TimelineEventId)
 
     @Query(
         """UPDATE reactions SET targetEventId = :parentId
-           WHERE targetMsgid = :msgid AND targetEventId IS NULL
-             AND bufferId IN (SELECT id FROM buffers WHERE networkId = :networkId)""",
+           WHERE bufferId = :bufferId AND targetMsgid = :msgid AND targetEventId IS NULL""",
     )
-    suspend fun resolveReactions(networkId: Long, msgid: String, parentId: TimelineEventId)
+    suspend fun resolveReactions(bufferId: RoomId, msgid: String, parentId: TimelineEventId)
 
     @Query("UPDATE messages SET soundHandled = 1 WHERE id = :eventId AND soundHandled = 0")
     suspend fun claimSound(eventId: TimelineEventId): Int
@@ -977,12 +1042,15 @@ interface HistoryCursorDao {
     )
     suspend fun markComplete(roomId: RoomId)
 
-    @Query("SELECT lastSuccessfulSync FROM network_history_cursors WHERE networkId = :networkId")
+    @Query(
+        """SELECT lastSuccessfulSync FROM network_history_cursors
+           WHERE networkId = :networkId AND serverDerived = 1""",
+    )
     suspend fun networkLastSuccessfulSync(networkId: Long): Long?
 
     @Query(
-        "INSERT OR REPLACE INTO network_history_cursors(networkId, lastSuccessfulSync) " +
-            "VALUES (:networkId, :timestamp)",
+        "INSERT OR REPLACE INTO network_history_cursors(networkId, lastSuccessfulSync, serverDerived) " +
+            "VALUES (:networkId, :timestamp, 1)",
     )
     suspend fun setNetworkLastSuccessfulSync(networkId: Long, timestamp: Long)
 

@@ -9,27 +9,36 @@ import org.junit.Test
 
 class ReactionMutationStoreTest {
     private class FakeStore(initial: ReactionEntity? = null) : ReactionMutationStore {
-        var row = initial
+        val rows = mutableListOf<ReactionEntity>().apply { initial?.let { add(it) } }
+        val row: ReactionEntity? get() = rows.singleOrNull()
 
         override suspend fun findOwn(
             bufferId: Long,
             targetMsgid: String,
-            sender: String,
-            normalizeNick: (String) -> String,
-        ): ReactionEntity? = row
+            actorKeys: List<String>,
+            emoji: String,
+        ): ReactionEntity? = rows.firstOrNull {
+            it.bufferId == bufferId && it.targetMsgid == targetMsgid &&
+                it.actorKey in actorKeys && it.emoji == emoji
+        }
 
         override suspend fun upsert(reaction: ReactionEntity) {
-            row = reaction
+            remove(reaction)
+            rows += reaction
         }
 
         override suspend fun remove(reaction: ReactionEntity) {
-            if (row?.sender == reaction.sender && row?.targetMsgid == reaction.targetMsgid) row = null
+            rows.removeAll {
+                it.bufferId == reaction.bufferId && it.targetMsgid == reaction.targetMsgid &&
+                    it.actorKey == reaction.actorKey && it.emoji == reaction.emoji
+            }
         }
     }
 
     private fun reaction(emoji: String = "👍") = ReactionEntity(
         bufferId = 1,
         targetMsgid = "m1",
+        actorKey = "nick:me",
         sender = "me",
         emoji = emoji,
         serverTime = 10,
@@ -90,14 +99,12 @@ class ReactionMutationStoreTest {
     }
 
     @Test
-    fun `failed replacement restores previous emoji`() = runTest {
-        val previous = reaction("❤️")
-        val store = FakeStore(previous)
+    fun `adding another emoji retains the actors existing emoji`() = runTest {
+        val existing = reaction("❤️")
+        val store = FakeStore(existing)
 
-        runCatching {
-            mutateReaction(store, previous, reaction("👍")) { error("send failed") }
-        }
+        mutateReaction(store, previous = null, reaction("👍")) { }
 
-        assertSame(previous, store.row)
+        assertEquals(setOf("❤️", "👍"), store.rows.map { it.emoji }.toSet())
     }
 }

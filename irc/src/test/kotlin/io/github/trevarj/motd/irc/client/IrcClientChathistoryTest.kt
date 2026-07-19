@@ -120,6 +120,7 @@ class IrcClientChathistoryTest {
 
         val response = request.await() as ChatHistoryResponse.Messages
         assertEquals(3, response.events.size)
+        assertEquals(2, response.primaryMessageCount)
         assertEquals(ChatHistoryReference("FirstCase", 1_784_055_600_000L), response.oldest)
         assertEquals(ChatHistoryReference("secondCase", 1_784_055_600_000L), response.newest)
         assertTrue(response.endOfHistory)
@@ -142,6 +143,7 @@ class IrcClientChathistoryTest {
         runCurrent()
 
         val response = request.await() as ChatHistoryResponse.Messages
+        assertEquals(1, response.primaryMessageCount)
         assertEquals(ChatHistoryReference("ExactCase", null), response.oldest)
         assertEquals(response.oldest, response.newest)
     }
@@ -164,6 +166,34 @@ class IrcClientChathistoryTest {
 
         val response = request.await() as ChatHistoryResponse.Messages
         assertEquals(1, response.events.size)
+        assertEquals(1, response.primaryMessageCount)
+        assertNull(response.oldest)
+        assertNull(response.newest)
+    }
+
+    @Test
+    fun `completed context-only batch reports zero primary messages`() = runTest {
+        val transport = FakeTransport()
+        val client = registeredWithoutLabeledResponse(transport)
+        val request = async {
+            client.chathistory(
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#room", limit = 100),
+            )
+        }
+        runCurrent()
+
+        transport.feed("BATCH +history chathistory #room")
+        transport.feed(
+            "@batch=history;draft/chathistory-context;msgid=context;" +
+                "time=2026-07-14T19:00:01.000Z;+draft/react=+1;+reply=missing " +
+                ":bob!user@example.test TAGMSG #room",
+        )
+        transport.feed("BATCH -history")
+        runCurrent()
+
+        val response = request.await() as ChatHistoryResponse.Messages
+        assertEquals(1, response.events.size)
+        assertEquals(0, response.primaryMessageCount)
         assertNull(response.oldest)
         assertNull(response.newest)
     }
@@ -273,6 +303,7 @@ class IrcClientChathistoryTest {
 
         val response = request.await() as ChatHistoryResponse.Messages
         assertTrue(response.events.isEmpty())
+        assertEquals(0, response.primaryMessageCount)
         assertNull(response.oldest)
         assertNull(response.newest)
     }

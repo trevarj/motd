@@ -61,6 +61,7 @@ class DeleteNetworkTreeDaoTest {
         reactions.upsert(ReactionEntity(
             bufferId = childBuffer,
             targetMsgid = "child",
+            actorKey = "nick:alice",
             sender = "alice",
             emoji = "👍",
             serverTime = 2,

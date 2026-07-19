@@ -1,7 +1,9 @@
 package io.github.trevarj.motd.irc.proto
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IsupportTest {
@@ -11,6 +13,9 @@ class IsupportTest {
         val isup = Isupport()
         assertEquals("rfc1459", isup.caseMapping)
         assertEquals("#&", isup.chanTypes)
+        assertTrue(isup.isChannel("#room"))
+        assertTrue(isup.isChannel("&local"))
+        assertFalse(isup.isChannel("nick"))
         assertEquals(listOf('o' to '@', 'v' to '+'), isup.prefixModes)
     }
 
@@ -110,8 +115,21 @@ class IsupportTest {
     @Test
     fun `CHANTYPES override`() {
         val isup = Isupport()
-        isup.update(listOf("CHANTYPES=#"))
-        assertEquals("#", isup.chanTypes)
+        isup.update(listOf("CHANTYPES=+!"))
+        assertEquals("+!", isup.chanTypes)
+        assertTrue(isup.isChannel("+modeless"))
+        assertTrue(isup.isChannel("!safe"))
+        assertFalse(isup.isChannel("#room"))
+    }
+
+    @Test
+    fun `explicitly empty CHANTYPES means no channels`() {
+        val isup = Isupport()
+        isup.update(listOf("CHANTYPES="))
+
+        assertEquals("", isup.chanTypes)
+        assertEquals("", isup.identityRules.advertisedChanTypes)
+        assertFalse(isup.isChannel("#room"))
     }
 
     // -- normalize --
@@ -131,6 +149,30 @@ class IsupportTest {
         assertEquals("foobar", isup.normalize("FooBar"))
         assertEquals("{}|^", isup.normalize("[]\\~"))
         assertEquals("nick{|}^", isup.normalize("Nick[\\]~"))
+    }
+
+    @Test
+    fun `normalize rfc1459 strict does not fold tilde to caret`() {
+        val isup = Isupport()
+        isup.update(listOf("CASEMAPPING=rfc1459-strict"))
+
+        assertEquals("{}|~^", isup.normalize("[]\\~^"))
+        assertFalse(isup.normalize("~") == isup.normalize("^"))
+    }
+
+    @Test
+    fun `unknown CASEMAPPING is diagnostic and conservatively ascii`() {
+        val isup = Isupport()
+        isup.update(listOf("CASEMAPPING=Vendor-Unicode"))
+
+        val mapping = isup.identityRules.caseMapping
+        assertEquals("vendor-unicode", isup.caseMapping)
+        assertEquals(IrcCaseMapping.Unknown("Vendor-Unicode"), mapping)
+        assertEquals(
+            "Unsupported IRC CASEMAPPING 'Vendor-Unicode'; using conservative ASCII folding",
+            mapping.diagnostic,
+        )
+        assertEquals("nick[]\\~", isup.normalize("NICK[]\\~"))
     }
 
     @Test

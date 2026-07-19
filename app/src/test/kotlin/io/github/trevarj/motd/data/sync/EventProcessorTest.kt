@@ -6,10 +6,15 @@ import android.content.Context
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.InviteState
+import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.irc.client.ChatHistoryReference
+import io.github.trevarj.motd.irc.client.ChatHistoryRequest
+import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
@@ -44,8 +49,12 @@ class EventProcessorTest {
     private lateinit var processor: EventProcessor
     private var networkId: Long = 0
 
-    private fun ctx(msgid: String? = null, time: Long = 1000, label: String? = null) =
-        MessageContext(msgid = msgid, serverTime = time, account = null, batchId = null, label = label)
+    private fun ctx(
+        msgid: String? = null,
+        time: Long = 1000,
+        label: String? = null,
+        account: String? = null,
+    ) = MessageContext(msgid = msgid, serverTime = time, account = account, batchId = null, label = label)
 
     @Before
     fun setUp() = runTest {
@@ -84,6 +93,76 @@ class EventProcessorTest {
         assertEquals(1, rows.size)
         assertEquals("hello world", rows.single().text)
         assertFalse(rows.single().hasMention)
+    }
+
+    @Test
+    fun advertisedCustomChantypesAreAuthoritativeForRoomRouting() = runTest {
+        processor.onRegistered(
+            networkId,
+            "me",
+            mapOf("CASEMAPPING" to "rfc1459", "CHANTYPES" to "+!"),
+        )
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "custom-channel"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "+room", text = "channel",
+            isSelf = false, replyToMsgid = null,
+        ))
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "hash-query"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("bob"), target = "#room", text = "query",
+            isSelf = false, replyToMsgid = null,
+        ))
+
+        assertEquals(BufferType.CHANNEL, db.bufferDao().byName(networkId, "+room")?.type)
+        assertEquals(BufferType.QUERY, db.bufferDao().byName(networkId, "bob")?.type)
+        assertNull(db.bufferDao().byName(networkId, "#room"))
+    }
+
+    @Test
+    fun explicitlyEmptyChantypesRoutesHashTargetAsQueryWithoutSplittingOldRooms() = runTest {
+        val legacyId = db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = "#legacy",
+                displayName = "#legacy",
+                type = BufferType.CHANNEL,
+            ),
+        )
+        processor.onRegistered(
+            networkId,
+            "me",
+            mapOf("CASEMAPPING" to "rfc1459", "CHANTYPES" to ""),
+        )
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "empty-chantypes"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#legacy", text = "query now",
+            isSelf = false, replyToMsgid = null,
+        ))
+
+        assertEquals(BufferType.CHANNEL, db.bufferDao().observeById(legacyId)?.type)
+        assertEquals(BufferType.QUERY, db.bufferDao().byName(networkId, "alice")?.type)
+    }
+
+    @Test
+    fun strictRfc1459KeepsTildeAndCaretRoomsDistinctForFutureEvents() = runTest {
+        processor.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459-strict"))
+        listOf("#room~", "#room^").forEachIndexed { index, target ->
+            processor.process(networkId, IrcEvent.ChatMessage(
+                ctx = ctx(msgid = "strict-room-$index", time = 1000L + index),
+                kind = IrcEvent.ChatKind.PRIVMSG,
+                source = Prefix("alice"),
+                target = target,
+                text = target,
+                isSelf = false,
+                replyToMsgid = null,
+            ))
+        }
+
+        val tilde = db.bufferDao().byName(networkId, "#room~")
+        val caret = db.bufferDao().byName(networkId, "#room^")
+        assertNotNull(tilde)
+        assertNotNull(caret)
+        assertNotEquals(tilde?.id, caret?.id)
     }
 
     @Test
@@ -332,6 +411,25 @@ class EventProcessorTest {
     }
 
     @Test
+    fun mentionMatchingUsesStrictRfc1459WithoutFoldingTilde() = runTest {
+        processor.onRegistered(networkId, "me~", mapOf("CASEMAPPING" to "rfc1459-strict"))
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "strict-no"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "ping me^",
+            isSelf = false, replyToMsgid = null,
+        ))
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "strict-yes", time = 1001), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "ping ME~",
+            isSelf = false, replyToMsgid = null,
+        ))
+
+        val rows = pagingList(db.bufferDao().byName(networkId, "#chan")!!.id)
+        assertFalse(rows.first { it.msgid == "strict-no" }.hasMention)
+        assertTrue(rows.first { it.msgid == "strict-yes" }.hasMention)
+    }
+
+    @Test
     fun replyToOwnKnownParent_setsMention_withoutTextMention() = runTest {
         processor.process(networkId, IrcEvent.ChatMessage(
             ctx = ctx(msgid = "parent"), kind = IrcEvent.ChatKind.PRIVMSG,
@@ -346,6 +444,26 @@ class EventProcessorTest {
 
         val buffer = db.bufferDao().byName(networkId, "#chan")!!
         assertTrue(pagingList(buffer.id).first { it.msgid == "child" }.hasMention)
+    }
+
+    @Test
+    fun replyArrivingBeforeParentResolvesByIndexedRoomAndMsgidLookup() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "child"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "child",
+            isSelf = false, replyToMsgid = "late-parent",
+        ))
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        assertNull(db.messageDao().byMsgid(buffer.id, "child")?.replyToEventId)
+
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "late-parent", time = 1001), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("bob"), target = "#chan", text = "parent",
+            isSelf = false, replyToMsgid = null,
+        ))
+
+        val parent = db.messageDao().byMsgid(buffer.id, "late-parent")!!
+        assertEquals(parent.id, db.messageDao().byMsgid(buffer.id, "child")?.replyToEventId)
     }
 
     @Test
@@ -619,6 +737,117 @@ class EventProcessorTest {
     }
 
     @Test
+    fun actorCanReactWithMultipleEmojis_andUnreactRemovesOnlySelectedEmoji() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "m1"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "parent",
+            isSelf = false, replyToMsgid = null,
+        ))
+        listOf("👍", "🎉").forEachIndexed { index, emoji ->
+            processor.process(networkId, IrcEvent.TagMessage(
+                ctx = ctx(time = 2_000L + index), source = Prefix("bob"), target = "#chan",
+                typing = null, reactEmoji = emoji, reactTargetMsgid = "m1",
+            ))
+        }
+        processor.process(
+            networkId,
+            IrcEvent.Raw(
+                IrcMessage.parse("@+draft/unreact=👍;+reply=m1 :BOB!u@h TAGMSG #chan"),
+            ),
+        )
+
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        val rows = db.reactionDao().observeFor(buffer.id, listOf("m1")).first()
+        assertEquals(listOf("🎉"), rows.map { it.emoji })
+    }
+
+    @Test
+    fun accountReactionEchoReconcilesOptimisticNickKeyWithTargetedMutation() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "m1"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "parent",
+            isSelf = false, replyToMsgid = null,
+        ))
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        db.reactionDao().upsert(
+            io.github.trevarj.motd.data.db.ReactionEntity(
+                bufferId = buffer.id,
+                targetMsgid = "m1",
+                actorKey = "nick:bob",
+                sender = "bob",
+                emoji = "👍",
+                serverTime = 1,
+            ),
+        )
+
+        processor.process(networkId, IrcEvent.TagMessage(
+            ctx = ctx(time = 2, account = "BobAccount"), source = Prefix("BOB"), target = "#chan",
+            typing = null, reactEmoji = "👍", reactTargetMsgid = "m1",
+        ))
+
+        val echoed = db.reactionDao().observeFor(buffer.id, listOf("m1")).first().single()
+        assertEquals("account:BobAccount", echoed.actorKey)
+        assertEquals("BOB", echoed.sender)
+
+        processor.process(networkId, IrcEvent.AccountChanged("bob", "BobAccount"))
+        processor.process(networkId, IrcEvent.TagMessage(
+            ctx = ctx(time = 3), source = Prefix("bob"), target = "#chan",
+            typing = null, reactEmoji = "👍", reactTargetMsgid = "m1",
+        ))
+        assertEquals(
+            "account:BobAccount",
+            db.reactionDao().observeFor(buffer.id, listOf("m1")).first().single().actorKey,
+        )
+
+        processor.process(
+            networkId,
+            IrcEvent.Raw(
+                IrcMessage.parse(
+                    "@+draft/unreact=👍;+reply=m1 :bob!u@h TAGMSG #chan",
+                ),
+            ),
+        )
+        assertTrue(db.reactionDao().observeFor(buffer.id, listOf("m1")).first().isEmpty())
+    }
+
+    @Test
+    fun migratedLegacyReactionAliasesAreCleanedPerEmojiWithoutScanningOtherReactions() = runTest {
+        processor.process(networkId, IrcEvent.ChatMessage(
+            ctx = ctx(msgid = "m1"), kind = IrcEvent.ChatKind.PRIVMSG,
+            source = Prefix("alice"), target = "#chan", text = "parent",
+            isSelf = false, replyToMsgid = null,
+        ))
+        val buffer = db.bufferDao().byName(networkId, "#chan")!!
+        val legacyActor = "nick:bob\u0000legacy:7"
+        db.reactionDao().upsert(
+            ReactionEntity(bufferId = buffer.id, targetMsgid = "m1", actorKey = legacyActor,
+                sender = "BOB", emoji = "one", serverTime = 1),
+        )
+        db.reactionDao().upsert(
+            ReactionEntity(bufferId = buffer.id, targetMsgid = "m1", actorKey = legacyActor,
+                sender = "BOB", emoji = "two", serverTime = 2),
+        )
+
+        processor.process(networkId, IrcEvent.TagMessage(
+            ctx = ctx(time = 3), source = Prefix("Bob"), target = "#chan",
+            typing = null, reactEmoji = "one", reactTargetMsgid = "m1",
+        ))
+
+        var rows = db.reactionDao().observeFor(buffer.id, listOf("m1")).first()
+        assertEquals("nick:bob", rows.single { it.emoji == "one" }.actorKey)
+        assertEquals(legacyActor, rows.single { it.emoji == "two" }.actorKey)
+
+        processor.process(
+            networkId,
+            IrcEvent.Raw(IrcMessage.parse("@+draft/unreact=one;+reply=m1 :BOB!u@h TAGMSG #chan")),
+        )
+
+        rows = db.reactionDao().observeFor(buffer.id, listOf("m1")).first()
+        assertEquals(listOf("two"), rows.map { it.emoji })
+        assertEquals(legacyActor, rows.single().actorKey)
+    }
+
+    @Test
     fun queryHistoryReactionsAndUnreactionsFollowBatchPeerAcrossNickChanges() = runTest {
         processor.process(
             networkId,
@@ -727,12 +956,13 @@ class EventProcessorTest {
         val reactions = db.reactionDao().observeFor(buffer.id, listOf("late-parent")).first()
         assertEquals("👍", reactions.single().emoji)
         assertEquals("bob", reactions.single().sender)
+        assertEquals(db.messageDao().byMsgid(buffer.id, "late-parent")?.id, reactions.single().targetEventId)
     }
 
     @Test
     fun ownReactionEcho_reconcilesOntoOptimisticRow_withoutDuplicating() = runTest {
         // Auto-create the buffer and seed the optimistic own-reaction row the way sendReact does
-        // (upsert keyed by bufferId+targetMsgid+sender) before the server echo arrives.
+        // (upsert keyed by bufferId+targetMsgid+actorKey+emoji) before the server echo arrives.
         processor.process(networkId, IrcEvent.ChatMessage(
             ctx = ctx(msgid = "m1"), kind = IrcEvent.ChatKind.PRIVMSG,
             source = Prefix("alice"), target = "#chan", text = "hi",
@@ -741,7 +971,8 @@ class EventProcessorTest {
         val buffer = db.bufferDao().byName(networkId, "#chan")!!
         db.reactionDao().upsert(
             io.github.trevarj.motd.data.db.ReactionEntity(
-                bufferId = buffer.id, targetMsgid = "m1", sender = "me", emoji = "👍", serverTime = 5,
+                bufferId = buffer.id, targetMsgid = "m1", actorKey = "nick:me",
+                sender = "me", emoji = "👍", serverTime = 5,
             ),
         )
         // Server echoes our own react back with different nick casing; IRC casefolding must still
@@ -2225,6 +2456,147 @@ class EventProcessorTest {
             IrcEvent.ChatMessage(ctx("post-history", 30_000), IrcEvent.ChatKind.PRIVMSG, Prefix("Alice"), "#room", "hello me", false, null),
         )
         assertEquals(listOf("hello me"), notifications)
+    }
+
+    @Test
+    fun protocolPageUsesPrimaryMetadataForCursorAndRestoresGenericHistoryWrites() = runTest {
+        val context = IrcEvent.ChatMessage(
+            ctx("context", 50), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"), "#page",
+            "context", false, null,
+        )
+        val primary = IrcEvent.ChatMessage(
+            ctx("PrimaryCase", 100), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"), "#page",
+            "primary", false, null,
+        )
+        processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#page", limit = 50),
+            ChatHistoryResponse.Messages(
+                events = listOf(context, primary),
+                oldest = ChatHistoryReference("PrimaryCase", 100),
+                newest = ChatHistoryReference("PrimaryCase", 100),
+                endOfHistory = false,
+                primaryMessageCount = 1,
+            ),
+        )
+
+        val page = db.bufferDao().byName(networkId, "#page")!!
+        assertEquals(
+            HistoryCursorEntity(page.id, "PrimaryCase", 100, "PrimaryCase", 100, false),
+            db.historyCursorDao().byRoom(page.id),
+        )
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "#other",
+                listOf(
+                    IrcEvent.ChatMessage(
+                        ctx("other", 25), IrcEvent.ChatKind.PRIVMSG, Prefix("bob"), "#other",
+                        "other", false, null,
+                    ),
+                ),
+            ),
+        )
+        val other = db.bufferDao().byName(networkId, "#other")!!
+        assertEquals("other", db.historyCursorDao().byRoom(other.id)?.oldestMsgid)
+        assertEquals("PrimaryCase", db.historyCursorDao().byRoom(page.id)?.oldestMsgid)
+    }
+
+    @Test
+    fun protocolPageCompletionIsDirectional() = runTest {
+        val empty = ChatHistoryResponse.Messages(
+            events = emptyList(),
+            oldest = null,
+            newest = null,
+            endOfHistory = true,
+            primaryMessageCount = 0,
+        )
+        val incompleteRequests = listOf(
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.AFTER, "#after", bound1 = "msgid=x"),
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.AROUND, "#around", bound1 = "msgid=x"),
+            ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.BETWEEN,
+                "#between",
+                bound1 = "msgid=x",
+                bound2 = "msgid=y",
+            ),
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#bounded", bound1 = "msgid=x"),
+        )
+
+        incompleteRequests.forEach { request ->
+            val roomId = processor.persistHistoryPage(networkId, request, empty)
+            assertFalse(db.bufferDao().observeById(roomId)!!.historyComplete)
+            assertFalse(db.historyCursorDao().byRoom(roomId)!!.historyComplete)
+        }
+
+        listOf(
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.BEFORE, "#before", bound1 = "msgid=x"),
+            ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#latest"),
+        ).forEach { request ->
+            val roomId = processor.persistHistoryPage(networkId, request, empty)
+            assertTrue(db.bufferDao().observeById(roomId)!!.historyComplete)
+            assertTrue(db.historyCursorDao().byRoom(roomId)!!.historyComplete)
+        }
+    }
+
+    @Test
+    fun protocolPagePreservesPostMergeWinnerCursorExtents() = runTest {
+        val store = BufferStore(db)
+        val winner = store.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
+        store.bindQueryIdentity(winner.id, networkId, "alice", "Alice", "shared-account")
+        val loser = store.getOrCreate(networkId, "bob", "Bob", BufferType.QUERY)
+        db.historyCursorDao().upsert(
+            HistoryCursorEntity(
+                roomId = winner.id,
+                newestMsgid = "winner-newest",
+                newestServerTime = 1_000,
+                oldestMsgid = "winner-oldest",
+                oldestServerTime = 100,
+            ),
+        )
+        db.historyCursorDao().upsert(
+            HistoryCursorEntity(
+                roomId = loser.id,
+                newestMsgid = "loser-newest",
+                newestServerTime = 800,
+                oldestMsgid = "loser-oldest",
+                oldestServerTime = 300,
+            ),
+        )
+        val historyMessage = IrcEvent.ChatMessage(
+            ctx(msgid = "page", time = 200, account = "shared-account"),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("Bob"),
+            "me",
+            "merged history",
+            false,
+            null,
+        )
+
+        val roomId = processor.persistHistoryPage(
+            networkId,
+            ChatHistoryRequest(
+                ChatHistoryRequest.Subcommand.BEFORE,
+                "bob",
+                bound1 = "msgid=loser-oldest",
+            ),
+            ChatHistoryResponse.Messages(
+                events = listOf(historyMessage),
+                oldest = ChatHistoryReference("page", 200),
+                newest = ChatHistoryReference("page", 200),
+                endOfHistory = false,
+                primaryMessageCount = 1,
+            ),
+        )
+
+        assertEquals(winner.id, roomId)
+        val cursor = db.historyCursorDao().byRoom(winner.id)
+        assertEquals("winner-oldest", cursor?.oldestMsgid)
+        assertEquals(100L, cursor?.oldestServerTime)
+        assertEquals("winner-newest", cursor?.newestMsgid)
+        assertEquals(1_000L, cursor?.newestServerTime)
+        assertNull(db.historyCursorDao().byRoom(loser.id))
     }
 
     @Test
