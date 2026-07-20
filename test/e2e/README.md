@@ -27,7 +27,7 @@ runs its own unit, lint, and FOSS release build checks.
 
 ## Prerequisites
 
-- Enter the project environment with `nix develop`; it supplies JDK 17 and
+- Enter the project environment with `nix develop`; it supplies JDK 21 and
   Android platform tools. Do not install or invoke a separate host SDK.
 - The local headless commands require Linux KVM access. Their first run enters
   the opt-in `.#emulator` shell and fetches the pinned API 34 AOSP image; normal

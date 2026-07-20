@@ -1,0 +1,6 @@
+[submodule "third_party/sing-box/source"]
+	path = third_party/sing-box/source
+	url = https://github.com/SagerNet/sing-box.git
+[submodule "third_party/gomobile"]
+	path = third_party/gomobile
+	url = https://github.com/SagerNet/gomobile.git

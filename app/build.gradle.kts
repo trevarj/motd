@@ -257,7 +257,7 @@ val verifyLibboxArtifact by tasks.registering(VerifyLibboxArtifact::class) {
     aar.set(libboxAar)
     manifest.set(libboxManifest)
     expectedVersion.set("v1.13.12")
-    expectedSha256.set("ddab37d0bcbf6ad20a1cdc8429abe144fdbd731f0c1a05bb6a70a2c61cb196b3")
+    expectedSha256.set("cdb8eef80c3792df860094759ab0f8b8ecd73d595cec4c80f4526c1cae8ebdae")
     enforcePinnedSha256.set(!libboxSourceBuild)
 }
 
@@ -265,7 +265,7 @@ tasks.matching { it.name == "check" || it.name.startsWith("assemble") }.configur
     dependsOn(verifyLibboxArtifact)
 }
 
-kotlin { jvmToolchain(17) }
+kotlin { jvmToolchain(21) }
 
 dependencies {
     implementation(project(":irc"))

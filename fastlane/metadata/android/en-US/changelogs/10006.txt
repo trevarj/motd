@@ -1,0 +1,2 @@
+- Pinned libbox source dependencies as Git submodules for F-Droid builds.
+- Updated the source and Android build environments to OpenJDK 21.

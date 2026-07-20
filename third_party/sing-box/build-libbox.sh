@@ -20,7 +20,7 @@ android_platform="${LIBBOX_ANDROID_PLATFORM:-android/arm64}"
 # shellcheck disable=SC1090
 source "$lock_file"
 
-for required in git go java make sha256sum tar unzip; do
+for required in cp git go head java make sed sha256sum tar unzip; do
   command -v "$required" >/dev/null || {
     echo "missing $required; run nix develop .#libbox -c $0" >&2
     exit 1
@@ -41,6 +41,22 @@ else
   echo "could not determine Go version: $go_version_output" >&2
   exit 1
 fi
+export GOTOOLCHAIN=local
+
+if [[ -n "${JAVA_HOME:-}" ]]; then
+  java_command="$JAVA_HOME/bin/java"
+else
+  java_command="$(command -v java)"
+fi
+[[ -x "$java_command" ]] || {
+  echo "Java executable is missing: $java_command" >&2
+  exit 1
+}
+java_version_output="$("$java_command" --version 2>&1 | head -n 1)"
+[[ "$java_version_output" == *"openjdk $JAVA_VERSION"* ]] || {
+  echo "OpenJDK $JAVA_VERSION is required (found $java_version_output)" >&2
+  exit 1
+}
 
 offline="${LIBBOX_OFFLINE:-0}"
 if [[ "$offline" == "1" ]]; then
@@ -232,14 +248,34 @@ if [[ "${LIBBOX_PREPARE_NDK_ONLY:-}" == "1" ]]; then
 fi
 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/motd-libbox.XXXXXX")"
-trap 'rm -rf "$work_dir"' EXIT
-source_dir="${LIBBOX_SOURCE_DIR:-$work_dir/sing-box}"
+patched_java_check_file=""
+java_check_backup=""
+cleanup_work_dir() {
+  if [[ -n "$patched_java_check_file" && -f "$java_check_backup" ]]; then
+    cp "$java_check_backup" "$patched_java_check_file"
+  fi
+  rm -rf "$work_dir"
+}
+trap cleanup_work_dir EXIT
+
+source_dir="${LIBBOX_SOURCE_DIR:-}"
+source_checkout=0
+[[ -z "$source_dir" ]] || source_checkout=1
+if [[ -z "$source_dir" && -e "$root_dir/third_party/sing-box/source/.git" ]]; then
+  source_dir="$root_dir/third_party/sing-box/source"
+  source_checkout=1
+fi
+[[ -n "$source_dir" ]] || source_dir="$work_dir/sing-box"
 source_archive="${LIBBOX_SOURCE_ARCHIVE:-}"
 android_source_archive="${LIBBOX_ANDROID_SOURCE_ARCHIVE:-}"
 android_source_dir="${LIBBOX_ANDROID_SOURCE_DIR:-}"
 gomobile_source_archive="${LIBBOX_GOMOBILE_SOURCE_ARCHIVE:-}"
+if [[ -z "${GOMOBILE_SOURCE_DIR:-}" && -z "$gomobile_source_archive" &&
+  -e "$root_dir/third_party/gomobile/.git" ]]; then
+  export GOMOBILE_SOURCE_DIR="$root_dir/third_party/gomobile"
+fi
 
-if [[ "$offline" == "1" && -z "${LIBBOX_SOURCE_DIR:-}" &&
+if [[ "$offline" == "1" && "$source_checkout" == "0" &&
   -z "$source_archive" && -z "$android_source_archive" ]]; then
   echo "offline libbox builds require LIBBOX_SOURCE_DIR or both source archives" >&2
   exit 1
@@ -306,8 +342,8 @@ if [[ -n "$source_archive" || -n "$android_source_archive" ]]; then
   GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
     git -C "$source_dir" commit --quiet --message "$SING_BOX_VERSION source archive"
   git -C "$source_dir" tag "$SING_BOX_VERSION"
-elif [[ -n "${LIBBOX_SOURCE_DIR:-}" ]]; then
-  source_dir="$(cd "$LIBBOX_SOURCE_DIR" && pwd)"
+elif ((source_checkout)); then
+  source_dir="$(cd "$source_dir" && pwd)"
   [[ -e "$source_dir/.git" ]] || {
     echo "LIBBOX_SOURCE_DIR must be a git checkout" >&2
     exit 1
@@ -378,6 +414,27 @@ else
     echo "Android submodule source archive verification failed" >&2
     exit 1
   }
+fi
+
+# sing-box v1.13.12 unnecessarily rejects newer JDKs before invoking gomobile. MOTD validates
+# the exact JDK above, then temporarily updates that guard without changing the pinned source
+# checkout or archive provenance. The original file is restored when the build exits.
+java_check_file="$source_dir/cmd/internal/build_libbox/main.go"
+[[ -f "$java_check_file" ]] || {
+  echo "sing-box Java version check is missing: $java_check_file" >&2
+  exit 1
+}
+java_check_backup="$work_dir/build-libbox-main.go"
+cp "$java_check_file" "$java_check_backup"
+patched_java_check_file="$java_check_file"
+if grep -F 'strings.Contains(javaVersion, "openjdk 17")' "$java_check_file" >/dev/null; then
+  sed -i \
+    -e 's/strings.Contains(javaVersion, "openjdk 17")/strings.Contains(javaVersion, "openjdk 21")/' \
+    -e 's/java version should be openjdk 17/java version should be openjdk 21/' \
+    "$java_check_file"
+elif ! grep -F 'strings.Contains(javaVersion, "openjdk 21")' "$java_check_file" >/dev/null; then
+  echo "unrecognized sing-box Java version check" >&2
+  exit 1
 fi
 
 [[ -f "$source_dir/go.mod" && -f "$source_dir/go.sum" ]] || {
@@ -467,6 +524,7 @@ sing-box-version=$SING_BOX_VERSION
 sing-box-commit=$SING_BOX_COMMIT
 android-submodule-commit=$ANDROID_SUBMODULE_COMMIT
 go-version=$GO_VERSION
+java-version=$JAVA_VERSION
 gomobile-version=$GOMOBILE_VERSION
 gomobile-commit=${GOMOBILE_COMMIT:-unknown}
 android-ndk-version=$ANDROID_NDK_VERSION

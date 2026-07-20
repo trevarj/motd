@@ -17,7 +17,7 @@ prebuild:
 ```
 
 Release tags use `vMAJOR.MINOR.PATCH`. The current deterministic source-build
-defaults are `0.10.5` and `10005`; the F-Droid metadata is authoritative for
+defaults are `0.10.6` and `10006`; the F-Droid metadata is authoritative for
 each published build. A recipe should use:
 
 ```yaml
@@ -36,10 +36,11 @@ The application entry in the fdroiddata fork must pin the source explicitly:
 RepoType: git
 Repo: https://github.com/trevarj/motd.git
 Builds:
-  - versionName: 0.10.5
-    versionCode: 10005
+  - versionName: 0.10.6
+    versionCode: 10006
     commit: <full upstream commit SHA>
     subdir: app
+    submodules: true
 ```
 
 Replace the placeholder with the full SHA of the merged upstream commit before
@@ -49,36 +50,39 @@ running `fdroid readmeta`; never use a branch name or abbreviated SHA.
 
 F-Droid's `rm` step removes the checked-in AAR before scanning. The `build`
 step, which runs after scanning and source-tarball creation, regenerates the
-AAR in the build directory from four pinned source libraries:
+AAR in the build directory from the recursively initialized upstream
+submodules and F-Droid's pinned Go toolchain:
 
 ```yaml
 rm: app/libs/libbox.aar,app/src/google,firebase
 ndk: 28.0.13004108
-srclibs: SingBox@1086ab2563320e0da0c23b3a491d8dfa0939dff4,SingBoxAndroid@772879ce9cd37c29e377d4d44d0efee12662948d,GoMobile@b2c30f47825831593d6980af8191527490f9c968,go@go1.25.12
+submodules: true
+srclibs: go@go1.25.12
 build:
-  - (cd "$$go$$/src" && ./make.bash)
+  - pushd "$$go$$/src"
+  - ./make.bash
+  - popd
   - export GOROOT="$$go$$"
   - export PATH="$$go$$/bin:$PATH"
-  - export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-  - export LIBBOX_SOURCE_DIR="$$SingBox$$"
-  - export LIBBOX_ANDROID_SOURCE_DIR="$$SingBoxAndroid$$"
-  - export GOMOBILE_SOURCE_DIR="$$GoMobile$$"
+  - export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
   - export LIBBOX_OUTPUT_DIR="$PWD/build/generated/libbox"
   - export LIBBOX_NDK_HOME="$$NDK$$"
   - export LIBBOX_PATCH_NDK_HOST_TOOLS=0
-  - export LIBBOX_OFFLINE=1
   - ../third_party/sing-box/build-libbox.sh
 gradle: foss
 gradleprops: motdLibboxSource=true,motdLibboxAar=build/generated/libbox/libbox.aar,motdLibboxManifest=build/generated/libbox/libbox-v1.13.12.manifest
 ```
 
-The four source libraries need matching files under `srclibs/` in the
-fdroiddata fork. Their repositories and revisions are the values recorded in
+The application checkout pins sing-box and gomobile as Git submodules. The
+sing-box checkout in turn pins its Android client submodule, so F-Droid's
+recursive submodule initialization supplies all three exact revisions without
+custom `srclibs` metadata. Their revisions are also recorded in
 [`third_party/sing-box/source.lock`](../third_party/sing-box/source.lock).
-The source builder verifies each checkout's commit and archive hash, requires
-Go `1.25.12`, validates NDK `28.0.13004108`, and rejects any JNI entry other than
-`jni/arm64-v8a/libbox.so`. It does not download Go modules or patch the shared
-F-Droid NDK in offline mode.
+The source builder verifies each checkout, requires Go `1.25.12` and OpenJDK
+21, validates NDK `28.0.13004108`, and rejects any JNI entry other than
+`jni/arm64-v8a/libbox.so`. Go fetches the checksummed modules needed by the
+normal build; no redundant `go mod download` step is required. The shared
+F-Droid NDK is validated but not patched.
 
 The Gradle verifier remains strict for normal GitHub builds: the tracked AAR
 must match its pinned SHA-256. `motdLibboxSource=true` relaxes only that
@@ -125,12 +129,12 @@ update.
 ## Submission checks
 
 Run these commands from the fdroiddata fork after adding the application
-metadata and its four `srclibs` files:
+metadata:
 
 ```sh
 fdroid readmeta io.github.trevarj.motd
 fdroid lint io.github.trevarj.motd
-fdroid build --test --verbose io.github.trevarj.motd:10005
+fdroid build --test --verbose io.github.trevarj.motd:10006
 ```
 
 The last check is expected to be performed on an F-Droid buildserver because

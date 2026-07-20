@@ -1,5 +1,5 @@
 {
-  description = "MOTD dev shell: JDK 17 + Android SDK (CI remains the canonical build env)";
+  description = "MOTD dev shell: JDK 21 + Android SDK (CI remains the canonical build env)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
@@ -51,8 +51,8 @@
         emulatorSdkRoot = "${emulatorSdk}/libexec/android-sdk";
       in {
         devShells.default = pkgs.mkShell {
-          packages = [ pkgs.jdk17 pkgs.nodejs_22 androidSdk ];
-          JAVA_HOME = pkgs.jdk17.home;
+          packages = [ pkgs.jdk21 pkgs.nodejs_22 androidSdk ];
+          JAVA_HOME = pkgs.jdk21.home;
           ANDROID_HOME = sdkRoot;
           ANDROID_SDK_ROOT = sdkRoot;
           # AGP downloads a dynamically-linked aapt2 that won't run outside FHS;
@@ -60,8 +60,8 @@
           GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2";
         };
         devShells.emulator = pkgs.mkShell {
-          packages = [ pkgs.jdk17 emulatorSdk ];
-          JAVA_HOME = pkgs.jdk17.home;
+          packages = [ pkgs.jdk21 emulatorSdk ];
+          JAVA_HOME = pkgs.jdk21.home;
           ANDROID_HOME = emulatorSdkRoot;
           ANDROID_SDK_ROOT = emulatorSdkRoot;
           LANG = "C.UTF-8";
@@ -92,8 +92,8 @@
           # /lib64/ld-linux-x86-64.so.2.  Guix does not provide that path, so
           # build-libbox.sh patches the verified *extracted cache* (never the
           # downloaded archive) to use these pinned Nix runtime paths.
-          packages = [ libboxPkgs.go_1_25 libboxPkgs.git libboxPkgs.gnumake libboxPkgs.unzip libboxPkgs.jdk17 libboxPkgs.patchelf libboxPkgs.zlib ];
-          JAVA_HOME = libboxPkgs.jdk17.home;
+          packages = [ libboxPkgs.go_1_25 libboxPkgs.git libboxPkgs.gnumake libboxPkgs.unzip libboxPkgs.jdk21 libboxPkgs.patchelf libboxPkgs.zlib ];
+          JAVA_HOME = libboxPkgs.jdk21.home;
           LIBBOX_NDK_HOST_LOADER = libboxPkgs.stdenv.cc.bintools.dynamicLinker;
           LIBBOX_NDK_HOST_RPATH = "${libboxPkgs.zlib}/lib:${libboxPkgs.stdenv.cc.cc.lib}/lib";
         };

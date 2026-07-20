@@ -62,8 +62,11 @@ Requires Android 8.0 (API 26) or newer.
 
 GitHub Actions defines the canonical CI jobs (see
 [`.github/workflows/`](.github/workflows/)). For local work, the Nix flake
-provides JDK 17 and the Android SDK; direnv loads it via `.envrc`, or run the
+provides JDK 21 and the Android SDK; direnv loads it via `.envrc`, or run the
 commands under `nix develop`.
+
+Initialize submodules recursively before rebuilding the bundled libbox AAR:
+`git submodule update --init --recursive`.
 
 ```sh
 nix develop -c ./gradlew :irc:test               # protocol tests (pure JVM)

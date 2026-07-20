@@ -19,9 +19,10 @@ the exact upstream sources remain at the pinned public revisions below.
 - gomobile source archive SHA-256:
   `ecbdc425d07884ba2895985d77a1a5fb9c443f93ceb71acaa894ca7609a4322a`
 - Go toolchain: `go1.25.12`
+- Java toolchain: OpenJDK 21
 - Vendored artifact: `app/libs/libbox.aar`, **arm64-v8a-only**, used by the
   main Android application build
-- Artifact SHA-256: `ddab37d0bcbf6ad20a1cdc8429abe144fdbd731f0c1a05bb6a70a2c61cb196b3`
+- Artifact SHA-256: `cdb8eef80c3792df860094759ab0f8b8ecd73d595cec4c80f4526c1cae8ebdae`
 - Artifact build manifest: `app/libs/libbox-v1.13.12.manifest`
 
 ## Controlled build
@@ -61,7 +62,7 @@ that environment set `LIBBOX_NDK_HOME` (or use `ANDROID_NDK_HOME`) and
 without requiring the Nix archive marker or mutating the shared SDK.
 
 `source.lock` pins every source revision, source-tree SHA-256, and the exact Go
-toolchain. The script checks those values before building, uses sing-box's
+and Java toolchains. The script checks those values before building, uses sing-box's
 supported `android/arm64` platform selector, and verifies that the AAR contains only
 `jni/arm64-v8a/libbox.so`, and writes it to `app/libs/libbox.aar` plus its
 SHA-256 manifest at `app/libs/libbox-v1.13.12.manifest` by default. Set
@@ -82,8 +83,9 @@ without prior consent.
 
 ## Complete corresponding source and release procedure
 
-1. Clone the exact sing-box commit and initialize the Android submodule at the
-   pinned revision. Verify both source-tree hashes in `source.lock`.
+1. Initialize the repository submodules recursively. The top-level gitlinks pin
+   sing-box and gomobile, while sing-box pins its Android client submodule. The
+   build script verifies all revisions against `source.lock`.
 2. Use `build-libbox.sh` with the pinned Go/gomobile and NDK inputs described
    above. The script verifies the AAR ABI and writes the checked artifact hash
    into `app/libs/libbox-v1.13.12.manifest`.
@@ -113,8 +115,12 @@ In archive mode the build script verifies all three pinned archive hashes, then 
 deterministic local Git metadata tagged with the pinned sing-box and gomobile versions. Upstream's
 libbox builder reads the sing-box tag to embed the same release version string; the archive hashes
 remain the source-provenance authority. For an offline build from F-Droid-provisioned source
-checkouts, use `LIBBOX_SOURCE_DIR`, `LIBBOX_ANDROID_SOURCE_DIR`, and `GOMOBILE_SOURCE_DIR` with
-`LIBBOX_OFFLINE=1`. The script creates gomobile's empty toolchain directory
+checkouts outside the repository, use `LIBBOX_SOURCE_DIR`,
+`LIBBOX_ANDROID_SOURCE_DIR`, and `GOMOBILE_SOURCE_DIR` with `LIBBOX_OFFLINE=1`.
+By default, initialized `third_party/sing-box/source` and
+`third_party/gomobile` submodules are used directly. The script validates
+OpenJDK 21 and temporarily adjusts sing-box v1.13.12's overly strict Java 17
+guard after source verification, restoring the checkout on exit. It creates gomobile's empty toolchain directory
 directly because this build does not use OpenAL; it never runs gomobile's
 unpinned `gobind@latest` initialization step.
 

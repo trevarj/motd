@@ -9,7 +9,7 @@ transport:
 - sing-box version: `v1.13.12`
 - Delivery: main Android application APK
 - ABI: `arm64-v8a` only; unsupported ABI variants are not built
-- SHA-256: `ddab37d0bcbf6ad20a1cdc8429abe144fdbd731f0c1a05bb6a70a2c61cb196b3`
+- SHA-256: `cdb8eef80c3792df860094759ab0f8b8ecd73d595cec4c80f4526c1cae8ebdae`
 - Build manifest: `app/libs/libbox-v1.13.12.manifest`
 - Source-build tool: [SagerNet/gomobile](https://github.com/SagerNet/gomobile),
   `v0.1.12` at commit
