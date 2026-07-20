@@ -581,6 +581,37 @@ class EventProcessorTest {
     }
 
     @Test
+    fun revivedQueryRejectsDiscardBoundaryReplayThatLostItsMsgid() = runTest {
+        val old = IrcEvent.ChatMessage(
+            ctx("m-old", 100),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("bob"),
+            "me",
+            "old",
+            false,
+            null,
+        )
+        processor.process(networkId, old)
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+
+        processor.process(
+            networkId,
+            old.copy(ctx = ctx("m-new", 200), text = "new"),
+        )
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "bob",
+                listOf(old.copy(ctx = ctx(null, 100).copy(batchId = "history"))),
+            ),
+        )
+
+        assertFalse(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertEquals(listOf("new"), pagingList(query.id).map { it.text })
+    }
+
+    @Test
     fun dismissedQueryAlwaysRevivesForPushDespiteServerClockSkew() = runTest {
         processor.process(
             networkId,

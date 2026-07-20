@@ -623,7 +623,11 @@ class EventProcessor @Inject constructor(
         }
     }
 
-    /** Keep discarded history out permanently; ambiguous equal-time events are retained. */
+    /**
+     * Keep discarded history out permanently. A different msgid at the exact floor remains
+     * potentially new, but an equal-time replay with no msgid cannot be distinguished from the
+     * discarded boundary and must stay forgotten.
+     */
     private suspend fun shouldDiscardHistoricalEvent(roomId: RoomId, event: IrcEvent): Boolean {
         val room = bufferDao.observeById(roomId)?.takeIf { it.type == BufferType.QUERY }
             ?: return false
@@ -649,7 +653,9 @@ class EventProcessor @Inject constructor(
             return true
         }
         val floor = room.historyDiscardedThroughTime ?: return false
-        return context.serverTimeSource == ServerTimeSource.TAG && context.serverTime < floor
+        return context.serverTimeSource == ServerTimeSource.TAG && (
+            context.serverTime < floor || context.serverTime == floor && msgid == null
+        )
     }
 
     private suspend fun isExactDiscardedEvent(roomId: RoomId, context: MessageContext): Boolean {
