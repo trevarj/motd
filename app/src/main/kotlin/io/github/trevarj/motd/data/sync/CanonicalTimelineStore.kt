@@ -39,6 +39,8 @@ data class TimelineObservation(
     val batchExactOrdinal: Int? = null,
     /** Protocol page writers persist exact primary boundaries after ingesting all context events. */
     val persistHistoryCursor: Boolean = true,
+    /** The observation has enough protocol context to replace, rather than only promote, direction. */
+    val selfAttributionAuthoritative: Boolean = false,
 )
 
 sealed interface IngestResult {
@@ -347,7 +349,12 @@ class CanonicalTimelineStore @Inject constructor(
             canonical = coalesce(canonical, provisionalCandidate, incoming)
         }
 
-        val enriched = enrich(canonical, incoming, observation.timeProvenance)
+        val enriched = enrich(
+            canonical,
+            incoming,
+            observation.timeProvenance,
+            observation.selfAttributionAuthoritative,
+        )
         if (enriched != canonical) {
             dao.updateEvent(enriched)
             db.bufferDao().retimeLocalReadAnchor(enriched.id, enriched.serverTime)
@@ -462,6 +469,7 @@ class CanonicalTimelineStore @Inject constructor(
         existing: TimelineEventEntity,
         incoming: TimelineEventEntity,
         provenance: TimeProvenance,
+        selfAttributionAuthoritative: Boolean = false,
     ): TimelineEventEntity {
         val authoritative = provenance == TimeProvenance.SERVER_TAG
         return existing.copy(
@@ -480,7 +488,11 @@ class CanonicalTimelineStore @Inject constructor(
                 authoritative && !existing.serverTimeAuthoritative -> incoming.text
                 else -> existing.text
             },
-            isSelf = existing.isSelf || incoming.isSelf,
+            isSelf = if (selfAttributionAuthoritative) {
+                incoming.isSelf
+            } else {
+                existing.isSelf || incoming.isSelf
+            },
             hasMention = existing.hasMention || incoming.hasMention,
             replyToMsgid = existing.replyToMsgid ?: incoming.replyToMsgid,
             replyToEventId = existing.replyToEventId ?: incoming.replyToEventId,

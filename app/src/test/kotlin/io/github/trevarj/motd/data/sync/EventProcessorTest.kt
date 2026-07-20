@@ -809,6 +809,66 @@ class EventProcessorTest {
     }
 
     @Test
+    fun historicalIncomingPmIgnoresCurrentNickCollisionInMapperSelfFlag() = runTest {
+        processor.onRegistered(networkId, "newMe", mapOf("CASEMAPPING" to "rfc1459"))
+        val historical = IrcEvent.ChatMessage(
+            ctx(msgid = "peer-used-current-self-nick", time = 4_200).copy(
+                account = "bob-account",
+                batchId = "bob-history",
+            ),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("newMe"),
+            "oldMe",
+            "the peer used my current nick in the past",
+            true,
+            null,
+        )
+
+        processor.process(networkId, IrcEvent.HistoryBatch("Bob", listOf(historical)))
+
+        val bob = db.bufferDao().byName(networkId, "bob")!!
+        val row = pagingList(bob.id).single()
+        assertFalse(row.isSelf)
+        assertEquals("newMe", row.sender)
+        assertEquals("bob-account", row.senderAccount)
+        assertNull(db.bufferDao().byName(networkId, "oldme"))
+    }
+
+    @Test
+    fun historicalQueryReplayRepairsIncorrectSelfAttribution() = runTest {
+        processor.onRegistered(networkId, "newMe", mapOf("CASEMAPPING" to "rfc1459"))
+        val incorrectlyAttributed = IrcEvent.ChatMessage(
+            ctx(msgid = "repair-query-direction", time = 4_300),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("newMe"),
+            "Bob",
+            "repair my direction",
+            true,
+            null,
+        )
+        processor.processPush(networkId, incorrectlyAttributed)
+        val bob = db.bufferDao().byName(networkId, "bob")!!
+        assertTrue(pagingList(bob.id).single().isSelf)
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "Bob",
+                listOf(
+                    incorrectlyAttributed.copy(
+                        ctx = incorrectlyAttributed.ctx.copy(batchId = "bob-history"),
+                        target = "oldMe",
+                    ),
+                ),
+            ),
+        )
+
+        val repaired = pagingList(bob.id).single()
+        assertFalse(repaired.isSelf)
+        assertEquals("repair-query-direction", repaired.msgid)
+    }
+
+    @Test
     fun accountTaggedDmMergesExistingProvisionalNickRoomIntoKnownAccount() = runTest {
         processor.process(
             networkId,

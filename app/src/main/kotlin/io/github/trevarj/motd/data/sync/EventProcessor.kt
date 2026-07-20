@@ -121,6 +121,7 @@ class EventProcessor @Inject constructor(
         val storedText: String,
         val serverNotice: Boolean,
         val sourceIsSelf: Boolean,
+        val selfAttributionAuthoritative: Boolean,
     )
 
     private data class ActiveHistoryTarget(
@@ -412,6 +413,7 @@ class EventProcessor @Inject constructor(
                         batchExactMultiplicity = multiplicity?.exact ?: 1,
                         batchExactOrdinal = nextHistoryExactOrdinal(networkId, batchKey),
                         persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
+                        selfAttributionAuthoritative = route.selfAttributionAuthoritative,
                     ),
                 )
             }
@@ -2000,18 +2002,22 @@ class EventProcessor @Inject constructor(
                 storedText = event.text,
                 serverNotice = true,
                 sourceIsSelf = false,
+                selfAttributionAuthoritative = false,
             )
         }
         val historyPeer = when {
             active?.type == BufferType.QUERY -> active.target
             else -> historyTarget?.takeIf { isDm && !isChannel(networkId, it, st) }
         }
-        // In a query CHATHISTORY batch the wire target disambiguates direction across nick
-        // changes: outgoing rows target the peer; incoming rows target any historical self nick.
-        val sourceIsSelf = event.isSelf || when (origin) {
-            EventOrigin.HISTORY ->
-                historyPeer != null && st.normalize(event.target) == st.normalize(historyPeer)
-            EventOrigin.LIVE, EventOrigin.PUSH -> st.isSelfNick(event.source.nick)
+        // In a query CHATHISTORY batch the wire target is authoritative across nick changes:
+        // outgoing rows target the peer; incoming rows target any historical self nick. EventMapper
+        // compares historical sources with the current self nick, so OR-ing its isSelf guess here
+        // can turn a peer's old message into an own message after either side reused that nick.
+        val sourceIsSelf = when {
+            origin == EventOrigin.HISTORY && historyPeer != null ->
+                st.normalize(event.target) == st.normalize(historyPeer)
+            origin == EventOrigin.HISTORY -> event.isSelf
+            else -> event.isSelf || st.isSelfNick(event.source.nick)
         }
         val bufferName = active?.target ?: if (isDm) {
             historyPeer ?: if (sourceIsSelf) event.target else event.source.nick
@@ -2052,6 +2058,7 @@ class EventProcessor @Inject constructor(
             storedText,
             serverNotice = false,
             sourceIsSelf = sourceIsSelf,
+            selfAttributionAuthoritative = origin == EventOrigin.HISTORY && historyPeer != null,
         )
     }
 
