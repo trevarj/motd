@@ -14,6 +14,7 @@ import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
+import io.github.trevarj.motd.irc.client.ChatHistoryTarget
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.client.IrcClient
@@ -177,9 +178,15 @@ class HistoryResyncCoordinator @Inject constructor(
     )
 
     private data class TargetDiscovery(
-        val targets: List<String>,
+        val targets: List<ChatHistoryTarget>,
         val status: WorkStatus,
         val highWater: Long?,
+    )
+
+    private data class SyncTarget(
+        val knownBufferId: Long?,
+        val name: String,
+        val latestMessageTime: Long?,
     )
 
     // Cancellation is non-suspending, so registration and removal share a synchronous monitor.
@@ -473,8 +480,7 @@ class HistoryResyncCoordinator @Inject constructor(
             }
             val targetPass = syncTargets(
                 networkId = networkId,
-                targets = (openBuffers + discovery.targets.map { null to it })
-                    .distinctBy { source.normalizeTarget(it.second) },
+                targets = mergeSyncTargets(openBuffers, discovery.targets, source),
                 source = source,
                 isCurrent = isCurrent,
                 // Use the last completed whole-network pass, not Room's newest row, as the
@@ -529,7 +535,7 @@ class HistoryResyncCoordinator @Inject constructor(
         lower: Long,
     ): TargetDiscovery {
         val limit = source.pageLimit().coerceAtLeast(1)
-        val targets = LinkedHashMap<String, String>()
+        val targets = LinkedHashMap<String, ChatHistoryTarget>()
         var pageUpper = upper
         var highWater: Long? = null
         var previousTie: Pair<Long, Set<String>>? = null
@@ -547,7 +553,11 @@ class HistoryResyncCoordinator @Inject constructor(
             )
             val page = response.targets
             page.forEach { target ->
-                targets.putIfAbsent(source.normalizeTarget(target.name), target.name)
+                val key = source.normalizeTarget(target.name)
+                val existing = targets[key]
+                if (existing == null || target.latestMessageTime > existing.latestMessageTime) {
+                    targets[key] = target
+                }
                 highWater = maxHighWater(highWater, target.latestMessageTime)
             }
             if (response.endOfHistory || page.isEmpty()) {
@@ -619,6 +629,31 @@ class HistoryResyncCoordinator @Inject constructor(
             }
         }
         error("unreachable")
+    }
+
+    private fun mergeSyncTargets(
+        openBuffers: List<Pair<Long, String>>,
+        discovered: List<ChatHistoryTarget>,
+        source: HistorySource,
+    ): List<SyncTarget> {
+        val targets = LinkedHashMap<String, SyncTarget>()
+        openBuffers.forEach { (bufferId, name) ->
+            targets[source.normalizeTarget(name)] = SyncTarget(bufferId, name, null)
+        }
+        discovered.forEach { target ->
+            val key = source.normalizeTarget(target.name)
+            val existing = targets[key]
+            targets[key] = if (existing == null) {
+                SyncTarget(null, target.name, target.latestMessageTime)
+            } else {
+                existing.copy(
+                    latestMessageTime = existing.latestMessageTime
+                        ?.let { maxOf(it, target.latestMessageTime) }
+                        ?: target.latestMessageTime,
+                )
+            }
+        }
+        return targets.values.toList()
     }
 
     internal suspend fun resyncBuffer(
@@ -838,7 +873,7 @@ class HistoryResyncCoordinator @Inject constructor(
 
     private suspend fun syncTargets(
         networkId: Long,
-        targets: List<Pair<Long?, String>>,
+        targets: List<SyncTarget>,
         source: HistorySource,
         isCurrent: () -> Boolean,
         reconnectBoundary: Boundary?,
@@ -853,9 +888,10 @@ class HistoryResyncCoordinator @Inject constructor(
         var inserted = 0
         var status: WorkStatus = WorkStatus.Complete
         var highWater: Long? = null
-        for ((knownBufferId, target) in targets) {
+        for (targetSpec in targets) {
             if (!isCurrent()) throw StaleConnectionException()
-            val canonicalRoomId = knownBufferId ?: if (source.isChannelTarget(target)) {
+            val target = targetSpec.name
+            val canonicalRoomId = targetSpec.knownBufferId ?: if (source.isChannelTarget(target)) {
                 continue
             } else {
                 processor.ensureHistoryQuery(networkId, target, source.normalizeTarget(target))
@@ -868,6 +904,7 @@ class HistoryResyncCoordinator @Inject constructor(
                 isCurrent,
                 includeRecentOverlap,
                 reconnectBoundary,
+                discoveredLatestMessageTime = targetSpec.latestMessageTime,
             )
             inserted += targetResult.inserted
             status = status.merge(targetResult.status)
@@ -885,6 +922,7 @@ class HistoryResyncCoordinator @Inject constructor(
         includeRecentOverlap: Boolean,
         reconnectBoundary: Boundary? = null,
         healSparseGaps: Boolean = false,
+        discoveredLatestMessageTime: Long? = null,
     ): WorkResult {
         val pageLimit = source.pageLimit()
         val bufferId = knownBufferId
@@ -893,6 +931,16 @@ class HistoryResyncCoordinator @Inject constructor(
         val discardedBoundary = room?.let {
             Boundary(it.historyDiscardedThroughMsgid, it.historyDiscardedThroughTime)
                 .takeIf { boundary -> boundary.msgid != null || boundary.serverTime != null }
+        }
+        if (room?.dismissed == true) {
+            // TARGETS reports the newest retained chat timestamp. If it did not rediscover this
+            // tombstone, or its newest activity is at/before the discard floor, requesting LATEST
+            // can only replay content the user already forgot.
+            if (discoveredLatestMessageTime == null) return WorkResult()
+            val discardedThroughTime = discardedBoundary?.serverTime
+            if (discardedThroughTime != null && discoveredLatestMessageTime <= discardedThroughTime) {
+                return WorkResult()
+            }
         }
         val storedBoundary = if (protocolCursor != null) {
             Boundary(protocolCursor.newestMsgid, protocolCursor.newestServerTime)

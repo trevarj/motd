@@ -711,6 +711,48 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun dismissedMsgidlessQueryIgnoresTargetAtExactDiscardTime() = runTest {
+        val old = directMessage("ignored", 100).copy(
+            ctx = MessageContext(null, 100, null, "batch", null),
+            text = "msgidless-old",
+        )
+        processor.process(networkId, old)
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+        syncPrefs.setLastSuccessfulSync(networkId, 150)
+
+        val shell = db.bufferDao().rawById(query.id)!!
+        assertTrue(shell.dismissed)
+        assertEquals(null, shell.historyDiscardedThroughMsgid)
+        assertEquals(100L, shell.historyDiscardedThroughTime)
+
+        val source = FakeSource { request ->
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.TARGETS ->
+                    FakeResponse(targets = listOf("bob" to 100L), endOfHistory = true)
+                ChatHistoryRequest.Subcommand.AFTER -> FakeResponse(endOfHistory = true)
+                ChatHistoryRequest.Subcommand.LATEST -> FakeResponse(
+                    events = if (request.target == "bob") listOf(old) else emptyList(),
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        assertEquals(
+            HistoryResyncState.UpToDate,
+            coordinator.resyncNetwork(
+                networkId,
+                db.bufferDao().openTargets(networkId).map { it.id to it.name },
+                source,
+            ),
+        )
+        assertTrue(db.bufferDao().rawById(query.id)!!.dismissed)
+        assertEquals(0, db.messageDao().countForBuffer(query.id))
+        assertTrue(source.requests.none { it.target == "bob" })
+    }
+
+    @Test
     fun dismissedQueryUsesLatestWhenDiscardBoundarySelectorIsUnsupported() = runTest {
         processor.process(networkId, directMessage("dm-old", 100))
         val query = db.bufferDao().byName(networkId, "bob")!!
