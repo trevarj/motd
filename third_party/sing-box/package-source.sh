@@ -66,6 +66,12 @@ git -C "$gomobile_dir" checkout --detach "$GOMOBILE_COMMIT"
 gomobile_tar="$upstream_dir/gomobile-${GOMOBILE_VERSION}.tar"
 git -C "$gomobile_dir" archive --format=tar --output="$gomobile_tar" HEAD
 
+go_dir="$work_dir/go"
+git clone --no-checkout --depth 1 --branch "$GO_VERSION" "$GO_REPOSITORY" "$go_dir"
+git -C "$go_dir" checkout --detach "$GO_COMMIT"
+go_tar="$upstream_dir/go-${GO_VERSION}.tar"
+git -C "$go_dir" archive --format=tar --output="$go_tar" HEAD
+
 [[ "$(sha256sum "$sing_box_tar" | cut -d ' ' -f1)" == "$SING_BOX_GIT_ARCHIVE_SHA256" ]] || {
   echo "sing-box source archive verification failed" >&2; exit 1;
 }
@@ -75,6 +81,9 @@ git -C "$gomobile_dir" archive --format=tar --output="$gomobile_tar" HEAD
 [[ "$(sha256sum "$gomobile_tar" | cut -d ' ' -f1)" == "$GOMOBILE_GIT_ARCHIVE_SHA256" ]] || {
   echo "gomobile source archive verification failed" >&2; exit 1;
 }
+[[ "$(sha256sum "$go_tar" | cut -d ' ' -f1)" == "$GO_GIT_ARCHIVE_SHA256" ]] || {
+  echo "Go source archive verification failed" >&2; exit 1;
+}
 
 package_name="motd-libbox-source-${release_tag}"
 package_dir="$work_dir/$package_name"
@@ -83,6 +92,7 @@ mkdir -p "$package_dir/upstream" "$motd_dir/third_party/sing-box" "$motd_dir/app
 install -m 0644 "$sing_box_tar" "$package_dir/upstream/$(basename "$sing_box_tar")"
 install -m 0644 "$android_tar" "$package_dir/upstream/$(basename "$android_tar")"
 install -m 0644 "$gomobile_tar" "$package_dir/upstream/$(basename "$gomobile_tar")"
+install -m 0644 "$go_tar" "$package_dir/upstream/$(basename "$go_tar")"
 install -m 0644 "$root_dir/LICENSE" "$motd_dir/LICENSE"
 install -m 0644 "$root_dir/THIRD_PARTY_NOTICES.md" "$motd_dir/THIRD_PARTY_NOTICES.md"
 install -m 0644 "$root_dir/flake.nix" "$motd_dir/flake.nix"
@@ -98,18 +108,26 @@ cat > "$package_dir/README.md" <<EOF
 # MOTD libbox corresponding source — ${release_tag}
 
 This archive is the complete libbox source snapshot distributed beside MOTD ${release_tag}.
-It contains the exact git archives for sing-box, its Android submodule, and gomobile, plus MOTD's
+It contains the exact git archives for Go, sing-box, its Android submodule, and gomobile, plus MOTD's
 pinned build inputs and rebuild procedure. The inner archive hashes are fixed in source.lock.
 
 To rebuild, provide the verified Android NDK r28 archive described in
-motd/third_party/sing-box/README.md, then run:
+motd/third_party/sing-box/README.md. Build Go from the included source first,
+then use that toolchain (Nix's Go is bootstrap-only):
 
     cd motd
-    LIBBOX_SOURCE_ARCHIVE=../upstream/$(basename "$sing_box_tar") \\
-    LIBBOX_ANDROID_SOURCE_ARCHIVE=../upstream/$(basename "$android_tar") \\
-    LIBBOX_GOMOBILE_SOURCE_ARCHIVE=../upstream/$(basename "$gomobile_tar") \\
-    LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28-linux.zip \\
-      nix develop .#libbox -c ./third_party/sing-box/build-libbox.sh
+    mkdir -p /tmp/motd-go-toolchain
+    tar -xf ../upstream/$(basename "$go_tar") -C /tmp/motd-go-toolchain
+    (cd /tmp/motd-go-toolchain/src && ./make.bash)
+    nix develop .#libbox -c bash -c '
+      export GOROOT=/tmp/motd-go-toolchain
+      export PATH="\$GOROOT/bin:\$PATH"
+      export LIBBOX_SOURCE_ARCHIVE=../upstream/$(basename "$sing_box_tar")
+      export LIBBOX_ANDROID_SOURCE_ARCHIVE=../upstream/$(basename "$android_tar")
+      export LIBBOX_GOMOBILE_SOURCE_ARCHIVE=../upstream/$(basename "$gomobile_tar")
+      export LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28-linux.zip
+      exec ./third_party/sing-box/build-libbox.sh
+    '
 EOF
 
 cat > "$package_dir/SOURCE-MANIFEST.txt" <<EOF
@@ -125,6 +143,10 @@ gomobile-archive=$(basename "$gomobile_tar")
 gomobile-archive-sha256=${GOMOBILE_GIT_ARCHIVE_SHA256}
 gomobile-version=${GOMOBILE_VERSION}
 gomobile-commit=${GOMOBILE_COMMIT}
+go-version=${GO_VERSION}
+go-commit=${GO_COMMIT}
+go-archive=$(basename "$go_tar")
+go-archive-sha256=${GO_GIT_ARCHIVE_SHA256}
 android-ndk-version=${ANDROID_NDK_VERSION}
 EOF
 

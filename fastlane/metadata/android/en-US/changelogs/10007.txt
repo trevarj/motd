@@ -1,0 +1,1 @@
+F-Droid builds now reproduce the release APK with the exact Go 1.25.12 source-built toolchain.

@@ -257,7 +257,7 @@ val verifyLibboxArtifact by tasks.registering(VerifyLibboxArtifact::class) {
     aar.set(libboxAar)
     manifest.set(libboxManifest)
     expectedVersion.set("v1.13.12")
-    expectedSha256.set("cdb8eef80c3792df860094759ab0f8b8ecd73d595cec4c80f4526c1cae8ebdae")
+    expectedSha256.set("63261bffaf3e6ac101a7351eed0058f7984ba356625c3ef31b6cdb21fc41245e")
     enforcePinnedSha256.set(!libboxSourceBuild)
 }
 

@@ -18,11 +18,12 @@ the exact upstream sources remain at the pinned public revisions below.
   `b2c30f47825831593d6980af8191527490f9c968`
 - gomobile source archive SHA-256:
   `ecbdc425d07884ba2895985d77a1a5fb9c443f93ceb71acaa894ca7609a4322a`
-- Go toolchain: `go1.25.12`
+- Go toolchain: `go1.25.12`, built from source commit
+  `d80d9a98f7e3a8f9b3a82d2c6079f84eb1101d46` with `src/make.bash`
 - Java toolchain: OpenJDK 21
 - Vendored artifact: `app/libs/libbox.aar`, **arm64-v8a-only**, used by the
   main Android application build
-- Artifact SHA-256: `cdb8eef80c3792df860094759ab0f8b8ecd73d595cec4c80f4526c1cae8ebdae`
+- Artifact SHA-256: `63261bffaf3e6ac101a7351eed0058f7984ba356625c3ef31b6cdb21fc41245e`
 - Artifact build manifest: `app/libs/libbox-v1.13.12.manifest`
 
 ## Controlled build
@@ -37,16 +38,27 @@ validates both archive hashes before extracting the NDK to an external cache.
 With an extracted NDK:
 
 ```sh
-LIBBOX_NDK_HOME=/path/to/android-ndk-r28 \
-  nix develop .#libbox -c ./third_party/sing-box/build-libbox.sh
+mkdir -p /tmp/motd-go
+tar -xf /path/to/go-go1.25.12.tar -C /tmp/motd-go
+(cd /tmp/motd-go/src && ./make.bash)
+nix develop .#libbox -c bash -c '
+  export GOROOT=/tmp/motd-go
+  export PATH="$GOROOT/bin:$PATH"
+  export LIBBOX_NDK_HOME=/path/to/android-ndk-r28
+  exec ./third_party/sing-box/build-libbox.sh
+'
 ```
 
 With a local archive (for example the verified one already downloaded by the
 operator):
 
 ```sh
-LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28-linux.zip \
-  nix develop .#libbox -c ./third_party/sing-box/build-libbox.sh
+nix develop .#libbox -c bash -c '
+  export GOROOT=/tmp/motd-go
+  export PATH="$GOROOT/bin:$PATH"
+  export LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28-linux.zip
+  exec ./third_party/sing-box/build-libbox.sh
+'
 ```
 
 The archive must match the URL, SHA-1, and SHA-256 pinned in `source.lock`.
@@ -62,7 +74,9 @@ that environment set `LIBBOX_NDK_HOME` (or use `ANDROID_NDK_HOME`) and
 without requiring the Nix archive marker or mutating the shared SDK.
 
 `source.lock` pins every source revision, source-tree SHA-256, and the exact Go
-and Java toolchains. The script checks those values before building, uses sing-box's
+and Java toolchains. For release and F-Droid reproducibility, Go must be built
+from the pinned source with `src/make.bash`; Nix's Go is only a bootstrap/
+convenience compiler and is not byte-identical. The script checks those values before building, uses sing-box's
 supported `android/arm64` platform selector, and verifies that the AAR contains only
 `jni/arm64-v8a/libbox.so`, and writes it to `app/libs/libbox.aar` plus its
 SHA-256 manifest at `app/libs/libbox-v1.13.12.manifest` by default. Set

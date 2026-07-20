@@ -17,7 +17,7 @@ prebuild:
 ```
 
 Release tags use `vMAJOR.MINOR.PATCH`. The current deterministic source-build
-defaults are `0.10.6` and `10006`; the F-Droid metadata is authoritative for
+defaults are `0.10.7` and `10007`; the F-Droid metadata is authoritative for
 each published build. A recipe should use:
 
 ```yaml
@@ -36,8 +36,8 @@ The application entry in the fdroiddata fork must pin the source explicitly:
 RepoType: git
 Repo: https://github.com/trevarj/motd.git
 Builds:
-  - versionName: 0.10.6
-    versionCode: 10006
+  - versionName: 0.10.7
+    versionCode: 10007
     commit: <full upstream commit SHA>
     subdir: app
     submodules: true
@@ -72,6 +72,10 @@ build:
 gradle: foss
 gradleprops: motdLibboxSource=true,motdLibboxAar=build/generated/libbox/libbox.aar,motdLibboxManifest=build/generated/libbox/libbox-v1.13.12.manifest
 ```
+
+Go must be built from the exact `go1.25.12` source commit
+`d80d9a98f7e3a8f9b3a82d2c6079f84eb1101d46` with `src/make.bash`; a Nixpkgs
+compiler of the same version can change native layout and fail verification.
 
 The application checkout pins sing-box and gomobile as Git submodules. The
 sing-box checkout in turn pins its Android client submodule, so F-Droid's
@@ -134,7 +138,7 @@ metadata:
 ```sh
 fdroid readmeta io.github.trevarj.motd
 fdroid lint io.github.trevarj.motd
-fdroid build --test --verbose io.github.trevarj.motd:10006
+fdroid build --test --verbose io.github.trevarj.motd:10007
 ```
 
 The last check is expected to be performed on an F-Droid buildserver because

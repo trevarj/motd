@@ -8,4 +8,4 @@ gomobile-commit=b2c30f47825831593d6980af8191527490f9c968
 android-ndk-version=28.0.13004108
 build-platform=android/arm64
 abis=arm64-v8a
-libbox-aar-sha256=cdb8eef80c3792df860094759ab0f8b8ecd73d595cec4c80f4526c1cae8ebdae
+libbox-aar-sha256=63261bffaf3e6ac101a7351eed0058f7984ba356625c3ef31b6cdb21fc41245e
