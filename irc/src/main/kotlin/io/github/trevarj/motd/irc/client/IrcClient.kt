@@ -657,7 +657,8 @@ class IrcClient(
     suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
         val limit = clampHistoryLimit(req.limit)
         val msg = when (req.subcommand) {
-            ChatHistoryRequest.Subcommand.LATEST -> ChatHistoryCommands.latest(req.target, limit)
+            ChatHistoryRequest.Subcommand.LATEST ->
+                ChatHistoryCommands.latest(req.target, req.bound1, limit)
             ChatHistoryRequest.Subcommand.BEFORE -> ChatHistoryCommands.before(req.target, req.bound1.orEmpty(), limit)
             ChatHistoryRequest.Subcommand.AFTER -> ChatHistoryCommands.after(req.target, req.bound1.orEmpty(), limit)
             ChatHistoryRequest.Subcommand.AROUND -> ChatHistoryCommands.around(req.target, req.bound1.orEmpty(), limit)

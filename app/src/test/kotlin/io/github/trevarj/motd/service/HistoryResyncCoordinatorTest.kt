@@ -753,6 +753,63 @@ class HistoryResyncCoordinatorTest {
     }
 
     @Test
+    fun repeatedForgetDoesNotRestorePreviousMsgidlessMessageOnOpen() = runTest {
+        fun dm(text: String, time: Long) = directMessage("ignored", time).copy(
+            ctx = MessageContext(null, time, null, null, null),
+            text = text,
+        )
+
+        val retained = mutableListOf<IrcEvent.ChatMessage>()
+        suspend fun receive(message: IrcEvent.ChatMessage) {
+            retained += message
+            processor.process(networkId, message)
+        }
+        val source = FakeSource(msgidRefs = false) { request ->
+            val lowerBound = when (request.bound1) {
+                null -> null
+                ChatHistorySelectors.timestamp(100) -> 100L
+                ChatHistorySelectors.timestamp(200) -> 200L
+                ChatHistorySelectors.timestamp(300) -> 300L
+                else -> error("unexpected history bound ${request.bound1}")
+            }
+            when (request.subcommand) {
+                ChatHistoryRequest.Subcommand.AFTER,
+                ChatHistoryRequest.Subcommand.LATEST,
+                -> FakeResponse(
+                    events = retained
+                        .filter { lowerBound == null || it.ctx.serverTime > lowerBound }
+                        .map { it.copy(ctx = it.ctx.copy(batchId = "history")) },
+                    endOfHistory = true,
+                )
+                else -> FakeResponse(endOfHistory = true)
+            }
+        }
+
+        receive(dm("1", 100))
+        val query = db.bufferDao().byName(networkId, "bob")!!
+        db.bufferDao().deleteBuffer(query.id)
+
+        receive(dm("2", 200))
+        coordinator.reconcileBuffer(networkId, query.id, "bob", source)
+
+        assertEquals(listOf("2"), rows(query.id).map { it.text })
+        assertEquals(
+            ChatHistorySelectors.timestamp(100),
+            source.requests.last { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }.bound1,
+        )
+
+        db.bufferDao().deleteBuffer(query.id)
+        receive(dm("3", 300))
+        coordinator.reconcileBuffer(networkId, query.id, "bob", source)
+
+        assertEquals(listOf("3"), rows(query.id).map { it.text })
+        assertEquals(
+            ChatHistorySelectors.timestamp(200),
+            source.requests.last { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }.bound1,
+        )
+    }
+
+    @Test
     fun dismissedQueryUsesLatestWhenDiscardBoundarySelectorIsUnsupported() = runTest {
         processor.process(networkId, directMessage("dm-old", 100))
         val query = db.bufferDao().byName(networkId, "bob")!!

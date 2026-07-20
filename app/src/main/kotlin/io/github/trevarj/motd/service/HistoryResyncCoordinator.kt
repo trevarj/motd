@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.data.db.BufferEntity
+import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.RoomId
@@ -1001,12 +1002,29 @@ class HistoryResyncCoordinator @Inject constructor(
             boundary == null || includeRecentOverlap || lacksStoredChat || room?.dismissed == true ||
             pagingBoundary != null && !pagingBoundarySupported || forceLatest
         ) {
-            val latestRequest = ChatHistoryRequest(
+            // Keep a query's permanent discard floor on newest-page overlap requests. An
+            // unbounded LATEST can otherwise replay the exact msgidless message at that floor,
+            // which cannot be distinguished locally from a new same-timestamp event after the
+            // message row has been purged. IRCv3 defines bounded LATEST as excluding its selector.
+            val boundedLatest = discardedBoundary
+                ?.takeIf { room.type == BufferType.QUERY }
+                ?.let { discardFloor ->
+                    requestAtBoundary(
+                        source = source,
+                        subcommand = ChatHistoryRequest.Subcommand.LATEST,
+                        target = target,
+                        boundary = discardFloor,
+                        secondBoundary = null,
+                        limit = pageLimit,
+                        msgidAllowed = source.supportsReference(HistoryReferenceType.MSGID),
+                    )
+                }
+            val latestRequest = boundedLatest?.request ?: ChatHistoryRequest(
                 ChatHistoryRequest.Subcommand.LATEST,
                 target,
                 limit = pageLimit,
             )
-            val latest = request(source, latestRequest)
+            val latest = boundedLatest?.response ?: request(source, latestRequest)
             latestPage = latest
             if (!isCurrent()) throw StaleConnectionException()
             inserted += ingest(networkId, bufferId, latestRequest, latest)

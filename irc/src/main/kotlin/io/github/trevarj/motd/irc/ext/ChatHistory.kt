@@ -23,7 +23,7 @@ object ChatHistorySelectors {
  * result via `sendLabeled` and reassembles the response batch.
  *
  * Subcommands:
- *  - LATEST  <target> * <limit>
+ *  - LATEST  <target> <* | bound> <limit>
  *  - BEFORE  <target> <bound> <limit>
  *  - AFTER   <target> <bound> <limit>
  *  - AROUND  <target> <bound> <limit>
@@ -33,8 +33,11 @@ object ChatHistorySelectors {
  * Bounds are pre-rendered selectors like `timestamp=<ISO>` or `msgid=<id>`.
  */
 internal object ChatHistoryCommands {
-    fun latest(target: String, limit: Int): IrcMessage =
-        IrcMessage(command = "CHATHISTORY", params = listOf("LATEST", target, "*", limit.toString()))
+    fun latest(target: String, bound: String?, limit: Int): IrcMessage =
+        IrcMessage(
+            command = "CHATHISTORY",
+            params = listOf("LATEST", target, bound ?: "*", limit.toString()),
+        )
 
     fun before(target: String, bound: String, limit: Int): IrcMessage =
         IrcMessage(command = "CHATHISTORY", params = listOf("BEFORE", target, bound, limit.toString()))

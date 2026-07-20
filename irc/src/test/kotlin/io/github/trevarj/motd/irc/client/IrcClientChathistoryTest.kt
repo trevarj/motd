@@ -16,6 +16,33 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class IrcClientChathistoryTest {
     @Test
+    fun `LATEST serializes an optional lower bound`() = runTest {
+        val transport = FakeTransport()
+        val client = registeredWithoutLabeledResponse(transport)
+        val response = async {
+            client.chathistory(
+                ChatHistoryRequest(
+                    ChatHistoryRequest.Subcommand.LATEST,
+                    "bob",
+                    bound1 = "timestamp=2026-07-20T09:00:00.123Z",
+                    limit = 100,
+                ),
+            )
+        }
+        runCurrent()
+
+        assertEquals(
+            "CHATHISTORY LATEST bob timestamp=2026-07-20T09:00:00.123Z 100",
+            transport.sent.last(),
+        )
+        transport.feed("BATCH +history chathistory bob")
+        transport.feed("BATCH -history")
+        runCurrent()
+
+        assertTrue(response.await() is ChatHistoryResponse.Messages)
+    }
+
+    @Test
     fun `unlabeled bouncer batches return TARGETS and LATEST results`() = runTest {
         val transport = FakeTransport()
         val client = registeredWithoutLabeledResponse(transport)
