@@ -2009,13 +2009,26 @@ class EventProcessor @Inject constructor(
             active?.type == BufferType.QUERY -> active.target
             else -> historyTarget?.takeIf { isDm && !isChannel(networkId, it, st) }
         }
-        // In a query CHATHISTORY batch the wire target is authoritative across nick changes:
-        // outgoing rows target the peer; incoming rows target any historical self nick. EventMapper
-        // compares historical sources with the current self nick, so OR-ing its isSelf guess here
-        // can turn a peer's old message into an own message after either side reused that nick.
+        val historySourceIsPeer = historyPeer != null && (
+            st.normalize(event.source.nick) == st.normalize(historyPeer) ||
+                active?.roomId?.let { targetRoomId ->
+                    bufferStore.resolveQueryRoom(
+                        networkId,
+                        st.normalize(event.source.nick),
+                        event.ctx.account,
+                    )?.id?.let { sourceRoomId ->
+                        (bufferDao.canonicalId(sourceRoomId) ?: sourceRoomId) ==
+                            (bufferDao.canonicalId(targetRoomId) ?: targetRoomId)
+                    }
+                } == true
+        )
+        // Query history needs both sides of the wire message. Some bouncers replay an incoming PM
+        // with the peer as its target as well as its source, so target == historyPeer alone cannot
+        // prove an outgoing message. A source already bound to this query is incoming; otherwise an
+        // event targeting the query peer is the historical-self/outgoing case.
         val sourceIsSelf = when {
             origin == EventOrigin.HISTORY && historyPeer != null ->
-                st.normalize(event.target) == st.normalize(historyPeer)
+                !historySourceIsPeer && st.normalize(event.target) == st.normalize(historyPeer)
             origin == EventOrigin.HISTORY -> event.isSelf
             else -> event.isSelf || st.isSelfNick(event.source.nick)
         }

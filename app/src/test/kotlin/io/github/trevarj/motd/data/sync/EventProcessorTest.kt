@@ -869,6 +869,42 @@ class EventProcessorTest {
     }
 
     @Test
+    fun historicalReplayFromQueryPeerCannotFlipIncomingLiveMessageToSelf() = runTest {
+        processor.onRegistered(networkId, "newMe", mapOf("CASEMAPPING" to "rfc1459"))
+        val incoming = IrcEvent.ChatMessage(
+            ctx(msgid = "incoming-then-history", time = 4_400),
+            IrcEvent.ChatKind.PRIVMSG,
+            Prefix("Bob"),
+            "newMe",
+            "correct before opening the chat",
+            false,
+            null,
+        )
+        processor.process(networkId, incoming)
+        val bob = db.bufferDao().byName(networkId, "bob")!!
+        assertFalse(pagingList(bob.id).single().isSelf)
+
+        processor.process(
+            networkId,
+            IrcEvent.HistoryBatch(
+                "Bob",
+                listOf(
+                    incoming.copy(
+                        ctx = incoming.ctx.copy(batchId = "bob-history"),
+                        // Some bouncers replay a query against its conversation target rather than
+                        // retaining the self nick that appeared on the original wire message.
+                        target = "Bob",
+                    ),
+                ),
+            ),
+        )
+
+        val replayed = pagingList(bob.id).single()
+        assertFalse(replayed.isSelf)
+        assertEquals("incoming-then-history", replayed.msgid)
+    }
+
+    @Test
     fun accountTaggedDmMergesExistingProvisionalNickRoomIntoKnownAccount() = runTest {
         processor.process(
             networkId,
