@@ -17,7 +17,7 @@ prebuild:
 ```
 
 Release tags use `vMAJOR.MINOR.PATCH`. The current deterministic source-build
-defaults are `0.10.4` and `10004`; the F-Droid metadata is authoritative for
+defaults are `0.10.5` and `10005`; the F-Droid metadata is authoritative for
 each published build. A recipe should use:
 
 ```yaml
@@ -36,8 +36,8 @@ The application entry in the fdroiddata fork must pin the source explicitly:
 RepoType: git
 Repo: https://github.com/trevarj/motd.git
 Builds:
-  - versionName: 0.10.4
-    versionCode: 10004
+  - versionName: 0.10.5
+    versionCode: 10005
     commit: <full upstream commit SHA>
     subdir: app
 ```
@@ -100,6 +100,10 @@ The release workflow derives both Android version fields from
 its backups safe: changing the key would prevent installed copies from
 receiving updates from either distribution channel.
 
+The Android build disables AGP dependency metadata in APKs and bundles. F-Droid
+rejects that extra signing block; dependency provenance remains available in the
+pinned fdroiddata recipe and the release's complete libbox source bundle.
+
 ## FOSS boundary
 
 The recipe builds `foss`, not `google`. Firebase code is under `app/src/google`
@@ -126,7 +130,7 @@ metadata and its four `srclibs` files:
 ```sh
 fdroid readmeta io.github.trevarj.motd
 fdroid lint io.github.trevarj.motd
-fdroid build --test --verbose io.github.trevarj.motd:10004
+fdroid build --test --verbose io.github.trevarj.motd:10005
 ```
 
 The last check is expected to be performed on an F-Droid buildserver because

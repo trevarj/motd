@@ -47,6 +47,10 @@ jobs:
           :app:testFossDebugUnitTest :app:testFossReleaseUnitTest
           :app:lintFossDebug :app:lintFossRelease :app:assembleFossRelease
           --stacktrace --no-daemon --max-workers=1
+      - name: Verify F-Droid-compatible APK signing blocks
+        run: >-
+          java .github/scripts/CheckApkSigningBlocks.java
+          app/build/outputs/apk/foss/release/app-foss-release.apk
       - name: Prepare licensed release assets
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}

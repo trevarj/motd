@@ -1,0 +1,2 @@
+- Removed Android dependency metadata that F-Droid rejects from release APKs.
+- Kept dependency provenance in the pinned F-Droid recipe and release source bundle.

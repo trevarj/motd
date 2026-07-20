@@ -120,6 +120,13 @@ android {
     namespace = "io.github.trevarj.motd"
     compileSdk = 35
 
+    // F-Droid rejects AGP's dependency metadata APK signing block. Dependency provenance is
+    // pinned and published separately through the fdroiddata recipe and release source bundle.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+
     defaultConfig {
         applicationId = "io.github.trevarj.motd"
         minSdk = 26
