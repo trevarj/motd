@@ -561,11 +561,27 @@ reset_to_chatlist() {
   [ -n "$(bounds_of_desc 'New conversation')" ]
 }
 
-# scroll_to_text "<text>" [tries] — in a reverse-layout chat list (newest at the bottom), scroll up
-# toward older messages until the exact text is on screen. Used before long-pressing an older
-# message that auto-scroll pushed off the top. Returns success if the text becomes visible.
+# scroll_to_text "<text>" [tries] — in a reverse-layout chat list (newest at the bottom), normalize
+# a restored older viewport to the bottom, then scroll up toward older messages until the exact text
+# is on screen. Used before long-pressing an older message that auto-scroll pushed off the top.
+# Returns success if the text becomes visible.
 scroll_to_text() {
-  local t="$1" tries="${2:-6}" i
+  local t="$1" tries="${2:-6}" i bottom_bounds cx cy
+  dump || true
+  [ -n "$(bounds_of_text "$t")" ] && return 0
+
+  # MOTD deliberately restores each chat's saved viewport. The runbook's search below is
+  # one-directional, so an older restored anchor must first be reset to the newest viewport or the
+  # swipes can only walk farther toward "Beginning of history" and never reach a newer target.
+  bottom_bounds="$(bounds_of_desc "Scroll to bottom")"
+  if [ -n "$bottom_bounds" ]; then
+    read -r cx cy <<EOF
+$(_e2e_center "$bottom_bounds")
+EOF
+    adb_shell input tap "$cx" "$cy"
+    sleep 1
+  fi
+
   for i in $(seq 1 "$tries"); do
     dump || true
     [ -n "$(bounds_of_text "$t")" ] && return 0
