@@ -334,7 +334,7 @@ elif [[ -n "${LIBBOX_SOURCE_DIR:-}" ]]; then
       exit 1
     }
     rm -rf "$android_dir"
-    mkdir -p "$(dirname "$android_dir")"
+    mkdir -p "$android_dir"
     tar --exclude=.git -C "$android_source_dir" -cf - . | tar -C "$android_dir" -xf -
     android_verify_dir="$android_source_dir"
   else
