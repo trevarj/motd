@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chatlist
 
 import androidx.activity.compose.BackHandler
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -534,6 +535,7 @@ private fun RowWithMenu(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    val removalCopy = chatRemovalCopy(row.type)
 
     // Swipe end-to-start reveals a destructive red background; releasing arms the confirm dialog
     // (deleting drops history + parts a joined channel, so we never delete silently). We do NOT
@@ -552,7 +554,7 @@ private fun RowWithMenu(
         SwipeToDismissBox(
             state = dismissState,
         enableDismissFromStartToEnd = false,
-        backgroundContent = { DeleteSwipeBackground() },
+        backgroundContent = { DeleteSwipeBackground(removalCopy.actionLabel) },
         ) {
         // Row background must be opaque so the swipe background stays hidden until swiped.
         Box(modifier = Modifier.background(MaterialTheme.colorScheme.background)) {
@@ -604,7 +606,7 @@ private fun RowWithMenu(
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text(stringResource(R.string.chatlist_delete)) },
+                    text = { Text(stringResource(removalCopy.actionLabel)) },
                     leadingIcon = {
                         Icon(
                             Icons.Outlined.Delete,
@@ -637,7 +639,7 @@ private fun RowWithMenu(
 
 /** Red end-aligned trash background revealed while swiping a chat-list row toward delete. */
 @Composable
-private fun DeleteSwipeBackground() {
+private fun DeleteSwipeBackground(@StringRes actionLabel: Int) {
     Row(
         modifier = Modifier
             .fillMaxSize()
@@ -648,7 +650,7 @@ private fun DeleteSwipeBackground() {
     ) {
         Icon(
             imageVector = Icons.Outlined.Delete,
-            contentDescription = stringResource(R.string.chatlist_delete),
+            contentDescription = stringResource(actionLabel),
             tint = MaterialTheme.colorScheme.onErrorContainer,
         )
     }
@@ -661,19 +663,20 @@ private fun DeleteConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val message = if (row.type == BufferType.CHANNEL) {
-        stringResource(R.string.chatlist_delete_confirm_channel, row.displayName)
+    val copy = chatRemovalCopy(row.type)
+    val message = if (copy.messageFormatsDisplayName) {
+        stringResource(copy.message, row.displayName)
     } else {
-        stringResource(R.string.chatlist_delete_confirm_message, row.displayName)
+        stringResource(copy.message)
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.chatlist_delete_confirm_title)) },
+        title = { Text(stringResource(copy.confirmTitle)) },
         text = { Text(message) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
                 Text(
-                    stringResource(R.string.action_delete),
+                    stringResource(copy.confirmAction),
                     color = MaterialTheme.colorScheme.error,
                 )
             }
@@ -683,6 +686,38 @@ private fun DeleteConfirmDialog(
                 Text(stringResource(R.string.action_cancel))
             }
         },
+    )
+}
+
+internal data class ChatRemovalCopy(
+    @get:StringRes val actionLabel: Int,
+    @get:StringRes val confirmTitle: Int,
+    @get:StringRes val message: Int,
+    @get:StringRes val confirmAction: Int,
+    val messageFormatsDisplayName: Boolean,
+)
+
+internal fun chatRemovalCopy(type: BufferType): ChatRemovalCopy = when (type) {
+    BufferType.QUERY -> ChatRemovalCopy(
+        actionLabel = R.string.chatlist_forget,
+        confirmTitle = R.string.chatlist_forget_confirm_title,
+        message = R.string.chatlist_forget_confirm_message,
+        confirmAction = R.string.chatlist_forget_action,
+        messageFormatsDisplayName = false,
+    )
+    BufferType.CHANNEL -> ChatRemovalCopy(
+        actionLabel = R.string.chatlist_delete,
+        confirmTitle = R.string.chatlist_delete_confirm_title,
+        message = R.string.chatlist_delete_confirm_channel,
+        confirmAction = R.string.action_delete,
+        messageFormatsDisplayName = true,
+    )
+    BufferType.SERVER -> ChatRemovalCopy(
+        actionLabel = R.string.chatlist_delete,
+        confirmTitle = R.string.chatlist_delete_confirm_title,
+        message = R.string.chatlist_delete_confirm_message,
+        confirmAction = R.string.action_delete,
+        messageFormatsDisplayName = true,
     )
 }
 
