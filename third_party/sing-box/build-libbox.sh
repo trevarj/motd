@@ -5,7 +5,7 @@ set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 lock_file="$root_dir/third_party/sing-box/source.lock"
-output_dir="$root_dir/app/libs"
+output_dir="${LIBBOX_OUTPUT_DIR:-$root_dir/app/libs}"
 # libbox's upstream builder supports a platform selector.  MOTD currently
 # ships to the connected arm64-v8a device only, so keep the generated AAR
 # deliberately single-ABI rather than paying for three unused native slices.
@@ -27,6 +27,28 @@ for required in git go java make sha256sum tar unzip; do
   }
 done
 
+go_version="$(go version)"
+if [[ "$go_version" =~ go([0-9]+)\.([0-9]+)(\.([0-9]+))? ]]; then
+  go_major="${BASH_REMATCH[1]}"
+  go_minor="${BASH_REMATCH[2]}"
+  go_patch="${BASH_REMATCH[4]:-0}"
+  if ((go_major < 1 || (go_major == 1 && go_minor < 24) ||
+    (go_major == 1 && go_minor == 24 && go_patch < 7))); then
+    echo "Go 1.24.7 or newer is required (found $go_version)" >&2
+    exit 1
+  fi
+else
+  echo "could not determine Go version: $go_version" >&2
+  exit 1
+fi
+
+offline="${LIBBOX_OFFLINE:-0}"
+if [[ "$offline" == "1" ]]; then
+  export GOPROXY=off
+  export GOSUMDB=off
+  export GOTOOLCHAIN=local
+fi
+
 verify_ndk_home() {
   local ndk_home="$1"
   [[ -f "$ndk_home/source.properties" ]] || return 1
@@ -34,6 +56,7 @@ verify_ndk_home() {
 }
 
 ndk_archive_verified_sha256=""
+ndk_from_archive=0
 
 # Google distributes the Linux NDK host tools for FHS systems.  They request
 # /lib64/ld-linux-x86-64.so.2 and depend on libz, neither of which exists at
@@ -82,10 +105,10 @@ patch_ndk_host_tools() {
   }
 }
 
-# A pre-extracted NDK always wins. LIBBOX_NDK_HOME is preferred so invoking
-# this tool cannot accidentally use an unrelated app-build NDK.
-ndk_home="${LIBBOX_NDK_HOME:-${ANDROID_NDK_HOME:-}}"
-if [[ -z "$ndk_home" && -n "${LIBBOX_NDK_ARCHIVE:-}" ]]; then
+# An explicitly supplied archive wins over ambient SDK variables. This keeps a
+# source rebuild from accidentally using a different app-build NDK.
+ndk_home=""
+if [[ -n "${LIBBOX_NDK_ARCHIVE:-}" ]]; then
   ndk_archive="$LIBBOX_NDK_ARCHIVE"
   [[ -f "$ndk_archive" ]] || { echo "LIBBOX_NDK_ARCHIVE does not exist: $ndk_archive" >&2; exit 1; }
   [[ "$(sha1sum "$ndk_archive" | cut -d ' ' -f1)" == "$ANDROID_NDK_ARCHIVE_SHA1" ]] || {
@@ -95,6 +118,7 @@ if [[ -z "$ndk_home" && -n "${LIBBOX_NDK_ARCHIVE:-}" ]]; then
     echo "Android NDK archive SHA-256 verification failed" >&2; exit 1;
   }
   ndk_archive_verified_sha256="$ANDROID_NDK_ARCHIVE_SHA256"
+  ndk_from_archive=1
 
   cache_root="${LIBBOX_NDK_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/motd/libbox}"
   ndk_home="$cache_root/android-ndk-r28"
@@ -117,6 +141,11 @@ if [[ -z "$ndk_home" && -n "${LIBBOX_NDK_ARCHIVE:-}" ]]; then
     trap - EXIT
     cleanup_staging
   fi
+else
+  # F-Droid provisions an SDK-managed NDK rather than the verified Google
+  # archive used by the Nix shell. Validate its revision, but never patch or
+  # otherwise mutate the shared SDK directory.
+  ndk_home="${LIBBOX_NDK_HOME:-${ANDROID_NDK_HOME:-${ANDROID_NDK:-}}}"
 fi
 
 [[ -n "$ndk_home" ]] || {
@@ -127,18 +156,35 @@ verify_ndk_home "$ndk_home" || {
   echo "expected Android NDK $ANDROID_NDK_VERSION" >&2
   exit 1
 }
-# Persist provenance only after verifying both upstream archive hashes.  A
-# later build using the cache can prove that its host executables came from the
-# same verified archive before mutating their ELF metadata for Nix.
+# Persist provenance only after verifying both upstream archive hashes. A later
+# build using the cache can prove that its host executables came from the same
+# verified archive before mutating their ELF metadata for Nix.
 if [[ -n "$ndk_archive_verified_sha256" ]]; then
   printf '%s\n' "$ndk_archive_verified_sha256" > "$ndk_home/.motd-archive-sha256"
 fi
-[[ -f "$ndk_home/.motd-archive-sha256" ]] &&
-  [[ "$(<"$ndk_home/.motd-archive-sha256")" == "$ANDROID_NDK_ARCHIVE_SHA256" ]] || {
-  echo "refusing to patch an NDK not prepared from the verified archive; set LIBBOX_NDK_ARCHIVE" >&2
-  exit 1
-}
-patch_ndk_host_tools "$ndk_home"
+if ((ndk_from_archive)); then
+  [[ -f "$ndk_home/.motd-archive-sha256" ]] &&
+    [[ "$(<"$ndk_home/.motd-archive-sha256")" == "$ANDROID_NDK_ARCHIVE_SHA256" ]] || {
+    echo "verified NDK cache provenance is missing or stale" >&2
+    exit 1
+  }
+fi
+
+patch_mode="${LIBBOX_PATCH_NDK_HOST_TOOLS:-auto}"
+case "$patch_mode" in
+  0) ;;
+  1) patch_ndk_host_tools "$ndk_home" ;;
+  auto)
+    if [[ -n "${LIBBOX_NDK_HOST_LOADER:-}" && -n "${LIBBOX_NDK_HOST_RPATH:-}" ]] &&
+      command -v patchelf >/dev/null 2>&1; then
+      patch_ndk_host_tools "$ndk_home"
+    fi
+    ;;
+  *)
+    echo "LIBBOX_PATCH_NDK_HOST_TOOLS must be 0, 1, or auto" >&2
+    exit 1
+    ;;
+esac
 export ANDROID_NDK_HOME="$ndk_home"
 export ANDROID_NDK_ROOT="$ndk_home"
 export ANDROID_NDK="$ndk_home"
@@ -187,9 +233,43 @@ fi
 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/motd-libbox.XXXXXX")"
 trap 'rm -rf "$work_dir"' EXIT
-source_dir="$work_dir/sing-box"
+source_dir="${LIBBOX_SOURCE_DIR:-$work_dir/sing-box}"
 source_archive="${LIBBOX_SOURCE_ARCHIVE:-}"
 android_source_archive="${LIBBOX_ANDROID_SOURCE_ARCHIVE:-}"
+android_source_dir="${LIBBOX_ANDROID_SOURCE_DIR:-}"
+gomobile_source_archive="${LIBBOX_GOMOBILE_SOURCE_ARCHIVE:-}"
+
+if [[ "$offline" == "1" && -z "${LIBBOX_SOURCE_DIR:-}" &&
+  -z "$source_archive" && -z "$android_source_archive" ]]; then
+  echo "offline libbox builds require LIBBOX_SOURCE_DIR or both source archives" >&2
+  exit 1
+fi
+
+if [[ -n "$gomobile_source_archive" ]]; then
+  [[ -z "${GOMOBILE_SOURCE_DIR:-}" ]] || {
+    echo "set only one of LIBBOX_GOMOBILE_SOURCE_ARCHIVE and GOMOBILE_SOURCE_DIR" >&2
+    exit 1
+  }
+  [[ -f "$gomobile_source_archive" ]] || {
+    echo "LIBBOX_GOMOBILE_SOURCE_ARCHIVE does not exist: $gomobile_source_archive" >&2
+    exit 1
+  }
+  [[ "$(sha256sum "$gomobile_source_archive" | cut -d ' ' -f1)" == "$GOMOBILE_GIT_ARCHIVE_SHA256" ]] || {
+    echo "gomobile source archive verification failed" >&2
+    exit 1
+  }
+  gomobile_source_dir="$work_dir/gomobile"
+  mkdir -p "$gomobile_source_dir"
+  tar -xf "$gomobile_source_archive" -C "$gomobile_source_dir"
+  git -C "$gomobile_source_dir" init --quiet
+  git -C "$gomobile_source_dir" config user.name "MOTD source rebuild"
+  git -C "$gomobile_source_dir" config user.email "source-rebuild@invalid"
+  git -C "$gomobile_source_dir" add --all
+  GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
+    git -C "$gomobile_source_dir" commit --quiet --message "$GOMOBILE_VERSION source archive"
+  git -C "$gomobile_source_dir" tag "$GOMOBILE_VERSION"
+  export GOMOBILE_SOURCE_DIR="$gomobile_source_dir"
+fi
 
 if [[ -n "$source_archive" || -n "$android_source_archive" ]]; then
   [[ -n "$source_archive" && -n "$android_source_archive" ]] || {
@@ -226,7 +306,53 @@ if [[ -n "$source_archive" || -n "$android_source_archive" ]]; then
   GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
     git -C "$source_dir" commit --quiet --message "$SING_BOX_VERSION source archive"
   git -C "$source_dir" tag "$SING_BOX_VERSION"
+elif [[ -n "${LIBBOX_SOURCE_DIR:-}" ]]; then
+  source_dir="$(cd "$LIBBOX_SOURCE_DIR" && pwd)"
+  [[ -e "$source_dir/.git" ]] || {
+    echo "LIBBOX_SOURCE_DIR must be a git checkout" >&2
+    exit 1
+  }
+  [[ "$(git -C "$source_dir" rev-parse HEAD)" == "$SING_BOX_COMMIT" ]] || {
+    echo "sing-box commit verification failed" >&2
+    exit 1
+  }
+  [[ "$(git -C "$source_dir" archive --format=tar HEAD | sha256sum | cut -d ' ' -f1)" == "$SING_BOX_GIT_ARCHIVE_SHA256" ]] || {
+    echo "sing-box source archive verification failed" >&2
+    exit 1
+  }
+  if [[ "$(git -C "$source_dir" describe --exact-match --tags HEAD 2>/dev/null || true)" != "$SING_BOX_VERSION" ]]; then
+    git -C "$source_dir" tag "$SING_BOX_VERSION" "$SING_BOX_COMMIT" 2>/dev/null || {
+      echo "sing-box source checkout is missing tag $SING_BOX_VERSION" >&2
+      exit 1
+    }
+  fi
+  android_dir="$source_dir/$ANDROID_SUBMODULE_PATH"
+  if [[ -n "$android_source_dir" ]]; then
+    android_source_dir="$(cd "$android_source_dir" && pwd)"
+    [[ -e "$android_source_dir/.git" ]] || {
+      echo "LIBBOX_ANDROID_SOURCE_DIR must be a git checkout" >&2
+      exit 1
+    }
+    rm -rf "$android_dir"
+    mkdir -p "$(dirname "$android_dir")"
+    tar --exclude=.git -C "$android_source_dir" -cf - . | tar -C "$android_dir" -xf -
+    android_verify_dir="$android_source_dir"
+  else
+    android_verify_dir="$android_dir"
+  fi
+  [[ "$(git -C "$android_verify_dir" rev-parse HEAD)" == "$ANDROID_SUBMODULE_COMMIT" ]] || {
+    echo "Android submodule verification failed" >&2
+    exit 1
+  }
+  [[ "$(git -C "$android_verify_dir" archive --format=tar HEAD | sha256sum | cut -d ' ' -f1)" == "$ANDROID_SUBMODULE_GIT_ARCHIVE_SHA256" ]] || {
+    echo "Android submodule source archive verification failed" >&2
+    exit 1
+  }
 else
+  [[ "$offline" != "1" ]] || {
+    echo "offline libbox builds cannot clone sing-box; provide LIBBOX_SOURCE_DIR" >&2
+    exit 1
+  }
   git clone --no-checkout "$SING_BOX_REPOSITORY" "$source_dir"
   git -C "$source_dir" checkout --detach "$SING_BOX_COMMIT"
   [[ "$(git -C "$source_dir" rev-parse HEAD)" == "$SING_BOX_COMMIT" ]] || {
@@ -259,16 +385,56 @@ fi
   exit 1
 }
 
-go install "github.com/sagernet/gomobile/cmd/gomobile@$GOMOBILE_VERSION"
-go install "github.com/sagernet/gomobile/cmd/gobind@$GOMOBILE_VERSION"
-gopath_bin="$(go env GOPATH)/bin"
-export PATH="$PATH:$gopath_bin"
+gopath_bin="$(go env GOPATH | cut -d: -f1)/bin"
+mkdir -p "$gopath_bin"
+if [[ -n "${GOMOBILE_SOURCE_DIR:-}" ]]; then
+  gomobile_source_dir="$(cd "$GOMOBILE_SOURCE_DIR" && pwd)"
+  if [[ -z "$gomobile_source_archive" ]]; then
+    [[ -e "$gomobile_source_dir/.git" ]] || {
+      echo "GOMOBILE_SOURCE_DIR must be a git checkout" >&2
+      exit 1
+    }
+    [[ "$(git -C "$gomobile_source_dir" rev-parse HEAD)" == "$GOMOBILE_COMMIT" ]] || {
+      echo "gomobile commit verification failed" >&2
+      exit 1
+    }
+    [[ "$(git -C "$gomobile_source_dir" archive --format=tar HEAD | sha256sum | cut -d ' ' -f1)" == "$GOMOBILE_GIT_ARCHIVE_SHA256" ]] || {
+      echo "gomobile source archive verification failed" >&2
+      exit 1
+    }
+  fi
+  (
+    cd "$gomobile_source_dir"
+    go build -o "$gopath_bin/gomobile" ./cmd/gomobile
+    go build -o "$gopath_bin/gobind" ./cmd/gobind
+  )
+elif [[ -n "${GOMOBILE_BIN:-}" || -n "${GOBIND_BIN:-}" ]]; then
+  [[ -x "${GOMOBILE_BIN:-}" && -x "${GOBIND_BIN:-}" ]] || {
+    echo "GOMOBILE_BIN and GOBIND_BIN must both be executable" >&2
+    exit 1
+  }
+  export PATH="$(dirname "$GOMOBILE_BIN"):$(dirname "$GOBIND_BIN"):$PATH"
+else
+  [[ "$offline" != "1" ]] || {
+    echo "offline libbox builds require GOMOBILE_SOURCE_DIR or pinned tool binaries" >&2
+    exit 1
+  }
+  GOBIN="$gopath_bin" go install "github.com/sagernet/gomobile/cmd/gomobile@$GOMOBILE_VERSION"
+  GOBIN="$gopath_bin" go install "github.com/sagernet/gomobile/cmd/gobind@$GOMOBILE_VERSION"
+fi
+export PATH="$gopath_bin:$PATH"
 for required in gomobile gobind; do
   command -v "$required" >/dev/null || {
     echo "gomobile installation failed: missing $required" >&2
     exit 1
   }
 done
+# sing-box does not use gomobile's optional OpenAL support. Creating the
+# toolchain directory directly avoids gomobile init's unpinned
+# `go install .../gobind@latest` step and keeps offline builds reproducible.
+gomobile_path="$(go env GOPATH | cut -d: -f1)/pkg/gomobile"
+rm -rf "$gomobile_path"
+mkdir -p "$gomobile_path"
 
 (
   cd "$source_dir"
@@ -281,12 +447,18 @@ done
 mkdir -p "$output_dir"
 install -m 0644 "$source_dir/libbox.aar" "$output_dir/libbox.aar"
 
-mapfile -t abis < <(unzip -Z1 "$output_dir/libbox.aar" 'jni/*/libbox.so' | cut -d/ -f2 | sort)
-expected_abis='arm64-v8a'
-[[ "$(printf '%s\n' "${abis[@]}")" == "$expected_abis" ]] || {
-  echo "unexpected libbox ABI set: ${abis[*]}" >&2
+mapfile -t jni_entries < <(
+  unzip -Z1 "$output_dir/libbox.aar" |
+    while IFS= read -r entry; do
+      [[ "$entry" == jni/* && "$entry" != */ ]] && printf '%s\n' "$entry"
+    done
+)
+expected_jni='jni/arm64-v8a/libbox.so'
+[[ "$(printf '%s\n' "${jni_entries[@]}")" == "$expected_jni" ]] || {
+  echo "unexpected libbox JNI entries: ${jni_entries[*]}" >&2
   exit 1
 }
+abis='arm64-v8a'
 
 aar_sha256="$(sha256sum "$output_dir/libbox.aar" | cut -d ' ' -f1)"
 manifest="$output_dir/libbox-v${SING_BOX_VERSION#v}.manifest"
@@ -295,9 +467,10 @@ sing-box-version=$SING_BOX_VERSION
 sing-box-commit=$SING_BOX_COMMIT
 android-submodule-commit=$ANDROID_SUBMODULE_COMMIT
 gomobile-version=$GOMOBILE_VERSION
+gomobile-commit=${GOMOBILE_COMMIT:-unknown}
 android-ndk-version=$ANDROID_NDK_VERSION
 build-platform=$android_platform
-abis=$(IFS=,; echo "${abis[*]}")
+abis=$abis
 libbox-aar-sha256=$aar_sha256
 EOF
 

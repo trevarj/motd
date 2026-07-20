@@ -86,6 +86,22 @@ arm64-v8a-only. APKs built from this source tree must not be installed on 32-bit
 ARM or x86 devices. Other ABI support needs a separately pinned and verified
 libbox artifact.
 
+## F-Droid packaging
+
+The official F-Droid build uses the `foss` flavor only. Its metadata supplies a
+full source commit, semantic version, and deterministic version code; the
+checked-in defaults in `gradle.properties` keep ordinary source builds
+versioned as well. F-Droid removes the checked-in libbox AAR and dormant
+Google/Firebase sources before scanning, then rebuilds libbox from the pinned
+sing-box, Android-submodule, and gomobile sources into
+`app/build/generated/libbox`. The source-build procedure and metadata guidance
+are in [docs/fdroid.md](docs/fdroid.md).
+
+F-Droid builds retain the arm64-v8a-only embedded transport. The F-Droid
+signature is independent from the GitHub release key, so switching channels
+requires uninstalling the GitHub-signed package before installing the F-Droid
+package.
+
 ## Connecting
 
 On first launch the empty chat list routes you to onboarding. Add a network and
@@ -140,7 +156,7 @@ git push origin v0.1.0
 
 CI decodes the keystore from `KEYSTORE_BASE64`, runs the full build with the
 signing env (`MOTD_KEYSTORE_PATH`, `MOTD_KEYSTORE_PASSWORD`, `MOTD_KEY_ALIAS`,
-`MOTD_KEY_PASSWORD`), and attaches the APK, GPL and IBM Plex licenses,
+`MOTD_KEY_PASSWORD`, `MOTD_SOURCE_COMMIT`), and attaches the APK, GPL and IBM Plex licenses,
 deterministic complete libbox source, `SHA256SUMS`, and release-specific
 third-party notice. Required
 repository secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`,

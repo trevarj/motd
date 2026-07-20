@@ -11,6 +11,11 @@ transport:
 - ABI: `arm64-v8a` only; unsupported ABI variants are not built
 - SHA-256: `ef8b4a00eb2e2de7b9a593db18f5190431d1cd311066bde76792bfb1a262a88f`
 - Build manifest: `app/libs/libbox-v1.13.12.manifest`
+- Source-build tool: [SagerNet/gomobile](https://github.com/SagerNet/gomobile),
+  `v0.1.12` at commit
+  `b2c30f47825831593d6980af8191527490f9c968`
+- Source archive SHA-256:
+  `ecbdc425d07884ba2895985d77a1a5fb9c443f93ceb71acaa894ca7609a4322a`
 
 ## Embedded transport: sing-box / libbox
 

@@ -40,7 +40,7 @@ cat >> "$output_dir/$notice_name" <<EOF
 - Complete libbox corresponding source: [${source_name}](${source_url})
 - Source archive SHA-256: \`${source_sha256}\`
 
-The source archive contains the exact pinned sing-box and Android-submodule source archives,
+The source archive contains the exact pinned sing-box, Android-submodule, and gomobile source archives,
 MOTD's build script and lock file, the Nix build definition, artifact manifest, licenses, and
 rebuild instructions. It is provided alongside the APK at no additional charge.
 EOF

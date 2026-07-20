@@ -28,8 +28,8 @@ git push origin v0.1.0
 ```
 
 Replace the example version with the approved tag. The workflow uses the tag as
-`versionName` and the GitHub run number as `versionCode`, builds and signs the
-FOSS APK, and publishes:
+`versionName`, the GitHub run number as `versionCode`, and the tagged commit SHA
+as embedded source provenance, then builds and signs the FOSS APK and publishes:
 
 - the renamed FOSS APK;
 - complete corresponding libbox source;

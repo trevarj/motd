@@ -28,6 +28,7 @@ jobs:
           MOTD_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           MOTD_VERSION_NAME: ${{ github.ref_name }}
           MOTD_VERSION_CODE: ${{ github.run_number }}
+          MOTD_SOURCE_COMMIT: ${{ github.sha }}
         run: >-
           ./gradlew :irc:build
           :app:testFossDebugUnitTest :app:testFossReleaseUnitTest

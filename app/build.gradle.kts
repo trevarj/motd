@@ -1,5 +1,6 @@
 import java.security.MessageDigest
 import java.util.Properties
+import java.util.zip.ZipFile
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
@@ -31,11 +32,17 @@ if (providers.gradleProperty("motdComposeMetrics").map(String::toBoolean).getOrE
     }
 }
 
+val libboxSourceBuild = providers.gradleProperty("motdLibboxSource").orNull?.toBoolean() ?: false
+val libboxAar = providers.gradleProperty("motdLibboxAar").orNull?.let(::file)
+    ?: file("libs/libbox.aar")
+val libboxManifest = providers.gradleProperty("motdLibboxManifest").orNull?.let(::file)
+    ?: file("libs/libbox-v1.13.12.manifest")
+
 // The release/debug APKs ship the pinned arm64 native core. Hermetic UI tests exercise plain IRC
 // on an x86_64 emulator, so derive an AAR that retains the generated Java API but omits JNI. This
 // keeps the E2E build installable without pretending that embedded obfuscation supports x86_64.
 val libboxE2eAar by tasks.registering(Zip::class) {
-    from(zipTree(layout.projectDirectory.file("libs/libbox.aar")))
+    from(zipTree(libboxAar))
     exclude("jni/**")
     archiveFileName.set("libbox-e2e-no-jni.aar")
     destinationDirectory.set(layout.buildDirectory.dir("generated/e2e-libs"))
@@ -48,18 +55,20 @@ abstract class VerifyLibboxArtifact : DefaultTask() {
     @get:InputFile abstract val manifest: RegularFileProperty
     @get:Input abstract val expectedVersion: Property<String>
     @get:Input abstract val expectedSha256: Property<String>
+    @get:Input abstract val enforcePinnedSha256: Property<Boolean>
 
     @TaskAction
     fun verify() {
+        check(aar.get().asFile.isFile) { "libbox AAR does not exist: ${aar.get().asFile}" }
+        check(manifest.get().asFile.isFile) {
+            "libbox manifest does not exist: ${manifest.get().asFile}"
+        }
         val values = Properties().also { manifest.get().asFile.inputStream().use(it::load) }
         check(values.getProperty("sing-box-version") == expectedVersion.get()) {
             "libbox manifest version must be ${expectedVersion.get()}"
         }
         check(values.getProperty("abis") == "arm64-v8a") {
             "libbox manifest must declare only arm64-v8a"
-        }
-        check(values.getProperty("libbox-aar-sha256") == expectedSha256.get()) {
-            "libbox manifest SHA-256 does not match the pinned value"
         }
         val digest = MessageDigest.getInstance("SHA-256")
         aar.get().asFile.inputStream().use { input ->
@@ -71,11 +80,41 @@ abstract class VerifyLibboxArtifact : DefaultTask() {
             }
         }
         val actualSha256 = digest.digest().joinToString("") { "%02x".format(it) }
-        check(actualSha256 == expectedSha256.get()) {
-            "libbox AAR SHA-256 does not match the pinned value"
+        check(values.getProperty("libbox-aar-sha256") == actualSha256) {
+            "libbox manifest SHA-256 does not match the generated AAR"
+        }
+        if (enforcePinnedSha256.get()) {
+            check(actualSha256 == expectedSha256.get()) {
+                "libbox AAR SHA-256 does not match the pinned value"
+            }
+        }
+        ZipFile(aar.get().asFile).use { archive ->
+            val nativeEntries = archive.entries().asSequence()
+                .map { it.name }
+                .filter { it.startsWith("jni/") && !it.endsWith("/") }
+                .sorted()
+                .toList()
+            check(nativeEntries == listOf("jni/arm64-v8a/libbox.so")) {
+                "libbox AAR must contain only jni/arm64-v8a/libbox.so, found $nativeEntries"
+            }
         }
     }
 }
+
+fun quotedBuildConfigValue(value: String): String =
+    "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
+val configuredVersionName = System.getenv("MOTD_VERSION_NAME")
+    ?.takeIf(String::isNotBlank)
+    ?: providers.gradleProperty("motdVersionName").orNull?.takeIf(String::isNotBlank)
+    ?: "0.10.2"
+val configuredVersionCode = System.getenv("MOTD_VERSION_CODE")?.toIntOrNull()
+    ?: providers.gradleProperty("motdVersionCode").orNull?.toIntOrNull()
+    ?: 10002
+val sourceCommit = System.getenv("MOTD_SOURCE_COMMIT")
+    ?.takeIf(String::isNotBlank)
+    ?: providers.gradleProperty("motdSourceCommit").orNull?.takeIf(String::isNotBlank)
+    ?: "unknown"
 
 android {
     namespace = "io.github.trevarj.motd"
@@ -85,9 +124,11 @@ android {
         applicationId = "io.github.trevarj.motd"
         minSdk = 26
         targetSdk = 35
-        // Release CI derives these from the git tag and GitHub run number.
-        versionName = System.getenv("MOTD_VERSION_NAME") ?: "0.0.0-dev"
-        versionCode = System.getenv("MOTD_VERSION_CODE")?.toIntOrNull() ?: 1
+        // Release CI and F-Droid supply these explicitly; the checked-in Gradle properties provide
+        // a deterministic fallback for source builds outside either service.
+        versionName = configuredVersionName
+        versionCode = configuredVersionCode
+        buildConfigField("String", "MOTD_SOURCE_COMMIT", quotedBuildConfigValue(sourceCommit))
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testInstrumentationRunnerArguments["clearPackageData"] = "true"
     }
@@ -205,11 +246,12 @@ androidComponents {
 
 val verifyLibboxArtifact by tasks.registering(VerifyLibboxArtifact::class) {
     group = "verification"
-    description = "Verifies the tracked libbox AAR against its pinned SHA-256 manifest."
-    aar.set(layout.projectDirectory.file("libs/libbox.aar"))
-    manifest.set(layout.projectDirectory.file("libs/libbox-v1.13.12.manifest"))
+    description = "Verifies the libbox AAR against its manifest and pinned source contract."
+    aar.set(libboxAar)
+    manifest.set(libboxManifest)
     expectedVersion.set("v1.13.12")
     expectedSha256.set("ef8b4a00eb2e2de7b9a593db18f5190431d1cd311066bde76792bfb1a262a88f")
+    enforcePinnedSha256.set(!libboxSourceBuild)
 }
 
 tasks.matching { it.name == "check" || it.name.startsWith("assemble") }.configureEach {
@@ -220,8 +262,8 @@ kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation(project(":irc"))
-    debugImplementation(files("libs/libbox.aar"))
-    releaseImplementation(files("libs/libbox.aar"))
+    debugImplementation(files(libboxAar))
+    releaseImplementation(files(libboxAar))
     add("e2eImplementation", files(libboxE2eAar))
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

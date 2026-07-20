@@ -1,0 +1,17 @@
+motd is a native Android IRC client with a modern chat interface for direct IRC networks and soju bouncers.
+
+Connect directly to an IRC server or use a bouncer for persistent connections, multi-network access, synchronized history, read markers, and push delivery.
+
+Features:
+
+* IRCv3 capabilities, SASL PLAIN and EXTERNAL, TLS, and client certificates
+* soju bouncer networks and Web Push with UnifiedPush
+* Infinite scrollback with local search and full-text filtering
+* Replies, reactions, typing indicators, nick autocomplete, and slash commands
+* Inline images, link previews, file uploads, and configurable chat wallpapers
+* SOCKS5, Tor, and optional VLESS + REALITY routing through embedded sing-box
+* Material You themes, dark and AMOLED modes, custom text sizes, and message styles
+
+motd does not require a hosted account or a proprietary chat service. The FOSS build uses UnifiedPush for battery-friendly background delivery and contains no Google Firebase dependency.
+
+The embedded VLESS + REALITY transport is available on arm64-v8a devices. Android 8.0 (API 26) or newer is required.

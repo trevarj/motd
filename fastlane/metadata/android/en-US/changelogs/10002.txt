@@ -1,0 +1,2 @@
+- Refined chat history, message delivery, and conversation navigation.
+- Improved the FOSS release build and source provenance checks.

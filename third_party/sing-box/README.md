@@ -14,6 +14,10 @@ the exact upstream sources remain at the pinned public revisions below.
   at `772879ce9cd37c29e377d4d44d0efee12662948d`
 - Android submodule source archive SHA-256:
   `bf6c420460899347d3080220288bfe7279962e30a4ffef482e1c61924300c171`
+- gomobile version: `v0.1.12`, commit
+  `b2c30f47825831593d6980af8191527490f9c968`
+- gomobile source archive SHA-256:
+  `ecbdc425d07884ba2895985d77a1a5fb9c443f93ceb71acaa894ca7609a4322a`
 - Vendored artifact: `app/libs/libbox.aar`, **arm64-v8a-only**, used by the
   main Android application build
 - Artifact SHA-256: `ef8b4a00eb2e2de7b9a593db18f5190431d1cd311066bde76792bfb1a262a88f`
@@ -24,9 +28,9 @@ the exact upstream sources remain at the pinned public revisions below.
 The regular project shell deliberately does not carry this large native toolchain.
 The `libbox` shell contains the pinned Go/JDK build tools but deliberately does
 not compose an Android SDK: that would force Nix to fetch the NDK before the
-shell starts. Supply either an already-extracted r28 NDK or the exact Google
-archive; the build script validates both archive hashes before extracting it to
-an external cache.
+shell starts. Supply an Android SDK with platform 35, plus either an
+already-extracted r28 NDK or the exact Google archive; the build script
+validates both archive hashes before extracting the NDK to an external cache.
 
 With an extracted NDK:
 
@@ -50,16 +54,22 @@ It is extracted only after verification into
 Set `LIBBOX_PREPARE_NDK_ONLY=1` with the same command to validate and prepare
 that external cache without fetching sing-box or building an AAR.
 
+F-Droid supplies an SDK-managed NDK instead of the verified Google archive. In
+that environment set `LIBBOX_NDK_HOME` (or use `ANDROID_NDK_HOME`) and
+`LIBBOX_PATCH_NDK_HOST_TOOLS=0`; the script validates the exact NDK revision
+without requiring the Nix archive marker or mutating the shared SDK.
+
 `source.lock` pins every source revision and source-tree SHA-256. The script
 checks those values before building, uses sing-box's supported `android/arm64`
-platform selector, verifies that the AAR contains only `arm64-v8a`, and writes
-it to `app/libs/libbox.aar` plus its SHA-256 manifest at
-`app/libs/libbox-v1.13.12.manifest`. Both files are deliberately versioned in
-this repository and their values above must match before release. Gradle's
-`verifyLibboxArtifact` task verifies the tracked AAR against both the manifest
-and the pinned expected SHA-256; every `assemble*` and `check` task depends on
-it. The Android application build is arm64-only while this is the only packaged
-libbox artifact.
+platform selector, verifies that the AAR contains only
+`jni/arm64-v8a/libbox.so`, and writes it to `app/libs/libbox.aar` plus its
+SHA-256 manifest at `app/libs/libbox-v1.13.12.manifest` by default. Set
+`LIBBOX_OUTPUT_DIR` to place a source-built artifact under a generated build
+directory instead; this is the mode used by F-Droid after the checked-in AAR
+has been removed. The Gradle `verifyLibboxArtifact` task always verifies the
+manifest hash and exact JNI set. Normal builds additionally require the pinned
+checked-in AAR hash; `-PmotdLibboxSource=true` deliberately accepts a different
+source-build hash while retaining the structural checks.
 
 ## License and notices
 
@@ -77,7 +87,7 @@ without prior consent.
    above. The script verifies the AAR ABI and writes the checked artifact hash
    into `app/libs/libbox-v1.13.12.manifest`.
 3. Run `./third_party/sing-box/package-source.sh <tag> <output-dir>`. It clones
-   and verifies both pinned revisions, emits their exact `git archive` streams,
+   and verifies all pinned revisions, emits their exact `git archive` streams,
    and packages them with this build script, `source.lock`, `go.mod`/`go.sum`,
    vendored source, the Nix build inputs, license, and artifact manifest. The
    outer archive is deterministic (`tar` metadata normalized; `gzip -n`).
@@ -93,13 +103,19 @@ The packaged inner source archives can be rebuilt without cloning upstream:
 ```sh
 LIBBOX_SOURCE_ARCHIVE=/path/to/sing-box-v1.13.12.tar \
 LIBBOX_ANDROID_SOURCE_ARCHIVE=/path/to/sing-box-for-android-772879ce....tar \
+LIBBOX_GOMOBILE_SOURCE_ARCHIVE=/path/to/gomobile-v0.1.12.tar \
 LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28-linux.zip \
   nix develop .#libbox -c ./third_party/sing-box/build-libbox.sh
 ```
 
-In archive mode the build script verifies both pinned archive hashes, then recreates deterministic
-local Git metadata tagged with the pinned sing-box version. Upstream's libbox builder reads that tag
-to embed the same release version string; the archive hashes remain the source-provenance authority.
+In archive mode the build script verifies all three pinned archive hashes, then recreates
+deterministic local Git metadata tagged with the pinned sing-box and gomobile versions. Upstream's
+libbox builder reads the sing-box tag to embed the same release version string; the archive hashes
+remain the source-provenance authority. For an offline build from F-Droid-provisioned source
+checkouts, use `LIBBOX_SOURCE_DIR`, `LIBBOX_ANDROID_SOURCE_DIR`, and `GOMOBILE_SOURCE_DIR` with
+`LIBBOX_OFFLINE=1`. The script creates gomobile's empty toolchain directory
+directly because this build does not use OpenAL; it never runs gomobile's
+unpinned `gobind@latest` initialization step.
 
 These records ensure recipients can obtain the exact source needed to rebuild
 the distributed libbox artifact under GPL-3.0-or-later.

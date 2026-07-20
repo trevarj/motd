@@ -68,6 +68,13 @@ jobs:
         run: |
           git diff --exit-code -- app/schemas
           test -z "$(git ls-files --others --exclude-standard -- app/schemas)"
+      - name: Verify FOSS dependency boundary
+        run: |
+          if ./gradlew :app:dependencies --configuration fossReleaseRuntimeClasspath \
+            | rg -i 'firebase|play-services'; then
+            echo "Google-only dependencies reached the FOSS runtime classpath" >&2
+            exit 1
+          fi
       # Lint runs isolated with a single worker and no daemon to avoid the
       # flaky Gradle-worker classloader race that surfaces as
       # NoClassDefFoundError in ModifierDeclarationDetector. A bounded retry
