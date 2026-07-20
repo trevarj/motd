@@ -176,8 +176,8 @@ class ChatViewModelTest {
         vm.setReply(parent)
         vm.saveDraft("answer")
 
-        vm.submit("answer", {}, {})
-        advanceUntilIdle()
+        val submission = vm.submit("answer", {}, {})
+        submission.join()
 
         assertEquals("answer", db.composerDraftDao().byRoom(channel.id)?.text)
         assertEquals(88L, db.composerDraftDao().byRoom(channel.id)?.replyToEventId)
