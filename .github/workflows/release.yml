@@ -20,15 +20,28 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
       - name: Decode keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/keystore.jks"
+      - name: Validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_name="$(sed -n 's/^motdVersionName=//p' gradle.properties)"
+          version_code="$(sed -n 's/^motdVersionCode=//p' gradle.properties)"
+          [[ "$GITHUB_REF_NAME" == "v$version_name" ]] || {
+            echo "tag $GITHUB_REF_NAME does not match gradle.properties version $version_name" >&2
+            exit 1
+          }
+          [[ "$version_code" =~ ^[0-9]+$ ]] || {
+            echo "invalid motdVersionCode: $version_code" >&2
+            exit 1
+          }
+          printf 'MOTD_VERSION_NAME=%s\nMOTD_VERSION_CODE=%s\nMOTD_SOURCE_COMMIT=%s\n' \
+            "$version_name" "$version_code" "$GITHUB_SHA" >> "$GITHUB_ENV"
       - name: Full build, tests, lint, and signed release APK
         env:
           MOTD_KEYSTORE_PATH: ${{ runner.temp }}/keystore.jks
           MOTD_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           MOTD_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           MOTD_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          MOTD_VERSION_NAME: ${{ github.ref_name }}
-          MOTD_VERSION_CODE: ${{ github.run_number }}
-          MOTD_SOURCE_COMMIT: ${{ github.sha }}
         run: >-
           ./gradlew :irc:build
           :app:testFossDebugUnitTest :app:testFossReleaseUnitTest

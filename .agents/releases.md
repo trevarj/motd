@@ -27,9 +27,10 @@ git tag -s v0.1.0 -m "v0.1.0"
 git push origin v0.1.0
 ```
 
-Replace the example version with the approved tag. The workflow uses the tag as
-`versionName`, the GitHub run number as `versionCode`, and the tagged commit SHA
-as embedded source provenance, then builds and signs the FOSS APK and publishes:
+Replace the example version with the approved tag. The workflow requires the
+tag to match `v<versionName>` from `gradle.properties`, uses the matching
+`motdVersionCode`, and embeds the tagged commit SHA as source provenance. It
+then builds and signs the FOSS APK and publishes:
 
 - the renamed FOSS APK;
 - complete corresponding libbox source;

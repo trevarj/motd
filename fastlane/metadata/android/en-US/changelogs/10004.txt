@@ -1,0 +1,3 @@
+- Made release APKs reproducible for distribution through F-Droid.
+- Fixed release version names and codes to match the tagged source.
+- Pinned the native libbox Go toolchain for deterministic rebuilds.

@@ -18,9 +18,10 @@ the exact upstream sources remain at the pinned public revisions below.
   `b2c30f47825831593d6980af8191527490f9c968`
 - gomobile source archive SHA-256:
   `ecbdc425d07884ba2895985d77a1a5fb9c443f93ceb71acaa894ca7609a4322a`
+- Go toolchain: `go1.25.12`
 - Vendored artifact: `app/libs/libbox.aar`, **arm64-v8a-only**, used by the
   main Android application build
-- Artifact SHA-256: `ef8b4a00eb2e2de7b9a593db18f5190431d1cd311066bde76792bfb1a262a88f`
+- Artifact SHA-256: `ddab37d0bcbf6ad20a1cdc8429abe144fdbd731f0c1a05bb6a70a2c61cb196b3`
 - Artifact build manifest: `app/libs/libbox-v1.13.12.manifest`
 
 ## Controlled build
@@ -59,9 +60,9 @@ that environment set `LIBBOX_NDK_HOME` (or use `ANDROID_NDK_HOME`) and
 `LIBBOX_PATCH_NDK_HOST_TOOLS=0`; the script validates the exact NDK revision
 without requiring the Nix archive marker or mutating the shared SDK.
 
-`source.lock` pins every source revision and source-tree SHA-256. The script
-checks those values before building, uses sing-box's supported `android/arm64`
-platform selector, verifies that the AAR contains only
+`source.lock` pins every source revision, source-tree SHA-256, and the exact Go
+toolchain. The script checks those values before building, uses sing-box's
+supported `android/arm64` platform selector, and verifies that the AAR contains only
 `jni/arm64-v8a/libbox.so`, and writes it to `app/libs/libbox.aar` plus its
 SHA-256 manifest at `app/libs/libbox-v1.13.12.manifest` by default. Set
 `LIBBOX_OUTPUT_DIR` to place a source-built artifact under a generated build

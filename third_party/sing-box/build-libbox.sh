@@ -27,18 +27,18 @@ for required in git go java make sha256sum tar unzip; do
   }
 done
 
-go_version="$(go version)"
-if [[ "$go_version" =~ go([0-9]+)\.([0-9]+)(\.([0-9]+))? ]]; then
+go_version_output="$(go version)"
+if [[ "$go_version_output" =~ go([0-9]+)\.([0-9]+)(\.([0-9]+))? ]]; then
   go_major="${BASH_REMATCH[1]}"
   go_minor="${BASH_REMATCH[2]}"
   go_patch="${BASH_REMATCH[4]:-0}"
-  if ((go_major < 1 || (go_major == 1 && go_minor < 24) ||
-    (go_major == 1 && go_minor == 24 && go_patch < 7))); then
-    echo "Go 1.24.7 or newer is required (found $go_version)" >&2
+  detected_go_version="go${go_major}.${go_minor}.${go_patch}"
+  [[ "$detected_go_version" == "$GO_VERSION" ]] || {
+    echo "Go $GO_VERSION is required (found $go_version_output)" >&2
     exit 1
-  fi
+  }
 else
-  echo "could not determine Go version: $go_version" >&2
+  echo "could not determine Go version: $go_version_output" >&2
   exit 1
 fi
 
@@ -466,6 +466,7 @@ cat > "$manifest" <<EOF
 sing-box-version=$SING_BOX_VERSION
 sing-box-commit=$SING_BOX_COMMIT
 android-submodule-commit=$ANDROID_SUBMODULE_COMMIT
+go-version=$GO_VERSION
 gomobile-version=$GOMOBILE_VERSION
 gomobile-commit=${GOMOBILE_COMMIT:-unknown}
 android-ndk-version=$ANDROID_NDK_VERSION

@@ -142,8 +142,9 @@ Questions, bug reports, and feedback: join `#motd` on
 
 Releases are cut by pushing a signed `v*` tag. The tag workflow runs FOSS
 release-parity tests and lint, then builds and signs the FOSS APK. `versionName`
-comes from the tag and
-`versionCode` from the CI run number.
+and `versionCode` come from `gradle.properties`; the workflow requires the
+signed tag to match `v<versionName>`. This keeps the upstream-signed APK
+reproducible by F-Droid without changing its update-compatible signing key.
 
 The managed-device smoke and exhaustive emulator journey remain available as
 separate workflows, but currently do not gate releases because hosted emulator
