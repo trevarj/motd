@@ -1,0 +1,3 @@
+- Fixed forgotten query messages reappearing from bouncer history.
+- Fixed query direction, sender attribution, and read-marker precision.
+- Added a shortcut to jump to active chats at the top of Recents.

@@ -16,7 +16,7 @@ prebuild:
 ```
 
 Release tags use `vMAJOR.MINOR.PATCH`. The current deterministic source-build
-defaults are `0.10.2` and `10002`; the F-Droid metadata is authoritative for
+defaults are `0.10.3` and `10003`; the F-Droid metadata is authoritative for
 each published build. A recipe should use:
 
 ```yaml
@@ -35,8 +35,8 @@ The application entry in the fdroiddata fork must pin the source explicitly:
 RepoType: git
 Repo: https://github.com/trevarj/motd.git
 Builds:
-  - versionName: 0.10.2
-    versionCode: 10002
+  - versionName: 0.10.3
+    versionCode: 10003
     commit: <full upstream commit SHA>
 ```
 
@@ -105,7 +105,7 @@ metadata and its three `srclibs` files:
 ```sh
 fdroid readmeta io.github.trevarj.motd
 fdroid lint io.github.trevarj.motd
-fdroid build --test --verbose io.github.trevarj.motd:10002
+fdroid build --test --verbose io.github.trevarj.motd:10003
 ```
 
 The last check is expected to be performed on an F-Droid buildserver because
