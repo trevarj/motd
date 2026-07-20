@@ -16,11 +16,13 @@ class ChatListSectioningTest {
         pinned: Boolean = false,
         networkId: Long = 1,
         caseMapping: String? = null,
+        unreadCount: Int = 0,
+        mentionCount: Int = 0,
     ) = ChatListRow(
         bufferId = id, networkId = networkId, networkName = "net",
         displayName = name, type = type, pinned = pinned, muted = false,
         lastMessageText = null, lastMessageSender = null, lastMessageTime = null,
-        unreadCount = 0, mentionCount = 0,
+        unreadCount = unreadCount, mentionCount = mentionCount,
         caseMapping = caseMapping,
     )
 
@@ -156,5 +158,29 @@ class ChatListSectioningTest {
 
         assertEquals(listOf(2L, 4L), sections.friends.map { it.bufferId })
         assertEquals(listOf(1L, 3L), sections.regular.map { it.bufferId })
+    }
+
+    @Test
+    fun `activity above viewport follows rendered section indices`() {
+        val sections = sectionChatList(
+            rows = listOf(
+                row(1, "pinned", pinned = true, unreadCount = 2),
+                row(2, "friend", unreadCount = 3),
+                row(3, "regular-new", unreadCount = 4),
+                row(4, "regular-old", mentionCount = 2),
+                row(5, "fool", unreadCount = 5),
+            ),
+            friends = setOf("friend"),
+            fools = setOf("fool"),
+        )
+
+        assertEquals(0, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = false, 0))
+        assertEquals(2, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = false, 1))
+        assertEquals(2, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = false, 2))
+        assertEquals(5, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = false, 3))
+        assertEquals(5, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = false, 4))
+        assertEquals(9, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = false, 5))
+        assertEquals(11, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = false, 7))
+        assertEquals(16, unreadActivityBeforeDisplayIndex(sections, foolsExpanded = true, 8))
     }
 }

@@ -6,6 +6,11 @@
     <string name="chatlist_search">Search</string>
     <string name="chatlist_settings">Settings</string>
     <string name="chatlist_new_conversation">New conversation</string>
+    <string name="chatlist_scroll_to_top">Scroll to top</string>
+    <plurals name="chatlist_scroll_to_top_with_unread">
+        <item quantity="one">Scroll to top, %1$d unread message above</item>
+        <item quantity="other">Scroll to top, %1$d unread messages above</item>
+    </plurals>
     <string name="chatlist_pinned">Pinned</string>
     <string name="chatlist_empty_title">No conversations yet</string>
     <string name="chatlist_empty_message">Connect to a network to start chatting.</string>

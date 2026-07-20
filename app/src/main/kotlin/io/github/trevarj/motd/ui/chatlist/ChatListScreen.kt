@@ -2,6 +2,9 @@ package io.github.trevarj.motd.ui.chatlist
 
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,11 +19,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Delete
@@ -31,6 +36,8 @@ import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -52,6 +59,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -403,37 +411,20 @@ private fun ChatList(
     val sections = sectionChatList(rows, friends, fools)
     // Fools section is collapsed by default; state is local to the screen (accepted, plans/13).
     var foolsExpanded by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 88.dp),
-    ) {
-        items(sections.pinned, key = { it.bufferId }) { row ->
-            RowWithMenu(
-                row,
-                presence[row.bufferId],
-                isFriend = isFriendQuery(row, friends),
-                multiNetwork,
-                onOpenBuffer,
-                onSetPinned,
-                onSetMuted,
-                onDeleteBuffer,
-                modifier = Modifier.animateItem(
-                    fadeInSpec = MotdMotion.microFadeIn,
-                    fadeOutSpec = MotdMotion.microFadeOut,
-                    placementSpec = MotdMotion.rowPlacement,
-                ),
-            )
-        }
-        if (sections.friends.isNotEmpty()) {
-            item(key = "friends-header") {
-                SectionHeader(stringResource(R.string.chatlist_friends))
-            }
-            items(sections.friends, key = { it.bufferId }) { row ->
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 88.dp),
+        ) {
+            items(sections.pinned, key = { it.bufferId }) { row ->
                 RowWithMenu(
                     row,
                     presence[row.bufferId],
-                    isFriend = true,
+                    isFriend = isFriendQuery(row, friends),
                     multiNetwork,
                     onOpenBuffer,
                     onSetPinned,
@@ -446,51 +437,136 @@ private fun ChatList(
                     ),
                 )
             }
-        }
-        if (sections.showRecentHeader) {
-            item(key = "recent-header") {
-                SectionHeader(stringResource(R.string.chatlist_recent))
+            if (sections.friends.isNotEmpty()) {
+                item(key = "friends-header") {
+                    SectionHeader(stringResource(R.string.chatlist_friends))
+                }
+                items(sections.friends, key = { it.bufferId }) { row ->
+                    RowWithMenu(
+                        row,
+                        presence[row.bufferId],
+                        isFriend = true,
+                        multiNetwork,
+                        onOpenBuffer,
+                        onSetPinned,
+                        onSetMuted,
+                        onDeleteBuffer,
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = MotdMotion.microFadeIn,
+                            fadeOutSpec = MotdMotion.microFadeOut,
+                            placementSpec = MotdMotion.rowPlacement,
+                        ),
+                    )
+                }
             }
-        }
-        items(sections.regular, key = { it.bufferId }) { row ->
-            RowWithMenu(
-                row,
-                presence[row.bufferId],
-                isFriend = false,
-                multiNetwork,
-                onOpenBuffer,
-                onSetPinned,
-                onSetMuted,
-                onDeleteBuffer,
-                modifier = Modifier.animateItem(
-                    fadeInSpec = MotdMotion.microFadeIn,
-                    fadeOutSpec = MotdMotion.microFadeOut,
-                    placementSpec = MotdMotion.rowPlacement,
-                ),
-            )
-        }
-        if (sections.fools.isNotEmpty()) {
-            item(key = "fools-header") {
-                FoolsSectionHeader(
-                    count = sections.fools.size,
-                    expanded = foolsExpanded,
-                    onToggle = { foolsExpanded = !foolsExpanded },
+            if (sections.showRecentHeader) {
+                item(key = "recent-header") {
+                    SectionHeader(stringResource(R.string.chatlist_recent))
+                }
+            }
+            items(sections.regular, key = { it.bufferId }) { row ->
+                RowWithMenu(
+                    row,
+                    presence[row.bufferId],
+                    isFriend = false,
+                    multiNetwork,
+                    onOpenBuffer,
+                    onSetPinned,
+                    onSetMuted,
+                    onDeleteBuffer,
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = MotdMotion.microFadeIn,
+                        fadeOutSpec = MotdMotion.microFadeOut,
+                        placementSpec = MotdMotion.rowPlacement,
+                    ),
                 )
             }
-            if (foolsExpanded) {
-                items(sections.fools, key = { it.bufferId }) { row ->
-                    Box(
-                        modifier = Modifier
-                            .alpha(0.55f)
-                            .animateItem(
-                                fadeInSpec = MotdMotion.microFadeIn,
-                                fadeOutSpec = MotdMotion.microFadeOut,
-                                placementSpec = MotdMotion.rowPlacement,
-                            ),
-                    ) {
-                        RowWithMenu(row, presence[row.bufferId], isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
+            if (sections.fools.isNotEmpty()) {
+                item(key = "fools-header") {
+                    FoolsSectionHeader(
+                        count = sections.fools.size,
+                        expanded = foolsExpanded,
+                        onToggle = { foolsExpanded = !foolsExpanded },
+                    )
+                }
+                if (foolsExpanded) {
+                    items(sections.fools, key = { it.bufferId }) { row ->
+                        Box(
+                            modifier = Modifier
+                                .alpha(0.55f)
+                                .animateItem(
+                                    fadeInSpec = MotdMotion.microFadeIn,
+                                    fadeOutSpec = MotdMotion.microFadeOut,
+                                    placementSpec = MotdMotion.rowPlacement,
+                                ),
+                        ) {
+                            RowWithMenu(row, presence[row.bufferId], isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
+                        }
                     }
                 }
+            }
+        }
+
+        ViewportScrollToTopFab(
+            listState = listState,
+            sections = sections,
+            foolsExpanded = foolsExpanded,
+            onClick = { scope.launch { listState.animateScrollToItem(0) } },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 88.dp),
+        )
+    }
+}
+
+@Composable
+private fun ViewportScrollToTopFab(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    sections: ChatListSections,
+    foolsExpanded: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val canScrollToTop by remember(listState) {
+        derivedStateOf { listState.canScrollBackward }
+    }
+    val firstVisibleItemIndex by remember(listState) {
+        derivedStateOf { listState.firstVisibleItemIndex }
+    }
+    val unreadAbove = remember(sections, foolsExpanded, firstVisibleItemIndex) {
+        unreadActivityBeforeDisplayIndex(sections, foolsExpanded, firstVisibleItemIndex)
+    }
+    val description = if (unreadAbove > 0) {
+        pluralStringResource(
+            R.plurals.chatlist_scroll_to_top_with_unread,
+            unreadAbove,
+            unreadAbove,
+        )
+    } else {
+        stringResource(R.string.chatlist_scroll_to_top)
+    }
+
+    AnimatedVisibility(
+        visible = canScrollToTop,
+        enter = scaleIn(),
+        exit = scaleOut(),
+        modifier = modifier,
+    ) {
+        BadgedBox(
+            badge = {
+                if (unreadAbove > 0) {
+                    Badge { Text(if (unreadAbove > 99) "99+" else unreadAbove.toString()) }
+                }
+            },
+        ) {
+            FloatingActionButton(
+                onClick = onClick,
+                modifier = Modifier.testTag("chatlist_scroll_to_top"),
+            ) {
+                Icon(
+                    Icons.Filled.KeyboardArrowUp,
+                    contentDescription = description,
+                )
             }
         }
     }

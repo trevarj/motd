@@ -59,5 +59,46 @@ fun sectionChatList(
     )
 }
 
+/**
+ * Count unread activity in rendered chat rows strictly above [firstVisibleItemIndex]. Section
+ * headers occupy lazy-list indices but never contribute activity; collapsed fool rows do neither.
+ */
+internal fun unreadActivityBeforeDisplayIndex(
+    sections: ChatListSections,
+    foolsExpanded: Boolean,
+    firstVisibleItemIndex: Int,
+): Int {
+    if (firstVisibleItemIndex <= 0) return 0
+    var displayIndex = 0
+    var unread = 0L
+
+    fun consumeHeader() {
+        displayIndex++
+    }
+
+    fun consumeRows(rows: List<ChatListRow>) {
+        rows.forEach { row ->
+            if (displayIndex < firstVisibleItemIndex) {
+                unread += maxOf(row.unreadCount, row.mentionCount).coerceAtLeast(0)
+            }
+            displayIndex++
+        }
+    }
+
+    consumeRows(sections.pinned)
+    if (sections.friends.isNotEmpty()) {
+        consumeHeader()
+        consumeRows(sections.friends)
+    }
+    if (sections.showRecentHeader) consumeHeader()
+    consumeRows(sections.regular)
+    if (sections.fools.isNotEmpty()) {
+        consumeHeader()
+        if (foolsExpanded) consumeRows(sections.fools)
+    }
+
+    return unread.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+}
+
 private val ChatListRow.identityRules: IrcIdentityRules
     get() = IrcIdentityRules.from(caseMapping, chanTypes)
