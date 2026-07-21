@@ -87,6 +87,7 @@ import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.attachment.supports
+import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -515,9 +516,11 @@ private fun UploadPrivacyCard(config: PasteBackendConfig) {
     val termbin = config.backend == AttachmentBackend.TERMBIN
     val safe = config.backend == AttachmentBackend.CNET ||
         (config.protocol == io.github.trevarj.motd.attachment.PasteProtocol.MULTIPART_0X0 && config.secretUrl)
+    val semanticColors = LocalMotdSemanticColors.current
     Surface(
         shape = RoundedCornerShape(18.dp),
-        color = if (safe) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.errorContainer,
+        color = if (safe) semanticColors.successContainer else MaterialTheme.colorScheme.errorContainer,
+        contentColor = if (safe) semanticColors.onSuccessContainer else MaterialTheme.colorScheme.onErrorContainer,
     ) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
             Icon(if (safe) Icons.Outlined.Lock else Icons.Outlined.Public, null)

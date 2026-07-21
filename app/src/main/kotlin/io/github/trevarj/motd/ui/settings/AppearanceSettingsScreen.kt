@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
@@ -19,6 +21,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
@@ -62,7 +65,6 @@ import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.foundation.shape.CircleShape
-import io.github.trevarj.motd.ui.theme.fixedThemeScheme
 import kotlin.math.roundToInt
 
 /** Appearance category: theme, dynamic color, layout density, avatar style, nick colors, wallpaper. */
@@ -79,6 +81,7 @@ fun AppearanceSettingsScreen(
         onBack = onBack,
         onOpenNickColors = onOpenNickColors,
         onThemePreset = viewModel::setThemePreset,
+        onTrueBlack = viewModel::setTrueBlack,
         onDynamicColor = viewModel::setDynamicColor,
         onLayoutDensity = viewModel::setLayoutDensity,
         onAvatarStyle = viewModel::setAvatarStyle,
@@ -97,6 +100,7 @@ fun AppearanceSettingsContent(
     onBack: () -> Unit,
     onOpenNickColors: () -> Unit,
     onThemePreset: (ColorThemePreset) -> Unit,
+    onTrueBlack: (Boolean) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onLayoutDensity: (LayoutDensity) -> Unit,
     onAvatarStyle: (AvatarStyle) -> Unit,
@@ -107,6 +111,7 @@ fun AppearanceSettingsContent(
     onConversationFontScale: (Int) -> Unit,
 ) {
     var showThemeSheet by remember { mutableStateOf(false) }
+    val trueBlackAvailable = appearance.theme == ColorThemePreset.SYSTEM || appearance.theme.isDark
     SettingsScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
         SettingsGroup(title = stringResource(R.string.settings_theme_section)) {
             SettingsNavigationRow(
@@ -115,6 +120,22 @@ fun AppearanceSettingsContent(
                 value = themePresetLabel(appearance.theme),
                 onClick = { showThemeSheet = true },
                 modifier = Modifier.testTag("settings_theme_picker"),
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_true_black),
+                subtitle = stringResource(
+                    when {
+                        appearance.theme == ColorThemePreset.SYSTEM -> R.string.settings_true_black_system_desc
+                        trueBlackAvailable -> R.string.settings_true_black_desc
+                        appearance.trueBlack -> R.string.settings_true_black_saved_desc
+                        else -> R.string.settings_true_black_unavailable_desc
+                    },
+                ),
+                checked = appearance.trueBlack,
+                onCheckedChange = onTrueBlack,
+                switchTag = "settings_switch_true_black",
+                enabled = trueBlackAvailable,
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
@@ -179,6 +200,8 @@ fun AppearanceSettingsContent(
     if (showThemeSheet) {
         ThemePickerSheet(
             current = appearance.theme,
+            trueBlack = appearance.trueBlack,
+            dynamicColor = settings.dynamicColor,
             onSelect = { mode -> onThemePreset(mode); showThemeSheet = false },
             onDismiss = { showThemeSheet = false },
         )
@@ -239,7 +262,13 @@ private fun FontScaleSlider(
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun ThemePickerSheet(current: ColorThemePreset, onSelect: (ColorThemePreset) -> Unit, onDismiss: () -> Unit) {
+private fun ThemePickerSheet(
+    current: ColorThemePreset,
+    trueBlack: Boolean,
+    dynamicColor: Boolean,
+    onSelect: (ColorThemePreset) -> Unit,
+    onDismiss: () -> Unit,
+) {
     var query by remember { mutableStateOf("") }
     val normalized = query.trim().lowercase()
     fun filtered(items: List<ColorThemePreset>) = items.filter {
@@ -268,7 +297,7 @@ private fun ThemePickerSheet(current: ColorThemePreset, onSelect: (ColorThemePre
                     item { SubLabel(stringResource(title)) }
                     items(modes.size) { index ->
                         val mode = modes[index]
-                        ThemeRadioRow(mode, current == mode, onSelect)
+                        ThemeRadioRow(mode, current == mode, trueBlack, dynamicColor, onSelect)
                     }
                 }
             }
@@ -280,20 +309,39 @@ private fun ThemePickerSheet(current: ColorThemePreset, onSelect: (ColorThemePre
 }
 
 @Composable
-private fun ThemeRadioRow(mode: ColorThemePreset, selected: Boolean, onSelect: (ColorThemePreset) -> Unit) {
-    val scheme = fixedThemeScheme(mode)
+private fun ThemeRadioRow(
+    mode: ColorThemePreset,
+    selected: Boolean,
+    trueBlack: Boolean,
+    dynamicColor: Boolean,
+    onSelect: (ColorThemePreset) -> Unit,
+) {
     RadioRow(
         label = themePresetLabel(mode),
         selected = selected,
         enabled = true,
         onClick = { onSelect(mode) },
         modifier = Modifier.testTag("settings_theme_${mode.name.lowercase()}"),
-        trailing = scheme?.let {
-            {
-                Row {
-                    listOf(it.primary, it.secondary, it.tertiary).forEach { color ->
-                        Box(Modifier.size(14.dp).background(color, CircleShape))
-                        Spacer(Modifier.width(3.dp))
+        trailing = {
+            MotdTheme(themePreset = mode, trueBlack = trueBlack, dynamicColor = dynamicColor) {
+                val scheme = MaterialTheme.colorScheme
+                Surface(
+                    color = scheme.background,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, scheme.outline),
+                    modifier = Modifier
+                        .width(88.dp)
+                        .height(30.dp)
+                        .testTag("settings_theme_preview_${mode.name.lowercase()}"),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Text("Aa", color = scheme.onBackground, style = MaterialTheme.typography.labelSmall)
+                        listOf(scheme.primary, scheme.secondary, scheme.tertiary).forEach { color ->
+                            Box(Modifier.size(11.dp).background(color, CircleShape))
+                        }
                     }
                 }
             }
@@ -370,7 +418,9 @@ private fun themePresetLabelRes(mode: ColorThemePreset): Int = when (mode) {
 
 internal val LIGHT_THEME_PRESETS = ColorThemePreset.entries.filter { !it.isDark && it != ColorThemePreset.SYSTEM }
     .sortedBy(::themePresetLabelText)
-internal val DARK_THEME_PRESETS = ColorThemePreset.entries.filter { it.isDark }.sortedBy(::themePresetLabelText)
+internal val DARK_THEME_PRESETS = ColorThemePreset.entries
+    .filter { it.isDark && it != ColorThemePreset.AMOLED }
+    .sortedBy(::themePresetLabelText)
 
 @Composable
 private fun AvatarStyleGroup(current: AvatarStyle, onSelect: (AvatarStyle) -> Unit) {
@@ -470,7 +520,7 @@ private fun AppearanceSettingsPreview() {
         AppearanceSettingsContent(
             settings = Settings(dynamicColor = true),
             appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(theme = ColorThemePreset.DARK),
-            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onDynamicColor = {},
+            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onDynamicColor = {},
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
             onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
             onConversationFontScale = {},
@@ -485,7 +535,7 @@ private fun AppearanceSettingsMinTextPreview() {
         AppearanceSettingsContent(
             settings = Settings(dynamicColor = true),
             appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(uiFontScalePercent = 80),
-            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onDynamicColor = {},
+            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onDynamicColor = {},
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
             onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
             onConversationFontScale = {},
@@ -500,7 +550,7 @@ private fun AppearanceSettingsMaxTextPreview() {
         AppearanceSettingsContent(
             settings = Settings(dynamicColor = true),
             appearance = io.github.trevarj.motd.data.prefs.AppearanceConfig(uiFontScalePercent = 140),
-            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onDynamicColor = {},
+            onBack = {}, onOpenNickColors = {}, onThemePreset = {}, onTrueBlack = {}, onDynamicColor = {},
             onLayoutDensity = {}, onAvatarStyle = {}, onNickColorsEnabled = {},
             onNickColorPalette = {}, onWallpaper = {}, onUiFontScale = {},
             onConversationFontScale = {},

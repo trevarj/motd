@@ -46,11 +46,10 @@ import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MutedActivityBadge
 import io.github.trevarj.motd.ui.components.NetworkChip
 import io.github.trevarj.motd.ui.components.UnreadBadge
-import io.github.trevarj.motd.ui.components.isAppliedThemeDark
+import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.ui.theme.presenceOnlineColor
 
 internal data class ChatListBadgeState(
     val mutedActivity: Int? = null,
@@ -281,7 +280,7 @@ private fun PresenceBadge(
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val online = presenceOnlineColor(isAppliedThemeDark())
+    val online = LocalMotdSemanticColors.current.success
     Box(
         modifier = modifier
             .size(14.dp)

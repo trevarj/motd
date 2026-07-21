@@ -15,8 +15,9 @@ import org.junit.Test
 class SettingsUiModelsTest {
     @Test
     fun `theme groups are complete and alphabetically arranged by display label`() {
-        assertEquals(ColorThemePreset.entries.size - 1, LIGHT_THEME_PRESETS.size + DARK_THEME_PRESETS.size)
-        assertEquals(ColorThemePreset.entries.toSet(), (listOf(ColorThemePreset.SYSTEM) + LIGHT_THEME_PRESETS + DARK_THEME_PRESETS).toSet())
+        val selectable = ColorThemePreset.entries.toSet() - ColorThemePreset.AMOLED
+        assertEquals(selectable.size - 1, LIGHT_THEME_PRESETS.size + DARK_THEME_PRESETS.size)
+        assertEquals(selectable, (listOf(ColorThemePreset.SYSTEM) + LIGHT_THEME_PRESETS + DARK_THEME_PRESETS).toSet())
         assertEquals(LIGHT_THEME_PRESETS.map(::themePresetLabelText).sorted(), LIGHT_THEME_PRESETS.map(::themePresetLabelText))
         assertEquals(DARK_THEME_PRESETS.map(::themePresetLabelText).sorted(), DARK_THEME_PRESETS.map(::themePresetLabelText))
     }

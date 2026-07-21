@@ -25,7 +25,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.layout.onSizeChanged
@@ -40,6 +40,7 @@ import androidx.core.graphics.withTranslation
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.components.isAppliedThemeDark
+import io.github.trevarj.motd.ui.theme.contrastSafeOverlay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -62,11 +63,24 @@ fun ChatWallpaperBackground(
     val dark = isAppliedThemeDark()
     val scheme = MaterialTheme.colorScheme
     val base = scheme.background
-    val gradient = remember(wallpaper.preset, base, scheme.primary, scheme.secondary, scheme.tertiary) {
-        gradientColors(wallpaper.preset, base, scheme.primary, scheme.secondary, scheme.tertiary)
+    val foregrounds = listOf(scheme.onBackground, scheme.onSurface, scheme.onSurfaceVariant)
+    val gradient = remember(wallpaper.preset, scheme) {
+        gradientColors(
+            wallpaper.preset,
+            base,
+            scheme.primary,
+            scheme.secondary,
+            scheme.tertiary,
+            foregrounds,
+        )
     }
     val maxAlpha = if (dark) .22f else .18f
-    val pattern = scheme.onSurfaceVariant.copy(alpha = maxAlpha * wallpaper.intensity.coerceIn(0, 100) / 100f)
+    val pattern = contrastSafeOverlay(
+        base = base,
+        overlay = scheme.onSurfaceVariant,
+        requestedAlpha = maxAlpha * wallpaper.intensity.coerceIn(0, 100) / 100f,
+        foregrounds = foregrounds,
+    )
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     val rasterKey = remember(wallpaper, canvasSize, density, gradient, pattern) {
         canvasSize.takeIf { it.width > 0 && it.height > 0 }?.let {
@@ -112,6 +126,7 @@ private fun gradientColors(
     primary: Color,
     secondary: Color,
     tertiary: Color,
+    foregrounds: List<Color>,
 ): List<Color> {
     // AMOLED remains genuinely black: the pattern supplies texture without colored surface glow.
     if (base.toArgb() == AndroidColor.BLACK) return List(4) { base }
@@ -124,12 +139,9 @@ private fun gradientColors(
         ChatWallpaperPreset.PIXELS -> listOf(primary, tertiary, secondary)
         ChatWallpaperPreset.NONE -> listOf(base, base, base)
     }
-    return listOf(
-        lerp(base, accents[0], .10f),
-        lerp(base, accents[1], .07f),
-        lerp(base, accents[2], .09f),
-        lerp(base, accents[0], .05f),
-    )
+    return listOf(.10f, .07f, .09f, .05f).mapIndexed { index, alpha ->
+        contrastSafeOverlay(base, accents[index % accents.size], alpha, foregrounds).compositeOver(base)
+    }
 }
 
 private data class PatternPath(

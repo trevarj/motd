@@ -431,7 +431,7 @@ fun MessageBubble(
                     text = displayedTime,
                     style = MaterialTheme.typography.labelSmall,
                     color = if (failed) MaterialTheme.colorScheme.error
-                    else textColor.copy(alpha = 0.6f),
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.CenterVertically),
                 )
             }
@@ -569,7 +569,7 @@ private fun ActionMessageRow(
                         color = if (failed) {
                             MaterialTheme.colorScheme.error
                         } else {
-                            bodyColor.copy(alpha = 0.6f)
+                            MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     )
                 }
@@ -780,7 +780,7 @@ private fun TwoLineMessageRow(
                         text = formattedTime,
                         style = MaterialTheme.typography.labelSmall,
                         color = if (failed) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -918,7 +918,7 @@ internal fun SentIcon() {
     Icon(
         Icons.Filled.Done,
         contentDescription = stringResource(R.string.chat_sent),
-        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
             .padding(end = 4.dp)
             .heightIn(max = 12.dp)
@@ -932,7 +932,7 @@ internal fun PendingIcon() {
     Icon(
         Icons.Filled.Schedule,
         contentDescription = stringResource(R.string.chat_sending),
-        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
             .padding(end = 4.dp)
             .heightIn(max = 12.dp)

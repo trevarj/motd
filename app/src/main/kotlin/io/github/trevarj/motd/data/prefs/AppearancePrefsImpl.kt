@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.prefs
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -13,10 +14,26 @@ import kotlinx.coroutines.flow.map
 
 private val Context.appearanceDataStore by preferencesDataStore("appearance")
 private val THEME = stringPreferencesKey("theme_preset_v1")
+private val TRUE_BLACK = booleanPreferencesKey("true_black_v1")
 private val WALLPAPER = stringPreferencesKey("wallpaper_preset_v1")
 private val WALLPAPER_INTENSITY = intPreferencesKey("wallpaper_intensity_v1")
 private val UI_FONT_SCALE = intPreferencesKey("ui_font_scale_percent_v1")
 private val CONVERSATION_FONT_SCALE = intPreferencesKey("conversation_font_scale_percent_v1")
+
+internal data class StoredThemeResolution(
+    val theme: ColorThemePreset,
+    val trueBlack: Boolean,
+)
+
+internal fun resolveStoredTheme(name: String?, explicitTrueBlack: Boolean?): StoredThemeResolution {
+    val storedTheme = name?.let { runCatching { ColorThemePreset.valueOf(it) }.getOrNull() }
+        ?: ColorThemePreset.SYSTEM
+    val legacyAmoled = storedTheme == ColorThemePreset.AMOLED
+    return StoredThemeResolution(
+        theme = if (legacyAmoled) ColorThemePreset.DARK else storedTheme,
+        trueBlack = explicitTrueBlack ?: legacyAmoled,
+    )
+}
 
 @Singleton
 class AppearancePrefsImpl @Inject constructor(
@@ -25,9 +42,9 @@ class AppearancePrefsImpl @Inject constructor(
     private val store = context.appearanceDataStore
 
     override val config: Flow<AppearanceConfig> = store.data.map { prefs ->
+        val storedTheme = resolveStoredTheme(prefs[THEME], prefs[TRUE_BLACK])
         AppearanceConfig(
-            theme = prefs[THEME]?.let { runCatching { ColorThemePreset.valueOf(it) }.getOrNull() }
-                ?: ColorThemePreset.SYSTEM,
+            theme = storedTheme.theme,
             wallpaper = WallpaperSelection(
                 preset = prefs[WALLPAPER]?.let { runCatching { ChatWallpaperPreset.valueOf(it) }.getOrNull() }
                     ?: ChatWallpaperPreset.CHATTER,
@@ -39,11 +56,23 @@ class AppearancePrefsImpl @Inject constructor(
             conversationFontScalePercent = normalizeFontScalePercent(
                 prefs[CONVERSATION_FONT_SCALE] ?: DEFAULT_FONT_SCALE_PERCENT,
             ),
+            trueBlack = storedTheme.trueBlack,
         )
     }
 
     override suspend fun setTheme(theme: ColorThemePreset) {
-        store.edit { it[THEME] = theme.name }
+        store.edit {
+            if (theme == ColorThemePreset.AMOLED) {
+                it[THEME] = ColorThemePreset.DARK.name
+                it[TRUE_BLACK] = true
+            } else {
+                it[THEME] = theme.name
+            }
+        }
+    }
+
+    override suspend fun setTrueBlack(enabled: Boolean) {
+        store.edit { it[TRUE_BLACK] = enabled }
     }
 
     override suspend fun setWallpaper(selection: WallpaperSelection) {

@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity() {
             val appearance = uiState.appearance
             MotdTheme(
                 themePreset = appearance.theme,
+                trueBlack = appearance.trueBlack,
                 dynamicColor = settings.dynamicColor,
                 layoutDensity = settings.layoutDensity,
                 nickColorsEnabled = settings.nickColorsEnabled,

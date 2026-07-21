@@ -120,6 +120,10 @@ class SettingsViewModel @Inject constructor(
         appearancePrefs.setTheme(theme)
     }
 
+    fun setTrueBlack(enabled: Boolean) = viewModelScope.launch {
+        appearancePrefs.setTrueBlack(enabled)
+    }
+
     fun setDynamicColor(enabled: Boolean) = viewModelScope.launch {
         settingsRepository.setDynamicColor(enabled)
     }

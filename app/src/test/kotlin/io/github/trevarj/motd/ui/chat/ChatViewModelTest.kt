@@ -1012,6 +1012,7 @@ class ChatViewModelTest {
     private class FakeAppearancePrefs : AppearancePrefs {
         override val config = MutableStateFlow(AppearanceConfig())
         override suspend fun setTheme(theme: ColorThemePreset) = Unit
+        override suspend fun setTrueBlack(enabled: Boolean) = Unit
         override suspend fun setWallpaper(selection: io.github.trevarj.motd.data.prefs.WallpaperSelection) = Unit
         override suspend fun setUiFontScale(percent: Int) = Unit
         override suspend fun setConversationFontScale(percent: Int) = Unit

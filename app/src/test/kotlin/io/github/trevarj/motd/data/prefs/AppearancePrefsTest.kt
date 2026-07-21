@@ -27,9 +27,28 @@ class AppearancePrefsTest {
 
     @Test fun themeAndWallpaper_roundTrip() = runTest {
         prefs.setTheme(ColorThemePreset.KANAGAWA_WAVE)
+        prefs.setTrueBlack(true)
         prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RELAY, 73))
         assertEquals(ColorThemePreset.KANAGAWA_WAVE, prefs.config.first().theme)
+        assertEquals(true, prefs.config.first().trueBlack)
         assertEquals(WallpaperSelection(ChatWallpaperPreset.RELAY, 73), prefs.config.first().wallpaper)
+    }
+
+    @Test fun legacyAmoledTheme_migratesToDarkWithTrueBlack() {
+        assertEquals(
+            StoredThemeResolution(ColorThemePreset.DARK, true),
+            resolveStoredTheme(ColorThemePreset.AMOLED.name, explicitTrueBlack = null),
+        )
+        assertEquals(
+            StoredThemeResolution(ColorThemePreset.DARK, false),
+            resolveStoredTheme(ColorThemePreset.AMOLED.name, explicitTrueBlack = false),
+        )
+    }
+
+    @Test fun legacyAmoledSetter_preservesCompatibility() = runTest {
+        prefs.setTheme(ColorThemePreset.AMOLED)
+        assertEquals(ColorThemePreset.DARK, prefs.config.first().theme)
+        assertEquals(true, prefs.config.first().trueBlack)
     }
 
     @Test fun wallpaperIntensity_isClampedAtomically() = runTest {

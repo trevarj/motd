@@ -157,7 +157,7 @@ internal fun CompactMessageRow(
                     text = formattedTime,
                     style = MaterialTheme.typography.labelSmall,
                     color = if (failed) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

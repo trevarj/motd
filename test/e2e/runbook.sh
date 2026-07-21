@@ -753,8 +753,8 @@ phase_f() {
   assert_tag_present settings_category_appearance
   assert_no_crash
 
-  # 45. Theme AMOLED (color-only oracle uses a screenshot).
-  step "Theme: AMOLED"
+  # 45. True-black modifier on a dark palette (color-only oracle uses a screenshot).
+  step "Theme: True black"
   tap_tag settings_category_appearance
   wait_for_text "Appearance" 6 || true
   assert_tag_present settings_theme_picker
@@ -765,11 +765,12 @@ phase_f() {
   # later Settings check onto the wrong window.
   wait_for_text "Search themes" 6 || true
   assert_text "Search themes"
-  input_by_text_label "Search themes" "AMOLED"
-  wait_for_text "AMOLED (true black)" 6 || true
-  tap_text "AMOLED (true black)"
+  input_by_text_label "Search themes" "Ayu Dark"
+  wait_for_text "Ayu Dark" 6 || true
+  tap_text "Ayu Dark"
+  tap_tag settings_switch_true_black
   screencap_step "amoled_background"   # color-only oracle
-  ok "selected AMOLED (background asserted via screencap only)"
+  ok "enabled true black on Ayu Dark (background asserted via screencap only)"
   assert_no_crash
 
   # 46. Colored nicknames off/on.

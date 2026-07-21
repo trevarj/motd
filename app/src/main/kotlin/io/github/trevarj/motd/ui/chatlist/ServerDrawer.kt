@@ -57,9 +57,8 @@ import io.github.trevarj.motd.ui.components.IrcNetworkBadge
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
+import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
-
-private val ConnectedRingColor = Color(0xFF4CAF50)
 
 /**
  * Server-drawer content (plans/16 §3.1). Stateless: takes the built [DrawerRow]s + rollups and
@@ -259,7 +258,7 @@ private fun DrawerNetworkItem(
                     name = row.name,
                     networkId = row.networkId,
                     status = if (connected) {
-                        ConnectedRingColor
+                        LocalMotdSemanticColors.current.success
                     } else {
                         MaterialTheme.colorScheme.outlineVariant
                     },

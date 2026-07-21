@@ -60,6 +60,7 @@ import io.github.trevarj.motd.bouncer.ChannelCommandFields
 import io.github.trevarj.motd.bouncer.NetworkCommandFields
 import io.github.trevarj.motd.bouncer.UserCommandFields
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 data class BouncerControlCallbacks(
@@ -417,10 +418,13 @@ private fun BouncerRow(
 }
 
 @Composable
-private fun bouncerStateColor(state: String?): Color = when (state) {
-    "connected" -> Color(0xFF4CAF50)
-    "connecting" -> Color(0xFFFFB300)
-    else -> MaterialTheme.colorScheme.outlineVariant
+private fun bouncerStateColor(state: String?): Color {
+    val semanticColors = LocalMotdSemanticColors.current
+    return when (state) {
+        "connected" -> semanticColors.success
+        "connecting" -> semanticColors.warning
+        else -> MaterialTheme.colorScheme.outlineVariant
+    }
 }
 
 @Preview

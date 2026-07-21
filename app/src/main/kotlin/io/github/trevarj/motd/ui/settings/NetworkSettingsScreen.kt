@@ -71,6 +71,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
+import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /** Stateful entry: wires the ViewModel, seeds the edit form from the network id. */
@@ -438,13 +439,15 @@ private fun statusLabel(connState: IrcClientState): String = when (connState) {
     is IrcClientState.Failed -> stringResource(R.string.network_settings_status_failed, connState.reason)
 }
 
-/** Static semaphore matching the drawer's status dots (theme-independent). */
 @Composable
-private fun statusColor(connState: IrcClientState): Color = when (connState) {
-    is IrcClientState.Ready -> Color(0xFF4CAF50)
-    IrcClientState.Connecting, IrcClientState.Registering -> Color(0xFFFFB300)
+private fun statusColor(connState: IrcClientState): Color {
+    val semanticColors = LocalMotdSemanticColors.current
+    return when (connState) {
+    is IrcClientState.Ready -> semanticColors.success
+    IrcClientState.Connecting, IrcClientState.Registering -> semanticColors.warning
     is IrcClientState.Failed -> MaterialTheme.colorScheme.error
     IrcClientState.Disconnected -> MaterialTheme.colorScheme.outlineVariant
+    }
 }
 
 @Composable

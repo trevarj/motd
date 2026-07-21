@@ -59,11 +59,13 @@ data class AppearanceConfig(
     val wallpaper: WallpaperSelection = WallpaperSelection(),
     val uiFontScalePercent: Int = DEFAULT_FONT_SCALE_PERCENT,
     val conversationFontScalePercent: Int = DEFAULT_FONT_SCALE_PERCENT,
+    val trueBlack: Boolean = false,
 )
 
 interface AppearancePrefs {
     val config: Flow<AppearanceConfig>
     suspend fun setTheme(theme: ColorThemePreset)
+    suspend fun setTrueBlack(enabled: Boolean)
     suspend fun setWallpaper(selection: WallpaperSelection)
     suspend fun setUiFontScale(percent: Int)
     suspend fun setConversationFontScale(percent: Int)

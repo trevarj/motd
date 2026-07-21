@@ -31,6 +31,7 @@ import io.github.trevarj.motd.avatar.canonicalAvatarNick
 import io.github.trevarj.motd.avatar.expandAvatarUrl
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.bestOnColor
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import coil.compose.AsyncImage
 
@@ -84,7 +85,7 @@ internal fun isAppliedThemeDark(): Boolean =
 
 /** Pick a legible on-color (black/white) for text/initials over [bg] by its luminance. */
 internal fun onColorFor(bg: Color): Color =
-    if (bg.luminance() < 0.5f) Color.White else Color.Black
+    bestOnColor(bg)
 
 /**
  * Circular nick avatar. [AvatarStyle.MONOGRAM] is a quiet theme-tinted disc with a single
