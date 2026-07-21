@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -72,7 +73,7 @@ fun NewConversationSheet(
 }
 
 @Composable
-private fun NewConversationSheetContent(
+internal fun NewConversationSheetContent(
     networks: List<NetworkEntity>,
     onJoinChannel: (networkId: Long, channel: String) -> Unit,
     onMessageUser: (networkId: Long, nick: String) -> Unit,
@@ -98,7 +99,8 @@ private fun NewConversationSheetContent(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
-            .padding(bottom = 32.dp),
+            .padding(bottom = 32.dp)
+            .testTag("new_conversation_content"),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         TabRow(selectedTabIndex = tab) {
@@ -161,15 +163,25 @@ private fun NewConversationSheetContent(
             )
         }
 
-        // Browse: LIST is meaningless on the unbound soju root, so gate BOUNCER_ROOT out.
-        if (tab == 0) {
-            val net = selectedNetwork
-            TextButton(
-                onClick = { net?.let { onBrowseChannels(it.id) } },
-                enabled = net != null && net.role != NetworkRole.BOUNCER_ROOT,
-                modifier = Modifier.fillMaxWidth().testTag("new_conversation_browse"),
-            ) {
-                Text(stringResource(R.string.new_sheet_browse))
+        // Keep this action slot on both tabs. Without it, hiding Browse for direct messages also
+        // removes the Column spacing before it and makes the bottom sheet visibly jump in height.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("new_conversation_action_slot"),
+            contentAlignment = Alignment.Center,
+        ) {
+            // Browse: LIST is meaningless on the unbound soju root, so gate BOUNCER_ROOT out.
+            if (tab == 0) {
+                val net = selectedNetwork
+                TextButton(
+                    onClick = { net?.let { onBrowseChannels(it.id) } },
+                    enabled = net != null && net.role != NetworkRole.BOUNCER_ROOT,
+                    modifier = Modifier.fillMaxWidth().testTag("new_conversation_browse"),
+                ) {
+                    Text(stringResource(R.string.new_sheet_browse))
+                }
             }
         }
     }
