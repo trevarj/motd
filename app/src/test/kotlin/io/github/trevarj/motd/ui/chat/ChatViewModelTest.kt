@@ -150,6 +150,7 @@ class ChatViewModelTest {
         val parent = message(channel.id, "parent", msgid = "parent-1", sender = "alice", id = 88)
         vm.setReply(parent)
         vm.state.first { it.replyTo?.msgid == "parent-1" }
+        vm.saveDraft("answer")
 
         val revisionBeforeSubmit = vm.composerDraft.value.revision
         val submission = vm.submit("answer", {}, {})
@@ -183,6 +184,40 @@ class ChatViewModelTest {
         assertEquals(88L, db.composerDraftDao().byRoom(channel.id)?.replyToEventId)
         assertEquals(parent, vm.state.value.replyTo)
         assertEquals("answer", vm.composerDraft.value.text)
+    }
+
+    @Test
+    fun `rapid duplicate submits of an unchanged draft send only once`() = runTest {
+        val sendGate = CompletableDeferred<Unit>()
+        val manager = FakeConnectionManager(network.id, sendGate = sendGate)
+        val vm = viewModel(channel, manager)
+        vm.state.first { it.buffer != null }
+        val link = "https://crafterbin.example/paste"
+        vm.saveDraft(link)
+
+        val first = vm.submit(link, {}, {})
+        runCurrent()
+        manager.messageStarted.await()
+
+        val second = vm.submit(link, {}, {})
+        val third = vm.submit(link, {}, {})
+        runCurrent()
+
+        assertEquals(listOf(SentMessage(channel.id, link, null)), manager.messages)
+
+        sendGate.complete(Unit)
+        advanceUntilIdle()
+        first.join()
+        second.join()
+        third.join()
+
+        // A callback held by Compose until after the accepted draft clear is stale, not a new edit.
+        val staleCallback = vm.submit(link, {}, {})
+        advanceUntilIdle()
+        staleCallback.join()
+
+        assertEquals(listOf(SentMessage(channel.id, link, null)), manager.messages)
+        assertEquals("", vm.composerDraft.value.text)
     }
 
     @Test
@@ -250,6 +285,7 @@ class ChatViewModelTest {
         val vm = viewModel(channel, manager)
         vm.state.first { it.buffer != null }
         val opened = CompletableDeferred<Long>()
+        vm.saveDraft("/msg alice hello there")
 
         vm.submit("/msg alice hello there", { opened.complete(it) })
         val openedBuffer = opened.await()

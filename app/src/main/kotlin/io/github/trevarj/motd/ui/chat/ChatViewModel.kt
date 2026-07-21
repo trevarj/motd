@@ -110,6 +110,12 @@ private data class DraftSnapshot(
     val revision: Long,
 )
 
+/** One user-visible draft revision may produce at most one outbound submission. */
+private data class DraftSubmissionKey(
+    val roomId: Long,
+    val revision: Long,
+)
+
 private sealed interface DraftCommand {
     data class Persist(val snapshot: DraftSnapshot) : DraftCommand
     data class PrepareSubmission(
@@ -234,6 +240,9 @@ class ChatViewModel @Inject constructor(
     private var nextDraftRevision = 0L
     private var draftTextEdited = false
     private var draftReplyEdited = false
+    // A duplicate click can arrive before the UI has observed the accepted draft clear. Keep the
+    // reservation with the draft state so every entry point gets the same exactly-once behavior.
+    private val inFlightDraftSubmissions = mutableSetOf<DraftSubmissionKey>()
     private val _members = MutableStateFlow<List<MemberEntity>>(emptyList())
     private val _memberNicks = MutableStateFlow<List<String>>(emptyList())
     val memberNicks: StateFlow<List<String>> = _memberNicks.asStateFlow()
@@ -708,30 +717,38 @@ class ChatViewModel @Inject constructor(
             is ChatCommand.None -> Unit
             is ChatCommand.Message -> {
                 val roomId = operationalBufferId.value
-                val submission = prepareDraftSubmission(raw)
-                val result = connectionManager.sendMessage(
-                    roomId,
-                    cmd.text,
-                    submission.snapshot.replyToEventId,
-                )
-                if (result is SendAcceptance.Accepted) {
-                    clearDraftSubmission(submission)
-                    connectionManager.sendTyping(roomId, "done")
-                } else if (result is SendAcceptance.Rejected) {
-                    uiEventQueue.enqueue(ChatUiEvent.SendRejected)
+                val submission = prepareDraftSubmission(raw) ?: return@launch
+                try {
+                    val result = connectionManager.sendMessage(
+                        roomId,
+                        cmd.text,
+                        submission.snapshot.replyToEventId,
+                    )
+                    if (result is SendAcceptance.Accepted) {
+                        clearDraftSubmission(submission)
+                        connectionManager.sendTyping(roomId, "done")
+                    } else if (result is SendAcceptance.Rejected) {
+                        uiEventQueue.enqueue(ChatUiEvent.SendRejected)
+                    }
+                } finally {
+                    releaseDraftSubmission(submission.snapshot)
                 }
             }
             is ChatCommand.Join -> networkId?.let { connectionManager.joinChannel(it, cmd.channel) }
             is ChatCommand.Part -> connectionManager.partChannel(operationalBufferId.value, cmd.reason)
             is ChatCommand.Msg -> networkId?.let { nid ->
                 val target = connectionManager.ensureQueryBuffer(nid, cmd.nick)
-                val submission = prepareDraftSubmission(raw)
-                when (connectionManager.sendMessage(target, cmd.text)) {
-                    is SendAcceptance.Accepted -> {
-                        clearDraftSubmission(submission)
-                        onOpenBuffer(target)
+                val submission = prepareDraftSubmission(raw) ?: return@let
+                try {
+                    when (connectionManager.sendMessage(target, cmd.text)) {
+                        is SendAcceptance.Accepted -> {
+                            clearDraftSubmission(submission)
+                            onOpenBuffer(target)
+                        }
+                        is SendAcceptance.Rejected -> uiEventQueue.enqueue(ChatUiEvent.SendRejected)
                     }
-                    is SendAcceptance.Rejected -> uiEventQueue.enqueue(ChatUiEvent.SendRejected)
+                } finally {
+                    releaseDraftSubmission(submission.snapshot)
                 }
             }
             is ChatCommand.Query -> networkId?.let { nid ->
@@ -773,9 +790,13 @@ class ChatViewModel @Inject constructor(
             return
         }
         val client = connectionManager.clientFor(nid) ?: return
-        val submission = prepareDraftSubmission(raw)
-        client.send(msg)
-        clearDraftSubmission(submission)
+        val submission = prepareDraftSubmission(raw) ?: return
+        try {
+            client.send(msg)
+            clearDraftSubmission(submission)
+        } finally {
+            releaseDraftSubmission(submission.snapshot)
+        }
     }
 
     // --- nick sheet + whois (plans/16 §5.8) ---
@@ -999,23 +1020,44 @@ class ChatViewModel @Inject constructor(
         )
     }
 
-    private suspend fun prepareDraftSubmission(raw: String): PreparedDraftSubmission {
+    /**
+     * Reserve the currently rendered draft before any persistence or wire work begins.
+     *
+     * The composer owns edits through [saveDraft]. Treating a stale callback's [raw] text as a
+     * new edit used to recreate a draft just after an accepted send, which turned one rapid UI
+     * activation into multiple real IRC messages.
+     */
+    private suspend fun prepareDraftSubmission(raw: String): PreparedDraftSubmission? {
         draftHydrated.await()
         val result = CompletableDeferred<ComposerDraftEntity?>()
         val snapshot = synchronized(draftStateLock) {
-            if (currentDraftText != raw) {
-                draftTextEdited = true
-                currentDraftText = raw
-                draftCommands.trySend(DraftCommand.Persist(advanceDraftRevisionLocked()))
-            }
-            DraftSnapshot(
+            if (currentDraftText != raw) return@synchronized null
+            val candidate = DraftSnapshot(
                 roomId = operationalBufferId.value,
                 text = currentDraftText,
                 replyToEventId = currentReplyToEventId,
                 revision = _composerDraft.value.revision,
-            ).also { draftCommands.trySend(DraftCommand.PrepareSubmission(it, result)) }
+            )
+            val key = DraftSubmissionKey(candidate.roomId, candidate.revision)
+            if (!inFlightDraftSubmissions.add(key)) return@synchronized null
+            if (draftCommands.trySend(DraftCommand.PrepareSubmission(candidate, result)).isFailure) {
+                inFlightDraftSubmissions.remove(key)
+                return@synchronized null
+            }
+            candidate
+        } ?: return null
+        return try {
+            PreparedDraftSubmission(snapshot, result.await())
+        } catch (cancelled: CancellationException) {
+            releaseDraftSubmission(snapshot)
+            throw cancelled
         }
-        return PreparedDraftSubmission(snapshot, result.await())
+    }
+
+    private fun releaseDraftSubmission(snapshot: DraftSnapshot) {
+        synchronized(draftStateLock) {
+            inFlightDraftSubmissions.remove(DraftSubmissionKey(snapshot.roomId, snapshot.revision))
+        }
     }
 
     private suspend fun clearDraftSubmission(submission: PreparedDraftSubmission): Boolean {
