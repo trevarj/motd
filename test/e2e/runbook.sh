@@ -768,6 +768,9 @@ phase_f() {
   input_by_text_label "Search themes" "Ayu Dark"
   wait_for_text "Ayu Dark" 6 || true
   tap_text "Ayu Dark"
+  # Theme selection is intentionally non-dismissing so users can compare palettes in place.
+  adb_shell input keyevent 4
+  wait_for_text "Appearance" 6 || true
   tap_tag settings_switch_true_black
   screencap_step "amoled_background"   # color-only oracle
   ok "enabled true black on Ayu Dark (background asserted via screencap only)"

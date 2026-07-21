@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -110,7 +111,7 @@ fun AppearanceSettingsContent(
     onUiFontScale: (Int) -> Unit,
     onConversationFontScale: (Int) -> Unit,
 ) {
-    var showThemeSheet by remember { mutableStateOf(false) }
+    var showThemeSheet by rememberSaveable { mutableStateOf(false) }
     val trueBlackAvailable = appearance.theme == ColorThemePreset.SYSTEM || appearance.theme.isDark
     SettingsScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
         SettingsGroup(title = stringResource(R.string.settings_theme_section)) {
@@ -202,7 +203,7 @@ fun AppearanceSettingsContent(
             current = appearance.theme,
             trueBlack = appearance.trueBlack,
             dynamicColor = settings.dynamicColor,
-            onSelect = { mode -> onThemePreset(mode); showThemeSheet = false },
+            onSelect = onThemePreset,
             onDismiss = { showThemeSheet = false },
         )
     }

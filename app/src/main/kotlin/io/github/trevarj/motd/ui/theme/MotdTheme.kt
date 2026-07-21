@@ -101,14 +101,17 @@ fun MotdTheme(
     uiFontScalePercent: Int = DEFAULT_FONT_SCALE_PERCENT,
     content: @Composable () -> Unit,
 ) {
-    val dark = if (themePreset == ColorThemePreset.SYSTEM) isSystemInDarkTheme() else themePreset.isDark
+    // Read composable environment values unconditionally. Changing between dynamic/system and a
+    // fixed palette must not change this function's slot structure and dispose stateful content.
+    val systemDark = isSystemInDarkTheme()
+    val context = LocalContext.current
+    val dark = if (themePreset == ColorThemePreset.SYSTEM) systemDark else themePreset.isDark
     val effectivePreset = if (themePreset == ColorThemePreset.AMOLED) ColorThemePreset.DARK else themePreset
     val resolvedScheme = fixedThemeScheme(effectivePreset) ?: when {
         // Material You dynamic color, API 31+.
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val ctx = LocalContext.current
             accessibleColorScheme(
-                if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx),
+                if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context),
                 dark,
             )
         }

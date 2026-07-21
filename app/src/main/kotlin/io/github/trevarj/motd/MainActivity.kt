@@ -27,6 +27,7 @@ import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.prefs.Settings
@@ -106,6 +107,9 @@ class MainActivity : ComponentActivity() {
         acceptInvitationFrom(intent)
 
         setContent {
+            // Theme changes can replace the MaterialTheme subtree. Keep navigation above that
+            // boundary so applying a palette never resets the user to the start destination.
+            val navController = rememberNavController()
             val uiState by rootUiState.collectAsStateWithLifecycle()
             val settings = uiState.settings
             val appearance = uiState.appearance
@@ -150,6 +154,7 @@ class MainActivity : ComponentActivity() {
                         color = MaterialTheme.colorScheme.background,
                     ) {
                         MotdNavGraph(
+                            navController = navController,
                             notificationTarget = notificationTarget,
                             onNotificationTargetHandled = { notificationTarget = null },
                         )
