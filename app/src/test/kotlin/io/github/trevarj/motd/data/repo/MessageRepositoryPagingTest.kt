@@ -104,6 +104,52 @@ class MessageRepositoryPagingTest {
     }
 
     @Test
+    fun importingOlderHistoryAfterRecentPageKeepsNewestWindowInFront() = runTest {
+        val recentIds = db.messageDao().insertAll(
+            (1..25).map { ordinal ->
+                message(
+                    bufferId = bufferId,
+                    text = "recent-$ordinal",
+                    serverTime = 1_000L + ordinal,
+                    dedupKey = "recent-$ordinal",
+                    msgid = "recent-$ordinal",
+                )
+            },
+        )
+        val initialSource = db.messageDao().pagingSource(
+            messagePagingQuery(bufferId, MessageVisibilitySpec()),
+        )
+        val initialPage = initialSource.load(
+            PagingSource.LoadParams.Refresh(null, 50, true),
+        ).requirePage()
+        val initialNewestIds = initialPage.data.map { it.id }
+
+        db.messageDao().insertAll(
+            (1..513).map { ordinal ->
+                message(
+                    bufferId = bufferId,
+                    text = "history-$ordinal",
+                    serverTime = ordinal.toLong(),
+                    dedupKey = "history-$ordinal",
+                )
+            },
+        )
+        initialSource.invalidate()
+        assertTrue(initialSource.invalid)
+
+        val reloadedPage = db.messageDao().pagingSource(
+            messagePagingQuery(bufferId, MessageVisibilitySpec()),
+        ).load(
+            PagingSource.LoadParams.Refresh(null, 50, true),
+        ).requirePage()
+
+        assertEquals(recentIds.reversed(), initialNewestIds)
+        assertEquals(initialNewestIds, reloadedPage.data.take(initialNewestIds.size).map { it.id })
+        assertEquals("history-513", reloadedPage.data[initialNewestIds.size].text)
+        assertEquals(25 + 513, reloadedPage.itemsBefore + reloadedPage.data.size + reloadedPage.itemsAfter)
+    }
+
+    @Test
     fun foolSetPastBindLimitIsCompleteAndEmptySetProducesValidSql() = runTest {
         db.messageDao().insertAll(
             listOf(

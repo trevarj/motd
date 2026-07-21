@@ -189,12 +189,19 @@ class ChatModelsTest {
         assertTrue(tracker.onItemCountChanged(11))
     }
 
-    @Test fun `ignored tail growth does not trigger follow until meaningful identity changes`() {
+    @Test fun `513 recovered history rows do not follow or animate a live entry`() {
         val tracker = AutoFollowTracker(initialItemCount = 10)
         tracker.reset(itemCount = 10, atBottom = true, newestEffectiveId = 7)
 
-        assertFalse(tracker.onTimelineChanged(newItemCount = 11, newNewestEffectiveId = 7))
-        assertTrue(tracker.onTimelineChanged(newItemCount = 12, newNewestEffectiveId = 8))
+        val recoveredHistory = tracker.onTimelineChangedWithEntry(
+            newItemCount = 523,
+            newNewestEffectiveId = 7,
+        )
+
+        assertFalse(recoveredHistory.shouldFollow)
+        assertNull(recoveredHistory.liveEntryId)
+        assertTrue(tracker.following)
+        assertTrue(tracker.onTimelineChanged(newItemCount = 524, newNewestEffectiveId = 8))
     }
 
     @Test fun `live entry animation is emitted only for a followed newer identity`() {
@@ -338,9 +345,9 @@ class ChatModelsTest {
         assertTrue(shouldScrollToInitialTarget(ChatPositionTarget(index = 0), atBottom = false))
     }
 
-    @Test fun `normal entry always scrolls to older unread target`() {
-        assertTrue(shouldScrollToInitialTarget(ChatPositionTarget(index = 7), atBottom = true))
-        assertTrue(shouldScrollToInitialTarget(ChatPositionTarget(index = 7), atBottom = false))
+    @Test fun `unsaved older target cannot displace a bottom aligned entry`() {
+        assertFalse(shouldScrollToInitialTarget(ChatPositionTarget(index = 513), atBottom = true))
+        assertTrue(shouldScrollToInitialTarget(ChatPositionTarget(index = 513), atBottom = false))
     }
 
     @Test fun `saved scroll position always restores`() {

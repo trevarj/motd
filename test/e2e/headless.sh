@@ -157,6 +157,8 @@ fast() {
   log "discovering and running isolated fast journeys only on $SERIAL"
   if SERIAL="$SERIAL" FAST_E2E_OUT_DIR="$ARTIFACTS" \
     FAST_E2E_SOJU_HOST=127.0.0.1 FAST_E2E_SOJU_PORT="$SOJU_PORT" \
+    FAST_E2E_STACK_KIND=native FAST_E2E_NATIVE_STACK_DIR="$STACK_DIR" \
+    FAST_E2E_NATIVE_ERGO_PORT="$ERGO_PORT" \
     nix develop "$REPO" -c "$E2E_DIR/fast-suite.sh" direct; then
     :
   else

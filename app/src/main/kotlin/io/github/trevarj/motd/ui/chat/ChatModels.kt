@@ -222,7 +222,7 @@ fun nearestAnchorRow(
     return null
 }
 
-/** One exact destination model shared by deep links, saved positions, and unread entry. */
+/** One exact destination model shared by deep links and saved positions. */
 data class ChatPositionTarget(
     val index: Int,
     val offset: Int = 0,
@@ -244,11 +244,11 @@ data class ChatScrollPosition(
 )
 
 /**
- * Normal entry scroll: saved viewports and older unread targets need explicit positioning; a fresh
- * newest target only scrolls if the list state was retained off-bottom.
+ * Normal entry scroll: an explicit saved viewport always restores. An unsaved target only repairs
+ * list state retained physically off-bottom; it must not displace an already-bottom conversation.
  */
 fun shouldScrollToInitialTarget(target: ChatPositionTarget, atBottom: Boolean): Boolean =
-    target.fromSavedPosition || target.index > 0 || !atBottom
+    target.fromSavedPosition || !atBottom
 
 /** Canonical local identity is checked before the case-sensitive opaque wire msgid. */
 fun positionTargetMatches(target: ChatPositionTarget, actual: MessageEntity?): Boolean {

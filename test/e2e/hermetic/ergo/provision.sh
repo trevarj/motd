@@ -23,6 +23,10 @@
 #
 #   push      Send one uniquely-tagged channel highlight and one direct message.
 #
+#   reconnect-gap TOKEN      Send TOKEN g01 through TOKEN g40 for recovered history.
+#
+#   reconnect-current TOKEN  Send TOKEN c01 through TOKEN c03 as live arrivals.
+#
 #   all       register then seed (for standalone/local use without soju ordering).
 #
 # The optional MOTD_STACK_PROFILE=showcase profile provisions several believable
@@ -295,6 +299,55 @@ do_canonical() {
   } | feed_irc
 }
 
+require_reconnect_token() {
+  token="${1:-}"
+  case "$token" in
+    ''|*[!A-Za-z0-9]*) log "FATAL: reconnect token must be nonempty ASCII alphanumeric"; exit 2 ;;
+  esac
+}
+
+do_reconnect_gap() {
+  require_reconnect_token "${1:-}"
+  token="$1"
+  log "posting recovered reconnect gap tagged $token"
+  {
+    printf 'NICK %s\r\n' "$SEED_NICK"
+    printf 'USER %s 0 * :motd reconnect gap fixture\r\n' "$SEED_NICK"
+    printf 'NICKSERV IDENTIFY %s %s\r\n' "$SEED_NICK" "$SEED_PASS"
+    sleep 2
+    printf 'JOIN %s\r\n' "$TEST_CHANNEL"
+    sleep 1
+    i=1
+    while [ "$i" -le 40 ]; do
+      printf 'PRIVMSG %s :%s g%02d\r\n' "$TEST_CHANNEL" "$token" "$i"
+      i=$((i + 1))
+    done
+    sleep 1
+    printf 'QUIT :reconnect gap fixture complete\r\n'
+  } | feed_irc
+}
+
+do_reconnect_current() {
+  require_reconnect_token "${1:-}"
+  token="$1"
+  log "posting current reconnect rows tagged $token"
+  {
+    printf 'NICK %s\r\n' "$SEED_NICK"
+    printf 'USER %s 0 * :motd reconnect current fixture\r\n' "$SEED_NICK"
+    printf 'NICKSERV IDENTIFY %s %s\r\n' "$SEED_NICK" "$SEED_PASS"
+    sleep 2
+    printf 'JOIN %s\r\n' "$TEST_CHANNEL"
+    sleep 1
+    i=1
+    while [ "$i" -le 3 ]; do
+      printf 'PRIVMSG %s :%s c%02d\r\n' "$TEST_CHANNEL" "$token" "$i"
+      sleep 1
+      i=$((i + 1))
+    done
+    printf 'QUIT :reconnect current fixture complete\r\n'
+  } | feed_irc
+}
+
 wait_for_ergo
 case "$MODE" in
   register) do_register ;;
@@ -305,10 +358,12 @@ case "$MODE" in
   jpq)      do_jpq ;;
   push)     do_push ;;
   canonical) do_canonical ;;
+  reconnect-gap) do_reconnect_gap "${2:-}" ;;
+  reconnect-current) do_reconnect_current "${2:-}" ;;
   all)
     do_register
     if [ "$STACK_PROFILE" = showcase ]; then do_showcase_seed; else do_seed; fi
     ;;
-  *) log "FATAL: unknown mode '$MODE' (want register|seed|showcase|showcase-hold|burst|jpq|push|canonical|all)"; exit 2 ;;
+  *) log "FATAL: unknown mode '$MODE' (want register|seed|showcase|showcase-hold|burst|jpq|push|canonical|reconnect-gap|reconnect-current|all)"; exit 2 ;;
 esac
 log "done"

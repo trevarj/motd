@@ -1198,11 +1198,11 @@ class ChatViewModel @Inject constructor(
                 visibilityReader.firstVisibleUnreadAnchor(bufferId, realMarker, entrySpec)
                     ?.let { TimelineAnchor(it.serverTime, it.eventId - 1L) }
             }
-            // A deep-link owns positioning. A normal open first restores this buffer's last
-            // in-memory viewport, then falls back to oldest unread incoming, then newest.
+            // A deep-link owns positioning. A normal open restores this buffer's last in-memory
+            // viewport when available; otherwise it remains at the newest row. The frozen unread
+            // marker above still drives the divider and badge, but never repositions the window.
             if (!hasDeepJump && !_entryPositionSettled.value) {
                 _initialTarget.value = restoredScrollPosition(entrySpec)
-                    ?: unreadEntryPosition(realMarker, entrySpec)
                     ?: ChatPositionTarget(index = 0)
             }
         }
@@ -1285,25 +1285,6 @@ class ChatViewModel @Inject constructor(
             serverTime = anchor.serverTime,
             fromSavedPosition = true,
         )
-    }
-
-    private suspend fun unreadEntryPosition(
-        realMarker: TimelineAnchor?,
-        spec: MessageVisibilitySpec,
-    ): ChatPositionTarget? {
-        val target = realMarker?.let {
-            visibilityReader.firstVisibleUnreadAnchor(bufferId, it, spec)
-        } ?: return null
-        return when (val result = resolver.resolve(
-            bufferId,
-            null,
-            target.serverTime,
-            null,
-            eventId = target.eventId,
-        )) {
-            is ChatJumpResolver.Result.Resolved -> result.target.copy(highlightMsgid = null)
-            ChatJumpResolver.Result.NotFound -> null
-        }
     }
 
     private fun resolveJump() {
@@ -1447,7 +1428,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** Saved/unread positions use the same exact one-shot index repair as explicit jumps. */
+    /** Saved positions use the same exact one-shot index repair as explicit jumps. */
     fun reresolveInitialOnce(target: ChatPositionTarget) = viewModelScope.launch {
         if (initialReresolveUsed) {
             onInitialPositionUnresolved()

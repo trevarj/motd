@@ -25,7 +25,8 @@ E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _explicit_config=()
 for _name in \
   MOTD_PKG MOTD_APK MOTD_SOJU_HOST MOTD_SOJU_PORT MOTD_SOJU_USER MOTD_SOJU_PASS \
-  MOTD_NICK MOTD_TEST_CHANNEL MOTD_SECOND_NICK SERIAL E2E_OUT_DIR E2E_PHASES; do
+  MOTD_NICK MOTD_TEST_CHANNEL MOTD_SECOND_NICK MOTD_RECONNECT_TOKEN MOTD_RECONNECT_STACK_KIND \
+  SERIAL E2E_OUT_DIR E2E_PHASES; do
   if [[ -v "$_name" ]]; then
     _explicit_config+=("$(declare -p "$_name")")
   fi
@@ -64,6 +65,8 @@ MOTD_ACTIVITY="${MOTD_PKG}/io.github.trevarj.motd.MainActivity"
 # Optional second identity (drives DM/mention/typing). When unset, those steps
 # are skipped without failing.
 : "${MOTD_SECOND_NICK:=}"
+: "${MOTD_RECONNECT_TOKEN:=motd$(date +%s)}"
+: "${MOTD_RECONNECT_STACK_KIND:=native}"
 
 export MOTD_PKG
 
@@ -96,6 +99,26 @@ _animation_scales_captured=false
 _window_animation_scale=""
 _transition_animation_scale=""
 _animator_duration_scale=""
+_reconnect_restore_armed=false
+
+reconnect_stack() {
+  case "$MOTD_RECONNECT_STACK_KIND" in
+    native) "$E2E_DIR/local-stack.sh" "$@" ;;
+    hermetic) "$E2E_DIR/hermetic-stack.sh" "$@" ;;
+    *) fail "unknown reconnect stack kind '$MOTD_RECONNECT_STACK_KIND'"; return 2 ;;
+  esac
+}
+
+_restore_reconnect_stack() {
+  [ "$_reconnect_restore_armed" = true ] || return 0
+  if reconnect_stack start-soju; then
+    _reconnect_restore_armed=false
+    ok "reconnect fixture restored during cleanup"
+  else
+    fail "reconnect fixture cleanup could not restart soju"
+    return 1
+  fi
+}
 
 _capture_animation_scales() {
   _window_animation_scale="$(adb_shell settings get global window_animation_scale)" || return 1
@@ -126,6 +149,7 @@ _restore_animation_scales() {
 
 _final() {
   local rc=$?
+  _restore_reconnect_stack || rc=1
   _restore_animation_scales
   if [ "$_device_idle_forced" = true ]; then
     adb_shell dumpsys deviceidle unforce >/dev/null 2>&1 || true
@@ -1270,6 +1294,150 @@ phase_k() {
   assert_no_crash
 }
 
+# wait_for_drawer_retrying_connection <timeout_s> — after a fresh app launch while the
+# fixture listener is down, prove the connection actor is in its visible retry/backoff state.
+# Two consecutive drawer frames rule out an initial, not-yet-observed dial; a process that never
+# starts its actor remains Disconnected and cannot satisfy this assertion.
+wait_for_drawer_retrying_connection() {
+  local timeout="${1:-25}" waited=0 consecutive=0
+  while [ "$waited" -lt "$timeout" ]; do
+    if dump && [ -n "$(bounds_of_tag_prefix_containing_text drawer_network_row_ 'Connecting…')" ]; then
+      consecutive=$((consecutive + 1))
+      if [ "$consecutive" -ge 2 ]; then
+        ok "drawer network row remained in retrying Connecting state across two polls"
+        return 0
+      fi
+    else
+      consecutive=0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  screencap_step "reconnect_listener_down_state_missing"
+  fail "app never showed a persistent retrying drawer network state while soju was stopped"
+  return 1
+}
+
+# ==========================================================================
+# Phase R — retained reconnect-history window
+# ==========================================================================
+phase_r() {
+  echo ""
+  echo "${_C_CYA}########## Phase R: retained reconnect-history window ##########${_C_RST}"
+
+  case "$MOTD_RECONNECT_TOKEN" in
+    ''|*[!A-Za-z0-9]*) fail "MOTD_RECONNECT_TOKEN must be nonempty ASCII alphanumeric"; return 2 ;;
+  esac
+  local gap_first="${MOTD_RECONNECT_TOKEN} g01"
+  local current_last="${MOTD_RECONNECT_TOKEN} c03"
+  local baseline="${MOTD_RECONNECT_TOKEN} baseline"
+
+  step "Join ${MOTD_TEST_CHANNEL} and create a unique baseline"
+  reset_to_chatlist || return 1
+  tap_desc "New conversation"
+  tap_text "Join channel"
+  input_by_text_label "Channel name" "${MOTD_TEST_CHANNEL#\#}"
+  tap_text "Join"
+  wait_for_text "$MOTD_TEST_CHANNEL" 15 || true
+  tap_tag_prefix_containing_text chatlist_row_ "$MOTD_TEST_CHANNEL"
+  wait_for_desc "Send" 10 || true
+  input_tag chat_composer_field "$baseline"
+  tap_desc "Send"
+  wait_for_text "$baseline" 10 || true
+  assert_text_exactly_once "$baseline"
+  assert_no_crash
+
+  step "Return to the chat list and mark the current scope read"
+  adb_shell input keyevent 4
+  wait_for_desc "New conversation" 10 || return 1
+  tap_desc "Open navigation drawer"
+  dump || return 1
+  if [ -z "$(bounds_of_tag drawer_mark_all_read)" ]; then
+    fail "current-scope read action was absent after the baseline"
+    return 1
+  fi
+  tap_tag drawer_mark_all_read
+  wait_for_text "Mark all chats as read?" 8 || return 1
+  tap_text "Mark as read"
+  wait_for_desc "Open navigation drawer" 8 || return 1
+  tap_desc "Open navigation drawer"
+  dump || return 1
+  if [ -z "$(bounds_of_tag_prefix_containing_text drawer_network_row_ "$MOTD_NICK")" ]; then
+    fail "imported drawer network did not show ready nick '$MOTD_NICK' before listener shutdown"
+    return 1
+  fi
+  ok "imported drawer network showed ready nick '$MOTD_NICK' before listener shutdown"
+  adb_shell input keyevent 4
+  wait_for_desc "New conversation" 8 || return 1
+  assert_no_crash
+
+  step "Seed forty older retained rows while MOTD is absent"
+  adb_shell am force-stop "$MOTD_PKG"
+  reconnect_stack reconnect-gap "$MOTD_RECONNECT_TOKEN"
+  reconnect_stack history-check "$gap_first"
+
+  step "Restart soju while preserving its retained SQLite history"
+  _reconnect_restore_armed=true
+  reconnect_stack stop-soju
+  adb_shell am start -n "$MOTD_ACTIVITY" >/dev/null
+  wait_for_desc "New conversation" 15 || return 1
+  tap_desc "Open navigation drawer"
+  wait_for_drawer_retrying_connection 25 || return 1
+  reconnect_stack start-soju
+  _reconnect_restore_armed=false
+  reconnect_stack history-check "$gap_first"
+
+  step "Verify the imported network returns Ready before opening the channel"
+  wait_for_text "NETWORKS" 10 || return 1
+  assert_text "libera"
+  local ready_waited=0
+  while [ "$ready_waited" -lt 25 ]; do
+    if dump && [ -n "$(bounds_of_tag_prefix_containing_text drawer_network_row_ "$MOTD_NICK")" ]; then
+      break
+    fi
+    sleep 1
+    ready_waited=$((ready_waited + 1))
+  done
+  if [ -n "$(bounds_of_tag_prefix_containing_text drawer_network_row_ "$MOTD_NICK")" ]; then
+    ok "imported drawer network returned to ready nick '$MOTD_NICK'"
+  else
+    fail "imported drawer network did not return to ready nick '$MOTD_NICK' after soju restart"
+    return 1
+  fi
+  adb_shell input keyevent 4
+  wait_for_desc "New conversation" 8 || return 1
+
+  step "Search recovered history globally before entering the channel"
+  tap_desc "Search"
+  wait_for_text "Search messages" 8 || return 1
+  input_by_text_label "Search messages" "$gap_first"
+  wait_for_tag_prefix_count search_result_ 1 20 || true
+  assert_tag_prefix_count search_result_ 1
+  assert_text "$gap_first"
+  adb_shell input keyevent 4
+  wait_for_desc "New conversation" 8 || return 1
+
+  step "Seed three current rows and require the newest list preview"
+  reconnect_stack reconnect-current "$MOTD_RECONNECT_TOKEN"
+  wait_for_text "${MOTD_SECOND_NICK}: $current_last" 20 || true
+  assert_text "${MOTD_SECOND_NICK}: $current_last"
+
+  step "Open newest window without materializing the recovered oldest row"
+  tap_tag_prefix_containing_text chatlist_row_ "$MOTD_TEST_CHANNEL"
+  wait_for_text "$current_last" 12 || true
+  assert_text_exactly_once "$current_last"
+  assert_no_text "$gap_first"
+  assert_no_crash
+
+  step "Scroll older history and find the recovered oldest row exactly once"
+  if scroll_to_text "$gap_first" 14; then
+    assert_text_exactly_once "$gap_first"
+  else
+    fail "recovered oldest row '$gap_first' never materialized while scrolling"
+  fi
+  assert_no_crash
+}
+
 # ==========================================================================
 # Phase S — deterministic public showcase screenshots
 # ==========================================================================
@@ -1370,7 +1538,7 @@ main() {
   local p phase_class phase_rc failures_before findings
   for p in $phases; do
     case "$p" in
-      a|b|c|i|j|s) phase_class=required ;;
+      a|b|c|i|j|r|s) phase_class=required ;;
       d|e|f|g) phase_class=diagnostic ;;
       h|k) phase_class=conditional ;;
       *) fail "unknown phase '$p'"; continue ;;
@@ -1405,6 +1573,7 @@ main() {
       i) phase_i ;;
       j) phase_j ;;
       k) phase_k ;;
+      r) phase_r ;;
       s) phase_s ;;
       *) return 2 ;;
     esac || phase_rc=$?

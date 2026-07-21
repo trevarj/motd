@@ -21,9 +21,11 @@ setup and teardown deliberately clear application data.
 | Managed-device fast suite | Alternate/manual CI execution of the fast journeys | `.github/workflows/smoke.yml` |
 | Hermetic emulator run | Scheduled/manual exhaustive CI diagnostics | `.github/workflows/e2e.yml` |
 
-The fast headless suite is a required pull-request and main-branch CI gate. The
-exhaustive A-I workflow remains scheduled/manual diagnostics. Release CI still
-runs its own unit, lint, and FOSS release build checks.
+The fast headless suite is a required pull-request and main-branch CI gate. It
+runs the four Kotlin journeys, then the host-driven reconnect-window phase in
+connected/direct modes; managed-device runs intentionally omit that lifecycle
+exercise. The exhaustive A-I workflow remains scheduled/manual diagnostics.
+Release CI still runs its own unit, lint, and FOSS release build checks.
 
 ## Prerequisites
 
@@ -161,6 +163,8 @@ The native stack provides deterministic inputs for the baseline matrix:
 ./test/e2e/local-stack.sh jpq         # JOIN/PART/JOIN/QUIT, no chat text
 ./test/e2e/local-stack.sh push TOKEN  # tagged highlight + DM for UnifiedPush checks
 ./test/e2e/local-stack.sh canonical TOKEN # repeated text + account-backed PM nick rewrite
+./test/e2e/local-stack.sh reconnect-gap TOKEN # retained TOKEN g01 through g40
+./test/e2e/local-stack.sh reconnect-current TOKEN # live TOKEN c01 through c03
 ./test/e2e/local-stack.sh pause-soju  # delay socket processing without disconnecting
 ./test/e2e/local-stack.sh resume-soju
 ./test/e2e/local-stack.sh stop-soju   # force EOF; preserve config/database
@@ -179,11 +183,17 @@ a downstream reconnect. The live response is required inside MOTD’s bounded
 five-second reconnect barrier: MOTD converges its durable local marker with the
 server maximum before CHATHISTORY replay can populate unread-count queries.
 
-`history-check` authenticates as the fixture bouncer user, requires
+`history-check [EXACT_TEXT]` authenticates as the fixture bouncer user, requires
 `##motdtest` in a `CHATHISTORY TARGETS` response bounded from
 `1970-01-01T00:00:00.000Z`, then requires its seeded message from
 `CHATHISTORY LATEST`. It makes the first-sync discovery path and its required
 three-digit fractional timestamp visible without needing an Android device.
+
+The reconnect seed modes accept only nonempty alphanumeric tokens. `reconnect-gap`
+posts forty older rows ending in `TOKEN g40`; `reconnect-current` posts three live
+rows ending in `TOKEN c03`. Native `stop-soju`/`start-soju` preserve the exact
+fixture database and configuration, verify the recorded listener goes down, then
+wait for the listener and upstream `[connected]` status after restart.
 
 Always pair `pause-soju` with `resume-soju`; both target the exact PID recorded
 by the fixture rather than matching processes by command line.
@@ -365,6 +375,7 @@ failure log.
 | I | Delete-chat cancellation, final crash sweep, clean reset | Required |
 | J | Soju control-center panels, admin discovery, safe console command | Required with the local admin fixture |
 | K | ntfy discovery, soju WebPush ACK, background/cold/Doze delivery, exactly-once notifications and visible rows | Conditional; skipped without F-Droid ntfy |
+| R | Force-stop, retained 40-row reconnect gap, soju stop/start, newest-window and older-scroll proof | Required when selected by fast connected/direct runs |
 | S | Deterministic public screenshot showcase | Required when selected by `headless.sh showcase` |
 
 Phase K is intentionally excluded from the default A–I sweep because it needs an installed
@@ -423,6 +434,12 @@ nix develop -c ./gradlew :app:assembleFossE2e
 nix develop -c ./test/e2e/runbook.sh
 ./test/e2e/hermetic-stack.sh down
 ```
+
+The hermetic controller also exposes `reconnect-gap TOKEN`, `reconnect-current
+TOKEN`, `history-check [EXACT_TEXT]`, `stop-soju`, and `start-soju`. Its
+stop/start path uses Docker Compose service lifecycle commands only: it never
+uses `down` or removes the soju volume, and restart waits for health plus the
+exact upstream `[connected]` status.
 
 Running this manually requires an already-booted x86_64 emulator. CI supplies
 the emulator and installs the E2E APK before invoking the same runbook. Stack

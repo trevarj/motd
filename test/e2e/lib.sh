@@ -224,6 +224,19 @@ bounds_of_tag_prefix() {
     | sed -E 's/^bounds="(.*)"$/\1/'
 }
 
+# tag_prefix_count <testTag-prefix> — count resource ids carrying a stable prefix. Search results
+# deliberately include a runtime msgid/id suffix, so a prefix count is the bounded exactly-once
+# assertion without guessing the database identity.
+tag_prefix_count() {
+  local prefix="$1"
+  _e2e_have_dump || return 1
+  local esc
+  # shellcheck disable=SC2016
+  esc="$(printf '%s' "$prefix" | sed 's/[][\.*^$(){}?+|/]/\\&/g')"
+  { grep -oE "<node[^>]* resource-id=\"[^\"]*${esc}[^\"]*\"[^>]*>" "$_E2E_DUMP" 2>/dev/null || true; } \
+    | wc -l | tr -d ' '
+}
+
 # bounds_of_tag_prefix_containing_text <prefix> <text> — select a runtime-id-suffixed tagged row
 # by the exact visible text geometrically contained inside it. Text disambiguates rows; interaction
 # still targets the stable tagged container rather than a copy-sensitive child node.
@@ -476,6 +489,18 @@ assert_tag_present() {
   fi
 }
 
+assert_tag_prefix_count() {
+  local prefix="$1" expected="$2" count
+  dump || { fail "dump failed asserting tag prefix '${prefix}'"; return 1; }
+  count="$(tag_prefix_count "$prefix")"
+  if [ "$count" -eq "$expected" ]; then
+    ok "tag prefix '${prefix}' present ${expected} time(s)"
+  else
+    screencap_step "tag_prefix_count_$(_e2e_slug "$prefix")"
+    fail "expected tag prefix '${prefix}' ${expected} time(s), found ${count}"
+  fi
+}
+
 # assert_desc_present "<contentDesc>" — pass if a node with this content-desc exists.
 assert_desc_present() {
   local d="$1"
@@ -495,6 +520,19 @@ wait_for_text() {
   while [ "$waited" -lt "$timeout" ]; do
     if dump && [ -n "$(bounds_of_text "$t")" ]; then
       return 0
+    fi
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
+  return 1
+}
+
+wait_for_tag_prefix_count() {
+  local prefix="$1" expected="$2" timeout="${3:-20}" waited=0 count
+  while [ "$waited" -lt "$timeout" ]; do
+    if dump; then
+      count="$(tag_prefix_count "$prefix")"
+      [ "$count" -eq "$expected" ] && return 0
     fi
     sleep 1
     waited=$(( waited + 1 ))

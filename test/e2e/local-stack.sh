@@ -19,6 +19,8 @@
 #   ./test/e2e/local-stack.sh jpq       # emit JOIN/PART/QUIT-only activity
 #   ./test/e2e/local-stack.sh push TOKEN # emit one tagged highlight and direct message
 #   ./test/e2e/local-stack.sh canonical TOKEN # repeated text + account-backed PM nick rewrite
+#   ./test/e2e/local-stack.sh reconnect-gap TOKEN # persist forty older TOKEN gNN rows
+#   ./test/e2e/local-stack.sh reconnect-current TOKEN # send three live TOKEN cNN rows
 #   ./test/e2e/local-stack.sh pause-soju  # delay echo/MARKREAD processing via SIGSTOP
 #   ./test/e2e/local-stack.sh resume-soju # resume soju via SIGCONT
 #   ./test/e2e/local-stack.sh stop-soju   # deterministic EOF while preserving soju DB/config
@@ -120,7 +122,7 @@ esac
 if [ "$need_reexec" = true ]; then
   [ "${MOTD_E2E_STACK_SHELL:-}" != 1 ] || die "required command is missing from the e2e-stack shell"
   log "entering the lockfile-backed e2e-stack shell…"
-  exec nix develop "$REPO#e2e-stack" -c "$0" "$CMD"
+  exec nix develop "$REPO#e2e-stack" -c "$0" "$@"
 fi
 
 CONF_ERGO="$RUN/ircd.yaml"
@@ -220,6 +222,44 @@ wait_port() { # host port label
   done
 }
 
+recorded_soju_running() {
+  local pid
+  [ -f "$RUN/soju.pid" ] || return 1
+  pid="$(cat "$RUN/soju.pid")"
+  kill -0 "$pid" 2>/dev/null || return 1
+  ps -p "$pid" -o comm= 2>/dev/null | grep -Eq '(^|/)soju$'
+}
+
+wait_for_soju_listener() {
+  local i=0
+  until [ -S "$ADMIN_SOCK" ] && nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null; do
+    i=$((i + 1)); [ "$i" -gt 60 ] && die "soju listener did not become ready (see $RUN/soju.log)"; sleep 1
+  done
+}
+
+wait_for_soju_ready() {
+  wait_for_soju_listener
+  local i=0
+  i=0
+  until ctl user run "$SOJU_USER" network status 2>/dev/null | grep -q '\[connected\]'; do
+    i=$((i + 1)); [ "$i" -gt 40 ] && die "soju upstream did not reconnect (see $RUN/soju.log)"; sleep 1
+  done
+}
+
+start_recorded_soju() {
+  if recorded_soju_running; then
+    wait_for_soju_listener
+    return
+  fi
+  if nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null; then
+    die "port $SOJU_PORT has a foreign listener; refusing to replace it"
+  fi
+  rm -f "$ADMIN_SOCK"
+  setsid soju -config "$CONF_SOJU" >>"$RUN/soju.log" 2>&1 &
+  echo $! >"$RUN/soju.pid"
+  wait_for_soju_listener
+}
+
 stop_pids() {
   for p in soju ergo; do
     local f="$RUN/$p.pid"
@@ -256,12 +296,7 @@ up() {
     -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:10.0.2.2" >/dev/null 2>&1
 
   log "soju: start (ircs://:$SOJU_PORT)"
-  setsid soju -config "$CONF_SOJU" >"$RUN/soju.log" 2>&1 &
-  echo $! >"$RUN/soju.pid"
-  local i=0
-  until [ -S "$ADMIN_SOCK" ]; do
-    i=$((i + 1)); [ "$i" -gt 60 ] && die "soju admin socket never appeared (see $RUN/soju.log)"; sleep 1
-  done
+  start_recorded_soju
 
   log "soju: provision user '$SOJU_USER' + network '$NETWORK_NAME' -> ergo"
   ctl user create -username "$SOJU_USER" -password "$SOJU_PASS" -realname "motd local" -admin 2>/dev/null \
@@ -288,10 +323,7 @@ up() {
     || log "network $NETWORK_NAME already exists (ok)"
 
   log "soju: waiting for upstream network to connect + join fixture channels"
-  i=0
-  until ctl user run "$SOJU_USER" network status 2>/dev/null | grep -q '\[connected\]'; do
-    i=$((i + 1)); [ "$i" -gt 40 ] && die "soju upstream never connected (see $RUN/soju.log)"; sleep 1
-  done
+  wait_for_soju_ready
 
   log "seeding history for profile $STACK_PROFILE"
   if [ "$STACK_PROFILE" = showcase ]; then
@@ -363,7 +395,8 @@ history_check() {
   [ -S "$ADMIN_SOCK" ] || die "soju admin socket not found; run '$0 up' first"
   nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null || die "soju is not listening on 127.0.0.1:$SOJU_PORT"
   log "proving retained TARGETS discovery and LATEST playback through Soju"
-  python3 "$REPO/test/e2e/fixtures/chathistory-probe.py" --port "$SOJU_PORT"
+  local exact_text="${1:-hello, this is a seeded plain line}"
+  python3 "$REPO/test/e2e/fixtures/chathistory-probe.py" --port "$SOJU_PORT" --seed-text "$exact_text"
 }
 
 read_marker_check() {
@@ -447,30 +480,32 @@ signal_soju() { # signal description
 stop_soju_for_reconnect() {
   local pid_file="$RUN/soju.pid"
   [ -f "$pid_file" ] || die "soju pid file missing; run '$0 up' first"
-  local pid
+  local pid i
   pid="$(cat "$pid_file")"
-  kill "$pid" 2>/dev/null || true
-  for _ in 1 2 3 4 5; do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
-  kill -9 "$pid" 2>/dev/null || true
+  recorded_soju_running || die "recorded soju pid $pid is not a live soju process"
+  kill "$pid"
+  for i in $(seq 1 10); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    recorded_soju_running || die "recorded pid $pid changed before forced stop"
+    kill -9 "$pid"
+  fi
+  for i in $(seq 1 20); do
+    ! kill -0 "$pid" 2>/dev/null && ! nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null && break
+    sleep 1
+  done
+  ! kill -0 "$pid" 2>/dev/null || die "recorded soju pid $pid did not stop"
+  ! nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null || die "soju listener $SOJU_PORT remained up after stop"
   rm -f "$pid_file" "$ADMIN_SOCK"
   log "soju stopped for reconnect test; DB/config preserved"
 }
 
 start_soju_for_reconnect() {
   [ -f "$CONF_SOJU" ] || die "soju config missing; run '$0 up' first"
-  if nc -z 127.0.0.1 "$SOJU_PORT" 2>/dev/null; then
-    die "port $SOJU_PORT is already occupied; inspect its exact PID before retrying"
-  fi
-  rm -f "$ADMIN_SOCK"
-  setsid soju -config "$CONF_SOJU" >"$RUN/soju.log" 2>&1 &
-  echo $! >"$RUN/soju.pid"
-  local count=0
-  until [ -S "$ADMIN_SOCK" ]; do
-    count=$((count + 1))
-    [ "$count" -gt 60 ] && die "soju admin socket did not return (see $RUN/soju.log)"
-    sleep 1
-  done
-  wait_port 127.0.0.1 "$SOJU_PORT" soju
+  start_recorded_soju
+  wait_for_soju_ready
   log "soju restarted from preserved state (pid $(cat "$RUN/soju.pid"))"
 }
 
@@ -851,13 +886,15 @@ case "$CMD" in
   jpq) sh "$PROVISION" jpq ;;
   push) sh "$PROVISION" push ;;
   canonical) sh "$PROVISION" canonical ;;
+  reconnect-gap) sh "$PROVISION" reconnect-gap "${2:-}" ;;
+  reconnect-current) sh "$PROVISION" reconnect-current "${2:-}" ;;
   pause-soju) signal_soju STOP paused ;;
   resume-soju) signal_soju CONT resumed ;;
   stop-soju) stop_soju_for_reconnect ;;
   start-soju) start_soju_for_reconnect ;;
   status) status ;;
   control-check) control_check ;;
-  history-check) history_check ;;
+  history-check) history_check "${2:-}" ;;
   read-marker-check) read_marker_check ;;
   invite-check) invite_check ;;
   ready-up) ready_up ;;
@@ -871,5 +908,5 @@ case "$CMD" in
   obfs-xray-validate) xray_obfs_validate ;;
   obfs-xray-history-check) xray_obfs_history_check ;;
   obfs-xray-negative) xray_obfs_negative ;;
-  *) die "unknown command '$CMD' (want up|down|seed|showcase|showcase-hold|burst|jpq|push|canonical|pause-soju|resume-soju|stop-soju|start-soju|status|history-check|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-history-check|obfs-xray-negative)" ;;
+  *) die "unknown command '$CMD' (want up|down|seed|showcase|showcase-hold|burst|jpq|push|canonical|reconnect-gap|reconnect-current|pause-soju|resume-soju|stop-soju|start-soju|status|history-check|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-history-check|obfs-xray-negative)" ;;
 esac

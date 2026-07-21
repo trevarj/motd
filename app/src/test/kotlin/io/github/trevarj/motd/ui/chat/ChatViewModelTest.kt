@@ -714,6 +714,50 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `recovered unread gap keeps normal entry at newest while preserving divider boundary`() = runTest {
+        val markerId = db.messageDao().insertAll(
+            listOf(message(channel.id, "marker", null, "alice").copy(
+                serverTime = 100,
+                dedupKey = "marker",
+            )),
+        ).single()
+        val historyIds = db.messageDao().insertAll(
+            (1..513).map { ordinal ->
+                message(channel.id, "history-$ordinal", null, "alice").copy(
+                    serverTime = 100L + ordinal,
+                    dedupKey = "history-$ordinal",
+                )
+            },
+        )
+        db.messageDao().insertAll(
+            (1..3).map { ordinal ->
+                message(channel.id, "live-$ordinal", "live-$ordinal", "alice").copy(
+                    serverTime = 1_000L + ordinal,
+                    dedupKey = "live-$ordinal",
+                )
+            },
+        )
+        val vm = viewModel(
+            channel.copy(
+                localReadAnchorTime = 100,
+                localReadAnchorEventId = markerId,
+            ),
+            FakeConnectionManager(network.id),
+        )
+
+        vm.state.first { it.buffer != null }
+        val divider = vm.readMarkerSnapshot.first { it != null }
+        val target = vm.initialTarget.first { it != null }
+
+        assertEquals(101L, divider?.serverTime)
+        assertEquals(historyIds.first() - 1L, divider?.eventId)
+        assertEquals(0, target?.index)
+        assertNull(target?.expectedEventId)
+        assertNull(target?.expectedMsgid)
+        assertFalse(target?.fromSavedPosition == true)
+    }
+
+    @Test
     fun `coalesced saved viewport follows canonical event and retains pixel offset`() = runTest {
         val winnerId = db.messageDao().insertAll(
             listOf(message(channel.id, "history", "server-id", "alice").copy(serverTime = 500)),

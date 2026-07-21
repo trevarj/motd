@@ -103,7 +103,8 @@ jobs:
 
   # Required product-level acceptance tier: a stock AOSP image, the real app,
   # and a hermetic soju -> ergo network. Android Test Orchestrator isolates the
-  # four highest-value user journeys from one another.
+  # four highest-value Kotlin journeys; the launcher then runs the host-driven
+  # reconnect-window regression against the same fixture.
   headless-core:
     runs-on: ubuntu-latest
     timeout-minutes: 35

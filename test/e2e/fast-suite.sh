@@ -96,12 +96,38 @@ run_direct_suite() {
   done
 }
 
+run_reconnect_window() {
+  case "$MODE" in
+    connected|direct) ;;
+    managed) return 0 ;;
+  esac
+  local reconnect_out="$OUT_DIR/reconnect-window"
+  mkdir -p "$reconnect_out"
+  MOTD_PKG="$FAST_E2E_TARGET_PACKAGE" \
+    MOTD_APK="${FAST_E2E_APP_APK:-$REPO/app/build/outputs/apk/foss/e2e/app-foss-e2e.apk}" \
+    MOTD_SOJU_HOST="$FAST_E2E_SOJU_HOST" MOTD_SOJU_PORT="$FAST_E2E_SOJU_PORT" \
+    MOTD_SOJU_USER="$FAST_E2E_SOJU_USER" MOTD_SOJU_PASS="$FAST_E2E_SOJU_PASSWORD" \
+    MOTD_NICK="$FAST_E2E_NICK" MOTD_TEST_CHANNEL="$FAST_E2E_CHANNEL" \
+    MOTD_SECOND_NICK="$FAST_E2E_SECOND_NICK" \
+    MOTD_RECONNECT_TOKEN="$FAST_E2E_RECONNECT_TOKEN" \
+    MOTD_RECONNECT_STACK_KIND="$FAST_E2E_STACK_KIND" \
+    MOTD_STACK_DIR="$FAST_E2E_NATIVE_STACK_DIR" MOTD_ERGO_PORT="$FAST_E2E_NATIVE_ERGO_PORT" \
+    E2E_OUT_DIR="$reconnect_out" E2E_PHASES='a r' \
+    "$E2E_DIR/runbook.sh"
+}
+
 case "$MODE" in
-  connected) run_gradle_suite :app:connectedFossE2eAndroidTest "$@" ;;
+  connected)
+    run_gradle_suite :app:connectedFossE2eAndroidTest "$@"
+    run_reconnect_window
+    ;;
   managed)
     run_gradle_suite headlessApi34FossE2eAndroidTest \
       -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect "$@"
     ;;
-  direct) run_direct_suite ;;
+  direct)
+    run_direct_suite
+    run_reconnect_window
+    ;;
   *) echo "usage: $0 {connected|managed|direct} [Gradle arguments...]" >&2; exit 2 ;;
 esac
