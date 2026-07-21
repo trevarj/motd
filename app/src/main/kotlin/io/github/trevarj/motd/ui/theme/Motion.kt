@@ -24,6 +24,7 @@ object MotdMotion {
     private const val SoftSpringStiffness = 340f
     private const val MaterialDefaultSpatialDampingRatio = 0.9f
     private const val MaterialDefaultSpatialStiffness = 700f
+    private const val ChatBackSpatialDampingRatio = 0.8f
 
     val fadeIn: FiniteAnimationSpec<Float> = tween(
         durationMillis = StandardDurationMs,
@@ -50,6 +51,15 @@ object MotdMotion {
     val navigationDrawerSpatial: FiniteAnimationSpec<IntOffset> = spring(
         dampingRatio = MaterialDefaultSpatialDampingRatio,
         stiffness = MaterialDefaultSpatialStiffness,
+    )
+
+    /**
+     * A lightly underdamped spatial spring for returning from chat to the chat list. The very-low
+     * stiffness token gives approximately twice the characteristic time of [Spring.StiffnessLow].
+     */
+    val chatBackSpatial: FiniteAnimationSpec<IntOffset> = spring(
+        dampingRatio = ChatBackSpatialDampingRatio,
+        stiffness = Spring.StiffnessVeryLow,
     )
 
     /** A calm spring: responsive and soft, without a playful bounce. */

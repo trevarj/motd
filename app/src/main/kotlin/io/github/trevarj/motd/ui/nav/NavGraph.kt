@@ -97,7 +97,7 @@ fun MotdNavGraph(
         },
         popExitTransition = {
             if (isChatInitial()) {
-                slideOutOfContainer(SlideDirection.End, MotdMotion.navigationDrawerSpatial)
+                slideOutOfContainer(SlideDirection.End, MotdMotion.chatBackSpatial)
             } else {
                 slideOutOfContainer(SlideDirection.End, tween(MotdMotion.NavigationDurationMs))
             }
