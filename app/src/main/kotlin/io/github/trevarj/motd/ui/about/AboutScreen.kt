@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.trevarj.motd.BuildConfig
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -105,7 +106,7 @@ private fun AboutContent(
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    text = appVersion(context),
+                    text = aboutBuildLabel(appVersion(context), BuildConfig.MOTD_SOURCE_COMMIT),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 16.dp),
@@ -188,6 +189,9 @@ internal fun appVersion(context: android.content.Context): String =
     runCatching {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?"
     }.getOrDefault("?")
+
+internal fun aboutBuildLabel(version: String, sourceCommit: String): String =
+    "$version ($sourceCommit)"
 
 @Preview
 @Composable
