@@ -17,10 +17,7 @@ class ConnectionProbe(private val connections: ConnectionManager, private val mi
                 when (val state = states[id]) {
                     is IrcClientState.Ready -> {
                         milestones.record("connection_ready", "network=$id caps=${state.caps.sorted().joinToString(",")}")
-                        check(requiredCaps.all { cap -> state.caps.any { it == cap || it.startsWith("$cap=") } }) {
-                            "connection readiness missing required capabilities"
-                        }
-                        true
+                        requiredCaps.all { cap -> state.caps.any { it == cap || it.startsWith("$cap=") } }
                     }
                     is IrcClientState.Failed -> {
                         milestones.record("connection_failed", "network=$id fatal=${state.fatal}")

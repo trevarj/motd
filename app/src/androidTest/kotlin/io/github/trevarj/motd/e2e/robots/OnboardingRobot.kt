@@ -17,7 +17,7 @@ internal class OnboardingRobot(compose: ComposeTestRule) : BaseRobot(compose) {
         replace("bouncer_password_field", args.password)
         click("onboarding_forward_button")
         click("cert_trust_accept")
-        click("onboarding_bouncer_switch_libera")
+        clickPrefix("onboarding_bouncer_switch_")
         click("onboarding_forward_button")
         click("onboarding_forward_button")
         assertDisplayed("screen_chat_list")
