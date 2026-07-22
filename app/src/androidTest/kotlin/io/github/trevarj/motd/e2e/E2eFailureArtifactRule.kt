@@ -19,7 +19,7 @@ class E2eFailureArtifactRule(
     override fun starting(description: Description) {
         this.description = description
         val context = InstrumentationRegistry.getInstrumentation().context
-        val root = File(context.filesDir, "required-e2e").apply { mkdirs() }
+        val root = artifactRoot(context)
         // This is the launcher-visible post-start boundary. It contains only the fixed test id;
         // fast-suite pulls it while adb is alive and never relies on logcat/instrumentation text.
         File(root, "started.jsonl").appendText("{\"test\":\"${safeName()}\"}\n")
@@ -38,7 +38,9 @@ class E2eFailureArtifactRule(
         // Deliberately use the instrumentation APK's internal storage. It is always available,
         // survives clearing the target package, and remains readable to the launcher via run-as.
         val context = InstrumentationRegistry.getInstrumentation().context
-        val output = File(context.filesDir, "required-e2e/${safeName()}").apply { mkdirs() }
+        val output = File(artifactRoot(context), safeName()).apply {
+            check(mkdirs() || isDirectory) { "Could not create structured E2E artifact directory" }
+        }
         val error = failure ?: return
         File(output, "failure.json").writeText(
             "{\"test\":\"${safeName()}\",\"throwable\":\"${error::class.java.name}\",\"frames\":[" +
@@ -53,6 +55,16 @@ class E2eFailureArtifactRule(
 
     private fun safeName(): String = (description?.className.orEmpty() + "_" + description?.methodName.orEmpty())
         .replace(Regex("[^A-Za-z0-9_.-]"), "_")
+
+    private fun artifactRoot(context: Context): File {
+        // ContextImpl creates filesDir lazily. Prime it through the framework API before making
+        // the structured subdirectory; direct mkdirs() can fail under Test Orchestrator on a
+        // freshly cleared instrumentation package.
+        context.openFileOutput("required-e2e.init", Context.MODE_PRIVATE).close()
+        return File(context.filesDir, "required-e2e").apply {
+            check(mkdirs() || isDirectory) { "Could not create E2E artifact directory" }
+        }
+    }
 }
 
 class ScenarioHolder {
