@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.ComposeTestRule
 internal class SettingsRobot(compose: ComposeTestRule) : BaseRobot(compose) {
     fun open() = click("chatlist_open_settings")
     fun appearance() = click("settings_category_appearance")
+    fun back() = click("settings_back")
     fun chat() {
         scrollContainerTo("settings_scroll", "settings_category_chat")
         click("settings_category_chat")

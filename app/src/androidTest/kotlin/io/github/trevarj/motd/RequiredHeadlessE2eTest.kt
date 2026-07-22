@@ -120,8 +120,8 @@ class RequiredHeadlessE2eTest {
         scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         compose.onAllNodesWithTag("settings_theme_sheet", useUnmergedTree = true).assertCountEquals(0)
         // Return from Appearance to Settings, then exercise the category and bouncer routes.
-        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         SettingsRobot(compose).apply {
+            back()
             chat()
             assertDisplayed("settings_switch_show_jpq")
         }

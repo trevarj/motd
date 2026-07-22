@@ -44,6 +44,10 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
     /** Lazy descendants are never queried until their tagged container has materialized them. */
     fun scrollContainerTo(containerTag: String, itemTag: String) {
         awaitTag(containerTag)
-        compose.onNodeWithTag(containerTag, useUnmergedTree = true).performScrollToNode(hasTestTag(itemTag))
+        compose.waitUntil(10_000) {
+            runCatching {
+                compose.onNodeWithTag(containerTag, useUnmergedTree = true).performScrollToNode(hasTestTag(itemTag))
+            }.isSuccess
+        }
     }
 }
