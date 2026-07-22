@@ -74,7 +74,10 @@ class RequiredHeadlessE2eTest {
         OnboardingRobot(compose).importSoju(bootstrap.args)
         val rows = runBlocking { bootstrap.seams.networks().observeNetworks().first() }
         val root = rows.single { it.role == NetworkRole.BOUNCER_ROOT }
-        val child = rows.single { it.role == NetworkRole.BOUNCER_CHILD && it.parentId == root.id && it.bouncerNetId == "libera" }
+        val child = rows.single {
+            it.role == NetworkRole.BOUNCER_CHILD && it.parentId == root.id &&
+                it.name == "libera" && !it.bouncerNetId.isNullOrBlank()
+        }
         runBlocking { ConnectionProbe(bootstrap.seams.connections(), milestones).awaitReady(child.id, emptySet()) }
         assertTrue(runBlocking { bootstrap.seams.certTrust().isPinned(bootstrap.args.host, bootstrap.args.port, bootstrap.args.fingerprint) })
         compose.onAllNodesWithTag("cert_trust_dialog", useUnmergedTree = true).assertCountEquals(0)
