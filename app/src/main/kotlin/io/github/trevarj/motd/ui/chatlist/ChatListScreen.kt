@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.chatlist
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
@@ -75,6 +76,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import io.github.trevarj.motd.R
@@ -395,6 +397,13 @@ private fun ScopeChip(name: String, onClear: () -> Unit) {
     }
 }
 
+/** Chat-list rows fade for inserts/removals but snap when activity changes their position. */
+internal object ChatListItemMotion {
+    val fadeInSpec: FiniteAnimationSpec<Float> = MotdMotion.microFadeIn
+    val fadeOutSpec: FiniteAnimationSpec<Float> = MotdMotion.microFadeOut
+    val placementSpec: FiniteAnimationSpec<IntOffset>? = null
+}
+
 @Composable
 private fun ChatList(
     rows: List<ChatListRow>,
@@ -432,9 +441,9 @@ private fun ChatList(
                     onSetMuted,
                     onDeleteBuffer,
                     modifier = Modifier.animateItem(
-                        fadeInSpec = MotdMotion.microFadeIn,
-                        fadeOutSpec = MotdMotion.microFadeOut,
-                        placementSpec = MotdMotion.rowPlacement,
+                        fadeInSpec = ChatListItemMotion.fadeInSpec,
+                        fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                        placementSpec = ChatListItemMotion.placementSpec,
                     ),
                 )
             }
@@ -453,9 +462,9 @@ private fun ChatList(
                         onSetMuted,
                         onDeleteBuffer,
                         modifier = Modifier.animateItem(
-                            fadeInSpec = MotdMotion.microFadeIn,
-                            fadeOutSpec = MotdMotion.microFadeOut,
-                            placementSpec = MotdMotion.rowPlacement,
+                            fadeInSpec = ChatListItemMotion.fadeInSpec,
+                            fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                            placementSpec = ChatListItemMotion.placementSpec,
                         ),
                     )
                 }
@@ -476,9 +485,9 @@ private fun ChatList(
                     onSetMuted,
                     onDeleteBuffer,
                     modifier = Modifier.animateItem(
-                        fadeInSpec = MotdMotion.microFadeIn,
-                        fadeOutSpec = MotdMotion.microFadeOut,
-                        placementSpec = MotdMotion.rowPlacement,
+                        fadeInSpec = ChatListItemMotion.fadeInSpec,
+                        fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                        placementSpec = ChatListItemMotion.placementSpec,
                     ),
                 )
             }
@@ -496,9 +505,9 @@ private fun ChatList(
                             modifier = Modifier
                                 .alpha(0.55f)
                                 .animateItem(
-                                    fadeInSpec = MotdMotion.microFadeIn,
-                                    fadeOutSpec = MotdMotion.microFadeOut,
-                                    placementSpec = MotdMotion.rowPlacement,
+                                    fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                    fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                    placementSpec = ChatListItemMotion.placementSpec,
                                 ),
                         ) {
                             RowWithMenu(row, presence[row.bufferId], isFriend = false, multiNetwork, onOpenBuffer, onSetPinned, onSetMuted, onDeleteBuffer)
