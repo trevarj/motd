@@ -14,7 +14,7 @@ room = "2.8.4"
 paging = "3.5.0"
 datastore = "1.2.1"
 coil = "2.7.0"
-okio = "3.17.0"
+okio = "3.18.0"
 # Explicit runtime pin for the WSS transport and MockWebServer-backed tests.
 okhttp = "5.4.0"
 coroutines = "1.11.0"
