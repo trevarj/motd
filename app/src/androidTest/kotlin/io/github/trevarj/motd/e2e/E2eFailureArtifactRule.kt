@@ -19,7 +19,7 @@ class E2eFailureArtifactRule(
     override fun starting(description: Description) {
         this.description = description
         val context = InstrumentationRegistry.getInstrumentation().context
-        val root = requireNotNull(context.getExternalFilesDir("required-e2e")).apply { mkdirs() }
+        val root = File(context.filesDir, "required-e2e").apply { mkdirs() }
         // This is the launcher-visible post-start boundary. It contains only the fixed test id;
         // fast-suite pulls it while adb is alive and never relies on logcat/instrumentation text.
         File(root, "started.jsonl").appendText("{\"test\":\"${safeName()}\"}\n")
@@ -35,11 +35,10 @@ class E2eFailureArtifactRule(
     }
 
     private fun capture() {
-        // Deliberately use the instrumentation APK's external storage. Orchestrator clears the
-        // target package between methods, so target-package storage would erase evidence before
-        // the launcher can pull it.
+        // Deliberately use the instrumentation APK's internal storage. It is always available,
+        // survives clearing the target package, and remains readable to the launcher via run-as.
         val context = InstrumentationRegistry.getInstrumentation().context
-        val output = File(requireNotNull(context.getExternalFilesDir("required-e2e")), safeName()).apply { mkdirs() }
+        val output = File(context.filesDir, "required-e2e/${safeName()}").apply { mkdirs() }
         val error = failure ?: return
         File(output, "failure.json").writeText(
             "{\"test\":\"${safeName()}\",\"throwable\":\"${error::class.java.name}\",\"frames\":[" +

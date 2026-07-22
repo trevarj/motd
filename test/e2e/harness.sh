@@ -38,7 +38,10 @@ e2e_capture_native_stack_artifacts() {
 }
 
 e2e_pull_required_e2e_artifacts() {
-  local output_dir="$1" remote="/sdcard/Android/data/${FAST_E2E_TEST_PACKAGE}/files/required-e2e"
-  mkdir -p "$output_dir/required-e2e"
-  e2e_adb pull "$remote/." "$output_dir/required-e2e" >/dev/null 2>&1 || true
+  local output_dir="$1"
+  mkdir -p "$output_dir"
+  # The instrumentation package owns these files. Unlike shared external storage, its internal
+  # files directory is always mounted; run-as keeps the pull scoped to the debuggable test APK.
+  e2e_adb exec-out run-as "$FAST_E2E_TEST_PACKAGE" tar -C files -cf - required-e2e 2>/dev/null \
+    | tar -C "$output_dir" -xf - 2>/dev/null || true
 }
