@@ -268,6 +268,7 @@ class BufferStore @Inject constructor(
                 dismissed = winner.dismissed && loser.dismissed,
                 historyDiscardedThroughMsgid = discardedBoundary?.historyDiscardedThroughMsgid,
                 historyDiscardedThroughTime = discardedBoundary?.historyDiscardedThroughTime,
+                layoutDensityOverride = winner.layoutDensityOverride ?: loser.layoutDensityOverride,
             )
             bufferDao.update(result)
             aliasDao.repoint(loser.id, winner.id)

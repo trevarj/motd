@@ -6,6 +6,7 @@ import androidx.room.ForeignKey
 import androidx.room.Fts4
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 
 enum class NetworkRole { DIRECT, BOUNCER_ROOT, BOUNCER_CHILD }
@@ -138,6 +139,8 @@ data class RoomEntity(
     val pendingCloseAt: Long? = null,
     /** Losing room ids remain durable redirects so stale navigation/deep links keep working. */
     val redirectToRoomId: RoomId? = null,
+    /** Null inherits the global message-layout preference for this durable conversation. */
+    val layoutDensityOverride: LayoutDensity? = null,
 )
 
 /** Compatibility name retained while callers migrate to the canonical room vocabulary. */

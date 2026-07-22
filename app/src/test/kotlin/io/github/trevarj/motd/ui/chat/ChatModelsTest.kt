@@ -27,6 +27,23 @@ import org.junit.Test
 
 class ChatModelsTest {
 
+    @Test fun `conversation layout inherits global when no override exists`() {
+        assertEquals(
+            LayoutDensity.COMPACT,
+            ConversationLayoutState(global = LayoutDensity.COMPACT).effective,
+        )
+    }
+
+    @Test fun `conversation layout override wins over global`() {
+        assertEquals(
+            LayoutDensity.TWO_LINE,
+            ConversationLayoutState(
+                global = LayoutDensity.COMPACT,
+                override = LayoutDensity.TWO_LINE,
+            ).effective,
+        )
+    }
+
     private fun react(
         msgid: String,
         sender: String,

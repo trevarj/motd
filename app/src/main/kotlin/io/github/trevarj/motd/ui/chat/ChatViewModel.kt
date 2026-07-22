@@ -22,6 +22,7 @@ import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
@@ -95,6 +96,7 @@ data class ChatState(
     // loading sentinel: it briefly paints a false status while entering an already-connected chat.
     val connState: IrcClientState? = null,
     val presence: Map<PresenceKey, PresenceState> = emptyMap(),
+    val conversationLayout: ConversationLayoutState = ConversationLayoutState(),
 )
 
 data class ComposerDraftState(
@@ -254,6 +256,17 @@ class ChatViewModel @Inject constructor(
     private val buffer: StateFlow<BufferEntity?> = bufferRepository.observeBuffer(bufferId)
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** The database remains authoritative: a completed write is reflected only after Room emits. */
+    val conversationLayout: StateFlow<ConversationLayoutState> = combine(
+        buffer,
+        settingsRepository.settings,
+    ) { room, settings ->
+        ConversationLayoutState(
+            global = settings.layoutDensity,
+            override = room?.layoutDensityOverride,
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ConversationLayoutState())
 
     /** The route id may be a durable redirect; all live screen behavior uses the winner id. */
     private val operationalBufferId: StateFlow<Long> = buffer
@@ -429,7 +442,22 @@ class ChatViewModel @Inject constructor(
             connState = conn,
             presence = presence,
         )
+    }.combine(conversationLayout) { current, layout ->
+        current.copy(conversationLayout = layout)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatState())
+
+    /** Persist to the canonical id captured at the time of selection; Room then drives the UI. */
+    fun setConversationLayoutOverride(override: LayoutDensity?) = viewModelScope.launch {
+        val requestedId = operationalBufferId.value
+        val written = try {
+            bufferRepository.setLayoutDensityOverride(requestedId, override)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            false
+        }
+        if (!written) uiEventQueue.enqueue(ChatUiEvent.ConversationLayoutWriteFailed)
+    }
 
     /**
      * Member rosters can be large on public IRC channels. Do not collect them as part of the first

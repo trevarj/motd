@@ -30,7 +30,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class,
         MemberEntity::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -527,6 +527,13 @@ val MIGRATION_13_14 = object : Migration(13, 14) {
                     ON UPDATE NO ACTION ON DELETE CASCADE
             )""",
         )
+    }
+}
+
+/** v14 -> v15: nullable per-conversation message-layout override; null inherits global layout. */
+val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE buffers ADD COLUMN layoutDensityOverride TEXT")
     }
 }
 

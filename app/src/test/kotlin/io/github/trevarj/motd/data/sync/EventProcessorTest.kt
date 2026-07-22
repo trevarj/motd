@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.RoomAliasNamespace
 import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -1788,10 +1789,38 @@ class EventProcessorTest {
         assertEquals(1, children.size)
         assertEquals("OFTC", children.single().name)
         assertEquals("42", children.single().bouncerNetId)
+        val child = children.single()
+        val originalRoom = BufferEntity(
+            networkId = child.id,
+            name = "#layout",
+            displayName = "#layout",
+            type = BufferType.CHANNEL,
+        ).let { it.copy(id = db.bufferDao().insert(it)) }
+        db.bufferDao().setLayoutDensityOverride(originalRoom.id, LayoutDensity.COMPACT)
+
+        // A repeated state is an update of this stable bouncer child, not a new local network.
+        processor.process(rootId, IrcEvent.BouncerNetworkState("42", mapOf("name" to "OFTC renamed")))
+        val updatedChild = db.networkDao().childrenOf(rootId).single()
+        val retainedRoom = db.bufferDao().byName(updatedChild.id, "#layout")
+        assertEquals(child.id, updatedChild.id)
+        assertEquals(originalRoom.id, retainedRoom?.id)
+        assertEquals(LayoutDensity.COMPACT, retainedRoom?.layoutDensityOverride)
 
         processor.process(rootId, IrcEvent.BouncerNetworkState("42", emptyMap())) // "*" → delete
         children = db.networkDao().childrenOf(rootId)
         assertTrue(children.isEmpty())
+
+        processor.process(rootId, IrcEvent.BouncerNetworkState("42", mapOf("name" to "OFTC recreated")))
+        val recreatedChild = db.networkDao().childrenOf(rootId).single()
+        val recreatedRoom = BufferEntity(
+            networkId = recreatedChild.id,
+            name = "#layout",
+            displayName = "#layout",
+            type = BufferType.CHANNEL,
+        ).let { it.copy(id = db.bufferDao().insert(it)) }
+        assertNotEquals(child.id, recreatedChild.id)
+        assertNotEquals(originalRoom.id, recreatedRoom.id)
+        assertNull(recreatedRoom.layoutDensityOverride)
     }
 
     @Test

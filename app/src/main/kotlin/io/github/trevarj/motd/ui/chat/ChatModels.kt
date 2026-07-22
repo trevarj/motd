@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.visibility.JOIN_PART_QUIT_KINDS
 import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -304,6 +305,15 @@ sealed interface ChatUiEvent {
     data class HistoryIncomplete(val inserted: Int) : ChatUiEvent
     data class HistoryCapped(val inserted: Int, val limit: Int) : ChatUiEvent
     data class ReplyJumpUnavailable(val request: ReplyJumpRequest) : ChatUiEvent
+    data object ConversationLayoutWriteFailed : ChatUiEvent
+}
+
+/** Database-backed conversation layout and the global setting it may inherit. */
+data class ConversationLayoutState(
+    val global: LayoutDensity = LayoutDensity.COMFORTABLE,
+    val override: LayoutDensity? = null,
+) {
+    val effective: LayoutDensity get() = override ?: global
 }
 
 data class QueuedChatUiEvent(val id: Long, val value: ChatUiEvent)

@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import kotlinx.coroutines.flow.Flow
 
 interface NetworkRepository {
@@ -32,6 +33,8 @@ interface BufferRepository {
     fun observeMembers(bufferId: Long): Flow<List<MemberEntity>>
     suspend fun setPinned(id: Long, pinned: Boolean)
     suspend fun setMuted(id: Long, muted: Boolean)
+    /** Persists a nullable per-conversation override; false means the requested room disappeared. */
+    suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean
     /** Remove local content. QUERY identity/cursor state remains as a hidden reconnect tombstone;
      *  the parting of a joined CHANNEL is handled upstream by the caller (ChatListViewModel). */
     suspend fun deleteBuffer(id: Long)

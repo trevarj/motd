@@ -30,8 +30,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import java.util.Locale
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -325,6 +327,50 @@ abstract class HeadlessE2eDriver {
         compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
     }
 
+    protected data class TimelineRowPosition(val tag: String, val top: Float)
+
+    /** Capture one particular visible row rather than treating any timeline content as an anchor. */
+    protected fun timelineRowPositionContaining(text: String): TimelineRowPosition {
+        val row = messageRowContaining(text)
+        compose.waitUntil(15_000) {
+            compose.onAllNodes(row, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        val rows = compose.onAllNodes(row, useUnmergedTree = true)
+        rows.onFirst().assertIsDisplayed()
+        val node = rows.fetchSemanticsNodes().first()
+        return TimelineRowPosition(node.config[SemanticsProperties.TestTag], node.boundsInRoot.top)
+    }
+
+    protected fun assertTimelineMessageOffscreen(text: String) {
+        val row = messageRowContaining(text)
+        compose.waitUntil(15_000) {
+            compose.onAllNodes(row, useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
+        }
+    }
+
+    /** 24 px permits remeasurement rounding but is tighter than a message line; resets fail visibly. */
+    protected fun assertTimelineRowPosition(
+        expected: TimelineRowPosition,
+        tolerancePx: Float = 24f,
+    ) {
+        waitForTag(expected.tag)
+        val rows = compose.onAllNodesWithTag(expected.tag, useUnmergedTree = true)
+        rows.onFirst().assertIsDisplayed()
+        val node = rows.fetchSemanticsNodes().first()
+        assertTrue(
+            "${expected.tag} moved from ${expected.top}px to ${node.boundsInRoot.top}px",
+            abs(node.boundsInRoot.top - expected.top) <= tolerancePx,
+        )
+    }
+
+    protected fun assertSelectedTag(tag: String) {
+        val selected = SemanticsMatcher.expectValue(SemanticsProperties.Selected, true)
+        compose.waitUntil(15_000) {
+            compose.onAllNodes(selected.and(hasTestTag(tag)), useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
     /** Assert the accessibility state on the concrete message row containing [text]. */
     protected fun assertMentionHighlight(text: String, highlighted: Boolean) {
         val messageTag = SemanticsMatcher("message row") { node ->
@@ -407,6 +453,44 @@ class OnboardingHeadlessE2eTest : HeadlessE2eDriver() {
 @RunWith(AndroidJUnit4::class)
 @FastHeadlessE2e
 class ChatHeadlessE2eTest : HeadlessE2eDriver() {
+    @Test
+    fun changesConversationLayoutWithoutMovingTheVisibleTimelineRow() {
+        openOrJoinChannel()
+        // Eighteen six-plus-line rows exceed Pixel 6's timeline even in Compact, without adding
+        // more network sends to this fast journey. The first row therefore must be scrolled to.
+        val wrappedTail = "viewport-anchor ".repeat(20)
+        val messages = List(18) { "${uniqueMessage("layout-anchor")} $wrappedTail" }
+        messages.forEach { message ->
+            replaceTag("chat_composer_field", message)
+            clickTag("chat_composer_send")
+            waitForText(message, timeoutMillis = 20_000)
+        }
+        scrollTimelineToTextWithConnectionDiagnostics(messages.first(), timeoutMillis = 30_000)
+        assertTimelineMessageOffscreen(messages.last())
+        val anchor = timelineRowPositionContaining(messages.first())
+
+        clickTag("chat_overflow")
+        clickTag("chat_layout_menu")
+        waitForTag("chat_layout_sheet")
+        assertSelectedTag("chat_layout_global")
+        clickTag("chat_layout_compact")
+        assertTag("chat_layout_effective_compact")
+        assertTimelineRowPosition(anchor)
+
+        clickTag("chat_overflow")
+        clickTag("chat_layout_menu")
+        waitForTag("chat_layout_sheet")
+        assertSelectedTag("chat_layout_compact")
+        clickTag("chat_layout_global")
+        assertTag("chat_layout_effective_comfortable")
+        assertTimelineRowPosition(anchor)
+
+        clickTag("chat_overflow")
+        clickTag("chat_layout_menu")
+        waitForTag("chat_layout_sheet")
+        assertSelectedTag("chat_layout_global")
+    }
+
     @Test
     fun joinsSendsSearchesAndExercisesComposer() {
         openOrJoinChannel()

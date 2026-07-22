@@ -51,6 +51,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -109,6 +110,8 @@ import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.LocalSpacing
+import io.github.trevarj.motd.ui.theme.spacingFor
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -298,6 +301,8 @@ fun ChatScreen(
         onRefreshHistory = viewModel::refreshHistory,
         onCancelHistoryRefresh = viewModel::cancelHistoryRefresh,
         onHistoryResyncShown = viewModel::consumeHistoryResyncState,
+        conversationLayout = state.conversationLayout,
+        onConversationLayoutSelected = viewModel::setConversationLayoutOverride,
     )
 
     // Nick sheet (plans/16 §5.8): actions render immediately; whois fills in when it lands.
@@ -414,6 +419,8 @@ fun ChatContent(
     onCancelHistoryRefresh: () -> Unit = {},
     onHistoryResyncShown: () -> Unit = {},
     countUnreadBelowViewport: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> Int = { _, _ -> 0 },
+    conversationLayout: ConversationLayoutState = ConversationLayoutState(),
+    onConversationLayoutSelected: (io.github.trevarj.motd.data.prefs.LayoutDensity?) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
@@ -468,6 +475,7 @@ fun ChatContent(
     var uploadCurrentDraftDirectly by rememberSaveable { mutableStateOf(false) }
     var longDraftPrompt by rememberSaveable { mutableStateOf(false) }
     var overflowOpen by rememberSaveable { mutableStateOf(false) }
+    var conversationLayoutSheetOpen by rememberSaveable { mutableStateOf(false) }
     var historyRefreshSheetOpen by rememberSaveable { mutableStateOf(false) }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
     // Global fool expand/collapse toggle (plans/13 §2.4): when true every collapsed fool row in the
@@ -558,6 +566,7 @@ fun ChatContent(
             ChatUiEvent.ReactionTargetUnavailable -> stringResource(R.string.chat_react_failed)
             ChatUiEvent.ReactionSendFailed -> stringResource(R.string.chat_reaction_send_failed)
             ChatUiEvent.SendRejected -> stringResource(R.string.chat_send_rejected)
+            ChatUiEvent.ConversationLayoutWriteFailed -> stringResource(R.string.chat_layout_write_failed)
             ChatUiEvent.HistoryOffline -> stringResource(R.string.chat_history_offline)
             is ChatUiEvent.HistoryUpdated -> pluralStringResource(
                 R.plurals.chat_history_updated,
@@ -1023,6 +1032,25 @@ fun ChatContent(
                         Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
                     }
                     DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                        DropdownMenuItem(
+                            modifier = Modifier.testTag("chat_layout_menu"),
+                            text = {
+                                Column {
+                                    Text(stringResource(R.string.chat_layout_title))
+                                    Text(
+                                        stringResource(
+                                            R.string.chat_layout_overflow_summary,
+                                            densityLabel(conversationLayout.effective),
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                overflowOpen = false
+                                conversationLayoutSheetOpen = true
+                            },
+                        )
                         if (fools.isNotEmpty()) {
                             val foolsShown = if (foolsMode == FoolsMode.HIDE) {
                                 hiddenFoolsRevealed
@@ -1115,6 +1143,16 @@ fun ChatContent(
                     // Subtle IRC-themed wallpaper layered UNDER the message list only (never over the
                     // composer). NONE renders the plain theme background; MessageList is untouched.
                     ChatWallpaperBackground(chatWallpaper, modifier = Modifier.matchParentSize())
+                    CompositionLocalProvider(
+                        LocalSpacing provides remember(conversationLayout.effective) {
+                            spacingFor(conversationLayout.effective)
+                        },
+                    ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("chat_layout_effective_${conversationLayout.effective.name.lowercase()}"),
+                    ) {
                     MessageList(
                         items = items,
                         listState = listState,
@@ -1179,6 +1217,8 @@ fun ChatContent(
                         },
                         onSenderClick = onSenderClick,
                     )
+                    }
+                    }
 
                     // Paging begins with a transient empty refresh before Room delivers its first
                     // page. Only show the empty state once APPEND proves the buffer is terminally
@@ -1386,6 +1426,17 @@ fun ChatContent(
                     onDraftChanged(composerText.text)
                 }
             },
+        )
+    }
+
+    if (conversationLayoutSheetOpen) {
+        ConversationLayoutSheet(
+            state = conversationLayout,
+            onSelect = { override ->
+                onConversationLayoutSelected(override)
+                conversationLayoutSheetOpen = false
+            },
+            onDismiss = { conversationLayoutSheetOpen = false },
         )
     }
 }

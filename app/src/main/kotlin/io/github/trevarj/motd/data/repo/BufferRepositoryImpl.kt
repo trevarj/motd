@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import javax.inject.Inject
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -43,6 +44,9 @@ class BufferRepositoryImpl @Inject constructor(
     override suspend fun setMuted(id: Long, muted: Boolean) {
         bufferDao.setMuted(bufferDao.canonicalId(id) ?: id, muted)
     }
+
+    override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean =
+        bufferDao.setLayoutDensityOverride(id, layout) == 1
 
     // QUERY rows become hidden cursor shells; other types are physically removed with their graph.
     override suspend fun deleteBuffer(id: Long) = bufferDao.deleteBuffer(bufferDao.canonicalId(id) ?: id)

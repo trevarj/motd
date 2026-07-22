@@ -9,6 +9,7 @@ import androidx.room.Query
 import androidx.room.RawQuery
 import androidx.room.Transaction
 import androidx.room.Update
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 
@@ -264,6 +265,17 @@ interface BufferDao {
 
     @Query("UPDATE buffers SET muted = :muted WHERE id = :id")
     suspend fun writeMuted(id: Long, muted: Boolean)
+
+    /** Write via a stale redirect shell to its current canonical conversation. */
+    @Query(
+        """UPDATE buffers SET layoutDensityOverride = :layout
+           WHERE id = (
+               SELECT COALESCE(redirectToRoomId, id)
+               FROM buffers
+               WHERE id = :requestedId
+           )""",
+    )
+    suspend fun setLayoutDensityOverride(requestedId: RoomId, layout: LayoutDensity?): Int
 
     @Query(
         """UPDATE buffers SET

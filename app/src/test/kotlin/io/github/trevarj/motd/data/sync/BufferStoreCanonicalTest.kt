@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.ObservationOrigin
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.inMemoryDb
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
 import androidx.paging.LoadType
@@ -534,9 +535,81 @@ class BufferStoreCanonicalTest {
     }
 
     @Test
+    fun mergeTransfersLoserLayoutOverrideOnlyWhenWinnerInherits() = runTest {
+        val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+        val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+        db.bufferDao().update(loser.copy(layoutDensityOverride = LayoutDensity.COMPACT))
+
+        val merged = store.mergeRooms(winner.id, loser.id)
+
+        assertEquals(LayoutDensity.COMPACT, merged.layoutDensityOverride)
+        assertEquals(LayoutDensity.COMPACT, db.bufferDao().observeById(winner.id)?.layoutDensityOverride)
+    }
+
+    @Test
+    fun mergeRetainsCanonicalWinnersConflictingLayoutOverride() = runTest {
+        val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+        val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+        db.bufferDao().update(winner.copy(layoutDensityOverride = LayoutDensity.TWO_LINE))
+        db.bufferDao().update(loser.copy(layoutDensityOverride = LayoutDensity.COMPACT))
+
+        val merged = store.mergeRooms(winner.id, loser.id)
+
+        assertEquals(LayoutDensity.TWO_LINE, merged.layoutDensityOverride)
+    }
+
+    @Test
+    fun layoutOverrideWriteThroughRedirectUpdatesOnlyCanonicalRoom() = runTest {
+        val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+        val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+        store.mergeRooms(winner.id, loser.id)
+
+        assertEquals(1, db.bufferDao().setLayoutDensityOverride(loser.id, LayoutDensity.COMPACT))
+        assertEquals(LayoutDensity.COMPACT, db.bufferDao().rawById(winner.id)?.layoutDensityOverride)
+        assertEquals(null, db.bufferDao().rawById(loser.id)?.layoutDensityOverride)
+        assertEquals(1, db.bufferDao().setLayoutDensityOverride(winner.id, null))
+        assertEquals(null, db.bufferDao().rawById(winner.id)?.layoutDensityOverride)
+    }
+
+    @Test
+    fun layoutOverridesAreIsolatedAcrossBufferKindsAndCanBeReset() = runTest {
+        val channel = store.getOrCreate(networkId, "#room", "#room", BufferType.CHANNEL)
+        val query = store.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
+        val server = store.getOrCreate(networkId, "server", "server", BufferType.SERVER)
+
+        assertEquals(1, db.bufferDao().setLayoutDensityOverride(channel.id, LayoutDensity.COMPACT))
+        assertEquals(1, db.bufferDao().setLayoutDensityOverride(query.id, LayoutDensity.TWO_LINE))
+
+        assertEquals(LayoutDensity.COMPACT, db.bufferDao().rawById(channel.id)?.layoutDensityOverride)
+        assertEquals(LayoutDensity.TWO_LINE, db.bufferDao().rawById(query.id)?.layoutDensityOverride)
+        assertEquals(null, db.bufferDao().rawById(server.id)?.layoutDensityOverride)
+
+        assertEquals(1, db.bufferDao().setLayoutDensityOverride(server.id, LayoutDensity.COMFORTABLE))
+        assertEquals(LayoutDensity.COMFORTABLE, db.bufferDao().rawById(server.id)?.layoutDensityOverride)
+
+        assertEquals(1, db.bufferDao().setLayoutDensityOverride(channel.id, null))
+        assertEquals(null, db.bufferDao().rawById(channel.id)?.layoutDensityOverride)
+        assertEquals(LayoutDensity.TWO_LINE, db.bufferDao().rawById(query.id)?.layoutDensityOverride)
+        assertEquals(1, db.bufferDao().setLayoutDensityOverride(server.id, null))
+        assertEquals(null, db.bufferDao().rawById(server.id)?.layoutDensityOverride)
+    }
+
+    @Test
+    fun deletedChannelDoesNotGiveItsLayoutOverrideToARecreatedChannel() = runTest {
+        val original = store.getOrCreate(networkId, "#room", "#room", BufferType.CHANNEL)
+        db.bufferDao().setLayoutDensityOverride(original.id, LayoutDensity.COMPACT)
+
+        db.bufferDao().deleteBuffer(original.id)
+        val recreated = store.getOrCreate(networkId, "#room", "#room", BufferType.CHANNEL)
+
+        assertEquals(null, recreated.layoutDensityOverride)
+    }
+
+    @Test
     fun dismissingCanonicalQueryPreservesRedirectsAndNickIdentity() = runTest {
         val old = store.getOrCreate(networkId, "oldnick", "OldNick", BufferType.QUERY)
         val next = store.getOrCreate(networkId, "newnick", "NewNick", BufferType.QUERY)
+        db.bufferDao().setLayoutDensityOverride(old.id, LayoutDensity.COMPACT)
         val merged = checkNotNull(
             store.bindNickChange(networkId, "oldnick", "newnick", "NewNick"),
         )
@@ -548,5 +621,6 @@ class BufferStoreCanonicalTest {
         assertTrue(db.bufferDao().rawById(merged.id)!!.dismissed)
         val resolved = store.getOrCreate(networkId, "newnick", "NewNick", BufferType.QUERY)
         assertEquals(merged.id, resolved.id)
+        assertEquals(LayoutDensity.COMPACT, resolved.layoutDensityOverride)
     }
 }

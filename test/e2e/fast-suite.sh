@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Canonical launcher for the existing four @FastHeadlessE2e journeys.
+# Canonical launcher for every @FastHeadlessE2e journey.
 set -euo pipefail
 
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

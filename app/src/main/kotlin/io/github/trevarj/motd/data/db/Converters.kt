@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.db
 
 import androidx.room.TypeConverter
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 
 // Enum <-> String converters so enum columns store their stable `name` (matching the string
 // literals used in raw @Query predicates like kind IN ('PRIVMSG', ...)).
@@ -59,4 +60,12 @@ internal class Converters {
 
     @TypeConverter
     fun stringToTimeProvenance(v: String): TimeProvenance = TimeProvenance.valueOf(v)
+
+    /** Unknown persisted values deliberately inherit the global setting instead of breaking reads. */
+    @TypeConverter
+    fun layoutDensityToString(v: LayoutDensity?): String? = v?.name
+
+    @TypeConverter
+    fun stringToLayoutDensity(v: String?): LayoutDensity? =
+        v?.let { runCatching { LayoutDensity.valueOf(it) }.getOrNull() }
 }

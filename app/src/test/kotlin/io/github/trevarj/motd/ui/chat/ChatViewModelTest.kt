@@ -267,6 +267,91 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `conversation layout inherits global then persists and clears an override`() = runTest {
+        val settings = FakeSettingsRepository()
+        val buffers = FakeBufferRepository(channel)
+        val vm = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            buffers = buffers,
+            settings = settings,
+        )
+        vm.state.first { it.buffer != null }
+
+        settings.settings.value = Settings(layoutDensity = LayoutDensity.COMPACT)
+        assertEquals(
+            LayoutDensity.COMPACT,
+            vm.state.first { it.conversationLayout.global == LayoutDensity.COMPACT }
+                .conversationLayout.effective,
+        )
+
+        vm.setConversationLayoutOverride(LayoutDensity.TWO_LINE)
+        advanceUntilIdle()
+        assertEquals(listOf(channel.id to LayoutDensity.TWO_LINE), buffers.layoutWrites)
+        assertEquals(
+            LayoutDensity.TWO_LINE,
+            vm.state.first { it.conversationLayout.override == LayoutDensity.TWO_LINE }
+                .conversationLayout.effective,
+        )
+
+        settings.settings.value = Settings(layoutDensity = LayoutDensity.COMFORTABLE)
+        assertEquals(
+            LayoutDensity.TWO_LINE,
+            vm.state.first { it.conversationLayout.global == LayoutDensity.COMFORTABLE }
+                .conversationLayout.effective,
+        )
+
+        vm.setConversationLayoutOverride(null)
+        advanceUntilIdle()
+        assertEquals(
+            LayoutDensity.COMFORTABLE,
+            vm.state.first { it.conversationLayout.override == null }
+                .conversationLayout.effective,
+        )
+    }
+
+    @Test
+    fun `conversation layout write failure is surfaced without optimistic state`() = runTest {
+        val buffers = FakeBufferRepository(channel).apply { layoutWriteResult = false }
+        val vm = viewModel(channel, FakeConnectionManager(network.id), buffers = buffers)
+        vm.state.first { it.buffer != null }
+
+        vm.setConversationLayoutOverride(LayoutDensity.COMPACT)
+        advanceUntilIdle()
+
+        assertEquals(listOf(channel.id to LayoutDensity.COMPACT), buffers.layoutWrites)
+        assertNull(vm.state.value.conversationLayout.override)
+        assertEquals(
+            ChatUiEvent.ConversationLayoutWriteFailed,
+            vm.uiEvents.first().single().value,
+        )
+    }
+
+    @Test
+    fun `conversation layouts write to canonical buffers independently`() = runTest {
+        val redirectedChannel = FakeBufferRepository(channel, routeId = query.id)
+        val queryBuffers = FakeBufferRepository(query)
+        val channelVm = viewModel(
+            channel,
+            FakeConnectionManager(network.id),
+            routeBufferId = query.id,
+            buffers = redirectedChannel,
+        )
+        val queryVm = viewModel(query, FakeConnectionManager(network.id), buffers = queryBuffers)
+        channelVm.state.first { it.buffer?.id == channel.id }
+        queryVm.state.first { it.buffer?.id == query.id }
+
+        channelVm.setConversationLayoutOverride(LayoutDensity.COMPACT)
+        queryVm.setConversationLayoutOverride(LayoutDensity.TWO_LINE)
+        advanceUntilIdle()
+
+        assertEquals(listOf(channel.id to LayoutDensity.COMPACT), redirectedChannel.layoutWrites)
+        assertEquals(listOf(query.id to LayoutDensity.TWO_LINE), queryBuffers.layoutWrites)
+        assertEquals(LayoutDensity.COMPACT, channelVm.state.value.conversationLayout.effective)
+        assertEquals(LayoutDensity.TWO_LINE, queryVm.state.value.conversationLayout.effective)
+    }
+
+    @Test
     fun `selecting reply primes its timeline preview before repository collection`() = runTest {
         val manager = FakeConnectionManager(network.id)
         val vm = viewModel(channel, manager)
@@ -817,12 +902,13 @@ class ChatViewModelTest {
         foreground: FakeForegroundBufferTracker = FakeForegroundBufferTracker(),
         scrollPositions: ChatScrollPositionStore = ChatScrollPositionStore(),
         settings: FakeSettingsRepository = FakeSettingsRepository(),
+        buffers: FakeBufferRepository = FakeBufferRepository(buffer, routeBufferId),
     ): ChatViewModel {
         val eventSink: IrcEventSink = processor
         return ChatViewModel(
             savedStateHandle = SavedStateHandle(mapOf("bufferId" to routeBufferId)),
             messageRepository = messages,
-            bufferRepository = FakeBufferRepository(buffer, routeBufferId),
+            bufferRepository = buffers,
             networkIdentityDao = db.networkIdentityDao(),
             connectionManager = manager,
             typingTracker = FakeTypingTracker(),
@@ -980,12 +1066,21 @@ class ChatViewModelTest {
         private val current: BufferEntity,
         private val routeId: Long = current.id,
     ) : BufferRepository {
+        private val buffer = MutableStateFlow(current)
+        val layoutWrites = mutableListOf<Pair<Long, LayoutDensity?>>()
+        var layoutWriteResult = true
+
         override fun observeChatList(): Flow<List<ChatListRow>> = flowOf(emptyList())
         override fun observeBuffer(id: Long): Flow<BufferEntity?> =
-            flowOf(current.takeIf { id == routeId || id == current.id })
+            buffer.takeIf { id == routeId || id == current.id } ?: flowOf(null)
         override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())
         override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
         override suspend fun setMuted(id: Long, muted: Boolean) = Unit
+        override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean {
+            layoutWrites += id to layout
+            if (layoutWriteResult) buffer.value = buffer.value.copy(layoutDensityOverride = layout)
+            return layoutWriteResult
+        }
         override suspend fun deleteBuffer(id: Long) = Unit
     }
 

@@ -50,6 +50,7 @@ class ChatListDeleteTest {
         override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())
         override suspend fun setPinned(id: Long, pinned: Boolean) = Unit
         override suspend fun setMuted(id: Long, muted: Boolean) = Unit
+        override suspend fun setLayoutDensityOverride(id: Long, layout: LayoutDensity?): Boolean = true
         override suspend fun deleteBuffer(id: Long) { deleted += id }
     }
 
