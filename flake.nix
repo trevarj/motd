@@ -2,7 +2,7 @@
   description = "MOTD dev shell: JDK 21 + Android SDK (CI remains the canonical build env)";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/767b0d3ec98a143ad9ed7dfc0d5553510ac27133";
     # libbox v1.13.12 requires Go >= 1.24.7 and Android NDK 28.0.13004108.
     # Keep this build-only toolchain separate from the app's stable SDK shell.
     nixpkgs-libbox.url = "github:NixOS/nixpkgs/767b0d3ec98a143ad9ed7dfc0d5553510ac27133";
@@ -29,7 +29,7 @@
         # Match compileSdk/buildTools used by the current Gradle configuration.
         androidComposition = pkgs.androidenv.composeAndroidPackages {
           platformVersions = [ "35" ];
-          buildToolsVersions = [ "35.0.0" ];
+          buildToolsVersions = [ "36.0.0" ];
           platformToolsVersion = "35.0.2";
           includeEmulator = false;
           includeSystemImages = false;
@@ -40,7 +40,7 @@
         # avoids making every ordinary build fetch an API image and emulator runtime.
         emulatorComposition = pkgs.androidenv.composeAndroidPackages {
           platformVersions = [ "34" ];
-          buildToolsVersions = [ "35.0.0" ];
+          buildToolsVersions = [ "36.0.0" ];
           platformToolsVersion = "35.0.2";
           includeEmulator = true;
           includeSystemImages = true;
@@ -57,7 +57,7 @@
           ANDROID_SDK_ROOT = sdkRoot;
           # AGP downloads a dynamically-linked aapt2 that won't run outside FHS;
           # point Gradle at the Nix-provided one instead.
-          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/35.0.0/aapt2";
+          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2";
         };
         devShells.emulator = pkgs.mkShell {
           packages = [ pkgs.jdk21 emulatorSdk ];
