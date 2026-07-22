@@ -98,7 +98,7 @@ class RequiredHeadlessE2eTest {
                 observed.await()
             }
         }
-        TimelineRobot(compose).assertMessage(canonical, token)
+        TimelineRobot(compose).assertMessage(token)
         runBlocking {
             bootstrap.seams.connections().disconnect(network.childId)
             bootstrap.seams.connections().connect(network.childId)
@@ -106,7 +106,7 @@ class RequiredHeadlessE2eTest {
         }
         val after = runBlocking { probe.awaitCanonical(token, bufferId) }
         assertEquals(canonical.id, after.id)
-        TimelineRobot(compose).assertMessage(after, token)
+        TimelineRobot(compose).assertMessage(token)
     }
 
     @Test
