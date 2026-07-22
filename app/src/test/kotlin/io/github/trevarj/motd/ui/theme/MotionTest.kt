@@ -7,6 +7,7 @@ import androidx.compose.animation.core.TargetBasedAnimation
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.spring
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -52,5 +53,26 @@ class MotionTest {
 
         val durationRatio = chatBack.durationNanos.toDouble() / baseline.durationNanos
         assertTrue(durationRatio in 1.95..2.05)
+    }
+
+    @Test
+    fun `content size grows smoothly without overshoot`() {
+        val start = IntSize(width = 320, height = 72)
+        val target = IntSize(width = 320, height = 184)
+        val animation = TargetBasedAnimation(
+            MotdMotion.contentSize,
+            IntSize.VectorConverter,
+            start,
+            target,
+            AnimationVector2D(0f, 0f),
+        )
+        val samples = (0..100).map { step ->
+            animation.getValueFromNanos(animation.durationNanos * step / 100)
+        }
+
+        assertTrue(samples.all { it.width == start.width })
+        assertTrue(samples.any { it.height > start.height && it.height < target.height })
+        assertTrue(samples.all { it.height in start.height..target.height })
+        assertEquals(target, animation.getValueFromNanos(animation.durationNanos))
     }
 }

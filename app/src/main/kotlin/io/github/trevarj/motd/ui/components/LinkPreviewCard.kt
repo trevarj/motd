@@ -1,5 +1,10 @@
 package io.github.trevarj.motd.ui.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -28,6 +33,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 internal fun shouldShowLinkPreview(
@@ -36,9 +42,39 @@ internal fun shouldShowLinkPreview(
     resolved: Boolean,
 ): Boolean = preview != null || loading || resolved
 
+internal sealed interface LinkPreviewRenderState {
+    data object Loading : LinkPreviewRenderState
+
+    data class Available(val preview: LinkPreview) : LinkPreviewRenderState
+
+    data object Unavailable : LinkPreviewRenderState
+}
+
+internal enum class LinkPreviewTransitionKey {
+    LOADING,
+    AVAILABLE,
+    UNAVAILABLE,
+}
+
+internal fun resolveLinkPreviewRenderState(
+    preview: LinkPreview?,
+    loading: Boolean,
+): LinkPreviewRenderState = when {
+    loading -> LinkPreviewRenderState.Loading
+    preview != null -> LinkPreviewRenderState.Available(preview)
+    else -> LinkPreviewRenderState.Unavailable
+}
+
+internal val LinkPreviewRenderState.transitionKey: LinkPreviewTransitionKey
+    get() = when (this) {
+        LinkPreviewRenderState.Loading -> LinkPreviewTransitionKey.LOADING
+        is LinkPreviewRenderState.Available -> LinkPreviewTransitionKey.AVAILABLE
+        LinkPreviewRenderState.Unavailable -> LinkPreviewTransitionKey.UNAVAILABLE
+    }
+
 /**
- * OG-tag link preview card. Loading, success, and a known unavailable result retain the same card
- * footprint, so completion cannot shift a reverse LazyColumn row under the user's finger.
+ * OG-tag link preview card. Each state retains a shared 72 dp minimum footprint; completed
+ * metadata may be taller and grows through the card-local content-size transition.
  */
 @Composable
 fun LinkPreviewCard(
@@ -47,17 +83,35 @@ fun LinkPreviewCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    when {
-        loading -> LinkPreviewSkeleton(modifier)
-        preview != null -> LinkPreviewContent(preview, onClick, modifier)
-        else -> LinkPreviewUnavailable(onClick, modifier)
+    val renderState = resolveLinkPreviewRenderState(preview, loading)
+    AnimatedContent(
+        targetState = renderState,
+        modifier = modifier.fillMaxWidth(),
+        transitionSpec = {
+            (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut))
+                .using(
+                    SizeTransform(
+                        clip = true,
+                        sizeAnimationSpec = { _, _ -> MotdMotion.contentSize },
+                    ),
+                )
+        },
+        contentAlignment = androidx.compose.ui.Alignment.TopStart,
+        contentKey = { it.transitionKey },
+        label = "link_preview_content",
+    ) { state ->
+        when (state) {
+            LinkPreviewRenderState.Loading -> LinkPreviewSkeleton()
+            is LinkPreviewRenderState.Available -> LinkPreviewContent(state.preview, onClick)
+            LinkPreviewRenderState.Unavailable -> LinkPreviewUnavailable(onClick)
+        }
     }
 }
 
 @Composable
-private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit, modifier: Modifier) {
+private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit) {
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
             .clip(RoundedCornerShape(12.dp))
@@ -106,13 +160,13 @@ private fun LinkPreviewContent(preview: LinkPreview, onClick: () -> Unit, modifi
 }
 
 @Composable
-private fun LinkPreviewSkeleton(modifier: Modifier) {
+private fun LinkPreviewSkeleton() {
     // A per-card infinite transition continuously invalidated the chat while previews were in
     // flight. A static skeleton communicates the same loading state without consuming scroll-frame
     // work; the card is replaced as soon as the preview resolves.
     val block = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.18f)
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
             .clip(RoundedCornerShape(12.dp))
@@ -134,9 +188,9 @@ private fun LinkPreviewSkeleton(modifier: Modifier) {
 }
 
 @Composable
-private fun LinkPreviewUnavailable(onClick: () -> Unit, modifier: Modifier) {
+private fun LinkPreviewUnavailable(onClick: () -> Unit) {
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
             .clip(RoundedCornerShape(12.dp))
