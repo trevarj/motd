@@ -1,0 +1,3 @@
+- Added higher-contrast and true-black themes plus per-conversation layouts.
+- Improved settings and conversation sheets, navigation, history recovery, and link-preview motion.
+- Prevented duplicate sends and show the exact source commit in About.
