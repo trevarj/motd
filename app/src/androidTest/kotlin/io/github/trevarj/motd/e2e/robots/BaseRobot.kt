@@ -9,6 +9,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.semantics.SemanticsProperties
 
 internal open class BaseRobot(protected val compose: ComposeTestRule) {
@@ -29,6 +31,18 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
             compose.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onAllNodes(matcher, useUnmergedTree = true)[0].performClick()
+    }
+
+    fun swipeUntilTag(containerTag: String, itemTag: String, timeoutMs: Long = 10_000) {
+        awaitTag(containerTag)
+        compose.waitUntil(timeoutMs) {
+            if (compose.onAllNodesWithTag(itemTag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()) {
+                true
+            } else {
+                compose.onNodeWithTag(containerTag, useUnmergedTree = true).performTouchInput { swipeUp() }
+                false
+            }
+        }
     }
 
     fun replace(tag: String, value: String) {
