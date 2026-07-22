@@ -15,9 +15,8 @@ paging = "3.5.0"
 datastore = "1.2.1"
 coil = "2.7.0"
 okio = "3.17.0"
-# Pinned to the version Coil 2.7.0 already resolves transitively (verified via :app:dependencies),
-# so adding okhttp explicitly for the WSS transport (plans/19) introduces no new resolved version.
-okhttp = "4.12.0"
+# Explicit runtime pin for the WSS transport and MockWebServer-backed tests.
+okhttp = "5.4.0"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 # plans/01 pins 2.4.0, but that version was never published to Maven Central
