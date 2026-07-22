@@ -2,31 +2,13 @@ package io.github.trevarj.motd.e2e
 
 import android.content.Context
 import androidx.test.platform.app.InstrumentationRegistry
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
-import dagger.hilt.components.SingletonComponent
 import io.github.trevarj.motd.MotdApplication
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
-import io.github.trevarj.motd.data.prefs.CertTrustStore
-import io.github.trevarj.motd.data.repo.BufferRepository
-import io.github.trevarj.motd.data.repo.NetworkRepository
-import io.github.trevarj.motd.data.repo.SearchRepository
-import io.github.trevarj.motd.service.ConnectionManager
+import io.github.trevarj.motd.di.RequiredE2eEntryPoint
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
-
-/** Production seams exposed to required instrumentation; no DAO, database, or preference files. */
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface RequiredE2eEntryPoint {
-    fun networks(): NetworkRepository
-    fun buffers(): BufferRepository
-    fun search(): SearchRepository
-    fun certTrust(): CertTrustStore
-    fun connections(): ConnectionManager
-}
 
 data class FixtureArgs(
     val host: String,
