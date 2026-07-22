@@ -117,7 +117,7 @@ val sourceCommit = System.getenv("MOTD_SOURCE_COMMIT")
 
 android {
     namespace = "io.github.trevarj.motd"
-    compileSdk = 36
+    compileSdk = 37
 
     // F-Droid rejects AGP's dependency metadata APK signing block. Dependency provenance is
     // pinned and published separately through the fdroiddata recipe and release source bundle.
