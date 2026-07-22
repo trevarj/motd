@@ -45,3 +45,13 @@ e2e_pull_required_e2e_artifacts() {
   e2e_adb exec-out run-as "$FAST_E2E_TEST_PACKAGE" tar -C files -cf - required-e2e 2>/dev/null \
     | tar -C "$output_dir" -xf - 2>/dev/null || true
 }
+
+e2e_collect_gradle_required_e2e_artifacts() {
+  local output_dir="$1" source_file relative
+  while IFS= read -r -d '' source_file; do
+    relative="${source_file#*required-e2e/}"
+    mkdir -p "$output_dir/required-e2e/$(dirname "$relative")"
+    cp "$source_file" "$output_dir/required-e2e/$relative"
+  done < <(find "$E2E_HARNESS_DIR/../../app/build/outputs" -type f \
+    -path '*additional*' -path '*/required-e2e/*' -print0 2>/dev/null)
+}

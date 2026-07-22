@@ -1,10 +1,8 @@
 package io.github.trevarj.motd.e2e
 
-import android.content.Context
 import androidx.test.core.app.ActivityScenario
-import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.platform.io.PlatformTestStorageRegistry
 import io.github.trevarj.motd.MainActivity
-import java.io.File
 import org.junit.rules.TestWatcher
 import org.junit.runner.Description
 
@@ -18,11 +16,9 @@ class E2eFailureArtifactRule(
 
     override fun starting(description: Description) {
         this.description = description
-        val context = InstrumentationRegistry.getInstrumentation().context
-        val root = artifactRoot(context)
         // This is the launcher-visible post-start boundary. It contains only the fixed test id;
-        // fast-suite pulls it while adb is alive and never relies on logcat/instrumentation text.
-        File(root, "started.jsonl").appendText("{\"test\":\"${safeName()}\"}\n")
+        // AGP collects it through AndroidX test storage without relying on app data directories.
+        writeOutput("required-e2e/started.jsonl", "{\"test\":\"${safeName()}\"}\n", append = true)
     }
 
     override fun failed(e: Throwable, description: Description) {
@@ -35,34 +31,26 @@ class E2eFailureArtifactRule(
     }
 
     private fun capture() {
-        // Deliberately use the instrumentation APK's internal storage. It is always available,
-        // survives clearing the target package, and remains readable to the launcher via run-as.
-        val context = InstrumentationRegistry.getInstrumentation().context
-        val output = File(artifactRoot(context), safeName()).apply {
-            check(mkdirs() || isDirectory) { "Could not create structured E2E artifact directory" }
-        }
         val error = failure ?: return
-        File(output, "failure.json").writeText(
+        val prefix = "required-e2e/${safeName()}"
+        writeOutput(
+            "$prefix/failure.json",
             "{\"test\":\"${safeName()}\",\"throwable\":\"${error::class.java.name}\",\"frames\":[" +
                 error.stackTrace.take(20).joinToString(",") { "\"${it.className}.${it.methodName}:${it.lineNumber}\"" } + "]}",
         )
-        File(output, "route.json").writeText("{\"screen\":\"unavailable\"}")
-        File(output, "semantics.json").writeText("{\"tags\":[],\"bounds\":[]}")
-        File(output, "lazy-state.json").writeText("{\"visible\":[]}")
-        File(output, "connections.json").writeText("{\"states\":[]}")
-        milestones.writeTo(File(output, "milestones.jsonl"))
+        writeOutput("$prefix/route.json", "{\"screen\":\"unavailable\"}")
+        writeOutput("$prefix/semantics.json", "{\"tags\":[],\"bounds\":[]}")
+        writeOutput("$prefix/lazy-state.json", "{\"visible\":[]}")
+        writeOutput("$prefix/connections.json", "{\"states\":[]}")
+        writeOutput("$prefix/milestones.jsonl", milestones.render())
     }
 
     private fun safeName(): String = (description?.className.orEmpty() + "_" + description?.methodName.orEmpty())
         .replace(Regex("[^A-Za-z0-9_.-]"), "_")
 
-    private fun artifactRoot(context: Context): File {
-        // ContextImpl creates filesDir lazily. Prime it through the framework API before making
-        // the structured subdirectory; direct mkdirs() can fail under Test Orchestrator on a
-        // freshly cleared instrumentation package.
-        context.openFileOutput("required-e2e.init", Context.MODE_PRIVATE).close()
-        return File(context.filesDir, "required-e2e").apply {
-            check(mkdirs() || isDirectory) { "Could not create E2E artifact directory" }
+    private fun writeOutput(path: String, content: String, append: Boolean = false) {
+        PlatformTestStorageRegistry.getInstance().openOutputFile(path, append).bufferedWriter().use {
+            it.write(content)
         }
     }
 }

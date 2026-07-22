@@ -116,6 +116,7 @@ run_attempt() {
 attempts=1
 rc=0
 run_attempt "$@" || rc=$?
+e2e_collect_gradle_required_e2e_artifacts "$OUT_DIR"
 e2e_pull_required_e2e_artifacts "$OUT_DIR"
 if [ "$MODE" != direct ] && [ "$rc" -eq 0 ]; then assert_three_gradle_results || rc=1; fi
 declared="$(pretest_classification)"
@@ -126,6 +127,7 @@ if [ "$rc" -ne 0 ] && [ "$started" = false ] && e2e_retry_allowed "$classificati
   attempts=2
   rc=0
   run_attempt "$@" || rc=$?
+  e2e_collect_gradle_required_e2e_artifacts "$OUT_DIR"
   e2e_pull_required_e2e_artifacts "$OUT_DIR"
   if [ "$MODE" != direct ] && [ "$rc" -eq 0 ]; then assert_three_gradle_results || rc=1; fi
   classification="$(e2e_classify_attempt "$OUT_DIR" "$(pretest_classification)")"
