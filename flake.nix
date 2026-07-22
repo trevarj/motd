@@ -28,7 +28,7 @@
         };
         # Match compileSdk/buildTools used by the current Gradle configuration.
         androidComposition = pkgs.androidenv.composeAndroidPackages {
-          platformVersions = [ "35" ];
+          platformVersions = [ "36" ];
           buildToolsVersions = [ "36.0.0" ];
           platformToolsVersion = "35.0.2";
           includeEmulator = false;
@@ -39,7 +39,7 @@
         # Opt-in, large emulator closure for the local headless E2E loop. Keeping this separate
         # avoids making every ordinary build fetch an API image and emulator runtime.
         emulatorComposition = pkgs.androidenv.composeAndroidPackages {
-          platformVersions = [ "34" ];
+          platformVersions = [ "34" "36" ];
           buildToolsVersions = [ "36.0.0" ];
           platformToolsVersion = "35.0.2";
           includeEmulator = true;
