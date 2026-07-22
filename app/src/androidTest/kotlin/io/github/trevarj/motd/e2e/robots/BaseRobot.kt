@@ -7,6 +7,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
@@ -24,6 +25,14 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
     fun click(tag: String) {
         awaitTag(tag)
         compose.onNodeWithTag(tag, useUnmergedTree = true).performClick()
+    }
+
+    fun scrollToAndClick(tag: String) {
+        awaitTag(tag)
+        compose.onNodeWithTag(tag, useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
     }
 
     fun clickPrefix(prefix: String, timeoutMs: Long = 30_000) {

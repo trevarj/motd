@@ -31,7 +31,7 @@ internal class NetworksRobot(compose: ComposeTestRule) : BaseRobot(compose) {
 
 internal class BouncerRobot(compose: ComposeTestRule) : BaseRobot(compose) {
     fun assertPanels() {
-        click("network_settings_bouncer_networks")
+        scrollToAndClick("network_settings_bouncer_networks")
         click("bouncer_tab_networks")
         assertDisplayed("bouncer_networks_panel")
         click("bouncer_tab_channels")
