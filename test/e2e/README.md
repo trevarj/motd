@@ -22,9 +22,10 @@ setup and teardown deliberately clear application data.
 | Hermetic emulator run | Scheduled/manual exhaustive CI diagnostics | `.github/workflows/e2e.yml` |
 
 The fast headless suite is a required pull-request and main-branch CI gate. It
-runs the four Kotlin journeys, then the host-driven reconnect-window phase in
-connected/direct modes; managed-device runs intentionally omit that lifecycle
-exercise. The exhaustive A-I workflow remains scheduled/manual diagnostics.
+runs exactly three isolated Kotlin journeys: TLS onboarding/import, one
+canonical echo/send/reconnect row, and bootstrapped navigation/settings/bouncer
+smoke. Host UIAutomator and the reconnect-window gap remain scheduled/manual;
+the exhaustive A-I workflow is diagnostics, not a required fast phase.
 Release CI still runs its own unit, lint, and FOSS release build checks.
 
 ## Prerequisites
@@ -59,16 +60,16 @@ For ordinary app feature work, run:
 The lifecycle wrapper owns a dedicated AVD, emulator serial, native soju/ergo
 stack, adb reverse, and temporary state. Every adb command includes that serial,
 so an attached phone is never installed to, cleared, reversed, or reconfigured.
-Each journey gets a fresh instrumentation process and cleared debug-app data;
-the launcher discovers every `@FastHeadlessE2e` class from the installed test
-package instead of maintaining a class list. CI and managed-device runs use the
-same fixture configuration and enforce isolation with Android Test Orchestrator.
-The four journeys cover:
+Each method gets a fresh instrumentation process and cleared debug-app data;
+the direct launcher discovers exactly three annotated `Class#method` cases from
+the installed test package, clears the target package before each one, and does
+not retain raw instrumentation output. CI and managed-device runs use the same
+fixture configuration and enforce isolation with Android Test Orchestrator.
+The three journeys cover:
 
 - onboarding, self-signed fixture trust, soju login, and network import;
-- channel join, send, emoji and command completion, and message search;
-- channel info, member actions, and leave cancellation; and
-- settings, themes, chat presentation, and Soju control-center panels.
+- one real UI send whose canonical Room event remains visible after reconnect; and
+- navigation, settings, themes, and Soju control-center panels.
 
 The production Activity, Room database, services, TLS transport, and bouncer
 connection are used. The fixture replaces only the remote IRC network. This is
@@ -90,9 +91,10 @@ fast. Manage their lifecycle explicitly:
 
 `full` runs the existing A-I uiautomator sweep on the same isolated emulator.
 `down` preserves the AVD; `reset` deletes only the wrapper's isolated AVD,
-stack, and state directories. Failures save a JSON summary, screenshot, logcat,
-instrumentation output, stack versions, and local bouncer logs under
-`test/e2e/artifacts/headless/`.
+stack, and state directories. Failures save a JSON summary and privacy-safe
+required-E2E structure under `test/e2e/artifacts/fast-suite/`; the fast gate
+does not capture screenshots, raw logcat, arbitrary semantics text, credentials,
+addresses, nicks, channels, or message content.
 
 ## Public screenshot showcase
 

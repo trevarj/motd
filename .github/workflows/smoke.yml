@@ -68,19 +68,12 @@ jobs:
       - name: Run isolated Kotlin headless journeys
         run: ./test/e2e/fast-suite.sh managed
 
-      - name: Capture bouncer diagnostics
-        if: failure()
-        run: ./test/e2e/hermetic-stack.sh capture test/e2e/artifacts/fast-suite
-
-      - name: Upload smoke reports
+      - name: Upload privacy-safe required diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: fast-headless-e2e-reports
-          path: |
-            app/build/reports/androidTests/**
-            app/build/outputs/androidTest-results/**
-            test/e2e/artifacts/fast-suite/**
+          name: fast-headless-e2e-diagnostics
+          path: test/e2e/artifacts/fast-suite/**
           if-no-files-found: ignore
 
       - name: Tear down hermetic stack

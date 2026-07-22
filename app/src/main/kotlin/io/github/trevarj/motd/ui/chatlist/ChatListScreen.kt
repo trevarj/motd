@@ -211,6 +211,7 @@ fun ChatListContent(
         },
     ) {
         Scaffold(
+            modifier = Modifier.testTag("screen_chat_list"),
             topBar = {
                 TopAppBar(
                     title = {
@@ -246,7 +247,7 @@ fun ChatListContent(
                                 contentDescription = stringResource(R.string.chatlist_search),
                             )
                         }
-                        IconButton(onClick = onOpenSettings) {
+                        IconButton(onClick = onOpenSettings, modifier = Modifier.testTag("chatlist_open_settings")) {
                             Icon(
                                 Icons.Outlined.Settings,
                                 contentDescription = stringResource(R.string.chatlist_settings),
@@ -256,7 +257,7 @@ fun ChatListContent(
                 )
             },
             floatingActionButton = {
-                FloatingActionButton(onClick = { showSheet = true }) {
+                FloatingActionButton(onClick = { showSheet = true }, modifier = Modifier.testTag("chatlist_new_conversation")) {
                     Icon(
                         Icons.Filled.Add,
                         contentDescription = stringResource(R.string.chatlist_new_conversation),

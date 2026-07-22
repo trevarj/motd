@@ -36,3 +36,9 @@ e2e_capture_native_stack_artifacts() {
     if command -v ergo >/dev/null 2>&1; then ergo version 2>&1 || true; fi
   } >"$output_dir/stack-versions.txt"
 }
+
+e2e_pull_required_e2e_artifacts() {
+  local output_dir="$1" remote="/sdcard/Android/data/${FAST_E2E_TEST_PACKAGE}/files/required-e2e"
+  mkdir -p "$output_dir/required-e2e"
+  e2e_adb pull "$remote/." "$output_dir/required-e2e" >/dev/null 2>&1 || true
+}

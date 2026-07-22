@@ -276,7 +276,9 @@ private fun ThemePickerSheet(
         themePresetLabelText(it).lowercase().contains(normalized)
     }
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_theme_sheet")) {
-        LazyColumn(Modifier.selectableGroup().heightIn(max = 680.dp).padding(bottom = 24.dp)) {
+        LazyColumn(
+            Modifier.testTag("settings_theme_list").selectableGroup().heightIn(max = 680.dp).padding(bottom = 24.dp),
+        ) {
             item {
                 Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
                 OutlinedTextField(

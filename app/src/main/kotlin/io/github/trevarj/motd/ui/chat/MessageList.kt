@@ -135,7 +135,11 @@ internal fun messageContentType(message: MessageEntity): MessageContentType = wh
 }
 
 /** Stable per-message testTag id: server msgid when present, else the local entity id (pending). */
-private fun messageTag(msg: MessageEntity): String = "chat_message_${msg.msgid ?: msg.id}"
+/** Stable UIAutomator/Compose address: server identity wins once an echo has promoted the row. */
+internal fun timelineMessageTag(msgid: String?, eventId: Long): String =
+    "chat_message_${msgid ?: eventId}"
+
+private fun messageTag(msg: MessageEntity): String = timelineMessageTag(msg.msgid, msg.id)
 
 private fun MessageEntity.timelineAnchor(): TimelineAnchor = TimelineAnchor(serverTime, id)
 

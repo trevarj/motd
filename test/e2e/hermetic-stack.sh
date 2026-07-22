@@ -52,6 +52,13 @@ start_soju() {
   wait_for_soju_ready
 }
 
+tls_fingerprint() {
+  # The generated leaf is intentionally passed as a lowercase opaque test argument; never print
+  # the certificate, endpoint, or fingerprint in harness diagnostics.
+  compose exec -T soju openssl x509 -in /etc/soju/tls/cert.pem -outform der \
+    | sha256sum | awk '{print tolower($1)}'
+}
+
 case "${1:-}" in
   up)
     compose up --build -d --wait
@@ -68,7 +75,8 @@ case "${1:-}" in
   history-check) history_check "${2:-}" ;;
   stop-soju) stop_soju ;;
   start-soju) start_soju ;;
+  tls-fingerprint) tls_fingerprint ;;
   down) compose down -v ;;
   validate) compose config --quiet ;;
-  *) echo "usage: $0 {up|status|logs|capture OUTPUT_DIR|reconnect-gap TOKEN|reconnect-current TOKEN|history-check [EXACT_TEXT]|stop-soju|start-soju|down|validate}" >&2; exit 2 ;;
+  *) echo "usage: $0 {up|status|logs|capture OUTPUT_DIR|reconnect-gap TOKEN|reconnect-current TOKEN|history-check [EXACT_TEXT]|stop-soju|start-soju|tls-fingerprint|down|validate}" >&2; exit 2 ;;
 esac

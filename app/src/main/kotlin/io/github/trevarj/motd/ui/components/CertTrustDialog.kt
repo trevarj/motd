@@ -78,10 +78,14 @@ fun CertTrustDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onTrust) { Text(stringResource(R.string.cert_trust_accept)) }
+            TextButton(onClick = onTrust, modifier = Modifier.testTag("cert_trust_accept")) {
+                Text(stringResource(R.string.cert_trust_accept))
+            }
         },
         dismissButton = {
-            TextButton(onClick = onCancel) { Text(stringResource(R.string.cert_trust_cancel)) }
+            TextButton(onClick = onCancel, modifier = Modifier.testTag("cert_trust_cancel")) {
+                Text(stringResource(R.string.cert_trust_cancel))
+            }
         },
     )
 }

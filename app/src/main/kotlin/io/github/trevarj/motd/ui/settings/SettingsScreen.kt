@@ -139,7 +139,11 @@ fun SettingsContent(
     onOpenAbout: () -> Unit,
 ) {
     val context = LocalContext.current
-    SettingsScaffold(title = stringResource(R.string.settings_title), onBack = onBack) {
+    SettingsScaffold(
+        title = stringResource(R.string.settings_title),
+        onBack = onBack,
+        modifier = Modifier.testTag("screen_settings"),
+    ) {
         CategoryRow(
             icon = Icons.Outlined.Language,
             title = stringResource(R.string.settings_networks),
@@ -212,9 +216,11 @@ private fun CategoryRow(
 internal fun SettingsScaffold(
     title: String,
     onBack: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     Scaffold(
+        modifier = modifier,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
