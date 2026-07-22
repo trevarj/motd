@@ -121,12 +121,12 @@ class RequiredHeadlessE2eTest {
         compose.onAllNodesWithTag("settings_theme_sheet", useUnmergedTree = true).assertCountEquals(0)
         // Return from Appearance to Settings, then exercise the category and bouncer routes.
         SettingsRobot(compose).apply {
-            back()
+            returnToRoot()
             chat()
             assertDisplayed("settings_switch_show_jpq")
+            returnToRoot()
+            networks()
         }
-        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
-        SettingsRobot(compose).networks()
         NetworksRobot(compose).openRoot(network.rootId)
         BouncerRobot(compose).assertPanels()
         milestones.record("settings_bouncer_smoke", "root=${network.rootId}")

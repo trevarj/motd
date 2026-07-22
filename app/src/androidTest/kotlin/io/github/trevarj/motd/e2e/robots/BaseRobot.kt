@@ -14,8 +14,11 @@ import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.semantics.SemanticsProperties
 
 internal open class BaseRobot(protected val compose: ComposeTestRule) {
+    fun isPresent(tag: String): Boolean =
+        compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+
     fun awaitTag(tag: String, timeoutMs: Long = 10_000) {
-        compose.waitUntil(timeoutMs) { compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(timeoutMs) { isPresent(tag) }
     }
 
     fun click(tag: String) {
@@ -36,7 +39,7 @@ internal open class BaseRobot(protected val compose: ComposeTestRule) {
     fun swipeUntilTag(containerTag: String, itemTag: String, timeoutMs: Long = 10_000) {
         awaitTag(containerTag)
         compose.waitUntil(timeoutMs) {
-            if (compose.onAllNodesWithTag(itemTag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()) {
+            if (isPresent(itemTag)) {
                 true
             } else {
                 compose.onNodeWithTag(containerTag, useUnmergedTree = true).performTouchInput { swipeUp() }

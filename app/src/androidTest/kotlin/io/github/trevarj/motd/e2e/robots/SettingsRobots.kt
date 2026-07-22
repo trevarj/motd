@@ -5,7 +5,10 @@ import androidx.compose.ui.test.junit4.ComposeTestRule
 internal class SettingsRobot(compose: ComposeTestRule) : BaseRobot(compose) {
     fun open() = click("chatlist_open_settings")
     fun appearance() = click("settings_category_appearance")
-    fun back() = click("settings_back")
+    fun returnToRoot() {
+        if (!isPresent("screen_settings")) click("settings_back")
+        assertDisplayed("screen_settings")
+    }
     fun chat() {
         swipeUntilTag("screen_settings", "settings_category_chat")
         click("settings_category_chat")
