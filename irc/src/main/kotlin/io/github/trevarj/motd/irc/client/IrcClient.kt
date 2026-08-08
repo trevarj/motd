@@ -888,18 +888,32 @@ class IrcClient(
         }
         val root = response.rootBatch
             ?: throw IrcProtocolException("CHATHISTORY", "response did not contain a complete root batch")
+        // Two accepted shapes, matching `search`: released soju sends a bare `chathistory` root,
+        // while soju master (post-70c4ded) wraps that batch in an outer `labeled-response` batch.
+        // In the wrapped shape the label opens the wrapper and the history batch sits one level in,
+        // so rejecting it would turn a server upgrade into silently broken scrollback.
+        // Unlike `search`, only the first batch inside the wrapper is the history batch: multiline
+        // and netsplit batches nest within it rather than beside it, so they must not be matched
+        // here. They are reassembled later by `mapCorrelatedHistory`, which walks the wrapper.
+        val hist = if (root.params.getOrNull(1).orEmpty().equals("labeled-response", ignoreCase = true)) {
+            response.messages.firstOrNull {
+                it.command == "BATCH" && it.params.firstOrNull()?.startsWith("+") == true
+            } ?: throw IrcProtocolException("CHATHISTORY", "labeled-response wrapper contained no batch")
+        } else {
+            root
+        }
         val expectedType = if (req.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
             "draft/chathistory-targets"
         } else {
             "chathistory"
         }
-        if (root.command != "BATCH" || !root.params.getOrNull(1).orEmpty().equals(expectedType, ignoreCase = true)) {
+        if (hist.command != "BATCH" || !hist.params.getOrNull(1).orEmpty().equals(expectedType, ignoreCase = true)) {
             throw IrcProtocolException(
                 "CHATHISTORY",
-                "unexpected batch type ${root.params.getOrNull(1).orEmpty()}",
+                "unexpected batch type ${hist.params.getOrNull(1).orEmpty()}",
             )
         }
-        val endOfHistory = "draft/chathistory-end" in root.tags
+        val endOfHistory = "draft/chathistory-end" in hist.tags
         return if (req.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
             ChatHistoryResponse.Targets(parseTargets(response.messages), endOfHistory)
         } else {

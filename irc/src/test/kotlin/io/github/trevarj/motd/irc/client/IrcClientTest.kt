@@ -546,6 +546,36 @@ class IrcClientTest {
     }
 
     @Test
+    fun `labeled chathistory accepts a labeled-response wrapper`() = runTest {
+        val ft = FakeTransport()
+        val client = registered(ft)
+
+        val result = clientScope().async {
+            client.chathistory(
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#chan", limit = 50),
+            )
+        }
+        runCurrent()
+
+        val label = responseLabel(ft.sent.last { it.contains("CHATHISTORY") })
+
+        ft.feed("@label=$label BATCH +wrap labeled-response")
+        ft.feed("@batch=wrap;draft/chathistory-end BATCH +hist chathistory #chan")
+        ft.feed("@batch=hist :a!u@h PRIVMSG #chan :first")
+        ft.feed("@batch=hist :b!u@h PRIVMSG #chan :second")
+        ft.feed("@batch=wrap BATCH -hist")
+        ft.feed("BATCH -wrap")
+        runCurrent()
+
+        val res = result.await() as ChatHistoryResponse.Messages
+        assertTrue(res.endOfHistory)
+        assertEquals(
+            listOf("first", "second"),
+            res.events.filterIsInstance<IrcEvent.ChatMessage>().map { it.text },
+        )
+    }
+
+    @Test
     fun `labeled chathistory reconstructs nested multiline message`() = runTest {
         val ft = FakeTransport()
         val client = registered(ft, multilineLs)
