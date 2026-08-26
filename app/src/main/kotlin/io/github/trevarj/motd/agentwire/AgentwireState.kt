@@ -115,6 +115,7 @@ data class AgentwireUiState(
     val requests: List<AgentwireRequest> = emptyList(),
     val timeline: List<AgentwireTimelineItem> = emptyList(),
     val sessionStatuses: Map<String, AgentwireSessionStatus> = emptyMap(),
+    val recentSessions: List<AgentwireRecentSession> = emptyList(),
     val actionStatus: Map<String, String> = emptyMap(),
     val historyLoading: Boolean = false,
     val historyPage: String? = null,

@@ -27,7 +27,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
@@ -61,6 +65,7 @@ internal suspend fun retryAgentwireSync(
     }
 }
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class AgentwireViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -79,6 +84,13 @@ class AgentwireViewModel @Inject constructor(
     private val autoReviewConfirmedSessions = HashSet<String>()
 
     init {
+        viewModelScope.launch {
+            _state.map { it.channel }.distinctUntilChanged()
+                .flatMapLatest { channel ->
+                    if (channel.isBlank()) flowOf(emptyList()) else prefs.recentSessions(channel)
+                }
+                .collect { recents -> _state.update { it.copy(recentSessions = recents) } }
+        }
         viewModelScope.launch {
             combine(
                 prefs.enabled,
@@ -285,12 +297,21 @@ class AgentwireViewModel @Inject constructor(
             it.copy(autoReviewConfirmed = activeSid != null && activeSid in autoReviewConfirmedSessions)
         }
         val current = _state.value
+        if (current.activeSid != null && current.activeSid != previousSid) rememberAttachedSession(current)
         if (
             current.activeSid != null &&
             (current.activeSid != previousSid || (result.syncCompleted && current.historySid == null))
         ) {
             requestHistory(initial = true)
         }
+    }
+
+    /** Records each newly bound session so the drawer can offer it again after detaching. */
+    private suspend fun rememberAttachedSession(state: AgentwireUiState) {
+        val sid = state.activeSid ?: return
+        val title = (state.liveSessions + state.workspaceSessions.values.flatten())
+            .firstOrNull { it.id == sid }?.title ?: sid.take(12)
+        prefs.addRecentSession(state.channel, sid, title, state.cwd, state.backend)
     }
 
     private suspend fun requestHistory(initial: Boolean) {

@@ -27,21 +27,26 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -50,12 +55,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.ui.components.Composer
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 
 @Composable
@@ -156,117 +164,151 @@ private fun AgentwireScreen(
     var composer by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(""))
     }
-    Scaffold(
-        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
-        topBar = {
-            Column {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(state.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                "${state.backend.orEmpty()}  ${state.activeSid?.take(12) ?: "detached"}",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        if (showBack) IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { overflow = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More")
-                        }
-                        DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
-                            DropdownMenuItem(
-                                text = { Text("View IRC transcript") },
-                                onClick = { overflow = false; viewModel.viewTranscript() },
-                            )
-                        }
-                    },
-                )
-                AgentwireStatusStrip(state) { sheet = AgentwireSheet.STATUS }
-            }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    // Opening the drawer is the refresh gesture: live status is only as fresh as the last page.
+    LaunchedEffect(drawerState.isOpen) {
+        if (drawerState.isOpen) viewModel.listSessions(live = true)
+    }
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        modifier = Modifier.testTag("agentwire_drawer"),
+        drawerContent = {
+            AgentwireSessionDrawer(
+                rows = agentwireDrawerRows(state),
+                attached = state.activeSid != null,
+                onSelect = { row ->
+                    viewModel.attachSession(row.sid, row.cwd)
+                    scope.launch { drawerState.close() }
+                },
+                onDetach = {
+                    viewModel.detachSession()
+                    scope.launch { drawerState.close() }
+                },
+                onNewSession = {
+                    sheet = AgentwireSheet.STATUS
+                    scope.launch { drawerState.close() }
+                },
+            )
         },
-    ) { padding ->
-        // Match the regular chat layout: consume overlapping navigation and animated IME
-        // insets around the whole content column so the composer remains above the keyboard.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .navigationBarsPadding()
-                .imePadding(),
-        ) {
-            if (state.gate == AgentwireGate.BLOCKED) {
-                AgentwireBlocked(state)
-            } else {
-                Column(Modifier.fillMaxSize()) {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().weight(1f).testTag("agentwire_timeline"),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        if (state.syncing) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-                        if (!state.connected && state.timeline.isEmpty()) item {
-                            Card(Modifier.fillMaxWidth().padding(16.dp)) {
-                                Column(Modifier.padding(16.dp)) {
-                                    Text("Agentwire is offline", style = MaterialTheme.typography.titleMedium)
-                                    Text("Structured state will be rebuilt after reconnecting.")
-                                    TextButton(onClick = viewModel::viewTranscript) { Text("View IRC transcript") }
-                                }
-                            }
-                        }
-                        if (state.error != null) item {
-                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(state.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                                TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
-                            }
-                        }
-                        if (state.historyLoading || state.olderHistoryAvailable) item {
-                            TextButton(
-                                onClick = viewModel::loadOlderHistory,
-                                enabled = !state.historyLoading,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text(if (state.historyLoading) "Loading history…" else "Load older history")
-                            }
-                        }
-                        items(state.timeline, key = AgentwireTimelineItem::id) { item ->
-                            AgentwireTimelineCard(item, state.actionStatus[item.id])
-                        }
-                        items(state.requests, key = AgentwireRequest::rid) { request ->
-                            AgentwireRequestCard(request, request.sid == null || request.sid == state.activeSid, viewModel) {
-                                questionRequestId = request.rid
-                                sheet = AgentwireSheet.QUESTION
-                            }
-                        }
-                        if (state.queue.isNotEmpty()) item {
-                            Surface(
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                modifier = Modifier.fillMaxWidth().clickable { sheet = AgentwireSheet.QUEUE },
-                            ) {
+    ) {
+        Scaffold(
+            contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
+            topBar = {
+                Column {
+                    TopAppBar(
+                        title = {
+                            Column {
+                                Text(state.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
-                                    "${state.queue.size} queued  •  tap to edit",
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                    style = MaterialTheme.typography.labelLarge,
+                                    "${state.backend.orEmpty()}  ${state.activeSid?.take(12) ?: "detached"}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
                                 )
                             }
+                        },
+                        navigationIcon = {
+                            Row {
+                                if (showBack) IconButton(onClick = onBack) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                }
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                    Icon(Icons.Default.Menu, contentDescription = "Sessions")
+                                }
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { overflow = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More")
+                            }
+                            DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("View IRC transcript") },
+                                    onClick = { overflow = false; viewModel.viewTranscript() },
+                                )
+                            }
+                        },
+                    )
+                    AgentwireStatusStrip(state) { sheet = AgentwireSheet.STATUS }
+                }
+            },
+        ) { padding ->
+            // Match the regular chat layout: consume overlapping navigation and animated IME
+            // insets around the whole content column so the composer remains above the keyboard.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .navigationBarsPadding()
+                    .imePadding(),
+            ) {
+                if (state.gate == AgentwireGate.BLOCKED) {
+                    AgentwireBlocked(state)
+                } else {
+                    Column(Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth().weight(1f).testTag("agentwire_timeline"),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            if (state.syncing) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                            if (!state.connected && state.timeline.isEmpty()) item {
+                                Card(Modifier.fillMaxWidth().padding(16.dp)) {
+                                    Column(Modifier.padding(16.dp)) {
+                                        Text("Agentwire is offline", style = MaterialTheme.typography.titleMedium)
+                                        Text("Structured state will be rebuilt after reconnecting.")
+                                        TextButton(onClick = viewModel::viewTranscript) { Text("View IRC transcript") }
+                                    }
+                                }
+                            }
+                            if (state.error != null) item {
+                                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(state.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                                    TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
+                                }
+                            }
+                            if (state.historyLoading || state.olderHistoryAvailable) item {
+                                TextButton(
+                                    onClick = viewModel::loadOlderHistory,
+                                    enabled = !state.historyLoading,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(if (state.historyLoading) "Loading history…" else "Load older history")
+                                }
+                            }
+                            items(state.timeline, key = AgentwireTimelineItem::id) { item ->
+                                AgentwireTimelineCard(item, state.actionStatus[item.id])
+                            }
+                            items(state.requests, key = AgentwireRequest::rid) { request ->
+                                AgentwireRequestCard(request, request.sid == null || request.sid == state.activeSid, viewModel) {
+                                    questionRequestId = request.rid
+                                    sheet = AgentwireSheet.QUESTION
+                                }
+                            }
+                            if (state.queue.isNotEmpty()) item {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    modifier = Modifier.fillMaxWidth().clickable { sheet = AgentwireSheet.QUEUE },
+                                ) {
+                                    Text(
+                                        "${state.queue.size} queued  •  tap to edit",
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                        style = MaterialTheme.typography.labelLarge,
+                                    )
+                                }
+                            }
+                            item { Spacer(Modifier.height(8.dp)) }
                         }
-                        item { Spacer(Modifier.height(8.dp)) }
-                    }
-                    if (state.gate == AgentwireGate.ACTIVE) {
-                        AgentwireComposer(
-                            value = composer,
-                            state = state,
-                            onValueChange = { composer = it },
-                            onSend = { viewModel.submit(composer.text); composer = TextFieldValue("") },
-                            onCancel = viewModel::cancelTurn,
-                        )
+                        if (state.gate == AgentwireGate.ACTIVE) {
+                            AgentwireComposer(
+                                value = composer,
+                                state = state,
+                                onValueChange = { composer = it },
+                                onSend = { viewModel.submit(composer.text); composer = TextFieldValue("") },
+                                onCancel = viewModel::cancelTurn,
+                            )
+                        }
                     }
                 }
             }
@@ -280,6 +322,126 @@ private fun AgentwireScreen(
             AgentwireQuestionSheet(it, viewModel) { sheet = null }
         }
         null -> Unit
+    }
+}
+
+@SuppressLint("HardcodedText")
+@Composable
+internal fun AgentwireSessionDrawer(
+    rows: List<AgentwireDrawerRow>,
+    attached: Boolean,
+    onSelect: (AgentwireDrawerRow) -> Unit,
+    onDetach: () -> Unit,
+    onNewSession: () -> Unit,
+) {
+    val sections = rows.groupBy(AgentwireDrawerRow::section)
+    ModalDrawerSheet {
+        Column(Modifier.fillMaxSize()) {
+            Text(
+                "Sessions",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+                if (rows.isEmpty()) item {
+                    Text(
+                        "No sessions yet",
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                AgentwireDrawerSection.entries.forEach { section ->
+                    val sectionRows = sections[section].orEmpty()
+                    if (sectionRows.isEmpty()) return@forEach
+                    item(key = "header:$section") {
+                        Text(
+                            when (section) {
+                                AgentwireDrawerSection.BOUND -> "BOUND"
+                                AgentwireDrawerSection.LIVE -> "LIVE"
+                                AgentwireDrawerSection.RECENT -> "RECENT"
+                            },
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    items(sectionRows, key = { "row:${it.sid}" }) { row ->
+                        AgentwireDrawerRowItem(row, onSelect)
+                    }
+                }
+            }
+            HorizontalDivider()
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (attached) {
+                    TextButton(onClick = onDetach, modifier = Modifier.testTag("agentwire_drawer_detach")) {
+                        Text("Detach")
+                    }
+                }
+                TextButton(onClick = onNewSession, modifier = Modifier.testTag("agentwire_drawer_new_session")) {
+                    Text("New session…")
+                }
+            }
+        }
+    }
+}
+
+@SuppressLint("HardcodedText")
+@Composable
+private fun AgentwireDrawerRowItem(row: AgentwireDrawerRow, onSelect: (AgentwireDrawerRow) -> Unit) {
+    Surface(
+        color = if (row.attached) MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .clickable(enabled = !row.attached) { onSelect(row) }
+            .testTag("agentwire_drawer_row_${row.sid}"),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(row.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    listOfNotNull(row.backend, row.directory).joinToString("  •  "),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                row.cwd?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    when (row.status) {
+                        AgentwireDrawerStatus.WORKING -> "working"
+                        AgentwireDrawerStatus.BLOCKED -> "blocked"
+                        AgentwireDrawerStatus.IDLE -> "idle"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (row.tuiAttached) Text("TUI", style = MaterialTheme.typography.labelSmall)
+                    if (row.attached) Text("Attached", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
     }
 }
 
