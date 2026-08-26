@@ -50,6 +50,7 @@ val AGENTWIRE_EVENT_KINDS = setOf(
     "queue.item.added", "queue.item.updated", "queue.item.moved", "queue.item.removed",
     "user.prompt", "turn.started", "turn.completed", "turn.failed", "assistant.delta", "assistant.completed",
     "plan.updated", "tool.started", "tool.updated", "tool.completed", "usage.updated",
+    "subagent.updated",
     "request.opened", "request.resolved", "approval.review.started", "approval.review.completed",
 )
 

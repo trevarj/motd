@@ -24,8 +24,8 @@ private val TOOL_TIMELINE_KEYS = setOf("id", "kind", "label", "status", "exitCod
 private val SESSION_OWNED_KINDS = setOf(
     "session.snapshot", "session.status", "user.prompt", "turn.started", "turn.completed",
     "turn.failed", "assistant.delta", "assistant.completed", "plan.updated", "tool.started",
-    "tool.updated", "tool.completed", "usage.updated", "request.opened", "request.resolved",
-    "approval.review.started", "approval.review.completed",
+    "tool.updated", "tool.completed", "usage.updated", "subagent.updated", "request.opened",
+    "request.resolved", "approval.review.started", "approval.review.completed",
 )
 
 data class AgentwireListItem(
@@ -70,6 +70,27 @@ data class AgentwireQuestion(
     val multiple: Boolean,
     val custom: Boolean,
 )
+
+/** One autonomous subagent of the bound session, as last reported by `subagent.updated`. */
+data class AgentwireSubagent(
+    val id: String,
+    val type: String,
+    val description: String,
+    val status: String,
+    val isBackground: Boolean,
+    val toolUses: Int? = null,
+    val durationMs: Int? = null,
+    val tokens: Int? = null,
+) {
+    val terminal: Boolean get() = status == "completed" || status == "failed"
+}
+
+/** "7 tool uses · 1.2k tokens · 4s" from whichever optional numbers the agent reported. */
+internal fun agentwireSubagentDetail(agent: AgentwireSubagent): String? = listOfNotNull(
+    agent.toolUses?.let { "$it tool use${if (it == 1) "" else "s"}" },
+    agent.tokens?.let { if (it >= 1000) "${it / 1000}.${(it % 1000) / 100}k tokens" else "$it tokens" },
+    agent.durationMs?.let { "${it / 1000}s" },
+).joinToString(" · ").ifEmpty { null }
 
 /** Liveness of one session, bound or not, as last reported by `session.status`. */
 data class AgentwireSessionStatus(
@@ -128,6 +149,8 @@ data class AgentwireUiState(
     /** [timeline] collapsed into per-turn tool groups; recomputed by the ViewModel, not composition. */
     val timelineEntries: List<AgentwireTimelineEntry> = emptyList(),
     val sessionStatuses: Map<String, AgentwireSessionStatus> = emptyMap(),
+    /** Bound-session state: every update replaces this list wholesale. */
+    val subagents: List<AgentwireSubagent> = emptyList(),
     val recentSessions: List<AgentwireRecentSession> = emptyList(),
     val actionStatus: Map<String, String> = emptyMap(),
     val historyLoading: Boolean = false,
@@ -210,6 +233,7 @@ class AgentwireReducer {
                     settings = data.objectStrings("settings").ifEmpty { state.settings },
                     queue = data.array("queue")?.mapNotNull(::queueItem).orEmpty(),
                     timeline = if (changed) emptyList() else state.timeline,
+                    subagents = if (changed) emptyList() else state.subagents,
                     historyLoading = false,
                     historyPage = null,
                     historyRequestId = null,
@@ -230,6 +254,7 @@ class AgentwireReducer {
                     busy = false,
                     currentTid = null,
                     timeline = emptyList(),
+                    subagents = emptyList(),
                     actionStatus = emptyMap(),
                     historyLoading = false,
                     historyPage = null,
@@ -376,6 +401,8 @@ class AgentwireReducer {
                     .upsert(envelope.timelineItem(success = envelope.kind == "turn.completed")),
             )
             "assistant.delta" -> state.copy(timeline = state.timeline.appendDelta(envelope))
+            // Replace, never merge: the event always carries the full current list.
+            "subagent.updated" -> state.copy(subagents = data.array("agents")?.mapNotNull(::subagent).orEmpty())
             "user.prompt", "assistant.completed", "plan.updated", "tool.started", "tool.updated", "tool.completed",
             "usage.updated", "approval.review.started", "approval.review.completed" -> state.copy(
                 timeline = state.timeline.upsert(
@@ -472,6 +499,20 @@ private fun mergePage(
     current.filterNot { old -> page.any { it.id == old.id } } + page
 } else {
     page
+}
+
+private fun subagent(element: JsonElement): AgentwireSubagent? {
+    val data = element as? JsonObject ?: return null
+    return AgentwireSubagent(
+        id = data.string("id") ?: return null,
+        type = data.string("type").orEmpty(),
+        description = data.string("description").orEmpty(),
+        status = data.string("status") ?: return null,
+        isBackground = data.bool("isBackground") ?: false,
+        toolUses = data.int("toolUses"),
+        durationMs = data.int("durationMs"),
+        tokens = data.int("tokens"),
+    )
 }
 
 private fun queueItem(element: JsonElement): AgentwireQueueItem? {

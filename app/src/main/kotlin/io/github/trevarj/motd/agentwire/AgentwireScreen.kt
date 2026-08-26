@@ -298,6 +298,9 @@ private fun AgentwireScreen(
                     AgentwireBlocked(state)
                 } else {
                     Column(Modifier.fillMaxSize()) {
+                        // Mirrors the pi-subagents TUI widget: a compact fleet header that stays
+                        // pinned above the transcript instead of scrolling away with it.
+                        if (state.subagents.isNotEmpty()) AgentwireSubagentsCard(state.subagents)
                         LazyColumn(
                             modifier = Modifier.fillMaxWidth().weight(1f).testTag("agentwire_timeline"),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -492,8 +495,62 @@ private fun AgentwireDrawerRowItem(row: AgentwireDrawerRow, onSelect: (Agentwire
                     fontFamily = FontFamily.Monospace,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (row.activeSubagents > 0) Text(
+                        "${row.activeSubagents} agent${if (row.activeSubagents == 1) "" else "s"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.testTag("agentwire_drawer_subagents_${row.sid}"),
+                    )
                     if (row.tuiAttached) Text("TUI", style = MaterialTheme.typography.labelSmall)
                     if (row.attached) Text("Attached", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+    }
+}
+
+@SuppressLint("HardcodedText")
+@Composable
+private fun AgentwireSubagentsCard(subagents: List<AgentwireSubagent>) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth().testTag("agentwire_subagents"),
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("● Agents", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace)
+            subagents.forEach { agent ->
+                Column(Modifier.fillMaxWidth().testTag("agentwire_subagent_${agent.id}")) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (agent.status == "running") {
+                            CircularProgressIndicator(Modifier.size(10.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text(
+                                when (agent.status) {
+                                    "completed" -> "✓"
+                                    "failed" -> "✗"
+                                    else -> "…"
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                        Text(agent.type, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            agent.description,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    agentwireSubagentDetail(agent)?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 16.dp),
+                        )
+                    }
                 }
             }
         }

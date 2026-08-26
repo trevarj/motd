@@ -880,6 +880,99 @@ class AgentwireReducerTest {
         put("iid", id); put("content", content); put("position", position); put("sid", "s1")
     }
 
+    @Test
+    fun `subagent updates replace the list and clear with the binding`() {
+        val reducer = AgentwireReducer()
+        var state = AgentwireUiState(activeSid = "s1")
+
+        state = reducer.reduce(state, event("subagent.updated", sid = "s1", data = subagents(
+            buildJsonObject {
+                put("id", "a1")
+                put("type", "Explore")
+                put("description", "map the repository")
+                put("status", "running")
+                put("isBackground", true)
+            },
+            buildJsonObject {
+                put("id", "a2")
+                put("type", "Terra")
+                put("description", "add the reducer test")
+                put("status", "completed")
+                put("isBackground", false)
+                put("toolUses", 7)
+                put("durationMs", 4200)
+                put("tokens", 1234)
+            },
+            // Dropped: an agent without an id or a status is not renderable.
+            buildJsonObject { put("type", "Terra") },
+        )))
+
+        assertEquals(
+            listOf(
+                AgentwireSubagent("a1", "Explore", "map the repository", "running", true),
+                AgentwireSubagent("a2", "Terra", "add the reducer test", "completed", false, 7, 4200, 1234),
+            ),
+            state.subagents,
+        )
+        assertFalse(state.subagents[0].terminal)
+        assertTrue(state.subagents[1].terminal)
+
+        // Replace, never merge: the newest list is the whole truth.
+        state = reducer.reduce(state, event("subagent.updated", sid = "s1", data = subagents(
+            buildJsonObject {
+                put("id", "a3")
+                put("type", "Terra")
+                put("description", "ship it")
+                put("status", "queued")
+            },
+        )))
+        assertEquals(listOf("a3"), state.subagents.map(AgentwireSubagent::id))
+
+        // Bound-session state: another session's list never lands here.
+        state = reducer.reduce(state, event("subagent.updated", sid = "other", data = subagents(
+            buildJsonObject {
+                put("id", "elsewhere")
+                put("type", "Terra")
+                put("description", "x")
+                put("status", "running")
+            },
+        )))
+        assertEquals(listOf("a3"), state.subagents.map(AgentwireSubagent::id))
+
+        state = reducer.reduce(
+            state,
+            event("binding.changed", sid = "s2", data = buildJsonObject { put("previousSid", "s1") }),
+        )
+        assertTrue(state.subagents.isEmpty())
+    }
+
+    @Test
+    fun `awaiting sync drops the subagent registry`() {
+        val state = AgentwireUiState(
+            activeSid = "s1",
+            subagents = listOf(AgentwireSubagent("a1", "Terra", "x", "running", false)),
+        ).awaitingAgentwireSync()
+
+        assertTrue(state.subagents.isEmpty())
+    }
+
+    @Test
+    fun `subagent detail line is built only from reported numbers`() {
+        val agent = AgentwireSubagent("a1", "Terra", "x", "completed", false)
+
+        assertEquals(null, agentwireSubagentDetail(agent))
+        assertEquals("1 tool use", agentwireSubagentDetail(agent.copy(toolUses = 1)))
+        assertEquals(
+            "7 tool uses · 1.2k tokens · 4s",
+            agentwireSubagentDetail(agent.copy(toolUses = 7, tokens = 1234, durationMs = 4200)),
+        )
+        assertEquals("999 tokens · 0s", agentwireSubagentDetail(agent.copy(tokens = 999, durationMs = 400)))
+    }
+
+    private fun subagents(vararg agents: kotlinx.serialization.json.JsonObject) = buildJsonObject {
+        put("agents", JsonArray(agents.toList()))
+    }
+
     private fun event(
         kind: String,
         sid: String? = null,

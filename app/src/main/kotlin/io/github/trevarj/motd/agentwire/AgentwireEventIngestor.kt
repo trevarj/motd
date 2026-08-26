@@ -215,6 +215,7 @@ internal fun AgentwireUiState.awaitingAgentwireSync(error: String? = null): Agen
     requests = emptyList(),
     timeline = emptyList(),
     sessionStatuses = emptyMap(),
+    subagents = emptyList(),
     actionStatus = emptyMap(),
     historyLoading = false,
     historyPage = null,

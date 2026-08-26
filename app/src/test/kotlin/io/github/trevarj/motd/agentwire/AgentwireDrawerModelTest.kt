@@ -182,6 +182,30 @@ class AgentwireDrawerModelTest {
         assertEquals(emptyList<AgentwireRecentSession>(), decodeAgentwireRecents("not json"))
     }
 
+    @Test
+    fun `only the bound row counts non-terminal subagents`() {
+        val state = AgentwireUiState(
+            activeSid = "sid-bound",
+            liveSessions = listOf(
+                session("sid-bound", "Bound session", "/work/motd"),
+                session("sid-live", "Live session", "/work/other"),
+            ),
+            subagents = listOf(
+                AgentwireSubagent("a1", "Explore", "map", "running", true),
+                AgentwireSubagent("a2", "Terra", "build", "queued", false),
+                AgentwireSubagent("a3", "Terra", "done", "completed", false),
+                AgentwireSubagent("a4", "Terra", "broke", "failed", false),
+            ),
+        )
+
+        val rows = agentwireDrawerRows(state)
+
+        assertEquals(2, rows[0].activeSubagents)
+        // The registry describes the bound session only, so no other row may claim it.
+        assertEquals(0, rows[1].activeSubagents)
+        assertEquals(0, agentwireDrawerRows(state.copy(subagents = emptyList()))[0].activeSubagents)
+    }
+
     private fun session(
         sid: String,
         title: String,

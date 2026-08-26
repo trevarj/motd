@@ -2,9 +2,11 @@ package io.github.trevarj.motd.irc.agentwire
 
 import java.security.MessageDigest
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -35,7 +37,7 @@ class AgentwireProtocolTest {
 
     @Test
     fun `canonical fixtures validate and re-encode byte for byte`() {
-        listOf("hello.json", "prompt-action.json", "observed-status.json").forEach { name ->
+        listOf("hello.json", "prompt-action.json", "observed-status.json", "subagent-update.json").forEach { name ->
             val fixture = resource("agentwire/fixtures/$name").trimEnd()
             val envelope = (decodeAgentwireValue(fixture).getOrThrow() as AgentwireValue.Envelope).value
             assertEquals(fixture, encodeAgentwireEnvelope(envelope))
@@ -54,6 +56,28 @@ class AgentwireProtocolTest {
         assertEquals("/home/example/project", envelope.data?.get("cwd")?.let { (it as JsonPrimitive).content })
         assertEquals(true, envelope.data?.get("tuiAttached")?.let { (it as JsonPrimitive).boolean })
         assertEquals(listOf("waiting"), (envelope.data?.get("flags") as JsonArray).map { (it as JsonPrimitive).content })
+    }
+
+    @Test
+    fun `subagent update carries the bound session's full agent list`() {
+        val fixture = resource("agentwire/fixtures/subagent-update.json").trimEnd()
+        val envelope = (decodeAgentwireValue(fixture).getOrThrow() as AgentwireValue.Envelope).value
+
+        assertEquals("subagent.updated", envelope.kind)
+        assertEquals("event", envelope.type)
+        assertEquals("session-example", envelope.sid)
+        val agents = envelope.data?.get("agents") as JsonArray
+        assertEquals(2, agents.size)
+        val running = agents[0] as JsonObject
+        assertEquals("agent-1", (running["id"] as JsonPrimitive).content)
+        assertEquals("Explore", (running["type"] as JsonPrimitive).content)
+        assertEquals("running", (running["status"] as JsonPrimitive).content)
+        assertEquals(true, (running["isBackground"] as JsonPrimitive).boolean)
+        val completed = agents[1] as JsonObject
+        assertEquals("completed", (completed["status"] as JsonPrimitive).content)
+        assertEquals(7, (completed["toolUses"] as JsonPrimitive).int)
+        assertEquals(4200, (completed["durationMs"] as JsonPrimitive).int)
+        assertEquals(1234, (completed["tokens"] as JsonPrimitive).int)
     }
 
     @Test
@@ -105,10 +129,11 @@ class AgentwireProtocolTest {
 
     @Test
     fun `copied canonical resources match upstream content hashes`() {
-        assertEquals("bf7b329a50d6129b4e7636f7af1e15765a5912bc9a76bc7963c4892195a36806", sha(resourceBytes("agentwire/agentwire-v1.schema.json")))
+        assertEquals("892530f71a98f4e89dd48eb68562b33501b0b1d21da18496a373cffc595bc22e", sha(resourceBytes("agentwire/agentwire-v1.schema.json")))
         assertEquals("11061874c62b58eb1c82bbdddc9d6db398f6d2ab6c274e82db5a401a2d634b95", sha(resourceBytes("agentwire/fixtures/hello.json")))
         assertEquals("e354c350de1de04cf396aa595c90c46658db9e72b381fc54b7f7559ee7f38465", sha(resourceBytes("agentwire/fixtures/prompt-action.json")))
         assertEquals("24c6fed5b79f794b3f31f8ede35b199fbe6746bc24311b4a50d08aeacbb26c03", sha(resourceBytes("agentwire/fixtures/observed-status.json")))
+        assertEquals("be00b7e2f858801ddb9fca1b2c33d090c20d45141b0e82c5ee1f55e2078e6b23", sha(resourceBytes("agentwire/fixtures/subagent-update.json")))
         assertEquals("058c5ad375bd89d3074349e4b01650525eb8138bd3d651d90236e72b4d4f964c", sha(resourceBytes("agentwire/fixtures/topic.txt")))
     }
 

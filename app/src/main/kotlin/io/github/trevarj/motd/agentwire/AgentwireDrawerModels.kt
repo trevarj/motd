@@ -27,6 +27,8 @@ data class AgentwireDrawerRow(
     val tuiAttached: Boolean,
     val attached: Boolean,
     val section: AgentwireDrawerSection,
+    /** Non-terminal subagents of this session; only the bound row can know this. */
+    val activeSubagents: Int = 0,
 )
 
 internal const val AGENTWIRE_RECENT_SESSION_LIMIT = 10
@@ -100,5 +102,7 @@ private fun drawerRow(
         tuiAttached = status?.tuiAttached ?: item?.raw?.bool("tuiAttached") ?: false,
         attached = attached,
         section = section,
+        // `subagent.updated` is bound-session state, so no other row can carry a count.
+        activeSubagents = if (attached) state.subagents.count { !it.terminal } else 0,
     )
 }
