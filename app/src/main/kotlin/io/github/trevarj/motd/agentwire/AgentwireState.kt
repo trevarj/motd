@@ -111,6 +111,8 @@ data class AgentwireUiState(
     val liveSessions: List<AgentwireListItem> = emptyList(),
     val workspaceSessions: Map<String, List<AgentwireListItem>> = emptyMap(),
     val loadedSessionDirectories: Set<String> = emptySet(),
+    /** Workspace paths the user has opened in the browser; hoisted so it survives sheet reopens. */
+    val expandedDirectories: Set<String> = emptySet(),
     val queue: List<AgentwireQueueItem> = emptyList(),
     val requests: List<AgentwireRequest> = emptyList(),
     val timeline: List<AgentwireTimelineItem> = emptyList(),
