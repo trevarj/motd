@@ -90,6 +90,74 @@ class AgentwireViewModelIngestTest {
         assertEquals("shared-epoch", state.epoch)
     }
 
+    @Test
+    fun `applied envelopes feed the session log until a resync clears it`() {
+        val ingestor = AgentwireEventIngestor()
+        val log = AgentwireLogStore()
+        val syncId = "33333333-3333-4333-8333-333333333333"
+        var state = AgentwireUiState(
+            channel = "#codex",
+            controllerAccount = "controller",
+            backendAccount = "agent-a",
+            syncing = true,
+        )
+        state = applied(ingestor, state, inbound("agent-a", hello(syncId, "epoch-a", setOf("turn.prompt"))), syncId)
+        state = applied(ingestor, state, inbound("agent-a", snapshot(syncId, "session-a")), syncId)
+
+        // The ViewModel captures from the envelope, so the log keeps what the timeline strips.
+        listOf(
+            tool("tool.started", at = 10) { put("id", "i1"); put("kind", "shell"); put("input", "rg needle") },
+            tool("tool.completed", at = 11) {
+                put("id", "i1"); put("kind", "shell"); put("input", "rg needle")
+                put("output", "src/found.kt"); put("status", "completed"); put("exitCode", 0)
+            },
+            AgentwireEnvelope(
+                kind = "assistant.completed", type = "event",
+                id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc", at = 12, instance = "agent",
+                epoch = "epoch-a", sid = "session-a", tid = "t1", iid = "a1", history = true,
+                data = buildJsonObject { put("content", "backfilled answer") },
+            ),
+        ).forEach { envelope ->
+            val result = ingestor.ingest(state, inbound("agent-a", envelope), syncId)
+            state = (result as AgentwireEventIngestor.Result.Applied).state
+            log.capture(result.envelope)
+        }
+
+        val entries = log.entries()
+        assertEquals(listOf("assistant.completed", "tool.completed"), entries.map(AgentwireLogEntry::kind))
+        assertEquals("src/found.kt", entries.last().output)
+        assertEquals("rg needle", entries.last().input)
+        assertEquals("backfilled answer", entries.first().body)
+        // The stripped timeline no longer carries either payload.
+        assertNull(state.timeline.first { it.kind == "tool.completed" }.data.string("output"))
+        assertEquals(listOf("src/found.kt"), agentwireLogQuery(entries, text = "FOUND").map { it.output })
+
+        log.clear()
+        assertTrue(log.entries().isEmpty())
+    }
+
+    @Test
+    fun `grouped timeline entries are derived once per timeline replacement`() {
+        val previous = AgentwireUiState(
+            timeline = listOf(AgentwireTimelineItem("a", "tool.started", 1, "s1", "t1", "$ ls", null, running = true)),
+        )
+        val derived = previous.withDerived(AgentwireUiState())
+        val group = derived.timelineEntries.single() as AgentwireTimelineEntry.ToolGroup
+        assertEquals(listOf("a"), group.items.map(AgentwireTimelineItem::id))
+        assertTrue(group.running)
+
+        // An envelope that leaves the timeline alone must not pay for regrouping.
+        val unrelated = derived.copy(busy = true)
+        assertTrue(unrelated.withDerived(derived) === unrelated)
+    }
+
+    private fun tool(kind: String, at: Long, data: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit) =
+        AgentwireEnvelope(
+            kind = kind, type = "event", id = java.util.UUID.randomUUID().toString(), at = at,
+            instance = "agent", epoch = "epoch-a", sid = "session-a", tid = "t1", iid = "i1",
+            data = buildJsonObject(data),
+        )
+
     private fun applied(
         ingestor: AgentwireEventIngestor,
         state: AgentwireUiState,
@@ -106,9 +174,20 @@ class AgentwireViewModelIngestTest {
 
     private fun inbound(account: String, envelope: AgentwireEnvelope): IrcEvent = checkNotNull(
         EventMapper({ "me" }, { Isupport() }).map(
-            IrcMessage.parse("@account=$account;$AGENTWIRE_TAG=${encodeAgentwireEnvelope(envelope)} :$account!u@h TAGMSG #codex"),
+            IrcMessage.parse(
+                "@account=$account;$AGENTWIRE_TAG=${escapeTagValue(encodeAgentwireEnvelope(envelope))}" +
+                    " :$account!u@h TAGMSG #codex",
+            ),
         ),
     )
+
+    /** Payload JSON carries spaces and semicolons, which are only legal in a tag when escaped. */
+    private fun escapeTagValue(value: String): String = value
+        .replace("\\", "\\\\")
+        .replace(";", "\\:")
+        .replace(" ", "\\s")
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
 
     private fun hello(reply: String, epoch: String, actions: Set<String>) = AgentwireEnvelope(
         kind = "agent.hello",

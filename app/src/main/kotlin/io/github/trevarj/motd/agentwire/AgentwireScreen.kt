@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.lazy.LazyColumn
@@ -35,6 +36,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -79,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
@@ -100,8 +103,18 @@ fun AgentwireGateScreen(
     }
 }
 
-private enum class AgentwireSheet { STATUS, QUEUE, QUESTION }
+private enum class AgentwireSheet { STATUS, QUEUE, QUESTION, LOG }
 private enum class AgentwireStatusTab { BROWSE, SETTINGS }
+
+/** Log sheet filters. Each maps to the kind prefixes [agentwireLogQuery] matches against. */
+private enum class AgentwireLogFilter(val label: String, val kinds: Set<String>) {
+    ALL("All", emptySet()),
+    TOOLS("Tools", setOf("tool")),
+    ASSISTANT("Assistant", setOf("assistant", "user")),
+    PLAN("Plan", setOf("plan")),
+    REQUESTS("Requests", setOf("request")),
+    TURNS("Turns", setOf("turn")),
+}
 
 private const val AGENTWIRE_SEARCH_DEBOUNCE_MS = 300L
 
@@ -257,6 +270,10 @@ private fun AgentwireScreen(
                             }
                             DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
                                 DropdownMenuItem(
+                                    text = { Text("Session log") },
+                                    onClick = { overflow = false; sheet = AgentwireSheet.LOG },
+                                )
+                                DropdownMenuItem(
                                     text = { Text("View IRC transcript") },
                                     onClick = { overflow = false; viewModel.viewTranscript() },
                                 )
@@ -309,8 +326,12 @@ private fun AgentwireScreen(
                                     Text(if (state.historyLoading) "Loading history…" else "Load older history")
                                 }
                             }
-                            items(state.timeline, key = AgentwireTimelineItem::id) { item ->
-                                AgentwireTimelineCard(item, state.actionStatus[item.id])
+                            items(state.timelineEntries, key = AgentwireTimelineEntry::id) { entry ->
+                                when (entry) {
+                                    is AgentwireTimelineEntry.Single ->
+                                        AgentwireTimelineCard(entry.item, state.actionStatus[entry.item.id])
+                                    is AgentwireTimelineEntry.ToolGroup -> AgentwireToolGroupCard(entry)
+                                }
                             }
                             items(state.requests, key = AgentwireRequest::rid) { request ->
                                 AgentwireRequestCard(request, request.sid == null || request.sid == state.activeSid, viewModel) {
@@ -353,6 +374,7 @@ private fun AgentwireScreen(
         AgentwireSheet.QUESTION -> state.requests.firstOrNull { it.rid == questionRequestId }?.let {
             AgentwireQuestionSheet(it, viewModel) { sheet = null }
         }
+        AgentwireSheet.LOG -> AgentwireLogSheet(viewModel) { sheet = null }
         null -> Unit
     }
 }
@@ -561,7 +583,7 @@ private fun AgentwireComposer(
 @Composable
 private fun AgentwireTimelineCard(item: AgentwireTimelineItem, actionStatus: String?) {
     var expanded by remember(item.running) { mutableStateOf(item.running || item.kind == "assistant.completed") }
-    val collapsible = item.kind.startsWith("tool.") || item.kind == "plan.updated" || item.kind == "usage.updated"
+    val collapsible = item.kind == "plan.updated" || item.kind == "usage.updated"
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
         colors = CardDefaults.cardColors(
@@ -596,16 +618,12 @@ private fun AgentwireTimelineCard(item: AgentwireTimelineItem, actionStatus: Str
             }
             if (item.running) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
             if (!collapsible || expanded) {
-                if (item.kind.startsWith("tool.")) {
-                    AgentwireToolBody(item)
-                } else {
-                    item.body?.let {
-                        Text(
-                            it,
-                            modifier = Modifier.padding(top = 8.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
+                item.body?.let {
+                    Text(
+                        it,
+                        modifier = Modifier.padding(top = 8.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
             }
             if (collapsible && !expanded) {
@@ -615,29 +633,194 @@ private fun AgentwireTimelineCard(item: AgentwireTimelineItem, actionStatus: Str
     }
 }
 
+/**
+ * A turn's tool calls as one row. Expanding lists label, status and duration only: payloads are
+ * deliberately absent from the timeline and live in the session log instead.
+ */
 @SuppressLint("HardcodedText")
 @Composable
-private fun AgentwireToolBody(item: AgentwireTimelineItem) {
-    val command = item.data.string("input")
-    val output = item.data.string("output")
-    val diff = item.data.string("diff")
-    val status = listOfNotNull(
-        item.data.string("status"),
-        item.data.int("exitCode")?.let { "exit $it" },
-    ).joinToString(" · ").ifBlank { null }
-
-    Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        command?.let { ToolTextSection("Command", it) }
-        output?.let { ToolTextSection("Output", it) }
-        diff?.let { AgentwireGitDiff(item.id, it) }
-        status?.let {
-            Text(it, style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace)
-        }
-        if (command == null && output == null && diff == null && status == null) {
-            item.body?.let {
-                SelectionContainer {
-                    Text(it, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+private fun AgentwireToolGroupCard(group: AgentwireTimelineEntry.ToolGroup) {
+    var expanded by rememberSaveable(group.id) { mutableStateOf(false) }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .testTag("agentwire_tool_group_${group.id}"),
+        colors = CardDefaults.cardColors(
+            containerColor = if (group.anyFailed) MaterialTheme.colorScheme.errorContainer
+            else MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    group.summary,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (group.running) {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                 }
+                Text(
+                    if (expanded) "▾" else "▸",
+                    modifier = Modifier.padding(start = 8.dp),
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            if (expanded) Column(
+                Modifier.padding(top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                group.items.forEach { item ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            item.title,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val detail = listOfNotNull(
+                            item.data.string("status"),
+                            item.data.int("exitCode")?.let { "exit $it" },
+                            item.data.int("durationMs")?.let { "${it}ms" },
+                        ).joinToString(" · ")
+                        if (detail.isNotEmpty()) {
+                            Text(
+                                detail,
+                                modifier = Modifier.padding(start = 8.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Queries the bounded payload log. Entries are read on open and whenever the store's revision
+ * advances, so the thousands of retained payloads never travel through [AgentwireUiState].
+ */
+@SuppressLint("HardcodedText")
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AgentwireLogSheet(viewModel: AgentwireViewModel, dismiss: () -> Unit) {
+    val revision by viewModel.logRevision.collectAsStateWithLifecycle()
+    val entries = remember(revision) { viewModel.logEntries() }
+    var search by remember { mutableStateOf("") }
+    var appliedSearch by remember { mutableStateOf("") }
+    var filter by remember { mutableStateOf(AgentwireLogFilter.ALL) }
+    // The field echoes every keystroke; filtering thousands of payloads waits for a typing pause.
+    LaunchedEffect(search) {
+        delay(AGENTWIRE_SEARCH_DEBOUNCE_MS)
+        appliedSearch = search
+    }
+    val results = remember(entries, appliedSearch, filter) {
+        agentwireLogQuery(entries, appliedSearch, filter.kinds)
+    }
+    val formatTime = rememberMessageTimeFormatter()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = dismiss,
+        sheetState = sheetState,
+        modifier = Modifier.fillMaxHeight().testTag("agentwire_log_sheet"),
+    ) {
+        LazyColumn(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            item { Text("Session log", style = MaterialTheme.typography.titleLarge) }
+            item {
+                OutlinedTextField(
+                    value = search,
+                    onValueChange = { search = it },
+                    label = { Text("Search captured payloads") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("agentwire_log_search"),
+                )
+            }
+            item {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    AgentwireLogFilter.entries.forEach { option ->
+                        FilterChip(
+                            selected = filter == option,
+                            onClick = { filter = option },
+                            label = { Text(option.label) },
+                        )
+                    }
+                }
+            }
+            if (results.isEmpty()) item {
+                Text(
+                    if (entries.isEmpty()) "Nothing captured for this session yet" else "No matching entries",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            items(results, key = AgentwireLogEntry::id) { entry ->
+                AgentwireLogRow(entry, formatTime)
+            }
+            item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+@SuppressLint("HardcodedText")
+@Composable
+private fun AgentwireLogRow(entry: AgentwireLogEntry, formatTime: (Long) -> String) {
+    var expanded by rememberSaveable(entry.id) { mutableStateOf(false) }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("agentwire_log_row_${entry.id}")
+            .clickable { expanded = !expanded },
+        colors = CardDefaults.cardColors(
+            containerColor = if (entry.success == false) MaterialTheme.colorScheme.errorContainer
+            else MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    entry.title,
+                    modifier = Modifier.weight(1f),
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    listOfNotNull(
+                        entry.status,
+                        entry.exitCode?.let { "exit $it" },
+                        formatTime(entry.at),
+                    ).joinToString(" · "),
+                    modifier = Modifier.padding(start = 8.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+            if (expanded) {
+                entry.input?.let { ToolTextSection("Command", it) }
+                entry.output?.let { ToolTextSection("Output", it) }
+                entry.diff?.let { AgentwireGitDiff(entry.id, it) }
+                entry.body?.let { ToolTextSection(entry.kind, it) }
+            } else {
+                Text(
+                    entry.kind,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

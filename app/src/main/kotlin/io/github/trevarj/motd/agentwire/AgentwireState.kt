@@ -12,6 +12,15 @@ import kotlinx.serialization.json.intOrNull
 
 enum class AgentwireGate { LOADING, ORDINARY, BLOCKED, ACTIVE }
 
+/**
+ * Live timeline bound. Older rows stay queryable in [AgentwireLogStore] and reloadable through
+ * `history.request`, so the rendered list never has to grow without limit.
+ */
+internal const val AGENTWIRE_TIMELINE_CAP = 400
+
+/** Tool payload keys the collapsed card still needs; `id` also anchors the stable timeline id. */
+private val TOOL_TIMELINE_KEYS = setOf("id", "kind", "label", "status", "exitCode", "success", "durationMs")
+
 private val SESSION_OWNED_KINDS = setOf(
     "session.snapshot", "session.status", "user.prompt", "turn.started", "turn.completed",
     "turn.failed", "assistant.delta", "assistant.completed", "plan.updated", "tool.started",
@@ -116,6 +125,8 @@ data class AgentwireUiState(
     val queue: List<AgentwireQueueItem> = emptyList(),
     val requests: List<AgentwireRequest> = emptyList(),
     val timeline: List<AgentwireTimelineItem> = emptyList(),
+    /** [timeline] collapsed into per-turn tool groups; recomputed by the ViewModel, not composition. */
+    val timelineEntries: List<AgentwireTimelineEntry> = emptyList(),
     val sessionStatuses: Map<String, AgentwireSessionStatus> = emptyMap(),
     val recentSessions: List<AgentwireRecentSession> = emptyList(),
     val actionStatus: Map<String, String> = emptyMap(),
@@ -496,7 +507,28 @@ private fun request(envelope: AgentwireEnvelope, data: JsonObject): AgentwireReq
 
 private fun AgentwireEnvelope.timelineItem(running: Boolean = false, success: Boolean? = null): AgentwireTimelineItem {
     val payload = data ?: JsonObject(emptyMap())
-    val title = when {
+    val tool = kind.startsWith("tool.")
+    return AgentwireTimelineItem(
+        id = id,
+        kind = kind,
+        at = at,
+        sid = sid,
+        tid = tid,
+        title = agentwireTitle(),
+        // A grouped tool card shows label and status only. The input/output/diff stay out of the
+        // retained state and remain queryable through AgentwireLogStore.
+        body = if (tool) null else agentwireBody(),
+        running = running,
+        success = success,
+        historical = history == true,
+        data = if (tool) payload.retainToolMetadata() else payload,
+        backendItemId = iid,
+    )
+}
+
+internal fun AgentwireEnvelope.agentwireTitle(): String {
+    val payload = data ?: JsonObject(emptyMap())
+    return when {
         kind == "user.prompt" -> "You"
         kind.startsWith("assistant.") -> "Assistant"
         kind.startsWith("turn.") -> kind.substringAfter('.').replaceFirstChar(Char::uppercase)
@@ -506,16 +538,20 @@ private fun AgentwireEnvelope.timelineItem(running: Boolean = false, success: Bo
         kind.startsWith("request.") -> payload.string("type")?.replaceFirstChar(Char::uppercase) ?: "Request"
         else -> kind
     }
-    val body = when {
-        kind.startsWith("tool.") -> toolPreview(payload)
+}
+
+/** Readable content of a non-tool envelope. Tool payloads are rendered from their own fields. */
+internal fun AgentwireEnvelope.agentwireBody(): String? {
+    val payload = data ?: JsonObject(emptyMap())
+    return when {
         kind == "plan.updated" -> planPreview(payload)
         payload.bool("omitted") == true -> "Content omitted because it may contain a secret"
         else -> payload.string("content") ?: payload.string("summary") ?: payload.string("message")
     }
-    return AgentwireTimelineItem(
-        id, kind, at, sid, tid, title, body, running, success, history == true, payload, iid,
-    )
 }
+
+private fun JsonObject.retainToolMetadata(): JsonObject =
+    if (keys.all { it in TOOL_TIMELINE_KEYS }) this else JsonObject(filterKeys { it in TOOL_TIMELINE_KEYS })
 
 private fun AgentwireEnvelope.timelineRunning(): Boolean = when (kind) {
     "plan.updated" -> data?.bool("running") ?: false
@@ -610,15 +646,38 @@ private fun restoredSessionTimeline(
     return restoredOutputs + restoredActivity
 }
 
-private fun List<AgentwireTimelineItem>.upsert(item: AgentwireTimelineItem): List<AgentwireTimelineItem> {
+private fun List<AgentwireTimelineItem>.upsert(item: AgentwireTimelineItem): List<AgentwireTimelineItem> =
+    insertOrReplace(item).capTimeline()
+
+/**
+ * Keeps the list ordered by `at` without re-sorting it on every event: a replacement lands in
+ * place, and a new item is spliced at the binary-searched upper bound of its timestamp (so items
+ * sharing a timestamp keep arrival order, as the previous stable sort did).
+ */
+private fun List<AgentwireTimelineItem>.insertOrReplace(item: AgentwireTimelineItem): List<AgentwireTimelineItem> {
     val stableId = item.stableTimelineId()
-    if (stableId == null) return (this + item).sortedBy(AgentwireTimelineItem::at)
-    val existing = indexOfFirst { old ->
-        old.stableTimelineId() == stableId
+    if (stableId != null) {
+        val existing = indexOfFirst { old -> old.stableTimelineId() == stableId }
+        if (existing >= 0) {
+            // The first sighting fixes the row's position: a tool that completes later must not
+            // jump past everything logged while it ran, and re-sorting is what we are avoiding.
+            return toMutableList().also { it[existing] = item.copy(at = this[existing].at) }
+        }
     }
-    return if (existing < 0) (this + item).sortedBy(AgentwireTimelineItem::at)
-    else toMutableList().also { it[existing] = item }
+    var low = 0
+    var high = size
+    while (low < high) {
+        val mid = (low + high) ushr 1
+        if (this[mid].at <= item.at) low = mid + 1 else high = mid
+    }
+    return ArrayList<AgentwireTimelineItem>(size + 1).also {
+        it.addAll(this)
+        it.add(low, item)
+    }
 }
+
+private fun List<AgentwireTimelineItem>.capTimeline(): List<AgentwireTimelineItem> =
+    if (size <= AGENTWIRE_TIMELINE_CAP) this else subList(size - AGENTWIRE_TIMELINE_CAP, size).toList()
 
 private fun AgentwireTimelineItem.stableTimelineId(): String? {
     if (kind == "user.prompt") return "prompt:$sid:${backendItemId ?: id}"
@@ -636,12 +695,13 @@ private fun AgentwireTimelineItem.stableTimelineId(): String? {
     }
 }
 
+// A history page is merged whole and only then capped, so a backfill is never truncated midway.
 private fun mergeHistoryPage(
     history: List<AgentwireTimelineItem>,
     current: List<AgentwireTimelineItem>,
-): List<AgentwireTimelineItem> = (history + current).fold(emptyList()) { result, item ->
-    result.upsert(item)
-}
+): List<AgentwireTimelineItem> = (history + current)
+    .fold(emptyList<AgentwireTimelineItem>()) { result, item -> result.insertOrReplace(item) }
+    .capTimeline()
 
 private fun List<AgentwireTimelineItem>.stopPlan(turnId: String?): List<AgentwireTimelineItem> =
     map { item ->

@@ -70,6 +70,14 @@ internal fun agentwireDirectoriesToReopen(
 internal fun agentwireExpansionNeedsLoad(state: AgentwireUiState, path: String): Boolean =
     path !in state.workspaceChildren || path !in state.loadedSessionDirectories
 
+/**
+ * Timeline-derived UI data, recomputed only where the timeline itself was replaced. Grouping in
+ * composition would rerun on every unrelated state change; the identity check keeps the ordinary
+ * envelope (status, pages, queue) free.
+ */
+internal fun AgentwireUiState.withDerived(previous: AgentwireUiState): AgentwireUiState =
+    if (timeline === previous.timeline) this else copy(timelineEntries = agentwireTimelineGroups(timeline))
+
 internal suspend fun retryAgentwireSync(
     isReady: () -> Boolean,
     issue: suspend (String) -> Unit,
@@ -98,6 +106,10 @@ class AgentwireViewModel @Inject constructor(
     private val session = AgentwireSessionOrchestrator()
     private val _state = MutableStateFlow(AgentwireUiState())
     val state: StateFlow<AgentwireUiState> = _state.asStateFlow()
+    private val log = AgentwireLogStore()
+    // The log holds thousands of payloads; only its revision travels through the UI state stream.
+    private val _logRevision = MutableStateFlow(0L)
+    val logRevision: StateFlow<Long> = _logRevision.asStateFlow()
     private var sessionJob: Job? = null
     private var syncJob: Job? = null
     private var client: IrcClient? = null
@@ -157,6 +169,9 @@ class AgentwireViewModel @Inject constructor(
         }
     }
 
+    /** Snapshot for the log sheet, read on open and whenever [logRevision] advances. */
+    fun logEntries(): List<AgentwireLogEntry> = log.entries()
+
     fun viewTranscript() = _state.update { it.copy(transcriptOverride = true) }
     fun returnToHarness() = _state.update { it.copy(transcriptOverride = false) }
     fun clearError() = _state.update { it.copy(error = null) }
@@ -171,7 +186,7 @@ class AgentwireViewModel @Inject constructor(
                 localId, "user.prompt", System.currentTimeMillis(), state.activeSid, state.currentTid,
                 if (kind == "turn.steer") "Steer" else "You", content,
                 backendItemId = localId,
-            ))
+            )).withDerived(state)
         }
         sendAction(kind, data = data, sid = _state.value.activeSid, id = localId)
     }
@@ -266,7 +281,8 @@ class AgentwireViewModel @Inject constructor(
         stopSession(disconnected = client != null)
         client = next
         session.reset()
-        _state.value = session.beginSync(_state.value)
+        clearLog()
+        _state.value = session.beginSync(_state.value).withDerived(_state.value)
         sessionJob = viewModelScope.launch {
             launch { next.sequencedEvents.collect(::ingest) }
             // Let the hot-flow collector attach before sync.request is emitted.
@@ -303,18 +319,21 @@ class AgentwireViewModel @Inject constructor(
     private suspend fun ingest(event: SequencedIrcEvent) {
         val result = session.ingest(_state.value, event)
         if (result is AgentwireDeliveryCoordinator.Result.Rejected) {
-            _state.value = result.state
+            _state.value = result.state.withDerived(_state.value)
             return
         }
         if (result is AgentwireDeliveryCoordinator.Result.ResyncRequired) {
-            _state.value = result.state
+            clearLog()
+            _state.value = result.state.withDerived(_state.value)
             startSyncRetry()
             return
         }
         if (result !is AgentwireDeliveryCoordinator.Result.Updated) return
         val envelope = result.envelope
+        // Captured from the envelope, so the log keeps what the timeline strips, history included.
+        if (log.capture(envelope)) _logRevision.value += 1
         val previousSid = _state.value.activeSid
-        _state.value = result.state
+        _state.value = result.state.withDerived(_state.value)
         if (envelope.kind == "workspace.page") {
             agentwireDirectoriesToReopen(_state.value, envelope.data?.string("parent")).forEach {
                 expandWorkspace(it.id, it.raw.bool("hasChildren") ?: true)
@@ -340,6 +359,11 @@ class AgentwireViewModel @Inject constructor(
         ) {
             requestHistory(initial = true)
         }
+    }
+
+    private fun clearLog() {
+        log.clear()
+        _logRevision.value += 1
     }
 
     /** Records each newly bound session so the drawer can offer it again after detaching. */
