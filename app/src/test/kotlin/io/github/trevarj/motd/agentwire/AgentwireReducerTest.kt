@@ -711,6 +711,79 @@ class AgentwireReducerTest {
         assertEquals("uncertain", state.actionStatus["a1"])
     }
 
+    @Test
+    fun `status of another session fills the registry without touching the bound session`() {
+        val reducer = AgentwireReducer()
+        val bound = AgentwireUiState(activeSid = "s1", cwd = "/work", busy = true, currentTid = "t1")
+
+        val state = reducer.reduce(bound, event("session.status", sid = "s9", data = buildJsonObject {
+            put("busy", false)
+            put("flags", JsonArray(listOf(JsonPrimitive("waiting"))))
+            put("cwd", "/other")
+            put("tuiAttached", true)
+        }))
+
+        assertEquals(
+            AgentwireSessionStatus("s9", busy = false, flags = listOf("waiting"), cwd = "/other", tuiAttached = true, at = 1),
+            state.sessionStatuses["s9"],
+        )
+        // The drawer learned about s9; the bound session's own state is unchanged.
+        assertEquals("s1", state.activeSid)
+        assertEquals("/work", state.cwd)
+        assertTrue(state.busy)
+        assertEquals("t1", state.currentTid)
+        assertTrue(state.timeline.isEmpty())
+    }
+
+    @Test
+    fun `status of the bound session updates both the session and its registry entry`() {
+        val reducer = AgentwireReducer()
+        val bound = AgentwireUiState(activeSid = "s1", cwd = "/work", busy = false)
+
+        val state = reducer.reduce(bound, event("session.status", sid = "s1", tid = "t2", data = buildJsonObject {
+            put("busy", true)
+            put("flags", JsonArray(listOf(JsonPrimitive("waiting"))))
+            put("cwd", "/moved")
+        }))
+
+        assertTrue(state.busy)
+        assertEquals("/moved", state.cwd)
+        assertEquals("t2", state.currentTid)
+        assertEquals(
+            AgentwireSessionStatus("s1", busy = true, flags = listOf("waiting"), cwd = "/moved", tuiAttached = null, at = 1),
+            state.sessionStatuses["s1"],
+        )
+    }
+
+    @Test
+    fun `other session-owned kinds with a foreign sid are still dropped`() {
+        val reducer = AgentwireReducer()
+        val bound = AgentwireUiState(activeSid = "s1", busy = false)
+
+        var state = reducer.reduce(bound, event("assistant.completed", sid = "s9", data = buildJsonObject {
+            put("content", "not ours")
+        }))
+        state = reducer.reduce(state, event("turn.started", sid = "s9", tid = "t9"))
+        state = reducer.reduce(state, event("session.snapshot", sid = "s9", data = buildJsonObject {
+            put("cwd", "/other")
+        }))
+
+        assertEquals(bound, state)
+        assertTrue(state.sessionStatuses.isEmpty())
+    }
+
+    @Test
+    fun `resync clears the session status registry`() {
+        val reducer = AgentwireReducer()
+        val state = reducer.reduce(
+            AgentwireUiState(activeSid = "s1"),
+            event("session.status", sid = "s9", data = buildJsonObject { put("busy", true) }),
+        )
+        assertTrue(state.sessionStatuses.isNotEmpty())
+
+        assertTrue(state.awaitingAgentwireSync().sessionStatuses.isEmpty())
+    }
+
     private fun queue(id: String, content: String, position: Int) = buildJsonObject {
         put("iid", id); put("content", content); put("position", position); put("sid", "s1")
     }

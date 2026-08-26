@@ -62,6 +62,16 @@ data class AgentwireQuestion(
     val custom: Boolean,
 )
 
+/** Liveness of one session, bound or not, as last reported by `session.status`. */
+data class AgentwireSessionStatus(
+    val sid: String,
+    val busy: Boolean,
+    val flags: List<String>,
+    val cwd: String?,
+    val tuiAttached: Boolean?,
+    val at: Long,
+)
+
 data class AgentwireTimelineItem(
     val id: String,
     val kind: String,
@@ -104,6 +114,7 @@ data class AgentwireUiState(
     val queue: List<AgentwireQueueItem> = emptyList(),
     val requests: List<AgentwireRequest> = emptyList(),
     val timeline: List<AgentwireTimelineItem> = emptyList(),
+    val sessionStatuses: Map<String, AgentwireSessionStatus> = emptyMap(),
     val actionStatus: Map<String, String> = emptyMap(),
     val historyLoading: Boolean = false,
     val historyPage: String? = null,
@@ -143,7 +154,14 @@ class AgentwireReducer {
             )
             return reduceHistorical(anchored, envelope)
         }
-        if (envelope.kind in SESSION_OWNED_KINDS && envelope.sid != null && envelope.sid != state.activeSid) {
+        // `session.status` is the one session-owned kind that may describe a session this channel
+        // is not bound to; it feeds the status registry instead of the bound timeline.
+        if (
+            envelope.kind in SESSION_OWNED_KINDS &&
+            envelope.kind != "session.status" &&
+            envelope.sid != null &&
+            envelope.sid != state.activeSid
+        ) {
             return state
         }
         if (!seen.add(envelope.id)) return state
@@ -220,12 +238,32 @@ class AgentwireReducer {
                     state.timeline
                 },
             )
-            "session.status" -> state.copy(
-                cwd = data.string("cwd") ?: state.cwd,
-                busy = data.bool("busy") ?: state.busy,
-                currentTid = envelope.tid ?: data.string("tid") ?: state.currentTid,
-                settings = data.objectStrings("settings").ifEmpty { state.settings },
-            )
+            "session.status" -> {
+                val sid = envelope.sid
+                val statuses = if (sid == null) {
+                    state.sessionStatuses
+                } else {
+                    state.sessionStatuses + (sid to AgentwireSessionStatus(
+                        sid = sid,
+                        busy = data.bool("busy") ?: false,
+                        flags = data.stringList("flags"),
+                        cwd = data.string("cwd"),
+                        tuiAttached = data.bool("tuiAttached"),
+                        at = envelope.at,
+                    ))
+                }
+                if (sid != null && sid != state.activeSid) {
+                    state.copy(sessionStatuses = statuses)
+                } else {
+                    state.copy(
+                        cwd = data.string("cwd") ?: state.cwd,
+                        busy = data.bool("busy") ?: state.busy,
+                        currentTid = envelope.tid ?: data.string("tid") ?: state.currentTid,
+                        settings = data.objectStrings("settings").ifEmpty { state.settings },
+                        sessionStatuses = statuses,
+                    )
+                }
+            }
             "workspace.page" -> {
                 val parent = data.string("parent").orEmpty()
                 val page = workspaceItems(data)

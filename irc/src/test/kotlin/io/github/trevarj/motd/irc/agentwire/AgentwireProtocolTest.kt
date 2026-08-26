@@ -1,6 +1,9 @@
 package io.github.trevarj.motd.irc.agentwire
 
 import java.security.MessageDigest
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -32,11 +35,25 @@ class AgentwireProtocolTest {
 
     @Test
     fun `canonical fixtures validate and re-encode byte for byte`() {
-        listOf("hello.json", "prompt-action.json").forEach { name ->
+        listOf("hello.json", "prompt-action.json", "observed-status.json").forEach { name ->
             val fixture = resource("agentwire/fixtures/$name").trimEnd()
             val envelope = (decodeAgentwireValue(fixture).getOrThrow() as AgentwireValue.Envelope).value
             assertEquals(fixture, encodeAgentwireEnvelope(envelope))
         }
+    }
+
+    @Test
+    fun `observed session status carries a sid the channel is not bound to`() {
+        val fixture = resource("agentwire/fixtures/observed-status.json").trimEnd()
+        val envelope = (decodeAgentwireValue(fixture).getOrThrow() as AgentwireValue.Envelope).value
+
+        assertEquals("session.status", envelope.kind)
+        assertEquals("event", envelope.type)
+        assertEquals("observed-example", envelope.sid)
+        assertEquals(true, envelope.data?.get("busy")?.let { (it as JsonPrimitive).boolean })
+        assertEquals("/home/example/project", envelope.data?.get("cwd")?.let { (it as JsonPrimitive).content })
+        assertEquals(true, envelope.data?.get("tuiAttached")?.let { (it as JsonPrimitive).boolean })
+        assertEquals(listOf("waiting"), (envelope.data?.get("flags") as JsonArray).map { (it as JsonPrimitive).content })
     }
 
     @Test
@@ -91,6 +108,7 @@ class AgentwireProtocolTest {
         assertEquals("bf7b329a50d6129b4e7636f7af1e15765a5912bc9a76bc7963c4892195a36806", sha(resourceBytes("agentwire/agentwire-v1.schema.json")))
         assertEquals("11061874c62b58eb1c82bbdddc9d6db398f6d2ab6c274e82db5a401a2d634b95", sha(resourceBytes("agentwire/fixtures/hello.json")))
         assertEquals("e354c350de1de04cf396aa595c90c46658db9e72b381fc54b7f7559ee7f38465", sha(resourceBytes("agentwire/fixtures/prompt-action.json")))
+        assertEquals("24c6fed5b79f794b3f31f8ede35b199fbe6746bc24311b4a50d08aeacbb26c03", sha(resourceBytes("agentwire/fixtures/observed-status.json")))
         assertEquals("058c5ad375bd89d3074349e4b01650525eb8138bd3d651d90236e72b4d4f964c", sha(resourceBytes("agentwire/fixtures/topic.txt")))
     }
 
