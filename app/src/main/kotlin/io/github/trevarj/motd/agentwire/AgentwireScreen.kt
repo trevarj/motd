@@ -84,6 +84,7 @@ import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 
 @Composable
@@ -998,48 +999,78 @@ private fun AgentwireQueueSheet(state: AgentwireUiState, viewModel: AgentwireVie
 private fun AgentwireQuestionSheet(request: AgentwireRequest, viewModel: AgentwireViewModel, dismiss: () -> Unit) {
     val answers = remember(request.rid) { mutableStateMapOf<String, Set<String>>() }
     val customAnswers = remember(request.rid) { mutableStateMapOf<String, String>() }
+    val submission = agentwireQuestionAnswers(request.questions, answers, customAnswers)
     ModalBottomSheet(onDismissRequest = dismiss) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            Modifier.fillMaxWidth().padding(16.dp).testTag("agentwire_question_sheet"),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Text("Questions", style = MaterialTheme.typography.titleLarge)
             request.questions.forEach { question ->
                 Text(question.header ?: question.prompt, fontWeight = FontWeight.SemiBold)
                 if (question.header != null) Text(question.prompt)
-                question.options.forEach { option ->
+                question.options.forEachIndexed { index, option ->
                     val selected = option in answers[question.id].orEmpty()
-                    FilterChip(
-                        selected = selected,
-                        onClick = {
-                            val current = answers[question.id].orEmpty()
-                            answers[question.id] = if (question.multiple) {
-                                if (option in current) current - option else current + option
-                            } else {
-                                setOf(option)
-                            }
-                        },
-                        label = { Text(option) },
-                    )
+                    val choose = {
+                        val current = answers[question.id].orEmpty()
+                        answers[question.id] = if (question.multiple) {
+                            if (option in current) current - option else current + option
+                        } else {
+                            setOf(option)
+                        }
+                    }
+                    val tag = "agentwire_question_option_${question.id}_$index"
+                    // One answer reads as a picker like the settings sheet; many stay chips.
+                    if (question.multiple) {
+                        FilterChip(selected = selected, onClick = choose, label = { Text(option) }, modifier = Modifier.testTag(tag))
+                    } else {
+                        Row(Modifier.fillMaxWidth().clickable(onClick = choose), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = selected, onClick = choose, modifier = Modifier.testTag(tag))
+                            Text(option)
+                        }
+                    }
                 }
                 if (question.custom || question.options.isEmpty()) {
                     OutlinedTextField(
                         value = customAnswers[question.id].orEmpty(),
                         onValueChange = { customAnswers[question.id] = it },
+                        label = { Text("Your own answer") },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
-            Button(onClick = {
-                viewModel.respondQuestions(request.rid, request.questions.map { question ->
-                    val values = buildList {
-                        addAll(answers[question.id].orEmpty())
-                        customAnswers[question.id]?.takeIf(String::isNotBlank)?.let(::add)
-                    }
-                    kotlinx.serialization.json.JsonArray(values.map(::JsonPrimitive))
-                })
-                dismiss()
-            }) { Text("Submit answers") }
+            Button(
+                onClick = {
+                    submission?.let { viewModel.respondQuestions(request.rid, it) }
+                    dismiss()
+                },
+                enabled = submission != null,
+                modifier = Modifier.testTag("agentwire_question_submit"),
+            ) { Text("Submit answers") }
             Spacer(Modifier.height(24.dp))
         }
     }
+}
+
+/**
+ * Answers for every question, or null while any one is still unanswered so the sheet can hold its
+ * submit button disabled.
+ *
+ * Free-form text wins over a selection on a single-answer question: typing is the deliberate escape
+ * from the offered options, and the bridge routes it back through pi's "Other (free-form)" row. Each
+ * question keeps its own array because the bridge reads the first value of each.
+ */
+internal fun agentwireQuestionAnswers(
+    questions: List<AgentwireQuestion>,
+    selections: Map<String, Set<String>>,
+    customs: Map<String, String>,
+): List<JsonArray>? = questions.map { question ->
+    val custom = customs[question.id]?.takeIf(String::isNotBlank)
+    // Offered order, not selection order, keeps a multi-answer reply readable.
+    val chosen = question.options.filter { it in selections[question.id].orEmpty() }
+    val values = if (custom != null && !question.multiple) listOf(custom) else chosen + listOfNotNull(custom)
+    if (values.isEmpty()) return null
+    JsonArray(values.map(::JsonPrimitive))
 }
 
 @SuppressLint("HardcodedText")
