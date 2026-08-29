@@ -25,6 +25,8 @@ exact `nix develop` commands for one activity.
   transport behavior and validation.
 - [`ntfy-push.md`](ntfy-push.md) — ntfy and UnifiedPush setup for Google-free
   push.
+- [`xmpp-companion.md`](xmpp-companion.md) — build, install, pair, and configure
+  the XMPP companion prototype.
 - [`theme-sources.md`](theme-sources.md) — editor, terminal, and wallpaper
   palette sources.
 - [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) — third-party
