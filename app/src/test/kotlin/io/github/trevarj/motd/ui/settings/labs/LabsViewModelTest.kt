@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
 import io.github.trevarj.motd.gesture.GestureMenuConfig
 import io.github.trevarj.motd.gesture.GesturePrefs
 import io.github.trevarj.motd.gesture.radial.OrbPlacement
+import io.github.trevarj.motd.sidecar.SidecarPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -30,6 +31,7 @@ class LabsViewModelTest {
     private val gestures = FakeGesturePrefs()
     private val agentwire = FakeAgentwirePrefs()
     private val globalFeed = FakeGlobalFeedPrefs()
+    private val sidecars = FakeSidecarPrefs()
 
     @Before fun setUp() {
         Dispatchers.setMain(dispatcher)
@@ -39,7 +41,7 @@ class LabsViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun vm() = LabsViewModel(gestures, agentwire, globalFeed)
+    private fun vm() = LabsViewModel(gestures, agentwire, globalFeed, sidecars)
 
     @Test fun everyLabStartsOff() =
         runTest {
@@ -47,6 +49,19 @@ class LabsViewModelTest {
                 LabsUiState(gesturesEnabled = false, agentwireEnabled = false, globalFeedEnabled = false),
                 vm().state.first(),
             )
+        }
+
+    @Test fun sidecarToggle_writesOnlyTheSidecarStore() =
+        runTest {
+            val model = vm()
+            model.setSidecarsEnabled(true)
+            assertEquals(
+                LabsUiState(sidecarsEnabled = true),
+                model.state.first { it.sidecarsEnabled },
+            )
+            assertEquals(false, gestures.enabled.first())
+            assertEquals(false, agentwire.enabled.first())
+            assertEquals(false, globalFeed.enabled.first())
         }
 
     /** The feed's entry points read this flag, so its default decides whether they render at all. */
@@ -92,6 +107,15 @@ class LabsViewModelTest {
             )
             assertEquals(false, gestures.enabled.first())
         }
+
+    private class FakeSidecarPrefs : SidecarPrefs {
+        val flag = MutableStateFlow(false)
+        override val enabled: Flow<Boolean> = flag
+
+        override suspend fun setEnabled(enabled: Boolean) {
+            flag.value = enabled
+        }
+    }
 
     private class FakeGlobalFeedPrefs : GlobalFeedPrefs {
         val flag = MutableStateFlow(false)

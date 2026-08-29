@@ -8,6 +8,7 @@ import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.audio.VoicePrefs
 import io.github.trevarj.motd.avatar.AvatarPrefsImpl
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.ConnectionTransport
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
@@ -82,6 +83,49 @@ class ConfigurationBackupRepositoryTest {
             )
             assertFalse(imported.autoConnect)
             assertEquals(true, imported.restoreAutoConnect)
+        }
+
+    @Test
+    fun sidecarBackupKeepsProviderIdentityButRequiresLocalAccountPairing() =
+        runTest {
+            val sourceDb = inMemoryDb()
+            sourceDb.networkDao().insert(
+                NetworkEntity(
+                    name = "XMPP",
+                    role = NetworkRole.DIRECT,
+                    host = "sidecar",
+                    port = 0,
+                    tls = false,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    connectionTransport = ConnectionTransport.SIDECAR,
+                    sidecarPackage = "provider.example",
+                    sidecarService = "provider.example.Service",
+                    sidecarAccountId = "device-local-account",
+                ),
+            )
+            val raw =
+                repository(sourceDb)
+                    .exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+
+            assertTrue(raw.contains("provider.example"))
+            assertFalse(raw.contains("device-local-account"))
+
+            val targetDb = inMemoryDb()
+            val target = repository(targetDb)
+            assertEquals(
+                1,
+                target.preview(raw, importMode = BackupImportMode.MERGE).missingCredentialNetworks,
+            )
+            target.import(raw, importMode = BackupImportMode.MERGE)
+
+            val imported = targetDb.networkDao().allNow().single()
+            assertEquals(ConnectionTransport.SIDECAR, imported.connectionTransport)
+            assertEquals("provider.example", imported.sidecarPackage)
+            assertNull(imported.sidecarAccountId)
+            assertEquals("sidecarAccount", imported.pendingCredentialRequirements)
+            assertFalse(imported.autoConnect)
         }
 
     @Test

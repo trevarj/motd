@@ -58,6 +58,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -159,6 +160,7 @@ fun NetworkSettingsContent(
     onClearAvatar: () -> Unit = {},
     onStopManagingAvatar: () -> Unit = {},
 ) {
+    val context = LocalContext.current
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
     val requestBack = { if (state.hasUnsavedChanges) showDiscardConfirm = true else onBack() }
@@ -196,7 +198,7 @@ fun NetworkSettingsContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 SettingsGroup { StatusCard(state.connState, onConnect, onDisconnect) }
-                if (state.entity?.role == NetworkRole.DIRECT && state.server.tls && state.auth.mode == AuthMode.NONE &&
+                if (!state.isSidecar && state.entity?.role == NetworkRole.DIRECT && state.server.tls && state.auth.mode == AuthMode.NONE &&
                     state.auth.nickServPassword.isBlank()
                 ) {
                     FilledTonalButton(
@@ -214,7 +216,46 @@ fun NetworkSettingsContent(
                     )
                     AutoConnectRow(checked = state.autoConnect, onCheckedChange = onSetAutoConnect)
                 }
-                if (state.entity?.role == NetworkRole.BOUNCER_CHILD) {
+                if (state.isSidecar) {
+                    SettingsGroup(title = stringResource(R.string.network_settings_connection_section)) {
+                        ListItem(
+                            headlineContent = { Text(state.entity?.sidecarPackage.orEmpty()) },
+                            supportingContent = {
+                                Text(
+                                    stringResource(
+                                        R.string.sidecar_account_summary,
+                                        state.entity?.sidecarAccountId.orEmpty(),
+                                    ),
+                                )
+                            },
+                            colors =
+                                androidx.compose.material3.ListItemDefaults
+                                    .colors(containerColor = Color.Transparent),
+                        )
+                        androidx.compose.material3.HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                        ListItem(
+                            headlineContent = { Text(stringResource(R.string.sidecar_manage_account)) },
+                            supportingContent = { Text(stringResource(R.string.sidecar_manage_account_desc)) },
+                            colors =
+                                androidx.compose.material3.ListItemDefaults
+                                    .colors(containerColor = Color.Transparent),
+                            modifier =
+                                Modifier
+                                    .clickable {
+                                        state.entity
+                                            ?.sidecarPackage
+                                            ?.let(context.packageManager::getLaunchIntentForPackage)
+                                            ?.let(context::startActivity)
+                                    }.testTag("network_sidecar_manage"),
+                        )
+                        Text(
+                            text = stringResource(R.string.sidecar_encryption_boundary),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
+                } else if (state.entity?.role == NetworkRole.BOUNCER_CHILD) {
                     SettingsGroup(title = stringResource(R.string.network_settings_connection_section)) {
                         ListItem(
                             headlineContent = { Text(stringResource(R.string.network_settings_managed_by, state.parentName.orEmpty())) },

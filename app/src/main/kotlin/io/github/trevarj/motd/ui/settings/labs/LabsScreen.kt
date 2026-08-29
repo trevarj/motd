@@ -34,6 +34,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 fun LabsScreen(
     onBack: () -> Unit = {},
     onOpenGestureMenu: () -> Unit = {},
+    onOpenSidecars: () -> Unit = {},
     viewModel: LabsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -43,7 +44,9 @@ fun LabsScreen(
         onGesturesChanged = viewModel::setGesturesEnabled,
         onAgentwireChanged = viewModel::setAgentwireEnabled,
         onGlobalFeedChanged = viewModel::setGlobalFeedEnabled,
+        onSidecarsChanged = viewModel::setSidecarsEnabled,
         onOpenGestureMenu = onOpenGestureMenu,
+        onOpenSidecars = onOpenSidecars,
     )
 }
 
@@ -54,7 +57,9 @@ fun LabsContent(
     onGesturesChanged: (Boolean) -> Unit,
     onAgentwireChanged: (Boolean) -> Unit,
     onGlobalFeedChanged: (Boolean) -> Unit = {},
+    onSidecarsChanged: (Boolean) -> Unit = {},
     onOpenGestureMenu: () -> Unit = {},
+    onOpenSidecars: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val agentwireUrl = stringResource(R.string.labs_agentwire_url)
@@ -110,6 +115,25 @@ fun LabsContent(
                         }.testTag("labs_agentwire_repo"),
             )
         }
+        SettingsGroup(title = stringResource(R.string.labs_sidecars_section)) {
+            SwitchRow(
+                title = stringResource(R.string.labs_sidecars),
+                subtitle = stringResource(R.string.labs_sidecars_desc),
+                checked = state.sidecarsEnabled,
+                onCheckedChange = onSidecarsChanged,
+                switchTag = "labs_sidecars_switch",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.labs_sidecars_manage)) },
+                supportingContent = { Text(stringResource(R.string.labs_sidecars_manage_desc)) },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier =
+                    Modifier
+                        .clickable(enabled = state.sidecarsEnabled, onClick = onOpenSidecars)
+                        .testTag("labs_sidecars_manage"),
+            )
+        }
         SettingsGroup(title = stringResource(R.string.labs_feed_section)) {
             SwitchRow(
                 title = stringResource(R.string.labs_global_feed),
@@ -132,6 +156,8 @@ private fun LabsScreenPreview() {
             onGesturesChanged = {},
             onAgentwireChanged = {},
             onGlobalFeedChanged = {},
+            onSidecarsChanged = {},
+            onOpenSidecars = {},
         )
     }
 }

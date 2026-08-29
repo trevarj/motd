@@ -1,8 +1,11 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import android.app.Activity
 import android.os.SystemClock
 import android.view.View
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -158,6 +161,9 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.sidecar.SidecarContract
+import io.github.trevarj.motd.sidecar.SidecarJson
+import io.github.trevarj.motd.sidecar.SidecarTargetKind
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AudioPlaybackViewModel
 import io.github.trevarj.motd.ui.components.ConnectionBanner
@@ -195,6 +201,7 @@ fun ChatListScreen(
     onDefaultBufferAvailable: (Long) -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
     audioViewModel: AudioPlaybackViewModel = hiltViewModel(),
+    sidecarTargetViewModel: SidecarTargetViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val audioPlaybackState by audioViewModel.state.collectAsStateWithLifecycle()
@@ -203,6 +210,31 @@ fun ChatListScreen(
     val syncIndicators by viewModel.syncIndicators.collectAsStateWithLifecycle()
     val syncChrome by viewModel.syncChrome.collectAsStateWithLifecycle()
     val titleConnecting by viewModel.titleConnecting.collectAsStateWithLifecycle()
+    val sidecarScope = rememberCoroutineScope()
+    var pendingSidecarNetworkId by remember { mutableStateOf<Long?>(null) }
+    val sidecarTargetLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val networkId = pendingSidecarNetworkId
+            val raw = result.data?.getStringExtra(SidecarContract.RESULT_TARGET_JSON)
+            pendingSidecarNetworkId = null
+            if (networkId != null && result.resultCode == Activity.RESULT_OK && raw != null) {
+                runCatching { SidecarJson.decodeTarget(raw) }.getOrNull()?.let { target ->
+                    if (target.kind == SidecarTargetKind.ROOM) {
+                        viewModel.joinChannel(networkId, target.wireTarget, null)
+                    } else {
+                        sidecarScope.launch {
+                            onOpenBuffer(
+                                sidecarTargetViewModel.openPerson(
+                                    networkId,
+                                    target.wireTarget,
+                                    target.displayName,
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
     // Fresh installs enter onboarding once state is loaded; a durable skip keeps the empty main UI.
     LaunchedEffect(state.loading, state.networks.isEmpty(), state.onboardingComplete, suppressOnboarding) {
@@ -264,6 +296,14 @@ fun ChatListScreen(
         onOpenAddNetwork = onOpenAddNetwork,
         onScanInvite = onScanInvite,
         onOpenChannelList = onOpenChannelList,
+        onChooseProviderTarget = { networkId ->
+            sidecarScope.launch {
+                sidecarTargetViewModel.createIntent(networkId)?.let { intent ->
+                    pendingSidecarNetworkId = networkId
+                    sidecarTargetLauncher.launch(intent)
+                }
+            }
+        },
         onMarkAllRead = viewModel::markCurrentScopeRead,
         onMarkSelectedRead = viewModel::markSelectedRead,
         onMoveNetwork = viewModel::moveNetwork,
@@ -344,6 +384,7 @@ fun ChatListContent(
     onOpenAddNetwork: () -> Unit = {},
     onScanInvite: () -> Unit = {},
     onOpenChannelList: (Long) -> Unit = {},
+    onChooseProviderTarget: (Long) -> Unit = {},
     onMarkAllRead: () -> Unit = {},
     onMarkSelectedRead: (Collection<Long>) -> Unit = {},
     // Manual drawer order (see DrawerReorder.kt); defaulted so previews and tests stay terse.
@@ -866,6 +907,10 @@ fun ChatListContent(
             },
             onBrowseChannels = { networkId ->
                 onOpenChannelList(networkId)
+                scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
+            },
+            onChooseProviderTarget = { networkId ->
+                onChooseProviderTarget(networkId)
                 scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
             },
         )

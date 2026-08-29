@@ -37,7 +37,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 38,
+    version = 39,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1021,6 +1021,20 @@ val MIGRATION_37_38 =
         }
     }
 
+/** v38 -> v39 adds an additive Android companion transport and presentation-safe target metadata. */
+val MIGRATION_38_39 =
+    object : Migration(38, 39) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE networks ADD COLUMN connectionTransport TEXT NOT NULL DEFAULT 'NETWORK'")
+            db.execSQL("ALTER TABLE networks ADD COLUMN sidecarPackage TEXT")
+            db.execSQL("ALTER TABLE networks ADD COLUMN sidecarService TEXT")
+            db.execSQL("ALTER TABLE networks ADD COLUMN sidecarAccountId TEXT")
+            db.execSQL("ALTER TABLE buffers ADD COLUMN wireTarget TEXT")
+            db.execSQL("ALTER TABLE buffers ADD COLUMN sidecarSecurity TEXT")
+            db.execSQL("ALTER TABLE messages ADD COLUMN sidecarSecurity TEXT")
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1071,6 +1085,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_35_36,
         MIGRATION_36_37,
         MIGRATION_37_38,
+        MIGRATION_38_39,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"

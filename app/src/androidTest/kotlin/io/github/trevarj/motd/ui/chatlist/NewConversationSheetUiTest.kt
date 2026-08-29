@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import io.github.trevarj.motd.data.db.ConnectionTransport
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -92,6 +93,33 @@ class NewConversationSheetUiTest {
         compose.onNodeWithTag("new_conversation_submit").performClick()
 
         compose.runOnIdle { assertEquals(Triple(1L, "#motd", "hunter2"), joined) }
+    }
+
+    @Test
+    fun sidecarNetworkUsesProviderOwnedTargetPicker() {
+        var selected: Long? = null
+        compose.setContent {
+            MotdTheme {
+                NewConversationSheetContent(
+                    networks =
+                        listOf(
+                            network().copy(
+                                name = "XMPP",
+                                connectionTransport = ConnectionTransport.SIDECAR,
+                                sidecarPackage = "provider.example",
+                                sidecarService = "provider.example.Service",
+                                sidecarAccountId = "account",
+                            ),
+                        ),
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
+                    onChooseProviderTarget = { selected = it },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("new_conversation_provider_picker").performClick()
+        compose.runOnIdle { assertEquals(1L, selected) }
     }
 
     private fun network() =

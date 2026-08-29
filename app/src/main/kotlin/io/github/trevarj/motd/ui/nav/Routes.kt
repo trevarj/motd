@@ -58,6 +58,8 @@ import kotlinx.serialization.Serializable
 // Experimental features (gestures, Agentwire harness) live under their own category.
 @Serializable data object LabsRoute
 
+@Serializable data object SidecarProvidersRoute
+
 // The gesture lab's menu-graph editor, reached from Labs > Gestures > Configure menu.
 @Serializable data object GestureMenuEditorRoute
 

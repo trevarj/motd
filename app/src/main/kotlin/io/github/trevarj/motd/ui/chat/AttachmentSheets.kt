@@ -177,6 +177,8 @@ fun AttachmentSheets(
     onInsertUrl: (String) -> Unit,
     onReplaceDraft: (String) -> Unit,
     onDirectFile: (Uri) -> Unit = {},
+    providerUploadAvailable: Boolean = false,
+    onProviderUpload: (AttachmentSource) -> Unit = {},
     viewModel: AttachmentViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -423,6 +425,11 @@ fun AttachmentSheets(
                 source = current.source,
                 config = current.config,
                 sojuFileHostAvailable = sojuFileHostAvailable,
+                providerUploadAvailable = providerUploadAvailable,
+                onProviderUpload = {
+                    onProviderUpload(current.source)
+                    closeSourceSheet()
+                },
                 onChangeDestination = {
                     backendPickerRequest = current
                     flow = AttachmentFlow.Idle
@@ -869,6 +876,8 @@ internal fun ConfirmationSheet(
     source: AttachmentSource,
     config: PasteBackendConfig,
     sojuFileHostAvailable: Boolean,
+    providerUploadAvailable: Boolean = false,
+    onProviderUpload: () -> Unit = {},
     onChangeDestination: () -> Unit,
     onDismiss: () -> Unit,
     onUpload: () -> Unit,
@@ -934,6 +943,17 @@ internal fun ConfirmationSheet(
                 Spacer(Modifier.height(8.dp))
             }
             Column(Modifier.padding(horizontal = 16.dp)) {
+                if (providerUploadAvailable && source !is AttachmentSource.Text) {
+                    Button(
+                        onClick = onProviderUpload,
+                        modifier = Modifier.fillMaxWidth().height(52.dp).testTag("attachment_provider_upload"),
+                    ) {
+                        Icon(Icons.Outlined.Lock, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.sidecar_upload_action))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
                 Button(
                     onClick = onUpload,
                     enabled = !sojuUnavailable && !customUnavailable,

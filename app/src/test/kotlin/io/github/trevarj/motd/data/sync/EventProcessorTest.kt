@@ -33,6 +33,8 @@ import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Prefix
 import io.github.trevarj.motd.push.PushEventHandler
+import io.github.trevarj.motd.sidecar.SidecarContract
+import io.github.trevarj.motd.sidecar.SidecarSecurityState
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -90,7 +92,15 @@ class EventProcessorTest {
         time: Long = 1000,
         label: String? = null,
         account: String? = null,
-    ) = MessageContext(msgid = msgid, serverTime = time, account = account, batchId = null, label = label)
+        extensionTags: Map<String, String> = emptyMap(),
+    ) = MessageContext(
+        msgid = msgid,
+        serverTime = time,
+        account = account,
+        batchId = null,
+        label = label,
+        extensionTags = extensionTags,
+    )
 
     @Before
     fun setUp() =
@@ -159,6 +169,45 @@ class EventProcessorTest {
             assertEquals("hello world", rows.single().text)
             assertNull(rows.single().ircFormattedText)
             assertFalse(rows.single().hasMention)
+        }
+
+    @Test
+    fun sidecarMetadataSeparatesWireIdentityAndPersistsSecurity() =
+        runTest {
+            processor.process(
+                networkId,
+                IrcEvent.Raw(
+                    IrcMessage.parse(":sidecar METADATA u_a display-name * :Alice Smith"),
+                ),
+            )
+            processor.process(
+                networkId,
+                IrcEvent.ChatMessage(
+                    ctx =
+                        ctx(
+                            msgid = "sidecar-1",
+                            extensionTags =
+                                mapOf(
+                                    SidecarContract.SECURITY_MESSAGE_TAG to "e2ee-verified",
+                                ),
+                        ),
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    source = Prefix("u_a"),
+                    target = "me",
+                    text = "encrypted hello",
+                    isSelf = false,
+                    replyToMsgid = null,
+                ),
+            )
+
+            val room = db.bufferDao().byWireTarget(networkId, "u_a")!!
+            assertEquals("u_a", room.wireTarget)
+            assertEquals("Alice Smith", room.displayName)
+            assertEquals(SidecarSecurityState.E2EE_VERIFIED, room.sidecarSecurity)
+            val row = pagingList(room.id).single()
+            assertEquals("Alice Smith", row.sender)
+            assertEquals("u_a", row.normalizedActor)
+            assertEquals(SidecarSecurityState.E2EE_VERIFIED, row.sidecarSecurity)
         }
 
     @Test

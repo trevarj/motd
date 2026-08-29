@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.data.repo
 
+import io.github.trevarj.motd.data.db.ConnectionTransport
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -99,10 +100,14 @@ internal fun networkIdentityKey(n: NetworkEntity): String =
         }
 
         NetworkRole.DIRECT -> {
-            // Keep credentials out of the key. SASL authcid and relay PASS prefixes identify the
-            // account/network without retaining either password.
-            val passSelector = n.serverPassword?.let(::serverPasswordSelector).orEmpty()
-            "direct|${normalizeHost(n.host)}|${n.port}|${n.nick}|${n.username}|${n.saslUser.orEmpty()}|$passSelector"
+            if (n.connectionTransport == ConnectionTransport.SIDECAR) {
+                "sidecar|${n.sidecarPackage.orEmpty()}|${n.sidecarService.orEmpty()}|${n.sidecarAccountId ?: n.name}"
+            } else {
+                // Keep credentials out of the key. SASL authcid and relay PASS prefixes identify the
+                // account/network without retaining either password.
+                val passSelector = n.serverPassword?.let(::serverPasswordSelector).orEmpty()
+                "direct|${normalizeHost(n.host)}|${n.port}|${n.nick}|${n.username}|${n.saslUser.orEmpty()}|$passSelector"
+            }
         }
     }
 

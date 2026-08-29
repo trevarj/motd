@@ -923,6 +923,8 @@ internal fun sendRejectionText(reason: SendRejectionReason): String =
 
         SendRejectionReason.UNSUPPORTED_BUFFER -> "This conversation can't receive messages"
 
+        SendRejectionReason.SIDECARS_DISABLED -> "Companion bridges are disabled in Labs"
+
         SendRejectionReason.INVALID_CONTENT,
         SendRejectionReason.EVENT_NOT_RETRYABLE,
         SendRejectionReason.PERSISTENCE_FAILED,

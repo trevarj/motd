@@ -42,6 +42,8 @@ data class MessageContext(
     val isHistoryContext: Boolean = false,
     /** Client-only IRCv3 tags, retained for feature-local protocol consumers. */
     val clientTags: Map<String, String> = emptyMap(),
+    /** Namespaced server tags retained without teaching the pure IRC engine their semantics. */
+    val extensionTags: Map<String, String> = emptyMap(),
 )
 
 sealed interface IrcEvent {

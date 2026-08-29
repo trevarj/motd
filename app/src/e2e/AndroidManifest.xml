@@ -3,6 +3,21 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <application>
+        <service
+            android:name=".e2e.E2eSidecarProviderService"
+            android:exported="true"
+            android:label="motd E2E Companion"
+            android:process=":sidecarfixture">
+            <intent-filter>
+                <action android:name="io.github.trevarj.motd.sidecar.PROVIDER" />
+            </intent-filter>
+            <meta-data android:name="io.github.trevarj.motd.sidecar.API_VERSION" android:value="1" />
+        </service>
+        <activity
+            android:name=".e2e.E2eSidecarPairActivity"
+            android:exported="true"
+            android:process=":sidecarfixture" />
+
         <!-- Test-only host for component instrumentation; see ComposeHostActivity. -->
         <activity
             android:name=".ComposeHostActivity"

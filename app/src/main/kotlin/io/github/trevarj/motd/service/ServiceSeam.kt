@@ -23,6 +23,7 @@ enum class SendRejectionReason {
     EVENT_NOT_RETRYABLE,
     PERSISTENCE_FAILED,
     NOT_IN_CHANNEL,
+    SIDECARS_DISABLED,
 }
 
 enum class ImmediateWireAcceptance {
@@ -179,6 +180,10 @@ interface ConnectionManager {
     /** Live client for a connected network, null otherwise. */
     fun clientFor(networkId: Long): IrcClient?
 
+    fun isSidecarNetwork(networkId: Long): Boolean = false
+
+    fun sidecarsEnabled(): Boolean = true
+
     /** Start/stop the whole subsystem (invoked by service / delivery-mode changes). */
     suspend fun startAll()
 
@@ -219,6 +224,11 @@ interface ConnectionManager {
      * interleaves it with any pass already on the wire.
      */
     suspend fun checkpointHistory(focusBufferId: Long? = null)
+
+    /** Bounded provider wake path: connect and reconcile only one durable companion network. */
+    suspend fun checkpointNetwork(networkId: Long) {
+        checkpointHistory()
+    }
 
     /** Accepted means every chunk is durably represented, not necessarily written to the wire. */
     suspend fun sendMessage(

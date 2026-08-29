@@ -70,6 +70,7 @@ class EventMapper(
             serverTimeSource = parsedTime.source,
             isHistoryContext = "draft/chathistory-context" in msg.tags,
             clientTags = msg.tags.filterKeys { it.startsWith('+') },
+            extensionTags = msg.tags.filterKeys { !it.startsWith('+') && '/' in it },
         )
     }
 

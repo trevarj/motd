@@ -37,6 +37,24 @@ class AvatarProtocolTest {
             ),
         )
         assertEquals(
+            AvatarMetadataEvent.Changed(
+                "alice",
+                "content://io.github.trevarj.motd.xmpp.sidecar.avatar/hash",
+            ),
+            parseAvatarMetadata(
+                IrcMessage(
+                    command = "METADATA",
+                    params =
+                        listOf(
+                            "alice",
+                            "avatar",
+                            "*",
+                            "content://io.github.trevarj.motd.xmpp.sidecar.avatar/hash",
+                        ),
+                ),
+            ),
+        )
+        assertEquals(
             AvatarMetadataEvent.Removed("alice"),
             parseAvatarMetadata(IrcMessage(command = "766", params = listOf("me", "alice", "avatar", "not set"))),
         )

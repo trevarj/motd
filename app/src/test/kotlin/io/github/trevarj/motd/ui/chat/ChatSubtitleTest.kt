@@ -6,6 +6,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.sidecar.SidecarSecurityState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -66,6 +67,22 @@ class ChatSubtitleTest {
         assertEquals(
             ChatSubtitleModel.Text("alice is typing…"),
             chatSubtitleModel(state, context),
+        )
+    }
+
+    @Test
+    fun sidecarSecurityReplacesOrdinaryReadySubtitle() {
+        val state =
+            channelState(memberCount = 42).copy(
+                buffer =
+                    channelState(42).buffer?.copy(
+                        sidecarSecurity = SidecarSecurityState.E2EE_VERIFIED,
+                    ),
+            )
+
+        assertEquals(
+            context.getString(R.string.sidecar_security_verified),
+            chatSubtitle(state, context),
         )
     }
 

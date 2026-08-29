@@ -3,6 +3,7 @@ package io.github.trevarj.motd.data.db
 import androidx.room.TypeConverter
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.sidecar.SidecarSecurityState
 
 // Enum <-> String converters so enum columns store their stable `name` (matching the string
 // literals used in raw @Query predicates like kind IN ('PRIVMSG', ...)).
@@ -12,6 +13,12 @@ internal class Converters {
 
     @TypeConverter
     fun stringToNetworkRole(v: String): NetworkRole = NetworkRole.valueOf(v)
+
+    @TypeConverter
+    fun connectionTransportToString(v: ConnectionTransport): String = v.name
+
+    @TypeConverter
+    fun stringToConnectionTransport(v: String): ConnectionTransport = ConnectionTransport.valueOf(v)
 
     @TypeConverter
     fun bufferTypeToString(v: BufferType): String = v.name
@@ -85,6 +92,12 @@ internal class Converters {
 
     @TypeConverter
     fun stringToTimeProvenance(v: String): TimeProvenance = TimeProvenance.valueOf(v)
+
+    @TypeConverter
+    fun sidecarSecurityToString(v: SidecarSecurityState?): String? = v?.name
+
+    @TypeConverter
+    fun stringToSidecarSecurity(v: String?): SidecarSecurityState? = v?.let { runCatching { SidecarSecurityState.valueOf(it) }.getOrNull() }
 
     /** Unknown persisted values deliberately inherit the global setting instead of breaking reads. */
     @TypeConverter

@@ -4,3 +4,6 @@
 [submodule "third_party/gomobile"]
 	path = third_party/gomobile
 	url = https://github.com/SagerNet/gomobile.git
+[submodule "motd-sidecar-sdk"]
+	path = third_party/motd-sidecar-sdk
+	url = https://github.com/trevarj/motd-sidecar-sdk.git

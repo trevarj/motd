@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -31,6 +32,7 @@ fun NetworksSettingsScreen(
     onOpenNetwork: (Long) -> Unit = {},
     onOpenAddNetwork: () -> Unit = {},
     onScanInvite: () -> Unit = {},
+    onOpenSidecars: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -41,6 +43,8 @@ fun NetworksSettingsScreen(
         onOpenNetwork = onOpenNetwork,
         onOpenAddNetwork = onOpenAddNetwork,
         onScanInvite = onScanInvite,
+        sidecarsEnabled = state.sidecarsEnabled,
+        onOpenSidecars = onOpenSidecars,
     )
 }
 
@@ -52,6 +56,8 @@ fun NetworksSettingsContent(
     onOpenNetwork: (Long) -> Unit,
     onOpenAddNetwork: () -> Unit,
     onScanInvite: () -> Unit = {},
+    sidecarsEnabled: Boolean = false,
+    onOpenSidecars: () -> Unit = {},
 ) {
     SettingsScaffold(title = stringResource(R.string.settings_networks), onBack = onBack) {
         FilledTonalButton(
@@ -60,6 +66,15 @@ fun NetworksSettingsContent(
         ) {
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
             Text(stringResource(R.string.add_network_title))
+        }
+        if (sidecarsEnabled) {
+            FilledTonalButton(
+                onClick = onOpenSidecars,
+                modifier = Modifier.fillMaxWidth().testTag("settings_add_sidecar"),
+            ) {
+                Icon(Icons.Filled.Extension, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                Text(stringResource(R.string.sidecar_providers_title))
+            }
         }
         FilledTonalButton(
             onClick = onScanInvite,

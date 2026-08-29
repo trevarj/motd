@@ -143,6 +143,8 @@ data class ChatState(
     // True for a CHANNEL buffer we are no longer a member of (server-confirmed or reflected self-PART).
     // Drives the "You're not in #channel — Rejoin" banner and disables the composer.
     val parted: Boolean = false,
+    val isSidecar: Boolean = false,
+    val sidecarsEnabled: Boolean = true,
 )
 
 data class ComposerDraftState(
@@ -959,6 +961,8 @@ class ChatViewModel
                     connState = conn,
                     presence = presence,
                     parted = buffer?.type == BufferType.CHANNEL && !buffer.joined && buffer.pendingCloseAt == null,
+                    isSidecar = buffer?.networkId?.let(connectionManager::isSidecarNetwork) == true,
+                    sidecarsEnabled = connectionManager.sidecarsEnabled(),
                 )
             }.combine(conversationLayout) { current, layout ->
                 current.copy(conversationLayout = layout)

@@ -9,6 +9,7 @@ import io.github.trevarj.motd.avatar.SelfAvatarSetting
 import io.github.trevarj.motd.avatar.validateAvatarUrl
 import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.bouncer.parseZncLogin
+import io.github.trevarj.motd.data.db.ConnectionTransport
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
@@ -60,10 +61,14 @@ data class NetworkSettingsUiState(
     val avatarPublishingAvailable: Boolean = false,
     val avatarPublishError: Boolean = false,
 ) {
+    val isSidecar: Boolean get() = entity?.connectionTransport == ConnectionTransport.SIDECAR
     val vlessLinkError: String?
         get() = if (obfsMode == ObfsMode.EMBEDDED_REALITY) vlessLinkValidationError(obfsLink) else null
     val hasUnsavedChanges: Boolean get() {
         val current = entity ?: return false
+        if (isSidecar) {
+            return displayName.trim().ifBlank { current.name } != current.name || autoConnect != current.autoConnect
+        }
         return displayName.trim().ifBlank { current.name } != current.name ||
             wsUrl.trim().ifBlank { null } != current.wsUrl?.trim()?.ifBlank { null } ||
             obfsMode != (current.obfsMode ?: ObfsMode.NONE) ||
@@ -89,8 +94,11 @@ data class NetworkSettingsUiState(
     }
     val initialAwayValid: Boolean get() = initialAwayValidationError(initialAwayMessage) == null
     val isValid: Boolean get() =
-        server.isValid && (if (isZnc) zncLogin.isValid else auth.isValid) &&
-            vlessLinkError == null && initialAwayValid
+        isSidecar ||
+            (
+                server.isValid && (if (isZnc) zncLogin.isValid else auth.isValid) &&
+                    vlessLinkError == null && initialAwayValid
+            )
     val canSave: Boolean get() = isValid && hasUnsavedChanges
 }
 
@@ -363,6 +371,12 @@ class NetworkSettingsViewModel
 
         private fun updatedNetwork(current: NetworkEntity): NetworkEntity {
             val state = _state.value
+            if (state.isSidecar) {
+                return current.copy(
+                    name = state.displayName.trim().ifBlank { current.name },
+                    autoConnect = state.autoConnect,
+                )
+            }
             val server =
                 if (state.isZnc) {
                     state.server.copy(username = state.zncLogin.username.trim(), realname = state.server.nick.trim())

@@ -75,6 +75,16 @@ fun validateAvatarUrl(raw: String): String? {
     return value
 }
 
+fun validateSharedAvatarModel(raw: String): String? {
+    validateAvatarUrl(raw)?.let { return it }
+    val value = raw.trim()
+    val uri = runCatching { java.net.URI(value) }.getOrNull() ?: return null
+    if (!uri.scheme.equals("content", ignoreCase = true)) return null
+    if (uri.host?.endsWith(".sidecar.avatar") != true || uri.path.isNullOrBlank()) return null
+    if (uri.userInfo != null || uri.query != null || uri.fragment != null) return null
+    return value
+}
+
 fun expandAvatarUrl(
     url: String,
     sizePx: Int,
@@ -88,7 +98,7 @@ fun conversationAvatarModel(
 ): String? =
     override?.takeIf { it.startsWith("file://") }
         ?: override?.let { expandAvatarUrl(it, sizePx) }
-        ?: shared?.let { expandAvatarUrl(it, sizePx) }
+        ?: shared?.let { expandAvatarUrl(it, sizePx) ?: validateSharedAvatarModel(it) }
 
 fun avatarIdentity(
     nick: String,

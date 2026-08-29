@@ -9,8 +9,11 @@ import androidx.room.PrimaryKey
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.sidecar.SidecarSecurityState
 
 enum class NetworkRole { DIRECT, BOUNCER_ROOT, BOUNCER_CHILD }
+
+enum class ConnectionTransport { NETWORK, SIDECAR }
 
 /**
  * Per-network obfuscation transport. `NONE` is the default
@@ -149,6 +152,13 @@ data class NetworkEntity(
     val restoreAutoConnect: Boolean = false,
     /** Validated HTTPS icon advertised through IRCv3 draft/ICON; refreshed on registration. */
     val serverIconUrl: String? = null,
+    /** Physical connection boundary. SIDECAR opens an approved Android provider instead of a socket. */
+    val connectionTransport: ConnectionTransport = ConnectionTransport.NETWORK,
+    /** Explicit provider service identity; set together for SIDECAR rows. */
+    val sidecarPackage: String? = null,
+    val sidecarService: String? = null,
+    /** Provider-owned opaque account key. It is not a credential and is removed from backups. */
+    val sidecarAccountId: String? = null,
 ) {
     // Redact secrets (saslPassword, serverPassword, nickServPassword, obfsLink) from logs; proxyHost/port are
     // non-sensitive so keep them out
@@ -324,6 +334,10 @@ data class RoomEntity(
     val folderId: Long? = null,
     /** Latest locally retained non-presence event for QUERY-only MONITOR ranking. */
     val monitorActivityTime: Long? = null,
+    /** Stable server/provider target when [displayName] is presentation-only. */
+    val wireTarget: String? = null,
+    /** Current provider-reported policy; null for ordinary IRC and unknown provider state. */
+    val sidecarSecurity: SidecarSecurityState? = null,
     /**
      * Newest activity CHATHISTORY TARGETS advertised for this room, or null when discovery has
      * never mentioned it. Written forward-only, by [io.github.trevarj.motd.data.sync.EventProcessor]
@@ -372,7 +386,7 @@ data class DiscardedMessageIdEntity(
 
 /** Internal room keys may be disambiguated; wire targets always retain server spelling. */
 val RoomEntity.ircTarget: String
-    get() = if (type == BufferType.SERVER) name else displayName
+    get() = if (type == BufferType.SERVER) name else wireTarget ?: displayName
 
 @Entity(
     tableName = "room_aliases",
@@ -469,6 +483,8 @@ data class TimelineEventEntity(
             TimeProvenance.LOCAL_CLOCK
         },
     val notificationHandled: Boolean = false,
+    /** Provider-reported protection for this exact row; null on ordinary IRC. */
+    val sidecarSecurity: SidecarSecurityState? = null,
     /** Durable two-phase notification claim; reset on startup before database-backed recovery. */
     val notificationClaimed: Boolean = false,
     /** Process-session owner prevents startup recovery from releasing an active presentation. */

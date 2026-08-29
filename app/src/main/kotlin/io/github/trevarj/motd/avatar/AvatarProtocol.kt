@@ -95,7 +95,7 @@ fun parseAvatarMetadata(message: IrcMessage): AvatarMetadataEvent? {
             val target = message.params.getOrNull(0) ?: return null
             if (message.params.getOrNull(1) != AVATAR_KEY) return null
             val value = message.params.getOrNull(3) ?: return null
-            validateAvatarUrl(value)?.let { AvatarMetadataEvent.Changed(target, it) }
+            validateSharedAvatarModel(value)?.let { AvatarMetadataEvent.Changed(target, it) }
                 ?: AvatarMetadataEvent.Removed(target)
         }
 
@@ -103,7 +103,7 @@ fun parseAvatarMetadata(message: IrcMessage): AvatarMetadataEvent? {
             val target = message.params.getOrNull(1) ?: return null
             if (message.params.getOrNull(2) != AVATAR_KEY) return null
             val value = message.params.getOrNull(4) ?: return null
-            validateAvatarUrl(value)?.let { AvatarMetadataEvent.Changed(target, it) }
+            validateSharedAvatarModel(value)?.let { AvatarMetadataEvent.Changed(target, it) }
                 ?: AvatarMetadataEvent.Removed(target)
         }
 

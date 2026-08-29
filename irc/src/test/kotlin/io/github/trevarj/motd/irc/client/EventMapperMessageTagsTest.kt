@@ -51,6 +51,16 @@ class EventMapperMessageTagsTest {
     }
 
     @Test
+    fun `namespaced server tags remain in message context`() {
+        val event =
+            mapper.map(
+                IrcMessage.parse("@trevarj.github.io/sidecar/security=e2ee-verified :alice!u@h PRIVMSG me :secret"),
+            ) as IrcEvent.ChatMessage
+
+        assertEquals("e2ee-verified", event.ctx.extensionTags["trevarj.github.io/sidecar/security"])
+    }
+
+    @Test
     fun `reaction aliases map onto tag message`() {
         val event =
             mapper.map(

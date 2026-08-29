@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.service
 
+import android.content.ComponentName
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
@@ -12,6 +13,7 @@ import io.github.trevarj.motd.bouncer.isBouncerConsole
 import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.ConnectionTransport
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -64,6 +66,11 @@ import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.push.PushHealthStore
 import io.github.trevarj.motd.push.WebPushRegistrar
 import io.github.trevarj.motd.push.pushSuspendedNetworkIds
+import io.github.trevarj.motd.sidecar.SidecarBinder
+import io.github.trevarj.motd.sidecar.SidecarContract
+import io.github.trevarj.motd.sidecar.SidecarPrefs
+import io.github.trevarj.motd.sidecar.SidecarTransportFactory
+import io.github.trevarj.motd.sidecar.SidecarWakeRegistrar
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -532,6 +539,9 @@ class ConnectionManagerImpl
         private val inviteEnrollmentStore: InviteEnrollmentStore,
         private val baseTransportFactory: TransportFactory,
         private val localSocksProvider: LocalSocksProvider,
+        private val sidecarBinder: SidecarBinder,
+        private val sidecarPrefs: SidecarPrefs,
+        private val sidecarWakeRegistrar: SidecarWakeRegistrar,
         private val historyResyncCoordinator: HistoryResyncCoordinator,
         private val readMarkerRepository: ReadMarkerRepository,
         private val messageNotifier: MessageNotifier,
@@ -561,6 +571,8 @@ class ConnectionManagerImpl
         // Latest full network set, kept so buildClient can resolve a BOUNCER_CHILD's root row (its
         // bouncer endpoint + account SASL) without a suspend DB read. Updated on every reconcile.
         @Volatile private var networksById: Map<Long, NetworkEntity> = emptyMap()
+
+        @Volatile private var sidecarsEnabled = false
 
         // Sticky in-memory user intent per network: true = force-connect,
         // false = force-disconnect, absent = follow autoConnect. Survives reconcile emissions so a
@@ -631,6 +643,10 @@ class ConnectionManagerImpl
                 graceMs = EMBEDDED_REALITY_BACKGROUND_GRACE_MS,
             )
 
+        override fun isSidecarNetwork(networkId: Long): Boolean = networksById[networkId]?.connectionTransport == ConnectionTransport.SIDECAR
+
+        override fun sidecarsEnabled(): Boolean = sidecarsEnabled
+
         override fun clientFor(networkId: Long): IrcClient? =
             (
                 registry.snapshot.value.actors[networkId]
@@ -656,12 +672,18 @@ class ConnectionManagerImpl
                 // Seed actors from the current full set (reconcile applies autoConnect + sticky intent),
                 // then keep reconciling on every DB change. The collector no longer pre-filters: reconcile
                 // owns the wanted-set computation so manual connect/disconnect intents survive DB writes.
-                reconcile(networkDao.observeAll().first())
+                val initialNetworks = networkDao.observeAll().first()
+                sidecarsEnabled = sidecarPrefs.enabled.first()
+                sidecarWakeRegistrar.reconcile(initialNetworks, sidecarsEnabled)
+                reconcile(initialNetworks)
                 val reconcileJob =
                     scope.launch {
-                        networkDao.observeAll().collect { all ->
-                            reconcile(all)
-                        }
+                        combine(networkDao.observeAll(), sidecarPrefs.enabled) { all, enabled -> all to enabled }
+                            .collect { (all, enabled) ->
+                                sidecarsEnabled = enabled
+                                sidecarWakeRegistrar.reconcile(all, enabled)
+                                reconcile(all)
+                            }
                     }
                 // Delivery-mode reaction: UNIFIED_PUSH tears verified sockets down only after Android
                 // enters Doze. Merely switching away from motd keeps active conversations connected.
@@ -824,6 +846,20 @@ class ConnectionManagerImpl
         override suspend fun checkpointHistory(focusBufferId: Long?) {
             focusBufferId?.let(::reconcileFocusedBuffer)
             historyCheckpoint()
+        }
+
+        override suspend fun checkpointNetwork(networkId: Long) {
+            val row = networkDao.byId(networkId) ?: return
+            if (row.connectionTransport != ConnectionTransport.SIDECAR || !sidecarsEnabled) return
+            connect(networkId)
+            val client =
+                withTimeoutOrNull(SIDECAR_WAKE_TIMEOUT_MS) {
+                    connectionStates
+                        .map { states -> states[networkId] }
+                        .first { it is IrcClientState.Ready }
+                    clientFor(networkId)
+                } ?: return
+            catchUpForConnection(networkId, client)
         }
 
         /**
@@ -1076,6 +1112,7 @@ class ConnectionManagerImpl
 
         override suspend fun connect(networkId: Long) {
             val row = networkDao.byId(networkId) ?: return
+            if (row.connectionTransport == ConnectionTransport.SIDECAR && !sidecarsEnabled) return
             // Seed the network snapshot so buildClient can resolve a child's root even before the
             // first reconcile emission (e.g. connecting a freshly imported BOUNCER_CHILD).
             if (row.role == NetworkRole.BOUNCER_CHILD && row.parentId != null && networksById[row.parentId] == null) {
@@ -1128,7 +1165,8 @@ class ConnectionManagerImpl
             val deletedIds = networksById.keys - all.mapTo(mutableSetOf()) { it.id }
             // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
             networksById = all.associateBy { it.id }
-            val wantedIds = wantedNetworkIds(all, userIntents) - pushSuspendedIds
+            val eligible = if (sidecarsEnabled) all else all.filter { it.connectionTransport != ConnectionTransport.SIDECAR }
+            val wantedIds = wantedNetworkIds(eligible, userIntents) - pushSuspendedIds
             diagnostics.record("connections", "reconcile") {
                 mapOf(
                     "configured" to all.size,
@@ -1705,6 +1743,22 @@ class ConnectionManagerImpl
                     null
                 }
             val config = buildChildConfig(row, root)
+            if (row.connectionTransport == ConnectionTransport.SIDECAR) {
+                val component =
+                    ComponentName(
+                        requireNotNull(row.sidecarPackage) { "Companion provider package is missing" },
+                        requireNotNull(row.sidecarService) { "Companion provider service is missing" },
+                    )
+                val accountId = requireNotNull(row.sidecarAccountId) { "Companion provider account is missing" }
+                return IrcClientConnection(
+                    IrcClient(
+                        config,
+                        SidecarTransportFactory(sidecarBinder, component, accountId),
+                        scope,
+                        nickRecoveryGuard = nickRecoveryGuard,
+                    ),
+                )
+            }
             // Obfuscation/proxy follows the transport endpoint too: a bound child dials the same
             // bouncer endpoint on its OWN socket (and, for EMBEDDED_REALITY, its own libbox core — see
             // resolveTransportProxy), so it inherits the root's proxy CONFIGURATION, never its
@@ -1782,6 +1836,18 @@ class ConnectionManagerImpl
                     }
                 }
             avatarCoordinator.onReady(row.id, client)
+            if (row.connectionTransport == ConnectionTransport.SIDECAR) {
+                sidecarWakeRegistrar.reconcile(networksById.values.toList(), sidecarsEnabled)
+            }
+            if (row.connectionTransport == ConnectionTransport.SIDECAR && client.hasCap("draft/metadata-2")) {
+                client.send(IrcMessage(command = "METADATA", params = listOf("*", "SUB", "display-name")))
+                client.send(
+                    IrcMessage(
+                        command = "METADATA",
+                        params = listOf("*", "SUB", SidecarContract.SECURITY_METADATA_KEY),
+                    ),
+                )
+            }
             if (!isCurrent()) return
             reconcileMonitor(
                 row.id,
@@ -2266,6 +2332,10 @@ class ConnectionManagerImpl
                 val buffer =
                     bufferDao.observeById(bufferId)
                         ?: return@sending SendAcceptance.Rejected(SendRejectionReason.BUFFER_NOT_FOUND)
+                val network = networkDao.byId(buffer.networkId)
+                if (network?.connectionTransport == ConnectionTransport.SIDECAR && !sidecarsEnabled) {
+                    return@sending SendAcceptance.Rejected(SendRejectionReason.SIDECARS_DISABLED)
+                }
                 // The soju console is the one SERVER-typed room that accepts writes.
                 if (buffer.type == BufferType.SERVER && !buffer.isBouncerConsole) {
                     return@sending SendAcceptance.Rejected(SendRejectionReason.UNSUPPORTED_BUFFER)
@@ -2398,6 +2468,11 @@ class ConnectionManagerImpl
                             ?: return@withLock SendAcceptance.Rejected(SendRejectionReason.BUFFER_NOT_FOUND)
                     if (!isGenericRetryEligible(currentBuffer, current)) {
                         return@withLock SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
+                    }
+                    if (networkDao.byId(currentBuffer.networkId)?.connectionTransport == ConnectionTransport.SIDECAR &&
+                        !sidecarsEnabled
+                    ) {
+                        return@withLock SendAcceptance.Rejected(SendRejectionReason.SIDECARS_DISABLED)
                     }
                     if (currentBuffer.type == BufferType.CHANNEL && !currentBuffer.joined &&
                         currentBuffer.pendingCloseAt == null
@@ -2735,12 +2810,12 @@ class ConnectionManagerImpl
                                             client.isupport.normalize(it.channel) == client.isupport.normalize(buffer.ircTarget)
                                         }
                                     }
-                                val whox = async { client.whox(buffer.displayName) }
+                                val whox = async { client.whox(buffer.ircTarget) }
                                 try {
                                     client.send(
                                         io.github.trevarj.motd.irc.proto.IrcMessage(
                                             command = "NAMES",
-                                            params = listOf(buffer.displayName),
+                                            params = listOf(buffer.ircTarget),
                                         ),
                                     )
                                     names.await()
@@ -2953,6 +3028,7 @@ class ConnectionManagerImpl
             // Stable logcat tag for reconnect catch-up failures.
             private const val TAG = "MotdCatchUp"
             const val READ_MARKER_CAP = "draft/read-marker"
+            const val SIDECAR_WAKE_TIMEOUT_MS = 8_000L
             const val CHATHISTORY_CAP = "draft/chathistory"
             const val SOJU_READ_CAP = "soju.im/read"
             const val WEBPUSH_CAP = "soju.im/webpush"
@@ -3568,6 +3644,7 @@ internal fun buildChildConfig(
                 emptyList()
             },
         bouncerNetId = null,
+        extraCaps = if (row.connectionTransport == ConnectionTransport.SIDECAR) setOf(SidecarContract.IRC_CAPABILITY) else emptySet(),
         // WSS transport follows the physical endpoint: the bouncer's wsUrl for a bound child.
         wsUrl = endpoint.wsUrl,
     )
@@ -3652,7 +3729,7 @@ internal fun networkFingerprint(
         "${endpoint.saslMechanism}:${endpoint.saslUser}:${endpoint.saslPassword}:${endpoint.serverPassword}:" +
         "${row.nickServPassword}:${row.nickServIdentifySyntax}:${row.nickServRecoveryEnabled}:" +
         "${row.nickServRecoverySequence}:${row.initialAwayMessage}:" +
-        "${row.bouncerNetId}:" +
+        "${row.bouncerNetId}:${row.connectionTransport}:${row.sidecarPackage}:${row.sidecarService}:${row.sidecarAccountId}:" +
         "${endpoint.clientCertAlias}:${endpoint.wsUrl}:${endpoint.obfsMode}:${endpoint.proxyHost}:${endpoint.proxyPort}:${endpoint.obfsLink}"
 }
 

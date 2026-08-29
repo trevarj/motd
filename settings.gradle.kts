@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "motd"
 include(":irc", ":app")
+includeBuild("third_party/motd-sidecar-sdk")

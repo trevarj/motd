@@ -52,6 +52,7 @@ import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkScreen
 import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetworksScreen
 import io.github.trevarj.motd.ui.settings.labs.GestureMenuEditorScreen
 import io.github.trevarj.motd.ui.settings.labs.LabsScreen
+import io.github.trevarj.motd.ui.settings.sidecar.SidecarProvidersScreen
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.SharePickerScreen
 import io.github.trevarj.motd.ui.theme.MotdMotion
@@ -304,6 +305,7 @@ fun MotdNavGraph(
                 onOpenNetwork = { navController.navigate(NetworkSettingsRoute(it)) },
                 onOpenAddNetwork = { navController.navigate(AddNetworkRoute) },
                 onScanInvite = { navController.navigate(QrInviteScannerRoute) },
+                onOpenSidecars = { navController.navigate(SidecarProvidersRoute) },
             )
         }
         composable<BackupRestoreRoute> {
@@ -331,6 +333,17 @@ fun MotdNavGraph(
             LabsScreen(
                 onBack = { navController.popBackStack() },
                 onOpenGestureMenu = { navController.navigate(GestureMenuEditorRoute) },
+                onOpenSidecars = { navController.navigate(SidecarProvidersRoute) },
+            )
+        }
+        composable<SidecarProvidersRoute> {
+            SidecarProvidersScreen(
+                onBack = { navController.popBackStack() },
+                onAdded = { networkId ->
+                    navController.navigate(NetworkSettingsRoute(networkId)) {
+                        popUpTo<SidecarProvidersRoute> { inclusive = true }
+                    }
+                },
             )
         }
         composable<GestureMenuEditorRoute> {

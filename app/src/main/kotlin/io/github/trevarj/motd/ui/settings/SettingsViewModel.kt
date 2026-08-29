@@ -35,6 +35,8 @@ import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.push.PushDistributorController
 import io.github.trevarj.motd.service.DeliveryMode
+import io.github.trevarj.motd.sidecar.DisabledSidecarPrefs
+import io.github.trevarj.motd.sidecar.SidecarPrefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -57,6 +59,7 @@ data class SettingsUiState(
     val contentPreviews: ContentPreviewConfig = ContentPreviewConfig(),
     val voice: VoiceConfig = VoiceConfig(),
     val avatars: AvatarConfig = AvatarConfig(),
+    val sidecarsEnabled: Boolean = false,
 )
 
 private data class ChatUiPrefs(
@@ -103,6 +106,7 @@ class SettingsViewModel
         private val pushDistributorController: PushDistributorController,
         private val customFontStore: CustomFontStore,
         private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
+        private val sidecarPrefs: SidecarPrefs = DisabledSidecarPrefs,
     ) : ViewModel() {
         private val _audioCacheClearEvents = MutableSharedFlow<AudioCacheClearEvent>()
         val audioCacheClearEvents: SharedFlow<AudioCacheClearEvent> = _audioCacheClearEvents.asSharedFlow()
@@ -146,7 +150,8 @@ class SettingsViewModel
                 // toggle enables live once the soju bouncer advertises webpush.
                 pushAvailability.availability(),
                 appearanceReplyAndPreviews,
-            ) { settings, networkPrefs, availability, appearanceReplyPreviews ->
+                sidecarPrefs.enabled,
+            ) { settings, networkPrefs, availability, appearanceReplyPreviews, sidecarsEnabled ->
                 val (appearance, reply, contentPreviews, voice, avatars) = appearanceReplyPreviews
                 SettingsUiState(
                     settings = settings,
@@ -158,6 +163,7 @@ class SettingsViewModel
                     contentPreviews = contentPreviews,
                     voice = voice,
                     avatars = avatars,
+                    sidecarsEnabled = sidecarsEnabled,
                 )
             }.stateIn(
                 scope = viewModelScope,

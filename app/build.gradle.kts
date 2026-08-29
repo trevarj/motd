@@ -273,6 +273,7 @@ kotlin { jvmToolchain(21) }
 
 dependencies {
     implementation(project(":irc"))
+    implementation(libs.sidecar.api)
     debugImplementation(files(libboxAar))
     releaseImplementation(files(libboxAar))
     add("e2eImplementation", files(libboxE2eAar))

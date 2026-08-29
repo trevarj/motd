@@ -42,6 +42,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.db.ConnectionTransport
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.settings.PasswordField
@@ -64,6 +65,7 @@ fun NewConversationSheet(
     // Round 5: seed the network from the active scope + browse entry.
     preselectedNetworkId: Long? = null,
     onBrowseChannels: (networkId: Long) -> Unit = {},
+    onChooseProviderTarget: (networkId: Long) -> Unit = {},
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -77,6 +79,7 @@ fun NewConversationSheet(
             onJoinChannel = onJoinChannel,
             onMessageUser = onMessageUser,
             onBrowseChannels = onBrowseChannels,
+            onChooseProviderTarget = onChooseProviderTarget,
         )
     }
 }
@@ -88,6 +91,7 @@ internal fun NewConversationSheetContent(
     onMessageUser: (networkId: Long, nick: String) -> Unit,
     preselectedNetworkId: Long? = null,
     onBrowseChannels: (networkId: Long) -> Unit = {},
+    onChooseProviderTarget: (networkId: Long) -> Unit = {},
 ) {
     var tab by remember { mutableIntStateOf(0) }
     // Joining channels / messaging users only works on bound child networks or direct networks;
@@ -106,7 +110,8 @@ internal fun NewConversationSheetContent(
     var input by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordExpanded by remember { mutableStateOf(false) }
-    val canSubmit = selectedNetwork != null && input.isNotBlank()
+    val sidecarSelected = selectedNetwork?.connectionTransport == ConnectionTransport.SIDECAR
+    val canSubmit = selectedNetwork != null && !sidecarSelected && input.isNotBlank()
 
     fun submit() {
         val net = selectedNetwork ?: return
@@ -159,9 +164,19 @@ internal fun NewConversationSheetContent(
             onSelect = { selectedNetwork = it },
         )
 
+        if (sidecarSelected) {
+            Button(
+                onClick = { selectedNetwork?.let { onChooseProviderTarget(it.id) } },
+                modifier = Modifier.fillMaxWidth().testTag("new_conversation_provider_picker"),
+            ) {
+                Text(stringResource(R.string.new_sheet_choose_provider_target))
+            }
+        }
+
         OutlinedTextField(
             value = input,
             onValueChange = { input = it },
+            enabled = !sidecarSelected,
             singleLine = true,
             modifier = Modifier.fillMaxWidth().testTag("new_conversation_input"),
             prefix =
@@ -188,7 +203,7 @@ internal fun NewConversationSheetContent(
             keyboardActions = KeyboardActions(onDone = { if (canSubmit) submit() }),
         )
 
-        if (tab == 0) {
+        if (tab == 0 && !sidecarSelected) {
             Column {
                 Row(
                     modifier =
@@ -253,7 +268,7 @@ internal fun NewConversationSheetContent(
             contentAlignment = Alignment.Center,
         ) {
             // Browse: LIST is meaningless on the unbound soju root, so gate BOUNCER_ROOT out.
-            if (tab == 0) {
+            if (tab == 0 && !sidecarSelected) {
                 val net = selectedNetwork
                 TextButton(
                     onClick = { net?.let { onBrowseChannels(it.id) } },

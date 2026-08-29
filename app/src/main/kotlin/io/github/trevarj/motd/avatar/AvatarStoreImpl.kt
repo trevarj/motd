@@ -22,7 +22,7 @@ class AvatarStoreImpl
             account: String?,
             url: String,
         ) {
-            val valid = validateAvatarUrl(url) ?: return
+            val valid = validateSharedAvatarModel(url) ?: return
             val normalizedNick = canonicalAvatarNick(nick)
             val identity = avatarIdentity(normalizedNick, account)
             dao.replaceIdentity(

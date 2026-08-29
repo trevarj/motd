@@ -62,6 +62,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.db.ConnectionTransport
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.about.appVersion
@@ -366,6 +367,9 @@ internal fun networkSupporting(
     all: List<NetworkEntity>,
     zncNetworkIds: Set<Long> = emptySet(),
 ): String {
+    if (network.connectionTransport == ConnectionTransport.SIDECAR) {
+        return stringResource(R.string.settings_network_sidecar_suffix, network.sidecarPackage.orEmpty())
+    }
     val base = "${network.host}:${network.port}"
     return when (network.role) {
         NetworkRole.BOUNCER_ROOT -> {

@@ -421,7 +421,7 @@ interface BufferDao {
     // QUERY-only materialization keeps channel traffic from invalidating this always-on projection.
     @Query(
         """SELECT b.networkId AS networkId,
-                  b.displayName AS displayName,
+                  COALESCE(b.wireTarget, b.displayName) AS displayName,
                   b.pinned AS pinned,
                   b.monitorActivityTime AS lastMessageTime
            FROM buffers b
@@ -472,15 +472,38 @@ interface BufferDao {
         normName: String,
     ): BufferEntity?
 
+    @Query(
+        """SELECT * FROM buffers WHERE networkId = :networkId
+           AND (wireTarget = :target COLLATE NOCASE OR displayName = :target COLLATE NOCASE)
+           AND redirectToRoomId IS NULL LIMIT 1""",
+    )
+    suspend fun byWireTarget(
+        networkId: Long,
+        target: String,
+    ): BufferEntity?
+
+    @Query("UPDATE buffers SET displayName = :displayName, wireTarget = COALESCE(wireTarget, :wireTarget) WHERE id = :roomId")
+    suspend fun updateSidecarDisplayName(
+        roomId: RoomId,
+        wireTarget: String,
+        displayName: String,
+    ): Int
+
+    @Query("UPDATE buffers SET sidecarSecurity = :security WHERE id = :roomId")
+    suspend fun updateSidecarSecurity(
+        roomId: RoomId,
+        security: io.github.trevarj.motd.sidecar.SidecarSecurityState?,
+    ): Int
+
     @Query("SELECT id FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND pendingCloseAt IS NULL")
     suspend fun channelIds(networkId: Long): List<Long>
 
-    @Query("SELECT displayName FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND joined = 1 AND pendingCloseAt IS NULL ORDER BY id")
+    @Query("SELECT COALESCE(wireTarget, displayName) FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND joined = 1 AND pendingCloseAt IS NULL ORDER BY id")
     suspend fun joinedChannelNames(networkId: Long): List<String>
 
     /** Authoritative self-JOIN persistence for channel-browser buttons, retaining server spelling. */
     @Query(
-        """SELECT displayName FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND joined = 1
+        """SELECT COALESCE(wireTarget, displayName) FROM buffers WHERE networkId = :networkId AND type = 'CHANNEL' AND joined = 1
            AND pendingCloseAt IS NULL AND redirectToRoomId IS NULL ORDER BY id""",
     )
     fun observeJoinedChannelNames(networkId: Long): Flow<List<String>>
@@ -501,7 +524,7 @@ interface BufferDao {
      */
     @Query(
         """SELECT id,
-                  CASE WHEN type = 'SERVER' AND lower(name) != 'bouncerserv' THEN name ELSE displayName END AS name,
+                  CASE WHEN type = 'SERVER' AND lower(name) != 'bouncerserv' THEN name ELSE COALESCE(wireTarget, displayName) END AS name,
                   pinned
            FROM buffers WHERE networkId = :networkId
              AND (type != 'SERVER' OR (lower(name) = 'bouncerserv' AND EXISTS (
@@ -520,7 +543,7 @@ interface BufferDao {
 
     @Query(
         """SELECT id FROM buffers WHERE networkId = :networkId AND pendingCloseAt IS NULL
-           AND (name = :target COLLATE NOCASE OR displayName = :target COLLATE NOCASE) LIMIT 1""",
+           AND (name = :target COLLATE NOCASE OR displayName = :target COLLATE NOCASE OR wireTarget = :target COLLATE NOCASE) LIMIT 1""",
     )
     suspend fun idForTarget(
         networkId: Long,
@@ -542,7 +565,7 @@ interface BufferDao {
 
     @Query(
         """SELECT b.id AS bufferId,
-                   CASE WHEN b.type = 'SERVER' THEN b.name ELSE b.displayName END AS target,
+                   CASE WHEN b.type = 'SERVER' THEN b.name ELSE COALESCE(b.wireTarget, b.displayName) END AS target,
                   CASE
                     WHEN b.readMarkerTime IS NULL THEN candidate.serverTime
                     WHEN candidate.serverTime IS NULL THEN b.readMarkerTime
@@ -1459,7 +1482,7 @@ interface MessageDao {
 
     @Query(
         """SELECT b.id AS bufferId,
-                   CASE WHEN b.type = 'SERVER' THEN b.name ELSE b.displayName END AS target,
+                   CASE WHEN b.type = 'SERVER' THEN b.name ELSE COALESCE(b.wireTarget, b.displayName) END AS target,
                   m.serverTime AS timestamp, m.id AS eventId
            FROM buffers b JOIN messages m ON m.id = (
                SELECT newest.id FROM messages newest
@@ -1907,6 +1930,13 @@ interface UserDao {
         nid: Long,
         nick: String,
     ): Flow<UserEntity?>
+
+    @Query("UPDATE users SET realname = :displayName WHERE networkId = :nid AND nick = :nick")
+    suspend fun updateDisplayName(
+        nid: Long,
+        nick: String,
+        displayName: String,
+    ): Int
 
     @Query("DELETE FROM users WHERE networkId = :nid AND nick = :nick")
     suspend fun delete(

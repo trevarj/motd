@@ -106,6 +106,10 @@ import io.github.trevarj.motd.service.PendingChannelCloseCoordinator
 import io.github.trevarj.motd.service.ReadMarkerRepository
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import io.github.trevarj.motd.service.TypingTracker
+import io.github.trevarj.motd.sidecar.SidecarPrefs
+import io.github.trevarj.motd.sidecar.SidecarPrefsImpl
+import io.github.trevarj.motd.sidecar.SidecarTrustStore
+import io.github.trevarj.motd.sidecar.SidecarTrustStoreImpl
 import io.github.trevarj.motd.ui.onboarding.ConnectionManagerOnboardingBouncerOperations
 import io.github.trevarj.motd.ui.onboarding.OnboardingBouncerOperations
 import io.github.trevarj.motd.ui.settings.PushAvailabilityProvider
@@ -199,6 +203,12 @@ internal abstract class AppModule {
     /** Global Feed lab store; same backup-excluded rule as the other lab flags. */
     @Binds @Singleton
     abstract fun globalFeedPrefs(impl: GlobalFeedPrefsImpl): GlobalFeedPrefs
+
+    @Binds @Singleton
+    abstract fun sidecarPrefs(impl: SidecarPrefsImpl): SidecarPrefs
+
+    @Binds @Singleton
+    abstract fun sidecarTrustStore(impl: SidecarTrustStoreImpl): SidecarTrustStore
 
     @Binds @Singleton
     abstract fun voiceRecorder(impl: AndroidVoiceRecorder): VoiceRecorder

@@ -104,6 +104,7 @@ import io.github.trevarj.motd.dcc.DccEndpointRisk
 import io.github.trevarj.motd.dcc.dccEndpointRisk
 import io.github.trevarj.motd.dcc.resolveDccAddress
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.sidecar.SidecarSecurityState
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.DaySeparator
 import io.github.trevarj.motd.ui.components.HistoryGapDivider
@@ -1636,6 +1637,17 @@ private fun MessageRow(
                 }
             } else if (!standaloneVoice) {
                 messageBubble()
+            }
+            if (msg.sidecarSecurity == SidecarSecurityState.PLAINTEXT) {
+                Text(
+                    text = stringResource(R.string.sidecar_security_plaintext),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier =
+                        Modifier
+                            .padding(horizontal = 16.dp, vertical = 2.dp)
+                            .testTag("sidecar_plaintext_${msg.id}"),
+                )
             }
             AudioAttachmentPlayers(
                 attachments = audioAttachments,

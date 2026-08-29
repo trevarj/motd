@@ -9,6 +9,7 @@ import io.github.trevarj.motd.audio.VoicePrefs
 import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.avatar.SelfAvatarSetting
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.ConnectionTransport
 import io.github.trevarj.motd.data.db.FolderIconKind
 import io.github.trevarj.motd.data.db.FolderIdentityKind
 import io.github.trevarj.motd.data.db.IgnoredAutoGroupPatternEntity
@@ -371,8 +372,15 @@ class ConfigurationBackupRepositoryImpl
             payload.networks.forEach { network ->
                 require(network.exportId.isNotBlank()) { "Backup contains a network without an id." }
                 require(network.name.isNotBlank()) { "Backup contains a network without a name." }
-                require(network.host.isNotBlank()) { "Backup contains a network without a host." }
-                require(network.port in 1..65535) { "Backup contains an invalid port." }
+                if (network.connectionTransport == ConnectionTransport.SIDECAR) {
+                    require(!network.sidecarPackage.isNullOrBlank() && !network.sidecarService.isNullOrBlank()) {
+                        "Backup contains a companion network without a provider."
+                    }
+                    require(network.port == 0) { "Backup contains an invalid companion port." }
+                } else {
+                    require(network.host.isNotBlank()) { "Backup contains a network without a host." }
+                    require(network.port in 1..65535) { "Backup contains an invalid port." }
+                }
                 require(network.nick.isNotBlank()) { "Backup contains a network without a nick." }
                 if (network.role == NetworkRole.BOUNCER_CHILD) {
                     require(!network.parentExportId.isNullOrBlank() && network.parentExportId in idSet) {
@@ -458,6 +466,15 @@ class ConfigurationBackupRepositoryImpl
             portable: PortableNetwork,
             current: List<NetworkEntity>,
         ): NetworkEntity? {
+            if (portable.connectionTransport == ConnectionTransport.SIDECAR) {
+                return current.firstOrNull {
+                    it.role == portable.role &&
+                        it.connectionTransport == ConnectionTransport.SIDECAR &&
+                        it.sidecarPackage == portable.sidecarPackage &&
+                        it.sidecarService == portable.sidecarService &&
+                        it.name == portable.name
+                }
+            }
             val probe = portable.toEntity(includeSecrets = true, parentId = null, local = null)
             return current.firstOrNull { it.role == portable.role && it.role != NetworkRole.BOUNCER_CHILD && networkIdentityKey(it) == networkIdentityKey(probe) }
         }
@@ -779,6 +796,9 @@ private data class PortableNetwork(
     val obfsLink: String? = null,
     val hadObfsLink: Boolean = false,
     val znc: Boolean = false,
+    val connectionTransport: ConnectionTransport = ConnectionTransport.NETWORK,
+    val sidecarPackage: String? = null,
+    val sidecarService: String? = null,
 ) {
     override fun toString(): String = "PortableNetwork(exportId=$exportId, name=$name, role=$role, host=$host:$port)"
 }
@@ -844,6 +864,9 @@ private fun NetworkEntity.toPortable(
         obfsLink = obfsLink.takeIf { includeSecrets },
         hadObfsLink = !obfsLink.isNullOrBlank(),
         znc = id in zncIds,
+        connectionTransport = connectionTransport,
+        sidecarPackage = sidecarPackage,
+        sidecarService = sidecarService,
     )
 
 private fun PortableNetwork.toEntity(
@@ -862,7 +885,7 @@ private fun PortableNetwork.toEntity(
             localServerPassword = retainedServerPassword,
             localNickServPassword = retainedNickServPassword,
             localObfsLink = retainedObfsLink,
-        )
+        ) + if (connectionTransport == ConnectionTransport.SIDECAR && local?.sidecarAccountId.isNullOrBlank()) listOf("sidecarAccount") else emptyList()
     return NetworkEntity(
         id = local?.id ?: 0L,
         name = name,
@@ -894,6 +917,11 @@ private fun PortableNetwork.toEntity(
         obfsLink = retainedObfsLink,
         pendingCredentialRequirements = requirements.takeIf { it.isNotEmpty() }?.joinToString(","),
         restoreAutoConnect = autoConnect,
+        connectionTransport = connectionTransport,
+        sidecarPackage = sidecarPackage,
+        sidecarService = sidecarService,
+        // Provider account ids and signer trust are intentionally device-local.
+        sidecarAccountId = local?.sidecarAccountId,
     )
 }
 
@@ -909,7 +937,7 @@ private fun PortableNetwork.missingCredentials(local: NetworkEntity?): Boolean =
         localServerPassword = local?.serverPassword,
         localNickServPassword = local?.nickServPassword,
         localObfsLink = local?.obfsLink,
-    ).isNotEmpty()
+    ).isNotEmpty() || (connectionTransport == ConnectionTransport.SIDECAR && local?.sidecarAccountId.isNullOrBlank())
 
 private fun PortableNetwork.missingRequirements(
     localSaslPassword: String?,

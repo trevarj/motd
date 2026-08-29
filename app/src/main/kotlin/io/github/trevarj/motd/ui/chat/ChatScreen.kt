@@ -149,6 +149,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -160,6 +161,7 @@ import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
@@ -189,6 +191,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistorySyncStatus
+import io.github.trevarj.motd.sidecar.SidecarSecurityState
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AutocompletePanel
@@ -309,6 +312,7 @@ fun ChatScreen(
     onOpenAccountSetup: (Long) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
     voiceViewModel: VoiceMessageViewModel = hiltViewModel(),
+    sidecarAttachmentViewModel: SidecarAttachmentViewModel = hiltViewModel(),
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -347,6 +351,74 @@ fun ChatScreen(
     val joinedChannels by viewModel.joinedChannels.collectAsStateWithLifecycle()
     val voiceState by voiceViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val sidecarAttachmentScope = rememberCoroutineScope()
+    var grantedSidecarUri by remember { mutableStateOf<Uri?>(null) }
+    val sidecarSecurityLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
+    val sidecarAttachmentLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            grantedSidecarUri?.let { uri -> context.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            grantedSidecarUri = null
+        }
+    val sendProviderAttachment = { source: AttachmentSource ->
+        val buffer = state.buffer
+        if (buffer != null) {
+            val uri =
+                when (source) {
+                    is AttachmentSource.Document -> {
+                        source.uri
+                    }
+
+                    is AttachmentSource.Photo -> {
+                        source.uri
+                    }
+
+                    is AttachmentSource.LocalFile -> {
+                        FileProvider.getUriForFile(context, "${context.packageName}.camera", source.file)
+                    }
+
+                    is AttachmentSource.Text -> {
+                        null
+                    }
+                }
+            if (uri != null) {
+                val fileName =
+                    when (source) {
+                        is AttachmentSource.Document -> source.name
+                        is AttachmentSource.Photo -> source.name
+                        is AttachmentSource.LocalFile -> source.name
+                        is AttachmentSource.Text -> source.name
+                    }
+                val mimeType =
+                    when (source) {
+                        is AttachmentSource.Document -> source.mimeType
+                        is AttachmentSource.Photo -> source.mimeType
+                        is AttachmentSource.LocalFile -> source.mimeType
+                        is AttachmentSource.Text -> "text/plain"
+                    }
+                sidecarAttachmentScope.launch {
+                    sidecarAttachmentViewModel
+                        .createIntent(buffer.id, mimeType, fileName, caption = null)
+                        ?.apply {
+                            grantedSidecarUri = uri
+                            clipData = ClipData.newUri(context.contentResolver, fileName, uri)
+                            data = uri
+                            type = mimeType
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }?.let(sidecarAttachmentLauncher::launch)
+                }
+            }
+        }
+    }
+    val manageProviderSecurity: () -> Unit = {
+        state.buffer?.let { buffer ->
+            sidecarAttachmentScope.launch {
+                sidecarAttachmentViewModel
+                    .createSecurityIntent(buffer.id)
+                    ?.let(sidecarSecurityLauncher::launch)
+            }
+        }
+    }
     val voicePermissionGate =
         remember(context, voiceViewModel) {
             VoiceRecordingPermissionGate(
@@ -446,7 +518,9 @@ fun ChatScreen(
     ChatContent(
         state = state,
         items = items,
-        composerEnabled = (!isServerBuffer || state.connState is IrcClientState.Ready) && !state.parted,
+        composerEnabled =
+            (!isServerBuffer || state.connState is IrcClientState.Ready) && !state.parted &&
+                (!state.isSidecar || state.sidecarsEnabled),
         friends = settings.friends,
         fools = settings.fools,
         foolsMode = settings.foolsMode,
@@ -469,6 +543,7 @@ fun ChatScreen(
         onRejectDccTransfer = viewModel::rejectDccTransfer,
         onRemoveDccTransfer = viewModel::removeDccTransfer,
         onSendDccFile = viewModel::sendDccFile,
+        onSendProviderAttachment = sendProviderAttachment,
         memberNicks = memberNicks,
         knownNicks = knownNicks,
         identityRules = identityRules,
@@ -492,6 +567,7 @@ fun ChatScreen(
         },
         onOpenSearch = onOpenSearch,
         onOpenImage = onOpenImage,
+        onManageProviderSecurity = manageProviderSecurity,
         onInviteUser = {
             viewModel.ensureMembersObserved()
             inviteChannelOpen = true
@@ -741,6 +817,7 @@ fun ChatContent(
     onOpenChannelInfo: (Long) -> Unit,
     onOpenSearch: (Long) -> Unit,
     onOpenImage: (String) -> Unit,
+    onManageProviderSecurity: () -> Unit = {},
     nickNormalizer: (String) -> String,
     onSubmit: (String) -> Unit,
     onTyping: (Boolean) -> Unit,
@@ -790,6 +867,7 @@ fun ChatContent(
     onRejectDccTransfer: (Long) -> Unit = {},
     onRemoveDccTransfer: (Long) -> Unit = {},
     onSendDccFile: (Uri) -> Unit = {},
+    onSendProviderAttachment: (AttachmentSource) -> Unit = {},
     memberNicks: List<String> = emptyList(),
     knownNicks: Set<String> = emptySet(),
     identityRules: IrcIdentityRules = IrcIdentityRules(),
@@ -2243,6 +2321,17 @@ fun ChatContent(
                             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
                         }
                         DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                            if (state.isSidecar) {
+                                DropdownMenuItem(
+                                    modifier = Modifier.testTag("chat_sidecar_security"),
+                                    text = { Text(stringResource(R.string.sidecar_manage_security)) },
+                                    leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
+                                    onClick = {
+                                        overflowOpen = false
+                                        onManageProviderSecurity()
+                                    },
+                                )
+                            }
                             if (buffer?.type == BufferType.CHANNEL && buffer.joined) {
                                 val inviteEnabled = state.connState is IrcClientState.Ready
                                 DropdownMenuItem(
@@ -2894,6 +2983,8 @@ fun ChatContent(
             onDraftChanged(composerText.text)
         },
         onDirectFile = onSendDccFile,
+        providerUploadAvailable = state.isSidecar && state.sidecarsEnabled,
+        onProviderUpload = onSendProviderAttachment,
     )
     if (longDraftPrompt) {
         androidx.compose.material3.AlertDialog(
@@ -3471,6 +3562,9 @@ internal fun chatSubtitleModel(
     state: ChatState,
     context: android.content.Context,
 ): ChatSubtitleModel? {
+    if (state.isSidecar && !state.sidecarsEnabled) {
+        return ChatSubtitleModel.Text(context.getString(R.string.sidecar_disabled_in_labs))
+    }
     when (val connection = state.connState) {
         null -> return null
 
@@ -3492,6 +3586,15 @@ internal fun chatSubtitleModel(
         return ChatSubtitleModel.Text(typingText(context, state.typingNicks))
     }
     val buffer = state.buffer ?: return null
+    val securityText =
+        when (buffer.sidecarSecurity) {
+            SidecarSecurityState.PLAINTEXT -> R.string.sidecar_security_plaintext
+            SidecarSecurityState.E2EE_UNVERIFIED -> R.string.sidecar_security_unverified
+            SidecarSecurityState.E2EE_VERIFIED -> R.string.sidecar_security_verified
+            SidecarSecurityState.BLOCKED -> R.string.sidecar_security_blocked
+            null -> null
+        }
+    if (securityText != null) return ChatSubtitleModel.Text(context.getString(securityText))
     return if (buffer.type == BufferType.CHANNEL && state.memberCount != null) {
         val n = state.memberCount
         ChatSubtitleModel.Text(context.resources.getQuantityString(R.plurals.chat_member_count, n, n))

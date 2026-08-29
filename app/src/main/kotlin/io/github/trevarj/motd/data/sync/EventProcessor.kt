@@ -7,6 +7,7 @@ import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.bouncer.redactBouncerServReply
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.ConnectionTransport
 import io.github.trevarj.motd.data.db.DccAddressKind
 import io.github.trevarj.motd.data.db.DccDirection
 import io.github.trevarj.motd.data.db.DccTransferEntity
@@ -51,6 +52,8 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.replyReference
 import io.github.trevarj.motd.irc.proto.unreactionValue
 import io.github.trevarj.motd.service.IrcEventSink
+import io.github.trevarj.motd.sidecar.SidecarContract
+import io.github.trevarj.motd.sidecar.SidecarSecurityState
 import kotlinx.coroutines.CancellationException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -707,6 +710,24 @@ class EventProcessor
                 !sourceIsSelf && type != BufferType.SERVER &&
                     (replyMentionsSelf || st.containsSelfMention(storedText))
             val identitySender = st.normalize(e.source.nick)
+            val sidecarSecurity = e.ctx.sidecarSecurity()
+            val displaySender =
+                if (sidecarSecurity != null) {
+                    userDao.byNick(networkId, identitySender)?.realname ?: e.source.nick
+                } else {
+                    e.source.nick
+                }
+            if (sidecarSecurity != null) {
+                val room = bufferDao.observeById(bufferId)
+                val displayName =
+                    if (isDm) {
+                        userDao.byNick(networkId, st.normalize(bufferName))?.realname ?: room?.displayName ?: bufferName
+                    } else {
+                        room?.displayName ?: bufferName
+                    }
+                bufferDao.updateSidecarDisplayName(bufferId, bufferName, displayName)
+                bufferDao.updateSidecarSecurity(bufferId, sidecarSecurity)
+            }
 
             traceMessageDecision("message_classified", networkId, bufferId, e, origin) {
                 mapOf(
@@ -720,7 +741,7 @@ class EventProcessor
                     bufferId = bufferId,
                     msgid = e.ctx.msgid,
                     serverTime = e.ctx.serverTime,
-                    sender = e.source.nick,
+                    sender = displaySender,
                     normalizedActor = identitySender,
                     senderAccount = e.ctx.account,
                     kind = kindOf(e.kind),
@@ -732,6 +753,7 @@ class EventProcessor
                     replyToMsgid = e.replyToMsgid,
                     dedupKey = SemanticIdentity.keyFor(e.ctx, identitySender, ircFormattedText ?: storedText),
                     serverTimeAuthoritative = e.ctx.serverTimeSource == ServerTimeSource.TAG,
+                    sidecarSecurity = sidecarSecurity,
                 )
 
             run {
@@ -857,11 +879,17 @@ class EventProcessor
         ) {
             val st = stateFor(networkId)
             val route = resolveReactionRoute(networkId, e.source.nick, e.target, historyTarget, st)
+            val displaySource =
+                if (networkDao.byId(networkId)?.connectionTransport == ConnectionTransport.SIDECAR) {
+                    userDao.byNick(networkId, st.normalize(e.source.nick))?.realname ?: e.source.nick
+                } else {
+                    e.source.nick
+                }
             // Peer typing is routed to the tracker, never persisted.
             if (origin == EventOrigin.LIVE && !route.sourceIsSelf) {
                 e.typing?.let { typingState ->
                     val bufferId = ensureBuffer(networkId, route.bufferName, route.type, st)
-                    typing.onTyping(bufferId, e.source.nick, typingState)
+                    typing.onTyping(bufferId, displaySource, typingState)
                 }
             }
             // React rows are emoji-specific; an account-tag echo also removes the optimistic nick key.
@@ -903,7 +931,7 @@ class EventProcessor
                         bufferId = bufferId,
                         targetMsgid = targetMsgid,
                         actorKey = actorKey,
-                        sender = e.source.nick,
+                        sender = displaySource,
                         emoji = emoji,
                         serverTime = e.ctx.serverTime,
                         targetEventId = targetEvent?.id,
@@ -3613,6 +3641,7 @@ class EventProcessor
             origin: EventOrigin,
             historyTarget: String?,
         ) {
+            if (applySidecarMetadata(networkId, e.message)) return
             if (removeReaction(networkId, e.message, origin, historyTarget)) return
             if (origin != EventOrigin.LIVE) return
             val response = commandResponse(networkId, e.message.tags["label"])
@@ -3635,6 +3664,38 @@ class EventProcessor
                     .joinToString(" ")
                     .trim()
             insertSystem(bufferId, serverCtx(), MessageKind.SERVER_INFO, "", text)
+        }
+
+        private suspend fun applySidecarMetadata(
+            networkId: Long,
+            message: io.github.trevarj.motd.irc.proto.IrcMessage,
+        ): Boolean {
+            if (message.command != "METADATA") return false
+            val target = message.params.getOrNull(0) ?: return true
+            val key = message.params.getOrNull(1) ?: return true
+            val value = message.params.getOrNull(3)
+            when (key) {
+                "display-name" -> {
+                    val displayName = value?.takeIf(String::isNotBlank) ?: return true
+                    val room = bufferDao.byWireTarget(networkId, target)
+                    if (room != null) {
+                        bufferDao.updateSidecarDisplayName(room.id, target, displayName)
+                    } else {
+                        val normalized = stateFor(networkId).normalize(target)
+                        val existing = userDao.byNick(networkId, normalized)
+                        userDao.upsert(
+                            existing?.copy(realname = displayName)
+                                ?: UserEntity(networkId = networkId, nick = normalized, realname = displayName),
+                        )
+                    }
+                }
+
+                SidecarContract.SECURITY_METADATA_KEY -> {
+                    val room = bufferDao.byWireTarget(networkId, target) ?: return true
+                    bufferDao.updateSidecarSecurity(room.id, value.toSidecarSecurity())
+                }
+            }
+            return key == "display-name" || key == SidecarContract.SECURITY_METADATA_KEY
         }
 
         /** Consume Raw `draft/unreact` at the sole reaction-persistence boundary. */
@@ -4519,6 +4580,17 @@ class EventProcessor
             val NOT_IN_CHANNEL_NUMERICS: Set<String> = setOf("403", "442")
             const val DCC_OFFER_EXPIRY_MS: Long = 5 * 60 * 1000
         }
+    }
+
+private fun MessageContext.sidecarSecurity(): SidecarSecurityState? = extensionTags[SidecarContract.SECURITY_MESSAGE_TAG].toSidecarSecurity()
+
+private fun String?.toSidecarSecurity(): SidecarSecurityState? =
+    when (this?.lowercase()) {
+        "plaintext" -> SidecarSecurityState.PLAINTEXT
+        "e2ee-unverified" -> SidecarSecurityState.E2EE_UNVERIFIED
+        "e2ee-verified" -> SidecarSecurityState.E2EE_VERIFIED
+        "blocked" -> SidecarSecurityState.BLOCKED
+        else -> null
     }
 
 private fun parsePrefixModes(value: String?): Map<Char, Char> {
