@@ -43,6 +43,7 @@ class ChatJumpResolver(
      * @param msgid       exact message id to land on and highlight; null → time approximation
      * @param timeMs      epoch-ms of the target (used for AROUND fetch and null-msgid approx)
      * @param bufferName  IRC target name (channel/nick) for the AROUND fetch; null disables it
+     * @param eventId     exact local event ID; when found it also drives highlighting for msgid-less rows
      */
     suspend fun resolve(
         bufferId: Long,
@@ -112,4 +113,5 @@ private fun io.github.trevarj.motd.data.db.MessageEntity.toPositionTarget(
         expectedMsgid = expectedMsgid,
         serverTime = serverTime,
         highlightMsgid = highlightMsgid,
+        highlightEventId = id,
     )

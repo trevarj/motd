@@ -377,6 +377,7 @@ fun MessageList(
     // interprets against its own older neighbor, never a list item of its own (see the items block).
     timelineSeams: TimelineSeamState = TimelineSeamState(),
     onLoadGap: (Long) -> Unit = {},
+    highlightEventId: Long? = null,
 ) {
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
     // Keep the user's expanded JOIN/PART runs above the volatile Paging rows. A history sync may
@@ -562,13 +563,13 @@ fun MessageList(
             }
 
             // Deep-jump pulse: fade a highlight tint in then back out on the target row (~1.6s).
-            val highlighted = highlightMsgid != null && msg.msgid == highlightMsgid
+            val highlighted = messageHighlightMatches(msg, highlightMsgid, highlightEventId)
             // Deep jumps are rare. Do not install an animation state object in every ordinary row;
             // only the single target needs one while the highlight is active.
             val highlightColor =
                 if (highlighted) {
-                    val pulse = remember(msg.id, highlightMsgid) { Animatable(0f) }
-                    LaunchedEffect(msg.id, highlightMsgid) {
+                    val pulse = remember(msg.id, highlightMsgid, highlightEventId) { Animatable(0f) }
+                    LaunchedEffect(msg.id, highlightMsgid, highlightEventId) {
                         pulse.animateTo(1f, tween(durationMillis = 800))
                         pulse.animateTo(0f, tween(durationMillis = 800))
                     }

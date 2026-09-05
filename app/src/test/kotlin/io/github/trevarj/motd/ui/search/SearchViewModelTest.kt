@@ -12,23 +12,19 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.SearchHit
-import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.LocalSearchResult
 import io.github.trevarj.motd.data.repo.SearchCoverage
 import io.github.trevarj.motd.data.repo.SearchRepository
-import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcCommandException
 import io.github.trevarj.motd.irc.client.IrcTimeoutException
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.ext.SOJU_SEARCH_MAX_LIMIT
 import io.github.trevarj.motd.irc.ext.SearchResultKind
 import io.github.trevarj.motd.irc.ext.SearchResultMessage
-import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
-import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -693,13 +689,17 @@ class SearchViewModelTest {
                 repo.emit("alpha", null, listOf(hit(1, "global alpha result")))
                 vm.onQueryChange("alpha")
                 runCurrent()
-                awaitItem() // global loading
                 advanceTimeBy(250)
                 runCurrent()
+                val globalResults =
+                    awaitStateWhere {
+                        it.rawQuery == "alpha" &&
+                            it.scope == SearchScope.ALL &&
+                            it.groups.isNotEmpty()
+                    }
                 assertEquals(
                     "global alpha result",
-                    awaitItem()
-                        .groups
+                    globalResults.groups
                         .single()
                         .hits
                         .single()
@@ -707,10 +707,13 @@ class SearchViewModelTest {
                 )
 
                 vm.onScopeChange(SearchScope.CURRENT)
-                runCurrent()
-                val currentLoading = awaitItem()
-                assertEquals(SearchScope.CURRENT, currentLoading.scope)
-                assertTrue(currentLoading.searching)
+                val currentLoading =
+                    awaitStateWhere {
+                        it.rawQuery == "alpha" &&
+                            it.scope == SearchScope.CURRENT &&
+                            it.searching &&
+                            it.groups.isEmpty()
+                    }
                 assertTrue(currentLoading.groups.isEmpty())
 
                 repo.emit("alpha", null, listOf(hit(1, "late global alpha result")))
@@ -721,8 +724,12 @@ class SearchViewModelTest {
                 runCurrent()
                 repo.emit("alpha", 7L, listOf(hit(7, "current alpha result")))
                 runCurrent()
-                val currentResults = awaitItem()
-                assertEquals(SearchScope.CURRENT, currentResults.scope)
+                val currentResults =
+                    awaitStateWhere {
+                        it.rawQuery == "alpha" &&
+                            it.scope == SearchScope.CURRENT &&
+                            it.groups.isNotEmpty()
+                    }
                 assertTrue(!currentResults.searching)
                 assertEquals(
                     "current alpha result",
@@ -829,7 +836,11 @@ class SearchViewModelTest {
                 runCurrent()
                 assertEquals(
                     SearchUiState(coverage = SearchCoverage.DeviceOnly),
-                    awaitStateWhere { it.groups.isEmpty() },
+                    awaitStateWhere {
+                        it.rawQuery.isEmpty() &&
+                            it.groups.isEmpty() &&
+                            it.coverage == SearchCoverage.DeviceOnly
+                    },
                 )
 
                 repo.emit("alpha", null, listOf(hit(1, "late alpha result")))
@@ -868,21 +879,26 @@ class SearchViewModelTest {
     }
 
     @Test
-    fun buffer_matches_populate_only_for_the_all_scope() =
+    fun buffer_matches_populate_only_for_all_scope() =
         runTest {
             val repo = ControlledSearchRepository()
             repo.emit("motd", null, emptyList())
-            val buffers = FakeBufferRepository(chatList = listOf(chatListRow(9, "#motd")))
-            val vm = viewModel(repo, buffers = buffers)
+            val buffers = FakeBufferRepository(buffer(), chatList = listOf(chatListRow(9, "#motd")))
+            val vm = viewModel(repo, buffers = buffers).also { it.init(BUFFER_ID) }
 
             vm.state.test {
-                awaitItem()
+                awaitStateWhere { it.hasBufferScope && it.scope == SearchScope.CURRENT }
+                vm.onScopeChange(SearchScope.ALL)
                 vm.onQueryChange("motd")
                 runCurrent()
                 advanceTimeBy(250)
                 runCurrent()
                 val allScope = awaitStateWhere { it.bufferMatches.isNotEmpty() }
                 assertEquals(listOf(9L), allScope.bufferMatches.map(ChatListRow::bufferId))
+
+                vm.onScopeChange(SearchScope.CURRENT)
+                runCurrent()
+                assertEquals(emptyList<ChatListRow>(), awaitStateWhere { it.scope == SearchScope.CURRENT }.bufferMatches)
 
                 vm.onScopeChange(SearchScope.SERVER)
                 runCurrent()

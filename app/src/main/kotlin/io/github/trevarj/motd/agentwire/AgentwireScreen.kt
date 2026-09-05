@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.agentwire
 
 import android.annotation.SuppressLint
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -68,6 +69,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -76,6 +78,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -84,10 +87,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -96,10 +101,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.agentwire.AgentwireTopicDefect
+import io.github.trevarj.motd.irc.format.markdownToIrcFormatting
 import io.github.trevarj.motd.ui.chat.ScrollToBottomFab
 import io.github.trevarj.motd.ui.chat.shouldShowNewestFab
 import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.components.mircFormattedText
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import kotlinx.coroutines.delay
@@ -117,6 +125,9 @@ fun AgentwireGateScreen(
     ordinaryChat: @Composable () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var composer by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
     when {
         state.gate == AgentwireGate.LOADING -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -132,6 +143,9 @@ fun AgentwireGateScreen(
             AgentwireScreen(
                 state = state,
                 viewModel = viewModel,
+                composer = composer,
+                onComposerChange = { composer = it },
+                onComposerAccepted = { sent -> if (composer == sent) composer = TextFieldValue("") },
                 onBack = onBack,
                 showBack = showBack,
                 showComposerEmoji = showComposerEmoji,
@@ -246,6 +260,9 @@ internal fun workspaceRows(
 private fun AgentwireScreen(
     state: AgentwireUiState,
     viewModel: AgentwireViewModel,
+    composer: TextFieldValue,
+    onComposerChange: (TextFieldValue) -> Unit,
+    onComposerAccepted: (TextFieldValue) -> Unit,
     onBack: () -> Unit,
     showBack: Boolean,
     showComposerEmoji: Boolean,
@@ -254,9 +271,7 @@ private fun AgentwireScreen(
     var sheet by remember { mutableStateOf<AgentwireSheet?>(null) }
     var questionRequestId by remember { mutableStateOf<String?>(null) }
     var overflow by remember { mutableStateOf(false) }
-    var composer by rememberSaveable(stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(TextFieldValue(""))
-    }
+    val contextReview by viewModel.contextReview.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val stamp = agentwireTimelineStamp(state.timeline, state.requests.size)
@@ -268,6 +283,7 @@ private fun AgentwireScreen(
     // explicit user toggle survives tool lifecycle transitions. Reset with the bound session.
     val expandedKeys = remember(state.activeSid) { mutableStateMapOf<String, Boolean>() }
     val rows = remember(state.timeline) { agentwireDisplayRows(state.timeline) }
+    val sessionRows = agentwireDrawerRows(state)
 
     // A plain animateScrollToItem(last) parks at the TOP of a taller-than-viewport streaming
     // card, so a second phase closes any remaining gap to the last item's bottom edge.
@@ -316,12 +332,15 @@ private fun AgentwireScreen(
     LaunchedEffect(drawerState.isOpen) {
         if (drawerState.isOpen) viewModel.listSessions(live = true)
     }
+    BackHandler(enabled = contextReview?.destination != null && !drawerState.isOpen) {
+        viewModel.keepContextForLater()
+    }
     ModalNavigationDrawer(
         drawerState = drawerState,
         modifier = Modifier.testTag("agentwire_drawer"),
         drawerContent = {
             AgentwireSessionDrawer(
-                rows = agentwireDrawerRows(state),
+                rows = sessionRows,
                 attached = state.activeSid != null,
                 actions = state.actions,
                 onSelect = { row ->
@@ -359,7 +378,7 @@ private fun AgentwireScreen(
                         navigationIcon = {
                             Row {
                                 if (showBack) {
-                                    IconButton(onClick = onBack) {
+                                    IconButton(onClick = { if (contextReview?.destination != null) viewModel.keepContextForLater() else onBack() }) {
                                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                                     }
                                 }
@@ -532,19 +551,45 @@ private fun AgentwireScreen(
                             )
                         }
                         if (state.gate == AgentwireGate.ACTIVE) {
-                            AgentwireComposer(
-                                value = composer,
-                                state = state,
-                                showComposerEmoji = showComposerEmoji,
-                                showComposerFormattingTools = showComposerFormattingTools,
-                                onValueChange = { composer = it },
-                                onSend = {
-                                    viewModel.submit(composer.text)
-                                    composer = TextFieldValue("")
-                                    scope.launch { scrollToTimelineBottom(animate = true) }
-                                },
-                                onCancel = viewModel::cancelTurn,
-                            )
+                            contextReview?.let { review ->
+                                AgentwireContextCard(
+                                    review = review,
+                                    state = state,
+                                    sessionName = sessionRows.firstOrNull { it.attached }?.title,
+                                    canReview = viewModel.canReviewContext(),
+                                    onReview = viewModel::reviewContext,
+                                    onKeep = viewModel::keepContextForLater,
+                                    onDiscard = viewModel::discardContext,
+                                    onSessions = { scope.launch { drawerState.open() } },
+                                )
+                            }
+                            val reviewedContext = contextReview?.takeIf { it.destination != null }
+                            if (reviewedContext != null) {
+                                // Context stays process-local, including the shared field's internal saver.
+                                CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
+                                    AgentwireContextComposer(
+                                        review = reviewedContext,
+                                        viewModel = viewModel,
+                                        showComposerEmoji = showComposerEmoji,
+                                        showComposerFormattingTools = showComposerFormattingTools,
+                                    )
+                                }
+                            } else {
+                                AgentwireComposer(
+                                    value = composer,
+                                    state = state,
+                                    showComposerEmoji = showComposerEmoji,
+                                    showComposerFormattingTools = showComposerFormattingTools,
+                                    onValueChange = onComposerChange,
+                                    onSend = {
+                                        viewModel.submit(composer.text) {
+                                            onComposerAccepted(composer)
+                                            scope.launch { scrollToTimelineBottom(animate = true) }
+                                        }
+                                    },
+                                    onCancel = viewModel::cancelTurn,
+                                )
+                            }
                         }
                     }
                 }
@@ -996,6 +1041,101 @@ private fun AgentwireBlocked(
     }
 }
 
+@Composable
+private fun AgentwireContextCard(
+    review: AgentwireContextReview,
+    state: AgentwireUiState,
+    sessionName: String?,
+    canReview: Boolean,
+    onReview: () -> Unit,
+    onKeep: () -> Unit,
+    onDiscard: () -> Unit,
+    onSessions: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("agentwire_context_review")) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(stringResource(R.string.agentwire_context_source, review.share.sourceLabel), style = MaterialTheme.typography.titleSmall)
+            Text(review.share.coverage, style = MaterialTheme.typography.bodySmall)
+            Text(
+                stringResource(R.string.agentwire_context_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            val selected = review.destination
+            if (selected != null) {
+                Text(
+                    stringResource(R.string.agentwire_context_selected, selected.channel, sessionName ?: selected.sid, selected.backend),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                val bytes =
+                    remember(review.share.prompt) {
+                        review.share.prompt
+                            .toByteArray(Charsets.UTF_8)
+                            .size
+                    }
+                Text(
+                    stringResource(R.string.agentwire_context_bytes, bytes),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (bytes > AGENTWIRE_MAX_PROMPT_BYTES) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = onKeep) { Text(stringResource(R.string.agentwire_context_keep)) }
+            } else {
+                if (state.activeSid == null || !canReview) {
+                    Text(
+                        stringResource(
+                            if (state.activeSid == null) R.string.agentwire_context_session_needed else R.string.agentwire_context_not_ready,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = onReview, enabled = canReview && !review.sending, modifier = Modifier.weight(1f)) {
+                        Text(
+                            if (state.activeSid == null) {
+                                stringResource(R.string.agentwire_context_resume)
+                            } else {
+                                stringResource(R.string.agentwire_context_review, sessionName ?: state.activeSid)
+                            },
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    IconButton(onClick = onSessions) {
+                        Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.agentwire_context_session_needed))
+                    }
+                    TextButton(onClick = onDiscard, enabled = !review.sending) {
+                        Text(stringResource(R.string.agentwire_context_discard))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentwireContextComposer(
+    review: AgentwireContextReview,
+    viewModel: AgentwireViewModel,
+    showComposerEmoji: Boolean,
+    showComposerFormattingTools: Boolean,
+) {
+    var value by remember { mutableStateOf(TextFieldValue(review.share.prompt)) }
+    LaunchedEffect(review.share.prompt) {
+        if (value.text != review.share.prompt) value = TextFieldValue(review.share.prompt)
+    }
+    Composer(
+        value = value,
+        onValueChange = { if (viewModel.editContext(it.text)) value = it },
+        onSend = viewModel::submitContext,
+        enabled = !review.sending,
+        modifier = Modifier.testTag("agentwire_context_composer"),
+        placeholder = stringResource(R.string.agentwire_context_placeholder),
+        showEmojiTool = showComposerEmoji,
+        showFormattingTools = showComposerFormattingTools,
+        voiceEnabled = false,
+    )
+}
+
 @SuppressLint("HardcodedText")
 @Composable
 private fun AgentwireComposer(
@@ -1041,7 +1181,7 @@ private fun AgentwireComposer(
 
 @SuppressLint("HardcodedText")
 @Composable
-private fun AgentwireTimelineCard(
+internal fun AgentwireTimelineCard(
     item: AgentwireTimelineItem,
     actionStatus: String?,
     expandedOverride: Boolean?,
@@ -1107,9 +1247,14 @@ private fun AgentwireTimelineCard(
             }
             if (item.running) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
             if (!collapsible || expanded) {
-                item.body?.let {
+                item.body?.let { body ->
+                    val assistant = item.kind.startsWith("assistant.")
+                    val text =
+                        remember(body, assistant) {
+                            if (assistant) mircFormattedText(markdownToIrcFormatting(body)) else AnnotatedString(body)
+                        }
                     Text(
-                        it,
+                        text,
                         modifier = Modifier.padding(top = 8.dp),
                         style = MaterialTheme.typography.bodyMedium,
                     )

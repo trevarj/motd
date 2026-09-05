@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -148,6 +149,8 @@ fun MessageActionSheet(
     onRedact: () -> Unit = {},
     // SERVER buffers have no msgids/targets: reply + reactions are inert and hidden.
     isServerBuffer: Boolean = false,
+    canPrepareThreadContext: Boolean = false,
+    onPrepareThreadContext: () -> Unit = {},
 ) {
     var showGrid by remember { mutableStateOf(false) }
     val hasReactions = reactions.isNotEmpty()
@@ -253,6 +256,14 @@ fun MessageActionSheet(
                     }
 
                     ActionItem(Icons.AutoMirrored.Filled.Reply, stringResource(R.string.chat_action_reply), onReply)
+                    if (canPrepareThreadContext) {
+                        ActionItem(
+                            Icons.Outlined.AutoAwesome,
+                            stringResource(R.string.agent_context_thread),
+                            onPrepareThreadContext,
+                            modifier = Modifier.testTag("message_prepare_thread_context"),
+                        )
+                    }
                 } // end !isServerBuffer (reactions + reply hidden for SERVER buffers)
                 ActionItem(Icons.Filled.ContentCopy, stringResource(R.string.chat_action_copy), onCopy)
                 ActionItem(

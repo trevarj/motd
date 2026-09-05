@@ -17,6 +17,7 @@ import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.agentwire.AGENTWIRE_REQUIRED_CAPS
 import io.github.trevarj.motd.irc.agentwire.AGENTWIRE_TAG
 import io.github.trevarj.motd.irc.agentwire.AgentwireEnvelope
+import io.github.trevarj.motd.irc.agentwire.AgentwireReassembler
 import io.github.trevarj.motd.irc.agentwire.AgentwireTopicDefect
 import io.github.trevarj.motd.irc.agentwire.AgentwireValue
 import io.github.trevarj.motd.irc.agentwire.decodeAgentwireValue
@@ -32,6 +33,9 @@ import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.testing.NoopConnectionManager
+import io.github.trevarj.motd.ui.share.PendingShare
+import io.github.trevarj.motd.ui.share.PendingShareStore
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -41,6 +45,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -54,6 +59,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -338,18 +346,209 @@ class AgentwireSyncPhaseTest {
             assertEquals(true, gate.fields["lab_disabled"])
         }
 
+    @Test
+    fun `context waits for review and retains UTF8 overflow until explicit prompt acceptance`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val shares = PendingShareStore()
+            val prefs = FakeAgentwirePrefs()
+            shares.assignAgentContext(BUFFER_ID, PendingShare.AgentContext(99, "#source", "Draft context", "Two local messages"))
+            val viewModel = viewModel(FakeConnections(client), FakeBufferRepository(buffer(true)), pendingShares = shares, prefs = prefs)
+            viewModel.reviewContext()
+            assertNull(viewModel.contextReview.value?.destination)
+            completeSync(transport, setOf("turn.prompt", "turn.steer"), busy = true)
+            viewModel.submitContext()
+            runCurrent()
+            assertTrue(outboundEnvelopes(transport).none { it.kind.startsWith("turn.") })
+
+            viewModel.reviewContext()
+            val limit = "é".repeat(AGENTWIRE_MAX_PROMPT_BYTES / 2)
+            val oversized = limit + "a"
+            assertTrue(viewModel.editContext(oversized))
+            viewModel.submitContext()
+            runCurrent()
+            assertEquals(oversized, shares.agentContext(BUFFER_ID).value?.prompt)
+            assertNotNull(viewModel.state.value.error)
+            assertTrue(outboundEnvelopes(transport).none { it.kind.startsWith("turn.") })
+
+            assertTrue(viewModel.editContext(limit))
+            val gate = CompletableDeferred<Unit>()
+            prefs.deviceGate = gate
+            viewModel.submitContext()
+            runCurrent()
+            assertEquals(limit, shares.agentContext(BUFFER_ID).value?.prompt)
+            assertTrue(
+                viewModel.state.value.timeline
+                    .none { it.kind == "user.prompt" },
+            )
+            gate.complete(Unit)
+            runCurrent()
+
+            val prompt = outboundEnvelopes(transport).single { it.kind.startsWith("turn.") }
+            assertEquals("turn.prompt", prompt.kind)
+            assertEquals("session-1", prompt.sid)
+            assertEquals(limit, prompt.data?.string("content"))
+            assertNull(shares.agentContext(BUFFER_ID).value)
+            assertEquals(
+                limit,
+                viewModel.state.value.timeline
+                    .single { it.kind == "user.prompt" }
+                    .body,
+            )
+        }
+
+    @Test
+    fun `topic change during suspended context send retains edits and revokes review`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val shares = PendingShareStore()
+            val prefs = FakeAgentwirePrefs()
+            val buffers = FakeBufferRepository(buffer(true))
+            shares.assignAgentContext(BUFFER_ID, PendingShare.AgentContext(99, "#source", "Original context", "Two local messages"))
+            val viewModel = viewModel(FakeConnections(client), buffers, pendingShares = shares, prefs = prefs)
+            completeSync(transport, setOf("turn.prompt"))
+            viewModel.reviewContext()
+            assertTrue(viewModel.editContext("Edited context to retain"))
+            viewModel.keepContextForLater()
+            assertEquals("Edited context to retain", shares.agentContext(BUFFER_ID).value?.prompt)
+            viewModel.reviewContext()
+
+            val gate = CompletableDeferred<Unit>()
+            prefs.deviceGate = gate
+            viewModel.submitContext()
+            runCurrent()
+            buffers.buffers.value = buffer(true, topic = "Ordinary IRC channel")
+            runCurrent()
+            gate.complete(Unit)
+            runCurrent()
+
+            assertEquals(AgentwireGate.ORDINARY, viewModel.state.value.gate)
+            assertNull(viewModel.contextReview.value?.destination)
+            assertEquals("Edited context to retain", shares.agentContext(BUFFER_ID).value?.prompt)
+            assertTrue(outboundEnvelopes(transport).none { it.kind == "turn.prompt" })
+            buffers.buffers.value = buffer(true)
+            completeSync(transport, setOf("turn.prompt"))
+            viewModel.submitContext()
+            runCurrent()
+            assertNull(viewModel.contextReview.value?.destination)
+            assertTrue(outboundEnvelopes(transport).none { it.kind == "turn.prompt" })
+        }
+
+    @Test
+    fun `session change away and back and transcript override require another context review`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val shares = PendingShareStore()
+            val share = PendingShare.AgentContext(99, "#source", "Context", "Two local messages")
+            val viewModel = viewModel(FakeConnections(client), FakeBufferRepository(buffer(true)), pendingShares = shares)
+            completeSync(transport, setOf("turn.prompt"), sid = null)
+            viewModel.viewTranscript()
+            shares.assignAgentContext(BUFFER_ID, share)
+            runCurrent()
+            assertFalse(viewModel.state.value.transcriptOverride)
+            viewModel.reviewContext()
+            assertFalse(viewModel.canReviewContext())
+            assertNull(viewModel.contextReview.value?.destination)
+            transport.feed(tagMessage(BACKEND_ACCOUNT, snapshot("live", sid = "session-1")))
+            runCurrent()
+            viewModel.reviewContext()
+            assertNotNull(viewModel.contextReview.value?.destination)
+            transport.feed(tagMessage(BACKEND_ACCOUNT, snapshot("live", sid = "session-2")))
+            transport.feed(tagMessage(BACKEND_ACCOUNT, snapshot("live", sid = "session-1")))
+            runCurrent()
+            assertEquals("session-1", viewModel.state.value.activeSid)
+            assertNull(viewModel.contextReview.value?.destination)
+            viewModel.submitContext()
+            runCurrent()
+            assertTrue(outboundEnvelopes(transport).none { it.kind == "turn.prompt" })
+
+            viewModel.reviewContext()
+            viewModel.viewTranscript()
+            assertTrue(viewModel.editContext("Context edited"))
+            runCurrent()
+            assertTrue(viewModel.state.value.transcriptOverride)
+            viewModel.reviewContext()
+            viewModel.submitContext()
+            runCurrent()
+            assertNull(viewModel.contextReview.value?.destination)
+            assertEquals(share.copy(prompt = "Context edited"), shares.agentContext(BUFFER_ID).value)
+            assertTrue(outboundEnvelopes(transport).none { it.kind == "turn.prompt" })
+            viewModel.returnToHarness()
+            viewModel.submitContext()
+            runCurrent()
+            assertTrue(outboundEnvelopes(transport).none { it.kind == "turn.prompt" })
+            viewModel.reviewContext()
+            viewModel.submitContext()
+            runCurrent()
+            assertEquals("session-1", outboundEnvelopes(transport).single { it.kind == "turn.prompt" }.sid)
+            assertNull(shares.agentContext(BUFFER_ID).value)
+        }
+
+    private suspend fun TestScope.completeSync(
+        transport: RecordingTransport,
+        actions: Set<String>,
+        sid: String? = "session-1",
+        busy: Boolean = false,
+    ) {
+        advanceTimeBy(10)
+        runCurrent()
+        val syncId = syncRequests(transport).last()
+        transport.feed(tagMessage(BACKEND_ACCOUNT, hello(syncId, actions)))
+        transport.feed(tagMessage(BACKEND_ACCOUNT, snapshot(syncId, sid, busy)))
+        runCurrent()
+    }
+
+    @Test
+    fun `revoking context review cancels a send waiting behind another transport write`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val shares = PendingShareStore()
+            val share = PendingShare.AgentContext(99, "#source", "Private context", "Two local messages")
+            shares.assignAgentContext(BUFFER_ID, share)
+            val viewModel = viewModel(FakeConnections(client), FakeBufferRepository(buffer(true)), pendingShares = shares)
+            completeSync(transport, setOf("turn.prompt"))
+            viewModel.reviewContext()
+            val gate = CompletableDeferred<Unit>()
+            transport.sendGate = gate
+            val occupying =
+                launch {
+                    client.sendAtomicallyIfConnected(listOf(IrcMessage(command = "TAGMSG", params = listOf("#other"))))
+                }
+            runCurrent()
+            assertFalse(occupying.isCompleted)
+            viewModel.submitContext()
+            runCurrent()
+            assertTrue(viewModel.contextReview.value?.sending == true)
+            viewModel.viewTranscript()
+            gate.complete(Unit)
+            runCurrent()
+            occupying.join()
+
+            assertTrue(outboundEnvelopes(transport).none { it.kind == "turn.prompt" })
+            assertEquals(share, shares.agentContext(BUFFER_ID).value)
+            assertNull(viewModel.contextReview.value?.destination)
+            assertFalse(viewModel.contextReview.value?.sending == true)
+        }
+
     private fun TestScope.viewModel(
         connections: FakeConnections,
         buffers: FakeBufferRepository,
         diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
         lab: Boolean = true,
+        pendingShares: PendingShareStore = PendingShareStore(),
+        prefs: AgentwirePrefs = FakeAgentwirePrefs(lab),
     ): AgentwireViewModel =
         AgentwireViewModel(
             savedStateHandle = SavedStateHandle(mapOf("bufferId" to BUFFER_ID)),
-            prefs = FakeAgentwirePrefs(lab),
+            prefs = prefs,
             buffers = buffers,
             connections = connections,
             diagnostics = diagnostics,
+            pendingShares = pendingShares,
             clock = AppClock { testScheduler.currentTime },
         )
 
@@ -389,11 +588,17 @@ class AgentwireSyncPhaseTest {
         return client
     }
 
-    private fun outboundEnvelopes(transport: RecordingTransport): List<AgentwireEnvelope> =
-        transport.sent.mapNotNull { line ->
+    private fun outboundEnvelopes(transport: RecordingTransport): List<AgentwireEnvelope> {
+        val reassembler = AgentwireReassembler()
+        return transport.sent.mapNotNull { line ->
             val tag = runCatching { IrcMessage.parse(line) }.getOrNull()?.tags?.get(AGENTWIRE_TAG) ?: return@mapNotNull null
-            (decodeAgentwireValue(tag).getOrNull() as? AgentwireValue.Envelope)?.value
+            when (val value = decodeAgentwireValue(tag).getOrNull()) {
+                is AgentwireValue.Envelope -> value.value
+                is AgentwireValue.Fragment -> reassembler.accept(value.value).getOrThrow()
+                null -> null
+            }
         }
+    }
 
     /** Ids of the `sync.request` envelopes this device actually wrote to the wire. */
     private fun syncRequests(transport: RecordingTransport) = outboundEnvelopes(transport).filter { it.kind == "sync.request" }.map { it.id }
@@ -428,17 +633,25 @@ class AgentwireSyncPhaseTest {
             },
     )
 
-    private fun snapshot(reply: String) =
-        AgentwireEnvelope(
-            kind = "channel.snapshot",
-            type = "event",
-            id = UUID.randomUUID().toString(),
-            at = 2,
-            instance = "bridge",
-            epoch = "epoch-1",
-            reply = reply,
-            data = buildJsonObject { put("binding", buildJsonObject { put("sid", "session-1") }) },
-        )
+    private fun snapshot(
+        reply: String,
+        sid: String? = "session-1",
+        busy: Boolean = false,
+    ) = AgentwireEnvelope(
+        kind = "channel.snapshot",
+        type = "event",
+        id = UUID.randomUUID().toString(),
+        at = 2,
+        instance = "bridge",
+        epoch = "epoch-1",
+        reply = reply,
+        data =
+            buildJsonObject {
+                sid?.let { put("binding", buildJsonObject { put("sid", it) }) }
+                put("busy", busy)
+                if (busy) put("settings", buildJsonObject { put("delivery", "steer") })
+            },
+    )
 
     private fun actionFailed(
         reply: String,
@@ -456,12 +669,14 @@ class AgentwireSyncPhaseTest {
     private class RecordingTransport : IrcTransport {
         private val inbound = Channel<String>(Channel.UNLIMITED)
         val sent = mutableListOf<String>()
+        var sendGate: CompletableDeferred<Unit>? = null
 
         override suspend fun connect() = Unit
 
         override val incoming = inbound.consumeAsFlow()
 
         override suspend fun send(line: String) {
+            sendGate?.await()
             sent += line
         }
 
@@ -500,6 +715,7 @@ class AgentwireSyncPhaseTest {
         lab: Boolean = true,
     ) : AgentwirePrefs(ApplicationProvider.getApplicationContext<Context>()) {
         override val enabled: Flow<Boolean> = flowOf(lab)
+        var deviceGate: CompletableDeferred<Unit>? = null
 
         override suspend fun setEnabled(enabled: Boolean) = Unit
 
@@ -514,7 +730,10 @@ class AgentwireSyncPhaseTest {
             backend: String?,
         ) = Unit
 
-        override suspend fun deviceId(): String = "device-under-test"
+        override suspend fun deviceId(): String {
+            deviceGate?.await()
+            return "device-under-test"
+        }
     }
 
     private class FakeBufferRepository(

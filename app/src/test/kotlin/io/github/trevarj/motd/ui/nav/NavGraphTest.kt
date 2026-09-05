@@ -94,6 +94,32 @@ class NavGraphTest {
         assertEquals(listOf(5L, 7L), chatIds)
     }
 
+    @Test
+    fun `context handoff preserves source draft for same and different destinations`() {
+        for (destination in listOf(5L, 7L)) {
+            val controller =
+                NavHostController(ApplicationProvider.getApplicationContext<Context>()).apply {
+                    setLifecycleOwner(ResumedOwner())
+                    setViewModelStore(ViewModelStore())
+                    navigatorProvider.addNavigator(ComposeNavigator())
+                    graph =
+                        createGraph(startDestination = ChatListRoute) {
+                            composable<ChatListRoute> {}
+                            composable<ChatRoute> {}
+                            composable<SharePickerRoute> {}
+                        }
+                }
+            controller.navigate(ChatRoute(5))
+            controller.currentBackStackEntry!!.savedStateHandle["draft"] = "unsent original"
+            controller.navigate(SharePickerRoute)
+            controller.completeShareNavigation(destination, preserveSourceChat = true)
+            assertEquals(destination, controller.currentBackStackEntry!!.toRoute<ChatRoute>().bufferId)
+            if (destination != 5L) assertTrue(controller.popBackStack())
+            assertEquals(5L, controller.currentBackStackEntry!!.toRoute<ChatRoute>().bufferId)
+            assertEquals("unsent original", controller.currentBackStackEntry!!.savedStateHandle.get<String>("draft"))
+        }
+    }
+
     private class ResumedOwner : LifecycleOwner {
         private val registry = LifecycleRegistry(this).apply { currentState = Lifecycle.State.RESUMED }
         override val lifecycle: Lifecycle = registry

@@ -56,6 +56,14 @@ flowchart TD
   caches and never enter IRC history. Legacy voice settings survive migration;
   retired text-model imports remain unused in private storage rather than being
   automatically deleted.
+- When Agentwire Labs is enabled, Agentwire Summary prepares catch-up or thread
+  context for an existing session. Frozen visible messages and coverage disclosures stay in memory until the user
+  chooses an Agentwire channel, reviews its authenticated session, and presses
+  Send. Context never enters ordinary IRC drafts. Sending shares it with that
+  channel and its history, and the configured agent/model provider. Replies use
+  the normal harness, converting supported Markdown to IRC formatting for display
+  while retaining the original text. Agentwire uses its own backend credentials,
+  not a motd subscription gateway. Search remains keyword-based; there is no semantic index.
 - Channel watch follows one canonical channel across redirects until its saved
   deadline (or until stopped). It admits live PRIVMSG/ACTION notifications and
   overrides mute, including already-qualifying push mentions; it does not request

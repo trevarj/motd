@@ -14,6 +14,14 @@ sealed interface PendingShare {
         val uri: Uri,
         val mimeType: String?,
     ) : PendingShare
+
+    /** Sensitive source context: only the Agentwire harness may review or send this payload. */
+    data class AgentContext(
+        val originBufferId: Long,
+        val sourceLabel: String,
+        val prompt: String,
+        val coverage: String,
+    ) : PendingShare
 }
 
 /**

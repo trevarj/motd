@@ -1146,6 +1146,13 @@ data class MuteBacklogSuppression(
     val previousFloorTime: Long?,
 )
 
+data class ThreadTraversalRow(
+    @Embedded val message: TimelineEventEntity,
+    val traversalDepth: Int,
+    val traversalCycle: Boolean,
+    val traversalVisible: Boolean,
+)
+
 @Dao
 interface MessageDao {
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, timelineOrder DESC, id DESC")
@@ -1168,6 +1175,12 @@ interface MessageDao {
 
     @RawQuery
     suspend fun rawMessage(query: SupportSQLiteQuery): MessageEntity?
+
+    @RawQuery
+    suspend fun rawMessages(query: SupportSQLiteQuery): List<MessageEntity>
+
+    @RawQuery
+    suspend fun rawThreadRows(query: SupportSQLiteQuery): List<ThreadTraversalRow>
 
     /**
      * As [rawMessage], but re-run whenever the row set changes. Seam placement needs the newest
@@ -2582,6 +2595,45 @@ interface HistoryBackfillCursorDao {
 interface HistoryGapDao {
     @Query("SELECT * FROM history_gaps WHERE roomId = :roomId ORDER BY olderServerTime")
     suspend fun forRoom(roomId: RoomId): List<HistoryGapEntity>
+
+    /**
+     * Whether any stored gap's open edge interval overlaps ([lowerTime], [upperTime]).
+     * An unidentified equal-time edge is conservatively overlapping.
+     */
+    @Query(
+        """SELECT EXISTS(
+               SELECT 1 FROM history_gaps g
+               WHERE g.roomId = :roomId
+                 AND (
+                   g.newerServerTime > :lowerTime OR
+                   (g.newerServerTime = :lowerTime AND (
+                     g.newerEventId IS NULL OR
+                     COALESCE(g.newerTimelineOrder, g.newerEventId) > :lowerOrder OR
+                     (COALESCE(g.newerTimelineOrder, g.newerEventId) = :lowerOrder
+                       AND g.newerEventId > :lowerEventId)
+                   ))
+                 )
+                 AND (
+                   g.olderServerTime < :upperTime OR
+                   (g.olderServerTime = :upperTime AND (
+                     g.olderEventId IS NULL OR
+                     COALESCE(g.olderTimelineOrder, g.olderEventId) < :upperOrder OR
+                     (COALESCE(g.olderTimelineOrder, g.olderEventId) = :upperOrder
+                       AND g.olderEventId < :upperEventId)
+                   ))
+                 )
+               LIMIT 1
+           )""",
+    )
+    suspend fun hasIntersecting(
+        roomId: RoomId,
+        lowerTime: Long,
+        lowerOrder: Long,
+        lowerEventId: TimelineEventId,
+        upperTime: Long,
+        upperOrder: Long,
+        upperEventId: TimelineEventId,
+    ): Boolean
 
     @Query("SELECT * FROM history_gaps WHERE roomId = :roomId ORDER BY olderServerTime")
     fun observeForRoom(roomId: RoomId): Flow<List<HistoryGapEntity>>

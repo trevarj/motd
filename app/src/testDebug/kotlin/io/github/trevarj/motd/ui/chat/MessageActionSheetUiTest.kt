@@ -68,11 +68,35 @@ class MessageActionSheetUiTest {
         compose.runOnIdle { assertTrue(requested) }
     }
 
+    @Test
+    fun threadContextActionInvokesPreparation() {
+        var requested = false
+        render(canPrepareThreadContext = true, onPrepareThreadContext = { requested = true })
+
+        compose.onNodeWithTag("message_prepare_thread_context").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertTrue(requested) }
+    }
+
+    @Test
+    fun threadContextActionStaysHiddenWithoutEligibleContext() {
+        render()
+        compose.onNodeWithTag("message_prepare_thread_context").assertDoesNotExist()
+    }
+
+    @Test
+    fun threadContextActionStaysHiddenOnServer() {
+        render(canPrepareThreadContext = true, isServerBuffer = true)
+        compose.onNodeWithTag("message_prepare_thread_context").assertDoesNotExist()
+    }
+
     @OptIn(ExperimentalMaterial3Api::class)
     private fun render(
         reactions: List<ReactionChip> = emptyList(),
         canRedact: Boolean = false,
         onRedact: () -> Unit = {},
+        canPrepareThreadContext: Boolean = false,
+        onPrepareThreadContext: () -> Unit = {},
+        isServerBuffer: Boolean = false,
     ) {
         compose.setContent {
             MotdTheme {
@@ -87,6 +111,9 @@ class MessageActionSheetUiTest {
                     onShare = {},
                     canRedact = canRedact,
                     onRedact = onRedact,
+                    canPrepareThreadContext = canPrepareThreadContext,
+                    onPrepareThreadContext = onPrepareThreadContext,
+                    isServerBuffer = isServerBuffer,
                 )
             }
         }

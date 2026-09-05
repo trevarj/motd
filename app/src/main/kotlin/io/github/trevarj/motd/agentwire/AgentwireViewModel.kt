@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.di.AppClock
@@ -22,6 +23,9 @@ import io.github.trevarj.motd.irc.client.canSendClientTag
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.ui.nav.ChatRoute
+import io.github.trevarj.motd.ui.share.PendingShare
+import io.github.trevarj.motd.ui.share.PendingShareStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -71,6 +75,25 @@ internal fun agentwireExpansionNeedsLoad(
     path: String,
 ): Boolean = path !in state.workspaceChildren || path !in state.loadedSessionDirectories
 
+internal data class AgentwireContextDestination(
+    val networkId: Long,
+    val target: String,
+    val topic: String,
+    val channel: String,
+    val controllerAccount: String,
+    val backendAccount: String,
+    val backend: String,
+    val sid: String,
+    val epoch: String,
+    val client: IrcClient,
+)
+
+internal data class AgentwireContextReview(
+    val share: PendingShare.AgentContext,
+    val destination: AgentwireContextDestination? = null,
+    val sending: Boolean = false,
+)
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class AgentwireViewModel
@@ -81,6 +104,7 @@ class AgentwireViewModel
         private val buffers: BufferRepository,
         private val connections: ConnectionManager,
         private val diagnostics: DiagnosticLogger,
+        private val pendingShares: PendingShareStore,
         clock: AppClock,
     ) : ViewModel() {
         private val route = savedStateHandle.toRoute<ChatRoute>()
@@ -96,6 +120,7 @@ class AgentwireViewModel
         val logRevision: StateFlow<Long> = _logRevision.asStateFlow()
         private var sessionJob: Job? = null
         private var syncJob: Job? = null
+        private var contextSendJob: Job? = null
         private var client: IrcClient? = null
         private var startedOnce = false
         private var sendFailureStage = "transport"
@@ -103,8 +128,22 @@ class AgentwireViewModel
         private var untrustedRecorded = false
         private var joinTarget: Pair<Long, String>? = null
         private val autoReviewConfirmedSessions = HashSet<String>()
+        private var contextBuffer: BufferEntity? = null
+        private val assignedContext = pendingShares.agentContext(route.bufferId)
+        private val _contextReview = MutableStateFlow(assignedContext.value?.let(::AgentwireContextReview))
+        internal val contextReview: StateFlow<AgentwireContextReview?> = _contextReview.asStateFlow()
 
         init {
+            viewModelScope.launch {
+                assignedContext.collect { share ->
+                    if (_contextReview.value?.share != share) {
+                        val newlyAssigned = share != null && _contextReview.value == null
+                        contextSendJob?.cancel()
+                        _contextReview.value = share?.let(::AgentwireContextReview)
+                        if (newlyAssigned) returnToHarness()
+                    }
+                }
+            }
             // Recents are stored per channel, so the collector has to follow the channel the buffer
             // resolves to rather than being started once with a name we do not have yet.
             viewModelScope.launch {
@@ -167,7 +206,16 @@ class AgentwireViewModel
                         val identityChanged =
                             _state.value.channel != buffer?.displayName.orEmpty() ||
                                 _state.value.controllerAccount != topic?.account ||
-                                _state.value.backendAccount != topic?.agentAccount
+                                _state.value.backendAccount != topic?.agentAccount ||
+                                _state.value.backend != topic?.backend ||
+                                joinTarget != buffer?.let { it.networkId to it.name }
+                        if (
+                            identityChanged || contextBuffer?.topic != buffer?.topic ||
+                            gate != AgentwireGate.ACTIVE || ready == null || buffer?.joined != true
+                        ) {
+                            invalidateContextReview()
+                        }
+                        contextBuffer = buffer
                         _state.update {
                             it.copy(
                                 gate = gate,
@@ -213,7 +261,10 @@ class AgentwireViewModel
         /** Snapshot for the log sheet, read on open and whenever [logRevision] advances. */
         fun logEntries(): List<AgentwireLogEntry> = log.entries()
 
-        fun viewTranscript() = _state.update { it.copy(transcriptOverride = true) }
+        fun viewTranscript() {
+            invalidateContextReview()
+            _state.update { it.copy(transcriptOverride = true) }
+        }
 
         fun returnToHarness() = _state.update { it.copy(transcriptOverride = false) }
 
@@ -244,28 +295,166 @@ class AgentwireViewModel
             }
         }
 
-        fun submit(content: String) {
+        fun submit(
+            content: String,
+            onAccepted: () -> Unit = {},
+        ) {
             if (content.isBlank()) return
-            val kind = if (_state.value.busy && _state.value.settings["delivery"] == "steer") "turn.steer" else "turn.prompt"
-            val data = buildJsonObject { put("content", content) }
-            val localId = UUID.randomUUID().toString()
-            _state.update { state ->
-                state.copy(
-                    timeline =
-                        state.timeline +
-                            AgentwireTimelineItem(
-                                localId,
-                                "user.prompt",
-                                System.currentTimeMillis(),
-                                state.activeSid,
-                                state.currentTid,
-                                if (kind == "turn.steer") "Steer" else "You",
-                                content,
-                                backendItemId = localId,
-                            ),
-                )
+            val current = _state.value
+            clearError()
+            val kind = if (current.busy && current.settings["delivery"] == "steer") "turn.steer" else "turn.prompt"
+            viewModelScope.launch {
+                val id = sendActionInternal(kind, buildJsonObject { put("content", content) }, sid = current.activeSid)
+                if (id != null) {
+                    appendSubmittedPrompt(id, content, current.activeSid, kind)
+                    onAccepted()
+                } else {
+                    _state.update { it.copy(error = it.error ?: "Unable to send Agentwire prompt. Draft retained.") }
+                }
             }
-            sendAction(kind, data = data, sid = _state.value.activeSid, id = localId)
+        }
+
+        internal fun canReviewContext(): Boolean = contextDestination() != null
+
+        internal fun reviewContext() {
+            val review = _contextReview.value ?: return
+            if (review.sending || review.share != assignedContext.value) return
+            val destination = contextDestination() ?: return
+            _contextReview.value = review.copy(destination = destination)
+        }
+
+        internal fun editContext(prompt: String): Boolean {
+            val review = _contextReview.value ?: return false
+            if (review.share != assignedContext.value) return false
+            if (review.share.prompt == prompt) return true
+            val replacement = review.share.copy(prompt = prompt)
+            _contextReview.value = review.copy(share = replacement)
+            if (!pendingShares.updateAgentContext(route.bufferId, review.share, replacement)) {
+                contextSendJob?.cancel()
+                _contextReview.value = assignedContext.value?.let(::AgentwireContextReview)
+                return false
+            }
+            return true
+        }
+
+        internal fun keepContextForLater() {
+            contextSendJob?.cancel()
+            _contextReview.update { it?.copy(destination = null) }
+        }
+
+        internal fun discardContext() {
+            val review = _contextReview.value ?: return
+            if (review.sending) return
+            if (pendingShares.clearAgentContext(route.bufferId, review.share)) _contextReview.value = null
+        }
+
+        internal fun submitContext() {
+            val review = _contextReview.value ?: return
+            val destination = review.destination ?: return
+            if (review.sending || review.share.prompt.isBlank()) return
+            clearError()
+            _contextReview.value = review.copy(sending = true)
+            contextSendJob =
+                viewModelScope.launch {
+                    try {
+                        val id =
+                            sendActionInternal(
+                                "turn.prompt",
+                                buildJsonObject { put("content", review.share.prompt) },
+                                sid = destination.sid,
+                                context = review,
+                            )
+                        if (id != null) {
+                            appendSubmittedPrompt(id, review.share.prompt, destination.sid, "turn.prompt")
+                            if (pendingShares.clearAgentContext(route.bufferId, review.share)) _contextReview.value = null
+                        } else {
+                            _state.update { it.copy(error = it.error ?: "Unable to send Agentwire context. Draft retained; edit or retry.") }
+                        }
+                    } catch (failure: Exception) {
+                        if (failure is CancellationException) throw failure
+                        _state.update { it.copy(error = failure.message ?: "Unable to send Agentwire context. Draft retained.") }
+                    } finally {
+                        contextSendJob = null
+                        _contextReview.update { it?.copy(sending = false) }
+                    }
+                }
+        }
+
+        private fun appendSubmittedPrompt(
+            id: String,
+            content: String,
+            sid: String?,
+            kind: String,
+        ) {
+            _state.update { state ->
+                if (state.activeSid != sid || state.timeline.any { it.id == id || it.backendItemId == id }) {
+                    state
+                } else {
+                    state.copy(
+                        timeline =
+                            state.timeline +
+                                AgentwireTimelineItem(
+                                    id,
+                                    "user.prompt",
+                                    System.currentTimeMillis(),
+                                    sid,
+                                    state.currentTid,
+                                    if (kind == "turn.steer") "Steer" else "You",
+                                    content,
+                                    backendItemId = id,
+                                ),
+                    )
+                }
+            }
+        }
+
+        private fun contextDestination(
+            state: AgentwireUiState = _state.value,
+            buffer: BufferEntity? = contextBuffer,
+        ): AgentwireContextDestination? {
+            if (
+                state.gate != AgentwireGate.ACTIVE || state.transcriptOverride || !state.connected ||
+                state.sync != AgentwireSyncState.Ready || "turn.prompt" !in state.actions ||
+                buffer?.type != BufferType.CHANNEL || buffer.joined != true
+            ) {
+                return null
+            }
+            val topic = (buffer.topic?.let(::parseAgentwireTopicResult) as? AgentwireTopicParse.Valid)?.topic ?: return null
+            if (
+                state.channel != buffer.displayName || state.controllerAccount != topic.account ||
+                state.backendAccount != topic.agentAccount || state.backend != topic.backend ||
+                !topic.agentAccount.equals(state.botAccount, ignoreCase = true)
+            ) {
+                return null
+            }
+            val activeClient = client ?: return null
+            if (connections.clientFor(buffer.networkId) !== activeClient) return null
+            if (connections.connectionStates.value[buffer.networkId] !is IrcClientState.Ready) return null
+            val ready = activeClient.state.value as? IrcClientState.Ready ?: return null
+            if (
+                agentwireMissingCaps(ready.caps).isNotEmpty() ||
+                !canSendClientTag(ready.caps, ready.isupport, AGENTWIRE_TAG)
+            ) {
+                return null
+            }
+            return AgentwireContextDestination(
+                buffer.networkId,
+                buffer.name,
+                buffer.topic,
+                state.channel,
+                topic.account,
+                topic.agentAccount,
+                topic.backend,
+                state.activeSid ?: return null,
+                state.epoch ?: return null,
+                activeClient,
+            )
+        }
+
+        private fun invalidateContextReview() {
+            if (_contextReview.value?.destination == null) return
+            keepContextForLater()
+            _state.update { it.copy(error = "Destination or session changed. Context retained; select and review again.") }
         }
 
         fun cancelTurn() = sendAction("turn.cancel", sid = _state.value.activeSid, tid = _state.value.currentTid)
@@ -357,13 +546,15 @@ class AgentwireViewModel
         fun attachSession(
             sid: String,
             cwd: String? = null,
-        ) = sendAction(
-            "session.attach",
-            cwd?.let { buildJsonObject { put("cwd", it) } },
-            sid = sid,
-        )
+        ) {
+            invalidateContextReview()
+            sendAction("session.attach", cwd?.let { buildJsonObject { put("cwd", it) } }, sid = sid)
+        }
 
-        fun detachSession() = sendAction("session.detach", sid = _state.value.activeSid)
+        fun detachSession() {
+            invalidateContextReview()
+            sendAction("session.detach", sid = _state.value.activeSid)
+        }
 
         fun renameSession(
             sid: String,
@@ -522,6 +713,7 @@ class AgentwireViewModel
          */
         private fun failSync(failure: AgentwireSyncFailure) {
             recordSyncFailed(failure)
+            invalidateContextReview()
             _state.update { it.copy(sync = AgentwireSyncState.Failed(failure)) }
         }
 
@@ -589,6 +781,7 @@ class AgentwireViewModel
         }
 
         private fun stopSession(disconnected: Boolean) {
+            invalidateContextReview()
             sessionJob?.cancel()
             sessionJob = null
             syncJob?.cancel()
@@ -605,10 +798,12 @@ class AgentwireViewModel
         }
 
         private suspend fun ingest(event: SequencedIrcEvent) {
+            val reviewedDestination = _contextReview.value?.destination
             val result = session.ingest(_state.value, event)
             if (result is AgentwireDeliveryCoordinator.Result.Rejected) {
                 result.untrustedAccount?.let(::recordUntrustedEvents)
                 _state.value = result.state
+                if (reviewedDestination != null && contextDestination(result.state) != reviewedDestination) invalidateContextReview()
                 return
             }
             if (result is AgentwireDeliveryCoordinator.Result.SyncRejected) {
@@ -627,6 +822,7 @@ class AgentwireViewModel
             }
             if (result is AgentwireDeliveryCoordinator.Result.ResyncRequired) {
                 clearLog()
+                invalidateContextReview()
                 // Deliberately no budget.anchor(): an internal restart must not extend the deadline.
                 _state.value =
                     result.state
@@ -663,6 +859,7 @@ class AgentwireViewModel
                 } else {
                     result.state
                 }
+            if (reviewedDestination != null && contextDestination() != reviewedDestination) invalidateContextReview()
             if (result.syncCompleted) listSessions(live = true)
             if (envelope.kind == "workspace.page") {
                 agentwireDirectoriesToReopen(_state.value, envelope.data?.string("parent")).forEach {
@@ -774,7 +971,29 @@ class AgentwireViewModel
             iid: String? = null,
             rid: String? = null,
             id: String = UUID.randomUUID().toString(),
+            context: AgentwireContextReview? = null,
         ): String? {
+            val device = prefs.deviceId()
+            if (context != null) {
+                val enabled = prefs.enabled.first()
+                val buffer = buffers.observeBuffer(route.bufferId).first()
+                if (
+                    !enabled || context.destination == null || context.destination != contextDestination(buffer = buffer) ||
+                    _contextReview.value?.destination != context.destination ||
+                    assignedContext.value != context.share
+                ) {
+                    invalidateContextReview()
+                    _state.update { it.copy(error = "Destination or session changed. Context retained; select and review again.") }
+                    return null
+                }
+                if (context.share.prompt
+                        .toByteArray(Charsets.UTF_8)
+                        .size > AGENTWIRE_MAX_PROMPT_BYTES
+                ) {
+                    _state.update { it.copy(error = "Context exceeds 64 KiB of UTF-8 text. Edit it before sending; nothing was truncated.") }
+                    return null
+                }
+            }
             val current = _state.value
             if (kind != "sync.request" && kind !in current.actions) return null
             val activeClient = client ?: return null
@@ -786,7 +1005,7 @@ class AgentwireViewModel
                     at = System.currentTimeMillis(),
                     instance = instance,
                     epoch = if (kind == "sync.request") null else current.epoch ?: return null,
-                    device = prefs.deviceId(),
+                    device = device,
                     sid = sid,
                     tid = tid,
                     iid = iid,
@@ -797,6 +1016,7 @@ class AgentwireViewModel
                 runCatching {
                     activeClient.sendAgentwire(current.channel, envelope, envelope.readablePreview())
                 }.getOrElse {
+                    if (it is CancellationException) throw it
                     _state.update { state -> state.copy(error = it.message ?: "Unable to send Agentwire action") }
                     sendErrorClass = it::class.java.simpleName
                     false

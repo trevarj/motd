@@ -119,6 +119,8 @@ class ChatJumpResolverTest {
             val target = (result as ChatJumpResolver.Result.Resolved).target
             assertEquals(1, target.index)
             assertEquals(2L, target.expectedEventId)
+            assertEquals(2L, target.highlightEventId)
+            assertEquals(null, target.highlightMsgid)
         }
 
     @Test fun `canonical event id accepts a losing room redirect`() =
@@ -142,6 +144,7 @@ class ChatJumpResolverTest {
             val target = (result as ChatJumpResolver.Result.Resolved).target
             assertEquals(0, target.index)
             assertEquals(2L, target.expectedEventId)
+            assertEquals(2L, target.highlightEventId)
         }
 
     @Test fun `ordinary unresolved entry does not present the not-loaded snackbar`() {

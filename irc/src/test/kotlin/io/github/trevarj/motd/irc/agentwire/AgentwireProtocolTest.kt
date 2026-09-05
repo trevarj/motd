@@ -189,6 +189,24 @@ class AgentwireProtocolTest {
     }
 
     @Test
+    fun `long prompt has a bounded preview without losing structured context`() {
+        val content = "sender: λ technical discussion\n".repeat(500)
+        val prompt = event(content).copy(kind = "turn.prompt", type = "action", device = "mobile")
+        val preview = requireNotNull(prompt.readablePreview())
+        assertTrue(preview.toByteArray(Charsets.UTF_8).size <= 400)
+        val reassembler = AgentwireReassembler()
+        var received: AgentwireEnvelope? = null
+        fragmentAgentwireEnvelope(prompt).forEach { raw ->
+            received =
+                when (val value = decodeAgentwireValue(raw).getOrThrow()) {
+                    is AgentwireValue.Envelope -> value.value
+                    is AgentwireValue.Fragment -> reassembler.accept(value.value).getOrThrow() ?: received
+                }
+        }
+        assertEquals(content, (received?.data?.get("content") as? JsonPrimitive)?.content)
+    }
+
+    @Test
     fun `conflicting duplicate invalidates assembly`() {
         val fragments =
             fragmentAgentwireEnvelope(event(incompressibleText())).map {

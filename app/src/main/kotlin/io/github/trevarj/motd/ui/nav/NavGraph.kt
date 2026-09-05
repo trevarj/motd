@@ -198,6 +198,7 @@ fun MotdNavGraph(
                             showBack = showBack,
                             onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
                             onOpenSearch = { navController.navigate(SearchRoute(it)) },
+                            onOpenSharePicker = { navController.navigate(SharePickerRoute) { launchSingleTop = true } },
                             onOpenImage = { navController.navigate(ImageViewerRoute(it)) },
                             // /msg and /query replace the detail on wide layouts and push on phones.
                             onOpenBuffer = {
@@ -463,9 +464,8 @@ fun MotdNavGraph(
             SharePickerScreen(
                 // Leave the picker before opening the chat so back returns to the previous screen
                 // rather than the (now empty) picker.
-                onPicked = { bufferId ->
-                    navController.popBackStack()
-                    navController.openChat(ChatRoute(bufferId), replaceCurrentChat = true)
+                onPicked = { bufferId, isAgentContext ->
+                    navController.completeShareNavigation(bufferId, preserveSourceChat = isAgentContext)
                 },
                 onCancel = { navController.popBackStack() },
             )
@@ -560,6 +560,19 @@ internal fun NavHostController.openChat(
     navigate(route) {
         if (replaceCurrentChat) popUpTo<ChatRoute> { inclusive = true }
     }
+}
+
+internal fun NavHostController.completeShareNavigation(
+    bufferId: Long,
+    preserveSourceChat: Boolean,
+) {
+    popBackStack()
+    val currentChat =
+        currentBackStackEntry
+            ?.takeIf { isChatRoutePattern(it.destination.route) }
+            ?.toRoute<ChatRoute>()
+    if (preserveSourceChat && currentChat?.bufferId == bufferId) return
+    openChat(ChatRoute(bufferId), replaceCurrentChat = !preserveSourceChat)
 }
 
 private fun NavHostController.openSettingsResult(destination: SettingsSearchDestination) {

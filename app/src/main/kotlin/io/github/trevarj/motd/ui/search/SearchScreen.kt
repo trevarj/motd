@@ -153,8 +153,8 @@ fun SearchContent(
         } else {
             state.copy(
                 rawQuery = text.text,
+                bufferMatches = emptyList(),
                 groups = emptyList(),
-                // The cap belongs to the results being dropped for this frame, not to the new query.
                 truncated = false,
                 searching = !isEmptySearchQuery(text.text),
             )
@@ -205,7 +205,6 @@ fun SearchContent(
                         },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        // The wire round trip is submit-driven only; local search stays debounced.
                         keyboardActions =
                             KeyboardActions(
                                 onSearch = {
@@ -306,8 +305,6 @@ fun SearchContent(
                             icon = Icons.Outlined.SearchOff,
                             title = stringResource(R.string.search_empty_title),
                             message = stringResource(emptyMessage(visibleState)),
-                            // A result list with nothing in it, like the chat list's own empty state.
-                            // Prompt and error panes keep the icon: they are not empty lists.
                             ghostRows = true,
                         )
                     }
@@ -332,7 +329,13 @@ fun SearchContent(
 internal fun clearedSearchText(): TextFieldValue = TextFieldValue("")
 
 /** The results pane's identity; each value keeps exactly one branch (and its tags) mounted. */
-private enum class SearchPane { SERVER, PROMPT, SEARCHING, NO_RESULTS, RESULTS }
+private enum class SearchPane {
+    SERVER,
+    PROMPT,
+    SEARCHING,
+    NO_RESULTS,
+    RESULTS,
+}
 
 /** Same precedence as the pane branches themselves; the crossfade keys on this. */
 private fun searchPane(state: SearchUiState): SearchPane =

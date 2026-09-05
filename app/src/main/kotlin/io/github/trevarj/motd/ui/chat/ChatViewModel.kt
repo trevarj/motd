@@ -8,6 +8,8 @@ import androidx.navigation.toRoute
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.agentwire.AgentwirePrefs
+import io.github.trevarj.motd.agentwire.prepareAgentwireContext
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioMetadataRepository
@@ -53,6 +55,7 @@ import io.github.trevarj.motd.data.sync.HistoryGapFiller
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
 import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
 import io.github.trevarj.motd.data.sync.historySource
+import io.github.trevarj.motd.data.visibility.MessageContextResult
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dcc.DccTransferController
@@ -256,6 +259,7 @@ class ChatViewModel
         private val historyPageLoader: HistoryPageLoader,
         private val settingsRepository: SettingsRepository,
         private val replyPrefs: ReplyPrefs,
+        private val agentwirePrefs: AgentwirePrefs,
         private val visibilityReader: MessageVisibilityReader,
         private val historyResyncCoordinator: HistoryResyncController,
         private val userDao: UserDao,
@@ -287,6 +291,9 @@ class ChatViewModel
         val replyConfig: StateFlow<ReplyConfig> =
             replyPrefs.config
                 .stateIn(viewModelScope, SharingStarted.Eagerly, ReplyConfig())
+        val agentwireEnabled: StateFlow<Boolean> =
+            agentwirePrefs.enabled
+                .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
         private val route: ChatRoute = savedStateHandle.toRoute<ChatRoute>()
         val bufferId: Long = route.bufferId
@@ -806,6 +813,45 @@ class ChatViewModel
                 .map { it?.id ?: bufferId }
                 .distinctUntilChanged()
                 .stateIn(viewModelScope, SharingStarted.Eagerly, bufferId)
+
+        suspend fun prepareCatchUpContext(): AgentContextPreparation {
+            val snapshot = _unreadEntrySnapshot.value ?: return AgentContextPreparation.NO_CONTEXT
+            return prepareConversationContext(snapshot = snapshot)
+        }
+
+        suspend fun prepareThreadContext(eventId: Long): AgentContextPreparation = prepareConversationContext(eventId = eventId)
+
+        private suspend fun prepareConversationContext(
+            snapshot: UnreadEntrySnapshot? = null,
+            eventId: Long? = null,
+        ): AgentContextPreparation {
+            if (!agentwirePrefs.enabled.first()) return AgentContextPreparation.NO_CONTEXT
+            if (pendingShareStore.peek() != null) return AgentContextPreparation.PENDING_SHARE
+            val buffer = state.value.buffer ?: return AgentContextPreparation.NO_CONTEXT
+            if (buffer.type == BufferType.SERVER) return AgentContextPreparation.NO_CONTEXT
+            val roomId = operationalBufferId.value
+            val spec = filterSpec.value
+            return try {
+                val context =
+                    if (eventId != null) {
+                        visibilityReader.threadContext(roomId, eventId, spec)
+                    } else {
+                        val entry = snapshot ?: return AgentContextPreparation.NO_CONTEXT
+                        visibilityReader.catchUpContext(roomId, entry.marker, spec, knownIncomplete = entry.lowerBound)
+                    }
+                if (context !is MessageContextResult.Available) return AgentContextPreparation.NO_CONTEXT
+                val share =
+                    withContext(Dispatchers.Default) {
+                        prepareAgentwireContext(roomId, buffer.displayName, context)
+                    } ?: return AgentContextPreparation.TOO_LARGE
+                if (!agentwirePrefs.enabled.first()) return AgentContextPreparation.NO_CONTEXT
+                if (pendingShareStore.setIfEmpty(share)) AgentContextPreparation.READY else AgentContextPreparation.PENDING_SHARE
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                AgentContextPreparation.FAILED
+            }
+        }
 
         private val connState: StateFlow<IrcClientState?> =
             buffer
@@ -3034,6 +3080,7 @@ class ChatViewModel
                             result.target.copy(
                                 offset = target.offset,
                                 highlightMsgid = null,
+                                highlightEventId = null,
                                 fromSavedPosition = target.fromSavedPosition,
                                 forceScrollOnEntry = target.forceScrollOnEntry,
                                 placeAtTop = target.placeAtTop,

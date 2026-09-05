@@ -69,10 +69,15 @@ suspend fun IrcClient.sendAgentwire(
     return sendAtomicallyIfConnected(messages)
 }
 
-fun AgentwireEnvelope.readablePreview(): String? =
-    when (kind) {
-        "turn.prompt", "turn.steer" -> data?.get("content").stringContent()
-        else -> null
+fun AgentwireEnvelope.readablePreview(): String? {
+    if (kind != "turn.prompt" && kind != "turn.steer") return null
+    val content = data?.get("content").stringContent() ?: return null
+    // The full prompt travels in the structured envelope; previews must fit one IRC line.
+    return if (content.toByteArray(Charsets.UTF_8).size <= 400) {
+        content
+    } else {
+        "Agentwire prompt (preview omitted; full text in the Agentwire payload)."
     }
+}
 
 private fun kotlinx.serialization.json.JsonElement?.stringContent(): String? = (this as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull

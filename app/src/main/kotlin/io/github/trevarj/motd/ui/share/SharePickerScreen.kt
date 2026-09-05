@@ -17,9 +17,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -32,17 +34,27 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.agentwire.AgentwirePrefs
+import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.repo.BufferRepository
+import io.github.trevarj.motd.irc.agentwire.AgentwireTopicParse
+import io.github.trevarj.motd.irc.agentwire.parseAgentwireTopicResult
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -62,16 +74,28 @@ internal fun filterShareTargets(
     }
 }
 
+internal fun isAgentwireShareTarget(buffer: BufferEntity?): Boolean =
+    buffer != null &&
+        buffer.type == BufferType.CHANNEL &&
+        !buffer.archived &&
+        buffer.topic?.let(::parseAgentwireTopicResult) is AgentwireTopicParse.Valid
+
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class SharePickerViewModel
     @Inject
     constructor(
-        bufferRepository: BufferRepository,
+        private val bufferRepository: BufferRepository,
         private val store: PendingShareStore,
         private val draftStore: ComposerDraftStore,
+        private val agentwirePrefs: AgentwirePrefs,
     ) : ViewModel() {
         private val queryState = MutableStateFlow("")
         val query: StateFlow<String> = queryState.asStateFlow()
+        private val share = store.peek()
+        val contextShare = share as? PendingShare.AgentContext
+        private val _targetUnavailable = MutableStateFlow(false)
+        val targetUnavailable: StateFlow<Boolean> = _targetUnavailable.asStateFlow()
 
         // Set once the payload leaves this screen (picked or explicitly dismissed) so teardown never
         // discards someone else's parked share.
@@ -80,22 +104,56 @@ class SharePickerViewModel
         val targets: StateFlow<List<ChatListRow>> =
             bufferRepository
                 .observeChatList()
-                .combine(queryState, ::filterShareTargets)
+                .flatMapLatest { rows ->
+                    if (contextShare == null) {
+                        flowOf(rows)
+                    } else {
+                        val channels = rows.filter { !it.archived && it.type == BufferType.CHANNEL }
+                        if (channels.isEmpty()) {
+                            flowOf(emptyList())
+                        } else {
+                            combine(
+                                channels.map { row ->
+                                    bufferRepository.observeBuffer(row.bufferId).map { buffer ->
+                                        row.takeIf { isAgentwireShareTarget(buffer) }
+                                    }
+                                },
+                            ) { it.filterNotNull() }
+                        }
+                    }
+                }.combine(agentwirePrefs.enabled) { rows, enabled ->
+                    if (contextShare != null && !enabled) emptyList() else rows
+                }.combine(queryState, ::filterShareTargets)
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
         fun onQueryChange(value: String) {
             queryState.value = value
         }
 
-        /**
-         * Route the parked payload to [bufferId]: text becomes a composer prefill, a file is queued for
-         * that buffer's upload sheet. False when the payload was already consumed (nothing to open).
-         */
-        fun pick(bufferId: Long): Boolean {
-            val share = store.consume() ?: return false
-            when (share) {
-                is PendingShare.Text -> draftStore.push(bufferId, share.text)
-                is PendingShare.File -> store.assignFile(bufferId, share)
+        /** Picking only hands off a draft; sensitive context can never use the ordinary text path. */
+        suspend fun pick(bufferId: Long): Boolean {
+            val current = share ?: return false
+            if (store.peek() !== current) return false
+            if (current is PendingShare.AgentContext) {
+                if (
+                    !agentwirePrefs.enabled.first() ||
+                    !isAgentwireShareTarget(bufferRepository.observeBuffer(bufferId).first()) ||
+                    !store.assignAgentContext(bufferId, current)
+                ) {
+                    _targetUnavailable.value = true
+                    return false
+                }
+                if (!store.consumeIfUnchanged(current)) {
+                    store.clearAgentContext(bufferId, current)
+                    return false
+                }
+            } else {
+                if (!store.consumeIfUnchanged(current)) return false
+                when (current) {
+                    is PendingShare.Text -> draftStore.push(bufferId, current.text)
+                    is PendingShare.File -> store.assignFile(bufferId, current)
+                    is PendingShare.AgentContext -> error("Context uses the protected handoff")
+                }
             }
             handled = true
             return true
@@ -103,13 +161,18 @@ class SharePickerViewModel
 
         fun cancel() = discardUnhandled()
 
+        fun discardContext() {
+            contextShare?.let(store::consumeIfUnchanged)
+            handled = true
+        }
+
         /** System back / pop tears the screen down without a cancel callback; clean up here too. */
         override fun onCleared() = discardUnhandled()
 
         private fun discardUnhandled() {
             if (handled) return
             handled = true
-            store.consume()
+            if (contextShare == null) share?.let(store::consumeIfUnchanged)
         }
     }
 
@@ -117,16 +180,21 @@ class SharePickerViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SharePickerScreen(
-    onPicked: (Long) -> Unit,
+    onPicked: (bufferId: Long, isAgentContext: Boolean) -> Unit,
     onCancel: () -> Unit,
     viewModel: SharePickerViewModel = hiltViewModel(),
 ) {
     val rows by viewModel.targets.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
+    val targetUnavailable by viewModel.targetUnavailable.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    val contextShare = viewModel.contextShare
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.share_picker_title)) },
+                title = {
+                    Text(stringResource(if (contextShare == null) R.string.share_picker_title else R.string.agent_context_picker_title))
+                },
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -142,6 +210,29 @@ fun SharePickerScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            if (contextShare != null) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text(contextShare.sourceLabel, style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.agent_context_warning), modifier = Modifier.testTag("agent_context_warning"))
+                    Text(contextShare.coverage, modifier = Modifier.testTag("agent_context_coverage"))
+                    TextButton(
+                        onClick = {
+                            viewModel.discardContext()
+                            onCancel()
+                        },
+                        modifier = Modifier.testTag("agent_context_discard"),
+                    ) {
+                        Text(stringResource(R.string.agentwire_context_discard))
+                    }
+                }
+            }
+            if (targetUnavailable) {
+                Text(
+                    stringResource(R.string.agent_context_target_unavailable),
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(16.dp).testTag("agent_context_target_unavailable"),
+                )
+            }
             OutlinedTextField(
                 value = query,
                 onValueChange = viewModel::onQueryChange,
@@ -157,7 +248,7 @@ fun SharePickerScreen(
             if (rows.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        text = stringResource(R.string.share_picker_empty),
+                        text = stringResource(if (contextShare == null) R.string.share_picker_empty else R.string.agent_context_empty),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -170,9 +261,15 @@ fun SharePickerScreen(
                         ChatListRowItem(
                             row = row,
                             showNetworkChip = true,
-                            // A consumed payload means there is nothing left to deliver: leave the
-                            // picker instead of opening a chat the user didn't ask for.
-                            onClick = { if (viewModel.pick(row.bufferId)) onPicked(row.bufferId) else onCancel() },
+                            onClick = {
+                                scope.launch {
+                                    if (viewModel.pick(row.bufferId)) {
+                                        onPicked(row.bufferId, contextShare != null)
+                                    } else if (contextShare == null) {
+                                        onCancel()
+                                    }
+                                }
+                            },
                             onLongClick = {},
                         )
                     }

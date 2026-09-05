@@ -7,6 +7,7 @@ import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.agentwire.AgentwirePrefs
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioMetadataRepository
@@ -90,7 +91,9 @@ import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
+import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
+import io.github.trevarj.motd.ui.share.SharePickerViewModel
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -119,6 +122,9 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -3545,6 +3551,221 @@ class ChatViewModelTest {
             assertEquals(listOf(channel.id to fixture.gapId), filler.requests)
         }
 
+    @Test
+    fun `summary preparation follows Agentwire enable and disable transitions`() =
+        runTest {
+            val (entered, unread) = seedContextUnread()
+            val prefs = FakeAgentwirePrefs()
+            val shares = PendingShareStore()
+            val vm =
+                viewModel(
+                    entered,
+                    FakeConnectionManager(network.id),
+                    messages = FakeMessageRepository(events = unread),
+                    shares = shares,
+                    agentwirePrefs = prefs,
+                )
+            vm.state.first { it.buffer != null }
+            vm.unreadEntrySnapshot.first { it != null }
+
+            assertFalse(vm.agentwireEnabled.value)
+            assertEquals(AgentContextPreparation.NO_CONTEXT, vm.prepareCatchUpContext())
+            assertEquals(AgentContextPreparation.NO_CONTEXT, vm.prepareThreadContext(unread.first().id))
+            assertNull(shares.peek())
+
+            prefs.setEnabled(true)
+            vm.agentwireEnabled.first { it }
+            assertEquals(AgentContextPreparation.READY, vm.prepareCatchUpContext())
+            assertTrue(shares.consume() is PendingShare.AgentContext)
+            assertEquals(AgentContextPreparation.READY, vm.prepareThreadContext(unread.first().id))
+            assertTrue(shares.consume() is PendingShare.AgentContext)
+
+            prefs.setEnabled(false)
+            vm.agentwireEnabled.first { !it }
+            assertEquals(AgentContextPreparation.NO_CONTEXT, vm.prepareCatchUpContext())
+            assertEquals(AgentContextPreparation.NO_CONTEXT, vm.prepareThreadContext(unread.first().id))
+            assertNull(shares.peek())
+        }
+
+    @Test
+    fun `catch-up preparation keeps the visit marker and never sends or persists source output`() =
+        runTest {
+            val (entered, unread) = seedContextUnread()
+            val manager = FakeConnectionManager(network.id)
+            val savedState = SavedStateHandle()
+            val buffers = FakeBufferRepository(entered)
+            val shares = PendingShareStore()
+            val vm =
+                viewModel(
+                    entered,
+                    manager,
+                    messages = FakeMessageRepository(events = unread),
+                    savedStateHandle = savedState,
+                    buffers = buffers,
+                    shares = shares,
+                    agentwirePrefs = FakeAgentwirePrefs(true),
+                )
+            vm.state.first { it.buffer != null }
+            val frozen = checkNotNull(vm.unreadEntrySnapshot.first { it != null })
+            savedState.getStateFlow("unread_entry_snapshot_computed", false).first { it }
+            vm.onResume()
+            val advancedMarker = TimelineAnchor(unread.last().serverTime, unread.last().id)
+            vm.markRead(advancedMarker)
+            buffers.update(
+                entered.copy(
+                    localReadAnchorTime = advancedMarker.serverTime,
+                    localReadAnchorEventId = advancedMarker.eventId,
+                ),
+            )
+            vm.localReadAnchor.first { it?.eventId == advancedMarker.eventId }
+            runCurrent()
+            val markerWrites = manager.readMarkers.size
+            val savedSnapshot = savedState.keys().associateWith { savedState.get<Any>(it) }
+            val before = db.messageDao().historyRowsForMerge(channel.id)
+
+            assertEquals(AgentContextPreparation.READY, vm.prepareCatchUpContext())
+            val share = shares.peek() as PendingShare.AgentContext
+            val records =
+                share.prompt
+                    .lineSequence()
+                    .filter { it.startsWith("{") }
+                    .map(Json::parseToJsonElement)
+                    .toList()
+            assertEquals(
+                unread.map { it.text },
+                records.map {
+                    it.jsonObject
+                        .getValue("text")
+                        .jsonPrimitive.content
+                },
+            )
+            assertEquals(
+                unread.map { it.sender },
+                records.map {
+                    it.jsonObject
+                        .getValue("sender")
+                        .jsonPrimitive.content
+                },
+            )
+            assertEquals(frozen, vm.unreadEntrySnapshot.value)
+            assertEquals(markerWrites, manager.readMarkers.size)
+            assertEquals(savedSnapshot, savedState.keys().associateWith { savedState.get<Any>(it) })
+            assertEquals(before, db.messageDao().historyRowsForMerge(channel.id))
+            assertTrue(manager.messages.isEmpty())
+
+            assertEquals(AgentContextPreparation.PENDING_SHARE, vm.prepareCatchUpContext())
+            assertEquals(share, shares.peek())
+        }
+
+    @Test
+    fun `catch-up discloses a frozen incomplete lower bound without a current history gap`() =
+        runTest {
+            val (entered, unread) = seedContextUnread()
+            val marker = TimelineAnchor(unread.first().serverTime, unread.first().id - 1, unread.first().timelineOrder)
+            val savedState =
+                SavedStateHandle(
+                    mapOf(
+                        "unread_entry_snapshot_computed" to true,
+                        "unread_entry_snapshot_time" to marker.serverTime,
+                        "unread_entry_snapshot_event" to marker.eventId,
+                        "unread_entry_snapshot_order" to marker.timelineOrder,
+                        "unread_entry_snapshot_count" to unread.size,
+                        "unread_entry_snapshot_lower_bound" to true,
+                    ),
+                )
+            val shares = PendingShareStore()
+            val vm =
+                viewModel(
+                    entered,
+                    FakeConnectionManager(network.id),
+                    savedStateHandle = savedState,
+                    shares = shares,
+                    agentwirePrefs = FakeAgentwirePrefs(true),
+                )
+            vm.state.first { it.buffer != null }
+
+            assertEquals(AgentContextPreparation.READY, vm.prepareCatchUpContext())
+            val share = shares.peek() as PendingShare.AgentContext
+            assertTrue(share.coverage.contains("partial"))
+            assertTrue(share.coverage.contains("missing local history"))
+        }
+
+    @Test
+    fun `missing thread context does not replace a parked share or prepare an empty prompt`() =
+        runTest {
+            val shares = PendingShareStore()
+            val vm =
+                viewModel(
+                    channel,
+                    FakeConnectionManager(network.id),
+                    shares = shares,
+                    agentwirePrefs = FakeAgentwirePrefs(true),
+                )
+            vm.state.first { it.buffer != null }
+            assertEquals(AgentContextPreparation.NO_CONTEXT, vm.prepareThreadContext(Long.MAX_VALUE))
+            assertNull(shares.peek())
+
+            val prior = PendingShare.AgentContext(channel.id, channel.displayName, "frozen context", "partial")
+            shares.setIfEmpty(prior)
+            assertEquals(AgentContextPreparation.PENDING_SHARE, vm.prepareThreadContext(Long.MAX_VALUE))
+            assertEquals(prior, shares.peek())
+        }
+
+    @Test
+    fun `context picker rejects ordinary chats and preserves both canceled source and existing destination draft`() =
+        runTest {
+            val shares = PendingShareStore()
+            val original = PendingShare.AgentContext(query.id, query.displayName, "frozen messages", "partial")
+            shares.setIfEmpty(original)
+            val drafts = ComposerDraftStore(db)
+            val existing = drafts.saveDraft(channel.id, "unfinished destination message", null)
+            val buffers = FakeBufferRepository(channel)
+            val prefs = FakeAgentwirePrefs(true)
+            val picker = SharePickerViewModel(buffers, shares, drafts, prefs)
+
+            assertFalse(picker.pick(channel.id))
+            picker.cancel()
+            assertEquals(original, shares.peek())
+            assertNull(shares.agentContext(channel.id).value)
+            assertEquals(existing, drafts.loadDraft(channel.id))
+
+            buffers.update(channel.copy(topic = "agentwire:v1;account=controller;agent=host;backend=claude"))
+            val reopened = SharePickerViewModel(buffers, shares, drafts, prefs)
+            assertTrue(reopened.pick(channel.id))
+            assertNull(shares.peek())
+            assertEquals(original, shares.agentContext(channel.id).value)
+            assertEquals(existing, drafts.loadDraft(channel.id))
+        }
+
+    private suspend fun seedContextUnread(): Pair<BufferEntity, List<MessageEntity>> {
+        val markerId =
+            db
+                .messageDao()
+                .insertAll(
+                    listOf(
+                        message(channel.id, "marker", null, "alice").copy(
+                            serverTime = 100,
+                            dedupKey = "context-marker",
+                        ),
+                    ),
+                ).single()
+        val unreadIds =
+            db.messageDao().insertAll(
+                listOf(
+                    message(channel.id, "first unread", null, "alice").copy(
+                        serverTime = 101,
+                        dedupKey = "context-unread-1",
+                    ),
+                    message(channel.id, "second unread", null, "bob").copy(
+                        serverTime = 102,
+                        dedupKey = "context-unread-2",
+                    ),
+                ),
+            )
+        val unread = unreadIds.map { checkNotNull(db.messageDao().byCanonicalId(it)) }
+        return channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId) to unread
+    }
+
     private fun viewModel(
         buffer: BufferEntity,
         manager: FakeConnectionManager,
@@ -3573,6 +3794,8 @@ class ChatViewModelTest {
         // Injectable so a test can push prefills at the exact store instance the VM listens to.
         drafts: ComposerDraftStore = ComposerDraftStore(db),
         replyPrefs: ReplyPrefs = FakeReplyPrefs(),
+        agentwirePrefs: AgentwirePrefs = FakeAgentwirePrefs(),
+        shares: PendingShareStore = PendingShareStore(),
         channelWatch: ChannelWatch = ChannelWatch.Noop,
     ): ChatViewModel {
         val routeState = mutableMapOf<String, Any>("bufferId" to routeBufferId)
@@ -3599,11 +3822,12 @@ class ChatViewModelTest {
                     ): LinkPreview? = null
                 },
             draftStore = drafts,
-            pendingShareStore = PendingShareStore(),
+            pendingShareStore = shares,
             scrollPositionStore = scrollPositions,
             historyPageLoader = HistoryPageLoader(processor),
             settingsRepository = settings,
             replyPrefs = replyPrefs,
+            agentwirePrefs = agentwirePrefs,
             visibilityReader = MessageVisibilityReader(db),
             historyResyncCoordinator = history,
             userDao = db.userDao(),
@@ -3924,6 +4148,10 @@ class ChatViewModelTest {
         var presenceWriteResult = true
         val memberNicks = MutableStateFlow<List<String>>(emptyList())
 
+        fun update(value: BufferEntity) {
+            buffer.value = value
+        }
+
         override fun observeChatList(): Flow<List<ChatListRow>> = chatList
 
         override fun observeBuffer(id: Long): Flow<BufferEntity?> = buffer.takeIf { id == routeId || id == current.id } ?: flowOf(null)
@@ -4142,6 +4370,16 @@ class ChatViewModelTest {
         override suspend fun setAutoAwayMinutes(minutes: Int) = Unit
 
         override suspend fun setAutoAwayMessage(message: String) = Unit
+    }
+
+    private class FakeAgentwirePrefs(
+        initial: Boolean = false,
+    ) : AgentwirePrefs(ApplicationProvider.getApplicationContext()) {
+        override val enabled = MutableStateFlow(initial)
+
+        override suspend fun setEnabled(enabled: Boolean) {
+            this.enabled.value = enabled
+        }
     }
 
     private class FakeReplyPrefs(

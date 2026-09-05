@@ -501,6 +501,21 @@ data class UnreadEntrySnapshot(
     val lowerBound: Boolean,
 )
 
+enum class AgentContextPreparation { READY, NO_CONTEXT, TOO_LARGE, FAILED, PENDING_SHARE }
+
+internal fun canPrepareCatchUpContext(
+    agentwireEnabled: Boolean,
+    isServerBuffer: Boolean,
+    unreadEntrySnapshot: UnreadEntrySnapshot?,
+): Boolean = agentwireEnabled && !isServerBuffer && unreadEntrySnapshot != null
+
+internal fun canPrepareThreadContext(
+    agentwireEnabled: Boolean,
+    isServerBuffer: Boolean,
+    message: MessageEntity,
+    visibilityPolicy: MessageVisibilityPolicy,
+): Boolean = agentwireEnabled && !isServerBuffer && message.kind in CONVERSATION_KINDS && visibilityPolicy.preview(message)
+
 /**
  * Rebuild the frozen entry boundary from its flat SavedState projection.
  *
@@ -1056,7 +1071,16 @@ data class ChatPositionTarget(
     val placeAtTop: Boolean = false,
     /** Opaque ViewModel request identity; stale UI completions must not consume a newer jump. */
     val requestToken: Long = 0,
+    val highlightEventId: Long? = null,
 )
+
+internal fun messageHighlightMatches(
+    message: MessageEntity,
+    highlightMsgid: String?,
+    highlightEventId: Long?,
+): Boolean =
+    (highlightMsgid != null && message.msgid == highlightMsgid) ||
+        (highlightEventId != null && message.id == highlightEventId)
 
 /**
  * Whether a normal open lands on the first unread row rather than on the saved viewport.

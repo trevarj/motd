@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.GroupAdd
@@ -306,6 +307,7 @@ fun ChatScreen(
     showBack: Boolean = true,
     onOpenChannelInfo: (Long) -> Unit = {},
     onOpenSearch: (Long) -> Unit = {},
+    onOpenSharePicker: () -> Unit = {},
     onOpenImage: (String) -> Unit = {},
     // /msg and /query resolve-or-create a QUERY buffer via the VM, then navigate to it.
     onOpenBuffer: (Long) -> Unit = {},
@@ -447,6 +449,23 @@ fun ChatScreen(
     val uiEvents by viewModel.uiEvents.collectAsStateWithLifecycle()
     val historySyncStatus by viewModel.historySyncStatus.collectAsStateWithLifecycle()
     val timelineSeams by viewModel.timelineSeams.collectAsStateWithLifecycle()
+    val agentwireEnabled by viewModel.agentwireEnabled.collectAsStateWithLifecycle()
+    val contextScope = rememberCoroutineScope()
+    var contextPreparing by remember(viewModel) { mutableStateOf(false) }
+    var contextPreparation by remember(viewModel) { mutableStateOf<AgentContextPreparation?>(null) }
+
+    fun prepareContext(load: suspend () -> AgentContextPreparation) {
+        if (contextPreparing) return
+        contextPreparing = true
+        contextScope.launch {
+            try {
+                val result = load()
+                if (result == AgentContextPreparation.READY) onOpenSharePicker() else contextPreparation = result
+            } finally {
+                contextPreparing = false
+            }
+        }
+    }
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
     val titleTarget = chatTitleTarget(state.buffer?.type)
 
@@ -480,6 +499,10 @@ fun ChatScreen(
         knownNicks = knownNicks,
         identityRules = identityRules,
         unreadEntrySnapshot = unreadEntrySnapshot,
+        agentwireEnabled = agentwireEnabled,
+        contextPreparing = contextPreparing,
+        onPrepareCatchUpContext = { prepareContext(viewModel::prepareCatchUpContext) },
+        onPrepareThreadContext = { eventId -> prepareContext { viewModel.prepareThreadContext(eventId) } },
         readMarkerLive = localReadAnchor,
         rawNewestAnchor = rawNewestAnchor,
         onMarkRead = viewModel::markRead,
@@ -596,6 +619,39 @@ fun ChatScreen(
         diagnostics = viewModel.diagnostics,
         avatarEvents = viewModel.avatarEvents,
     )
+
+    contextPreparation?.let { result ->
+        AlertDialog(
+            onDismissRequest = { contextPreparation = null },
+            title = { Text(stringResource(R.string.agent_context_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        when (result) {
+                            AgentContextPreparation.PENDING_SHARE -> R.string.agent_context_pending
+                            AgentContextPreparation.NO_CONTEXT -> R.string.agent_context_no_context
+                            AgentContextPreparation.TOO_LARGE -> R.string.agent_context_too_large
+                            else -> R.string.agent_context_failed
+                        },
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        contextPreparation = null
+                        if (result == AgentContextPreparation.PENDING_SHARE) onOpenSharePicker()
+                    },
+                ) {
+                    Text(
+                        stringResource(
+                            if (result == AgentContextPreparation.PENDING_SHARE) R.string.agent_context_resume else R.string.action_cancel,
+                        ),
+                    )
+                }
+            },
+        )
+    }
 
     // Nick sheet: actions render immediately; whois fills in when it lands.
     nickSheet?.let { sheet ->
@@ -909,6 +965,10 @@ fun ChatContent(
     accountSetupReminder: Boolean = false,
     onAccountSetup: () -> Unit = {},
     onDismissAccountSetup: () -> Unit = {},
+    agentwireEnabled: Boolean = false,
+    contextPreparing: Boolean = false,
+    onPrepareCatchUpContext: () -> Unit = {},
+    onPrepareThreadContext: (Long) -> Unit = {},
     watchingThisBuffer: Boolean = false,
     onStartChannelWatch: (ChannelWatchDuration) -> Unit = {},
     onStopChannelWatch: () -> Unit = {},
@@ -1105,6 +1165,7 @@ fun ChatContent(
     var watchDialogOpen by rememberSaveable { mutableStateOf(false) }
     var presenceModeSheetOpen by rememberSaveable { mutableStateOf(false) }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
+    var highlightEventId by rememberSaveable { mutableStateOf<Long?>(null) }
     // Global fool expand/collapse toggle: when true every collapsed fool row in the
     // buffer renders expanded; per-row toggles still override individually via [expandedFools] and
     // [collapsedFools]. Ephemeral per composition, like expandedFools.
@@ -1412,6 +1473,7 @@ fun ChatContent(
             }
             if (visibilityPolicy.isFool(targetRow)) expandedFools += targetRow.id
             highlightMsgid = j.highlightMsgid
+            highlightEventId = j.highlightEventId
             initialPositionSettled = true
             suppressNextAutoFollow = true
             onJumpHandled(j.requestToken)
@@ -1590,11 +1652,12 @@ fun ChatContent(
         }
     }
 
-    // Clear the highlight after the pulse settles (~1.6s).
-    LaunchedEffect(highlightMsgid) {
-        if (highlightMsgid != null) {
+    // Clear both identities together after the pulse settles (~1.6s).
+    LaunchedEffect(highlightMsgid, highlightEventId) {
+        if (highlightMsgid != null || highlightEventId != null) {
             kotlinx.coroutines.delay(1_600)
             highlightMsgid = null
+            highlightEventId = null
         }
     }
 
@@ -2284,6 +2347,18 @@ fun ChatContent(
                                     },
                                 )
                             }
+                            if (canPrepareCatchUpContext(agentwireEnabled, isServerBuffer, unreadEntrySnapshot)) {
+                                DropdownMenuItem(
+                                    modifier = Modifier.testTag("chat_catch_up"),
+                                    text = { Text(stringResource(R.string.agent_context_catch_up)) },
+                                    leadingIcon = { Icon(Icons.Outlined.AutoAwesome, contentDescription = null) },
+                                    enabled = !contextPreparing,
+                                    onClick = {
+                                        overflowOpen = false
+                                        onPrepareCatchUpContext()
+                                    },
+                                )
+                            }
                             if (buffer?.type == BufferType.CHANNEL) {
                                 DropdownMenuItem(
                                     modifier = Modifier.testTag("chat_watch"),
@@ -2600,6 +2675,7 @@ fun ChatContent(
                                             onVoiceTranscriptionCancel = onVoiceTranscriptionCancel,
                                             onOpenLink = onOpenLink,
                                             highlightMsgid = highlightMsgid,
+                                            highlightEventId = highlightEventId,
                                             knownNicks = knownNicks,
                                             friends = friends,
                                             fools = fools,
@@ -3017,6 +3093,15 @@ fun ChatContent(
                     } == true
                 ready != null && canSendReactionTags(ready.caps, ready.isupport, remove = mine)
             },
+            canPrepareThreadContext =
+                !contextPreparing &&
+                    canPrepareThreadContext(
+                        agentwireEnabled = agentwireEnabled,
+                        isServerBuffer = isServerBuffer,
+                        message = target,
+                        visibilityPolicy = visibilityPolicy,
+                    ),
+            onPrepareThreadContext = { hideThen { onPrepareThreadContext(target.id) } },
             onCopy = {
                 hideThen {
                     scope.launch {

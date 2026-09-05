@@ -1,8 +1,11 @@
 package io.github.trevarj.motd.ui.share
 
+import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SharePickerModelsTest {
@@ -57,5 +60,22 @@ class SharePickerModelsTest {
 
     @Test fun noMatchYieldsNoTargets() {
         assertEquals(emptyList<Long>(), filterShareTargets(rows, "zzz").map { it.bufferId })
+    }
+
+    @Test fun sensitiveContextOnlyAcceptsValidAgentwireChannels() {
+        val target =
+            BufferEntity(
+                id = 9,
+                networkId = 1,
+                name = "#agent",
+                displayName = "#agent",
+                type = BufferType.CHANNEL,
+                topic = "agentwire:v1;account=controller;agent=host;backend=claude",
+            )
+        assertTrue(isAgentwireShareTarget(target))
+        assertFalse(isAgentwireShareTarget(target.copy(topic = null)))
+        assertFalse(isAgentwireShareTarget(target.copy(topic = "agentwire:v1;account=controller")))
+        assertFalse(isAgentwireShareTarget(target.copy(type = BufferType.QUERY)))
+        assertFalse(isAgentwireShareTarget(target.copy(archived = true)))
     }
 }
