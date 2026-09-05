@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.di.ApplicationScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -20,9 +21,17 @@ import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
-const val CHANNEL_WATCH_15_MS = 15 * 60 * 1000L
-const val CHANNEL_WATCH_30_MS = 30 * 60 * 1000L
-const val CHANNEL_WATCH_60_MS = 60 * 60 * 1000L
+/** Offered watch durations. Shared by the chat overflow and the channel-info notifications row. */
+enum class ChannelWatchDuration(
+    val millis: Long,
+) {
+    MIN_15(15 * 60 * 1000L),
+    MIN_30(30 * 60 * 1000L),
+    MIN_60(60 * 60 * 1000L),
+    ;
+
+    val minutes: Int get() = (millis / 60_000L).toInt()
+}
 
 data class ChannelWatchState(
     val bufferId: Long,
@@ -61,9 +70,9 @@ private val BUFFER_ID = longPreferencesKey("buffer_id")
 private val EXPIRES_AT = longPreferencesKey("expires_at")
 
 @Singleton
-class ChannelWatchImpl(
+class ChannelWatchImpl internal constructor(
     private val scope: CoroutineScope,
-    private val clock: () -> Long,
+    private val clock: AppClock,
     private val onExpired: suspend (Long) -> Unit,
     private val load: suspend () -> ChannelWatchState? = { null },
     private val save: suspend (ChannelWatchState?) -> Unit = {},
@@ -72,10 +81,11 @@ class ChannelWatchImpl(
     constructor(
         @ApplicationScope scope: CoroutineScope,
         @ApplicationContext context: Context,
+        clock: AppClock,
         notifications: MotdNotifications,
     ) : this(
         scope = scope,
-        clock = { System.currentTimeMillis() },
+        clock = clock,
         onExpired = { notifications.watchEnded(it) },
         load = {
             val prefs = context.channelWatchDataStore.data.first()
@@ -111,7 +121,7 @@ class ChannelWatchImpl(
             try {
                 lock.withLock {
                     val saved = load() ?: return@withLock
-                    if (clock() >= saved.expiresAt) {
+                    if (clock.nowMillis() >= saved.expiresAt) {
                         save(null)
                         onExpired(saved.bufferId)
                     } else {
@@ -126,7 +136,7 @@ class ChannelWatchImpl(
 
     override fun isActive(bufferId: Long): Boolean {
         val current = _state.value ?: return false
-        return current.bufferId == bufferId && clock() < current.expiresAt
+        return current.bufferId == bufferId && clock.nowMillis() < current.expiresAt
     }
 
     override suspend fun start(
@@ -135,7 +145,7 @@ class ChannelWatchImpl(
     ) {
         restored.await()
         lock.withLock {
-            val next = ChannelWatchState(bufferId, clock() + durationMs)
+            val next = ChannelWatchState(bufferId, clock.nowMillis() + durationMs)
             save(next)
             armLocked(next)
         }
@@ -154,7 +164,7 @@ class ChannelWatchImpl(
     private fun armLocked(next: ChannelWatchState) {
         timer?.cancel()
         _state.value = next
-        val wait = (next.expiresAt - clock()).coerceAtLeast(0L)
+        val wait = (next.expiresAt - clock.nowMillis()).coerceAtLeast(0L)
         timer =
             scope.launch {
                 delay(wait)

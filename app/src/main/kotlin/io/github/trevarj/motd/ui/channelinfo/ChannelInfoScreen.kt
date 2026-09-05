@@ -32,6 +32,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -52,6 +53,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -73,6 +75,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
+import io.github.trevarj.motd.service.ChannelWatchDuration
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.ui.chat.AttachmentSheets
 import io.github.trevarj.motd.ui.chat.InviteSheetTarget
@@ -85,6 +88,7 @@ import io.github.trevarj.motd.ui.components.AvatarEditorSheet
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.botDisplayName
+import io.github.trevarj.motd.ui.components.label
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -105,6 +109,7 @@ fun ChannelInfoScreen(
     val leaveMutation by viewModel.leaveMutation.collectAsStateWithLifecycle()
     val inviteFeedback by viewModel.inviteFeedback.collectAsStateWithLifecycle()
     val presenceStates by viewModel.presenceStates.collectAsStateWithLifecycle()
+    val notifyLevel by viewModel.notifyLevel.collectAsStateWithLifecycle()
 
     LaunchedEffect(viewModel, onBack) {
         viewModel.operationEvents.collect { event ->
@@ -236,6 +241,9 @@ fun ChannelInfoScreen(
         onQueryChange = viewModel::setQuery,
         onEditAvatar = { avatarEditorOpen = true },
         onCreateInvite = { onCreateInvite(bufferId) },
+        notifyLevel = notifyLevel,
+        onStartWatch = viewModel::startWatch,
+        onStopWatch = viewModel::stopWatch,
     )
 
     AvatarEditorSheet(
@@ -396,7 +404,11 @@ fun ChannelInfoContent(
     onQueryChange: (String) -> Unit = {},
     onEditAvatar: () -> Unit = {},
     onCreateInvite: () -> Unit = {},
+    notifyLevel: ChannelNotifyLevel = ChannelNotifyLevel.MentionsOnly,
+    onStartWatch: (ChannelWatchDuration) -> Unit = {},
+    onStopWatch: () -> Unit = {},
 ) {
+    var showNotifyPicker by remember { mutableStateOf(false) }
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var showTopicEdit by remember { mutableStateOf(false) }
     // Fools section is collapsed by default; state is local to the screen.
@@ -450,6 +462,11 @@ fun ChannelInfoContent(
                     onEditAvatar = onEditAvatar,
                     onCreateInvite = onCreateInvite,
                 )
+            }
+            if (buffer?.type == BufferType.CHANNEL) {
+                item(key = "notify_level") {
+                    NotifyLevelRow(level = notifyLevel, onClick = { showNotifyPicker = true })
+                }
             }
             // Non-ops get no section at all rather than a wall of disabled controls; the gate
             // resolves after the roster loads, so it can appear a moment after the screen does.
@@ -619,6 +636,21 @@ fun ChannelInfoContent(
                 }
             }
         }
+    }
+
+    if (showNotifyPicker) {
+        NotifyLevelDialog(
+            watchActive = notifyLevel is ChannelNotifyLevel.All,
+            onDismiss = { showNotifyPicker = false },
+            onStartWatch = {
+                showNotifyPicker = false
+                onStartWatch(it)
+            },
+            onStopWatch = {
+                showNotifyPicker = false
+                onStopWatch()
+            },
+        )
     }
 
     if (showLeaveConfirm) {
@@ -878,6 +910,94 @@ private fun ChannelHeader(
             }
         }
     }
+}
+
+@Composable
+private fun NotifyLevelRow(
+    level: ChannelNotifyLevel,
+    onClick: () -> Unit,
+) {
+    val supporting =
+        when (level) {
+            ChannelNotifyLevel.MentionsOnly -> {
+                stringResource(R.string.channelinfo_notify_mentions)
+            }
+
+            ChannelNotifyLevel.Muted -> {
+                stringResource(R.string.channelinfo_notify_muted)
+            }
+
+            is ChannelNotifyLevel.All -> {
+                stringResource(
+                    if (level.overridesMute) {
+                        R.string.channelinfo_notify_overrides_mute
+                    } else {
+                        R.string.channelinfo_notify_all
+                    },
+                    level.minutesLeft,
+                )
+            }
+        }
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.channelinfo_notifications)) },
+        supportingContent = { Text(supporting) },
+        leadingContent = {
+            Icon(
+                if (level is ChannelNotifyLevel.Muted) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications,
+                contentDescription = null,
+            )
+        },
+        modifier = Modifier.testTag("channelinfo_notify_level").clickable(onClick = onClick),
+    )
+}
+
+@Composable
+private fun NotifyLevelDialog(
+    watchActive: Boolean,
+    onDismiss: () -> Unit,
+    onStartWatch: (ChannelWatchDuration) -> Unit,
+    onStopWatch: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        // Same opt-in as the leave dialog: a dialog window does not inherit the root's tag mapping.
+        modifier =
+            Modifier
+                .semantics { testTagsAsResourceId = true }
+                .testTag("channelinfo_notify_dialog"),
+        title = { Text(stringResource(R.string.channelinfo_notifications)) },
+        text = {
+            Column {
+                ChannelWatchDuration.entries.forEach { duration ->
+                    ListItem(
+                        headlineContent = { Text(duration.label()) },
+                        leadingContent = { Icon(Icons.Outlined.Notifications, contentDescription = null) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier =
+                            Modifier
+                                .testTag("channelinfo_watch_${duration.minutes}")
+                                .clickable { onStartWatch(duration) },
+                    )
+                }
+                if (watchActive) {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.chat_watch_stop)) },
+                        leadingContent = { Icon(Icons.Outlined.NotificationsOff, contentDescription = null) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier =
+                            Modifier
+                                .testTag("channelinfo_watch_stop")
+                                .clickable { onStopWatch() },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
 }
 
 @Composable

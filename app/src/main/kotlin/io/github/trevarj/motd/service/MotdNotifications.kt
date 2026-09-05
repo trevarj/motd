@@ -53,7 +53,7 @@ import javax.inject.Singleton
  * Precedence (highest first): foreground buffer suppresses everything; an explicit buffer mute
  * always wins over friend status; a fool sender is fully silenced. The `(DM || mention)` gate lives upstream in
  * [io.github.trevarj.motd.data.sync.EventProcessor.maybeNotify], so by the time this runs the
- * message already qualifies as a DM or a mention.
+ * message already qualifies as a DM, a mention, or a watched-channel message.
  */
 fun shouldPostNotification(
     foreground: Boolean,
@@ -61,7 +61,8 @@ fun shouldPostNotification(
     senderIsFriend: Boolean,
     senderIsFool: Boolean,
     alreadyRead: Boolean = false,
-): Boolean = !alreadyRead && !foreground && !muted && !senderIsFool
+    watched: Boolean = false,
+): Boolean = !alreadyRead && !foreground && !(muted && !watched) && !senderIsFool
 
 /**
  * MessagingStyle notifications. Owns the notification channels and applies the final
@@ -301,7 +302,8 @@ class MotdNotifications
             hasMention: Boolean,
             eventId: Long,
             message: IrcEvent.ChatMessage,
-        ) = postIncoming(networkId, bufferId, type, hasMention, eventId, message, firstPresentation = true)
+            watched: Boolean,
+        ) = postIncoming(networkId, bufferId, type, hasMention, eventId, message, firstPresentation = true, watched = watched)
 
         private suspend fun postIncoming(
             networkId: Long,
@@ -311,6 +313,7 @@ class MotdNotifications
             eventId: Long?,
             message: IrcEvent.ChatMessage,
             firstPresentation: Boolean,
+            watched: Boolean = false,
         ) {
             // Plain suspend reads: Room and DataStore dispatch off the main thread on their own. The
             // events collector runs on Dispatchers.Main, so the previous runBlocking { suspend query }
@@ -351,7 +354,8 @@ class MotdNotifications
                     ?: TimelineAnchor(message.ctx.serverTime, 0L)
             val effectiveReadAnchor = buffer?.let { effectiveLocalReadAnchor(it) }
             val alreadyRead = effectiveReadAnchor?.let { incomingAnchor <= it } == true
-            val decision = shouldPostNotification(foreground, muted, senderIsFriend, senderIsFool, alreadyRead)
+            val decision =
+                shouldPostNotification(foreground, muted, senderIsFriend, senderIsFool, alreadyRead, watched = watched)
             diagnostics.record("notifications", "message_evaluated") {
                 mapOf(
                     "network_id" to networkId,
@@ -364,6 +368,7 @@ class MotdNotifications
                     "friend" to senderIsFriend,
                     "fool" to senderIsFool,
                     "already_read" to alreadyRead,
+                    "watched" to watched,
                     "post" to decision,
                     "mention" to hasMention,
                 )
@@ -715,7 +720,7 @@ class MotdNotifications
                 NotificationCompat
                     .Builder(context, CHANNEL_MESSAGES)
                     .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
-                    .setContentTitle(text)
+                    .setContentTitle(context.getString(io.github.trevarj.motd.R.string.notification_watch_ended_title))
                     .setContentText(text)
                     .setContentIntent(contentIntent)
                     .setAutoCancel(true)

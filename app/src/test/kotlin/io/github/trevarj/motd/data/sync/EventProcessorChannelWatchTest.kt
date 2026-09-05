@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.TimelineEventId
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
@@ -27,6 +28,7 @@ import org.robolectric.RobolectricTestRunner
 class EventProcessorChannelWatchTest {
     private class RecordingNotifier : MessageNotifier {
         val incoming = mutableListOf<IrcEvent.ChatMessage>()
+        val watchedFlags = mutableListOf<Boolean>()
 
         override suspend fun onIncoming(
             networkId: Long,
@@ -36,6 +38,19 @@ class EventProcessorChannelWatchTest {
             message: IrcEvent.ChatMessage,
         ) {
             incoming += message
+        }
+
+        override suspend fun onCanonicalIncoming(
+            networkId: Long,
+            bufferId: Long,
+            type: BufferType,
+            hasMention: Boolean,
+            eventId: TimelineEventId,
+            message: IrcEvent.ChatMessage,
+            watched: Boolean,
+        ) {
+            watchedFlags += watched
+            onIncoming(networkId, bufferId, type, hasMention, message)
         }
     }
 
@@ -117,6 +132,17 @@ class EventProcessorChannelWatchTest {
             watched.onRegistered(networkId, "me", emptyMap())
             watched.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "still hello", "m2"))
             assertEquals(1, notifier.incoming.size)
+            assertEquals(listOf(true), notifier.watchedFlags)
+        }
+
+    @Test
+    fun `mention on an unwatched channel notifies without the watched flag`() =
+        runTest {
+            val idle = processor()
+            idle.onRegistered(networkId, "me", emptyMap())
+            idle.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "me: ping", "m3"))
+            assertEquals(1, notifier.incoming.size)
+            assertEquals(listOf(false), notifier.watchedFlags)
         }
 
     @Test

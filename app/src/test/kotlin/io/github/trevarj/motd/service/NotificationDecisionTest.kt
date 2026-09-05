@@ -63,6 +63,60 @@ class NotificationDecisionTest {
     }
 
     @Test
+    fun `watched posts despite mute`() {
+        assertTrue(
+            shouldPostNotification(
+                foreground = false,
+                muted = true,
+                senderIsFriend = false,
+                senderIsFool = false,
+                watched = true,
+            ),
+        )
+        assertTrue(
+            shouldPostNotification(
+                foreground = false,
+                muted = false,
+                senderIsFriend = false,
+                senderIsFool = false,
+                watched = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `watched still respects foreground, fool and already read`() {
+        assertFalse(
+            shouldPostNotification(
+                foreground = true,
+                muted = true,
+                senderIsFriend = false,
+                senderIsFool = false,
+                watched = true,
+            ),
+        )
+        assertFalse(
+            shouldPostNotification(
+                foreground = false,
+                muted = true,
+                senderIsFriend = false,
+                senderIsFool = true,
+                watched = true,
+            ),
+        )
+        assertFalse(
+            shouldPostNotification(
+                foreground = false,
+                muted = true,
+                senderIsFriend = false,
+                senderIsFool = false,
+                alreadyRead = true,
+                watched = true,
+            ),
+        )
+    }
+
+    @Test
     fun `read marker dismisses only when it covers the newest notification`() {
         val latest =
             io.github.trevarj.motd.data.db

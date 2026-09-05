@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.service
 
+import io.github.trevarj.motd.di.AppClock
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -18,7 +19,7 @@ class ChannelWatchTest {
             val watch =
                 ChannelWatchImpl(
                     scope = backgroundScope,
-                    clock = { testScheduler.currentTime },
+                    clock = AppClock { testScheduler.currentTime },
                     onExpired = { expired += it },
                 )
             watch.start(7, 1_000)
@@ -39,7 +40,7 @@ class ChannelWatchTest {
             val watch =
                 ChannelWatchImpl(
                     scope = backgroundScope,
-                    clock = { testScheduler.currentTime },
+                    clock = AppClock { testScheduler.currentTime },
                     onExpired = { expired += it },
                 )
             watch.start(7, 1_000)
@@ -57,7 +58,7 @@ class ChannelWatchTest {
             val watch =
                 ChannelWatchImpl(
                     scope = backgroundScope,
-                    clock = { testScheduler.currentTime },
+                    clock = AppClock { testScheduler.currentTime },
                     onExpired = { expired += it },
                 )
             watch.start(7, 1_000)
@@ -77,7 +78,7 @@ class ChannelWatchTest {
             val watch =
                 ChannelWatchImpl(
                     scope = backgroundScope,
-                    clock = { testScheduler.currentTime },
+                    clock = AppClock { testScheduler.currentTime },
                     onExpired = {},
                     save = { persisted += it },
                 )
@@ -87,5 +88,45 @@ class ChannelWatchTest {
             runCurrent()
             assertTrue(watch.isActive(8))
             assertEquals(8L, persisted.last()?.bufferId)
+        }
+
+    @Test
+    fun `restore re-arms an unexpired saved watch`() =
+        runTest {
+            val expired = mutableListOf<Long>()
+            val watch =
+                ChannelWatchImpl(
+                    scope = backgroundScope,
+                    clock = AppClock { testScheduler.currentTime },
+                    onExpired = { expired += it },
+                    load = { ChannelWatchState(7, 1_000) },
+                )
+            runCurrent()
+            assertTrue(watch.isActive(7))
+            assertTrue(expired.isEmpty())
+            advanceTimeBy(1_000)
+            runCurrent()
+            assertEquals(listOf(7L), expired)
+            assertFalse(watch.isActive(7))
+        }
+
+    @Test
+    fun `restore expires a stale saved watch and clears it`() =
+        runTest {
+            val expired = mutableListOf<Long>()
+            val persisted = mutableListOf<ChannelWatchState?>()
+            advanceTimeBy(5_000)
+            val watch =
+                ChannelWatchImpl(
+                    scope = backgroundScope,
+                    clock = AppClock { testScheduler.currentTime },
+                    onExpired = { expired += it },
+                    load = { ChannelWatchState(7, 1_000) },
+                    save = { persisted += it },
+                )
+            runCurrent()
+            assertEquals(listOf(7L), expired)
+            assertFalse(watch.isActive(7))
+            assertEquals(listOf<ChannelWatchState?>(null), persisted)
         }
 }

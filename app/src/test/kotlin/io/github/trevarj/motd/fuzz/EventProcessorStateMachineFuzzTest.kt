@@ -511,6 +511,7 @@ class EventProcessorStateMachineFuzzTest {
             hasMention: Boolean,
             eventId: Long,
             message: IrcEvent.ChatMessage,
+            watched: Boolean,
         ) {
             eventIds += eventId
         }

@@ -4424,7 +4424,7 @@ class EventProcessor
             // Never raise a notification for a SERVER buffer: a motd line containing the user's nick
             // must not fire a mention. The bouncer console's own NOTICEs are the one exemption.
             if (!shouldNotifyIncoming(type, hasMention, consoleNotice, watchedChat)) return
-            notifier.onCanonicalIncoming(networkId, bufferId, type, hasMention, eventId, e)
+            notifier.onCanonicalIncoming(networkId, bufferId, type, hasMention, eventId, e, watchedChat)
         }
 
         /**
@@ -4578,6 +4578,8 @@ interface MessageNotifier {
         hasMention: Boolean,
         eventId: TimelineEventId,
         message: IrcEvent.ChatMessage,
+        // A live channel watch; it overrides an explicit buffer mute downstream.
+        watched: Boolean = false,
     ) = onIncoming(networkId, bufferId, type, hasMention, message)
 
     /** A local or synchronized marker advanced through this exact timeline tuple. */

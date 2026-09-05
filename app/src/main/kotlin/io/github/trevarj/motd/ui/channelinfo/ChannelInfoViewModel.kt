@@ -21,9 +21,13 @@ import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
 import io.github.trevarj.motd.data.repo.NoopNetworkIgnoreRepository
+import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.service.ChannelWatch
+import io.github.trevarj.motd.service.ChannelWatchDuration
+import io.github.trevarj.motd.service.ChannelWatchState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
@@ -32,6 +36,7 @@ import io.github.trevarj.motd.ui.chat.WhoisInfo
 import io.github.trevarj.motd.ui.chat.parseWhois
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -39,7 +44,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -138,6 +145,48 @@ sealed interface ChannelInfoOperationEvent {
     data object LeaveAccepted : ChannelInfoOperationEvent
 }
 
+/** What the channel-info notifications row reports. */
+sealed interface ChannelNotifyLevel {
+    data object MentionsOnly : ChannelNotifyLevel
+
+    data object Muted : ChannelNotifyLevel
+
+    data class All(
+        val minutesLeft: Int,
+        val overridesMute: Boolean,
+    ) : ChannelNotifyLevel
+}
+
+internal const val NOTIFY_LEVEL_TICK_MS = 30_000L
+
+/** A live watch on this buffer wins over the mute; remaining time rounds up to a whole minute. */
+internal fun deriveNotifyLevel(
+    muted: Boolean,
+    watch: ChannelWatchState?,
+    bufferId: Long,
+    nowMillis: Long,
+): ChannelNotifyLevel {
+    val active = watch?.takeIf { it.bufferId == bufferId && it.expiresAt > nowMillis }
+    return when {
+        active != null -> {
+            ChannelNotifyLevel.All(
+                minutesLeft = ceilMinutes(active.expiresAt - nowMillis),
+                overridesMute = muted,
+            )
+        }
+
+        muted -> {
+            ChannelNotifyLevel.Muted
+        }
+
+        else -> {
+            ChannelNotifyLevel.MentionsOnly
+        }
+    }
+}
+
+private fun ceilMinutes(remainingMs: Long): Int = ((remainingMs + 59_999L) / 60_000L).toInt().coerceAtLeast(1)
+
 internal data class RosterPresentation(
     val memberCount: Int?,
     val hasStaleMembers: Boolean,
@@ -165,6 +214,8 @@ class ChannelInfoViewModel
         private val networkIdentityDao: NetworkIdentityDao,
         private val networkIgnoreRepository: NetworkIgnoreRepository = NoopNetworkIgnoreRepository,
         private val avatarController: AvatarController = NoopAvatarController,
+        private val channelWatch: ChannelWatch = ChannelWatch.Noop,
+        private val clock: AppClock = AppClock(System::currentTimeMillis),
     ) : ViewModel() {
         private val bufferIdFlow = MutableStateFlow<Long?>(null)
         val presenceStates = connectionManager.presenceStates
@@ -326,6 +377,41 @@ class ChannelInfoViewModel
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = ChannelInfoUiState(),
             )
+
+        /**
+         * Notification level for this channel: an active watch outranks the buffer mute, which
+         * outranks the default mentions-only. Re-emits on a tick so the remaining minutes stay live.
+         */
+        val notifyLevel: StateFlow<ChannelNotifyLevel> =
+            combine(bufferIdFlow, bufferFlow, channelWatch.state) { id, buffer, watch ->
+                Triple(id, buffer?.muted == true, watch)
+            }.flatMapLatest { (id, muted, watch) ->
+                val bufferId = id
+                if (bufferId == null) {
+                    flowOf<ChannelNotifyLevel>(ChannelNotifyLevel.MentionsOnly)
+                } else {
+                    flow {
+                        while (true) {
+                            val level = deriveNotifyLevel(muted, watch, bufferId, clock.nowMillis())
+                            emit(level)
+                            if (level !is ChannelNotifyLevel.All) break
+                            delay(NOTIFY_LEVEL_TICK_MS)
+                        }
+                    }
+                }
+            }.distinctUntilChanged()
+                .stateIn(
+                    scope = viewModelScope,
+                    started = SharingStarted.WhileSubscribed(5_000),
+                    initialValue = ChannelNotifyLevel.MentionsOnly,
+                )
+
+        fun startWatch(duration: ChannelWatchDuration) =
+            viewModelScope.launch {
+                bufferIdFlow.value?.let { channelWatch.start(it, duration.millis) }
+            }
+
+        fun stopWatch() = viewModelScope.launch { channelWatch.stop() }
 
         fun retryMembers() =
             viewModelScope.launch {

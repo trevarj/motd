@@ -65,6 +65,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.service.ChannelWatch
+import io.github.trevarj.motd.service.ChannelWatchDuration
 import io.github.trevarj.motd.service.ChannelWatchState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
@@ -290,11 +291,10 @@ class ChatViewModel
         private val route: ChatRoute = savedStateHandle.toRoute<ChatRoute>()
         val bufferId: Long = route.bufferId
 
-        val activeWatch: StateFlow<ChannelWatchState?> =
-            channelWatch.state.stateIn(viewModelScope, SharingStarted.Eagerly, channelWatch.state.value)
+        val activeWatch: StateFlow<ChannelWatchState?> = channelWatch.state
 
-        fun startChannelWatch(durationMs: Long) {
-            viewModelScope.launch { channelWatch.start(bufferId, durationMs) }
+        fun startChannelWatch(duration: ChannelWatchDuration) {
+            viewModelScope.launch { channelWatch.start(bufferId, duration.millis) }
         }
 
         fun stopChannelWatch() {

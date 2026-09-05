@@ -192,9 +192,7 @@ import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
-import io.github.trevarj.motd.service.CHANNEL_WATCH_15_MS
-import io.github.trevarj.motd.service.CHANNEL_WATCH_30_MS
-import io.github.trevarj.motd.service.CHANNEL_WATCH_60_MS
+import io.github.trevarj.motd.service.ChannelWatchDuration
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
@@ -206,6 +204,7 @@ import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.avatarsHidden
+import io.github.trevarj.motd.ui.components.label
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.ConversationTypography
@@ -907,7 +906,7 @@ fun ChatContent(
     onAccountSetup: () -> Unit = {},
     onDismissAccountSetup: () -> Unit = {},
     watchingThisBuffer: Boolean = false,
-    onStartChannelWatch: (Long) -> Unit = {},
+    onStartChannelWatch: (ChannelWatchDuration) -> Unit = {},
     onStopChannelWatch: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
@@ -2294,39 +2293,19 @@ fun ChatContent(
                                         },
                                     )
                                 } else {
-                                    DropdownMenuItem(
-                                        modifier = Modifier.testTag("chat_watch_15"),
-                                        text = { Text(stringResource(R.string.chat_watch_15)) },
-                                        leadingIcon = {
-                                            Icon(Icons.Outlined.Notifications, contentDescription = null)
-                                        },
-                                        onClick = {
-                                            overflowOpen = false
-                                            onStartChannelWatch(CHANNEL_WATCH_15_MS)
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        modifier = Modifier.testTag("chat_watch_30"),
-                                        text = { Text(stringResource(R.string.chat_watch_30)) },
-                                        leadingIcon = {
-                                            Icon(Icons.Outlined.Notifications, contentDescription = null)
-                                        },
-                                        onClick = {
-                                            overflowOpen = false
-                                            onStartChannelWatch(CHANNEL_WATCH_30_MS)
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        modifier = Modifier.testTag("chat_watch_60"),
-                                        text = { Text(stringResource(R.string.chat_watch_60)) },
-                                        leadingIcon = {
-                                            Icon(Icons.Outlined.Notifications, contentDescription = null)
-                                        },
-                                        onClick = {
-                                            overflowOpen = false
-                                            onStartChannelWatch(CHANNEL_WATCH_60_MS)
-                                        },
-                                    )
+                                    ChannelWatchDuration.entries.forEach { duration ->
+                                        DropdownMenuItem(
+                                            modifier = Modifier.testTag("chat_watch_${duration.minutes}"),
+                                            text = { Text(duration.label()) },
+                                            leadingIcon = {
+                                                Icon(Icons.Outlined.Notifications, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                overflowOpen = false
+                                                onStartChannelWatch(duration)
+                                            },
+                                        )
+                                    }
                                 }
                             }
                             DropdownMenuItem(
