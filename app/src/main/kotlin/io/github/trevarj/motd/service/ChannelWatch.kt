@@ -21,16 +21,15 @@ import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Offered watch durations. Shared by the chat overflow and the channel-info notifications row. */
+/** Offered watch durations; [millis] null means forever. [tag] is the stable UI test-tag suffix. */
 enum class ChannelWatchDuration(
-    val millis: Long,
+    val millis: Long?,
+    val tag: String,
 ) {
-    MIN_15(15 * 60 * 1000L),
-    MIN_30(30 * 60 * 1000L),
-    MIN_60(60 * 60 * 1000L),
-    ;
-
-    val minutes: Int get() = (millis / 60_000L).toInt()
+    MIN_15(15 * 60 * 1000L, "15"),
+    MIN_30(30 * 60 * 1000L, "30"),
+    MIN_60(60 * 60 * 1000L, "60"),
+    FOREVER(null, "forever"),
 }
 
 data class ChannelWatchState(
@@ -38,15 +37,19 @@ data class ChannelWatchState(
     val expiresAt: Long,
 )
 
+/** A forever watch is stored as a sentinel expiry and never runs an expiry timer. */
+val ChannelWatchState.isForever: Boolean get() = expiresAt == Long.MAX_VALUE
+
 /** One channel at a time: notify on every live PRIVMSG/ACTION until [expiresAt]. */
 interface ChannelWatch {
     val state: StateFlow<ChannelWatchState?>
 
     fun isActive(bufferId: Long): Boolean
 
+    /** [durationMs] null watches forever. */
     suspend fun start(
         bufferId: Long,
-        durationMs: Long,
+        durationMs: Long?,
     )
 
     suspend fun stop()
@@ -58,7 +61,7 @@ interface ChannelWatch {
 
         override suspend fun start(
             bufferId: Long,
-            durationMs: Long,
+            durationMs: Long?,
         ) = Unit
 
         override suspend fun stop() = Unit
@@ -141,11 +144,12 @@ class ChannelWatchImpl internal constructor(
 
     override suspend fun start(
         bufferId: Long,
-        durationMs: Long,
+        durationMs: Long?,
     ) {
         restored.await()
         lock.withLock {
-            val next = ChannelWatchState(bufferId, clock.nowMillis() + durationMs)
+            val expiresAt = if (durationMs == null) Long.MAX_VALUE else clock.nowMillis() + durationMs
+            val next = ChannelWatchState(bufferId, expiresAt)
             save(next)
             armLocked(next)
         }
@@ -163,7 +167,9 @@ class ChannelWatchImpl internal constructor(
 
     private fun armLocked(next: ChannelWatchState) {
         timer?.cancel()
+        timer = null
         _state.value = next
+        if (next.isForever) return
         val wait = (next.expiresAt - clock.nowMillis()).coerceAtLeast(0L)
         timer =
             scope.launch {

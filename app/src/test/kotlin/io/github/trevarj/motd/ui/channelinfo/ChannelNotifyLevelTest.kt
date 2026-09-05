@@ -38,6 +38,19 @@ class ChannelNotifyLevelTest {
     }
 
     @Test
+    fun `a forever watch reports no remaining minutes`() {
+        val watch = ChannelWatchState(bufferId = 7, expiresAt = Long.MAX_VALUE)
+        assertEquals(
+            ChannelNotifyLevel.All(minutesLeft = null, overridesMute = false),
+            deriveNotifyLevel(muted = false, watch = watch, bufferId = 7, nowMillis = 0),
+        )
+        assertEquals(
+            ChannelNotifyLevel.All(minutesLeft = null, overridesMute = true),
+            deriveNotifyLevel(muted = true, watch = watch, bufferId = 7, nowMillis = 5_000_000),
+        )
+    }
+
+    @Test
     fun `remaining minutes round up and never reach zero`() {
         val watch = ChannelWatchState(bufferId = 7, expiresAt = 90_000)
         assertEquals(

@@ -111,6 +111,43 @@ class ChannelWatchTest {
         }
 
     @Test
+    fun `forever watch stays active and never expires`() =
+        runTest {
+            val expired = mutableListOf<Long>()
+            val watch =
+                ChannelWatchImpl(
+                    scope = backgroundScope,
+                    clock = AppClock { testScheduler.currentTime },
+                    onExpired = { expired += it },
+                )
+            watch.start(7, null)
+            assertTrue(watch.isActive(7))
+            advanceTimeBy(30L * 24 * 60 * 60 * 1000)
+            runCurrent()
+            assertTrue(watch.isActive(7))
+            assertTrue(expired.isEmpty())
+        }
+
+    @Test
+    fun `restore re-arms a forever watch`() =
+        runTest {
+            val expired = mutableListOf<Long>()
+            val watch =
+                ChannelWatchImpl(
+                    scope = backgroundScope,
+                    clock = AppClock { testScheduler.currentTime },
+                    onExpired = { expired += it },
+                    load = { ChannelWatchState(7, Long.MAX_VALUE) },
+                )
+            runCurrent()
+            assertTrue(watch.isActive(7))
+            advanceTimeBy(30L * 24 * 60 * 60 * 1000)
+            runCurrent()
+            assertTrue(watch.isActive(7))
+            assertTrue(expired.isEmpty())
+        }
+
+    @Test
     fun `restore expires a stale saved watch and clears it`() =
         runTest {
             val expired = mutableListOf<Long>()

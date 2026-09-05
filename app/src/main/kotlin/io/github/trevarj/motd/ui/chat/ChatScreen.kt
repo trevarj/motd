@@ -66,7 +66,7 @@ import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.NotificationsOff
+import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.PeopleOutline
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.ViewAgenda
@@ -199,12 +199,12 @@ import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AvatarEditorSheet
+import io.github.trevarj.motd.ui.components.ChannelWatchDialog
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.avatarsHidden
-import io.github.trevarj.motd.ui.components.label
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.ConversationTypography
@@ -1098,6 +1098,7 @@ fun ChatContent(
     var longDraftPrompt by rememberSaveable { mutableStateOf(false) }
     var overflowOpen by rememberSaveable { mutableStateOf(false) }
     var conversationLayoutSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var watchDialogOpen by rememberSaveable { mutableStateOf(false) }
     var presenceModeSheetOpen by rememberSaveable { mutableStateOf(false) }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
     // Global fool expand/collapse toggle: when true every collapsed fool row in the
@@ -2280,33 +2281,24 @@ fun ChatContent(
                                 )
                             }
                             if (buffer?.type == BufferType.CHANNEL) {
-                                if (watchingThisBuffer) {
-                                    DropdownMenuItem(
-                                        modifier = Modifier.testTag("chat_watch_stop"),
-                                        text = { Text(stringResource(R.string.chat_watch_stop)) },
-                                        leadingIcon = {
-                                            Icon(Icons.Outlined.NotificationsOff, contentDescription = null)
-                                        },
-                                        onClick = {
-                                            overflowOpen = false
-                                            onStopChannelWatch()
-                                        },
-                                    )
-                                } else {
-                                    ChannelWatchDuration.entries.forEach { duration ->
-                                        DropdownMenuItem(
-                                            modifier = Modifier.testTag("chat_watch_${duration.minutes}"),
-                                            text = { Text(duration.label()) },
-                                            leadingIcon = {
-                                                Icon(Icons.Outlined.Notifications, contentDescription = null)
+                                DropdownMenuItem(
+                                    modifier = Modifier.testTag("chat_watch"),
+                                    text = { Text(stringResource(R.string.channelinfo_notifications)) },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (watchingThisBuffer) {
+                                                Icons.Outlined.NotificationsActive
+                                            } else {
+                                                Icons.Outlined.Notifications
                                             },
-                                            onClick = {
-                                                overflowOpen = false
-                                                onStartChannelWatch(duration)
-                                            },
+                                            contentDescription = null,
                                         )
-                                    }
-                                }
+                                    },
+                                    onClick = {
+                                        overflowOpen = false
+                                        watchDialogOpen = true
+                                    },
+                                )
                             }
                             DropdownMenuItem(
                                 modifier = Modifier.testTag("chat_layout_menu"),
@@ -3080,6 +3072,15 @@ fun ChatContent(
                 conversationLayoutSheetOpen = false
             },
             onDismiss = { conversationLayoutSheetOpen = false },
+        )
+    }
+    if (watchDialogOpen) {
+        ChannelWatchDialog(
+            watchActive = watchingThisBuffer,
+            onStart = onStartChannelWatch,
+            onStop = onStopChannelWatch,
+            onDismiss = { watchDialogOpen = false },
+            tagPrefix = "chat",
         )
     }
 }

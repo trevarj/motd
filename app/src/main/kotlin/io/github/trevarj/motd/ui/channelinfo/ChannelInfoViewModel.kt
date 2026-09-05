@@ -30,6 +30,7 @@ import io.github.trevarj.motd.service.ChannelWatchDuration
 import io.github.trevarj.motd.service.ChannelWatchState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.RosterLoadState
+import io.github.trevarj.motd.service.isForever
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.NickSheetState
 import io.github.trevarj.motd.ui.chat.WhoisInfo
@@ -151,8 +152,9 @@ sealed interface ChannelNotifyLevel {
 
     data object Muted : ChannelNotifyLevel
 
+    /** [minutesLeft] null means the watch never expires. */
     data class All(
-        val minutesLeft: Int,
+        val minutesLeft: Int?,
         val overridesMute: Boolean,
     ) : ChannelNotifyLevel
 }
@@ -170,7 +172,7 @@ internal fun deriveNotifyLevel(
     return when {
         active != null -> {
             ChannelNotifyLevel.All(
-                minutesLeft = ceilMinutes(active.expiresAt - nowMillis),
+                minutesLeft = if (active.isForever) null else ceilMinutes(active.expiresAt - nowMillis),
                 overridesMute = muted,
             )
         }
@@ -394,7 +396,7 @@ class ChannelInfoViewModel
                         while (true) {
                             val level = deriveNotifyLevel(muted, watch, bufferId, clock.nowMillis())
                             emit(level)
-                            if (level !is ChannelNotifyLevel.All) break
+                            if (level !is ChannelNotifyLevel.All || level.minutesLeft == null) break
                             delay(NOTIFY_LEVEL_TICK_MS)
                         }
                     }

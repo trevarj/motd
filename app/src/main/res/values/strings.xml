@@ -602,6 +602,7 @@
     <string name="chat_watch_15">Notify on all for 15 minutes</string>
     <string name="chat_watch_30">Notify on all for 30 minutes</string>
     <string name="chat_watch_60">Notify on all for 1 hour</string>
+    <string name="chat_watch_forever">Notify on all forever</string>
     <string name="chat_watch_stop">Stop notifying on all messages</string>
     <string name="notification_watch_ended">No longer notifying on every message in %1$s</string>
     <string name="notification_watch_ended_title">Watch ended</string>
@@ -610,6 +611,8 @@
     <string name="channelinfo_notify_muted">Muted</string>
     <string name="channelinfo_notify_all">All messages, %1$d min left</string>
     <string name="channelinfo_notify_overrides_mute">All messages, %1$d min left (overrides mute)</string>
+    <string name="channelinfo_notify_all_forever">All messages</string>
+    <string name="channelinfo_notify_all_forever_overrides_mute">All messages (overrides mute)</string>
     <string name="chat_layout_title">Conversation layout</string>
     <string name="chat_layout_use_global">Use global setting</string>
     <string name="chat_layout_use_server_default">Server default (Two-line)</string>

@@ -64,7 +64,7 @@ class EventProcessorChannelWatchTest {
 
         override suspend fun start(
             bufferId: Long,
-            durationMs: Long,
+            durationMs: Long?,
         ) = Unit
 
         override suspend fun stop() = Unit

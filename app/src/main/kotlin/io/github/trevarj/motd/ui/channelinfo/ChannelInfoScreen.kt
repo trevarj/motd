@@ -32,7 +32,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -53,7 +52,6 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -85,10 +83,10 @@ import io.github.trevarj.motd.ui.chat.NickActionSheet
 import io.github.trevarj.motd.ui.chat.lagTone
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AvatarEditorSheet
+import io.github.trevarj.motd.ui.components.ChannelWatchDialog
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.botDisplayName
-import io.github.trevarj.motd.ui.components.label
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -639,17 +637,12 @@ fun ChannelInfoContent(
     }
 
     if (showNotifyPicker) {
-        NotifyLevelDialog(
+        ChannelWatchDialog(
             watchActive = notifyLevel is ChannelNotifyLevel.All,
+            onStart = onStartWatch,
+            onStop = onStopWatch,
             onDismiss = { showNotifyPicker = false },
-            onStartWatch = {
-                showNotifyPicker = false
-                onStartWatch(it)
-            },
-            onStopWatch = {
-                showNotifyPicker = false
-                onStopWatch()
-            },
+            tagPrefix = "channelinfo",
         )
     }
 
@@ -928,14 +921,25 @@ private fun NotifyLevelRow(
             }
 
             is ChannelNotifyLevel.All -> {
-                stringResource(
-                    if (level.overridesMute) {
-                        R.string.channelinfo_notify_overrides_mute
-                    } else {
-                        R.string.channelinfo_notify_all
-                    },
-                    level.minutesLeft,
-                )
+                val minutesLeft = level.minutesLeft
+                if (minutesLeft == null) {
+                    stringResource(
+                        if (level.overridesMute) {
+                            R.string.channelinfo_notify_all_forever_overrides_mute
+                        } else {
+                            R.string.channelinfo_notify_all_forever
+                        },
+                    )
+                } else {
+                    stringResource(
+                        if (level.overridesMute) {
+                            R.string.channelinfo_notify_overrides_mute
+                        } else {
+                            R.string.channelinfo_notify_all
+                        },
+                        minutesLeft,
+                    )
+                }
             }
         }
     ListItem(
@@ -948,55 +952,6 @@ private fun NotifyLevelRow(
             )
         },
         modifier = Modifier.testTag("channelinfo_notify_level").clickable(onClick = onClick),
-    )
-}
-
-@Composable
-private fun NotifyLevelDialog(
-    watchActive: Boolean,
-    onDismiss: () -> Unit,
-    onStartWatch: (ChannelWatchDuration) -> Unit,
-    onStopWatch: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        // Same opt-in as the leave dialog: a dialog window does not inherit the root's tag mapping.
-        modifier =
-            Modifier
-                .semantics { testTagsAsResourceId = true }
-                .testTag("channelinfo_notify_dialog"),
-        title = { Text(stringResource(R.string.channelinfo_notifications)) },
-        text = {
-            Column {
-                ChannelWatchDuration.entries.forEach { duration ->
-                    ListItem(
-                        headlineContent = { Text(duration.label()) },
-                        leadingContent = { Icon(Icons.Outlined.Notifications, contentDescription = null) },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        modifier =
-                            Modifier
-                                .testTag("channelinfo_watch_${duration.minutes}")
-                                .clickable { onStartWatch(duration) },
-                    )
-                }
-                if (watchActive) {
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.chat_watch_stop)) },
-                        leadingContent = { Icon(Icons.Outlined.NotificationsOff, contentDescription = null) },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        modifier =
-                            Modifier
-                                .testTag("channelinfo_watch_stop")
-                                .clickable { onStopWatch() },
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
     )
 }
 
