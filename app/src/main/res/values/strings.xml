@@ -368,11 +368,11 @@
     <string name="ai_metadata_multilingual">Multilingual</string>
     <string name="ai_metadata_single_language">Single-language model</string>
     <string name="ai_recommended_transcription">Transcription model links</string>
-    <string name="ai_link_whisper_cpp">whisper.cpp models</string>
+    <string name="ai_link_whisper_cpp">Whisper models on Hugging Face</string>
     <string name="ai_link_openai_whisper">OpenAI Whisper</string>
-    <string name="ai_link_whisper_cpp_summary">MIT · whisper.cpp model conversion and upstream model links.</string>
+    <string name="ai_link_whisper_cpp_summary">MIT · Download whisper.cpp-compatible GGML models.</string>
     <string name="ai_link_openai_whisper_summary">MIT · Original Whisper project and model information.</string>
-    <string name="ai_url_whisper_cpp_models" translatable="false">https://github.com/ggml-org/whisper.cpp/tree/master/models</string>
+    <string name="ai_url_whisper_cpp_models" translatable="false">https://huggingface.co/ggerganov/whisper.cpp/tree/main</string>
     <string name="ai_url_openai_whisper" translatable="false">https://github.com/openai/whisper</string>
     <string name="ai_error_source_permission">Permission to read the selected model was denied.</string>
     <string name="ai_error_source_open">The selected model could not be opened.</string>

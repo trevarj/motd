@@ -280,7 +280,7 @@ class AiLabsScreenUiTest {
         }
         val expected =
             listOf(
-                "ai_link_whisper_cpp" to "https://github.com/ggml-org/whisper.cpp/tree/master/models",
+                "ai_link_whisper_cpp" to "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
                 "ai_link_openai_whisper" to "https://github.com/openai/whisper",
             )
 
