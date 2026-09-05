@@ -96,6 +96,8 @@ import io.github.trevarj.motd.push.WebPushCryptoFacade
 import io.github.trevarj.motd.service.AndroidChatSoundPlayer
 import io.github.trevarj.motd.service.AppVisibility
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
+import io.github.trevarj.motd.service.ChannelWatch
+import io.github.trevarj.motd.service.ChannelWatchImpl
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncController
@@ -262,6 +264,9 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun chatSoundPlayer(impl: AndroidChatSoundPlayer): ChatSoundPlayer
+
+    @Binds @Singleton
+    abstract fun channelWatch(impl: ChannelWatchImpl): ChannelWatch
 
     @Binds @Singleton
     abstract fun diagnosticLogger(impl: FileDiagnosticLogger): DiagnosticLogger

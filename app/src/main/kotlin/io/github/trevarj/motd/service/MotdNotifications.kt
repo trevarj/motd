@@ -119,8 +119,11 @@ class MotdNotifications
         internal fun retireLegacyMessageNotifications() {
             runCatching {
                 manager.activeNotifications
-                    .filter { it.notification.channelId in MESSAGE_CHANNELS && !isMessageNotificationId(it.id) }
-                    .forEach { legacy ->
+                    .filter {
+                        it.notification.channelId in MESSAGE_CHANNELS &&
+                            !isMessageNotificationId(it.id) &&
+                            it.id != WATCH_ENDED_ID
+                    }.forEach { legacy ->
                         manager.cancel(legacy.id)
                         diagnostics.record("notifications", "legacy_message_id_retired") {
                             mapOf("notification_id" to legacy.id, "channel" to legacy.notification.channelId)
@@ -695,6 +698,37 @@ class MotdNotifications
             if (canPost) manager.notify(invitationNotificationId(canonicalMessageId), notification)
         }
 
+        suspend fun watchEnded(bufferId: Long) {
+            val name = db.bufferDao().observeById(bufferId)?.displayName ?: return
+            val text = context.getString(io.github.trevarj.motd.R.string.notification_watch_ended, name)
+            val contentIntent =
+                PendingIntent.getActivity(
+                    context,
+                    WATCH_ENDED_ID,
+                    Intent(context, MainActivity::class.java)
+                        .setAction(ACTION_OPEN_BUFFER)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        .putExtra(EXTRA_BUFFER_ID, bufferId),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                )
+            val notification =
+                NotificationCompat
+                    .Builder(context, CHANNEL_MESSAGES)
+                    .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
+                    .setContentTitle(text)
+                    .setContentText(text)
+                    .setContentIntent(contentIntent)
+                    .setAutoCancel(true)
+                    .build()
+            val canPost =
+                android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+                    androidx.core.content.ContextCompat.checkSelfPermission(
+                        context,
+                        android.Manifest.permission.POST_NOTIFICATIONS,
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (canPost) manager.notify(WATCH_ENDED_ID, notification)
+        }
+
         override suspend fun onInvitationResolved(messageId: Long) {
             val canonicalId = db.canonicalTimelineDao().canonicalEventId(messageId)
             manager.cancel(invitationNotificationId(canonicalId))
@@ -895,6 +929,7 @@ class MotdNotifications
 
             private const val MESSAGE_ID_NAMESPACE = 0x10000000
             private const val NAMESPACE_MASK = -0x10000000 // 0xf0000000
+            private const val WATCH_ENDED_ID = 0x30000001
         }
     }
 

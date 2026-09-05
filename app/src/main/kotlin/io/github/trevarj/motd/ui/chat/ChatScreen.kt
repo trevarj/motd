@@ -65,6 +65,8 @@ import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.PeopleOutline
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.ViewAgenda
@@ -190,6 +192,9 @@ import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.service.CHANNEL_WATCH_15_MS
+import io.github.trevarj.motd.service.CHANNEL_WATCH_30_MS
+import io.github.trevarj.motd.service.CHANNEL_WATCH_60_MS
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
@@ -347,6 +352,7 @@ fun ChatScreen(
     val memberNicks by viewModel.memberNicks.collectAsStateWithLifecycle()
     val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
     val joinedChannels by viewModel.joinedChannels.collectAsStateWithLifecycle()
+    val activeWatch by viewModel.activeWatch.collectAsStateWithLifecycle()
     val voiceState by voiceViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val voicePermissionGate =
@@ -498,6 +504,9 @@ fun ChatScreen(
             viewModel.ensureMembersObserved()
             inviteChannelOpen = true
         },
+        watchingThisBuffer = activeWatch?.bufferId == state.buffer?.id,
+        onStartChannelWatch = viewModel::startChannelWatch,
+        onStopChannelWatch = viewModel::stopChannelWatch,
         nickNormalizer = nickNormalizer,
         onSubmit = { raw -> viewModel.submit(raw, onOpenBuffer = onOpenBuffer, onOpenChannelList = onOpenChannelList) },
         onTyping = viewModel::sendTyping,
@@ -897,6 +906,9 @@ fun ChatContent(
     accountSetupReminder: Boolean = false,
     onAccountSetup: () -> Unit = {},
     onDismissAccountSetup: () -> Unit = {},
+    watchingThisBuffer: Boolean = false,
+    onStartChannelWatch: (Long) -> Unit = {},
+    onStopChannelWatch: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
@@ -2267,6 +2279,55 @@ fun ChatContent(
                                         onInviteUser()
                                     },
                                 )
+                            }
+                            if (buffer?.type == BufferType.CHANNEL) {
+                                if (watchingThisBuffer) {
+                                    DropdownMenuItem(
+                                        modifier = Modifier.testTag("chat_watch_stop"),
+                                        text = { Text(stringResource(R.string.chat_watch_stop)) },
+                                        leadingIcon = {
+                                            Icon(Icons.Outlined.NotificationsOff, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            overflowOpen = false
+                                            onStopChannelWatch()
+                                        },
+                                    )
+                                } else {
+                                    DropdownMenuItem(
+                                        modifier = Modifier.testTag("chat_watch_15"),
+                                        text = { Text(stringResource(R.string.chat_watch_15)) },
+                                        leadingIcon = {
+                                            Icon(Icons.Outlined.Notifications, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            overflowOpen = false
+                                            onStartChannelWatch(CHANNEL_WATCH_15_MS)
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        modifier = Modifier.testTag("chat_watch_30"),
+                                        text = { Text(stringResource(R.string.chat_watch_30)) },
+                                        leadingIcon = {
+                                            Icon(Icons.Outlined.Notifications, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            overflowOpen = false
+                                            onStartChannelWatch(CHANNEL_WATCH_30_MS)
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        modifier = Modifier.testTag("chat_watch_60"),
+                                        text = { Text(stringResource(R.string.chat_watch_60)) },
+                                        leadingIcon = {
+                                            Icon(Icons.Outlined.Notifications, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            overflowOpen = false
+                                            onStartChannelWatch(CHANNEL_WATCH_60_MS)
+                                        },
+                                    )
+                                }
                             }
                             DropdownMenuItem(
                                 modifier = Modifier.testTag("chat_layout_menu"),

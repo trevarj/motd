@@ -1,0 +1,148 @@
+package io.github.trevarj.motd.data.sync
+
+import android.content.Context
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.data.db.BufferEntity
+import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.proto.Prefix
+import io.github.trevarj.motd.service.ChannelWatch
+import io.github.trevarj.motd.service.ChannelWatchState
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.test.runTest
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+
+@RunWith(RobolectricTestRunner::class)
+class EventProcessorChannelWatchTest {
+    private class RecordingNotifier : MessageNotifier {
+        val incoming = mutableListOf<IrcEvent.ChatMessage>()
+
+        override suspend fun onIncoming(
+            networkId: Long,
+            bufferId: Long,
+            type: BufferType,
+            hasMention: Boolean,
+            message: IrcEvent.ChatMessage,
+        ) {
+            incoming += message
+        }
+    }
+
+    private class StickyWatch(
+        private val watched: Long,
+    ) : ChannelWatch {
+        override val state: StateFlow<ChannelWatchState?> =
+            MutableStateFlow(ChannelWatchState(watched, Long.MAX_VALUE))
+
+        override fun isActive(bufferId: Long): Boolean = bufferId == watched
+
+        override suspend fun start(
+            bufferId: Long,
+            durationMs: Long,
+        ) = Unit
+
+        override suspend fun stop() = Unit
+    }
+
+    private lateinit var db: MotdDatabase
+    private lateinit var notifier: RecordingNotifier
+    private var networkId = 0L
+    private var bufferId = 0L
+
+    @Before
+    fun setUp() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java).allowMainThreadQueries().build()
+            notifier = RecordingNotifier()
+            networkId =
+                db.networkDao().insert(
+                    NetworkEntity(
+                        name = "libera",
+                        role = NetworkRole.DIRECT,
+                        host = "h",
+                        port = 6697,
+                        nick = "me",
+                        username = "me",
+                        realname = "Me",
+                    ),
+                )
+            bufferId =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "#chan", displayName = "#chan", type = BufferType.CHANNEL),
+                )
+        }
+
+    @After
+    fun tearDown() {
+        db.close()
+    }
+
+    private fun processor(watch: ChannelWatch = ChannelWatch.Noop) = EventProcessor(db, TypingTrackerImpl(), notifier, channelWatch = watch)
+
+    private fun chat(
+        kind: IrcEvent.ChatKind,
+        text: String,
+        msgid: String,
+    ) = IrcEvent.ChatMessage(
+        ctx = MessageContext(msgid = msgid, serverTime = 1000, account = null, batchId = null, label = null),
+        kind = kind,
+        source = Prefix("alice"),
+        target = "#chan",
+        text = text,
+        isSelf = false,
+        replyToMsgid = null,
+    )
+
+    @Test
+    fun `live channel privmsg without mention notifies only while watched`() =
+        runTest {
+            val idle = processor()
+            idle.onRegistered(networkId, "me", emptyMap())
+            idle.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "hello", "m1"))
+            assertEquals(0, notifier.incoming.size)
+
+            val watched = processor(StickyWatch(bufferId))
+            watched.onRegistered(networkId, "me", emptyMap())
+            watched.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "still hello", "m2"))
+            assertEquals(1, notifier.incoming.size)
+        }
+
+    @Test
+    fun `watched channel action notifies without a mention`() =
+        runTest {
+            val watched = processor(StickyWatch(bufferId))
+            watched.onRegistered(networkId, "me", emptyMap())
+            watched.process(networkId, chat(IrcEvent.ChatKind.ACTION, "waves", "a1"))
+            assertEquals(1, notifier.incoming.size)
+        }
+
+    @Test
+    fun `watched channel notice does not notify without a mention`() =
+        runTest {
+            val watched = processor(StickyWatch(bufferId))
+            watched.onRegistered(networkId, "me", emptyMap())
+            watched.process(networkId, chat(IrcEvent.ChatKind.NOTICE, "server-ish", "n1"))
+            assertEquals(0, notifier.incoming.size)
+        }
+
+    @Test
+    fun `push playback of a watched channel does not notify without a mention`() =
+        runTest {
+            val watched = processor(StickyWatch(bufferId))
+            watched.onRegistered(networkId, "me", emptyMap())
+            watched.processPush(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "replayed", "p1"))
+            assertEquals(0, notifier.incoming.size)
+        }
+}

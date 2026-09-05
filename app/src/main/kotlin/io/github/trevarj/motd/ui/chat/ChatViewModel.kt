@@ -64,6 +64,8 @@ import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.service.ChannelWatch
+import io.github.trevarj.motd.service.ChannelWatchState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncController
@@ -270,6 +272,7 @@ class ChatViewModel
         // Fail-closed default for hand-built call sites: the global image/video stacks cannot be
         // routed through a network proxy, so unknown transport policy means no direct media fetches.
         private val directMediaPolicy: DirectMediaPolicy = DirectMediaPolicy { false },
+        private val channelWatch: ChannelWatch = ChannelWatch.Noop,
         contentPreviewPrefs: ContentPreviewPrefs,
     ) : ViewModel() {
         val contentPreviews: StateFlow<ContentPreviewConfig> =
@@ -286,6 +289,17 @@ class ChatViewModel
 
         private val route: ChatRoute = savedStateHandle.toRoute<ChatRoute>()
         val bufferId: Long = route.bufferId
+
+        val activeWatch: StateFlow<ChannelWatchState?> =
+            channelWatch.state.stateIn(viewModelScope, SharingStarted.Eagerly, channelWatch.state.value)
+
+        fun startChannelWatch(durationMs: Long) {
+            viewModelScope.launch { channelWatch.start(bufferId, durationMs) }
+        }
+
+        fun stopChannelWatch() {
+            viewModelScope.launch { channelWatch.stop() }
+        }
 
         /** This screen was opened by a deep link/notification tap rather than by a plain room open. */
         private val routeHasDeepJump: Boolean =

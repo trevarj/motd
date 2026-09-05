@@ -599,6 +599,11 @@
     <string name="settings_density_compact">Compact</string>
     <string name="settings_density_comfortable">Comfortable</string>
     <string name="settings_density_two_line">Two-line</string>
+    <string name="chat_watch_15">Notify on all for 15 minutes</string>
+    <string name="chat_watch_30">Notify on all for 30 minutes</string>
+    <string name="chat_watch_60">Notify on all for 1 hour</string>
+    <string name="chat_watch_stop">Stop notifying on all messages</string>
+    <string name="notification_watch_ended">No longer notifying on every message in %1$s</string>
     <string name="chat_layout_title">Conversation layout</string>
     <string name="chat_layout_use_global">Use global setting</string>
     <string name="chat_layout_use_server_default">Server default (Two-line)</string>

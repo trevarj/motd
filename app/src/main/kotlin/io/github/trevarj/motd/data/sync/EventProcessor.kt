@@ -50,6 +50,7 @@ import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.replyReference
 import io.github.trevarj.motd.irc.proto.unreactionValue
+import io.github.trevarj.motd.service.ChannelWatch
 import io.github.trevarj.motd.service.IrcEventSink
 import kotlinx.coroutines.CancellationException
 import java.util.UUID
@@ -124,6 +125,7 @@ class EventProcessor
         private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
         private val canonicalTimeline: CanonicalTimelineStore = CanonicalTimelineStore(db),
         private val networkIgnoreCache: NetworkIgnoreCache = NetworkIgnoreCache(db.networkIgnoreDao()),
+        private val channelWatch: ChannelWatch = ChannelWatch.Noop,
     ) : IrcEventSink {
         private val networkDao get() = db.networkDao()
         private val networkIdentityDao get() = db.networkIdentityDao()
@@ -811,9 +813,13 @@ class EventProcessor
                         }
                     }
                 }
+                val watchedChat =
+                    origin == EventOrigin.LIVE &&
+                        channelWatch.isActive(canonical.bufferId) &&
+                        (e.kind == IrcEvent.ChatKind.PRIVMSG || e.kind == IrcEvent.ChatKind.ACTION)
                 if (origin.notifies &&
                     !sourceIsSelf &&
-                    (consoleNotice || (type != BufferType.SERVER && (type == BufferType.QUERY || hasMention)))
+                    shouldNotifyIncoming(type, hasMention, consoleNotice, watchedChat)
                 ) {
                     presentNotification(canonical.id) {
                         maybeNotify(
@@ -834,6 +840,7 @@ class EventProcessor
                                 replyToMsgid = canonical.replyToMsgid,
                             ),
                             consoleNotice = consoleNotice,
+                            watchedChat = watchedChat,
                         )
                     }
                 }
@@ -4411,12 +4418,12 @@ class EventProcessor
             eventId: TimelineEventId,
             e: IrcEvent.ChatMessage,
             consoleNotice: Boolean = false,
+            watchedChat: Boolean = false,
         ) {
             if (e.isSelf) return
             // Never raise a notification for a SERVER buffer: a motd line containing the user's nick
             // must not fire a mention. The bouncer console's own NOTICEs are the one exemption.
-            if (type == BufferType.SERVER && !consoleNotice) return
-            if (type != BufferType.QUERY && !hasMention && !consoleNotice) return
+            if (!shouldNotifyIncoming(type, hasMention, consoleNotice, watchedChat)) return
             notifier.onCanonicalIncoming(networkId, bufferId, type, hasMention, eventId, e)
         }
 
@@ -4612,4 +4619,15 @@ interface MessageNotifier {
             message: IrcEvent.ChatMessage,
         ) = Unit
     }
+}
+
+internal fun shouldNotifyIncoming(
+    type: BufferType,
+    hasMention: Boolean,
+    consoleNotice: Boolean,
+    watchedChat: Boolean,
+): Boolean {
+    if (consoleNotice) return true
+    if (type == BufferType.SERVER) return false
+    return type == BufferType.QUERY || hasMention || watchedChat
 }
