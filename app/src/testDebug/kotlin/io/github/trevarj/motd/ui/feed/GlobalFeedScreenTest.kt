@@ -21,6 +21,7 @@ import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.paging.compose.collectAsLazyPagingItems
+import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -46,6 +47,9 @@ import java.util.concurrent.atomic.AtomicInteger
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class GlobalFeedScreenTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule
     val compose = createComposeRule()
 

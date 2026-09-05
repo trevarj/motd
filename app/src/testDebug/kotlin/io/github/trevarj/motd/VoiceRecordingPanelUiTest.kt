@@ -27,6 +27,9 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w411dp-h891dp")
 class VoiceRecordingPanelUiTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule val compose = createComposeRule()
 
     @Test fun locking_keeps_the_recording_panel_height_stable() {

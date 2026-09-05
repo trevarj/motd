@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertTrue
@@ -22,6 +23,9 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w411dp-h891dp")
 class MessageActionSheetUiTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule val compose = createComposeRule()
 
     @Test

@@ -41,6 +41,9 @@ import kotlin.math.abs
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w411dp-h891dp")
 class MessageTimelineUiTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule val compose = createComposeRule()
 
     @Test

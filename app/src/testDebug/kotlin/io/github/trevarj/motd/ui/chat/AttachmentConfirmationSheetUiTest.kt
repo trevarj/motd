@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -21,6 +22,9 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w411dp-h891dp")
 class AttachmentConfirmationSheetUiTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule val compose = createComposeRule()
 
     @Test

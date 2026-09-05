@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Rule
@@ -19,6 +20,9 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w411dp-h891dp")
 class DeliverySettingsNotificationPermissionUiTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule val compose = createComposeRule()
 
     @Test fun persistent_socket_shows_notification_remediation_without_push_status() {

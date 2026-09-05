@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.settings
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkContent
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkUiState
 import io.github.trevarj.motd.ui.settings.bouncer.BouncerControlCallbacks
@@ -24,6 +25,9 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w411dp-h891dp")
 class SettingsOuterShellUiTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule val compose = createComposeRule()
 
     @Test

@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
+import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -28,6 +29,9 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class RemoteMediaTimelineTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule
     val compose = createComposeRule()
 

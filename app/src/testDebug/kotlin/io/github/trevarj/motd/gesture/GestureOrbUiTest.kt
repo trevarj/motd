@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.up
+import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.gesture.radial.GESTURE_MENU_A11Y_DIALOG_TAG
 import io.github.trevarj.motd.gesture.radial.GESTURE_MENU_SCRIM_TAG
 import io.github.trevarj.motd.gesture.radial.GESTURE_ORB_TAG
@@ -34,6 +35,9 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w411dp-h891dp")
 class GestureOrbUiTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule
     val compose = createComposeRule()
 

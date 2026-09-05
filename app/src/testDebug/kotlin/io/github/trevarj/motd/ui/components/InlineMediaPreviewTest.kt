@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
+import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -26,6 +27,9 @@ import java.util.UUID
 
 @RunWith(RobolectricTestRunner::class)
 class InlineMediaPreviewTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule
     val compose = createComposeRule()
 

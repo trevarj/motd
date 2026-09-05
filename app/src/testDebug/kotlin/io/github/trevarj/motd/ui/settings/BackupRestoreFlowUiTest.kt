@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.backup.BackupExportMode
 import io.github.trevarj.motd.data.backup.BackupImportMode
 import io.github.trevarj.motd.data.backup.ConfigurationImportPreview
@@ -28,6 +29,9 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w411dp-h891dp")
 class BackupRestoreFlowUiTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule val compose = createComposeRule()
 
     @Test

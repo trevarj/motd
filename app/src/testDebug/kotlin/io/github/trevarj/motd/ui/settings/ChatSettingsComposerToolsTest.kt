@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.audio.VoiceConfig
 import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
@@ -23,6 +24,9 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ChatSettingsComposerToolsTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule
     val compose = createComposeRule()
 

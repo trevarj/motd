@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.CompletableDeferred
 import me.saket.telephoto.zoomable.ZoomSpec
@@ -35,6 +36,9 @@ private const val IMAGE_LOAD_WAIT_MS = 5_000L
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w411dp-h891dp")
 class ImageViewerGestureUiTest {
+    @get:Rule(order = 1)
+    val uiDispatcher = UiDispatcherResetRule()
+
     @get:Rule val compose = createComposeRule()
 
     /** Coil decodes an in-memory bitmap without touching the network, so no fixture server. */
