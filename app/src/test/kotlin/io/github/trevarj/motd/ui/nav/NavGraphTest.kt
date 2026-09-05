@@ -47,6 +47,27 @@ class NavGraphTest {
     }
 
     @Test
+    fun `voice settings destinations preserve typed targets and model library route`() {
+        val controller =
+            NavHostController(ApplicationProvider.getApplicationContext<Context>()).apply {
+                setLifecycleOwner(ResumedOwner())
+                setViewModelStore(ViewModelStore())
+                navigatorProvider.addNavigator(ComposeNavigator())
+                graph =
+                    createGraph(startDestination = SettingsRoute()) {
+                        composable<SettingsRoute> {}
+                        composable<AiLabsRoute> {}
+                        composable<AiModelLibraryRoute> {}
+                    }
+            }
+
+        controller.navigate(AiLabsRoute(SettingsTarget.AI_TRANSCRIPTION))
+        assertEquals(SettingsTarget.AI_TRANSCRIPTION, controller.currentBackStackEntry!!.toRoute<AiLabsRoute>().target)
+        controller.navigate(AiModelLibraryRoute)
+        assertEquals(AiModelLibraryRoute, controller.currentBackStackEntry!!.toRoute<AiModelLibraryRoute>())
+    }
+
+    @Test
     fun `opening another chat pushes its route and keeps the previous chat for back`() {
         val controller =
             NavHostController(ApplicationProvider.getApplicationContext<Context>()).apply {

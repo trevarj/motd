@@ -51,6 +51,27 @@ class SettingsSearchTest {
     }
 
     @Test
+    fun `voice search opens local transcription targets without retired features or model data`() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+
+        assertEquals(
+            SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_MODELS),
+            searchSettings("ggml", entries).single().destination,
+        )
+        assertEquals(
+            SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_TRANSCRIPTION),
+            searchSettings("speech audio", entries).single().destination,
+        )
+        assertEquals(
+            SettingsSearchDestination.Page(SettingsSearchPage.LABS, SettingsTarget.AI),
+            searchSettings("local on device", entries).single().destination,
+        )
+        listOf("briefs", "semantic", "generation", "embeddings", "private-model.bin", "/storage/emulated/0/models").forEach { query ->
+            assertTrue(searchSettings(query, entries).isEmpty())
+        }
+    }
+
+    @Test
     fun `dynamic network entries use concrete network id and eligible sections without secrets`() {
         val direct = network(7, "Libera", NetworkRole.DIRECT)
         val child = network(9, "OFTC via soju", NetworkRole.BOUNCER_CHILD)
@@ -127,6 +148,12 @@ class SettingsSearchTest {
             R.string.settings_folder_layout_desc -> "Choose how folders appear in the chat list."
             R.string.settings_show_folder_chats_in_all -> "Show folder chats in All"
             R.string.settings_show_folder_chats_in_all_desc -> "Include chats assigned to folders in the All tab."
+            R.string.labs_ai -> "Local voice"
+            R.string.labs_ai_desc -> "Local voice transcription"
+            R.string.ai_model_library -> "Model Library"
+            R.string.ai_model_library_summary -> "Import local voice models"
+            R.string.ai_transcription -> "Voice transcription"
+            R.string.ai_transcription_summary -> "Transcribe voice messages locally"
             else -> "resource-$id"
         }
 

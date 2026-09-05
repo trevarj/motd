@@ -8,7 +8,10 @@ import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import coil.decode.VideoFrameDecoder
 import dagger.hilt.android.HiltAndroidApp
+import io.github.trevarj.motd.ai.AiExecutionCoordinator
+import io.github.trevarj.motd.ai.AiLabsRepository
 import io.github.trevarj.motd.appearance.LauncherIconController
+import io.github.trevarj.motd.audio.AudioCacheStore
 import io.github.trevarj.motd.avatar.LocalAvatarStore
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
@@ -46,6 +49,10 @@ class MotdApplication :
     // Process-wide "is the user looking at us", read by panes that navigation disposes.
     @Inject lateinit var appVisibility: AppVisibilityImpl
 
+    @Inject lateinit var aiExecutionCoordinator: AiExecutionCoordinator
+
+    @Inject lateinit var aiLabsRepository: AiLabsRepository
+
     @Inject lateinit var appearancePrefs: AppearancePrefs
 
     @Inject lateinit var launcherIconController: LauncherIconController
@@ -53,6 +60,8 @@ class MotdApplication :
     @Inject lateinit var database: MotdDatabase
 
     @Inject lateinit var localAvatarStore: LocalAvatarStore
+
+    @Inject lateinit var audioCacheStore: AudioCacheStore
 
     @ApplicationScope
     @Inject
@@ -65,6 +74,15 @@ class MotdApplication :
             mapOf("cold_start" to true)
         }
         appVisibility.start()
+        aiExecutionCoordinator.start()
+        applicationScope.launch(Dispatchers.IO) {
+            // Retired semantic-search sidecar; IRC history and imported models are untouched.
+            deleteDatabase("semantic-search-cache.db")
+            aiLabsRepository.reconcile()
+        }
+        applicationScope.launch(Dispatchers.IO) {
+            audioCacheStore.pruneStaleLeases()
+        }
         pushInstanceCoordinator.start()
         pushLifecycleCoordinator.start()
         autoAwayCoordinator.start()

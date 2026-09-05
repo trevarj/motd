@@ -1,7 +1,8 @@
 # Architecture
 
-motd has two Gradle modules: `:app` is the Android application and `:irc` is a
-pure-JVM IRC engine with no Android dependencies.
+motd has three Gradle modules: `:app` is the Android application, `:irc` is a
+pure-JVM IRC engine with no Android dependencies, and `:ai-whisper` isolates
+the source-built Android voice-transcription runtime.
 
 ```mermaid
 flowchart TD
@@ -49,6 +50,12 @@ flowchart TD
 - The app ships as a single Google-free build with no product flavors; push
   delivery is UnifiedPush only. The E2E build is x86_64-compatible and
   intentionally omits the arm64-only libbox JNI.
+- Labs voice transcription is opt-in and local-only. `AiExecutionCoordinator`
+  serializes Whisper inference and unloads models when the app backgrounds.
+  Imported weights and settings are backup-excluded; transcripts are disposable
+  caches and never enter IRC history. Legacy voice settings survive migration;
+  retired text-model imports remain unused in private storage rather than being
+  automatically deleted.
 - Channel watch follows one canonical channel across redirects until its saved
   deadline (or until stopped). It admits live PRIVMSG/ACTION notifications and
   overrides mute, including already-qualifying push mentions; it does not request

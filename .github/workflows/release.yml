@@ -33,6 +33,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
       - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with: { distribution: temurin, java-version: 21 }
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
@@ -56,13 +58,13 @@ jobs:
       - uses: ./.github/actions/setup-native-toolchain
       - name: Decode keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/keystore.jks"
-      - name: Build signed release APK
+      - name: Build signed release APK and verify AI native artifacts
         env:
           MOTD_KEYSTORE_PATH: ${{ runner.temp }}/keystore.jks
           MOTD_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           MOTD_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           MOTD_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease --stacktrace
+        run: ./gradlew :app:assembleRelease :app:verifyAiNativeArtifacts --stacktrace
       - name: Verify F-Droid-compatible APK signing blocks
         run: >-
           java .github/scripts/CheckApkSigningBlocks.java
@@ -74,6 +76,9 @@ jobs:
           ./third_party/sing-box/prepare-release-assets.sh \
             "${{ github.ref_name }}" \
             app/build/outputs/apk/release/app-release.apk \
+            release-assets
+          ./third_party/ai/prepare-release-assets.sh \
+            "${{ github.ref_name }}" \
             release-assets
       - name: Prepare release notes
         shell: bash
@@ -97,6 +102,7 @@ jobs:
           files: |
             release-assets/motd-${{ github.ref_name }}-foss.apk
             release-assets/motd-libbox-source-${{ github.ref_name }}.tar.gz
+            release-assets/motd-ai-source-${{ github.ref_name }}.tar.gz
             release-assets/LICENSE
             release-assets/ROBOTO-LICENSE.txt
             release-assets/SHA256SUMS

@@ -7,6 +7,8 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import io.github.trevarj.motd.ai.SpeechModelRuntime
+import io.github.trevarj.motd.ai.WhisperSpeechModelRuntime
 import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
 import io.github.trevarj.motd.attachment.AttachmentUploader
@@ -201,6 +203,9 @@ internal abstract class AppModule {
     /** Global Feed lab store; same backup-excluded rule as the other lab flags. */
     @Binds @Singleton
     abstract fun globalFeedPrefs(impl: GlobalFeedPrefsImpl): GlobalFeedPrefs
+
+    @Binds @Singleton
+    abstract fun speechModelRuntime(impl: WhisperSpeechModelRuntime): SpeechModelRuntime
 
     @Binds @Singleton
     abstract fun voiceRecorder(impl: AndroidVoiceRecorder): VoiceRecorder

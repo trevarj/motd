@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
@@ -23,7 +24,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.filled.ExpandMore
@@ -40,12 +44,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,16 +63,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
 import io.github.trevarj.motd.audio.AudioPlaybackOrigin
+import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.formatAudioDuration
+import io.github.trevarj.motd.ui.chat.VoiceTranscriptFailureKind
+import io.github.trevarj.motd.ui.chat.VoiceTranscriptState
 import io.github.trevarj.motd.ui.chat.formatBytes
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
@@ -97,6 +108,11 @@ fun AudioAttachmentPlayers(
     onLongPress: (() -> Unit)? = null,
     reactions: List<ReactionChip> = emptyList(),
     onReact: (String) -> Unit = {},
+    transcripts: Map<String, VoiceTranscriptState> = emptyMap(),
+    transcriptionEnabled: Boolean = false,
+    transcriptionReady: Boolean = false,
+    onTranscribe: (AudioPlaybackRequest, Boolean) -> Unit = { _, _ -> },
+    onCancelTranscription: (String) -> Unit = {},
 ) {
     var expanded by remember(attachments) { mutableStateOf(false) }
     val visible = if (expanded) attachments else attachments.take(MAX_COLLAPSED_AUDIO_PLAYERS)
@@ -124,6 +140,11 @@ fun AudioAttachmentPlayers(
                         origin = origin,
                         derivedWaveform = derivedWaveforms[attachment.playbackId],
                         cacheStatus = cacheStatuses[attachment.playbackId] ?: AudioCacheStatus.UNKNOWN,
+                        transcript = transcripts[attachment.playbackId],
+                        transcriptionEnabled = transcriptionEnabled,
+                        transcriptionReady = transcriptionReady,
+                        onTranscribe = onTranscribe,
+                        onCancelTranscription = onCancelTranscription,
                         formattedTime = formattedTime,
                         pending = pending,
                         failed = failed,
@@ -171,6 +192,11 @@ private fun AudioAttachmentPlayer(
     onSeek: (AudioAttachment, Long) -> Unit,
     onLongPress: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    transcript: VoiceTranscriptState?,
+    transcriptionEnabled: Boolean,
+    transcriptionReady: Boolean,
+    onTranscribe: (AudioPlaybackRequest, Boolean) -> Unit,
+    onCancelTranscription: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val active = playbackState.activeId == attachment.playbackId
@@ -397,7 +423,10 @@ private fun AudioAttachmentPlayer(
     }
 
     if (showDetails) {
-        ModalBottomSheet(onDismissRequest = { showDetails = false }) {
+        ModalBottomSheet(
+            onDismissRequest = { showDetails = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
             SheetSystemBars()
             AudioDetailsSheet(
                 attachment = attachment,
@@ -411,6 +440,13 @@ private fun AudioAttachmentPlayer(
                     context.startActivity(Intent(Intent.ACTION_VIEW, attachment.displayUrl.toUri()))
                 },
                 onSave = { enqueueDownload(context, attachment) },
+                transcriptionEnabled = transcriptionEnabled,
+                transcriptionReady = transcriptionReady,
+                transcript = transcript,
+                onTranscribe = { force ->
+                    onTranscribe(AudioPlaybackRequest(attachment, networkId, origin), force)
+                },
+                onCancelTranscription = { onCancelTranscription(attachment.playbackId) },
             )
         }
     }
@@ -423,9 +459,33 @@ fun AudioDetailsSheet(
     onCopy: (() -> Unit)? = null,
     onOpen: (() -> Unit)? = null,
     onSave: (() -> Unit)? = null,
+    transcriptionEnabled: Boolean = false,
+    transcriptionReady: Boolean = false,
+    transcript: VoiceTranscriptState? = null,
+    onTranscribe: ((Boolean) -> Unit)? = null,
+    onCancelTranscription: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    var pendingCleartextTranscription by
+        remember(attachment.playbackId) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(transcriptionEnabled, transcriptionReady) {
+        if (!transcriptionEnabled || !transcriptionReady) {
+            pendingCleartextTranscription = null
+        }
+    }
+    val requestTranscription: (Boolean) -> Unit = { force ->
+        if (attachment.cleartextHttp) {
+            pendingCleartextTranscription = force
+        } else {
+            onTranscribe?.invoke(force)
+        }
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
         Text("Audio", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         DetailRow("Link", attachment.displayUrl)
@@ -468,9 +528,303 @@ fun AudioDetailsSheet(
                 Text("Save")
             }
         }
+        if (attachment.voice && transcriptionEnabled) {
+            Spacer(Modifier.height(8.dp))
+            VoiceTranscriptionDetails(
+                ready = transcriptionReady,
+                transcript = transcript,
+                onTranscribe = requestTranscription,
+                onCancel = onCancelTranscription ?: {},
+            )
+        }
         Spacer(Modifier.height(18.dp))
     }
+    if (pendingCleartextTranscription != null) {
+        AlertDialog(
+            onDismissRequest = { pendingCleartextTranscription = null },
+            modifier = Modifier.testTag("audio_transcription_http_confirm"),
+            icon = { Icon(Icons.Outlined.Warning, null) },
+            title = { Text(stringResource(R.string.voice_transcription_http_title)) },
+            text = { Text(stringResource(R.string.voice_transcription_http_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val force = pendingCleartextTranscription ?: return@TextButton
+                        pendingCleartextTranscription = null
+                        onTranscribe?.invoke(force)
+                    },
+                ) {
+                    Text(stringResource(R.string.voice_transcription_http_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingCleartextTranscription = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
 }
+
+@Composable
+private fun VoiceTranscriptionDetails(
+    ready: Boolean,
+    transcript: VoiceTranscriptState?,
+    onTranscribe: (Boolean) -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().testTag("audio_transcription_section"),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            stringResource(R.string.voice_transcription_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (!ready) {
+            Text(
+                stringResource(R.string.voice_transcription_setup),
+                modifier = Modifier.testTag("audio_transcription_setup"),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@Column
+        }
+        when (transcript) {
+            null -> {
+                TextButton(
+                    onClick = { onTranscribe(false) },
+                    modifier = Modifier.testTag("audio_transcription_start"),
+                ) {
+                    Text(stringResource(R.string.voice_transcription_start))
+                }
+            }
+
+            is VoiceTranscriptState.Preparing -> {
+                VoiceTranscriptionProgress(
+                    label =
+                        stringResource(
+                            R.string.voice_transcription_preparing,
+                            transcript.progress,
+                        ),
+                    progress = transcript.progress,
+                    onCancel = onCancel,
+                )
+            }
+
+            VoiceTranscriptState.Waiting -> {
+                Text(
+                    stringResource(R.string.voice_transcription_waiting),
+                    modifier = Modifier.testTag("audio_transcription_progress"),
+                )
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                TranscriptionCancel(onCancel)
+            }
+
+            is VoiceTranscriptState.Transcribing -> {
+                VoiceTranscriptionProgress(
+                    label =
+                        stringResource(
+                            R.string.voice_transcription_running,
+                            transcript.progress,
+                        ),
+                    progress = transcript.progress,
+                    onCancel = onCancel,
+                )
+            }
+
+            is VoiceTranscriptState.Ready -> {
+                Text(
+                    stringResource(R.string.voice_transcription_transcript),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                val displayedTranscript =
+                    if (transcript.text.isBlank()) {
+                        stringResource(R.string.voice_transcription_no_speech)
+                    } else {
+                        transcript.text
+                    }
+                SelectionContainer {
+                    Text(
+                        text = displayedTranscript,
+                        modifier = Modifier.fillMaxWidth().testTag("audio_transcription_text"),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+                if (transcript.cached) {
+                    Text(
+                        stringResource(R.string.voice_transcription_cached),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(
+                    onClick = { onTranscribe(true) },
+                    modifier = Modifier.testTag("audio_transcription_again"),
+                ) {
+                    Text(stringResource(R.string.voice_transcription_again))
+                }
+            }
+
+            is VoiceTranscriptState.Failed -> {
+                Text(
+                    stringResource(transcript.kind.messageResource()),
+                    modifier = Modifier.testTag("audio_transcription_error"),
+                    color = MaterialTheme.colorScheme.error,
+                )
+                TextButton(
+                    onClick = { onTranscribe(false) },
+                    modifier = Modifier.testTag("audio_transcription_retry"),
+                ) {
+                    Text(stringResource(R.string.chat_retry))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceTranscriptionProgress(
+    label: String,
+    progress: Int,
+    onCancel: () -> Unit,
+) {
+    Text(label, modifier = Modifier.testTag("audio_transcription_progress"))
+    LinearProgressIndicator(
+        progress = { progress.coerceIn(0, 100) / 100f },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    TranscriptionCancel(onCancel)
+}
+
+@Composable
+private fun TranscriptionCancel(onCancel: () -> Unit) {
+    TextButton(
+        onClick = onCancel,
+        modifier = Modifier.testTag("audio_transcription_cancel"),
+    ) {
+        Text(stringResource(R.string.action_cancel))
+    }
+}
+
+@StringRes
+private fun VoiceTranscriptFailureKind.messageResource(): Int =
+    when (this) {
+        VoiceTranscriptFailureKind.FEATURE_UNAVAILABLE -> {
+            R.string.voice_transcription_error_unavailable
+        }
+
+        VoiceTranscriptFailureKind.UNSUPPORTED_SCHEME -> {
+            R.string.voice_transcription_error_scheme
+        }
+
+        VoiceTranscriptFailureKind.FILE_UNAVAILABLE -> {
+            R.string.voice_transcription_error_file
+        }
+
+        VoiceTranscriptFailureKind.EXPIRED -> {
+            R.string.voice_transcription_error_expired
+        }
+
+        VoiceTranscriptFailureKind.MISSING_ENCRYPTION_KEY -> {
+            R.string.voice_transcription_error_missing_key
+        }
+
+        VoiceTranscriptFailureKind.INVALID_ENCRYPTION_KEY -> {
+            R.string.voice_transcription_error_invalid_key
+        }
+
+        VoiceTranscriptFailureKind.AUTHENTICATION_FAILED -> {
+            R.string.voice_transcription_error_authentication
+        }
+
+        VoiceTranscriptFailureKind.ROUTE_UNAVAILABLE -> {
+            R.string.voice_transcription_error_route
+        }
+
+        VoiceTranscriptFailureKind.TLS_FAILED -> {
+            R.string.voice_transcription_error_tls
+        }
+
+        VoiceTranscriptFailureKind.HTTP_AUTHENTICATION_FAILED -> {
+            R.string.voice_transcription_error_host_authentication
+        }
+
+        VoiceTranscriptFailureKind.HTTP_FAILED -> {
+            R.string.voice_transcription_error_http
+        }
+
+        VoiceTranscriptFailureKind.READ_FAILED -> {
+            R.string.voice_transcription_error_read
+        }
+
+        VoiceTranscriptFailureKind.INPUT_TOO_LARGE -> {
+            R.string.voice_transcription_error_input_too_large
+        }
+
+        VoiceTranscriptFailureKind.NO_AUDIO -> {
+            R.string.voice_transcription_error_no_audio
+        }
+
+        VoiceTranscriptFailureKind.UNSUPPORTED_CODEC -> {
+            R.string.voice_transcription_error_codec
+        }
+
+        VoiceTranscriptFailureKind.AUDIO_TOO_LONG -> {
+            R.string.voice_transcription_error_too_long
+        }
+
+        VoiceTranscriptFailureKind.DECODE_FAILED -> {
+            R.string.voice_transcription_error_decode
+        }
+
+        VoiceTranscriptFailureKind.MODEL_OPEN,
+        VoiceTranscriptFailureKind.NO_MODEL_LOADED,
+        -> {
+            R.string.voice_transcription_error_model_unavailable
+        }
+
+        VoiceTranscriptFailureKind.INVALID_MODEL_FORMAT -> {
+            R.string.ai_error_invalid_format
+        }
+
+        VoiceTranscriptFailureKind.TRUNCATED_MODEL -> {
+            R.string.ai_error_truncated_model
+        }
+
+        VoiceTranscriptFailureKind.CORRUPT_MODEL -> {
+            R.string.ai_error_corrupt_model
+        }
+
+        VoiceTranscriptFailureKind.UNSUPPORTED_MODEL_ARCHITECTURE -> {
+            R.string.ai_error_unsupported_architecture
+        }
+
+        VoiceTranscriptFailureKind.INVALID_REQUEST -> {
+            R.string.voice_transcription_error_request
+        }
+
+        VoiceTranscriptFailureKind.OUT_OF_MEMORY -> {
+            R.string.voice_transcription_error_out_of_memory
+        }
+
+        VoiceTranscriptFailureKind.INVALID_AUDIO -> {
+            R.string.voice_transcription_error_invalid_audio
+        }
+
+        VoiceTranscriptFailureKind.INFERENCE_FAILED -> {
+            R.string.voice_transcription_error_inference
+        }
+
+        VoiceTranscriptFailureKind.NATIVE_FAILURE -> {
+            R.string.voice_transcription_error_runtime
+        }
+
+        VoiceTranscriptFailureKind.CACHE_FAILED -> {
+            R.string.voice_transcription_error_cache
+        }
+    }
 
 @Composable
 private fun DetailRow(

@@ -20,30 +20,32 @@
           (builtins.head (pkgs.lib.filter
             (line: pkgs.lib.hasPrefix "ANDROID_NDK_VERSION=" line)
             (pkgs.lib.splitString "\n" (builtins.readFile ./third_party/sing-box/source.lock))));
+        # Must match third_party/ai/source.lock. Gradle requests the same exact SDK package.
+        nativeCmakeVersion = "3.31.6";
         # Match compileSdk/buildTools used by the current Gradle configuration.
         androidComposition = pkgs.androidenv.composeAndroidPackages {
           platformVersions = [ "37.0" ];
           buildToolsVersions = [ "36.0.0" ];
           platformToolsVersion = "35.0.2";
-          includeEmulator = false;
-          includeSystemImages = false;
-        };
-        androidSdk = androidComposition.androidsdk;
-        sdkRoot = "${androidSdk}/libexec/android-sdk";
-        # Native release work needs the same NDK used for the checked-in
-        # libbox AAR. Keep it out of the ordinary shell so UI/JVM work does
-        # not pay for the 690 MiB toolchain closure.
-        nativeAndroidComposition = pkgs.androidenv.composeAndroidPackages {
-          platformVersions = [ "37.0" ];
-          buildToolsVersions = [ "36.0.0" ];
-          platformToolsVersion = "35.0.2";
+          # App builds compile the AI libraries, so both ordinary and native shells need these.
           includeNDK = true;
           ndkVersions = [ nativeNdkVersion ];
+          includeCmake = true;
+          cmakeVersions = [ nativeCmakeVersion ];
           includeEmulator = false;
           includeSystemImages = false;
         };
-        nativeAndroidSdk = nativeAndroidComposition.androidsdk;
-        nativeAndroidSdkRoot = "${nativeAndroidSdk}/libexec/android-sdk";
+        # Nix exposes the side-by-side NDK through both ndk/<version> and legacy
+        # ndk-bundle. AGP diagnoses that duplicate package location, so present
+        # the same immutable SDK without the legacy alias.
+        androidSdk = pkgs.runCommand "motd-android-sdk" {} ''
+          mkdir -p "$out/libexec"
+          ln -s "${androidComposition.androidsdk}/bin" "$out/bin"
+          cp -rs "${androidComposition.androidsdk}/libexec/android-sdk" "$out/libexec/"
+          chmod u+w "$out/libexec/android-sdk"
+          rm "$out/libexec/android-sdk/ndk-bundle"
+        '';
+        sdkRoot = "${androidSdk}/libexec/android-sdk";
         # Opt-in, large emulator closure for the local headless E2E loop. Keeping this separate
         # avoids making every ordinary build fetch an API image and emulator runtime.
         # This shell only runs emulator/avdmanager/adb; headless.sh shells back out to the
@@ -52,6 +54,7 @@
           platformVersions = [ "34" ];
           buildToolsVersions = [ ];
           platformToolsVersion = "35.0.2";
+          includeCmake = false;
           includeEmulator = true;
           includeSystemImages = true;
           systemImageTypes = [ "default" ];
@@ -63,22 +66,26 @@
         devShells.default = pkgs.mkShell {
           # imagemagick: test/e2e/showcase-composite.sh merges the light/dark
           # showcase captures into the tracked diagonal-split screenshots.
-          packages = [ pkgs.jdk21 pkgs.kotlin-language-server pkgs.nodejs_22 pkgs.imagemagick pkgs.actionlint androidSdk ];
+          packages = [ pkgs.jdk21 pkgs.ninja pkgs.kotlin-language-server pkgs.nodejs_22 pkgs.imagemagick pkgs.actionlint androidSdk ];
           JAVA_HOME = pkgs.jdk21.home;
           ANDROID_HOME = sdkRoot;
           ANDROID_SDK_ROOT = sdkRoot;
+          ANDROID_NDK_HOME = "${sdkRoot}/ndk/${nativeNdkVersion}";
+          ANDROID_NDK_ROOT = "${sdkRoot}/ndk/${nativeNdkVersion}";
+          CMAKE_MAKE_PROGRAM = "${pkgs.ninja}/bin/ninja";
           # AGP downloads a dynamically-linked aapt2 that won't run outside FHS;
           # point Gradle at the Nix-provided one instead.
           GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2 -Dorg.gradle.workers.max=2";
         };
         devShells.native = pkgs.mkShell {
-          packages = [ pkgs.jdk21 nativeAndroidSdk ];
+          packages = [ pkgs.jdk21 pkgs.ninja androidSdk ];
           JAVA_HOME = pkgs.jdk21.home;
-          ANDROID_HOME = nativeAndroidSdkRoot;
-          ANDROID_SDK_ROOT = nativeAndroidSdkRoot;
-          ANDROID_NDK_HOME = "${nativeAndroidSdkRoot}/ndk/${nativeNdkVersion}";
-          ANDROID_NDK_ROOT = "${nativeAndroidSdkRoot}/ndk/${nativeNdkVersion}";
-          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${nativeAndroidSdkRoot}/build-tools/36.0.0/aapt2 -Dorg.gradle.workers.max=2";
+          ANDROID_HOME = sdkRoot;
+          ANDROID_SDK_ROOT = sdkRoot;
+          ANDROID_NDK_HOME = "${sdkRoot}/ndk/${nativeNdkVersion}";
+          ANDROID_NDK_ROOT = "${sdkRoot}/ndk/${nativeNdkVersion}";
+          CMAKE_MAKE_PROGRAM = "${pkgs.ninja}/bin/ninja";
+          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2 -Dorg.gradle.workers.max=2";
         };
         devShells.emulator = pkgs.mkShell {
           packages = [ pkgs.jdk21 emulatorSdk ];

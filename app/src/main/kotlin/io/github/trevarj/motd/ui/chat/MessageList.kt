@@ -325,6 +325,11 @@ fun MessageList(
     onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
     onAudioCacheInspect: (AudioAttachment) -> Unit = {},
     onAudioSeek: (AudioAttachment, Long) -> Unit = { _, _ -> },
+    voiceTranscripts: Map<String, VoiceTranscriptState> = emptyMap(),
+    voiceTranscriptionEnabled: Boolean = false,
+    voiceTranscriptionReady: Boolean = false,
+    onVoiceTranscribe: (AudioPlaybackRequest, Boolean) -> Unit = { _, _ -> },
+    onVoiceTranscriptionCancel: (String) -> Unit = {},
     liveEntryIds: Set<Long> = emptySet(),
     onLiveEntryConsumed: (Long) -> Unit = {},
     // The send currently travelling from the composer, if any. Its row is hidden and reports its
@@ -618,6 +623,11 @@ fun MessageList(
                         onAudioToggle = onAudioToggle,
                         onAudioCacheInspect = onAudioCacheInspect,
                         onAudioSeek = onAudioSeek,
+                        voiceTranscripts = voiceTranscripts,
+                        voiceTranscriptionEnabled = voiceTranscriptionEnabled,
+                        voiceTranscriptionReady = voiceTranscriptionReady,
+                        onVoiceTranscribe = onVoiceTranscribe,
+                        onVoiceTranscriptionCancel = onVoiceTranscriptionCancel,
                         onOpenLink = onOpenLink,
                         onSenderClick = onSenderClick,
                         replyPreview = replyPreview,
@@ -1383,6 +1393,11 @@ private fun MessageRow(
     onAudioToggle: (AudioPlaybackRequest) -> Unit,
     onAudioCacheInspect: (AudioAttachment) -> Unit,
     onAudioSeek: (AudioAttachment, Long) -> Unit,
+    voiceTranscripts: Map<String, VoiceTranscriptState>,
+    voiceTranscriptionEnabled: Boolean,
+    voiceTranscriptionReady: Boolean,
+    onVoiceTranscribe: (AudioPlaybackRequest, Boolean) -> Unit,
+    onVoiceTranscriptionCancel: (String) -> Unit,
     onOpenLink: (String) -> Unit,
     onSenderClick: (String) -> Unit,
     replyPreview: (String) -> StateFlow<ReplyPreviewData?>,
@@ -1696,6 +1711,27 @@ private fun MessageRow(
             } else if (!standaloneVoice) {
                 messageBubble()
             }
+            val audioOrigin =
+                if (
+                    audioAttachments.isNotEmpty() &&
+                    bufferId != null &&
+                    networkId != null &&
+                    conversationName != null
+                ) {
+                    AudioPlaybackOrigin(
+                        bufferId = bufferId,
+                        networkId = networkId,
+                        conversation = conversationName,
+                        sender = msg.sender,
+                        isSelf = msg.isSelf,
+                        directMessage = directMessage,
+                        eventId = msg.id,
+                        msgid = msg.msgid,
+                        serverTime = msg.serverTime,
+                    )
+                } else {
+                    null
+                }
             AudioAttachmentPlayers(
                 attachments = audioAttachments,
                 playbackState = audioPlaybackState,
@@ -1706,40 +1742,14 @@ private fun MessageRow(
                 formattedTime = if (standaloneVoice) formattedTime else null,
                 pending = msg.pendingLabel != null,
                 failed = msg.failed,
-                origin =
-                    if (bufferId != null && networkId != null && conversationName != null) {
-                        AudioPlaybackOrigin(
-                            bufferId = bufferId,
-                            networkId = networkId,
-                            conversation = conversationName,
-                            sender = msg.sender,
-                            isSelf = msg.isSelf,
-                            directMessage = directMessage,
-                            eventId = msg.id,
-                            msgid = msg.msgid,
-                            serverTime = msg.serverTime,
-                        )
-                    } else {
-                        null
-                    },
+                origin = audioOrigin,
+                transcripts = voiceTranscripts,
+                transcriptionEnabled = voiceTranscriptionEnabled,
+                transcriptionReady = voiceTranscriptionReady,
+                onTranscribe = onVoiceTranscribe,
+                onCancelTranscription = onVoiceTranscriptionCancel,
                 onToggle = { attachment, routeNetworkId ->
-                    val origin =
-                        if (bufferId != null && networkId != null && conversationName != null) {
-                            AudioPlaybackOrigin(
-                                bufferId = bufferId,
-                                networkId = networkId,
-                                conversation = conversationName,
-                                sender = msg.sender,
-                                isSelf = msg.isSelf,
-                                directMessage = directMessage,
-                                eventId = msg.id,
-                                msgid = msg.msgid,
-                                serverTime = msg.serverTime,
-                            )
-                        } else {
-                            null
-                        }
-                    onAudioToggle(AudioPlaybackRequest(attachment, routeNetworkId, origin))
+                    onAudioToggle(AudioPlaybackRequest(attachment, routeNetworkId, audioOrigin))
                 },
                 onInspectCache = onAudioCacheInspect,
                 onSeek = onAudioSeek,

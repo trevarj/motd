@@ -52,6 +52,9 @@ enum class SettingsTarget {
     UPLOADS,
     BACKUP,
     LABS,
+    AI,
+    AI_MODELS,
+    AI_TRANSCRIPTION,
     ABOUT,
     THEME,
     FOLLOW_SYSTEM,
@@ -161,6 +164,12 @@ enum class NetworkSettingsTarget { CONNECTION, AUTHENTICATION, OBFUSCATION, AVAT
 @Serializable data class LabsRoute(
     val target: SettingsTarget? = null,
 )
+
+@Serializable data class AiLabsRoute(
+    val target: SettingsTarget? = null,
+)
+
+@Serializable data object AiModelLibraryRoute
 
 // The gesture lab's menu-graph editor, reached from Labs > Gestures > Configure menu.
 @Serializable data object GestureMenuEditorRoute

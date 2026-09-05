@@ -1,139 +1,93 @@
 package io.github.trevarj.motd.audio
 
-import android.media.AudioFormat
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
 import io.github.trevarj.motd.di.IoDispatcher
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import java.io.BufferedInputStream
 import java.io.File
-import java.nio.ByteOrder
+import java.io.FileInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.abs
 
 @Singleton
-class AudioWaveformAnalyzer
+class AudioWaveformAnalyzer internal constructor(
+    private val ioDispatcher: CoroutineDispatcher,
+    private val decodeFile: suspend (File) -> LocalPcmAudioLease,
+) {
     @Inject
     constructor(
-        @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
-    ) {
-        suspend fun analyze(file: File): AudioWaveform? =
+        @IoDispatcher ioDispatcher: CoroutineDispatcher,
+        decoder: PcmAudioDecoder,
+    ) : this(ioDispatcher, decoder::decode)
+
+    suspend fun analyze(file: File): AudioWaveform? =
+        try {
             withContext(ioDispatcher) {
-                runCatching { analyzeBlocking(file) }.getOrNull()
-            }
-
-        private fun analyzeBlocking(file: File): AudioWaveform? {
-            val extractor = MediaExtractor()
-            var decoder: MediaCodec? = null
-            try {
-                extractor.setDataSource(file.absolutePath)
-                val track =
-                    (0 until extractor.trackCount).firstOrNull { index ->
-                        extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
-                    } ?: return null
-                extractor.selectTrack(track)
-                val inputFormat = extractor.getTrackFormat(track)
-                val mime = inputFormat.getString(MediaFormat.KEY_MIME) ?: return null
-                val durationUs = inputFormat.getLong(MediaFormat.KEY_DURATION).takeIf { it > 0 }
-                decoder =
-                    MediaCodec.createDecoderByType(mime).apply {
-                        configure(inputFormat, null, null, 0)
-                        start()
-                    }
-                val info = MediaCodec.BufferInfo()
-                val peaks = IntArray(AudioWaveform.DISPLAY_PEAKS)
-                val chunkPeaks = mutableListOf<Int>()
-                var inputEnded = false
-                var outputEnded = false
-                var pcmEncoding = AudioFormat.ENCODING_PCM_16BIT
-                while (!outputEnded) {
-                    if (!inputEnded) {
-                        val inputIndex = decoder.dequeueInputBuffer(DEQUEUE_TIMEOUT_US)
-                        if (inputIndex >= 0) {
-                            val input = decoder.getInputBuffer(inputIndex) ?: continue
-                            val size = extractor.readSampleData(input, 0)
-                            if (size < 0) {
-                                decoder.queueInputBuffer(inputIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                                inputEnded = true
-                            } else {
-                                decoder.queueInputBuffer(inputIndex, 0, size, extractor.sampleTime, 0)
-                                extractor.advance()
-                            }
-                        }
-                    }
-                    when (val outputIndex = decoder.dequeueOutputBuffer(info, DEQUEUE_TIMEOUT_US)) {
-                        MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                            val outputFormat = decoder.outputFormat
-                            pcmEncoding =
-                                if (outputFormat.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
-                                    outputFormat.getInteger(MediaFormat.KEY_PCM_ENCODING)
-                                } else {
-                                    AudioFormat.ENCODING_PCM_16BIT
-                                }
-                        }
-
-                        MediaCodec.INFO_TRY_AGAIN_LATER -> {}
-
-                        else -> {
-                            if (outputIndex >= 0) {
-                                decoder.getOutputBuffer(outputIndex)?.let { output ->
-                                    output.position(info.offset)
-                                    output.limit(info.offset + info.size)
-                                    val peak = peakAmplitude(output.slice().order(ByteOrder.nativeOrder()), pcmEncoding)
-                                    if (durationUs != null) {
-                                        val bin =
-                                            ((info.presentationTimeUs * peaks.size) / durationUs)
-                                                .toInt()
-                                                .coerceIn(0, peaks.lastIndex)
-                                        if (peak > peaks[bin]) peaks[bin] = peak
-                                    } else {
-                                        chunkPeaks += peak
-                                    }
-                                }
-                                outputEnded = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
-                                decoder.releaseOutputBuffer(outputIndex, false)
-                            }
-                        }
-                    }
+                decodeFile(file).use { lease ->
+                    val context = currentCoroutineContext()
+                    waveformFromPcm16Wav(lease.file) { context.ensureActive() }
                 }
-                val amplitudes = if (durationUs != null) peaks.toList() else chunkPeaks
-                return AudioWaveform.fromAmplitudes(amplitudes)
-            } finally {
-                runCatching { decoder?.stop() }
-                runCatching { decoder?.release() }
-                extractor.release()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+}
+
+internal fun waveformFromPcm16Wav(
+    file: File,
+    checkCancellation: () -> Unit = {},
+): AudioWaveform {
+    val dataBytes = file.length() - WAV_HEADER_BYTES
+    if (dataBytes < 0 || dataBytes and 1L != 0L) throw IllegalArgumentException("Invalid PCM WAV")
+    val totalSamples = dataBytes / 2
+    if (totalSamples == 0L) return AudioWaveform.EMPTY
+
+    val peaks = IntArray(AudioWaveform.DISPLAY_PEAKS)
+    val buffer = ByteArray(WAVEFORM_READ_BUFFER_BYTES)
+    BufferedInputStream(FileInputStream(file), buffer.size).use { input ->
+        var remainingHeader = WAV_HEADER_BYTES.toLong()
+        while (remainingHeader > 0) {
+            checkCancellation()
+            val skipped = input.skip(remainingHeader)
+            if (skipped > 0) {
+                remainingHeader -= skipped
+            } else if (input.read() < 0) {
+                throw IllegalArgumentException("Invalid PCM WAV")
+            } else {
+                remainingHeader--
             }
         }
 
-        private fun peakAmplitude(
-            buffer: java.nio.ByteBuffer,
-            encoding: Int,
-        ): Int =
-            when (encoding) {
-                AudioFormat.ENCODING_PCM_FLOAT -> {
-                    val samples = buffer.asFloatBuffer()
-                    var peak = 0f
-                    while (samples.hasRemaining()) peak = maxOf(peak, abs(samples.get()))
-                    (peak.coerceIn(0f, 1f) * 32_767).toInt()
-                }
-
-                AudioFormat.ENCODING_PCM_8BIT -> {
-                    var peak = 0
-                    while (buffer.hasRemaining()) peak = maxOf(peak, abs((buffer.get().toInt() and 0xff) - 128) * 256)
-                    peak.coerceAtMost(32_767)
-                }
-
-                else -> {
-                    val samples = buffer.asShortBuffer()
-                    var peak = 0
-                    while (samples.hasRemaining()) peak = maxOf(peak, abs(samples.get().toInt()))
-                    peak.coerceAtMost(32_767)
+        var sampleIndex = 0L
+        var lowByte = -1
+        while (sampleIndex < totalSamples) {
+            checkCancellation()
+            val count = input.read(buffer)
+            if (count < 0) throw IllegalArgumentException("Truncated PCM WAV")
+            for (index in 0 until count) {
+                val byte = buffer[index].toInt() and 0xff
+                if (lowByte < 0) {
+                    lowByte = byte
+                } else {
+                    val sample = (lowByte or (byte shl 8)).toShort().toInt()
+                    val amplitude = abs(sample).coerceAtMost(Short.MAX_VALUE.toInt())
+                    val bin = ((sampleIndex * peaks.size) / totalSamples).toInt().coerceAtMost(peaks.lastIndex)
+                    if (amplitude > peaks[bin]) peaks[bin] = amplitude
+                    sampleIndex++
+                    lowByte = -1
+                    if (sampleIndex == totalSamples) break
                 }
             }
-
-        private companion object {
-            const val DEQUEUE_TIMEOUT_US = 10_000L
         }
     }
+    return AudioWaveform.fromAmplitudes(peaks.toList())
+}
+
+private const val WAV_HEADER_BYTES = 44
+private const val WAVEFORM_READ_BUFFER_BYTES = 8 * 1024

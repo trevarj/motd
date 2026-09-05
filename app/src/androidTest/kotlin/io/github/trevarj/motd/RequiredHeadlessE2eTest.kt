@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
+import io.github.trevarj.motd.ai.WhisperNativeAssertions
 import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.VoiceSendRequest
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -173,6 +174,8 @@ class RequiredHeadlessE2eTest {
         val after = runBlocking { probe.awaitCanonical(token, bufferId) }
         assertEquals(canonical.id, after.id)
         TimelineRobot(compose).assertMessageVisible(after.tag())
+
+        WhisperNativeAssertions.assertMalformedModelsDoNotAbortOrPoisonLaterInspections()
 
         val fixture =
             File(

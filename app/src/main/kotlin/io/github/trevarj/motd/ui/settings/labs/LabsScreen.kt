@@ -23,6 +23,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.settings.SettingsGroup
+import io.github.trevarj.motd.ui.settings.SettingsNavigationRow
 import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.settings.SwitchRow
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -36,6 +37,7 @@ import io.github.trevarj.motd.ui.settings.SettingsTarget as SettingsTargetAnchor
 fun LabsScreen(
     onBack: () -> Unit = {},
     onOpenGestureMenu: () -> Unit = {},
+    onOpenAi: () -> Unit = {},
     target: SettingsTarget? = null,
     viewModel: LabsViewModel = hiltViewModel(),
 ) {
@@ -47,6 +49,7 @@ fun LabsScreen(
         onAgentwireChanged = viewModel::setAgentwireEnabled,
         onGlobalFeedChanged = viewModel::setGlobalFeedEnabled,
         onOpenGestureMenu = onOpenGestureMenu,
+        onOpenAi = onOpenAi,
         target = target,
     )
 }
@@ -59,6 +62,7 @@ fun LabsContent(
     onAgentwireChanged: (Boolean) -> Unit,
     onGlobalFeedChanged: (Boolean) -> Unit = {},
     onOpenGestureMenu: () -> Unit = {},
+    onOpenAi: () -> Unit = {},
     target: SettingsTarget? = null,
 ) {
     val context = LocalContext.current
@@ -74,6 +78,16 @@ fun LabsContent(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp),
         )
+        SettingsTargetAnchor(target?.name, SettingsTarget.AI.name) { targetModifier ->
+            SettingsGroup(modifier = targetModifier) {
+                SettingsNavigationRow(
+                    title = stringResource(R.string.labs_ai),
+                    summary = stringResource(R.string.labs_ai_desc),
+                    modifier = Modifier.testTag("labs_ai"),
+                    onClick = onOpenAi,
+                )
+            }
+        }
         SettingsTargetAnchor(
             if (target == SettingsTarget.LABS) SettingsTarget.GESTURES.name else target?.name,
             SettingsTarget.GESTURES.name,

@@ -1,10 +1,15 @@
 import org.gradle.api.DefaultTask
+import org.gradle.api.GradleException
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.bundling.Zip
+import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 import java.util.Properties
 import java.util.zip.ZipFile
@@ -126,6 +131,166 @@ abstract class VerifyLibboxArtifact : DefaultTask() {
             check(nativeEntries == listOf("jni/arm64-v8a/libbox.so")) {
                 "libbox AAR must contain only jni/arm64-v8a/libbox.so, found $nativeEntries"
             }
+        }
+    }
+}
+
+abstract class VerifyAiNativeArtifacts : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val whisperAar: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val debugApk: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val e2eApk: RegularFileProperty
+
+    @TaskAction
+    fun verify() {
+        verifyAar(whisperAar.get().asFile, "ai-whisper debug AAR", "libmotd_whisper.so")
+        verifyApk(debugApk.get().asFile, "app debug APK", "arm64-v8a", rejectLibbox = false)
+        verifyApk(e2eApk.get().asFile, "app e2e APK", "x86_64", rejectLibbox = true)
+    }
+
+    private fun verifyAar(
+        archive: File,
+        label: String,
+        libraryName: String,
+    ) {
+        val entries = readEntries(archive, label)
+        val expected =
+            listOf(
+                "jni/arm64-v8a/$libraryName",
+                "jni/x86_64/$libraryName",
+            )
+        val aiLibraries = entries.filter(::isMotdAiLibrary)
+        check(aiLibraries == expected) {
+            "$label must contain exactly $expected; found AI JNI entries $aiLibraries"
+        }
+        val jniEntries = entries.filter { it.startsWith("jni/") }
+        check(jniEntries == expected) {
+            "$label must contain no JNI files except $expected; found $jniEntries"
+        }
+        rejectLeakedRuntimeLibraries(label, entries)
+        rejectModelWeights(label, entries)
+    }
+
+    private fun verifyApk(
+        archive: File,
+        label: String,
+        abi: String,
+        rejectLibbox: Boolean,
+    ) {
+        val entries = readEntries(archive, label)
+        val expectedAiLibraries =
+            listOf(
+                "lib/$abi/libmotd_whisper.so",
+            )
+        val aiLibraries = entries.filter(::isMotdAiLibrary)
+        check(aiLibraries == expectedAiLibraries) {
+            "$label must contain exactly $expectedAiLibraries; found AI JNI entries $aiLibraries"
+        }
+        val unexpectedAbiEntries =
+            entries.filter {
+                it.startsWith("lib/") &&
+                    it.substringAfter("lib/").substringBefore('/') != abi
+            }
+        check(unexpectedAbiEntries.isEmpty()) {
+            "$label must contain native files only for $abi; found $unexpectedAbiEntries"
+        }
+        if (rejectLibbox) {
+            val libboxEntries = entries.filter { it.substringAfterLast('/') == "libbox.so" }
+            check(libboxEntries.isEmpty()) {
+                "$label must not package libbox.so; found $libboxEntries"
+            }
+        }
+        rejectLeakedRuntimeLibraries(label, entries)
+        rejectModelWeights(label, entries)
+    }
+
+    private fun readEntries(
+        archive: File,
+        label: String,
+    ): List<String> {
+        check(archive.isFile) { "$label does not exist: $archive" }
+        return try {
+            ZipFile(archive).use { zip ->
+                zip
+                    .entries()
+                    .asSequence()
+                    .filterNot { it.isDirectory }
+                    .map { it.name }
+                    .sorted()
+                    .toList()
+            }
+        } catch (failure: IOException) {
+            throw GradleException("$label is not a readable ZIP archive: $archive", failure)
+        }
+    }
+
+    private fun rejectLeakedRuntimeLibraries(
+        label: String,
+        entries: List<String>,
+    ) {
+        val leaked =
+            entries.filter {
+                val name = it.substringAfterLast('/').lowercase()
+                name.endsWith(".so") &&
+                    (
+                        name.startsWith("libggml") ||
+                            name.startsWith("libllama") ||
+                            name.startsWith("libwhisper")
+                    )
+            }
+        check(leaked.isEmpty()) {
+            "$label must statically link GGML and whisper; found leaked shared libraries $leaked"
+        }
+    }
+
+    private fun rejectModelWeights(
+        label: String,
+        entries: List<String>,
+    ) {
+        val weights = entries.filter(::isModelWeight)
+        check(weights.isEmpty()) {
+            "$label must not package model weights under assets/resources/JNI; found $weights"
+        }
+    }
+
+    private fun isMotdAiLibrary(path: String): Boolean {
+        val name = path.substringAfterLast('/')
+        return name.startsWith("libmotd_") && name.endsWith(".so")
+    }
+
+    private fun isModelWeight(path: String): Boolean {
+        val normalized = path.lowercase()
+        if (
+            !normalized.startsWith("assets/") &&
+            !normalized.startsWith("res/") &&
+            !normalized.startsWith("resources/") &&
+            !normalized.startsWith("jni/") &&
+            !normalized.startsWith("lib/")
+        ) {
+            return false
+        }
+        return when (normalized.substringAfterLast('.', "")) {
+            "bin",
+            "ckpt",
+            "ggml",
+            "gguf",
+            "model",
+            "onnx",
+            "pt",
+            "pth",
+            "safetensors",
+            "tflite",
+            "weights",
+            -> true
+
+            else -> false
         }
     }
 }
@@ -255,6 +420,23 @@ val verifyLibboxArtifact =
         enforcePinnedSha256.set(!libboxSourceBuild)
     }
 
+tasks.register<VerifyAiNativeArtifacts>("verifyAiNativeArtifacts") {
+    group = "verification"
+    description = "Verifies AI runtime AAR and app APK native packaging contracts."
+    dependsOn(
+        ":ai-whisper:bundleDebugAar",
+        "assembleDebug",
+        "assembleE2e",
+    )
+    whisperAar.set(
+        rootProject.layout.projectDirectory.file(
+            "ai-whisper/build/outputs/aar/ai-whisper-debug.aar",
+        ),
+    )
+    debugApk.set(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
+    e2eApk.set(layout.buildDirectory.file("outputs/apk/e2e/app-e2e.apk"))
+}
+
 tasks.matching { it.name == "check" || it.name.startsWith("assemble") }.configureEach {
     dependsOn(verifyLibboxArtifact)
 }
@@ -263,6 +445,7 @@ kotlin { jvmToolchain(21) }
 
 dependencies {
     implementation(project(":irc"))
+    implementation(project(":ai-whisper"))
     debugImplementation(files(libboxAar))
     releaseImplementation(files(libboxAar))
     add("e2eImplementation", files(libboxE2eAar))

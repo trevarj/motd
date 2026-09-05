@@ -1,5 +1,5 @@
 name: Setup MOTD native toolchain
-description: Install and expose the exact Android NDK pinned for libbox and APK packaging.
+description: Install and expose the exact Android NDK and CMake pinned for native builds.
 
 runs:
   using: composite
@@ -13,6 +13,8 @@ runs:
       run: |
         set -euo pipefail
         # shellcheck disable=SC1091
+        source third_party/ai/source.lock
+        # shellcheck disable=SC1091
         source third_party/sing-box/source.lock
         {
           echo "cache_paths<<EOF"
@@ -20,33 +22,40 @@ runs:
           echo "$ANDROID_HOME/platforms/android-23"
           echo "$ANDROID_HOME/platforms/android-37.0"
           echo "$ANDROID_HOME/build-tools/36.0.0"
+          echo "$ANDROID_HOME/cmake/$CMAKE_VERSION"
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
-    # Cache the ~1GB NDK plus the pinned platforms/build-tools. The key hashes
-    # both source.lock (NDK version) and this action (the platform/build-tools
-    # list), so any pin change invalidates the cache automatically.
+    # Cache the pinned NDK, CMake, platforms, and build-tools. The key hashes
+    # both lock files and this action, so any pin change invalidates the cache
+    # automatically.
     - name: Cache pinned Android NDK/SDK packages
       id: cache
       uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: ${{ steps.paths.outputs.cache_paths }}
-        key: android-toolchain-${{ runner.os }}-${{ hashFiles('third_party/sing-box/source.lock', '.github/actions/setup-native-toolchain/action.yml') }}
+        key: android-toolchain-${{ runner.os }}-${{ hashFiles('third_party/sing-box/source.lock', 'third_party/ai/source.lock', '.github/actions/setup-native-toolchain/action.yml') }}
     - name: Install pinned Android SDK packages
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
         set -euo pipefail
         # shellcheck disable=SC1091
+        source third_party/ai/source.lock
+        # shellcheck disable=SC1091
         source third_party/sing-box/source.lock
         "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --install \
           "platforms;android-23" "platforms;android-37.0" "build-tools;36.0.0" \
-          "ndk;$ANDROID_NDK_VERSION"
-    - name: Validate and expose pinned NDK
+          "cmake;$CMAKE_VERSION" "ndk;$ANDROID_NDK_VERSION"
+    - name: Validate and expose pinned native toolchain
       shell: bash
       run: |
         set -euo pipefail
         # shellcheck disable=SC1091
+        source third_party/ai/source.lock
+        # shellcheck disable=SC1091
         source third_party/sing-box/source.lock
         ndk_home="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+        cmake_home="$ANDROID_HOME/cmake/$CMAKE_VERSION"
         grep -Fx "Pkg.Revision = $ANDROID_NDK_VERSION" "$ndk_home/source.properties"
+        grep -Fx "Pkg.Revision = $CMAKE_VERSION" "$cmake_home/source.properties"
         printf 'ANDROID_NDK_HOME=%s\nANDROID_NDK_ROOT=%s\n' "$ndk_home" "$ndk_home" >> "$GITHUB_ENV"

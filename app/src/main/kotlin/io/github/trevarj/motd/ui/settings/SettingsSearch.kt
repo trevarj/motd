@@ -9,7 +9,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 
-enum class SettingsSearchPage { ROOT, APPEARANCE, CHAT, DELIVERY, UPLOADS, NETWORKS, BACKUP, LABS, ABOUT }
+enum class SettingsSearchPage { ROOT, APPEARANCE, CHAT, DELIVERY, UPLOADS, NETWORKS, BACKUP, LABS, AI_LABS, ABOUT }
 
 sealed interface SettingsSearchDestination {
     data class Page(
@@ -138,6 +138,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_uploads, R.string.settings_uploads_summary, "attachments paste files", SettingsSearchPage.UPLOADS, SettingsTarget.UPLOADS),
         spec(R.string.settings_backup_restore, R.string.settings_backup_restore_summary, "data export import", SettingsSearchPage.BACKUP, SettingsTarget.BACKUP),
         spec(R.string.settings_labs, R.string.settings_labs_summary, "experimental", SettingsSearchPage.LABS, SettingsTarget.LABS),
+        spec(R.string.labs_ai, R.string.labs_ai_desc, "local on device voice transcription", SettingsSearchPage.LABS, SettingsTarget.AI),
         spec(R.string.settings_about, R.string.settings_about_summary_search, "version help support", SettingsSearchPage.ABOUT, SettingsTarget.ABOUT),
         spec(R.string.settings_theme, R.string.settings_theme_section, "dark light color palette", SettingsSearchPage.APPEARANCE, SettingsTarget.THEME),
         spec(R.string.settings_follow_system, R.string.settings_follow_system_desc, "dark light", SettingsSearchPage.APPEARANCE, SettingsTarget.FOLLOW_SYSTEM),
@@ -192,6 +193,8 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.labs_gestures, R.string.labs_gestures_desc, "orb radial menu", SettingsSearchPage.LABS, SettingsTarget.GESTURES),
         spec(R.string.labs_agentwire, R.string.labs_agentwire_desc, "harness", SettingsSearchPage.LABS, SettingsTarget.AGENTWIRE),
         spec(R.string.labs_global_feed, R.string.labs_global_feed_desc, "merged stream", SettingsSearchPage.LABS, SettingsTarget.GLOBAL_FEED),
+        spec(R.string.ai_model_library, R.string.ai_model_library_summary, "import whisper ggml speech model", SettingsSearchPage.AI_LABS, SettingsTarget.AI_MODELS),
+        spec(R.string.ai_transcription, R.string.ai_transcription_summary, "voice speech audio text whisper", SettingsSearchPage.AI_LABS, SettingsTarget.AI_TRANSCRIPTION),
         spec(R.string.about_diagnostic_logging, R.string.about_diagnostic_logging_summary, "support logs export", SettingsSearchPage.ABOUT, SettingsTarget.DIAGNOSTICS),
         spec(R.string.about_license, R.string.about_license_gpl, "legal free software", SettingsSearchPage.ABOUT, SettingsTarget.LICENSE),
         spec(R.string.settings_github, R.string.settings_github_url, "source project repository", SettingsSearchPage.ABOUT, SettingsTarget.PROJECT),

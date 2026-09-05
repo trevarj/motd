@@ -82,11 +82,13 @@ the source tree.
       - firebase
       - third_party/gomobile/internal/binres/testdata/bootstrap.bin
       - third_party/sing-box/source/clients/android/settings.gradle.kts
+      - third_party/whisper.cpp/source/models
     prebuild:
       - printf '\nmotdVersionName=%s\nmotdVersionCode=%s\nmotdSourceCommit=%s\n' "$$VERSION$$"
         "$$VERCODE$$" "$$COMMIT$$" >> ../gradle.properties
       - sdkmanager "platforms;android-23"
       - sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
+      - source ../third_party/ai/source.lock && sdkmanager "cmake;$CMAKE_VERSION"
     build:
       - pushd "$$go$$/src"
       - ./make.bash
@@ -98,6 +100,8 @@ the source tree.
       - export LIBBOX_NDK_HOME="$$NDK$$"
       - export LIBBOX_PATCH_NDK_HOST_TOOLS=0
       - ../third_party/sing-box/build-libbox.sh
+    preassemble:
+      - :app:verifyAiNativeArtifacts
     ndk: 28.2.13676358
     gradleprops:
       - motdLibboxSource=true
@@ -106,8 +110,9 @@ the source tree.
 ```
 
 API 23 is required by gomobile; platform 37.0 and build-tools 36.0.0 match
-`compileSdk = 37`. The buildserver supplies OpenJDK 21, so the recipe selects it
-with `JAVA_HOME` instead of installing a JDK.
+`compileSdk = 37`. SDK CMake `3.31.6` is installed from the pin in
+`third_party/ai/source.lock`. The buildserver supplies OpenJDK 21, so the recipe
+selects it with `JAVA_HOME` instead of installing a JDK.
 
 ## The flavor collapse, as a worked example
 
@@ -137,10 +142,12 @@ The published release asset keeps the name `motd-<tag>-foss.apk` because the
 
 ## Native source build
 
-F-Droid's `rm` step removes the checked-in AAR before scanning. The `build`
-step, which runs after scanning and source-tarball creation, regenerates the AAR
-in the build directory from the recursively initialized upstream submodules and
-F-Droid's pinned Go toolchain.
+F-Droid's `rm` step removes the checked-in AAR and the upstream whisper.cpp
+model-fixture directory before scanning, while retaining its runtime sources
+and license file. The `build` step, which runs after scanning
+and source-tarball creation, regenerates the AAR in the build directory from the
+recursively initialized upstream submodules and F-Droid's pinned Go toolchain.
+The `preassemble` task then runs the AI native artifact assertions.
 
 Go must be built from the exact `go1.25.12` source commit
 `d80d9a98f7e3a8f9b3a82d2c6079f84eb1101d46` with `src/make.bash`; a Nixpkgs

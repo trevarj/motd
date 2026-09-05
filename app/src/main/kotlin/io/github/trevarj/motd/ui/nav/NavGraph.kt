@@ -54,6 +54,8 @@ import io.github.trevarj.motd.ui.settings.SettingsSearchPage
 import io.github.trevarj.motd.ui.settings.UploadsSettingsScreen
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkScreen
 import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetworksScreen
+import io.github.trevarj.motd.ui.settings.labs.AiLabsScreen
+import io.github.trevarj.motd.ui.settings.labs.AiModelLibraryScreen
 import io.github.trevarj.motd.ui.settings.labs.GestureMenuEditorScreen
 import io.github.trevarj.motd.ui.settings.labs.LabsScreen
 import io.github.trevarj.motd.ui.share.PendingShare
@@ -357,7 +359,18 @@ fun MotdNavGraph(
                 target = entry.toRoute<LabsRoute>().target,
                 onBack = { navController.popBackStack() },
                 onOpenGestureMenu = { navController.navigate(GestureMenuEditorRoute) },
+                onOpenAi = { navController.navigate(AiLabsRoute()) },
             )
+        }
+        composable<AiLabsRoute> { entry ->
+            AiLabsScreen(
+                target = entry.toRoute<AiLabsRoute>().target,
+                onBack = { navController.popBackStack() },
+                onOpenModelLibrary = { navController.navigate(AiModelLibraryRoute) },
+            )
+        }
+        composable<AiModelLibraryRoute> {
+            AiModelLibraryScreen(onBack = { navController.popBackStack() })
         }
         composable<GestureMenuEditorRoute> {
             GestureMenuEditorScreen(onBack = { navController.popBackStack() })
@@ -566,6 +579,7 @@ private fun NavHostController.openSettingsResult(destination: SettingsSearchDest
                 SettingsSearchPage.NETWORKS -> navigate(NetworksSettingsRoute(target))
                 SettingsSearchPage.BACKUP -> navigate(BackupRestoreRoute(target))
                 SettingsSearchPage.LABS -> navigate(LabsRoute(target))
+                SettingsSearchPage.AI_LABS -> navigate(AiLabsRoute(target))
                 SettingsSearchPage.ABOUT -> navigate(AboutRoute(target))
             }
         }

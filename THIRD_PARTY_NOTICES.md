@@ -38,6 +38,20 @@ asset, `SHA256SUMS`, the project `LICENSE`, and a rendered release-specific copy
 of this notice. The rendered notice records the archive's actual release URL
 and SHA-256; use that copy as the provenance record for a particular APK.
 
+## On-device voice transcription: whisper.cpp
+
+Optional Labs voice transcription builds a CPU-only Android JNI library from:
+
+- [whisper.cpp](https://github.com/ggml-org/whisper.cpp) at commit
+  [`642b5d3260e020c2fc6f34a9569d10ddd7672963`](https://github.com/ggml-org/whisper.cpp/commit/642b5d3260e020c2fc6f34a9569d10ddd7672963),
+  licensed under MIT, for on-device voice-message transcription.
+
+Every GitHub release attaches the deterministic
+`motd-ai-source-<tag>.tar.gz` asset containing the pinned source tree, its
+MIT license, motd's native/Kotlin wrapper, and the reproducible build lock.
+Imported model weights remain user-owned; motd never includes them in the app
+or source asset and does not redistribute them.
+
 ## QR encoding: ZXing
 
 QR invitation generation and decoding use
