@@ -34,4 +34,5 @@ assert_paths "$device_only" app/src/androidTest/kotlin/RequiredHeadlessE2eTest.k
 assert_paths "$packaging" app/src/main/AndroidManifest.xml app/src/main/res/values/strings.xml
 assert_paths "$harness" .github/workflows/fuzz.yml
 assert_paths "$harness" test/e2e/fast-suite.sh
+assert_paths "$all" .github/workflows/ci.yml
 assert_paths "$all" unexpected/runtime.surface

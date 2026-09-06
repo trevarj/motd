@@ -61,7 +61,7 @@ for path in "${paths[@]}"; do
       runtime=true; harness=true
       ;;
     .github/workflows/ci.yml)
-      runtime=true; device=true; harness=true
+      all_tiers
       ;;
     .github/actions/setup-native-toolchain/*)
       runtime=true; app=true; package=true; harness=true
