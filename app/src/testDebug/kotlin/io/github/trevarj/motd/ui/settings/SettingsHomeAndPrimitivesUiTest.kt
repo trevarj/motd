@@ -23,6 +23,7 @@ import androidx.compose.ui.test.performTextReplacement
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
@@ -73,13 +74,28 @@ class SettingsHomeAndPrimitivesUiTest {
         compose.onNodeWithTag("settings_search_prompt").assertIsDisplayed()
         compose.onNodeWithTag("settings_category_networks").assertDoesNotExist()
         compose.onNodeWithTag("settings_search_field").performTextReplacement("obfuscation")
-        compose.onNodeWithText("Libera · Routing and obfuscation").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("settings_search_result_network_4_OBFUSCATION").assertIsDisplayed().performClick()
         compose.onNodeWithTag("settings_search_field").assertIsDisplayed()
-        compose.onNodeWithText("Libera · Routing and obfuscation").assertIsDisplayed()
+        compose.onNodeWithTag("settings_search_result_network_4_OBFUSCATION").assertIsDisplayed()
 
         compose.runOnIdle {
-            val destination = opened as SettingsSearchDestination.Network
-            assertEquals(4L, destination.networkId)
+            assertEquals(SettingsSearchDestination.Network(4L, NetworkSettingsTarget.OBFUSCATION), opened)
+            state = state.copy(networks = listOf(network(4, "Renamed"), network(5, "Renamed")))
+        }
+
+        compose.onNodeWithTag("settings_search_result_network_4_OBFUSCATION").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(SettingsSearchDestination.Network(4L, NetworkSettingsTarget.OBFUSCATION), opened)
+        }
+        compose.onNodeWithTag("settings_search_result_network_5_OBFUSCATION").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(SettingsSearchDestination.Network(5L, NetworkSettingsTarget.OBFUSCATION), opened)
+        }
+
+        compose.onNodeWithTag("settings_search_field").performTextReplacement("join part")
+        compose.onNodeWithTag("settings_search_result_page_CHAT_PRESENCE").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.PRESENCE), opened)
         }
     }
 

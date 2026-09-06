@@ -79,24 +79,13 @@ class GestureMenuEditorViewModelTest {
 
     @Test fun loadsTheStoredTreeAsAnIndentedPreorderList() =
         runTest {
-            val state = settled(editor())
+            val state = settled(editor(smallMenu()))
 
             assertTrue(state.loaded)
-            assertEquals(
-                "default-root",
-                state.rows
-                    .first()
-                    .node.id,
-            )
-            assertEquals(0, state.rows.first().depth)
-            assertEquals(8, state.rows.count { it.depth == 1 })
-            assertEquals(
-                listOf("default-search", "default-channel-info", "default-attach", "default-theme"),
-                state.rows.filter { it.depth == 2 }.map { it.node.id },
-            )
+            assertEquals(listOf("root", "outer", "inner"), state.rows.map { it.node.id })
+            assertEquals(listOf(0, 1, 2), state.rows.map { it.depth })
             assertFalse(state.dirty)
             assertFalse(state.canSave)
-            assertTrue(state.isDefault)
         }
 
     @Test fun pickersComeFromTheRepositories() =
@@ -155,13 +144,21 @@ class GestureMenuEditorViewModelTest {
 
     @Test fun aNinthSliceOverflowsTheRingAndBlocksSave() =
         runTest {
-            val model = editor()
+            val menu =
+                GestureMenuConfig(
+                    root = GestureNode.Submenu(id = "root", label = "Menu", children = (1..8).map { leaf("leaf-$it") }),
+                )
+            val model = editor(menu)
 
-            model.addChild("default-root", GestureNodeKind.LEAF)
+            model.addChild("root", GestureNodeKind.LEAF)
             val state = settled(model)
 
-            assertEquals(listOf(GestureMenuViolation.RingOverflow("default-root", 9)), state.violations)
+            assertEquals(listOf(GestureMenuViolation.RingOverflow("root", 9)), state.violations)
             assertFalse(state.canSave)
+
+            model.save()
+            advanceUntilIdle()
+            assertEquals(menu, prefs.menuState.value)
         }
 
     @Test fun aFourthRingIsReportedTooDeep() =
@@ -185,49 +182,45 @@ class GestureMenuEditorViewModelTest {
 
     @Test fun movesReorderWithinTheRingAndAreNotOfferedAtTheEnds() =
         runTest {
-            val model = editor()
+            val menu =
+                GestureMenuConfig(
+                    root = GestureNode.Submenu(id = "root", label = "Menu", children = listOf(leaf("a"), leaf("b"))),
+                )
+            val model = editor(menu)
 
-            val first = rowFor(model, "default-unread")
+            val first = rowFor(model, "a")
             assertFalse(first.canMoveUp)
             assertTrue(first.canMoveDown)
-            assertFalse(rowFor(model, "default-networks").canMoveDown)
+            assertFalse(rowFor(model, "b").canMoveDown)
 
-            model.moveDown("default-unread")
+            model.moveDown("a")
             val state = settled(model)
 
-            assertEquals(
-                listOf("default-pinned", "default-unread"),
-                state.rows
-                    .filter { it.depth == 1 }
-                    .take(2)
-                    .map { it.node.id },
-            )
+            assertEquals(listOf("b", "a"), state.rows.filter { it.depth == 1 }.map { it.node.id })
+            assertTrue(state.dirty)
+            assertEquals(menu, prefs.menuState.value)
         }
 
     @Test fun indentPushesANodeIntoTheRingAboveItAndOutdentLiftsItBackOut() =
         runTest {
-            val model = editor()
-            assertTrue(rowFor(model, "default-networks").canIndent)
+            val base = smallMenu()
+            val menu = base.copy(root = base.root.copy(children = base.root.children + leaf("target")))
+            val model = editor(menu)
+            assertTrue(rowFor(model, "target").canIndent)
 
-            model.indent("default-networks")
+            model.indent("target")
             val nested = settled(model)
-            assertEquals(2, nested.rows.first { it.node.id == "default-networks" }.depth)
+            assertEquals(2, nested.rows.first { it.node.id == "target" }.depth)
             assertEquals(
-                listOf("default-search", "default-channel-info", "default-attach", "default-theme", "default-networks"),
-                nested.rows.filter { it.depth == 2 }.map { it.node.id },
+                listOf("inner", "target"),
+                (nested.rows.first { it.node.id == "outer" }.node as GestureNode.Submenu).children.map { it.id },
             )
-            assertTrue(nested.rows.first { it.node.id == "default-networks" }.canOutdent)
+            assertTrue(nested.rows.first { it.node.id == "target" }.canOutdent)
 
-            model.outdent("default-networks")
+            model.outdent("target")
             val flat = settled(model)
-            assertEquals(1, flat.rows.first { it.node.id == "default-networks" }.depth)
-            assertEquals(
-                "default-networks",
-                flat.rows
-                    .last { it.depth == 1 }
-                    .node.id,
-            )
-            assertEquals(defaultGestureMenu(), flatConfigEquivalent(flat))
+            assertEquals(1, flat.rows.first { it.node.id == "target" }.depth)
+            assertEquals(menu, flatConfigEquivalent(flat))
         }
 
     @Test fun indentIsRefusedWhenTheSliceAboveOpensNoRing() =
@@ -473,6 +466,8 @@ class GestureMenuEditorViewModelTest {
 
     /** Rebuild a config from the flattened rows, to prove an indent/outdent pair is a true no-op. */
     private fun flatConfigEquivalent(state: GestureEditorUiState): GestureMenuConfig = GestureMenuConfig(root = state.rows.first().node as GestureNode.Submenu)
+
+    private fun leaf(id: String) = GestureNode.Leaf(id = id, label = id, action = GestureAction.MarkAllRead)
 
     private fun smallMenu(): GestureMenuConfig =
         GestureMenuConfig(

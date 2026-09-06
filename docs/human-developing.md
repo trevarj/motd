@@ -37,19 +37,39 @@ verified libbox artifact.
 ## Verification
 
 Use the authoritative local command matrix in
-[`.agents/testing.md`](../.agents/testing.md). Routine development runs the
-nearest test method, then its class, not a whole module:
+[`.agents/testing.md`](../.agents/testing.md). While editing, run the nearest
+relevant test method; before handoff/push, run its class once. For cross-module
+changes, do this for the nearest affected tests in each module:
 
 ```sh
 ./gradlew :app:testDebugUnitTest \
-  --tests '<fully-qualified-test-class.method>' --stacktrace
+  --tests '<fully-qualified-class.method>' --stacktrace
 ```
 
-Run `:app:assembleDebug` only when an APK, resources, manifest, or packaging
-check is needed. After committing the final clean candidate, run
-`./tools/prepush.sh` once for path-selected deterministic CI parity. Full lint
-and emulator E2E remain hosted; use `:app:lintDebug` locally only for an explicit
-pre-push lint check.
+Use the class filter for handoff and `:irc:test` for protocol changes. Filters
+narrow execution, not compilation of test sources and dependencies. The command
+above assumes the Nix shell; alternatively use
+`nix develop -c ./gradlew :app:testDebugUnitTest --tests '<fully-qualified-class.method>' --stacktrace`.
+
+Run each changed module's existing `:app:ktlintCheck`, `:irc:ktlintCheck`, or
+`:ai-whisper:ktlintCheck` once before handoff. Root Gradle/style configuration
+changes still require root `ktlintCheck`. Do not automatically append an
+unfiltered suite, Android lint, APK assembly, or a full pre-push gate.
+
+For database changes, run the nearest database regression and review/commit
+generated `app/schemas` changes. Compile affected instrumentation journeys with
+`:app:compileE2eAndroidTestKotlin`. Run `:app:assembleDebug` when resources,
+manifest, packaging, or an actual APK require it. No routine local emulator or
+physical-device runs.
+
+`./tools/prepush.sh` is only an explicitly requested diagnostic for broader
+failures, not a handoff/push prerequisite or a substitute for hosted CI. It
+requires a clean committed tree; `MOTD_PREFLIGHT_BASE=<ref>` overrides its
+`origin/main` comparison base.
+
+Require all applicable hosted `Required CI / gate` checks before merge. Inspect
+an individual failed job's existing diagnostics and begin fixing it immediately
+rather than waiting for aggregate `gate`; remaining coverage continues normally.
 
 ## Device and E2E testing
 

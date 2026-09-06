@@ -25,8 +25,8 @@ internal class SettingsRobot(
 
     fun searchPresence() {
         click("settings_search_action")
-        replace("settings_search_field", "presence changes")
-        click("settings_search_result_presence_changes")
+        replace("settings_search_field", "join part")
+        click("settings_search_result_page_CHAT_PRESENCE")
         assertDisplayed("settings_target_highlight_PRESENCE")
         assertDisplayed("settings_presence_picker")
     }
@@ -34,7 +34,7 @@ internal class SettingsRobot(
     fun returnToPresenceSearch() {
         click("settings_back")
         assertDisplayed("settings_search_field")
-        assertDisplayed("settings_search_result_presence_changes")
+        assertDisplayed("settings_search_result_page_CHAT_PRESENCE")
     }
 
     fun networks() = click("settings_category_networks")

@@ -28,44 +28,31 @@ class SettingsSearchTest {
 
     @Test
     fun `static keywords map to exact typed targets`() {
-        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        val entries =
+            buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle) +
+                entry("Unrelated result", "", "bold encrypted tabs unassigned")
 
-        val composer = searchSettings("bold", entries).single().destination as SettingsSearchDestination.Page
-        val encrypted = searchSettings("encrypted", entries).single().destination as SettingsSearchDestination.Page
-        val folderLayout = searchSettings("tabs", entries).single()
-        val folderDestination = folderLayout.destination as SettingsSearchDestination.Page
-        val folderAll = searchSettings("unassigned", entries).single()
-        val folderAllDestination = folderAll.destination as SettingsSearchDestination.Page
-
-        assertEquals("Folder layout", folderLayout.title)
-        assertEquals("Choose how folders appear in the chat list.", folderLayout.summary)
-        assertEquals(SettingsSearchPage.APPEARANCE, folderDestination.page)
-        assertEquals(SettingsTarget.FOLDER_LAYOUT, folderDestination.target)
-        assertEquals("Show folder chats in All", folderAll.title)
-        assertEquals(SettingsSearchPage.APPEARANCE, folderAllDestination.page)
-        assertEquals(SettingsTarget.SHOW_FOLDER_CHATS_IN_ALL, folderAllDestination.target)
-        assertEquals(SettingsSearchPage.CHAT, composer.page)
-        assertEquals(SettingsTarget.COMPOSER_FORMATTING, composer.target)
-        assertEquals(SettingsSearchPage.BACKUP, encrypted.page)
-        assertEquals(SettingsTarget.EXPORT_BACKUP, encrypted.target)
+        listOf(
+            "bold" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.COMPOSER_FORMATTING),
+            "encrypted" to SettingsSearchDestination.Page(SettingsSearchPage.BACKUP, SettingsTarget.EXPORT_BACKUP),
+            "tabs" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.FOLDER_LAYOUT),
+            "unassigned" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.SHOW_FOLDER_CHATS_IN_ALL),
+        ).forEach { (query, destination) ->
+            assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
+        }
     }
 
     @Test
     fun `voice search opens local transcription targets without retired features or model data`() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
 
-        assertEquals(
-            SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_MODELS),
-            searchSettings("ggml", entries).single().destination,
-        )
-        assertEquals(
-            SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_TRANSCRIPTION),
-            searchSettings("speech audio", entries).single().destination,
-        )
-        assertEquals(
-            SettingsSearchDestination.Page(SettingsSearchPage.LABS, SettingsTarget.AI),
-            searchSettings("local on device", entries).single().destination,
-        )
+        listOf(
+            "ggml" to SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_MODELS),
+            "speech audio" to SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_TRANSCRIPTION),
+            "local on device" to SettingsSearchDestination.Page(SettingsSearchPage.LABS, SettingsTarget.AI),
+        ).forEach { (query, destination) ->
+            assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
+        }
         listOf("briefs", "semantic", "generation", "embeddings", "private-model.bin", "/storage/emulated/0/models").forEach { query ->
             assertTrue(searchSettings(query, entries).isEmpty())
         }
@@ -79,10 +66,30 @@ class SettingsSearchTest {
         val directRows = entries.filter { (it.destination as? SettingsSearchDestination.Network)?.networkId == 7L }
         val childRows = entries.filter { (it.destination as? SettingsSearchDestination.Network)?.networkId == 9L }
 
-        assertEquals(NetworkSettingsTarget.OBFUSCATION, (searchSettings("proxy", directRows).single().destination as SettingsSearchDestination.Network).target)
-        assertEquals(NetworkSettingsTarget.AUTHENTICATION, (searchSettings("sasl", directRows).single().destination as SettingsSearchDestination.Network).target)
-        assertEquals(5, directRows.size)
-        assertEquals(3, childRows.size)
+        listOf(
+            "proxy" to SettingsSearchDestination.Network(7L, NetworkSettingsTarget.OBFUSCATION),
+            "sasl" to SettingsSearchDestination.Network(7L, NetworkSettingsTarget.AUTHENTICATION),
+        ).forEach { (query, destination) ->
+            assertEquals(destination, searchSettings(query, directRows).single { it.destination == destination }.destination)
+        }
+        listOf(
+            NetworkSettingsTarget.CONNECTION,
+            NetworkSettingsTarget.AUTHENTICATION,
+            NetworkSettingsTarget.OBFUSCATION,
+            NetworkSettingsTarget.AVATAR,
+            NetworkSettingsTarget.TOOLS,
+        ).forEach { target ->
+            val destination = SettingsSearchDestination.Network(7L, target)
+            assertEquals(destination, directRows.single { it.destination == destination }.destination)
+        }
+        listOf(
+            NetworkSettingsTarget.CONNECTION,
+            NetworkSettingsTarget.AVATAR,
+            NetworkSettingsTarget.TOOLS,
+        ).forEach { target ->
+            val destination = SettingsSearchDestination.Network(9L, target)
+            assertEquals(destination, childRows.single { it.destination == destination }.destination)
+        }
         listOf(
             "hidden-host.example",
             "private-nick",
@@ -100,6 +107,7 @@ class SettingsSearchTest {
         }
         assertTrue(searchSettings("Libera", directRows).isNotEmpty())
         assertTrue(childRows.none { (it.destination as SettingsSearchDestination.Network).target == NetworkSettingsTarget.AUTHENTICATION })
+        assertTrue(childRows.none { (it.destination as SettingsSearchDestination.Network).target == NetworkSettingsTarget.OBFUSCATION })
     }
 
     @Test

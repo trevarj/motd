@@ -132,7 +132,10 @@ fun SettingsContent(
                                 summary = result.summary,
                                 modifier =
                                     Modifier.testTag(
-                                        "settings_search_result_${result.title.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')}",
+                                        when (val destination = result.destination) {
+                                            is SettingsSearchDestination.Page -> "settings_search_result_page_${destination.page.name}_${destination.target.name}"
+                                            is SettingsSearchDestination.Network -> "settings_search_result_network_${destination.networkId}_${destination.target.name}"
+                                        },
                                     ),
                                 onClick = { onOpenSearchResult(result.destination) },
                             )

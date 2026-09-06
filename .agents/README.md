@@ -29,11 +29,28 @@ connection ownership, or module boundaries.
    behavior in long-running work.
 4. Add or update tests at the same boundary. For UI changes, include semantics
    or stable tags when the interaction belongs in the device harness.
-5. While iterating, run only the nearest local checks from
-   [`testing.md`](testing.md). After the final commit, run `./tools/prepush.sh`
-   once on the clean tree, inspect the diff, and report any verification that
-   could not be performed. Leave emulator E2E to hosted CI unless the matrix or
-   maintainer explicitly requires it locally.
+5. Follow [`testing.md`](testing.md): while editing, run the nearest relevant
+   test method; before handoff/push, run its class once, in each affected module
+   for cross-module changes. Use `nix develop -c ./gradlew
+   :app:testDebugUnitTest --tests '<fully-qualified-class.method>' --stacktrace`
+   (class filter for handoff; `:irc:test` for protocol changes). Filters narrow
+   execution, not compilation of test sources and dependencies; humans may
+   enter `nix develop` once. Run each changed module's existing
+   `:app:ktlintCheck`, `:irc:ktlintCheck`, or `:ai-whisper:ktlintCheck` once before
+   handoff; root Gradle/style configuration changes still require root
+   `ktlintCheck`. Keep the nearest database regression and review/commit of
+   generated `app/schemas`, `:app:compileE2eAndroidTestKotlin` for affected
+   instrumentation journeys, and `:app:assembleDebug` when resources, manifest,
+   packaging, or an actual APK require it. Do not automatically append an
+   unfiltered suite, Android lint, APK assembly, or a full pre-push gate; no
+   routine local emulator/device runs. `./tools/prepush.sh` is only an explicitly
+   requested diagnostic for broader failures, requires a clean committed tree,
+   and accepts `MOTD_PREFLIGHT_BASE=<ref>` to override `origin/main`; it is not a
+   handoff/push prerequisite or a substitute for hosted CI. Require all
+   applicable hosted `Required CI / gate` checks before merge. Inspect an
+   individual failed job's existing diagnostics and start its fix immediately,
+   without waiting for aggregate `gate`; remaining coverage continues normally.
+   Inspect the diff and report any verification that could not be performed.
 
 ## Task guides
 

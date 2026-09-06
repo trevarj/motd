@@ -51,16 +51,35 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
   is UnifiedPush only; do not reintroduce Firebase/FCM or a Play Store
   distribution unless the maintainer explicitly asks for it. Lint warnings are
   errors.
-  When a change crosses modules or release behavior, run the nearest checks in
-  each affected module; Required CI owns full release parity.
-- Run the nearest test method, then its class, and run path-selected
-  `./tools/prepush.sh` before pushing a clean candidate. Robolectric Compose
-  component tests are local unit-tier checks, not hosted-emulator follow-up.
-- Do not run emulator/device E2E as part of routine local development. Keep
-  local verification to unit/integration tests, lint, and builds. Before
+  When a change crosses modules or release behavior, run the nearest affected
+  tests in each module; Required CI owns full release parity.
+- While editing, run the nearest relevant test method; before handoff/push, run
+  its class once. Use `nix develop -c ./gradlew :app:testDebugUnitTest --tests
+  '<fully-qualified-class.method>' --stacktrace`, replacing the filter with the
+  class for handoff and the task with `:irc:test` for protocol changes. Filters
+  narrow execution, not compilation of test sources and dependencies. Humans
+  may enter `nix develop` once and run Gradle there. Robolectric Compose tests
+  are local unit-tier checks, not hosted-emulator follow-up.
+- Before handoff, run each changed module's existing `:app:ktlintCheck`,
+  `:irc:ktlintCheck`, or `:ai-whisper:ktlintCheck` once. Use root `ktlintCheck`
+  only for root Gradle/style configuration changes. Do not automatically append
+  an unfiltered suite, Android lint, APK assembly, or a full pre-push gate.
+- For database changes, run the nearest database regression and review/commit
+  generated `app/schemas` changes. Run `:app:assembleDebug` when resources,
+  manifest, packaging, or an actual APK require it.
+- `./tools/prepush.sh` is optional local gate reproduction only when explicitly
+  requested to diagnose broader failures, not a handoff/push prerequisite or a
+  substitute for hosted CI. It requires a clean, committed tree; use
+  `MOTD_PREFLIGHT_BASE=<ref>` to override its `origin/main` comparison base.
+- Require all applicable hosted `Required CI / gate` checks before merge. When
+  an individual job fails, inspect its existing diagnostics and begin fixing it
+  immediately rather than waiting for aggregate `gate`; remaining coverage
+  continues normally.
+- Do not run emulator/device E2E as part of routine local development. Before
   committing a change that affects a journey covered by `RequiredHeadlessE2eTest`,
-  inspect and update that journey in the same commit and compile the affected
-  instrumentation. Reserve `nix develop -c ./test/e2e/headless.sh fast` for
+  inspect and update that journey in the same commit and run
+  `:app:compileE2eAndroidTestKotlin`. Reserve
+  `nix develop -c ./test/e2e/headless.sh fast` for
   behavior that cannot be validated below E2E; do not defer a known required-gate
   mismatch until after push. Use a physical device only when the maintainer
   explicitly requests hardware/OS validation.
