@@ -1,0 +1,5 @@
+- Fixed media download taps, extensionless image previews, and compressed link previews.
+- Fixed preview permissions after changing proxy settings, including VLESS/REALITY.
+- Added on-device Whisper voice transcription and opt-in Agentwire conversation summaries.
+- Added channel watches, including forever watches and alerts for muted channels; fixed watch persistence.
+- Improved voice message playback controls, waveforms, and notification theming.
