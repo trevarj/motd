@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -276,22 +277,21 @@ private fun LinkPreviewLeading(preview: LinkPreview) {
 
 @Composable
 private fun LinkPreviewAwaiting(onClick: () -> Unit) {
-    val description = stringResource(R.string.chat_link_preview_awaiting)
-    Row(
+    val description = stringResource(R.string.chat_link_preview_download)
+    Box(
         modifier =
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
                 .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .clickable(onClickLabel = stringResource(R.string.chat_link_preview_download), onClick = onClick)
+                .clickable(onClickLabel = description, onClick = onClick)
                 .semantics { contentDescription = description }
                 .testTag("link_preview_awaiting")
                 .padding(8.dp),
+        contentAlignment = androidx.compose.ui.Alignment.Center,
     ) {
-        Icon(Icons.Outlined.Link, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.width(10.dp))
-        Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Icons.Outlined.Download, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

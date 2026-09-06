@@ -204,6 +204,7 @@ import io.github.trevarj.motd.ui.components.ChannelWatchDialog
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
+import io.github.trevarj.motd.ui.components.LocalDirectRemoteMediaAllowed
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.typingText
@@ -436,8 +437,8 @@ fun ChatScreen(
     val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
     val contentPreviews by viewModel.contentPreviews.collectAsStateWithLifecycle()
     // The global Coil/ExoPlayer stacks fetch directly and cannot honor a per-network proxy, so
-    // media rendered through them is withheld entirely on proxied networks (fail closed).
-    val directMediaAllowed by viewModel.directMediaAllowed.collectAsStateWithLifecycle()
+    // media rendered through them needs the current global direct-media permission.
+    val directMediaAllowed = LocalDirectRemoteMediaAllowed.current(state.buffer?.networkId)
     val audioPlaybackState by viewModel.audioPlaybackState.collectAsStateWithLifecycle()
     val audioWaveforms by viewModel.audioWaveforms.collectAsStateWithLifecycle()
     val audioCacheStatuses by viewModel.audioCacheStatuses.collectAsStateWithLifecycle()

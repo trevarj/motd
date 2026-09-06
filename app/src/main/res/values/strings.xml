@@ -895,10 +895,8 @@
     <string name="chat_remote_media_download">Download remote media</string>
     <string name="chat_remote_media_retry">Retry remote media download</string>
     <string name="chat_remote_media_loading">Downloading remote media</string>
-    <string name="chat_remote_media_awaiting">Remote media. Tap to download.</string>
     <string name="chat_remote_media_failed">Remote media download failed. Tap to retry.</string>
     <string name="chat_link_preview_download">Download link preview</string>
-    <string name="chat_link_preview_awaiting">Link preview. Tap to download.</string>
     <string name="chat_link_preview_loading">Downloading link preview</string>
     <string name="chat_link_preview_failed">Preview failed. Tap to retry.</string>
     <string name="chat_link_preview_unavailable">Preview unavailable. Tap to open link.</string>

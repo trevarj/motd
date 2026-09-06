@@ -1497,15 +1497,13 @@ private fun MessageRow(
     var manualInlineMediaConsent by rememberSaveable(msg.id, imageUrl) { mutableStateOf(false) }
     var manualLinkMediaConsent by rememberSaveable(msg.id, linkUrl) { mutableStateOf(false) }
     val linkMediaAllowed = automaticRemoteMedia || manualLinkMediaConsent
-    val grantInlineMediaConsent = { manualInlineMediaConsent = true }
-    val grantLinkMediaConsent = { manualLinkMediaConsent = true }
     val inlineMediaConsent =
-        remember(manualInlineMediaConsent) {
-            RemoteMediaConsent(manualInlineMediaConsent, grantInlineMediaConsent)
+        remember(msg.id, imageUrl, manualInlineMediaConsent) {
+            RemoteMediaConsent(manualInlineMediaConsent) { manualInlineMediaConsent = true }
         }
     val linkMediaConsent =
-        remember(manualLinkMediaConsent) {
-            RemoteMediaConsent(manualLinkMediaConsent, grantLinkMediaConsent)
+        remember(msg.id, linkUrl, manualLinkMediaConsent) {
+            RemoteMediaConsent(manualLinkMediaConsent) { manualLinkMediaConsent = true }
         }
     val headCandidates =
         remember(msg.id, msg.text, showLinkPreviews) {
@@ -1673,7 +1671,7 @@ private fun MessageRow(
                         onLinkPreviewClick = {
                             when (previewState) {
                                 PreviewState.Awaiting -> {
-                                    grantLinkMediaConsent()
+                                    linkMediaConsent.grant()
                                 }
 
                                 PreviewState.Failed -> {

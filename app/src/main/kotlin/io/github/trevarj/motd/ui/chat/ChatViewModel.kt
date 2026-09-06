@@ -16,7 +16,6 @@ import io.github.trevarj.motd.audio.AudioMetadataRepository
 import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.audio.CachedAudioMetadata
-import io.github.trevarj.motd.audio.DirectMediaPolicy
 import io.github.trevarj.motd.avatar.AvatarController
 import io.github.trevarj.motd.avatar.ConversationAvatarOutcome
 import io.github.trevarj.motd.avatar.NoopAvatarController
@@ -274,9 +273,6 @@ class ChatViewModel
         // consumer is the composable, not this class; Noop default for hand-built call sites, as
         // gapFiller above.
         val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
-        // Fail-closed default for hand-built call sites: the global image/video stacks cannot be
-        // routed through a network proxy, so unknown transport policy means no direct media fetches.
-        private val directMediaPolicy: DirectMediaPolicy = DirectMediaPolicy { false },
         private val channelWatch: ChannelWatch = ChannelWatch.Noop,
         contentPreviewPrefs: ContentPreviewPrefs,
     ) : ViewModel() {
@@ -766,21 +762,6 @@ class ChatViewModel
                 .flatMapLatest { room ->
                     room?.let { bufferRepository.observeJoinedChannels(it.networkId) } ?: flowOf(emptyList())
                 }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-
-        /**
-         * Whether the app-global image/video stacks (Coil, ExoPlayer) may fetch network content for
-         * this buffer. Starts false so a proxied network cannot leak a direct fetch during the initial
-         * lookup; flips once the network row confirms it uses no obfuscated transport, or once the user
-         * opts into direct media on proxied networks. Recomputes on that opt-in too, so flipping the
-         * setting reveals previews in the open conversation without a buffer switch.
-         */
-        val directMediaAllowed: StateFlow<Boolean> =
-            combine(
-                buffer.mapNotNull { it?.networkId }.distinctUntilChanged(),
-                contentPreviews.map { it.directMediaOnProxiedNetworks }.distinctUntilChanged(),
-            ) { networkId, _ -> networkId }
-                .map { networkId -> directMediaPolicy.directMediaAllowed(networkId) }
-                .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
         /** The database remains authoritative: a completed write is reflected only after Room emits. */
         val conversationLayout: StateFlow<ConversationLayoutState> =

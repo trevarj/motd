@@ -36,6 +36,7 @@ import java.net.URLDecoder
 import java.nio.charset.Charset
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
+import java.util.zip.GZIPInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
@@ -237,7 +238,7 @@ class LinkPreviewRepositoryImpl
                 ) {
                     return@request null
                 }
-                val bytes = conn.inputStream.readCappedBytes(WIKIPEDIA_MAX_BYTES)
+                val bytes = conn.readCappedBody(WIKIPEDIA_MAX_BYTES)
                 parseWikipediaSummary(articleUrl, decodeBody(bytes, contentType))
             }
 
@@ -250,6 +251,16 @@ class LinkPreviewRepositoryImpl
                 if (!hasSupportedContentEncoding(conn)) return@request null
                 val contentType = conn.getHeaderField("Content-Type")
                 val finalUrl = conn.url.toString()
+                if (mediaType(contentType).startsWith("image/")) {
+                    return@request LinkPreview(
+                        url = finalUrl,
+                        title = textTitle(finalUrl),
+                        description = contentType?.substringBefore(';')?.trim(),
+                        imageUrl = finalUrl,
+                        siteName = conn.url.host,
+                        kind = LinkPreviewKind.WEB,
+                    )
+                }
                 val declared = responseKind(contentType)
                 val generic = isGenericContentType(contentType)
                 if (!generic && (declared == LinkPreviewKind.VIDEO || declared == LinkPreviewKind.FILE)) {
@@ -263,7 +274,7 @@ class LinkPreviewRepositoryImpl
                     } else {
                         TEXT_MAX_BYTES
                     }
-                val bytes = conn.inputStream.readCappedBytes(maxBytes)
+                val bytes = conn.readCappedBody(maxBytes)
                 val decoded = decodeBody(bytes, contentType)
                 when (val kind = responseKind(contentType, finalUrl, decoded)) {
                     LinkPreviewKind.WEB -> {
@@ -348,6 +359,12 @@ class LinkPreviewRepositoryImpl
             }
         }
 
+        private fun HttpURLConnection.readCappedBody(max: Int): ByteArray {
+            val stream = inputStream
+            return (if (getHeaderField("Content-Encoding").equals("gzip", ignoreCase = true)) GZIPInputStream(stream) else stream)
+                .use { it.readCappedBytes(max) }
+        }
+
         private fun InputStream.readCappedBytes(max: Int): ByteArray {
             val buf = ByteArray(8 * 1024)
             val out = ByteArray(max)
@@ -363,7 +380,8 @@ class LinkPreviewRepositoryImpl
 
         private fun hasSupportedContentEncoding(connection: HttpURLConnection): Boolean =
             connection.getHeaderField("Content-Encoding").isNullOrBlank() ||
-                connection.getHeaderField("Content-Encoding").equals("identity", ignoreCase = true)
+                connection.getHeaderField("Content-Encoding").equals("identity", ignoreCase = true) ||
+                connection.getHeaderField("Content-Encoding").equals("gzip", ignoreCase = true)
 
         companion object {
             private const val CACHE_SIZE = 256
@@ -374,7 +392,7 @@ class LinkPreviewRepositoryImpl
             private const val TEXT_MAX_CODE_POINTS = 2_048
 
             private const val HTML_SNIFF_MAX_BYTES = 4 * 1024
-            private const val GENERIC_ACCEPT = "text/html, application/xhtml+xml, text/*, application/json, application/xml, video/*, application/*;q=0.1"
+            private const val GENERIC_ACCEPT = "text/html, application/xhtml+xml, text/*, application/json, application/xml, image/*, video/*, application/*;q=0.1"
             private const val WIKIPEDIA_ACCEPT = "application/json"
             private const val USER_AGENT = "motd-Android (https://github.com/trevarj/motd)"
             private const val WIKIPEDIA_SITE_NAME = "Wikipedia"
@@ -551,7 +569,7 @@ class LinkPreviewRepositoryImpl
             internal fun responseKind(contentType: String?): LinkPreviewKind? {
                 val mediaType = mediaType(contentType)
                 return when {
-                    mediaType == "text/html" || mediaType == "application/xhtml+xml" -> LinkPreviewKind.WEB
+                    mediaType == "text/html" || mediaType == "application/xhtml+xml" || mediaType.startsWith("image/") -> LinkPreviewKind.WEB
 
                     mediaType.startsWith("text/") -> LinkPreviewKind.TEXT
 
@@ -561,7 +579,7 @@ class LinkPreviewRepositoryImpl
 
                     mediaType.startsWith("video/") -> LinkPreviewKind.VIDEO
 
-                    mediaType.startsWith("audio/") || mediaType.startsWith("image/") || mediaType.isBlank() -> null
+                    mediaType.startsWith("audio/") || mediaType.isBlank() -> null
 
                     else -> LinkPreviewKind.FILE
                 }

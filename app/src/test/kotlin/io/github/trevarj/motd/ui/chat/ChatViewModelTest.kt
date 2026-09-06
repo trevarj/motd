@@ -13,7 +13,6 @@ import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioMetadataRepository
 import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.audio.AudioPlaybackState
-import io.github.trevarj.motd.audio.DirectMediaPolicy
 import io.github.trevarj.motd.avatar.LocalAvatarStore
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
@@ -3231,30 +3230,6 @@ class ChatViewModelTest {
             assertNull(messages.firstInitialKey.await())
         }
 
-    @Test
-    fun direct_media_starts_closed_and_opens_only_for_unproxied_networks() =
-        runTest {
-            // Fail closed while the network row is unknown; open once the policy confirms no proxy.
-            val vm =
-                viewModel(
-                    channel,
-                    FakeConnectionManager(network.id),
-                    directMediaPolicy = DirectMediaPolicy { it == network.id },
-                )
-            assertFalse(vm.directMediaAllowed.value)
-            advanceUntilIdle()
-            assertTrue(vm.directMediaAllowed.value)
-
-            val proxiedVm =
-                viewModel(
-                    channel,
-                    FakeConnectionManager(network.id),
-                    directMediaPolicy = DirectMediaPolicy { false },
-                )
-            advanceUntilIdle()
-            assertFalse(proxiedVm.directMediaAllowed.value)
-        }
-
     // --- the timeline's history rule: demand -> gate -> SeamLoadingRule -> HistoryGapFiller -------
     //
     // Models the store geometry the `unreadHistoryEntersAtMarkerAndRemainsCanonical` E2E journey
@@ -3787,7 +3762,6 @@ class ChatViewModelTest {
         restoredState: Map<String, Any> = emptyMap(),
         // Injectable so a test can observe the write-through entry-position keys after transitions.
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
-        directMediaPolicy: DirectMediaPolicy = DirectMediaPolicy { false },
         // The seam the timeline's history rule ends at. The production default is a Noop, so a test
         // that wants to observe a fill at all has to hand one in.
         gapFiller: HistoryGapFiller = NoopHistoryGapFiller,
@@ -3834,7 +3808,6 @@ class ChatViewModelTest {
             contentPreviewPrefs = FakeContentPreviewPrefs(),
             audioMetadataRepository = FakeAudioMetadataRepository(),
             audioPlaybackController = FakeAudioPlaybackController(),
-            directMediaPolicy = directMediaPolicy,
             gapFiller = gapFiller,
             channelWatch = channelWatch,
         )

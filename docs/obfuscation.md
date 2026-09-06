@@ -134,6 +134,24 @@ For an existing proxy, choose **SOCKS5** and enter its host and port. For Tor,
 install [Orbot](https://orbot.app/), start it, then choose **Tor (Orbot)**. A
 Tor hidden-service address for soju avoids exposing the bouncer's public IP.
 
+## Media previews
+
+On VLESS/REALITY, SOCKS5, and Tor networks, link metadata uses the network's
+proxy by default. The restrictive Xray example above blocks arbitrary web
+destinations: a working IRC connection does not imply a linked media host is
+reachable. Allow the intended host and port, including redirect destinations,
+before the blocking rule if you want previews through that tunnel.
+
+Inline images, videos, and link thumbnails use app-global loaders that cannot
+use a per-network proxy. They stay hidden unless **Settings → Chat → Load
+previews over direct connection** is enabled. This explicitly sends preview
+requests outside the tunnel, exposing the device's IP address to media hosts;
+it does not change the route for IRC, uploads, or audio-file downloads.
+
+When automatic loading is disabled, the download icon requests that preview;
+it does not grant permission to bypass a proxy. Failed link previews can be
+retried after the proxy or its destination rules are repaired.
+
 ## Troubleshooting
 
 - Confirm the VPS firewall allows the selected TCP port and that Xray validates

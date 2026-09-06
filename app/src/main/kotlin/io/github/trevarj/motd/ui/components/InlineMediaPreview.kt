@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -205,10 +206,27 @@ private fun RemoteMediaImage(
             modifier = Modifier.fillMaxSize(),
         )
         when (state) {
-            RemoteMediaLoadState.AWAITING -> MediaStatus(stringResource(R.string.chat_remote_media_awaiting))
-            RemoteMediaLoadState.LOADING -> CircularProgressIndicator(Modifier.testTag("inline_media_progress"))
-            RemoteMediaLoadState.FAILED -> MediaStatus(stringResource(R.string.chat_remote_media_failed))
-            RemoteMediaLoadState.LOADED -> Unit
+            RemoteMediaLoadState.AWAITING -> {
+                Icon(
+                    imageVector = Icons.Outlined.Download,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier =
+                        Modifier
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.86f))
+                            .padding(8.dp),
+                )
+            }
+
+            RemoteMediaLoadState.LOADING -> {
+                CircularProgressIndicator(Modifier.testTag("inline_media_progress"))
+            }
+
+            RemoteMediaLoadState.FAILED -> {
+                MediaStatus(stringResource(R.string.chat_remote_media_failed))
+            }
+
+            RemoteMediaLoadState.LOADED -> {}
         }
     }
 }

@@ -7,10 +7,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -66,12 +71,17 @@ class InlineMediaPreviewTest {
                 compose.onAllNodesWithTag("inline_media_awaiting", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
             }
             assertEquals(0, server.requestCount)
-            compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).performClick()
+            compose
+                .onNodeWithTag("inline_media_awaiting")
+                .assertHasClickAction()
+                .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.ContentDescription))
+                .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Text))
+                .performTouchInput { click() }
             compose.waitUntil(10_000) { server.requestCount == 1 }
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithTag("inline_media_loaded", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
             }
-            compose.onNodeWithTag("inline_media_loaded", useUnmergedTree = true).performClick()
+            compose.onNodeWithTag("inline_media_loaded", useUnmergedTree = true).performTouchInput { click() }
 
             compose.runOnIdle {
                 assertEquals(1, grants)
@@ -109,12 +119,12 @@ class InlineMediaPreviewTest {
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithTag("inline_media_awaiting", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
             }
-            compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).performClick()
+            compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).performTouchInput { click() }
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithTag("inline_media_failed", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
             }
             assertEquals(1, server.requestCount)
-            compose.onNodeWithTag("inline_media_failed", useUnmergedTree = true).performClick()
+            compose.onNodeWithTag("inline_media_failed", useUnmergedTree = true).performTouchInput { click() }
             compose.waitUntil(10_000) { server.requestCount == 2 }
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithTag("inline_media_loaded", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()

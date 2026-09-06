@@ -29,6 +29,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPOutputStream
 
 @RunWith(RobolectricTestRunner::class)
 class LinkPreviewRequestGateTest {
@@ -278,6 +279,28 @@ class LinkPreviewRequestGateTest {
         }
 
     @Test
+    fun gzip_metadata_is_decoded_with_the_existing_decompressed_body_cap() =
+        runTest {
+            val repository = repository(this, StandardTestDispatcher(testScheduler))
+            val compressed = Buffer()
+            GZIPOutputStream(compressed.outputStream()).use {
+                it.write(
+                    ("<title>Gzipped</title>" + " ".repeat(512 * 1024) + "<meta property=og:title content=Beyond>")
+                        .toByteArray(),
+                )
+            }
+            server.enqueue(
+                MockResponse()
+                    .setHeader("Content-Type", "text/html")
+                    .setHeader("Content-Encoding", "gzip")
+                    .setBody(compressed),
+            )
+
+            assertEquals("Gzipped", repository.preview(server.url("/compressed").toString(), NETWORK_ID)?.title)
+            assertEquals("identity", server.takeRequest().getHeader("Accept-Encoding"))
+        }
+
+    @Test
     fun unsupportedContentEncodingIsDefinitive_andIdentityIsRequested() =
         runTest {
             val repository = repository(this, StandardTestDispatcher(testScheduler))
@@ -285,7 +308,7 @@ class LinkPreviewRequestGateTest {
             server.enqueue(
                 MockResponse()
                     .setHeader("Content-Type", "text/html")
-                    .setHeader("Content-Encoding", "gzip")
+                    .setHeader("Content-Encoding", "br")
                     .setBody("not-decompressed"),
             )
 

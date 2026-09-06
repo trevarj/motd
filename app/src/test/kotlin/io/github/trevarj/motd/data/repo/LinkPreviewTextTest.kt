@@ -8,6 +8,7 @@ class LinkPreviewTextTest {
     @Test fun declared_types_are_classified_without_extension_inference() {
         assertEquals(LinkPreviewKind.WEB, LinkPreviewRepositoryImpl.responseKind("text/html; charset=utf-8"))
         assertEquals(LinkPreviewKind.WEB, LinkPreviewRepositoryImpl.responseKind("application/xhtml+xml"))
+        assertEquals(LinkPreviewKind.WEB, LinkPreviewRepositoryImpl.responseKind("IMAGE/PNG; charset=binary"))
         assertEquals(LinkPreviewKind.TEXT, LinkPreviewRepositoryImpl.responseKind("text/plain"))
         assertEquals(LinkPreviewKind.TEXT, LinkPreviewRepositoryImpl.responseKind("application/problem+json"))
         assertEquals(LinkPreviewKind.TEXT, LinkPreviewRepositoryImpl.responseKind("application/rss+xml"))

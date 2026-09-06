@@ -1,10 +1,15 @@
 package io.github.trevarj.motd
 
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import io.github.trevarj.motd.ui.components.LinkPreviewCard
@@ -52,7 +57,12 @@ class LinkPreviewCardUiTest {
             }
         }
 
-        compose.onNodeWithTag("link_preview_awaiting").performClick()
+        compose
+            .onNodeWithTag("link_preview_awaiting")
+            .assertHasClickAction()
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.ContentDescription))
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Text))
+            .performTouchInput { click() }
         assertEquals(1, requests)
     }
 
@@ -75,7 +85,7 @@ class LinkPreviewCardUiTest {
             }
         }
 
-        compose.onNodeWithTag("link_preview_failed").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("link_preview_failed").assertIsDisplayed().performTouchInput { click() }
         assertEquals(1, retries)
     }
 

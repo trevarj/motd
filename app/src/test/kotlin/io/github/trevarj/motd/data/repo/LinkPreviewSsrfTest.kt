@@ -139,6 +139,40 @@ class LinkPreviewSsrfTest {
         }
 
     @Test
+    fun redirect_to_extensionless_image_uses_headers_and_caches_final_image_url() =
+        runTest {
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    directResolver,
+                    LinkPreviewFetchPolicy(enforceDestinationPolicy = false),
+                    this,
+                    StandardTestDispatcher(testScheduler),
+                )
+            val url = server.url("/start").toString()
+            val finalUrl = server.url("/image?id=42").toString()
+            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", finalUrl))
+            server.enqueue(
+                MockResponse()
+                    .setHeader("Content-Type", "image/png; charset=binary")
+                    // Deliberately absent body: metadata must complete without downloading the image.
+                    .setHeader("Content-Length", 1024 * 1024),
+            )
+
+            val preview = repository.preview(url, NETWORK_ID)
+
+            assertEquals(LinkPreviewKind.WEB, preview?.kind)
+            assertEquals(finalUrl, preview?.url)
+            assertEquals(finalUrl, preview?.imageUrl)
+            assertEquals("image", preview?.title)
+            assertEquals("image/png", preview?.description)
+            assertEquals(server.url("/").host, preview?.siteName)
+            assertEquals(preview, repository.cachedPreview(url, NETWORK_ID)?.preview)
+            assertEquals(preview, repository.preview(url, NETWORK_ID))
+            assertEquals(2, server.requestCount)
+        }
+
+    @Test
     fun redirect_chains_are_capped() =
         runTest {
             val repository =

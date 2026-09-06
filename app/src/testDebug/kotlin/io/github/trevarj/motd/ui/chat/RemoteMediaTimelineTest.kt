@@ -2,12 +2,15 @@ package io.github.trevarj.motd.ui.chat
 
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.UiDispatcherResetRule
@@ -21,11 +24,16 @@ import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.flowOf
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.util.Base64
+import java.util.UUID
 
 @RunWith(RobolectricTestRunner::class)
 class RemoteMediaTimelineTest {
@@ -38,10 +46,12 @@ class RemoteMediaTimelineTest {
     @Test
     fun manualLinkPreviewWaitsForTapLoadsOnceThenOpens() {
         val result = CompletableDeferred<LinkPreview?>()
+        val url = "$LINK/${UUID.randomUUID()}"
         var loads = 0
         var opens = 0
         render(
             automatic = false,
+            text = url,
             loadPreview = { _, _ ->
                 loads++
                 result.await()
@@ -51,11 +61,11 @@ class RemoteMediaTimelineTest {
 
         awaitTag("link_preview_awaiting")
         assertEquals(0, loads)
-        compose.onNodeWithTag("link_preview_awaiting", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("link_preview_awaiting", useUnmergedTree = true).performTouchInput { click() }
         compose.waitUntil(10_000) { loads == 1 }
         awaitTag("link_preview_loading")
-        result.complete(PREVIEW)
-        compose.onNodeWithText("Example preview").assertIsDisplayed().performClick()
+        result.complete(PREVIEW.copy(url = url))
+        compose.onNodeWithText("Example preview").assertIsDisplayed().performTouchInput { click() }
 
         compose.runOnIdle {
             assertEquals(1, loads)
@@ -127,28 +137,60 @@ class RemoteMediaTimelineTest {
 
         awaitTag("link_preview_failed")
         assertEquals(1, loads)
-        compose.onNodeWithTag("link_preview_failed", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("link_preview_failed", useUnmergedTree = true).performTouchInput { click() }
         compose.waitUntil(10_000) { loads == 2 }
         compose.onNodeWithText("Example preview").assertIsDisplayed()
     }
 
     @Test
-    fun inlineImageConsentDoesNotStartSiblingLinkFetch() {
-        var linkLoads = 0
-        render(
-            automatic = false,
-            text = "https://example.test/image.png $LINK",
-            loadPreview = { _, _ ->
-                linkLoads++
-                PREVIEW
-            },
-        )
+    fun coldImageDownloadAfterPrivacyGateOpensLoadsOnceWithoutGrantingSiblingLink() {
+        val server = MockWebServer().also { it.start() }
+        try {
+            server.enqueue(
+                MockResponse()
+                    .setHeader("Content-Type", "image/png")
+                    .setBody(
+                        Buffer().write(
+                            Base64.getDecoder().decode(
+                                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+                            ),
+                        ),
+                    ),
+            )
+            val url = server.url("/${UUID.randomUUID()}.png").toString()
+            val showImages = mutableStateOf(false)
+            var linkLoads = 0
+            val openedImages = mutableListOf<String>()
+            render(
+                automatic = false,
+                text = "$url $LINK/${UUID.randomUUID()}",
+                showImages = { showImages.value },
+                onImageClick = openedImages::add,
+                loadPreview = { _, _ ->
+                    linkLoads++
+                    PREVIEW
+                },
+            )
 
-        awaitTag("inline_media_awaiting")
-        awaitTag("link_preview_awaiting")
-        compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).performClick()
-        compose.waitForIdle()
-        assertEquals(0, linkLoads)
+            // The sibling card proves the cold URL discovery completed while images were gated.
+            awaitTag("link_preview_awaiting")
+            compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).assertDoesNotExist()
+            compose.runOnIdle { showImages.value = true }
+            awaitTag("inline_media_awaiting")
+            assertEquals(0, server.requestCount)
+            compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).assertIsDisplayed().performTouchInput { click() }
+            awaitTag("inline_media_loaded")
+            compose.runOnIdle { assertEquals(emptyList<String>(), openedImages) }
+            compose.onNodeWithTag("inline_media_loaded", useUnmergedTree = true).assertIsDisplayed().performTouchInput { click() }
+
+            compose.runOnIdle {
+                assertEquals(listOf(url), openedImages)
+                assertEquals(1, server.requestCount)
+                assertEquals(0, linkLoads)
+            }
+        } finally {
+            server.shutdown()
+        }
     }
 
     @Test
@@ -165,7 +207,7 @@ class RemoteMediaTimelineTest {
 
         awaitTag("link_preview_awaiting")
         assertEquals(0, probes)
-        compose.onNodeWithTag("link_preview_awaiting", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("link_preview_awaiting", useUnmergedTree = true).performTouchInput { click() }
         compose.waitUntil(10_000) { probes == 1 }
         assertEquals(1, probes)
     }
@@ -177,6 +219,8 @@ class RemoteMediaTimelineTest {
         loadAudioMetadata: suspend (String, Long?) -> AudioMetadata? = { _, _ -> null },
         onOpenLink: (String) -> Unit = {},
         text: String = LINK,
+        showImages: () -> Boolean = { true },
+        onImageClick: (String) -> Unit = {},
     ) {
         val pages = flowOf(PagingData.from(listOf(message(text))))
         compose.setContent {
@@ -190,11 +234,11 @@ class RemoteMediaTimelineTest {
                         onLongPress = {},
                         onReply = {},
                         onReact = { _, _ -> },
-                        onImageClick = {},
+                        onImageClick = onImageClick,
                         onRetry = {},
                         loadPreview = loadPreview,
                         richContentReady = true,
-                        showImages = true,
+                        showImages = showImages(),
                         showLinkPreviews = true,
                         onOpenLink = onOpenLink,
                         cachedPreview = cachedPreview,
