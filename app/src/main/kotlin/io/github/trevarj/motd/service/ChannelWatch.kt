@@ -5,16 +5,23 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.data.db.BufferDao
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.di.ApplicationScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -44,7 +51,7 @@ val ChannelWatchState.isForever: Boolean get() = expiresAt == Long.MAX_VALUE
 interface ChannelWatch {
     val state: StateFlow<ChannelWatchState?>
 
-    fun isActive(bufferId: Long): Boolean
+    suspend fun isActive(bufferId: Long): Boolean
 
     /** [durationMs] null watches forever. */
     suspend fun start(
@@ -57,7 +64,7 @@ interface ChannelWatch {
     object Noop : ChannelWatch {
         override val state: StateFlow<ChannelWatchState?> = MutableStateFlow(null)
 
-        override fun isActive(bufferId: Long): Boolean = false
+        override suspend fun isActive(bufferId: Long): Boolean = false
 
         override suspend fun start(
             bufferId: Long,
@@ -79,6 +86,8 @@ class ChannelWatchImpl internal constructor(
     private val onExpired: suspend (Long) -> Unit,
     private val load: suspend () -> ChannelWatchState? = { null },
     private val save: suspend (ChannelWatchState?) -> Unit = {},
+    private val resolveBufferId: suspend (Long) -> Long? = { it },
+    private val observeBufferId: (Long) -> Flow<Long?> = { flowOf(it) },
 ) : ChannelWatch {
     @Inject
     constructor(
@@ -86,6 +95,7 @@ class ChannelWatchImpl internal constructor(
         @ApplicationContext context: Context,
         clock: AppClock,
         notifications: MotdNotifications,
+        bufferDao: BufferDao,
     ) : this(
         scope = scope,
         clock = clock,
@@ -111,6 +121,8 @@ class ChannelWatchImpl internal constructor(
                 }
             }
         },
+        resolveBufferId = bufferDao::canonicalId,
+        observeBufferId = { id -> bufferDao.observe(id).map { it?.id } },
     )
 
     private val _state = MutableStateFlow<ChannelWatchState?>(null)
@@ -124,22 +136,44 @@ class ChannelWatchImpl internal constructor(
             try {
                 lock.withLock {
                     val saved = load() ?: return@withLock
-                    if (clock.nowMillis() >= saved.expiresAt) {
+                    val bufferId = resolveBufferId(saved.bufferId)
+                    if (bufferId == null || clock.nowMillis() >= saved.expiresAt) {
                         save(null)
-                        onExpired(saved.bufferId)
+                        if (bufferId != null) onExpired(bufferId)
                     } else {
-                        armLocked(saved)
+                        val next = if (bufferId == saved.bufferId) saved else saved.copy(bufferId = bufferId)
+                        if (next != saved) save(next)
+                        armLocked(next)
                     }
                 }
             } finally {
                 restored.complete(Unit)
             }
+            _state.collectLatest { current ->
+                if (current == null) return@collectLatest
+                observeBufferId(current.bufferId).distinctUntilChanged().collect { bufferId ->
+                    lock.withLock {
+                        if (_state.value != current || bufferId == current.bufferId) return@withLock
+                        val next = bufferId?.let { current.copy(bufferId = it) }
+                        save(next)
+                        armLocked(next)
+                    }
+                }
+            }
         }
     }
 
-    override fun isActive(bufferId: Long): Boolean {
+    override suspend fun isActive(bufferId: Long): Boolean {
+        restored.await()
         val current = _state.value ?: return false
-        return current.bufferId == bufferId && clock.nowMillis() < current.expiresAt
+        if (current.bufferId == bufferId) return clock.nowMillis() < current.expiresAt
+        // A live event can arrive before Room publishes the redirect to the state observer.
+        return lock.withLock {
+            val latest = _state.value ?: return@withLock false
+            clock.nowMillis() < latest.expiresAt &&
+                (latest.bufferId == bufferId || resolveBufferId(latest.bufferId) == bufferId) &&
+                clock.nowMillis() < latest.expiresAt
+        }
     }
 
     override suspend fun start(
@@ -148,8 +182,9 @@ class ChannelWatchImpl internal constructor(
     ) {
         restored.await()
         lock.withLock {
+            val canonicalId = resolveBufferId(bufferId) ?: return@withLock
             val expiresAt = if (durationMs == null) Long.MAX_VALUE else clock.nowMillis() + durationMs
-            val next = ChannelWatchState(bufferId, expiresAt)
+            val next = ChannelWatchState(canonicalId, expiresAt)
             save(next)
             armLocked(next)
         }
@@ -158,18 +193,16 @@ class ChannelWatchImpl internal constructor(
     override suspend fun stop() {
         restored.await()
         lock.withLock {
-            timer?.cancel()
-            timer = null
-            _state.value = null
+            armLocked(null)
             save(null)
         }
     }
 
-    private fun armLocked(next: ChannelWatchState) {
+    private fun armLocked(next: ChannelWatchState?) {
         timer?.cancel()
         timer = null
         _state.value = next
-        if (next.isForever) return
+        if (next == null || next.isForever) return
         val wait = (next.expiresAt - clock.nowMillis()).coerceAtLeast(0L)
         timer =
             scope.launch {
@@ -179,7 +212,7 @@ class ChannelWatchImpl internal constructor(
                     timer = null
                     _state.value = null
                     save(null)
-                    onExpired(next.bufferId)
+                    resolveBufferId(next.bufferId)?.let { onExpired(it) }
                 }
             }
     }

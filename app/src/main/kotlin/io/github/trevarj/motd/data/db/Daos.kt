@@ -1237,7 +1237,8 @@ interface MessageDao {
                   ))
               )
              AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
-             AND (:queryRoom = 1 OR hasMention = 1)
+             AND (:queryRoom = 1 OR hasMention = 1
+                  OR (notificationWatched = 1 AND kind IN ('PRIVMSG', 'ACTION')))
            ORDER BY serverTime DESC, timelineOrder DESC, id DESC
            LIMIT :limit""",
     )
@@ -2468,7 +2469,9 @@ interface CanonicalTimelineDao {
              )
              AND (
                  (m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
-                    AND b.type != 'SERVER' AND (b.type = 'QUERY' OR m.hasMention = 1))
+                    AND b.type != 'SERVER'
+                    AND (b.type = 'QUERY' OR m.hasMention = 1
+                         OR (m.notificationWatched = 1 AND m.kind IN ('PRIVMSG', 'ACTION'))))
                  OR (m.kind = 'INVITE' AND m.inviteState IN ('PENDING', 'FAILED'))
                  OR (m.kind = 'DCC_TRANSFER' AND m.eventPayload IS NOT NULL)
              )

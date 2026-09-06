@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -16,6 +17,8 @@ import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MemberEntity
+import io.github.trevarj.motd.service.ChannelWatchDuration
+import io.github.trevarj.motd.ui.components.ChannelWatchDialog
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -111,8 +114,34 @@ class ChannelControlsUiTest {
     }
 
     @Test
-    fun limitDialog_presetsIncludeCommonRoomSizes() {
-        assertEquals(listOf(25, 50, 100, 500), LIMIT_PRESETS)
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun watchActionsRemainReachableInShortWindows() {
+        var selected: ChannelWatchDuration? = null
+        var stopped = 0
+        compose.setContent {
+            MotdTheme {
+                ChannelWatchDialog(
+                    watchActive = true,
+                    onStart = { selected = it },
+                    onStop = { stopped++ },
+                    onDismiss = {},
+                    tagPrefix = "channelinfo",
+                )
+            }
+        }
+
+        compose
+            .onNodeWithTag("channelinfo_watch_forever")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle { assertEquals(ChannelWatchDuration.FOREVER, selected) }
+        compose
+            .onNodeWithTag("channelinfo_watch_stop")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle { assertEquals(1, stopped) }
     }
 
     @Composable

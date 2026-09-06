@@ -6,6 +6,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -166,7 +167,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38)
+                .addMigrations(MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39)
                 .build()
         try {
             migrated.openHelper.writableDatabase
@@ -236,7 +237,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38)
+                .addMigrations(MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -310,7 +311,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38)
+                .addMigrations(MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -387,7 +388,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38)
+                .addMigrations(MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -421,6 +422,95 @@ class AllMigrationsTest {
             migrated.close()
         }
     }
+
+    @Test
+    fun migrateVersion38ToCurrent_preservesHistoryWithoutInventingWatchEligibility() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            context.deleteDatabase(DB_NAME)
+            legacyHelper =
+                FrameworkSQLiteOpenHelperFactory().create(
+                    SupportSQLiteOpenHelper.Configuration
+                        .builder(context)
+                        .name(DB_NAME)
+                        .callback(
+                            object : SupportSQLiteOpenHelper.Callback(38) {
+                                override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion(db, 38)
+
+                                override fun onUpgrade(
+                                    db: SupportSQLiteDatabase,
+                                    old: Int,
+                                    new: Int,
+                                ) = Unit
+                            },
+                        ).build(),
+                )
+            legacyHelper!!.writableDatabase.apply {
+                execSQL(
+                    """INSERT INTO networks
+                        (id, name, role, host, port, tls, nick, username, realname, saslMechanism,
+                         autoConnect, ordering, restoreAutoConnect)
+                        VALUES (1, 'libera', 'DIRECT', 'irc.libera.chat', 6697, 1, 'me', 'me', 'Me',
+                                'NONE', 1, 0, 1)""",
+                )
+                execSQL(
+                    """INSERT INTO buffers
+                        (id, networkId, name, displayName, type, joined, membershipCycle, pinned,
+                         muted, archived, ordering, historyComplete, dismissed)
+                        VALUES (1, 1, '#motd', '#motd', 'CHANNEL', 1, 0, 0, 1, 0, 0, 0, 0)""",
+                )
+                execSQL(
+                    """INSERT INTO messages
+                        (id, bufferId, serverTime, sender, normalizedActor, kind, text, isSelf,
+                         hasMention, failed, dedupKey, serverTimeAuthoritative, timelineOrder,
+                         timelineOrderConfirmed, timeProvenance, notificationHandled,
+                         notificationClaimed, soundHandled)
+                        VALUES (1, 1, 1000, 'alice', 'alice', 'PRIVMSG', 'ordinary', 0, 0, 0, 'm1',
+                                1, 1, 0, 'SERVER_TAG', 0, 0, 0),
+                               (2, 1, 2000, 'alice', 'alice', 'PRIVMSG', 'me: mention', 0, 1, 0, 'm2',
+                                1, 2, 0, 'SERVER_TAG', 0, 0, 0)""",
+                )
+                execSQL(
+                    """INSERT INTO event_observations
+                        (networkId, timelineEventId, origin, receiveOrder, timeProvenance,
+                         semanticFingerprint, observedAt)
+                        SELECT 1, id, 'LIVE', id, 'SERVER_TAG', X'01', serverTime FROM messages""",
+                )
+            }
+            legacyHelper!!.close()
+            legacyHelper = null
+
+            val migrated =
+                Room
+                    .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
+                    .addMigrations(*ALL_MIGRATIONS)
+                    .build()
+            try {
+                assertEquals(
+                    listOf("ordinary", "me: mention"),
+                    migrated.messageDao().historyRowsForMerge(1).map { it.text },
+                )
+                assertEquals(
+                    listOf("me: mention"),
+                    migrated.canonicalTimelineDao().pendingNotifications(10).map { it.text },
+                )
+                assertEquals(
+                    listOf("me: mention"),
+                    migrated
+                        .messageDao()
+                        .recentNotifiable(
+                            bufferId = 1,
+                            afterTime = Long.MIN_VALUE,
+                            afterEventId = Long.MIN_VALUE,
+                            queryRoom = false,
+                            excludeEventId = -1,
+                            limit = 10,
+                        ).map { it.text },
+                )
+            } finally {
+                migrated.close()
+            }
+        }
 
     /**
      * The registered array is what `DbModule` hands Room on a real device, so a hop missing from it
@@ -456,10 +546,10 @@ class AllMigrationsTest {
         const val DB_NAME = "all-migrations-test.db"
 
         /**
-         * Mirrors `version = 38` on `@Database`. Room's annotation is CLASS-retained, so the
+         * Mirrors `version = 39` on `@Database`. Room's annotation is CLASS-retained, so the
          * declared version cannot be read reflectively; the exported schema JSON is the runtime
          * witness for it instead.
          */
-        const val DECLARED_VERSION = 38
+        const val DECLARED_VERSION = 39
     }
 }

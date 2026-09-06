@@ -2,6 +2,7 @@ package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.di.AppClock
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -31,6 +32,59 @@ class ChannelWatchTest {
             runCurrent()
             assertFalse(watch.isActive(7))
             assertEquals(listOf(7L), expired)
+        }
+
+    @Test
+    fun `start resolves a stale room before persisting the watch`() =
+        runTest {
+            val persisted = mutableListOf<ChannelWatchState?>()
+            val watch =
+                ChannelWatchImpl(
+                    scope = backgroundScope,
+                    clock = AppClock { testScheduler.currentTime },
+                    onExpired = {},
+                    save = { persisted += it },
+                    resolveBufferId = { 8 },
+                )
+
+            watch.start(7, 1_000)
+
+            assertTrue(watch.isActive(8))
+            assertEquals(ChannelWatchState(8, 1_000), persisted.last())
+        }
+
+    @Test
+    fun `live redirect keeps eligibility before observation and preserves the expiry`() =
+        runTest {
+            var canonicalId = 7L
+            val observedId = MutableStateFlow<Long?>(canonicalId)
+            val expired = mutableListOf<Long>()
+            val persisted = mutableListOf<ChannelWatchState?>()
+            val watch =
+                ChannelWatchImpl(
+                    scope = backgroundScope,
+                    clock = AppClock { testScheduler.currentTime },
+                    onExpired = { expired += it },
+                    save = { persisted += it },
+                    resolveBufferId = { canonicalId },
+                    observeBufferId = { observedId },
+                )
+            watch.start(7, 1_000)
+            advanceTimeBy(400)
+
+            canonicalId = 8
+            assertTrue(watch.isActive(8))
+            observedId.value = canonicalId
+            runCurrent()
+
+            assertEquals(ChannelWatchState(8, 1_000), watch.state.value)
+            assertEquals(ChannelWatchState(8, 1_000), persisted.last())
+
+            advanceTimeBy(600)
+            runCurrent()
+
+            assertFalse(watch.isActive(8))
+            assertEquals(listOf(8L), expired)
         }
 
     @Test
@@ -91,23 +145,29 @@ class ChannelWatchTest {
         }
 
     @Test
-    fun `restore re-arms an unexpired saved watch`() =
+    fun `restore resolves a redirected watch without extending its expiry`() =
         runTest {
             val expired = mutableListOf<Long>()
+            val persisted = mutableListOf<ChannelWatchState?>()
+            advanceTimeBy(400)
             val watch =
                 ChannelWatchImpl(
                     scope = backgroundScope,
                     clock = AppClock { testScheduler.currentTime },
                     onExpired = { expired += it },
                     load = { ChannelWatchState(7, 1_000) },
+                    save = { persisted += it },
+                    resolveBufferId = { 8 },
                 )
             runCurrent()
-            assertTrue(watch.isActive(7))
+            assertTrue(watch.isActive(8))
+            assertEquals(ChannelWatchState(8, 1_000), watch.state.value)
+            assertEquals(ChannelWatchState(8, 1_000), persisted.last())
             assertTrue(expired.isEmpty())
-            advanceTimeBy(1_000)
+            advanceTimeBy(600)
             runCurrent()
-            assertEquals(listOf(7L), expired)
-            assertFalse(watch.isActive(7))
+            assertEquals(listOf(8L), expired)
+            assertFalse(watch.isActive(8))
         }
 
     @Test
@@ -129,7 +189,7 @@ class ChannelWatchTest {
         }
 
     @Test
-    fun `restore re-arms a forever watch`() =
+    fun `restore resolves a forever watch`() =
         runTest {
             val expired = mutableListOf<Long>()
             val watch =
@@ -138,17 +198,18 @@ class ChannelWatchTest {
                     clock = AppClock { testScheduler.currentTime },
                     onExpired = { expired += it },
                     load = { ChannelWatchState(7, Long.MAX_VALUE) },
+                    resolveBufferId = { 8 },
                 )
             runCurrent()
-            assertTrue(watch.isActive(7))
+            assertTrue(watch.isActive(8))
             advanceTimeBy(30L * 24 * 60 * 60 * 1000)
             runCurrent()
-            assertTrue(watch.isActive(7))
+            assertTrue(watch.isActive(8))
             assertTrue(expired.isEmpty())
         }
 
     @Test
-    fun `restore expires a stale saved watch and clears it`() =
+    fun `restore expires a redirected stale saved watch and clears it`() =
         runTest {
             val expired = mutableListOf<Long>()
             val persisted = mutableListOf<ChannelWatchState?>()
@@ -160,10 +221,11 @@ class ChannelWatchTest {
                     onExpired = { expired += it },
                     load = { ChannelWatchState(7, 1_000) },
                     save = { persisted += it },
+                    resolveBufferId = { 8 },
                 )
             runCurrent()
-            assertEquals(listOf(7L), expired)
-            assertFalse(watch.isActive(7))
+            assertEquals(listOf(8L), expired)
+            assertFalse(watch.isActive(8))
             assertEquals(listOf<ChannelWatchState?>(null), persisted)
         }
 }

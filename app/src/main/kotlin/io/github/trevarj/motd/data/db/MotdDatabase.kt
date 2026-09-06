@@ -37,7 +37,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 38,
+    version = 39,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1021,6 +1021,14 @@ val MIGRATION_37_38 =
         }
     }
 
+/** v38 -> v39 retains original watch eligibility for interrupted notification recovery. */
+val MIGRATION_38_39 =
+    object : Migration(38, 39) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN notificationWatched INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1071,6 +1079,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_35_36,
         MIGRATION_36_37,
         MIGRATION_37_38,
+        MIGRATION_38_39,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"
