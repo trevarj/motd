@@ -19,9 +19,13 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.repo.BufferRepository
+import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.CertPrompt
+import io.github.trevarj.motd.service.ChannelWatch
+import io.github.trevarj.motd.service.ChannelWatchDuration
+import io.github.trevarj.motd.service.ChannelWatchImpl
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.SendAcceptance
@@ -35,6 +39,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -46,6 +51,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -227,6 +233,40 @@ class ChannelInfoTopicMutationTest {
             collector.cancelAndJoin()
         }
 
+    @Test
+    fun `stale redirect route watches the canonical channel and reports its notify level`() =
+        runTest {
+            val watch =
+                ChannelWatchImpl(
+                    scope = backgroundScope,
+                    clock = AppClock { testScheduler.currentTime },
+                    onExpired = {},
+                )
+            val canonical = BufferEntity(BUFFER_ID, 1, "#room", "#room", BufferType.CHANNEL, muted = true)
+            val viewModel =
+                viewModel(
+                    manager = FakeConnectionManager(),
+                    buffers = FakeBufferRepository(canonical),
+                    channelWatch = watch,
+                )
+            viewModel.init(42)
+            viewModel.state.first { it.buffer != null }
+            backgroundScope.launch { viewModel.notifyLevel.collect() }
+            runCurrent()
+
+            viewModel.startWatch(ChannelWatchDuration.FOREVER).join()
+            runCurrent()
+
+            assertTrue(watch.isActive(canonical.id))
+            assertEquals(ChannelNotifyLevel.All(minutesLeft = null, overridesMute = true), viewModel.notifyLevel.value)
+
+            viewModel.stopWatch().join()
+            runCurrent()
+
+            assertFalse(watch.isActive(canonical.id))
+            assertEquals(ChannelNotifyLevel.Muted, viewModel.notifyLevel.value)
+        }
+
     private suspend fun TestScope.assertRejectedLeaveDoesNotNavigate(manager: FakeConnectionManager) {
         val viewModel = viewModel(manager)
         viewModel.init(BUFFER_ID)
@@ -243,23 +283,26 @@ class ChannelInfoTopicMutationTest {
         collector.cancelAndJoin()
     }
 
-    private fun viewModel(manager: ConnectionManager) =
-        ChannelInfoViewModel(
-            bufferRepository = FakeBufferRepository(),
-            connectionManager = manager,
-            draftStore = ComposerDraftStore(database),
-            settingsRepository = FakeSettingsRepository(),
-            userDao = database.userDao(),
-            networkIdentityDao = database.networkIdentityDao(),
-        )
+    private fun viewModel(
+        manager: ConnectionManager,
+        buffers: BufferRepository = FakeBufferRepository(),
+        channelWatch: ChannelWatch = ChannelWatch.Noop,
+    ) = ChannelInfoViewModel(
+        bufferRepository = buffers,
+        connectionManager = manager,
+        draftStore = ComposerDraftStore(database),
+        settingsRepository = FakeSettingsRepository(),
+        userDao = database.userDao(),
+        networkIdentityDao = database.networkIdentityDao(),
+        channelWatch = channelWatch,
+    )
 
-    private class FakeBufferRepository : BufferRepository {
+    private class FakeBufferRepository(
+        private val buffer: BufferEntity = BufferEntity(BUFFER_ID, 1, "#room", "#room", BufferType.CHANNEL),
+    ) : BufferRepository {
         override fun observeChatList(): Flow<List<ChatListRow>> = flowOf(emptyList())
 
-        override fun observeBuffer(id: Long): Flow<BufferEntity?> =
-            flowOf(
-                BufferEntity(BUFFER_ID, 1, "#room", "#room", BufferType.CHANNEL),
-            )
+        override fun observeBuffer(id: Long): Flow<BufferEntity?> = flowOf(buffer)
 
         override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())
 

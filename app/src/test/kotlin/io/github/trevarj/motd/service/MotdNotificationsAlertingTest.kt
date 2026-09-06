@@ -12,9 +12,11 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
+import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.di.ForegroundBufferTrackerImpl
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
@@ -126,6 +128,195 @@ class MotdNotificationsAlertingTest {
         assertEquals(NotificationCompat.GROUP_ALERT_ALL, notification.groupAlertBehavior)
     }
 
+    private suspend fun mutedChannel(name: String = "#chan"): Long =
+        db.bufferDao().insert(
+            BufferEntity(
+                networkId = networkId,
+                name = name,
+                displayName = name,
+                type = BufferType.CHANNEL,
+                muted = true,
+            ),
+        )
+
+    private val interruptedNotifier =
+        object : MessageNotifier {
+            override suspend fun onIncoming(
+                networkId: Long,
+                bufferId: Long,
+                type: BufferType,
+                hasMention: Boolean,
+                message: IrcEvent.ChatMessage,
+            ) {
+                error("simulated interrupted presentation")
+            }
+        }
+
+    @Test
+    fun pushFirstWatchedMention_onMutedChannel_alertsOnlyOnce() =
+        runTest {
+            val channelId = mutedChannel()
+            val watch = ChannelWatchImpl(backgroundScope, AppClock { 0L }, onExpired = {})
+            watch.start(channelId, null)
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifications, channelWatch = watch)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val message = chat("alert-peer", "me: watched ping", msgid = "watched-push").copy(target = "#chan")
+
+            processor.processPush(networkId, message)
+
+            val posted = postedNotifications().single().notification
+            assertEquals(MotdNotifications.CHANNEL_MENTIONS, posted.channelId)
+            assertAlerting(posted)
+            val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted)
+            assertEquals(listOf(message.text), style?.messages?.map { it.text.toString() })
+
+            // A dismissed push must not reappear when its live duplicate arrives.
+            context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
+            processor.process(networkId, message)
+            assertEquals(0, postedNotifications().size)
+        }
+
+    @Test
+    fun interruptedWatchedMessages_afterWatchEnds_restoreHistoryAndRecoverSilentlyOnce() =
+        runTest {
+            val channelId = mutedChannel()
+            val watch = ChannelWatchImpl(backgroundScope, AppClock { 0L }, onExpired = {})
+            watch.start(channelId, null)
+            val live = EventProcessor(db, TypingTrackerImpl(), notifications, channelWatch = watch)
+            live.onRegistered(networkId, "me", emptyMap())
+            live.process(
+                networkId,
+                chat("alert-peer", "already presented", "watch-first").copy(target = "#chan"),
+            )
+            assertAlerting(postedNotifications().single().notification)
+
+            val interrupted = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, channelWatch = watch)
+            interrupted.onRegistered(networkId, "me", emptyMap())
+            interrupted.process(
+                networkId,
+                chat("alert-peer", "ordinary interrupted", "watch-ordinary", 2_000).copy(target = "#chan"),
+            )
+            interrupted.process(
+                networkId,
+                chat("alert-peer", "waves", "watch-action", 3_000).copy(target = "#chan", kind = IrcEvent.ChatKind.ACTION),
+            )
+            interrupted.processPush(
+                networkId,
+                chat("alert-peer", "me: interrupted mention", "watch-mention", 4_000).copy(target = "#chan"),
+            )
+            watch.stop()
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+
+            notifications.recoverCanonicalNotifications()
+
+            val recovered = postedNotifications().single().notification
+            assertSilent(recovered)
+            val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(recovered)
+            assertEquals(
+                listOf("already presented", "ordinary interrupted", "waves", "me: interrupted mention").sorted(),
+                style?.messages?.map { it.text.toString() }?.sorted(),
+            )
+            context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
+            notifications.recoverCanonicalNotifications()
+            live.process(
+                networkId,
+                chat("alert-peer", "me: interrupted mention", "watch-mention", 4_000).copy(target = "#chan"),
+            )
+            assertEquals(0, postedNotifications().size)
+        }
+
+    @Test
+    fun watchedRecovery_survivesHistoryIdentityUpgradeAndRoomCoalescence() =
+        runTest {
+            val winnerId = mutedChannel("#renamed")
+            val channelId = mutedChannel()
+            val watch = ChannelWatchImpl(backgroundScope, AppClock { 0L }, onExpired = {})
+            val processor = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, channelWatch = watch)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val message = chat("alert-peer", "survives coalescence").copy(target = "#chan")
+            processor.process(
+                networkId,
+                IrcEvent.HistoryBatch("#renamed", listOf(message.copy(target = "#renamed"))),
+            )
+            watch.start(channelId, null)
+            processor.process(networkId, message)
+            watch.stop()
+            processor.process(
+                networkId,
+                IrcEvent.HistoryBatch(
+                    "#chan",
+                    listOf(message.copy(ctx = message.ctx.copy(msgid = "upgraded-watch"))),
+                ),
+            )
+            BufferStore(db).mergeRooms(winnerId, channelId)
+
+            notifications.recoverCanonicalNotifications()
+
+            assertEquals(1, db.messageDao().countForBuffer(winnerId))
+            val recovered = postedNotifications().single().notification
+            assertSilent(recovered)
+            val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(recovered)
+            assertEquals(listOf(message.text), style?.messages?.map { it.text.toString() })
+            context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
+            notifications.recoverCanonicalNotifications()
+            assertEquals(0, postedNotifications().size)
+        }
+
+    @Test
+    fun currentWatch_doesNotMakeEarlierMessagesOrPlaybackRecoverable() =
+        runTest {
+            val channelId = mutedChannel()
+            val watch = ChannelWatchImpl(backgroundScope, AppClock { 0L }, onExpired = {})
+            val processor = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, channelWatch = watch)
+            processor.onRegistered(networkId, "me", emptyMap())
+            processor.process(
+                networkId,
+                chat("alert-peer", "before watch", "unwatched-live").copy(target = "#chan"),
+            )
+            processor.processPush(
+                networkId,
+                chat("alert-peer", "me: before watch", "unwatched-mention").copy(target = "#chan"),
+            )
+            watch.start(channelId, null)
+            processor.processPush(
+                networkId,
+                chat("alert-peer", "pushed ordinary", "watched-push-ordinary").copy(target = "#chan"),
+            )
+            processor.process(
+                networkId,
+                IrcEvent.HistoryBatch(
+                    "#chan",
+                    listOf(chat("alert-peer", "historical", "watched-history").copy(target = "#chan")),
+                ),
+            )
+            processor.process(
+                networkId,
+                IrcEvent.PlaybackBatch(
+                    source = IrcEvent.PlaybackSource.ZNC_PLAYBACK,
+                    target = "#chan",
+                    items =
+                        listOf(
+                            IrcEvent.PlaybackItem.from(
+                                chat("alert-peer", "replayed", "watched-replay").copy(target = "#chan"),
+                                ordinal = 0,
+                            ),
+                        ),
+                ),
+            )
+            processor.process(
+                networkId,
+                chat("alert-peer", "notice", "watched-notice").copy(target = "#chan", kind = IrcEvent.ChatKind.NOTICE),
+            )
+            processor.process(
+                networkId,
+                chat("me", "me: self", "watched-self").copy(target = "#chan", isSelf = true),
+            )
+
+            notifications.recoverCanonicalNotifications()
+
+            assertEquals(0, postedNotifications().size)
+        }
+
     @Test
     fun firstPresentation_ofDm_alertsThroughMessagesChannel() =
         runTest {
@@ -176,19 +367,7 @@ class MotdNotificationsAlertingTest {
     @Test
     fun recoveryRepost_staysSilent() =
         runTest {
-            val failing =
-                object : MessageNotifier {
-                    override suspend fun onIncoming(
-                        networkId: Long,
-                        bufferId: Long,
-                        type: BufferType,
-                        hasMention: Boolean,
-                        message: IrcEvent.ChatMessage,
-                    ) {
-                        error("simulated interrupted presentation")
-                    }
-                }
-            val processor = EventProcessor(db, TypingTrackerImpl(), failing)
+            val processor = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier)
             processor.onRegistered(networkId, "me", emptyMap())
             processor.process(networkId, chat("alert-peer", "recover me", msgid = "recover-alert"))
             assertEquals(0, postedNotifications().size)

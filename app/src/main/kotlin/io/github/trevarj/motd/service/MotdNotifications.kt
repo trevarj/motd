@@ -50,10 +50,10 @@ import javax.inject.Singleton
 /**
  * Final notification suppression decision. Pure and unit-tested.
  *
- * Precedence (highest first): foreground buffer suppresses everything; an explicit buffer mute
- * always wins over friend status; a fool sender is fully silenced. The `(DM || mention)` gate lives upstream in
- * [io.github.trevarj.motd.data.sync.EventProcessor.maybeNotify], so by the time this runs the
- * message already qualifies as a DM, a mention, or a watched-channel message.
+ * Precedence (highest first): already-read and foreground buffers suppress everything; an explicit
+ * buffer mute wins unless the message qualified under a watch; a fool sender is fully silenced.
+ * The DM, mention, or watched-channel qualification lives upstream in
+ * [io.github.trevarj.motd.data.sync.EventProcessor.maybeNotify].
  */
 fun shouldPostNotification(
     foreground: Boolean,
@@ -170,6 +170,7 @@ class MotdNotifications
                                 // about (the claim/present/complete cycle was interrupted after an
                                 // unknown amount of presentation work); it must never re-alert.
                                 firstPresentation = false,
+                                watched = event.notificationWatched,
                                 message =
                                     IrcEvent.ChatMessage(
                                         ctx =
@@ -338,7 +339,7 @@ class MotdNotifications
                     identityRules,
                 )
 
-            // Fools and explicit buffer mute are fully silent. Foreground suppression also applies.
+            // Only a watch bypasses buffer mute; fools, read markers, and foreground still suppress.
             val foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId
             val muted = buffer?.muted == true
             val senderIsFriend = identityRules.matchesConfiguredNick(message.source.nick, settings.friends)

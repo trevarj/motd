@@ -2,6 +2,8 @@ package io.github.trevarj.motd.ui.components
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material3.AlertDialog
@@ -38,7 +40,7 @@ fun ChannelWatchDialog(
                 .testTag("${tagPrefix}_notify_dialog"),
         title = { Text(stringResource(R.string.channelinfo_notifications)) },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 ChannelWatchDuration.entries.forEach { duration ->
                     ListItem(
                         headlineContent = { Text(duration.label()) },

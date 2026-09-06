@@ -63,6 +63,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.dcc.DccTransferController
+import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.client.IrcClient
@@ -73,6 +74,9 @@ import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.transport.IrcTransport
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.service.CertPrompt
+import io.github.trevarj.motd.service.ChannelWatch
+import io.github.trevarj.motd.service.ChannelWatchDuration
+import io.github.trevarj.motd.service.ChannelWatchImpl
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.ForegroundBufferTracker
@@ -1430,6 +1434,37 @@ class ChatViewModelTest {
             advanceUntilIdle()
 
             assertEquals(null, foreground.foregroundBufferId.value)
+        }
+
+    @Test
+    fun `stale redirect route starts and stops a canonical channel watch`() =
+        runTest {
+            val canonical = channel.copy(id = 42)
+            val watch =
+                ChannelWatchImpl(
+                    scope = backgroundScope,
+                    clock = AppClock { testScheduler.currentTime },
+                    onExpired = {},
+                )
+            val vm =
+                viewModel(
+                    buffer = canonical,
+                    manager = FakeConnectionManager(network.id),
+                    routeBufferId = channel.id,
+                    channelWatch = watch,
+                )
+            vm.state.first { it.buffer != null }
+
+            vm.startChannelWatch(ChannelWatchDuration.FOREVER)
+            runCurrent()
+
+            assertTrue(watch.isActive(canonical.id))
+            assertEquals(canonical.id, vm.activeWatch.value?.bufferId)
+
+            vm.stopChannelWatch()
+            runCurrent()
+
+            assertNull(vm.activeWatch.value)
         }
 
     @Test
@@ -3538,6 +3573,7 @@ class ChatViewModelTest {
         // Injectable so a test can push prefills at the exact store instance the VM listens to.
         drafts: ComposerDraftStore = ComposerDraftStore(db),
         replyPrefs: ReplyPrefs = FakeReplyPrefs(),
+        channelWatch: ChannelWatch = ChannelWatch.Noop,
     ): ChatViewModel {
         val routeState = mutableMapOf<String, Any>("bufferId" to routeBufferId)
         jumpToMsgid?.let { routeState["jumpToMsgid"] = it }
@@ -3576,6 +3612,7 @@ class ChatViewModelTest {
             audioPlaybackController = FakeAudioPlaybackController(),
             directMediaPolicy = directMediaPolicy,
             gapFiller = gapFiller,
+            channelWatch = channelWatch,
         )
     }
 

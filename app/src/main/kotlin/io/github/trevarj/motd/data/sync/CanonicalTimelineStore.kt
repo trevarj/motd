@@ -286,6 +286,7 @@ class CanonicalTimelineStore
                                 ircFormattedText = plan.ircFormattedText,
                                 pendingLabel = plan.label,
                                 dedupKey = SemanticIdentity.pendingKey(plan.label),
+                                notificationWatched = false,
                                 notificationHandled = false,
                                 notificationClaimed = false,
                                 notificationClaimOwner = null,
@@ -821,6 +822,7 @@ class CanonicalTimelineStore
                     } else {
                         existing.timeProvenance
                     },
+                notificationWatched = existing.notificationWatched || incoming.notificationWatched,
                 notificationHandled = existing.notificationHandled || incoming.notificationHandled,
                 notificationClaimed = existing.notificationClaimed || incoming.notificationClaimed,
                 notificationClaimOwner = existing.notificationClaimOwner ?: incoming.notificationClaimOwner,

@@ -294,7 +294,7 @@ class ChatViewModel
         val activeWatch: StateFlow<ChannelWatchState?> = channelWatch.state
 
         fun startChannelWatch(duration: ChannelWatchDuration) {
-            viewModelScope.launch { channelWatch.start(bufferId, duration.millis) }
+            viewModelScope.launch { channelWatch.start(operationalBufferId.value, duration.millis) }
         }
 
         fun stopChannelWatch() {

@@ -468,6 +468,8 @@ data class TimelineEventEntity(
         } else {
             TimeProvenance.LOCAL_CLOCK
         },
+    /** Qualified under a watch at ingestion; recovery must not consult the current watch. */
+    @ColumnInfo(defaultValue = "0") val notificationWatched: Boolean = false,
     val notificationHandled: Boolean = false,
     /** Durable two-phase notification claim; reset on startup before database-backed recovery. */
     val notificationClaimed: Boolean = false,

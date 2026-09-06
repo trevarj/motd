@@ -9,13 +9,16 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineEventId
+import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
 import io.github.trevarj.motd.service.ChannelWatch
+import io.github.trevarj.motd.service.ChannelWatchImpl
 import io.github.trevarj.motd.service.ChannelWatchState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -60,7 +63,7 @@ class EventProcessorChannelWatchTest {
         override val state: StateFlow<ChannelWatchState?> =
             MutableStateFlow(ChannelWatchState(watched, Long.MAX_VALUE))
 
-        override fun isActive(bufferId: Long): Boolean = bufferId == watched
+        override suspend fun isActive(bufferId: Long): Boolean = bufferId == watched
 
         override suspend fun start(
             bufferId: Long,
@@ -133,6 +136,49 @@ class EventProcessorChannelWatchTest {
             watched.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "still hello", "m2"))
             assertEquals(1, notifier.incoming.size)
             assertEquals(listOf(true), notifier.watchedFlags)
+        }
+
+    @Test
+    fun `watch follows a renamed source into the canonical channel`() =
+        runTest {
+            val buffers = db.bufferDao()
+            val sourceId =
+                buffers.insert(
+                    BufferEntity(networkId = networkId, name = "#old", displayName = "#old", type = BufferType.CHANNEL),
+                )
+            val watch =
+                ChannelWatchImpl(
+                    scope = backgroundScope,
+                    clock = AppClock { 0 },
+                    onExpired = {},
+                    resolveBufferId = buffers::canonicalId,
+                    observeBufferId = { id -> buffers.observe(id).map { it?.id } },
+                )
+            val watched = processor(watch)
+            watched.onRegistered(networkId, "me", emptyMap())
+            watch.start(sourceId, null)
+
+            watched.process(
+                networkId,
+                IrcEvent.ChannelRenamed(
+                    ctx = MessageContext(msgid = "rename-1", serverTime = 999, account = null, batchId = null, label = null),
+                    actor = "oper",
+                    oldName = "#old",
+                    newName = "#chan",
+                    reason = "moving",
+                ),
+            )
+            assertEquals(bufferId, buffers.canonicalId(sourceId))
+
+            watched.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "hello", "first-after-rename"))
+
+            assertEquals(listOf(true), notifier.watchedFlags)
+            assertEquals(
+                "first-after-rename",
+                notifier.incoming
+                    .single()
+                    .ctx.msgid,
+            )
         }
 
     @Test

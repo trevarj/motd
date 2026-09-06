@@ -700,6 +700,11 @@ class EventProcessor
             val hasMention =
                 !sourceIsSelf && type != BufferType.SERVER &&
                     (replyMentionsSelf || st.containsSelfMention(storedText))
+            val watchedChat =
+                !sourceIsSelf && type == BufferType.CHANNEL &&
+                    (e.kind == IrcEvent.ChatKind.PRIVMSG || e.kind == IrcEvent.ChatKind.ACTION) &&
+                    (origin == EventOrigin.LIVE || (origin == EventOrigin.PUSH && hasMention)) &&
+                    channelWatch.isActive(bufferId)
             val identitySender = st.normalize(e.source.nick)
 
             traceMessageDecision("message_classified", networkId, bufferId, e, origin) {
@@ -723,6 +728,7 @@ class EventProcessor
                     isSelf = sourceIsSelf,
                     isBot = e.isBot,
                     hasMention = hasMention,
+                    notificationWatched = watchedChat,
                     replyToMsgid = e.replyToMsgid,
                     dedupKey = SemanticIdentity.keyFor(e.ctx, identitySender, ircFormattedText ?: storedText),
                     serverTimeAuthoritative = e.ctx.serverTimeSource == ServerTimeSource.TAG,
@@ -813,10 +819,6 @@ class EventProcessor
                         }
                     }
                 }
-                val watchedChat =
-                    origin == EventOrigin.LIVE &&
-                        channelWatch.isActive(canonical.bufferId) &&
-                        (e.kind == IrcEvent.ChatKind.PRIVMSG || e.kind == IrcEvent.ChatKind.ACTION)
                 if (origin.notifies &&
                     !sourceIsSelf &&
                     shouldNotifyIncoming(type, hasMention, consoleNotice, watchedChat)
@@ -840,7 +842,7 @@ class EventProcessor
                                 replyToMsgid = canonical.replyToMsgid,
                             ),
                             consoleNotice = consoleNotice,
-                            watchedChat = watchedChat,
+                            watchedChat = canonical.notificationWatched,
                         )
                     }
                 }
@@ -4554,8 +4556,8 @@ private fun newerBoundary(
 
 /**
  * Notification hook the [EventProcessor] fires for a persisted incoming ChatMessage that already
- * passed the (DM || hasMention) filter. The concrete impl (MotdNotifications, WP5) applies the
- * remaining suppression rules (muted buffer, foregrounded buffer) and posts MessagingStyle.
+ * passed the DM, mention, or watched-channel filter. The concrete impl (MotdNotifications, WP5)
+ * applies the remaining suppression rules (muted buffer, foregrounded buffer) and posts MessagingStyle.
  */
 interface MessageNotifier {
     // suspend so implementations read Room / DataStore with plain suspend calls. The events
@@ -4578,7 +4580,7 @@ interface MessageNotifier {
         hasMention: Boolean,
         eventId: TimelineEventId,
         message: IrcEvent.ChatMessage,
-        // A live channel watch; it overrides an explicit buffer mute downstream.
+        // Qualified under a channel watch; overrides an explicit buffer mute downstream.
         watched: Boolean = false,
     ) = onIncoming(networkId, bufferId, type, hasMention, message)
 

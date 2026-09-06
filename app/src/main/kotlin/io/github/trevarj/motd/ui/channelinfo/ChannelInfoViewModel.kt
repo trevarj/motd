@@ -385,8 +385,8 @@ class ChannelInfoViewModel
          * outranks the default mentions-only. Re-emits on a tick so the remaining minutes stay live.
          */
         val notifyLevel: StateFlow<ChannelNotifyLevel> =
-            combine(bufferIdFlow, bufferFlow, channelWatch.state) { id, buffer, watch ->
-                Triple(id, buffer?.muted == true, watch)
+            combine(bufferFlow, channelWatch.state) { buffer, watch ->
+                Triple(buffer?.id, buffer?.muted == true, watch)
             }.flatMapLatest { (id, muted, watch) ->
                 val bufferId = id
                 if (bufferId == null) {
@@ -410,7 +410,7 @@ class ChannelInfoViewModel
 
         fun startWatch(duration: ChannelWatchDuration) =
             viewModelScope.launch {
-                bufferIdFlow.value?.let { channelWatch.start(it, duration.millis) }
+                state.value.buffer?.let { channelWatch.start(it.id, duration.millis) }
             }
 
         fun stopWatch() = viewModelScope.launch { channelWatch.stop() }

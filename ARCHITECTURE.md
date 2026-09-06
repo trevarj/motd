@@ -49,6 +49,13 @@ flowchart TD
 - The app ships as a single Google-free build with no product flavors; push
   delivery is UnifiedPush only. The E2E build is x86_64-compatible and
   intentionally omits the arm64-only libbox JNI.
+- Channel watch follows one canonical channel across redirects until its saved
+  deadline (or until stopped). It admits live PRIVMSG/ACTION notifications and
+  overrides mute, including already-qualifying push mentions; it does not request
+  additional push deliveries or notify for history/replay. Self, ignore, fool,
+  foreground, and read suppression remain. Original watch eligibility is stored
+  with each event so interrupted notification recovery stays silent and does not
+  reinterpret old messages using a later watch.
 
 ## Where to work
 
