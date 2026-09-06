@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#1b1b1f">
+    <meta name="description" content="Install motd on Android 8.0 or newer with a 64-bit ARM device, using F-Droid or the latest GitHub release.">
+    <title>Installation — motd</title>
+    <link rel="icon" href="assets/brand/motd-symbol.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#top">Skip to content</a>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="index.html" aria-label="motd home"><img src="assets/brand/motd-lockup-dark.svg" alt="motd" width="109" height="40"></a>
+        <nav class="header-links" aria-label="Project">
+          <a href="https://github.com/trevarj/motd/releases/latest">Latest release</a>
+          <a href="https://github.com/trevarj/motd">GitHub</a>
+        </nav>
+      </div>
+    </header>
+    <details class="mobile-nav">
+      <summary>Menu</summary>
+      <nav class="docs-nav" aria-label="Documentation">
+        <ul>
+          <li><a href="index.html">Overview</a></li>
+          <li><span class="nav-group">Get started</span>
+            <ul>
+              <li><a href="installation.html" aria-current="page">Installation</a></li>
+              <li><a href="getting-started.html">Getting started</a></li>
+            </ul>
+          </li>
+          <li><a href="configuration.html">Configuration</a></li>
+          <li><span class="nav-group">Guides</span>
+            <ul>
+              <li><a href="guides.html#push-notifications">Push notifications</a></li>
+              <li><a href="guides.html#cloak">CLoak</a></li>
+              <li><a href="guides.html#obfuscation">SOCKS5, Tor &amp; VLESS</a></li>
+            </ul>
+          </li>
+          <li><a href="https://web.libera.chat/#motd">Community</a></li>
+          <li><a href="https://github.com/trevarj/motd">Contributing</a></li>
+        </ul>
+      </nav>
+    </details>
+    <div class="docs-layout">
+      <aside class="sidebar">
+        <nav class="docs-nav" aria-label="Documentation">
+          <ul>
+            <li><a href="index.html">Overview</a></li>
+            <li><span class="nav-group">Get started</span>
+              <ul>
+                <li><a href="installation.html" aria-current="page">Installation</a></li>
+                <li><a href="getting-started.html">Getting started</a></li>
+              </ul>
+            </li>
+            <li><a href="configuration.html">Configuration</a></li>
+            <li><span class="nav-group">Guides</span>
+              <ul>
+                <li><a href="guides.html#push-notifications">Push notifications</a></li>
+                <li><a href="guides.html#cloak">CLoak</a></li>
+                <li><a href="guides.html#obfuscation">SOCKS5, Tor &amp; VLESS</a></li>
+              </ul>
+            </li>
+            <li><a href="https://web.libera.chat/#motd">Community</a></li>
+            <li><a href="https://github.com/trevarj/motd">Contributing</a></li>
+          </ul>
+        </nav>
+      </aside>
+      <nav class="page-outline" aria-label="On this page">
+        <p class="outline-title">On this page</p>
+        <ul>
+          <li><a href="#requirements">Requirements</a></li>
+          <li><a href="#f-droid">F-Droid</a></li>
+          <li><a href="#github">GitHub</a></li>
+          <li><a href="#next-steps">Next steps</a></li>
+        </ul>
+      </nav>
+      <main class="doc-content" id="top" tabindex="-1">
+        <h1>Installation</h1>
+        <p class="intro">Install motd from F-Droid or GitHub, then connect to an IRC network or your bouncer.</p>
+
+        <h2 id="requirements">Requirements</h2>
+        <ul>
+          <li>Android 8.0 or newer.</li>
+          <li>A 64-bit ARM device. The embedded obfuscation transport supports <code>arm64-v8a</code> only.</li>
+        </ul>
+        <p>motd is a single Google-free build. Push delivery uses UnifiedPush only, not Firebase, and motd is not distributed through the Play Store.</p>
+        <p>See the <a href="https://github.com/trevarj/motd/blob/main/README.md#install">installation source documentation</a> for platform and distribution details.</p>
+
+        <h2 id="f-droid">F-Droid</h2>
+        <p>Open <a href="https://f-droid.org/packages/io.github.trevarj.motd">motd on F-Droid</a> and install the app with package name <code>io.github.trevarj.motd</code>.</p>
+        <p>F-Droid and GitHub releases share the same signing key. An installation from either channel can receive updates from the other.</p>
+        <p>The <a href="https://github.com/trevarj/motd/blob/main/README.md#install">README installation section</a> lists both supported channels.</p>
+
+        <h2 id="github">GitHub</h2>
+        <p>Download the APK from the <a href="https://github.com/trevarj/motd/releases/latest">latest GitHub release</a> and install it on your Android device. This is the same Google-free app, with the same signing key used by F-Droid.</p>
+        <p>See the <a href="https://github.com/trevarj/motd/blob/main/README.md#install">README installation section</a> for the canonical release link and requirements.</p>
+
+        <h2 id="next-steps">Next steps</h2>
+        <p>Follow <a href="getting-started.html">Getting started</a> to set up a direct IRC or soju connection. For background delivery through a compatible soju bouncer, follow the <a href="guides.html#push-notifications">push notification guide</a>.</p>
+        <p>The <a href="https://github.com/trevarj/motd/blob/main/README.md#connecting">connection examples</a> and <a href="https://github.com/trevarj/motd/blob/main/docs/ntfy-push.md">full ntfy guide</a> provide additional setup and troubleshooting details.</p>
+
+        <footer class="site-footer">
+          <a href="https://github.com/trevarj/motd">Source</a>
+          <a href="https://github.com/trevarj/motd/releases/latest">Releases</a>
+          <a href="https://web.libera.chat/#motd">Community</a>
+          <a href="#top">Back to top</a>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

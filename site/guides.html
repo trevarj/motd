@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#1b1b1f">
+    <meta name="description" content="Set up and troubleshoot motd push notifications with ntfy, connect through CLoak, or use SOCKS5, Tor, and VLESS + REALITY.">
+    <title>Guides — motd</title>
+    <link rel="icon" href="assets/brand/motd-symbol.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#top">Skip to content</a>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="index.html" aria-label="motd home"><img src="assets/brand/motd-lockup-dark.svg" alt="motd" width="109" height="40"></a>
+        <nav class="header-links" aria-label="Project">
+          <a href="https://github.com/trevarj/motd/releases/latest">Latest release</a>
+          <a href="https://github.com/trevarj/motd">GitHub</a>
+        </nav>
+      </div>
+    </header>
+    <details class="mobile-nav">
+      <summary>Menu</summary>
+      <nav class="docs-nav" aria-label="Documentation">
+        <ul>
+          <li><a href="index.html">Overview</a></li>
+          <li><span class="nav-group">Get started</span>
+            <ul>
+              <li><a href="installation.html">Installation</a></li>
+              <li><a href="getting-started.html">Getting started</a></li>
+            </ul>
+          </li>
+          <li><a href="configuration.html">Configuration</a></li>
+          <li><a class="nav-group" href="guides.html" aria-current="page">Guides</a>
+            <ul>
+              <li><a href="guides.html#push-notifications">Push notifications</a></li>
+              <li><a href="guides.html#cloak">CLoak</a></li>
+              <li><a href="guides.html#obfuscation">SOCKS5, Tor &amp; VLESS</a></li>
+            </ul>
+          </li>
+          <li><a href="https://web.libera.chat/#motd">Community</a></li>
+          <li><a href="https://github.com/trevarj/motd">Contributing</a></li>
+        </ul>
+      </nav>
+    </details>
+    <div class="docs-layout">
+      <aside class="sidebar">
+        <nav class="docs-nav" aria-label="Documentation">
+          <ul>
+            <li><a href="index.html">Overview</a></li>
+            <li><span class="nav-group">Get started</span>
+              <ul>
+                <li><a href="installation.html">Installation</a></li>
+                <li><a href="getting-started.html">Getting started</a></li>
+              </ul>
+            </li>
+            <li><a href="configuration.html">Configuration</a></li>
+            <li><a class="nav-group" href="guides.html" aria-current="page">Guides</a>
+              <ul>
+                <li><a href="guides.html#push-notifications">Push notifications</a></li>
+                <li><a href="guides.html#cloak">CLoak</a></li>
+                <li><a href="guides.html#obfuscation">SOCKS5, Tor &amp; VLESS</a></li>
+              </ul>
+            </li>
+            <li><a href="https://web.libera.chat/#motd">Community</a></li>
+            <li><a href="https://github.com/trevarj/motd">Contributing</a></li>
+          </ul>
+        </nav>
+      </aside>
+      <nav class="page-outline" aria-label="On this page">
+        <p class="outline-title">On this page</p>
+        <ul>
+          <li><a href="#push-notifications">Push notifications</a></li>
+          <li><a href="#cloak">CLoak</a></li>
+          <li><a href="#obfuscation">SOCKS5, Tor &amp; VLESS</a></li>
+        </ul>
+      </nav>
+      <main class="doc-content" id="top" tabindex="-1">
+        <h1>Guides</h1>
+        <p class="intro">Set up background notifications, connect through CLoak, or route a network through a proxy. For a first direct IRC or soju connection, begin with <a href="getting-started.html">Getting started</a>.</p>
+
+        <h2 id="push-notifications">Push notifications</h2>
+        <p>motd uses UnifiedPush for Google-free push delivery. <a href="https://ntfy.sh/">ntfy</a> can act as the distributor, but your soju bouncer must advertise <code>soju.im/webpush</code>. A plain IRC server cannot provide this push delivery.</p>
+
+        <h3>Set up ntfy</h3>
+        <ol>
+          <li>Install <a href="https://f-droid.org/packages/io.heckel.ntfy/">ntfy from F-Droid</a>. This build contains no Firebase and maintains its own instant-delivery connection. Grant notification permission, allow background operation, and open ntfy once.</li>
+          <li>Connect motd to your soju bouncer at least once so it can detect Web Push support.</li>
+          <li>Open <strong>Settings → Message delivery</strong> in motd and select <strong>UnifiedPush</strong>.</li>
+          <li>If Android asks for a distributor, choose <strong>ntfy</strong>. motd selects it automatically when it is the only installed distributor.</li>
+          <li>Leave motd open until the status card says <strong>UnifiedPush active</strong>. It first obtains an endpoint, then waits for soju to confirm that an encrypted test delivery succeeded.</li>
+          <li>Background motd and send a direct message to your nick from another IRC client. Confirm that the notification arrives before relying on background push.</li>
+        </ol>
+        <p>You do not need an ntfy topic or account when using the public <a href="https://ntfy.sh"><code>https://ntfy.sh</code></a> server. motd creates and manages its private push endpoints. soju encrypts the payload and motd decrypts it on your device; ntfy cannot read the IRC message.</p>
+
+        <h3>Verification and socket fallback</h3>
+        <p>motd closes a network's IRC socket only after soju acknowledges its current endpoint. Networks without Web Push support, or whose registration has failed, remain connected through the foreground service. The delivery setting stays on UnifiedPush and the status card reports socket fallback rather than silently changing modes.</p>
+        <p>soju sends Web Push for direct messages and channel highlights. Ordinary channel messages are fetched through <code>CHATHISTORY</code> when motd returns to the foreground. Foregrounding reconnects first, runs catch-up, and keeps the socket available while you use the app.</p>
+        <p>The status card distinguishes endpoint setup, server verification, active delivery, partial socket fallback, and errors. <strong>Retry</strong> runs endpoint registration again without discarding your delivery-mode choice.</p>
+
+        <h3>Use a self-hosted ntfy server</h3>
+        <ol>
+          <li>In ntfy, open <strong>Settings</strong> and change the default server to your HTTPS ntfy URL.</li>
+          <li>If authentication is required, add credentials under <strong>Manage users</strong>.</li>
+          <li>Return to motd and select <strong>UnifiedPush</strong> again to obtain endpoints from that server.</li>
+        </ol>
+        <p>The phone must be able to maintain a connection to the server. Use a valid HTTPS certificate where possible; current ntfy Android releases also support self-signed and client certificates. See the <a href="https://docs.ntfy.sh/subscribe/phone/">ntfy phone documentation</a> and <a href="https://unifiedpush.org/users/distributors/ntfy/">UnifiedPush ntfy guide</a> for server-specific configuration.</p>
+        <p>The public ntfy service has its own usage policy and availability. Self-hosting is optional and gives you control over retention, accounts, and service reliability.</p>
+
+        <h3>Keep background delivery working</h3>
+        <ul>
+          <li>Allow notification permission for both ntfy and motd.</li>
+          <li>Exempt ntfy from battery optimization on devices that aggressively stop background apps.</li>
+          <li>Allow ntfy background data and automatic startup when those controls exist.</li>
+          <li>Do not force-stop ntfy: Android prevents force-stopped apps from receiving messages.</li>
+        </ul>
+        <p>The battery exemption shown in motd primarily protects persistent IRC connections. In UnifiedPush mode, ntfy is the app that must remain reachable in the background.</p>
+
+        <h3>Troubleshoot push delivery</h3>
+        <ul>
+          <li><strong>UnifiedPush is disabled:</strong> connect to soju first and confirm that the bouncer advertises <code>soju.im/webpush</code>.</li>
+          <li><strong>No distributor is installed:</strong> open ntfy, confirm UnifiedPush is enabled in its settings, then restart motd or select UnifiedPush again.</li>
+          <li><strong>No notification arrives:</strong> confirm ntfy reports an active connection, then check Android's battery, background-data, and notification permissions.</li>
+          <li><strong>Endpoint verification fails, or messages appear only after opening motd:</strong> inspect the status card and use <strong>Retry</strong> for endpoint or verification failures. Affected networks remain socket-backed until verification succeeds.</li>
+          <li><strong>Delivery stopped after a force-stop:</strong> reopen ntfy. Android intentionally blocks delivery to force-stopped apps.</li>
+          <li><strong>Multiple distributors are installed:</strong> use <strong>Choose distributor</strong> or <strong>Change distributor</strong> in the status card. motd does not silently make an ambiguous choice; changing distributor cleans up the previous instances before requesting replacements.</li>
+          <li><strong>Self-hosted delivery fails:</strong> check the ntfy URL, TLS certificate, login, reverse proxy WebSocket/streaming support, and whether the phone can reach the server outside Wi-Fi.</li>
+        </ul>
+        <p>Read the <a href="https://github.com/trevarj/motd/blob/main/docs/ntfy-push.md">full motd ntfy guide</a> for delivery details.</p>
+
+        <h2 id="cloak">CLoak</h2>
+        <p>motd connects to <a href="https://github.com/parenworks/cloak">CLoak</a> as a standard IRC network. Compatibility and the limitations below are documented for <a href="https://github.com/parenworks/cloak/releases/tag/v0.4.0">CLoak v0.4.0</a>, including live messages and buffered playback after reconnecting.</p>
+
+        <h3>Configure CLoak first</h3>
+        <p>Set up a CLoak user, at least one upstream network, and an IRC listener reachable from your phone. Follow the <a href="https://github.com/parenworks/cloak#configuration">upstream CLoak configuration documentation</a> for listener, user, and network settings.</p>
+        <p><strong>Use TLS for any connection that leaves the bouncer host.</strong> The listener's certificate must be valid for the hostname you enter in motd.</p>
+
+        <h3>Add an IRC network</h3>
+        <p>Choose <strong>IRC network</strong>, not the guided bouncer option, and enter:</p>
+        <ul>
+          <li><strong>Host and port:</strong> CLoak's IRC listener address and port.</li>
+          <li><strong>TLS:</strong> on for a normal remote connection.</li>
+          <li><strong>Nick and username:</strong> the identity motd should present to CLoak. These fields do not select the CLoak account or upstream network.</li>
+          <li><strong>Server password:</strong> <code>username/network:password</code>, using your CLoak account, configured network name, and password.</li>
+          <li><strong>SASL:</strong> <strong>None</strong>. CLoak v0.4.0 uses IRC <code>PASS</code> for downstream authentication, not SASL.</li>
+        </ul>
+        <p>Create one motd entry per upstream CLoak network. Change the network segment of the server password for each entry; network names and their case must match CLoak's configuration exactly.</p>
+
+        <h3>History and capability limits</h3>
+        <p>CLoak v0.4.0 and motd negotiate <code>batch</code>, <code>message-tags</code>, and <code>server-time</code>. CLoak keeps the upstream IRC connection alive and automatically replays buffered messages when motd reconnects. No manual history request is needed.</p>
+        <p>CLoak v0.4.0 does not advertise downstream SASL, <code>draft/chathistory</code>, <code>draft/read-marker</code>, <code>soju.im/bouncer-networks</code>, or <code>soju.im/webpush</code>. Replay is supplied by CLoak rather than motd's infinite-scrollback protocol. Each network needs its own motd entry, and cross-device read-marker sync and bouncer Web Push are unavailable.</p>
+
+        <h3>Troubleshoot CLoak</h3>
+        <ul>
+          <li><strong>Password rejected or numeric 464:</strong> check the full <code>username/network:password</code> value. Put it in <strong>Server password</strong>, not the SASL password field.</li>
+          <li><strong>Only one network works:</strong> check the other network's exact name and case in CLoak's configuration, then create a separate motd entry.</li>
+          <li><strong>TLS fails:</strong> use the certificate's hostname, confirm the phone trusts its issuer, and check that the port is CLoak's IRC listener, not its web interface.</li>
+          <li><strong>Old messages are not replayed:</strong> enable and configure CLoak's buffering modules. Playback comes from CLoak rather than a <code>CHATHISTORY</code> request.</li>
+        </ul>
+        <p>See the <a href="https://github.com/trevarj/motd/blob/main/docs/cloak.md">full motd CLoak guide</a> for the documented connection and compatibility details.</p>
+
+        <h2 id="obfuscation">SOCKS5, Tor &amp; VLESS</h2>
+        <p>Obfuscation is configured per network, for either an IRC server or a soju bouncer. It can help where ordinary IRC/TLS is blocked or conspicuous, but <strong>it is not an anonymity guarantee</strong> and may have legal or policy implications where you live.</p>
+
+        <h3>Choose a transport</h3>
+        <ul>
+          <li><strong>Off:</strong> connect directly.</li>
+          <li><strong>SOCKS5:</strong> use an existing proxy and enter its host and port. DNS is resolved through the proxy.</li>
+          <li><strong>Tor (Orbot):</strong> install <a href="https://orbot.app/">Orbot</a> and start it before choosing this option. motd uses Orbot's local SOCKS5 proxy, normally with a <code>.onion</code> bouncer address. A hidden-service address avoids exposing the bouncer's public IP.</li>
+          <li><strong>VLESS + REALITY:</strong> motd runs an embedded sing-box client and automatically exposes a local SOCKS proxy. Supply an existing VLESS URI; no companion Android proxy app is needed.</li>
+        </ul>
+        <p><strong>The embedded VLESS transport requires an arm64-v8a Android device.</strong> See the <a href="installation.html#requirements">installation requirements</a>.</p>
+
+        <h3>Configure VLESS + REALITY</h3>
+        <ol>
+          <li>Add or edit the network. Its <strong>Host</strong>, <strong>Port</strong>, and <strong>TLS</strong> fields describe the IRC server or bouncer destination <strong>after the tunnel</strong>, not the public VLESS ingress. The VLESS URI contains the public ingress address.</li>
+          <li>Open <strong>Settings → Networks → your network → Connection / Obfuscation</strong>.</li>
+          <li>Choose <strong>VLESS + REALITY (sing-box)</strong>, paste your existing URI, and save.</li>
+          <li>Reconnect. On first use of a self-signed or loopback certificate, verify its fingerprint before accepting motd's certificate-trust prompt. motd pins that leaf certificate for later connections.</li>
+        </ol>
+        <p><strong>Docker loopback warning:</strong> when the proxy and bouncer run in separate containers on a shared Docker network, use the bouncer's Docker DNS name, such as host <code>soju</code>, port <code>6697</code>, with TLS enabled. Do not use <code>127.0.0.1</code>: it points back to the proxy container. Loopback is correct only when the proxy and bouncer share a network namespace.</p>
+        <p>If the bouncer is elsewhere, keep its normal hostname and port and adjust the Xray route restriction accordingly. For VLESS networks, motd also accepts a Soju file host at the exact user-configured VLESS ingress hostname, while refusing unrelated hosts before sending the network credential. HTTPS certificate validation is still required.</p>
+
+        <h3>Troubleshoot the tunnel</h3>
+        <ul>
+          <li><strong>Cannot reach the ingress:</strong> check that the VPS firewall allows the selected TCP port and that Xray validates its configuration.</li>
+          <li><strong>REALITY negotiation fails:</strong> confirm that the REALITY server name is reachable from the VPS and supports TLS 1.3.</li>
+          <li><strong>The bouncer certificate changed:</strong> review the new certificate prompt and verify the fingerprint before trusting the replacement.</li>
+          <li><strong>The embedded transport is unavailable:</strong> confirm the device is arm64-v8a; the embedded option requires that architecture.</li>
+        </ul>
+        <p>The <a href="https://github.com/trevarj/motd/blob/main/docs/obfuscation.md">full obfuscation guide</a> includes VPS/Xray setup and routing details. Use that guide to configure the server rather than putting the VLESS ingress into motd's destination Host and Port fields.</p>
+
+        <footer class="site-footer">
+          <a href="https://github.com/trevarj/motd">Source</a>
+          <a href="https://github.com/trevarj/motd/releases/latest">Releases</a>
+          <a href="https://web.libera.chat/#motd">Community</a>
+          <a href="#top">Back to top</a>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

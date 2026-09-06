@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#1b1b1f">
+    <meta name="description" content="Adjust motd's appearance, chat layouts, and uploads, and move network settings safely with configuration-only backups.">
+    <title>Configuration — motd</title>
+    <link rel="icon" href="assets/brand/motd-symbol.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#top">Skip to content</a>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="index.html" aria-label="motd home"><img src="assets/brand/motd-lockup-dark.svg" alt="motd" width="109" height="40"></a>
+        <nav class="header-links" aria-label="Project">
+          <a href="https://github.com/trevarj/motd/releases/latest">Latest release</a>
+          <a href="https://github.com/trevarj/motd">GitHub</a>
+        </nav>
+      </div>
+    </header>
+    <details class="mobile-nav">
+      <summary>Menu</summary>
+      <nav class="docs-nav" aria-label="Documentation">
+        <ul>
+          <li><a href="index.html">Overview</a></li>
+          <li><span class="nav-group">Get started</span>
+            <ul>
+              <li><a href="installation.html">Installation</a></li>
+              <li><a href="getting-started.html">Getting started</a></li>
+            </ul>
+          </li>
+          <li><a href="configuration.html" aria-current="page">Configuration</a></li>
+          <li><span class="nav-group">Guides</span>
+            <ul>
+              <li><a href="guides.html#push-notifications">Push notifications</a></li>
+              <li><a href="guides.html#cloak">CLoak</a></li>
+              <li><a href="guides.html#obfuscation">SOCKS5, Tor &amp; VLESS</a></li>
+            </ul>
+          </li>
+          <li><a href="https://web.libera.chat/#motd">Community</a></li>
+          <li><a href="https://github.com/trevarj/motd">Contributing</a></li>
+        </ul>
+      </nav>
+    </details>
+    <div class="docs-layout">
+      <aside class="sidebar">
+        <nav class="docs-nav" aria-label="Documentation">
+          <ul>
+            <li><a href="index.html">Overview</a></li>
+            <li><span class="nav-group">Get started</span>
+              <ul>
+                <li><a href="installation.html">Installation</a></li>
+                <li><a href="getting-started.html">Getting started</a></li>
+              </ul>
+            </li>
+            <li><a href="configuration.html" aria-current="page">Configuration</a></li>
+            <li><span class="nav-group">Guides</span>
+              <ul>
+                <li><a href="guides.html#push-notifications">Push notifications</a></li>
+                <li><a href="guides.html#cloak">CLoak</a></li>
+                <li><a href="guides.html#obfuscation">SOCKS5, Tor &amp; VLESS</a></li>
+              </ul>
+            </li>
+            <li><a href="https://web.libera.chat/#motd">Community</a></li>
+            <li><a href="https://github.com/trevarj/motd">Contributing</a></li>
+          </ul>
+        </nav>
+      </aside>
+      <nav class="page-outline" aria-label="On this page">
+        <p class="outline-title">On this page</p>
+        <ul>
+          <li><a href="#appearance">Appearance</a></li>
+          <li><a href="#chat-and-uploads">Chat and uploads</a></li>
+          <li><a href="#configuration-backups">Configuration backups</a></li>
+        </ul>
+      </nav>
+      <main class="doc-content" id="top" tabindex="-1">
+        <h1>Configuration</h1>
+        <p class="intro">Make conversations comfortable to read, choose how you share files, and move your network configuration between devices.</p>
+
+        <h2 id="appearance">Appearance</h2>
+        <p>Use Material You dynamic color or choose a curated editor and terminal palette. Families include Ayu, Catppuccin, Dracula, Everforest, Gruvbox, Kanagawa, Modus, Monokai, Nord, One Dark, Rosé Pine, Solarized, Tokyo Night, and Zenburn. See the <a href="https://github.com/trevarj/motd/blob/main/docs/theme-sources.md">full palette variants and attribution table</a>.</p>
+        <p>Every dark palette can use <strong>True black backgrounds</strong>. This keeps the palette's accents while making the canvas black and using subtly palette-tinted near-black surfaces. The choice is remembered when you switch to a light theme and takes effect again when you return to a dark theme.</p>
+        <p>Palette colors are adapted to Material 3 roles and adjusted where needed for readable contrast. The <a href="https://github.com/trevarj/motd/blob/main/README.md#features">feature overview</a> also covers dynamic color and theming.</p>
+
+        <h2 id="chat-and-uploads">Chat and uploads</h2>
+        <p>Choose a conversation layout and adjust chat behavior, previews, and replies. The chat view includes a unified chat list, grouped bubbles, day separators, event pills, inline images, and link previews. The composer supports nick autocomplete, replies, reactions, typing indicators, and slash commands; IRCv3 features depend on what your server supports.</p>
+        <p>The attachment chooser can share a photo, a file, your current draft as a link, or a new text paste. Review the destination and its privacy and expiry information before uploading. Public uploads must not contain sensitive information; even a secret link can be opened by anyone who has it. A Soju file host uses the connected chat's authenticated network file service, with retention set by that server.</p>
+        <p>See the <a href="https://github.com/trevarj/motd/blob/main/README.md#features">documented chat features</a>. Chat preferences and upload backend configuration are included in <a href="https://github.com/trevarj/motd/blob/main/docs/configuration-backup.md#included">configuration exports</a>, but uploaded files and upload history are not transferred by a configuration backup.</p>
+
+        <h2 id="configuration-backups">Configuration backups</h2>
+        <p><strong>Configuration backups do not include messages, drafts, or chat history.</strong> A <code>.motdconfig</code> file moves configuration between devices; it is not a backup of your conversations.</p>
+        <p>Exports include direct networks, bouncer roots and children, their relationships and ordering, connection and identity settings, TLS and proxy configuration, and user-facing preferences such as appearance, chat behavior, replies, upload backends, avatars, and delivery mode.</p>
+
+        <h3>Choose an export mode</h3>
+        <ul>
+          <li><strong>Without credentials:</strong> excludes passwords and private connection links. This configuration-only JSON export is not encrypted.</li>
+          <li><strong>Encrypted with credentials:</strong> includes saved passwords and private connection links in a password-encrypted file. The payload uses AES-256-GCM encryption with a key derived from the export password. You need that password to import it.</li>
+        </ul>
+        <p>Neither mode transfers Android KeyChain client certificates. Messages, buffers, read markers, drafts, cached previews, upload history and deletion tokens, generated push endpoints and keypairs, certificate pins, STS policy state, diagnostics, history cursors, and other runtime or cache state are excluded.</p>
+
+        <h3>Choose an import mode carefully</h3>
+        <ul>
+          <li><strong>Merge</strong> updates matching networks in place and keeps networks that exist only on the destination device.</li>
+          <li><strong>Replace</strong> updates matching networks, adds missing networks, and <strong>deletes local-only network trees together with their local history</strong>. The configuration file does not contain that history to restore later.</li>
+        </ul>
+        <p>The complete document is validated before local state changes. Unsupported versions, invalid configuration, wrong passwords, damaged files, or tampered encrypted data fail without applying the backup.</p>
+        <p>A credentials-excluded import keeps existing local credentials on matching networks. New networks that need an omitted SASL password, server password, or VLESS link remain disconnected until you provide it. A network that used a client certificate is also imported disconnected: select a certificate on the destination device before connecting.</p>
+        <p>Read the <a href="https://github.com/trevarj/motd/blob/main/docs/configuration-backup.md">full configuration backup format specification</a> for the exact included fields, encryption format, exclusions, and import rules.</p>
+
+        <footer class="site-footer">
+          <a href="https://github.com/trevarj/motd">Source</a>
+          <a href="https://github.com/trevarj/motd/releases/latest">Releases</a>
+          <a href="https://web.libera.chat/#motd">Community</a>
+          <a href="#top">Back to top</a>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

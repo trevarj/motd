@@ -12,26 +12,35 @@ case "$OUT" in
     ;;
 esac
 
+pages=(
+  index.html
+  installation.html
+  getting-started.html
+  configuration.html
+  guides.html
+)
 required=(
-  "$SITE_DIR/index.html"
+  "${pages[@]/#/$SITE_DIR/}"
   "$SITE_DIR/styles.css"
   "$ROOT/screenshots/chat-list.png"
   "$ROOT/screenshots/chat.png"
   "$ROOT/screenshots/file-uploader.png"
   "$ROOT/docs/assets/brand/motd-symbol.svg"
   "$ROOT/docs/assets/brand/motd-lockup-light.svg"
+  "$ROOT/docs/assets/brand/motd-lockup-dark.svg"
+  "$ROOT/docs/assets/brand/motd-wordmark.svg"
 )
 for file in "${required[@]}"; do
   [ -s "$file" ] || {
-    printf 'missing required landing-page asset: %s\n' "$file" >&2
+    printf 'missing required site asset: %s\n' "$file" >&2
     exit 1
   }
 done
 
 rm -rf -- "$OUT"
 mkdir -p "$OUT/assets/brand" "$OUT/screenshots"
-cp "$SITE_DIR/index.html" "$SITE_DIR/styles.css" "$OUT/"
+cp "${pages[@]/#/$SITE_DIR/}" "$SITE_DIR/styles.css" "$OUT/"
 cp "$ROOT/docs/assets/brand/"motd-{symbol,lockup-light,lockup-dark,wordmark}.svg "$OUT/assets/brand/"
 cp "$ROOT/screenshots/"{chat-list,chat,file-uploader}.png "$OUT/screenshots/"
 
-printf 'built landing page: %s\n' "$OUT"
+printf 'built documentation site: %s\n' "$OUT"

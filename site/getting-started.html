@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#1b1b1f">
+    <meta name="description" content="Connect motd to a direct IRC network or soju bouncer, and understand server-dependent history, read markers, and background delivery.">
+    <title>Getting started — motd</title>
+    <link rel="icon" href="assets/brand/motd-symbol.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#top">Skip to content</a>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="index.html" aria-label="motd home"><img src="assets/brand/motd-lockup-dark.svg" alt="motd" width="109" height="40"></a>
+        <nav class="header-links" aria-label="Project">
+          <a href="https://github.com/trevarj/motd/releases/latest">Latest release</a>
+          <a href="https://github.com/trevarj/motd">GitHub</a>
+        </nav>
+      </div>
+    </header>
+    <details class="mobile-nav">
+      <summary>Menu</summary>
+      <nav class="docs-nav" aria-label="Documentation">
+        <ul>
+          <li><a href="index.html">Overview</a></li>
+          <li><span class="nav-group">Get started</span>
+            <ul>
+              <li><a href="installation.html">Installation</a></li>
+              <li><a href="getting-started.html" aria-current="page">Getting started</a></li>
+            </ul>
+          </li>
+          <li><a href="configuration.html">Configuration</a></li>
+          <li><span class="nav-group">Guides</span>
+            <ul>
+              <li><a href="guides.html#push-notifications">Push notifications</a></li>
+              <li><a href="guides.html#cloak">CLoak</a></li>
+              <li><a href="guides.html#obfuscation">SOCKS5, Tor &amp; VLESS</a></li>
+            </ul>
+          </li>
+          <li><a href="https://web.libera.chat/#motd">Community</a></li>
+          <li><a href="https://github.com/trevarj/motd">Contributing</a></li>
+        </ul>
+      </nav>
+    </details>
+    <div class="docs-layout">
+      <aside class="sidebar">
+        <nav class="docs-nav" aria-label="Documentation">
+          <ul>
+            <li><a href="index.html">Overview</a></li>
+            <li><span class="nav-group">Get started</span>
+              <ul>
+                <li><a href="installation.html">Installation</a></li>
+                <li><a href="getting-started.html" aria-current="page">Getting started</a></li>
+              </ul>
+            </li>
+            <li><a href="configuration.html">Configuration</a></li>
+            <li><span class="nav-group">Guides</span>
+              <ul>
+                <li><a href="guides.html#push-notifications">Push notifications</a></li>
+                <li><a href="guides.html#cloak">CLoak</a></li>
+                <li><a href="guides.html#obfuscation">SOCKS5, Tor &amp; VLESS</a></li>
+              </ul>
+            </li>
+            <li><a href="https://web.libera.chat/#motd">Community</a></li>
+            <li><a href="https://github.com/trevarj/motd">Contributing</a></li>
+          </ul>
+        </nav>
+      </aside>
+      <nav class="page-outline" aria-label="On this page">
+        <p class="outline-title">On this page</p>
+        <ul>
+          <li><a href="#direct-irc">Direct IRC</a></li>
+          <li><a href="#soju">Soju</a></li>
+          <li><a href="#history-and-delivery">History and delivery</a></li>
+          <li><a href="#next-steps">Next steps</a></li>
+        </ul>
+      </nav>
+      <main class="doc-content" id="top" tabindex="-1">
+        <h1>Getting started</h1>
+        <p class="intro">Connect directly to an IRC network or use your soju bouncer to manage upstream networks through one connection.</p>
+
+        <h2 id="direct-irc">Direct IRC</h2>
+        <p>For a direct connection to Libera.Chat, add a network with these connection details:</p>
+        <ul>
+          <li>Host: <code>irc.libera.chat</code></li>
+          <li>Port: <code>6697</code></li>
+          <li>TLS: on</li>
+          <li>SASL: <code>PLAIN</code> with your NickServ credentials, or <code>NONE</code> without SASL authentication.</li>
+        </ul>
+        <p>For a different network, use the connection details supplied by that network. See the <a href="https://github.com/trevarj/motd/blob/main/README.md#connecting">README connection examples</a>.</p>
+
+        <h2 id="soju">Soju</h2>
+        <p>Point the network at your soju bouncer's host and authenticate with your bouncer account. Use the connection details provided by your bouncer administrator, rather than the direct Libera.Chat settings above.</p>
+        <p>motd negotiates capabilities with soju and discovers and manages its upstream networks over a single connection using <code>soju.im/bouncer-networks</code>. Available history, read-state synchronization, and push delivery depend on the capabilities your bouncer advertises.</p>
+        <p>See the <a href="https://github.com/trevarj/motd/blob/main/README.md#connecting">bouncer connection documentation</a>. If you use CLoak instead, follow the <a href="guides.html#cloak">CLoak guide</a>; its setup and capabilities differ.</p>
+
+        <h2 id="history-and-delivery">History and delivery</h2>
+        <p>On supporting servers, <code>draft/chathistory</code> lets motd page through message history and <code>draft/read-marker</code> synchronizes read state across devices. These features are negotiated with the server, not guaranteed on every connection. Plain networks still work with local-only history and a persistent IRC socket.</p>
+        <p>Background push delivery requires a soju bouncer advertising <code>soju.im/webpush</code> and a UnifiedPush distributor such as ntfy. Connect motd to soju at least once so it can detect Web Push support, then follow the <a href="guides.html#push-notifications">push notification setup</a>.</p>
+        <p>motd closes a network's IRC socket only after soju acknowledges its current push endpoint and encrypted test delivery succeeds. Until then, or if Web Push is unsupported or registration fails, that network stays connected through the foreground service. The delivery setting remains UnifiedPush and the status card reports socket fallback.</p>
+        <p>Soju sends push notifications for direct messages and channel highlights. Ordinary channel traffic is fetched through CHATHISTORY when motd returns to the foreground. Opening the app reconnects first, runs catch-up, and keeps the socket available while you use it. Push payloads are encrypted by soju and decrypted on your device; ntfy cannot read the IRC message.</p>
+        <p>Read the <a href="https://github.com/trevarj/motd/blob/main/README.md#features">documented capabilities</a> and <a href="https://github.com/trevarj/motd/blob/main/docs/ntfy-push.md">full ntfy delivery guide</a> for details and troubleshooting.</p>
+
+        <h2 id="next-steps">Next steps</h2>
+        <ul>
+          <li>Set up and verify <a href="guides.html#push-notifications">push notifications</a> for a compatible soju bouncer.</li>
+          <li>Follow the <a href="guides.html#cloak">CLoak guide</a> for a CLoak connection and its compatibility limits.</li>
+          <li>Configure <a href="guides.html#obfuscation">SOCKS5, Tor, or VLESS + REALITY</a> if your connection needs obfuscation.</li>
+          <li>Explore <a href="configuration.html">appearance and configuration backups</a>.</li>
+        </ul>
+        <p>For technical detail, see the repository guides for <a href="https://github.com/trevarj/motd/blob/main/docs/ntfy-push.md">ntfy</a>, <a href="https://github.com/trevarj/motd/blob/main/docs/cloak.md">CLoak</a>, and <a href="https://github.com/trevarj/motd/blob/main/docs/obfuscation.md">obfuscation</a>.</p>
+
+        <footer class="site-footer">
+          <a href="https://github.com/trevarj/motd">Source</a>
+          <a href="https://github.com/trevarj/motd/releases/latest">Releases</a>
+          <a href="https://web.libera.chat/#motd">Community</a>
+          <a href="#top">Back to top</a>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>
