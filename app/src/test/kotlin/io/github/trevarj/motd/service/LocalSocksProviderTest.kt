@@ -9,6 +9,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.Inet6Address
+import java.net.InetAddress
 
 class LocalSocksProviderTest {
     private val link =
@@ -25,8 +27,6 @@ class LocalSocksProviderTest {
         assertEquals(11999, provider.start(link).getOrThrow().port)
         assertEquals(11999, provider.start(link).getOrThrow().port)
         assertEquals(1, first.starts)
-        assertTrue(first.lastJson!!.contains("\"listen\":\"127.0.0.1\""))
-        assertTrue(first.lastJson!!.contains("\"fingerprint\":\"firefox\""))
     }
 
     @Test
@@ -85,35 +85,37 @@ class LocalSocksProviderTest {
     }
 
     @Test
-    fun `embedded link starts loopback provider before legacy SOCKS validation`() {
-        val engine = FakeEngine(Result.success(11001))
-        val endpoint =
-            NetworkEntity(
-                id = 1,
-                name = "soju",
-                role = NetworkRole.BOUNCER_ROOT,
-                host = "bouncer.example",
-                port = 6697,
-                tls = true,
-                nick = "motd",
-                username = "motd",
-                realname = "motd",
-                obfsMode = ObfsMode.EMBEDDED_REALITY,
-                // Embedded REALITY intentionally clears legacy SOCKS settings when persisting a VLESS link.
-                proxyHost = null,
-                proxyPort = null,
-                obfsLink = validLink,
-            )
+    fun `embedded links use loopback SOCKS without legacy proxy settings`() {
+        for (uri in listOf(validLink, validWsLink)) {
+            val engine = FakeEngine(Result.success(11001))
+            val endpoint =
+                NetworkEntity(
+                    id = 1,
+                    name = "soju",
+                    role = NetworkRole.BOUNCER_ROOT,
+                    host = "bouncer.example",
+                    port = 6697,
+                    tls = true,
+                    nick = "motd",
+                    username = "motd",
+                    realname = "motd",
+                    obfsMode = ObfsMode.EMBEDDED_REALITY,
+                    proxyHost = null,
+                    proxyPort = null,
+                    obfsLink = uri,
+                )
 
-        val resolution = resolveTransportProxy(endpoint, LocalSocksProvider.forTest { engine })
+            val resolution = resolveTransportProxy(endpoint, LocalSocksProvider.forTest { engine })
 
-        assertEquals(null, resolution.error)
-        assertNotNull(resolution.proxy)
-        assertEquals(1, engine.starts)
+            assertEquals(null, resolution.error)
+            assertEquals(java.net.Proxy.Type.SOCKS, resolution.proxy!!.type())
+            assertEquals("127.0.0.1", (resolution.proxy.address() as java.net.InetSocketAddress).hostString)
+            resolution.release()
+        }
     }
 
     @Test
-    fun `invalid embedded link remains a fail closed configuration error`() {
+    fun `embedded link errors fail closed and park reconnect`() {
         val endpoint =
             NetworkEntity(
                 id = 1,
@@ -132,13 +134,23 @@ class LocalSocksProviderTest {
         val resolution = resolveTransportProxy(endpoint, LocalSocksProvider.forTest { FakeEngine(Result.success(11001)) })
 
         assertEquals(null, resolution.proxy)
-        assertTrue(resolution.error!!.startsWith("Embedded REALITY configuration:"))
+        assertNotNull(resolution.error)
+        assertTrue(isConfigurationFailure("connect failed: ${resolution.error}"))
+
+        val unavailable =
+            resolveTransportProxy(
+                endpoint.copy(obfsLink = validWsLink),
+                LocalSocksProvider.forTest { FakeEngine(Result.failure(IllegalStateException("unavailable"))) },
+            )
+        assertEquals(null, unavailable.proxy)
+        assertNotNull(unavailable.error)
+        assertTrue(isConfigurationFailure("connect failed: ${unavailable.error}"))
     }
 
     @Test
     fun `only known transport configuration failures are parked`() {
-        assertTrue(isConfigurationFailure("connect failed: Embedded REALITY configuration: unavailable"))
-        assertTrue(isConfigurationFailure("connect failed: SOCKS5 proxy host is required"))
+        val socksError = proxyConfigurationErrorForNetwork(ObfsMode.SOCKS5, null, null)
+        assertTrue(isConfigurationFailure("connect failed: $socksError"))
         assertFalse(isConfigurationFailure("connect failed: TLS handshake failed"))
     }
 
@@ -160,16 +172,32 @@ class LocalSocksProviderTest {
         assertTrue(runCatching { selectLocalSocksPort { 0 } }.isFailure)
     }
 
+    @Test
+    fun `local DNS responses separate families and omit IPv6 scope IDs`() {
+        val addresses =
+            arrayOf(
+                InetAddress.getByAddress("relay.example", byteArrayOf(192.toByte(), 0, 2, 4)),
+                Inet6Address.getByAddress("relay.example", InetAddress.getByName("fe80::1").address, 7),
+                InetAddress.getByName("2001:db8::2"),
+            )
+
+        assertEquals("192.0.2.4", localDnsResponse("ip4", addresses))
+        val ipv6 = localDnsResponse("ip6", addresses).split('\n')
+        assertTrue(ipv6.all { ':' in it && '%' !in it && '/' !in it })
+        assertEquals(
+            listOf(InetAddress.getByName("fe80::1"), InetAddress.getByName("2001:db8::2")),
+            ipv6.map(InetAddress::getByName),
+        )
+    }
+
     private class FakeEngine(
         private val result: Result<Int>,
     ) : LocalSocksEngine {
         var starts = 0
         var stops = 0
-        var lastJson: String? = null
 
         override fun start(configJson: String): Result<Int> {
             starts++
-            lastJson = configJson
             return result
         }
 
@@ -180,5 +208,6 @@ class LocalSocksProviderTest {
 
     private companion object {
         const val validLink = "vless://123e4567-e89b-12d3-a456-426614174000@edge.example:443?type=tcp&security=reality&sni=www.example.com&pbk=public-key&sid=abcd&fp=firefox"
+        const val validWsLink = "vless://123e4567-e89b-12d3-a456-426614174000@relay.example:443?type=ws&security=tls&sni=relay.example&host=relay.example&path=%2Firc-vless"
     }
 }

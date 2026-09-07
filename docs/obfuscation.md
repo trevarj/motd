@@ -7,11 +7,12 @@ options:
 - **SOCKS5** — use an existing SOCKS5 proxy; DNS is resolved through the proxy.
 - **Tor (Orbot)** — use Orbot's local SOCKS5 proxy, normally with a `.onion`
   bouncer address.
-- **VLESS + REALITY** — the arm64 build runs an embedded sing-box client
-  and exposes a local SOCKS proxy automatically. You supply one VLESS URI; no
-  companion Android proxy app is needed.
+- **Embedded VLESS (sing-box)** — TCP + REALITY or WebSocket + TLS, without
+  VLESS flow. The arm64 build runs an embedded sing-box client and exposes a
+  local SOCKS proxy automatically. Supply one VLESS URI; no companion Android
+  proxy app is needed.
 
-VLESS + REALITY is useful where ordinary IRC/TLS is blocked or conspicuous. It
+Embedded VLESS is useful where ordinary IRC/TLS is blocked or conspicuous. It
 is not a guarantee of anonymity, and operating it may have legal or policy
 implications where you live.
 
@@ -106,27 +107,77 @@ vless://<UUID>@<VPS_HOST>:443?encryption=none&security=reality&sni=<HANDSHAKE_HO
 Treat this URI like a password: it grants access to your VPS proxy. Use a unique
 UUID per device and remove it from the server config when a device is lost.
 
+## VLESS + WebSocket + TLS through a CDN
+
+A WebSocket-capable HTTPS CDN such as Cloudflare needs a separate VLESS
+WebSocket origin, not the TCP + REALITY listener above. Direct REALITY cannot
+simply be orange-clouded: an ordinary CDN terminates TLS and forwards HTTP
+WebSockets, not the REALITY handshake.
+
+Example client link (replace the example UUID with a device-specific credential):
+
+```text
+vless://00000000-0000-4000-8000-000000000001@relay.trevs.site:443?encryption=none&type=ws&security=tls&sni=relay.trevs.site&host=relay.trevs.site&path=%2Firc-vless#motd-cdn
+```
+
+The URI address is the public ingress. `sni` must match its valid TLS certificate;
+the WebSocket `host` must select the configured HTTP virtual host, and `path`
+must match the origin's WebSocket route (`/irc-vless` here, URL-encoded in the
+URI). Omitted `path` defaults to `/`; `host` is optional when no override is
+needed. Do not set `flow`. Use verified TLS from Cloudflare to the origin too
+(Full (strict)), and retain exact destination host/port allowlists followed by
+a catch-all reject rule.
+
+The ingress address and TLS identity may differ. If the CDN's assigned addresses
+stall on the affected network, an operator can use a separate DNS-only connection
+name (for example, `relay-entry.trevs.site`) pointing to a tested Cloudflare edge.
+Use that name only as the URI ingress; keep `sni` and `host` as the proxied
+`relay.trevs.site`. DNS-only must point to the CDN edge, not the VPS. This is
+path-specific address selection, not guaranteed unblockability: keep the edge
+choice in DNS so it can be changed without editing every client, and retain TLS
+verification.
+
+Cloudflare terminates the outer TLS, so keep **verified inner IRC TLS** enabled
+to protect IRC credentials and messages from the CDN. This CDN transport does
+not make arbitrary SSH work; it serves the configured VLESS WebSocket endpoint
+and only the destinations its routing rules permit.
+
+The pinned sing-box 1.13.12 supports WebSocket; Xray 26.6.1 emits a WebSocket
+deprecation warning. Check client/server transport compatibility before future
+upgrades.
+
 ## Configure motd
 
 1. Add or edit the bouncer network. These **Host**, **Port**, and TLS fields
    name the bouncer destination *after* the VLESS tunnel, not the public VLESS
-   server. The VLESS URI below contains the public server address.
+   server. The VLESS URI below contains the public server address. For example,
+   keep the ordinary inner IRC hostname and port `6697`, with TLS enabled;
+   leave the native IRC **WebSocket URL** blank. The VLESS WebSocket is an outer
+   tunnel, not the IRC server's own WebSocket transport.
 
    With separate Docker containers on a shared network, use the bouncer's Docker
    DNS name (for example, host `soju`, port `6697`, TLS enabled). Do **not** use
    `127.0.0.1`: in that layout it points back to the proxy container. Loopback is
    correct only when the proxy and bouncer share a network namespace.
 2. Open **Settings → Networks → _your network_ → Connection / Obfuscation**.
-3. Choose **VLESS + REALITY (sing-box)**, paste the URI, and save.
+3. Choose **Embedded VLESS (sing-box)**, paste either supported URI, and save.
 4. Reconnect. On first use of a self-signed or loopback certificate, verify the
    fingerprint and accept motd's certificate-trust prompt. motd pins that leaf
    certificate for later connections.
 
 If your bouncer is elsewhere, keep its normal hostname and port instead, and
-adjust the Xray route restriction accordingly. For VLESS + REALITY networks,
-motd also accepts a Soju file host at the exact user-configured VLESS ingress
-hostname, while still refusing unrelated hosts before sending the network
-credential. HTTPS certificate validation remains required.
+adjust the Xray route restriction accordingly. Invalid embedded configuration
+or a failed proxy does not fall back to a direct IRC connection.
+
+Upload credential scope is unchanged for both VLESS transports. `DIRECT` and
+child endpoints accept `FILEHOST` only at the IRC hostname or its subdomains,
+or at the exact URI ingress hostname; unrelated hosts are rejected before
+sending credentials. An ingress of `relay.trevs.site` alone does **not**
+authorize `irc.trevs.site` as a `FILEHOST` (it must independently match the IRC
+host namespace). The existing embedded Soju root exception still accepts its
+advertised HTTPS file host, since that Soju already holds the same credential.
+HTTPS certificate validation remains required, and server routing must
+separately allow the exact file-host destination and port.
 
 ## SOCKS5 and Tor
 
@@ -136,7 +187,7 @@ Tor hidden-service address for soju avoids exposing the bouncer's public IP.
 
 ## Media previews
 
-On VLESS/REALITY, SOCKS5, and Tor networks, link metadata uses the network's
+On embedded VLESS, SOCKS5, and Tor networks, link metadata uses the network's
 proxy by default. The restrictive Xray example above blocks arbitrary web
 destinations: a working IRC connection does not imply a linked media host is
 reachable. Allow the intended host and port, including redirect destinations,
@@ -157,6 +208,9 @@ retried after the proxy or its destination rules are repaired.
 - Confirm the VPS firewall allows the selected TCP port and that Xray validates
   its configuration.
 - Ensure the REALITY server name is reachable from the VPS and supports TLS 1.3.
+- Embedded VLESS resolves ingress hostnames through Android's active network
+  resolver, including its configured DNS policy. Keep the CDN hostname in the
+  URI; a fixed edge IP is only a diagnostic and may stop working as routing changes.
 - A changed bouncer certificate requires reviewing the new certificate prompt.
 - The embedded option currently requires an arm64-v8a Android device. Use
   SOCKS5 or Tor on other device ABIs.

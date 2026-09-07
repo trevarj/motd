@@ -21,8 +21,8 @@ exact `nix develop` commands for one activity.
 ## Feature and setup docs
 
 - [`cloak.md`](cloak.md) — CLoak bouncer connection guide.
-- [`obfuscation.md`](obfuscation.md) — SOCKS5, Tor, and VLESS + REALITY
-  transport behavior and validation.
+- [`obfuscation.md`](obfuscation.md) — SOCKS5, Tor, and embedded VLESS
+  (TCP + REALITY or WebSocket + TLS) transport behavior and validation.
 - [`ntfy-push.md`](ntfy-push.md) — ntfy and UnifiedPush setup for Google-free
   push.
 - [`theme-sources.md`](theme-sources.md) — editor, terminal, and wallpaper

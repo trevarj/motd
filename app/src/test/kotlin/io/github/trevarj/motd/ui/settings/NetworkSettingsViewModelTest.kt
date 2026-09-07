@@ -240,33 +240,34 @@ class NetworkSettingsViewModelTest {
     }
 
     @Test
-    fun vlessLinkValidationError_explainsInvalidLinkAndAcceptsSupportedRealityTcpLink() {
-        assertEquals(
-            "Only TCP VLESS links are supported",
-            vlessLinkValidationError(
-                "vless://0702fbe2-7d6e-4e71-85e5-3689b8dffa9f@ingress.example:8443?" +
-                    "security=reality&sni=www.cloudflare.com&pbk=key&sid=abcd",
-            ),
-        )
-        assertNull(
-            vlessLinkValidationError(
-                "vless://0702fbe2-7d6e-4e71-85e5-3689b8dffa9f@ingress.example:8443?" +
-                    "type=tcp&security=reality&sni=www.cloudflare.com&pbk=key&sid=abcd",
-            ),
-        )
-    }
-
-    @Test
-    fun embeddedRealityState_surfacesLinkErrorAndDisablesSave() {
-        val invalid =
+    fun embeddedVlessState_enablesSaveOnlyForSupportedTransports() {
+        val form =
             NetworkSettingsUiState(
+                entity = root(),
                 obfsMode = io.github.trevarj.motd.data.db.ObfsMode.EMBEDDED_REALITY,
-                obfsLink = "not a VLESS URI",
                 server = ServerForm(host = "soju", port = "6697", nick = "motd"),
                 auth = AuthForm(mode = AuthMode.PLAIN, saslUser = "motd", saslPassword = "password"),
             )
+        val reality =
+            form.copy(
+                obfsLink =
+                    "vless://0702fbe2-7d6e-4e71-85e5-3689b8dffa9f@ingress.example:8443?" +
+                        "type=tcp&security=reality&sni=www.cloudflare.com&pbk=key&sid=abcd",
+            )
+        val websocket =
+            form.copy(
+                obfsLink =
+                    "vless://0702fbe2-7d6e-4e71-85e5-3689b8dffa9f@relay.example:443?" +
+                        "type=ws&security=tls&sni=relay.example&host=relay.example&path=%2Firc-vless",
+            )
+
+        assertTrue(reality.canSave)
+        assertTrue(websocket.canSave)
+
+        val invalid = websocket.copy(obfsLink = websocket.obfsLink.replace("security=tls", "security=reality"))
         assertNotNull(invalid.vlessLinkError)
         assertFalse(invalid.canSave)
+        assertFalse(form.copy(obfsLink = "not a VLESS URI").canSave)
     }
 
     @Test

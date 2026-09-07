@@ -3603,7 +3603,7 @@ internal fun resolveTransportProxy(
             VlessLink.parse(endpoint.obfsLink.orEmpty()).getOrElse { error ->
                 return TransportProxyResolution(
                     proxy = null,
-                    error = "Embedded REALITY configuration: ${error.message ?: "invalid VLESS link"}",
+                    error = "Embedded VLESS configuration: ${error.message ?: "invalid VLESS link"}",
                 )
             }
         // Keep each physical IRC actor on its own libbox service. Sharing one SOCKS inbound across
@@ -3613,7 +3613,7 @@ internal fun resolveTransportProxy(
             localSocksProvider.acquire(link, ownerKey = ownerKey ?: endpoint.id.toString()).getOrElse { error ->
                 return TransportProxyResolution(
                     proxy = null,
-                    error = "Embedded REALITY configuration: ${error.message ?: "provider unavailable"}",
+                    error = "Embedded VLESS configuration: ${error.message ?: "provider unavailable"}",
                 )
             }
         // start() validates its returned port. Retain this guard so a future provider change
@@ -3622,7 +3622,7 @@ internal fun resolveTransportProxy(
             proxyForNetwork(ObfsMode.SOCKS5, lease.endpoint.host, lease.endpoint.port)
                 ?: return TransportProxyResolution(
                     proxy = null,
-                    error = "Embedded REALITY configuration: invalid local SOCKS endpoint",
+                    error = "Embedded VLESS configuration: invalid local SOCKS endpoint",
                     release = lease.release,
                 )
         return TransportProxyResolution(proxy = proxy, error = null, release = lease.release)
@@ -3669,7 +3669,7 @@ internal fun networkFingerprint(
 internal fun isConfigurationFailure(reason: String): Boolean =
     reason.startsWith("connect failed: SOCKS5 proxy ") ||
         reason.startsWith("connect failed: WebSocket transport cannot ") ||
-        reason.startsWith("connect failed: Embedded REALITY configuration")
+        reason.startsWith("connect failed: Embedded VLESS configuration")
 
 /**
  * Network ids parked on the given `host:port` cert endpoint (#48). When a TOFU cert is

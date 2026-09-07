@@ -81,7 +81,7 @@ with your bouncer account; motd negotiates capabilities and manages your
 upstream networks from a single connection. For CLoak, follow the
 [CLoak guide](docs/cloak.md).
 
-For SOCKS5, Tor, or VLESS + REALITY, see the
+For SOCKS5, Tor, or embedded VLESS (TCP + REALITY or WebSocket + TLS), see the
 [obfuscation guide](docs/obfuscation.md).
 
 ## Development

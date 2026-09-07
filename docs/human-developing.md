@@ -29,7 +29,7 @@ The debug APK lands under `app/build/outputs/apk/debug/`. Install it with
 `adb install`. The debug build carries the `.debug` application-id suffix, so
 it can coexist with a release install.
 
-The embedded VLESS + REALITY transport uses bundled libbox, which is
+The embedded VLESS transport (TCP + REALITY or WebSocket + TLS) uses bundled libbox, which is
 arm64-v8a-only. APKs built from this source tree must not be installed on
 32-bit ARM or x86 devices. Other ABI support needs a separately pinned and
 verified libbox artifact.

@@ -12,7 +12,9 @@ import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.obfs.VlessLink
 import io.nekohasekai.libbox.CommandServer
 import io.nekohasekai.libbox.CommandServerHandler
+import io.nekohasekai.libbox.ExchangeContext
 import io.nekohasekai.libbox.Libbox
+import io.nekohasekai.libbox.LocalDNSTransport
 import io.nekohasekai.libbox.OverrideOptions
 import io.nekohasekai.libbox.PlatformInterface
 import io.nekohasekai.libbox.SetupOptions
@@ -21,7 +23,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.net.Inet4Address
 import java.net.Inet6Address
+import java.net.InetAddress
 import java.net.InterfaceAddress
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -227,6 +231,19 @@ internal fun selectLocalSocksPort(findAvailablePort: (Int) -> Int): Int =
         require(port in 1..65535) { "libbox did not allocate a local SOCKS port" }
     }
 
+internal fun localDnsResponse(
+    network: String,
+    addresses: Array<InetAddress>,
+): String {
+    val matching =
+        when (network) {
+            "ip4" -> addresses.filterIsInstance<Inet4Address>()
+            "ip6" -> addresses.filterIsInstance<Inet6Address>()
+            else -> throw UnsupportedOperationException("Unsupported DNS address family: $network")
+        }
+    return matching.joinToString("\n") { it.hostAddress!!.substringBefore('%') }
+}
+
 /** SOCKS-only configuration uses no VPN, system proxy, interface monitor, or notifications. */
 private object NoOpCommandServerHandler : CommandServerHandler {
     override fun getSystemProxyStatus(): SystemProxyStatus =
@@ -297,6 +314,26 @@ private class AndroidPlatform(
     private var interfaceMonitor: io.nekohasekai.libbox.InterfaceUpdateListener? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
+    // ponytail: Ingress needs only A/AAAA; raw DNS exchange is deliberately unsupported.
+    private val dnsTransport =
+        object : LocalDNSTransport {
+            override fun raw() = false
+
+            override fun lookup(
+                ctx: ExchangeContext,
+                network: String,
+                domain: String,
+            ) {
+                val addresses = connectivity.activeNetwork?.getAllByName(domain) ?: InetAddress.getAllByName(domain)
+                ctx.success(localDnsResponse(network, addresses))
+            }
+
+            override fun exchange(
+                ctx: ExchangeContext,
+                message: ByteArray,
+            ): Unit = throw UnsupportedOperationException("Raw DNS exchange is not supported")
+        }
+
     override fun autoDetectInterfaceControl(fd: Int) = Unit
 
     override fun clearDNSCache() = Unit
@@ -341,7 +378,7 @@ private class AndroidPlatform(
 
     override fun includeAllNetworks() = false
 
-    override fun localDNSTransport(): io.nekohasekai.libbox.LocalDNSTransport? = null
+    override fun localDNSTransport(): LocalDNSTransport = dnsTransport
 
     override fun openTun(options: io.nekohasekai.libbox.TunOptions?): Int = throw UnsupportedOperationException("libbox TUN is not enabled by motd")
 
@@ -487,7 +524,7 @@ internal fun VlessLink.toSingBoxConfigJson(): String =
             put(
                 "route",
                 buildJsonObject {
-                    put("final", "motd-reality")
+                    put("final", "motd-vless")
                 },
             )
         },

@@ -59,6 +59,6 @@ connection ownership, or module boundaries.
   recovery.
 - [`../test/e2e/README.md`](../test/e2e/README.md) — local stack, physical
   device, hermetic emulator, phases, selectors, and diagnostics.
-- [`../docs/obfuscation.md`](../docs/obfuscation.md) — SOCKS5, Tor, and VLESS +
-  REALITY behavior and validation.
+- [`../docs/obfuscation.md`](../docs/obfuscation.md) — SOCKS5, Tor, and embedded
+  VLESS (TCP + REALITY or WebSocket + TLS) behavior and validation.
 - [`../docs/ntfy-push.md`](../docs/ntfy-push.md) — delivery backends.
