@@ -1,5 +1,3 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.android.library)
 }
@@ -13,29 +11,10 @@ fun aiSourcePin(name: String): String =
         ?.takeIf(String::isNotBlank)
         ?: error("third_party/ai/source.lock must pin $name")
 
-fun validatedAiNdkPath(path: String): String {
-    val expected = aiSourcePin("ANDROID_NDK_VERSION")
-    val sourceProperties = rootProject.file(path).resolve("source.properties")
-    check(sourceProperties.isFile) {
-        "ANDROID_NDK_HOME must contain source.properties: $sourceProperties"
-    }
-    val properties = Properties()
-    sourceProperties.inputStream().use(properties::load)
-    val actual = properties.getProperty("Pkg.Revision")
-    check(actual == expected) {
-        "ANDROID_NDK_HOME NDK revision must be $expected, found ${actual ?: "missing"}"
-    }
-    return path
-}
-
 android {
     namespace = "io.github.trevarj.motd.ai.whisper"
     compileSdk = 37
-    providers.environmentVariable("ANDROID_NDK_HOME").orNull?.let {
-        ndkPath = validatedAiNdkPath(it)
-    } ?: run {
-        ndkVersion = aiSourcePin("ANDROID_NDK_VERSION")
-    }
+    ndkVersion = aiSourcePin("ANDROID_NDK_VERSION")
 
     defaultConfig {
         minSdk = 26
