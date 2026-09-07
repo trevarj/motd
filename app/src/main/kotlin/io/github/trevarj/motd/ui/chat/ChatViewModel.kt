@@ -1117,18 +1117,18 @@ class ChatViewModel
         // Reply previews are requested only by composed rows. The bounded cache shares an in-flight
         // Room lookup across recompositions and its WhileSubscribed policy cancels unused collection.
         private val replyPreviewCache =
-            object : LinkedHashMap<String, StateFlow<ReplyPreviewData?>>() {
-                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, StateFlow<ReplyPreviewData?>>): Boolean = size > MAX_REPLY_PREVIEW_CACHE
+            object : LinkedHashMap<ReplyTarget, StateFlow<ReplyPreviewData?>>() {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<ReplyTarget, StateFlow<ReplyPreviewData?>>): Boolean = size > MAX_REPLY_PREVIEW_CACHE
             }
         private val dccTransferCache =
             object : LinkedHashMap<Long, StateFlow<DccTransferEntity?>>() {
                 override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, StateFlow<DccTransferEntity?>>): Boolean = size > MAX_REPLY_PREVIEW_CACHE
             }
 
-        fun replyPreview(msgid: String): StateFlow<ReplyPreviewData?> =
+        fun replyPreview(target: ReplyTarget): StateFlow<ReplyPreviewData?> =
             synchronized(replyPreviewCache) {
-                replyPreviewCache.getOrPut(msgid) {
-                    createReplyPreviewFlow(msgid, initialValue = null)
+                replyPreviewCache.getOrPut(target) {
+                    createReplyPreviewFlow(target, initialValue = null)
                 }
             }
 
@@ -1166,11 +1166,11 @@ class ChatViewModel
         }
 
         private fun createReplyPreviewFlow(
-            msgid: String,
+            target: ReplyTarget,
             initialValue: ReplyPreviewData?,
         ): StateFlow<ReplyPreviewData?> =
             messageRepository
-                .observeByMsgid(bufferId, msgid)
+                .observeReplyTarget(bufferId, target.eventId, target.msgid)
                 .map { it?.toReplyPreviewData() }
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), initialValue)
 
@@ -1314,13 +1314,14 @@ class ChatViewModel
             replySenderNotInChannel.value = false
             // The selected parent is already in memory. Seed its lookup so the optimistic outgoing row
             // renders the real quote on its first frame instead of flashing the unresolved placeholder.
-            message?.msgid?.let { msgid ->
+            message?.let { parent ->
+                val target = ReplyTarget(msgid = parent.msgid, eventId = parent.id)
                 synchronized(replyPreviewCache) {
-                    if (replyPreviewCache[msgid]?.value == null) {
-                        replyPreviewCache[msgid] =
+                    if (replyPreviewCache[target]?.value == null) {
+                        replyPreviewCache[target] =
                             createReplyPreviewFlow(
-                                msgid = msgid,
-                                initialValue = message.toReplyPreviewData(),
+                                target = target,
+                                initialValue = parent.toReplyPreviewData(),
                             )
                     }
                 }
@@ -2926,15 +2927,15 @@ class ChatViewModel
          * after their target has resolved from Room, so this normally remains a local index lookup; the
          * shared jump pipeline still supplies bounded paging, index-shift recovery, and highlighting.
          */
-        fun jumpToRepliedMessage(msgid: String) {
+        fun jumpToRepliedMessage(target: ReplyTarget) {
             timelineInteracted = true
             val settlesEntryPosition = _entryState.value is EntryPositionState.Pending
             val request =
                 JumpRequest(
                     token = ++nextJumpToken,
-                    msgid = msgid,
+                    msgid = target.msgid,
                     time = 0,
-                    eventId = null,
+                    eventId = target.eventId,
                     settlesEntryPosition = settlesEntryPosition,
                 )
             jumpResolveJob?.cancel()
@@ -2947,8 +2948,8 @@ class ChatViewModel
                 }
         }
 
-        fun retryReplyJump(request: ReplyJumpRequest) {
-            jumpToRepliedMessage(request.msgid)
+        fun retryReplyJump(target: ReplyTarget) {
+            jumpToRepliedMessage(target)
         }
 
         private fun failActiveJump(request: JumpRequest) {
@@ -2960,10 +2961,10 @@ class ChatViewModel
             val reportedDurably =
                 request.settlesEntryPosition &&
                     transitionEntry(EntryPositionState.Unresolved(messageUnavailable = true))
-            if (!reportedDurably) {
-                request.msgid?.let { msgid ->
-                    uiEventQueue.enqueue(ChatUiEvent.ReplyJumpUnavailable(ReplyJumpRequest(msgid)))
-                }
+            if (!reportedDurably && (request.msgid != null || request.eventId != null)) {
+                uiEventQueue.enqueue(
+                    ChatUiEvent.ReplyJumpUnavailable(ReplyTarget(msgid = request.msgid, eventId = request.eventId)),
+                )
             }
         }
 

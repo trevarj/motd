@@ -1415,8 +1415,10 @@ internal suspend fun <T> requestAndAwaitTarget(
     }
 }
 
-data class ReplyJumpRequest(
-    val msgid: String,
+/** A reply can identify its parent locally before a server message ID exists. */
+data class ReplyTarget(
+    val msgid: String? = null,
+    val eventId: Long? = null,
 )
 
 private val CLIENT_REDACTABLE_MESSAGE_KINDS: Set<MessageKind> =
@@ -1458,7 +1460,7 @@ sealed interface ChatUiEvent {
     data object InviteSendFailed : ChatUiEvent
 
     data class ReplyJumpUnavailable(
-        val request: ReplyJumpRequest,
+        val request: ReplyTarget,
     ) : ChatUiEvent
 
     data object ConversationLayoutWriteFailed : ChatUiEvent
@@ -1513,7 +1515,7 @@ internal fun ChatUiEvent.hasRetryAction(): Boolean = this is ChatUiEvent.ReplyJu
 internal fun handleChatUiEventResult(
     event: QueuedChatUiEvent,
     actionPerformed: Boolean,
-    retryReplyJump: (ReplyJumpRequest) -> Unit,
+    retryReplyJump: (ReplyTarget) -> Unit,
     acknowledge: (Long) -> Unit,
 ) {
     if (actionPerformed) {

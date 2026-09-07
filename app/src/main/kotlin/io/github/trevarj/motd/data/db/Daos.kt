@@ -1550,11 +1550,20 @@ interface MessageDao {
         hi: Long,
     ): List<MessageEntity>
 
-    /** Observe a reply target so a late echo promotion or history insert updates its preview. */
-    @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND msgid = :msgid LIMIT 1")
-    fun observeByMsgid(
+    /** Prefer the canonical local reply target, falling back to a server msgid in the same room. */
+    @Query(
+        """SELECT * FROM messages WHERE id = COALESCE(
+               (SELECT id FROM messages WHERE bufferId = :bufferId AND id = COALESCE(
+                   (SELECT canonicalEventId FROM event_redirects WHERE losingEventId = :eventId),
+                   :eventId
+               )),
+               (SELECT id FROM messages WHERE bufferId = :bufferId AND msgid = :msgid LIMIT 1)
+           ) LIMIT 1""",
+    )
+    fun observeReplyTarget(
         bufferId: Long,
-        msgid: String,
+        eventId: Long?,
+        msgid: String?,
     ): Flow<MessageEntity?>
 
     /**

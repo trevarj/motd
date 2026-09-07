@@ -767,17 +767,18 @@ class ChatViewModelTest {
         }
 
     @Test
-    fun `selecting reply primes its timeline preview before repository collection`() =
+    fun `selecting reply primes its preview before the parent has a server msgid`() =
         runTest {
             val manager = FakeConnectionManager(network.id)
             val vm = viewModel(channel, manager)
             vm.state.first { it.buffer != null }
-            val parent = message(channel.id, "original text", msgid = "parent-1", sender = "alice")
-            assertTrue(vm.replyPreview("parent-1").value == null)
+            val parent = message(channel.id, "original text", msgid = null, sender = "alice", id = 41)
+            val target = ReplyTarget(eventId = parent.id)
+            assertTrue(vm.replyPreview(target).value == null)
 
             vm.setReply(parent)
 
-            assertEquals(ReplyPreviewData("alice", "original text"), vm.replyPreview("parent-1").value)
+            assertEquals(ReplyPreviewData("alice", "original text"), vm.replyPreview(target).value)
         }
 
     @Test
@@ -1687,7 +1688,7 @@ class ChatViewModelTest {
             vm.onInitialPositionHandled()
             val exact = "MiXeD/opaque=Reply"
 
-            vm.jumpToRepliedMessage(exact)
+            vm.jumpToRepliedMessage(ReplyTarget(msgid = exact))
             advanceUntilIdle()
 
             val queued = vm.uiEvents.value.single()
@@ -1706,6 +1707,31 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun `local reply jump retries its event without a server msgid`() =
+        runTest {
+            val messages = FakeMessageRepository()
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
+            vm.state.first { it.buffer != null }
+            vm.onInitialPositionHandled()
+            val target = ReplyTarget(eventId = 90)
+
+            vm.jumpToRepliedMessage(target)
+            advanceUntilIdle()
+            val queued = vm.uiEvents.value.single()
+            val failure = queued.value as ChatUiEvent.ReplyJumpUnavailable
+            assertEquals(target, failure.request)
+            vm.acknowledgeUiEvent(queued.id)
+
+            messages.resolvedById = message(channel.id, "parent", msgid = null, sender = "alice", id = 90)
+            vm.retryReplyJump(failure.request)
+            advanceUntilIdle()
+
+            assertEquals(90L, vm.jumpTarget.value?.expectedEventId)
+            assertNull(vm.jumpTarget.value?.expectedMsgid)
+            assertTrue(messages.requestedMsgids.isEmpty())
+        }
+
+    @Test
     fun `newer reply jump supersedes older target and ignores stale acknowledgment`() =
         runTest {
             val messages = FakeMessageRepository()
@@ -1714,12 +1740,12 @@ class ChatViewModelTest {
             vm.onInitialPositionHandled()
             messages.resolvedByMsgid = message(channel.id, "first", "first", "alice", id = 90)
 
-            vm.jumpToRepliedMessage("first")
+            vm.jumpToRepliedMessage(ReplyTarget(msgid = "first"))
             advanceUntilIdle()
             val first = vm.jumpTarget.value!!
 
             messages.resolvedByMsgid = message(channel.id, "second", "second", "alice", id = 91)
-            vm.jumpToRepliedMessage("second")
+            vm.jumpToRepliedMessage(ReplyTarget(msgid = "second"))
             advanceUntilIdle()
             val second = vm.jumpTarget.value!!
 
@@ -1739,12 +1765,12 @@ class ChatViewModelTest {
             vm.state.first { it.buffer != null }
             vm.onInitialPositionHandled()
 
-            vm.jumpToRepliedMessage("slow")
+            vm.jumpToRepliedMessage(ReplyTarget(msgid = "slow"))
             advanceUntilIdle()
             assertTrue(messages.blockedResolutionStarted.isCompleted)
 
             messages.resolvedByMsgid = message(channel.id, "newer", "fast", "alice", id = 92)
-            vm.jumpToRepliedMessage("fast")
+            vm.jumpToRepliedMessage(ReplyTarget(msgid = "fast"))
             advanceUntilIdle()
 
             assertEquals("fast", vm.jumpTarget.value?.expectedMsgid)
@@ -2503,7 +2529,7 @@ class ChatViewModelTest {
 
             // The tap lands while entry is Pending, so the jump would settle entry; entry then settles
             // on its own before the resolve completes NotFound.
-            vm.jumpToRepliedMessage("missing")
+            vm.jumpToRepliedMessage(ReplyTarget(msgid = "missing"))
             vm.onInitialPositionHandled()
             advanceUntilIdle()
 
@@ -4222,10 +4248,17 @@ class ChatViewModelTest {
             return resolvedByMsgid?.takeIf { it.bufferId == bufferId && it.msgid == msgid }
         }
 
-        override fun observeByMsgid(
+        override fun observeReplyTarget(
             bufferId: Long,
-            msgid: String,
-        ): Flow<MessageEntity?> = flowOf(null)
+            eventId: Long?,
+            msgid: String?,
+        ): Flow<MessageEntity?> =
+            flowOf(
+                (resolvedById ?: events.firstOrNull { it.id == eventId })
+                    ?.takeIf { it.id == eventId && it.bufferId == bufferId }
+                    ?: (resolvedByMsgid ?: events.firstOrNull { msgid != null && it.msgid == msgid })
+                        ?.takeIf { msgid != null && it.msgid == msgid && it.bufferId == bufferId },
+            )
 
         override suspend fun awaitMsgid(
             id: Long,

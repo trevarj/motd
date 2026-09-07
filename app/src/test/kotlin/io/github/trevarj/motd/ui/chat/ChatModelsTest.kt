@@ -871,8 +871,8 @@ class ChatModelsTest {
 
     @Test fun `typed snackbar handles retry before acknowledging and preserves exact reply request`() {
         val order = mutableListOf<String>()
-        val request = ReplyJumpRequest("MiXeD/opaque=Reply")
-        var retried: ReplyJumpRequest? = null
+        val request = ReplyTarget("MiXeD/opaque=Reply")
+        var retried: ReplyTarget? = null
         handleChatUiEventResult(
             event = QueuedChatUiEvent(8, ChatUiEvent.ReplyJumpUnavailable(request)),
             actionPerformed = true,

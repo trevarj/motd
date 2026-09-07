@@ -235,10 +235,11 @@ interface MessageRepository {
         msgid: String,
     ): MessageEntity?
 
-    /** Reactive reply-target lookup; emits again when echo/history supplies the referenced msgid. */
-    fun observeByMsgid(
+    /** Observe the canonical local parent, with room-scoped msgid fallback for missing history. */
+    fun observeReplyTarget(
         bufferId: Long,
-        msgid: String,
+        eventId: Long?,
+        msgid: String?,
     ): Flow<MessageEntity?>
 
     /**

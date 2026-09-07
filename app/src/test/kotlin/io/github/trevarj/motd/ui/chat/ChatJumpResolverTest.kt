@@ -54,10 +54,17 @@ private class FakeMessageRepository(
         msgid: String,
     ): MessageEntity? = store.firstOrNull { it.bufferId == bufferId && it.msgid == msgid }
 
-    override fun observeByMsgid(
+    override fun observeReplyTarget(
         bufferId: Long,
-        msgid: String,
-    ): Flow<MessageEntity?> = flowOf(store.firstOrNull { it.bufferId == bufferId && it.msgid == msgid })
+        eventId: Long?,
+        msgid: String?,
+    ): Flow<MessageEntity?> {
+        val roomId = canonicalRooms[bufferId] ?: bufferId
+        return flowOf(
+            store.firstOrNull { it.bufferId == roomId && it.id == eventId }
+                ?: store.firstOrNull { it.bufferId == roomId && msgid != null && it.msgid == msgid },
+        )
+    }
 
     override suspend fun awaitMsgid(
         id: Long,

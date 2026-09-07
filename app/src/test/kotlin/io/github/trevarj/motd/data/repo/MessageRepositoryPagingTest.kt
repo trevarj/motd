@@ -5,6 +5,7 @@ import androidx.paging.LoadType
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.paging.RemoteMediator
+import io.github.trevarj.motd.data.db.EventRedirectEntity
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -22,11 +23,15 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -61,6 +66,113 @@ class MessageRepositoryPagingTest {
             ChatHistoryMediatorFactory { _, _, _ -> error("paging is driven by the source directly here") },
             db.historyGapDao(),
         )
+
+    @Test
+    fun observeReplyTarget_keepsLocalParentThroughPromotionAndRedaction() =
+        runTest {
+            val dao = db.messageDao()
+            val parentId =
+                dao
+                    .insertAll(
+                        listOf(message(bufferId, "local parent", serverTime = 100, dedupKey = "pending", isSelf = true)),
+                    ).single()
+            val updates = Channel<MessageEntity?>(Channel.UNLIMITED)
+            backgroundScope.launch {
+                repository().observeReplyTarget(bufferId, parentId, null).collect { updates.send(it) }
+            }
+            val parent = checkNotNull(updates.receive())
+            assertEquals(parentId, parent.id)
+            assertEquals("local parent", parent.text)
+            assertNull(parent.msgid)
+
+            dao.update(parent.copy(msgid = "echo-id"))
+            val promoted = checkNotNull(updates.receive())
+            assertEquals(parentId, promoted.id)
+            assertEquals("echo-id", promoted.msgid)
+
+            dao.update(promoted.copy(kind = MessageKind.REDACTED, text = ""))
+            val redacted = checkNotNull(updates.receive())
+            assertEquals(parentId, redacted.id)
+            assertEquals(MessageKind.REDACTED, redacted.kind)
+            assertEquals("", redacted.text)
+
+            dao.deleteById(parentId)
+            assertNull(updates.receive())
+        }
+
+    @Test
+    fun observeReplyTarget_prefersLocalParentAndScopesMissingReferenceFallback() =
+        runTest {
+            val dao = db.messageDao()
+            val repository = repository()
+            val missingId = 100L
+            val updates = Channel<MessageEntity?>(Channel.UNLIMITED)
+            backgroundScope.launch {
+                repository.observeReplyTarget(bufferId, missingId, "late-parent").collect { updates.send(it) }
+            }
+            assertNull(updates.receive())
+            val fallbackId =
+                dao
+                    .insertAll(
+                        listOf(message(bufferId, "history parent", serverTime = 100, dedupKey = "late", msgid = "late-parent")),
+                    ).single()
+            assertEquals(fallbackId, updates.receive()?.id)
+            assertEquals(fallbackId, repository.observeReplyTarget(bufferId, null, "late-parent").first()?.id)
+
+            dao.insertAll(
+                listOf(message(bufferId, "local parent", serverTime = 200, dedupKey = "local").copy(id = missingId)),
+            )
+            assertEquals(missingId, updates.receive()?.id)
+
+            val otherRoom = db.bufferDao().insert(buffer(db.bufferDao().observeById(bufferId)!!.networkId, "#other"))
+            val foreignId =
+                dao
+                    .insertAll(
+                        listOf(message(otherRoom, "foreign parent", serverTime = 300, dedupKey = "foreign", msgid = "foreign-id")),
+                    ).single()
+            assertEquals(fallbackId, repository.observeReplyTarget(bufferId, foreignId, "late-parent").first()?.id)
+            assertNull(repository.observeReplyTarget(bufferId, foreignId, "foreign-id").first())
+            assertNull(repository.observeReplyTarget(bufferId, foreignId, null).first())
+            assertNull(repository.observeReplyTarget(bufferId, null, null).first())
+        }
+
+    @Test
+    fun observeReplyTarget_followsEventAndRoomRedirects() =
+        runTest {
+            val dao = db.messageDao()
+            val repository = repository()
+            val ids =
+                dao.insertAll(
+                    listOf(
+                        message(bufferId, "optimistic parent", serverTime = 100, dedupKey = "pending"),
+                        message(bufferId, "canonical parent", serverTime = 200, dedupKey = "canonical", msgid = "parent-id"),
+                    ),
+                )
+            val winnerRoom = db.bufferDao().insert(buffer(db.bufferDao().observeById(bufferId)!!.networkId, "#winner"))
+            val winnerId =
+                dao
+                    .insertAll(
+                        listOf(message(winnerRoom, "merged parent", serverTime = 300, dedupKey = "merged", msgid = "parent-id")),
+                    ).single()
+            val updates = Channel<MessageEntity?>(Channel.UNLIMITED)
+            backgroundScope.launch {
+                repository.observeReplyTarget(bufferId, ids[0], "parent-id").collect { updates.send(it) }
+            }
+            assertEquals(ids[0], updates.receive()?.id)
+
+            // Only the redirects table changes: the old row must not mask its canonical parent.
+            db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(ids[0], ids[1]))
+            assertEquals(ids[1], updates.receive()?.id)
+            assertEquals(ids[1], repository.observeReplyTarget(bufferId, ids[0], null).first()?.id)
+
+            // Only the room changes: the old canonical event is now outside the requested room.
+            db.roomAliasDao().markRedirect(bufferId, winnerRoom)
+            assertEquals(winnerId, updates.receive()?.id)
+            assertNull(repository.observeReplyTarget(bufferId, ids[0], null).first())
+
+            db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(ids[0], winnerId))
+            assertEquals(winnerId, repository.observeReplyTarget(bufferId, ids[0], null).first()?.id)
+        }
 
     @Test
     fun pagingConfigIsPlaceholderAwareAndBounded() {

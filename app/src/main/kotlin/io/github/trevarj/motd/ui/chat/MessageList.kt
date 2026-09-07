@@ -348,8 +348,8 @@ fun MessageList(
     // in the draw phase like [flightProgress] so a frame moves one layer and composes nothing.
     listShift: () -> Float = { 0f },
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
-    replyPreview: (String) -> StateFlow<ReplyPreviewData?> = { MutableStateFlow(null) },
-    onReplyPreviewClick: (String) -> Unit = {},
+    replyPreview: (ReplyTarget) -> StateFlow<ReplyPreviewData?> = { MutableStateFlow(null) },
+    onReplyPreviewClick: (ReplyTarget) -> Unit = {},
     onDelete: (MessageEntity) -> Unit = {},
     highlightMsgid: String? = null,
     dccTransfer: (MessageEntity) -> StateFlow<DccTransferEntity?> = { MutableStateFlow(null) },
@@ -1403,8 +1403,8 @@ private fun MessageRow(
     onVoiceTranscriptionCancel: (String) -> Unit,
     onOpenLink: (String) -> Unit,
     onSenderClick: (String) -> Unit,
-    replyPreview: (String) -> StateFlow<ReplyPreviewData?>,
-    onReplyPreviewClick: (String) -> Unit,
+    replyPreview: (ReplyTarget) -> StateFlow<ReplyPreviewData?>,
+    onReplyPreviewClick: (ReplyTarget) -> Unit,
     // Non-null for an expanded fool row: renders a "hide" chip above the bubble that re-collapses it.
     onCollapseFool: (() -> Unit)? = null,
 ) {
@@ -1453,21 +1453,28 @@ private fun MessageRow(
         )
     }
 
+    val replyTarget =
+        remember(msg.replyToEventId, msg.replyToMsgid) {
+            if (msg.replyToEventId != null || msg.replyToMsgid != null) {
+                ReplyTarget(msgid = msg.replyToMsgid, eventId = msg.replyToEventId)
+            } else {
+                null
+            }
+        }
     // A row asks Room for its reply target only while it is composed. This avoids timeline-wide
     // loaded-window scans during fast traversal; collection is lifecycle-cancelled off-screen.
     val resolvedReply: ReplyPreviewData? =
-        if (msg.replyToMsgid != null) {
-            val replyFlow = remember(msg.replyToMsgid) { replyPreview(msg.replyToMsgid) }
+        if (replyTarget != null) {
+            val replyFlow = remember(replyTarget, replyPreview) { replyPreview(replyTarget) }
             val resolved by replyFlow.collectAsStateWithLifecycle()
             resolved
         } else {
             null
         }
     // A reply relationship remains visible even if its parent is not in local history yet. The
-    // reactive lookup above replaces this marker as soon as echo confirmation or history inserts
-    // the referenced msgid.
+    // reactive lookup replaces this marker when the referenced local or server identity resolves.
     val reply =
-        resolvedReply ?: msg.replyToMsgid?.let {
+        resolvedReply ?: replyTarget?.let {
             ReplyPreviewData(
                 sender = stringResource(R.string.chat_action_reply),
                 text = stringResource(R.string.chat_reply_target_unavailable),
@@ -1654,8 +1661,8 @@ private fun MessageRow(
                         pending = msg.pendingLabel != null,
                         reply = reply,
                         onReplyClick =
-                            if (resolvedReply != null) {
-                                msg.replyToMsgid?.let { parentMsgid -> { onReplyPreviewClick(parentMsgid) } }
+                            if (resolvedReply != null && replyTarget != null) {
+                                { onReplyPreviewClick(replyTarget) }
                             } else {
                                 null
                             },

@@ -3,6 +3,8 @@ package io.github.trevarj.motd
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
@@ -24,11 +26,13 @@ import io.github.trevarj.motd.data.sync.COMMAND_RESPONSE_PAYLOAD_PREFIX
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
 import io.github.trevarj.motd.ui.chat.MessageList
+import io.github.trevarj.motd.ui.chat.ReplyTarget
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -36,6 +40,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import kotlin.math.abs
@@ -104,6 +109,60 @@ class MessageTimelineUiTest {
         scrollTo(messageTag(3))
         compose
             .onNode(hasText("bob") and hasAnyAncestor(hasTestTag(messageTag(3))), useUnmergedTree = true)
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun eventOnlyReplyKeepsItsQuoteAndResolvesALateParent() {
+        val target = ReplyTarget(eventId = 41)
+        val parent = MutableStateFlow<ReplyPreviewData?>(null)
+        val previews = mapOf(target to parent)
+        var opened: ReplyTarget? = null
+        val reply =
+            message(2, 200, MessageKind.PRIVMSG, "child body", self = true).copy(
+                replyToEventId = target.eventId,
+                replyToMsgid = null,
+            )
+        val unrelated = message(3, 300, MessageKind.PRIVMSG, "unrelated body")
+        render(
+            flowOf(PagingData.from(listOf(unrelated, reply))),
+            replyPreview = previews::getValue,
+            onReplyPreviewClick = { opened = it },
+        )
+
+        scrollTo(messageTag(2))
+        compose
+            .onNodeWithTag("chat_reply_preview", useUnmergedTree = true)
+            .assertIsDisplayed()
+            .assertHasNoClickAction()
+        val unavailable = RuntimeEnvironment.getApplication().getString(R.string.chat_reply_target_unavailable)
+        compose
+            .onNode(hasText(unavailable) and hasAnyAncestor(hasTestTag("chat_reply_preview")), useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose.onNodeWithText("child body", useUnmergedTree = true).assertIsDisplayed()
+
+        compose.runOnIdle {
+            parent.value = ReplyPreviewData(sender = "parent nick", text = "original parent body")
+        }
+
+        compose
+            .onNode(hasText("parent nick") and hasAnyAncestor(hasTestTag("chat_reply_preview")), useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose
+            .onNode(hasText("original parent body") and hasAnyAncestor(hasTestTag("chat_reply_preview")), useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose.onNodeWithText(unavailable, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("child body", useUnmergedTree = true).assertIsDisplayed()
+        compose
+            .onNodeWithTag("chat_reply_preview", useUnmergedTree = true)
+            .assertHasClickAction()
+            .performClick()
+        compose.runOnIdle { assertEquals(ReplyTarget(eventId = 41), opened) }
+
+        scrollTo(messageTag(3))
+        compose.onNodeWithText("unrelated body", useUnmergedTree = true).assertIsDisplayed()
+        compose
+            .onNode(hasTestTag("chat_reply_preview") and hasAnyAncestor(hasTestTag(messageTag(3))), useUnmergedTree = true)
             .assertDoesNotExist()
     }
 
@@ -223,6 +282,8 @@ class MessageTimelineUiTest {
         marker: TimelineAnchor? = null,
         onAcceptInvite: (Long) -> Unit = {},
         onDismissInvite: (Long) -> Unit = {},
+        replyPreview: (ReplyTarget) -> StateFlow<ReplyPreviewData?> = { MutableStateFlow(ReplyPreviewData("parent nick", "parent text")) },
+        onReplyPreviewClick: (ReplyTarget) -> Unit = {},
     ) {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
@@ -242,7 +303,8 @@ class MessageTimelineUiTest {
                     showLinkPreviews = false,
                     onOpenLink = {},
                     onAcceptInvite = onAcceptInvite,
-                    replyPreview = { MutableStateFlow(ReplyPreviewData("parent nick", "parent text")) },
+                    replyPreview = replyPreview,
+                    onReplyPreviewClick = onReplyPreviewClick,
                     onDismissInvite = onDismissInvite,
                 )
             }

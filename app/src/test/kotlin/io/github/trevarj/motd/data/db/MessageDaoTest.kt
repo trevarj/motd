@@ -112,14 +112,14 @@ class MessageDaoTest {
         }
 
     @Test
-    fun observeByMsgid_emitsWhenReplyTargetArrivesAfterSubscription() =
+    fun observeReplyTarget_emitsWhenReplyTargetArrivesAfterSubscription() =
         runTest {
             val dao = db.messageDao()
-            assertNull(dao.observeByMsgid(bufferId, "late-parent").first())
+            assertNull(dao.observeReplyTarget(bufferId, null, "late-parent").first())
 
             val target =
                 async {
-                    dao.observeByMsgid(bufferId, "late-parent").first { it != null }
+                    dao.observeReplyTarget(bufferId, null, "late-parent").first { it != null }
                 }
             dao.insertAll(
                 listOf(

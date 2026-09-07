@@ -848,10 +848,10 @@ fun ChatContent(
     onVoiceErrorDismissed: () -> Unit = {},
     onVoiceNoticeDismissed: () -> Unit = {},
     reactionChips: (String) -> List<io.github.trevarj.motd.ui.components.ReactionChip> = { emptyList() },
-    replyPreview: (String) -> StateFlow<io.github.trevarj.motd.ui.components.ReplyPreviewData?> = {
+    replyPreview: (ReplyTarget) -> StateFlow<io.github.trevarj.motd.ui.components.ReplyPreviewData?> = {
         kotlinx.coroutines.flow.MutableStateFlow(null)
     },
-    onReplyPreviewClick: (String) -> Unit = {},
+    onReplyPreviewClick: (ReplyTarget) -> Unit = {},
     dccTransfer: (MessageEntity) -> StateFlow<DccTransferEntity?> = {
         kotlinx.coroutines.flow.MutableStateFlow(null)
     },
@@ -944,7 +944,7 @@ fun ChatContent(
     onInviteUser: () -> Unit = {},
     uiEvent: QueuedChatUiEvent? = null,
     onUiEventAcknowledged: (Long) -> Unit = {},
-    onRetryReplyJump: (ReplyJumpRequest) -> Unit = {},
+    onRetryReplyJump: (ReplyTarget) -> Unit = {},
     historySyncStatus: HistorySyncStatus = HistorySyncStatus.Idle,
     // Re-runs the reconciliation pass behind the failed-sync pill; Paging's own retry runs with it.
     onHistorySyncRetry: () -> Unit = {},

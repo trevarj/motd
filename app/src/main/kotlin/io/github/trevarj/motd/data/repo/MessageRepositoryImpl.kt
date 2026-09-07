@@ -99,10 +99,14 @@ class MessageRepositoryImpl
             msgid: String,
         ): MessageEntity? = messageDao.byMsgid(resolveRoomId(bufferId), msgid)
 
-        override fun observeByMsgid(
+        override fun observeReplyTarget(
             bufferId: Long,
-            msgid: String,
-        ): Flow<MessageEntity?> = canonicalRoomIdFlow(bufferId).flatMapLatest { messageDao.observeByMsgid(it, msgid) }
+            eventId: Long?,
+            msgid: String?,
+        ): Flow<MessageEntity?> =
+            canonicalRoomIdFlow(bufferId)
+                .flatMapLatest { messageDao.observeReplyTarget(it, eventId, msgid) }
+                .distinctUntilChanged()
 
         // Wait for the echo to promote a pending own row's msgid in place. observeMsgid emits the
         // current value immediately (null while pending) and again when the row updates, so first
