@@ -188,10 +188,11 @@ Tor hidden-service address for soju avoids exposing the bouncer's public IP.
 ## Media previews
 
 Chat images, link thumbnails, video posters and playback, fullscreen images,
-and image **Save** use the owning IRC network's route, including embedded
-VLESS, SOCKS5, or Tor. Missing networks and broken routes fail closed; they
-never fall back to a direct connection. Media GET/HEAD requests are anonymous
-and do not send SASL credentials.
+image **Save**, avatars, network icons, link metadata, and extensionless-audio
+HEAD discovery use the owning IRC network's route, including embedded VLESS,
+SOCKS5, or Tor. Missing networks and broken routes fail closed; they never fall
+back to a direct connection. Media GET/HEAD requests are anonymous and do not
+send SASL credentials.
 
 The restrictive Xray example above blocks arbitrary web destinations: a
 working IRC connection does not imply a media host is reachable. Allow the
@@ -202,12 +203,11 @@ Ergo filehost GET/HEAD viewing is public:
 it needs no direct bypass and grants no permission to POST uploads or send
 credentials to an unrelated host. Upload credential scope remains unchanged.
 
-**Settings → Chat → Load previews over direct connection** still opts URL-only
-avatars and network icons into direct loading on proxied networks. It also
-allows link metadata and extensionless-audio HEAD discovery to use a direct
-connection instead of the network route. These direct requests expose the
-device's IP address to those hosts. The setting does not change routed chat
-media, image Save, IRC, or uploads.
+The **Load previews over direct connection** setting has been retired.
+Existing preferences and imported backups cannot re-enable a direct bypass.
+Global avatar views use a shared avatar only when its source network is
+unambiguous; otherwise they retain the generated avatar rather than choosing
+an arbitrary route. Imported local avatar files remain local.
 
 Image/link-preview visibility and automatic-loading settings for metered and
 unmetered connections still apply. When automatic loading is disabled, the

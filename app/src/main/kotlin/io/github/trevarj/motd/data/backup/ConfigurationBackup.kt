@@ -544,7 +544,6 @@ class ConfigurationBackupRepositoryImpl
                 contentPreviewPrefs.setShowLinkPreviews(it.showLinkPreviews)
                 contentPreviewPrefs.setAutoLoadOnUnmetered(it.autoLoadOnUnmetered)
                 contentPreviewPrefs.setAutoLoadOnMetered(it.autoLoadOnMetered)
-                contentPreviewPrefs.setDirectMediaOnProxiedNetworks(it.directMediaOnProxiedNetworks)
             }
             settings.replies?.let { replyPrefs.setVisibleChannelPrefix(it.visibleChannelPrefix) }
             settings.attachments?.let { imported ->

@@ -52,7 +52,7 @@ class InlineMediaPreviewTest {
     val compose = createComposeRule()
 
     @Test
-    fun cacheMissWaitsForTapThenUsesSelectedRouteWithoutDirectPermissionAndOpens() {
+    fun cacheMissWaitsForTapThenUsesSelectedRouteAndOpens() {
         RoutedInlineMediaFixture().use { fixture ->
             fixture.server.enqueue(imageResponse())
             val url = "http://media.invalid/${UUID.randomUUID()}.png"
@@ -63,7 +63,6 @@ class InlineMediaPreviewTest {
                 MotdTheme(dynamicColor = false) {
                     CompositionLocalProvider(
                         LocalAutomaticRemoteMedia provides false,
-                        LocalDirectRemoteMediaAllowed provides { false },
                         LocalNetworkMediaHttp provides fixture.http,
                         LocalInlineMediaConsent provides
                             RemoteMediaConsent(consent) {
@@ -115,7 +114,6 @@ class InlineMediaPreviewTest {
                 MotdTheme(dynamicColor = false) {
                     CompositionLocalProvider(
                         LocalAutomaticRemoteMedia provides false,
-                        LocalDirectRemoteMediaAllowed provides { false },
                         LocalNetworkMediaHttp provides fixture.http,
                         LocalInlineMediaConsent provides RemoteMediaConsent(consent) { consent = true },
                     ) {
@@ -152,7 +150,6 @@ class InlineMediaPreviewTest {
                 MotdTheme(dynamicColor = false) {
                     CompositionLocalProvider(
                         LocalAutomaticRemoteMedia provides true,
-                        LocalDirectRemoteMediaAllowed provides { false },
                         LocalNetworkMediaHttp provides fixture.http,
                     ) {
                         InlineMediaPreview(

@@ -32,7 +32,7 @@ private data class NetworkMediaIdentity(
     val networkId: Long?,
 )
 
-/** Keep Coil's HTTP fetcher and caches; only tagged chat media selects an IRC network route. */
+/** Keep Coil's HTTP fetcher and caches while selecting the owning IRC network route. */
 fun ImageRequest.Builder.networkMediaData(
     url: String,
     networkId: Long?,
@@ -63,7 +63,6 @@ class NetworkMediaHttp
                 .readTimeout(15, TimeUnit.SECONDS)
                 .build()
 
-        // Untagged URL-only avatars/icons retain ordinary OkHttp behavior and their existing UI policy.
         val client: OkHttpClient =
             OkHttpClient
                 .Builder()
@@ -88,10 +87,9 @@ class NetworkMediaHttp
 
         private fun intercept(chain: Interceptor.Chain): Response {
             val original = chain.request()
-            val identity = original.tag(NetworkMediaIdentity::class.java) ?: return chain.proceed(original)
             // Let OkHttp itself return its cache-only miss, without even acquiring a tunnel lease.
             if (original.cacheControl.onlyIfCached) return chain.proceed(original)
-            val networkId = identity.networkId ?: throw IOException("Media has no owning network")
+            val networkId = original.tag(NetworkMediaIdentity::class.java)?.networkId ?: throw IOException("Media has no owning network")
             if (original.method != "GET" && original.method != "HEAD") throw IOException("Media requests must be GET or HEAD")
             val outer = chain.call()
             val exchange = RoutedExchange { exchanges.remove(outer) }

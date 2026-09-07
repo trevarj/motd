@@ -15,6 +15,7 @@ import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefsImpl
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
+import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
@@ -257,9 +258,12 @@ class ConfigurationBackupRepositoryTest {
             val prefs = ContentPreviewPrefsImpl(context)
             val backup = repository(inMemoryDb())
 
+            prefs.setShowImages(false)
+            prefs.setShowLinkPreviews(false)
             prefs.setAutoLoadOnUnmetered(false)
             prefs.setAutoLoadOnMetered(false)
             val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+            assertFalse(raw.contains("directMediaOnProxiedNetworks"))
 
             prefs.setAutoLoadOnUnmetered(true)
             prefs.setAutoLoadOnMetered(true)
@@ -267,8 +271,31 @@ class ConfigurationBackupRepositoryTest {
             assertFalse(prefs.config.first().autoLoadOnUnmetered)
             assertFalse(prefs.config.first().autoLoadOnMetered)
 
+            val legacyRaw =
+                raw.replace(
+                    "\"autoLoadOnMetered\": false",
+                    "\"autoLoadOnMetered\": false, \"directMediaOnProxiedNetworks\": true",
+                )
+            assertTrue(legacyRaw.contains("\"directMediaOnProxiedNetworks\": true"))
+            prefs.setShowImages(true)
+            prefs.setShowLinkPreviews(true)
+            prefs.setAutoLoadOnUnmetered(true)
+            prefs.setAutoLoadOnMetered(true)
+            backup.import(legacyRaw, importMode = BackupImportMode.MERGE)
+            assertEquals(
+                ContentPreviewConfig(
+                    showImages = false,
+                    showLinkPreviews = false,
+                    autoLoadOnUnmetered = false,
+                    autoLoadOnMetered = false,
+                ),
+                prefs.config.first(),
+            )
+            val reexported = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 2_000L)
+            assertFalse(reexported.contains("directMediaOnProxiedNetworks"))
+
             val oldRaw =
-                raw
+                legacyRaw
                     .replace(Regex("""\s*\"autoLoadOnUnmetered\": false,"""), "")
                     .replace(Regex("""\s*\"autoLoadOnMetered\": false,"""), "")
             prefs.setAutoLoadOnUnmetered(false)

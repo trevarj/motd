@@ -100,8 +100,6 @@ class ChatSettingsViewModel
 
         fun setAutoLoadOnMetered(value: Boolean) = launch { contentPreviewPrefs.setAutoLoadOnMetered(value) }
 
-        fun setDirectMediaOnProxiedNetworks(value: Boolean) = launch { contentPreviewPrefs.setDirectMediaOnProxiedNetworks(value) }
-
         fun setShowSharedAvatars(value: Boolean) = launch { avatarController.setShowSharedAvatars(value) }
 
         fun setVoiceEncryptionDefault(value: Boolean) = launch { voicePrefs.setEncryptionDefault(value) }

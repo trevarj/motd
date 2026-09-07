@@ -53,32 +53,19 @@ class ContentPreviewPrefsTest {
                 ),
                 prefs.config.first(),
             )
-
-            prefs.setDirectMediaOnProxiedNetworks(true)
-            assertEquals(
-                ContentPreviewConfig(
-                    showImages = true,
-                    showLinkPreviews = false,
-                    autoLoadOnUnmetered = false,
-                    autoLoadOnMetered = false,
-                    directMediaOnProxiedNetworks = true,
-                ),
-                prefs.config.first(),
-            )
         }
 
     @Test
     fun old_serialized_config_defaults_automatic_loading_on() {
         val restored =
             Json.decodeFromString<ContentPreviewConfig>(
-                """{"showImages":false,"showLinkPreviews":false,"directMediaOnProxiedNetworks":true}""",
+                """{"showImages":false,"showLinkPreviews":false}""",
             )
 
         assertEquals(
             ContentPreviewConfig(
                 showImages = false,
                 showLinkPreviews = false,
-                directMediaOnProxiedNetworks = true,
             ),
             restored,
         )

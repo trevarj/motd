@@ -82,7 +82,6 @@ enum class SettingsTarget {
     LINK_PREVIEWS,
     MEDIA_UNMETERED,
     MEDIA_METERED,
-    PROXIED_MEDIA,
     SHARED_AVATARS,
     AUTO_AWAY,
     AUTO_AWAY_DELAY,

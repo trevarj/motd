@@ -18,13 +18,6 @@ data class ContentPreviewConfig(
     val showLinkPreviews: Boolean = true,
     val autoLoadOnUnmetered: Boolean = true,
     val autoLoadOnMetered: Boolean = true,
-    /**
-     * Opt-in to direct URL-only avatars/icons, link metadata, and extensionless-audio HEAD
-     * discovery on proxied networks. Defaults off: direct requests expose the device IP
-     * outside the tunnel. Tagged chat images, video, thumbnails, fullscreen images, and
-     * image Save always use their owning network's route, regardless of this setting.
-     */
-    val directMediaOnProxiedNetworks: Boolean = false,
 )
 
 interface ContentPreviewPrefs {
@@ -37,8 +30,6 @@ interface ContentPreviewPrefs {
     suspend fun setAutoLoadOnUnmetered(enabled: Boolean)
 
     suspend fun setAutoLoadOnMetered(enabled: Boolean)
-
-    suspend fun setDirectMediaOnProxiedNetworks(enabled: Boolean)
 }
 
 private val Context.contentPreviewDataStore by preferencesDataStore("content_previews")
@@ -46,7 +37,6 @@ private val SHOW_IMAGES = booleanPreferencesKey("show_images")
 private val SHOW_LINK_PREVIEWS = booleanPreferencesKey("show_link_previews")
 private val AUTO_LOAD_ON_UNMETERED = booleanPreferencesKey("auto_load_on_unmetered")
 private val AUTO_LOAD_ON_METERED = booleanPreferencesKey("auto_load_on_metered")
-private val DIRECT_MEDIA_ON_PROXIED_NETWORKS = booleanPreferencesKey("direct_media_on_proxied_networks")
 
 @Singleton
 class ContentPreviewPrefsImpl
@@ -63,7 +53,6 @@ class ContentPreviewPrefsImpl
                     showLinkPreviews = prefs[SHOW_LINK_PREVIEWS] ?: true,
                     autoLoadOnUnmetered = prefs[AUTO_LOAD_ON_UNMETERED] ?: true,
                     autoLoadOnMetered = prefs[AUTO_LOAD_ON_METERED] ?: true,
-                    directMediaOnProxiedNetworks = prefs[DIRECT_MEDIA_ON_PROXIED_NETWORKS] ?: false,
                 )
             }
 
@@ -81,9 +70,5 @@ class ContentPreviewPrefsImpl
 
         override suspend fun setAutoLoadOnMetered(enabled: Boolean) {
             store.edit { it[AUTO_LOAD_ON_METERED] = enabled }
-        }
-
-        override suspend fun setDirectMediaOnProxiedNetworks(enabled: Boolean) {
-            store.edit { it[DIRECT_MEDIA_ON_PROXIED_NETWORKS] = enabled }
         }
     }

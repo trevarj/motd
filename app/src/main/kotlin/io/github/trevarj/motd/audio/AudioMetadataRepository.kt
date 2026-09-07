@@ -84,7 +84,7 @@ class AudioMetadataRepositoryImpl
         ): AudioMetadata? =
             withContext(ioDispatcher) {
                 if (!isExtensionlessHttpsAudioCandidate(url)) return@withContext null
-                val route = networkId?.let { routeProvider.routeForPreview(it) } ?: return@withContext null
+                val route = networkId?.let { routeProvider.routeForNetwork(it) } ?: return@withContext null
                 route.useAndClose { mediaRoute ->
                     if (mediaRoute.proxyError != null) return@useAndClose null
                     val connection =

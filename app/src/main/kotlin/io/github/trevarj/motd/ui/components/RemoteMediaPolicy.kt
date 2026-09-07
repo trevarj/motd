@@ -88,9 +88,6 @@ class RemoteMediaNetworkMonitor
 /** Fails closed in previews/tests unless app root supplies current automatic decision. */
 val LocalAutomaticRemoteMedia = staticCompositionLocalOf { false }
 
-/** Permission for URL-only avatars and network icons that cannot select a route. */
-val LocalDirectRemoteMediaAllowed = staticCompositionLocalOf<(Long?) -> Boolean> { { false } }
-
 /** Routed media never falls back to the platform HTTP stack when this is absent. */
 val LocalNetworkMediaHttp = staticCompositionLocalOf<NetworkMediaHttp?> { null }
 
@@ -102,17 +99,12 @@ internal data class RemoteMediaConsent(
 internal val LocalInlineMediaConsent = staticCompositionLocalOf { RemoteMediaConsent() }
 internal val LocalLinkMediaConsent = staticCompositionLocalOf { RemoteMediaConsent() }
 
-internal fun ImageRequest.Builder.remoteMediaData(
-    data: Any?,
-    networkAllowed: Boolean,
-): ImageRequest.Builder =
-    data(data).networkCachePolicy(
-        if (networkAllowed) CachePolicy.ENABLED else CachePolicy.DISABLED,
-    )
-
 internal fun ImageRequest.Builder.routedRemoteMediaData(
     url: String,
     networkId: Long?,
     networkAllowed: Boolean,
     retry: Int = 0,
-): ImageRequest.Builder = remoteMediaData(url, networkAllowed).networkMediaData(url, networkId, retry)
+): ImageRequest.Builder =
+    networkMediaData(url, networkId, retry).networkCachePolicy(
+        if (networkAllowed) CachePolicy.ENABLED else CachePolicy.DISABLED,
+    )

@@ -53,33 +53,33 @@ data class RemoteAvatarState(
     }
     private val unambiguousByIdentity by lazy(LazyThreadSafetyMode.NONE) {
         records.groupBy { it.identity }.mapValues { (_, matches) ->
-            matches.distinctBy { it.url }.singleOrNull()
+            matches.distinctBy { it.networkId to it.url }.singleOrNull()
         }
     }
     private val unambiguousByNick by lazy(LazyThreadSafetyMode.NONE) {
         records.groupBy { it.nick }.mapValues { (_, matches) ->
-            matches.distinctBy { it.url }.singleOrNull()
+            matches.distinctBy { it.networkId to it.url }.singleOrNull()
         }
     }
 
-    fun url(
+    fun record(
         networkId: Long?,
         name: String,
         account: String?,
-        sizePx: Int,
-    ): String? {
+    ): AvatarRecord? {
         if (!enabled) return null
         val identity = avatarIdentity(name, account)
         val normalizedNick = canonicalAvatarNick(name)
-        val record =
-            if (networkId != null) {
-                byNetworkIdentity[networkId to identity] ?: byNetworkNick[networkId to normalizedNick]
+        return if (networkId != null) {
+            byNetworkIdentity[networkId to identity] ?: byNetworkNick[networkId to normalizedNick]
+        } else {
+            // Global management can only borrow a source record with one owning network.
+            if (identity in unambiguousByIdentity) {
+                unambiguousByIdentity[identity]
             } else {
-                // Global friends/fools management has no network context. Use a remote image only when
-                // every matching network agrees on one URL; ambiguity falls back to the monogram.
-                unambiguousByIdentity[identity] ?: unambiguousByNick[normalizedNick]
+                unambiguousByNick[normalizedNick]
             }
-        return record?.url?.let { expandAvatarUrl(it, sizePx) }
+        }
     }
 }
 
@@ -155,22 +155,25 @@ fun Avatar(
 
             AvatarStyle.NONE -> {}
         }
-        conversationAvatarModel(
-            conversationModel,
-            LocalRemoteAvatars.current.url(networkId, name, account, size.value.toInt()),
-            size.value.toInt(),
-        )?.let { url ->
+        val override = conversationAvatarModel(conversationModel, null, size.value.toInt())
+        val record = if (override == null) LocalRemoteAvatars.current.record(networkId, name, account) else null
+        val owner = if (override != null) networkId else record?.networkId
+        (override ?: record?.url?.let { expandAvatarUrl(it, size.value.toInt()) })?.let { url ->
             // The deterministic local avatar stays underneath, so failed/cancelled loads fall
             // back without erasing valid metadata or flashing an empty avatar.
             val context = LocalContext.current
             val automaticRemoteMedia = LocalAutomaticRemoteMedia.current
-            val directRemoteMediaAllowed = LocalDirectRemoteMediaAllowed.current(networkId)
             val request =
-                remember(context, url, automaticRemoteMedia, directRemoteMediaAllowed) {
+                remember(context, url, owner, automaticRemoteMedia) {
                     ImageRequest
                         .Builder(context)
-                        .remoteMediaData(url, automaticRemoteMedia && directRemoteMediaAllowed)
-                        .build()
+                        .apply {
+                            if (url.startsWith("file://")) {
+                                data(url)
+                            } else {
+                                routedRemoteMediaData(url, owner, automaticRemoteMedia)
+                            }
+                        }.build()
                 }
             AsyncImage(
                 model = request,

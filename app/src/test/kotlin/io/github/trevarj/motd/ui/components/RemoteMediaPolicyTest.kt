@@ -1,9 +1,5 @@
 package io.github.trevarj.motd.ui.components
 
-import android.content.Context
-import androidx.test.core.app.ApplicationProvider
-import coil.request.CachePolicy
-import coil.request.ImageRequest
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -46,18 +42,5 @@ class RemoteMediaPolicyTest {
             RemoteMediaNetwork.UNMETERED,
             classifyRemoteMediaNetwork(validatedInternet = true, unmetered = true),
         )
-    }
-
-    @Test
-    fun remote_image_request_disables_only_network_cache_policy() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-
-        val cacheOnly = ImageRequest.Builder(context).remoteMediaData("https://example.test/a.png", false).build()
-        val automatic = ImageRequest.Builder(context).remoteMediaData("https://example.test/a.png", true).build()
-
-        assertEquals(CachePolicy.DISABLED, cacheOnly.networkCachePolicy)
-        assertEquals(CachePolicy.ENABLED, cacheOnly.memoryCachePolicy)
-        assertEquals(CachePolicy.ENABLED, cacheOnly.diskCachePolicy)
-        assertEquals(CachePolicy.ENABLED, automatic.networkCachePolicy)
     }
 }

@@ -85,10 +85,9 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.components.IrcNetworkBadge
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
-import io.github.trevarj.motd.ui.components.LocalDirectRemoteMediaAllowed
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.UnreadBadge
-import io.github.trevarj.motd.ui.components.remoteMediaData
+import io.github.trevarj.motd.ui.components.routedRemoteMediaData
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
@@ -485,15 +484,7 @@ private fun DrawerNetworkItem(
                     val iconUrl = expandAvatarUrl(row.iconUrl.orEmpty(), 64)
                     val context = LocalContext.current
                     val automaticRemoteMedia = LocalAutomaticRemoteMedia.current
-                    val directRemoteMediaAllowed = LocalDirectRemoteMediaAllowed.current(row.networkId)
-                    val iconRequest =
-                        remember(context, iconUrl, automaticRemoteMedia, directRemoteMediaAllowed) {
-                            ImageRequest
-                                .Builder(context)
-                                .remoteMediaData(iconUrl, automaticRemoteMedia && directRemoteMediaAllowed)
-                                .build()
-                        }
-                    var iconLoaded by remember(iconUrl) { mutableStateOf(false) }
+                    var iconLoaded by remember(iconUrl, row.networkId) { mutableStateOf(false) }
                     Box(
                         modifier =
                             Modifier
@@ -516,6 +507,13 @@ private fun DrawerNetworkItem(
                             )
                         }
                         iconUrl?.let { url ->
+                            val iconRequest =
+                                remember(context, url, row.networkId, automaticRemoteMedia) {
+                                    ImageRequest
+                                        .Builder(context)
+                                        .routedRemoteMediaData(url, row.networkId, automaticRemoteMedia)
+                                        .build()
+                                }
                             AsyncImage(
                                 model = iconRequest,
                                 contentDescription = null,

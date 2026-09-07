@@ -84,7 +84,7 @@ class NetworkMediaHttpTest {
     }
 
     @Test
-    fun `proxy redirects keep ranges and conditional reads anonymous while untagged calls stay ordinary`() {
+    fun `proxy redirects keep ranges and conditional reads anonymous`() {
         val http = NetworkMediaHttp({ id -> route(id, proxy = httpProxy()) }, relaxed)
         server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "http://other.invalid/media"))
         server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 2-4/8").setBody("abc"))
@@ -116,25 +116,28 @@ class NetworkMediaHttpTest {
             assertEquals("etag", received.getHeader("If-None-Match"))
             assertTrue(!received.requestLine.contains("password"))
         }
+    }
 
-        server.enqueue(MockResponse().setBody("ordinary"))
-        http.client
-            .newCall(
-                Request
-                    .Builder()
-                    .url(server.url("/avatar"))
-                    .header("Authorization", "ordinary-auth")
-                    .build(),
-            ).execute()
-            .use {
-                assertEquals("ordinary", it.body.string())
-            }
-        assertEquals("ordinary-auth", server.takeRequest(5, TimeUnit.SECONDS)!!.getHeader("Authorization"))
+    @Test
+    fun `unproxied network media uses its resolved route without credentials`() {
+        val http = NetworkMediaHttp({ id -> route(id) }, relaxed)
+        server.enqueue(MockResponse().setBody("direct network media"))
+        val request =
+            Request
+                .Builder()
+                .url(server.url("/media"))
+                .header("Authorization", "caller-secret")
+                .build()
+
+        http.callFactory(7).newCall(request).execute().use {
+            assertEquals("direct network media", it.body.string())
+        }
+        assertNull(server.takeRequest(5, TimeUnit.SECONDS)!!.getHeader("Authorization"))
         assertEquals(1, releases.get())
     }
 
     @Test
-    fun `missing broken and cache-only routes never open a connection`() {
+    fun `untagged missing broken and cache-only routes never open a connection`() {
         val resolutions = AtomicInteger()
         val http =
             NetworkMediaHttp(
@@ -145,6 +148,12 @@ class NetworkMediaHttpTest {
                 relaxed,
             )
         val request = Request.Builder().url(server.url("/must-not-fetch")).build()
+        assertThrows(IOException::class.java) {
+            http.client
+                .newCall(request)
+                .execute()
+                .close()
+        }
         for (id in listOf(null, 1L, 2L)) {
             assertThrows(IOException::class.java) {
                 http
@@ -157,6 +166,9 @@ class NetworkMediaHttpTest {
         assertEquals(2, resolutions.get())
         assertEquals(1, releases.get())
         http.callFactory(2).newCall(request.newBuilder().cacheControl(CacheControl.FORCE_CACHE).build()).execute().use {
+            assertEquals(504, it.code)
+        }
+        http.client.newCall(request.newBuilder().cacheControl(CacheControl.FORCE_CACHE).build()).execute().use {
             assertEquals(504, it.code)
         }
         assertEquals(2, resolutions.get())
@@ -300,6 +312,29 @@ class NetworkMediaHttpTest {
         }
 
     @Test
+    fun `extensionless audio HEAD uses its owning SOCKS route anonymously and releases the lease`() =
+        runTest(dispatcher) {
+            val certificate = enableTls()
+            SocksProxy(server.port).use { socks ->
+                val repository =
+                    AudioMetadataRepositoryImpl(
+                        routeProvider = { id -> route(id, proxy = socks.proxy, pin = PinningTrustManager.sha256Hex(certificate)) },
+                        applicationScope = backgroundScope,
+                        ioDispatcher = dispatcher,
+                    )
+                val url = "https://media-test.invalid:${server.port}/audio"
+                server.enqueue(MockResponse().setHeader("Content-Type", "audio/ogg").setHeader("Content-Length", "4096"))
+
+                assertEquals(AudioMetadata(url = url, mimeType = "audio/ogg", sizeBytes = 4096), repository.metadata(url, 7))
+                val received = server.takeRequest(5, TimeUnit.SECONDS)!!
+                assertEquals("HEAD", received.method)
+                assertNull(received.getHeader("Authorization"))
+                assertEquals(listOf("media-test.invalid"), socks.destinations.toList())
+                assertEquals(1, releases.get())
+            }
+        }
+
+    @Test
     fun `HTTPS redirects cannot downgrade enter private addresses or borrow the original hosts pin`() {
         val certificate = enableTls()
         SocksProxy(server.port).use { socks ->
@@ -349,7 +384,7 @@ class NetworkMediaHttpTest {
     private fun pngResponse() = MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(PNG))
 
     /** Same SOCKS5 DOMAIN handshake as OkioLineTransportProxyTest, forwarding to the real TLS fixture. */
-    private class SocksProxy(
+    internal class SocksProxy(
         private val originPort: Int,
     ) : AutoCloseable {
         private val listener = ServerSocket(0, 8, java.net.InetAddress.getByName("127.0.0.1"))

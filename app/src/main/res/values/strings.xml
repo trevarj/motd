@@ -886,8 +886,6 @@
     <string name="settings_auto_media_unmetered_desc">Load automatically on Wi-Fi and Ethernet that Android reports as unmetered</string>
     <string name="settings_auto_media_metered">Automatically load remote media on metered networks</string>
     <string name="settings_auto_media_metered_desc">Load automatically on mobile data and metered Wi-Fi</string>
-    <string name="settings_direct_media_proxied">Load previews over direct connection</string>
-    <string name="settings_direct_media_proxied_desc">On proxy and VLESS networks, fetch link metadata, avatars, and network icons over your device\'s direct connection. Those hosts see your IP address. Chat images, videos, and link thumbnails still use the network\'s route.</string>
     <string name="settings_show_link_previews">Show link previews</string>
     <string name="settings_show_link_previews_desc">Fetch page titles and descriptions for links</string>
     <string name="chat_video_play">Play video</string>

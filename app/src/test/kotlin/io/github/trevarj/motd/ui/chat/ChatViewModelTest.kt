@@ -4373,8 +4373,6 @@ class ChatViewModelTest {
         override suspend fun setAutoLoadOnUnmetered(enabled: Boolean) = Unit
 
         override suspend fun setAutoLoadOnMetered(enabled: Boolean) = Unit
-
-        override suspend fun setDirectMediaOnProxiedNetworks(enabled: Boolean) = Unit
     }
 
     private class FakeAudioMetadataRepository : AudioMetadataRepository {

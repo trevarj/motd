@@ -167,7 +167,7 @@ class LinkPreviewRepositoryImpl
         ): LinkPreview? {
             // Fail closed and retry later: route identity/readiness can recover without process restart.
             if (networkId == null) throw RetryableLinkPreviewException("route_missing")
-            val route = routeResolver.routeForPreview(networkId) ?: throw RetryableLinkPreviewException("route_missing")
+            val route = routeResolver.routeForNetwork(networkId) ?: throw RetryableLinkPreviewException("route_missing")
             return try {
                 // Never fall back direct when the owning network's proxy is unavailable.
                 if (route.proxyError != null) throw RetryableLinkPreviewException("proxy_unavailable")

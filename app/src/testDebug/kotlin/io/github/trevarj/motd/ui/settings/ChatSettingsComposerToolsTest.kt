@@ -62,7 +62,6 @@ class ChatSettingsComposerToolsTest {
                     onShowLinkPreviews = {},
                     onAutoLoadOnUnmetered = { unmetered = it },
                     onAutoLoadOnMetered = { metered = it },
-                    onDirectMediaOnProxiedNetworks = {},
                     onShowSharedAvatars = {},
                     onVoiceEncryptionDefault = {},
                     onVoiceQuality = {},
@@ -75,6 +74,8 @@ class ChatSettingsComposerToolsTest {
 
         compose.onNodeWithTag("settings_target_highlight_PRESENCE", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("settings_presence_picker", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("settings_switch_direct_media_proxied", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("settings_switch_show_images", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
         compose
             .onNodeWithText("Automatically load remote media on unmetered networks")
             .performScrollTo()
@@ -87,6 +88,8 @@ class ChatSettingsComposerToolsTest {
             .assertIsOn()
             .performClick()
         compose.onNodeWithTag("settings_switch_auto_media_metered", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("settings_switch_show_link_previews", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings_switch_show_shared_avatars", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
         compose
             .onNodeWithText("Emoji tool")
             .performScrollTo()

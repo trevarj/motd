@@ -100,7 +100,6 @@ fun ChatSettingsScreen(
         onShowLinkPreviews = viewModel::setShowLinkPreviews,
         onAutoLoadOnUnmetered = viewModel::setAutoLoadOnUnmetered,
         onAutoLoadOnMetered = viewModel::setAutoLoadOnMetered,
-        onDirectMediaOnProxiedNetworks = viewModel::setDirectMediaOnProxiedNetworks,
         onShowSharedAvatars = viewModel::setShowSharedAvatars,
         onVoiceEncryptionDefault = viewModel::setVoiceEncryptionDefault,
         onVoiceQuality = viewModel::setVoiceQuality,
@@ -136,7 +135,6 @@ fun ChatSettingsContent(
     onShowLinkPreviews: (Boolean) -> Unit,
     onAutoLoadOnUnmetered: (Boolean) -> Unit,
     onAutoLoadOnMetered: (Boolean) -> Unit,
-    onDirectMediaOnProxiedNetworks: (Boolean) -> Unit,
     onShowSharedAvatars: (Boolean) -> Unit,
     onVoiceEncryptionDefault: (Boolean) -> Unit,
     onVoiceQuality: (VoiceRecordingQuality) -> Unit,
@@ -214,18 +212,6 @@ fun ChatSettingsContent(
                 disabledExplanation = stringResource(R.string.settings_media_disabled_explanation),
                 requestedTarget = target?.name,
                 targetName = SettingsTarget.MEDIA_METERED.name,
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            SwitchRow(
-                title = stringResource(R.string.settings_direct_media_proxied),
-                subtitle = stringResource(R.string.settings_direct_media_proxied_desc),
-                checked = contentPreviews.directMediaOnProxiedNetworks,
-                onCheckedChange = onDirectMediaOnProxiedNetworks,
-                switchTag = "settings_switch_direct_media_proxied",
-                enabled = contentPreviews.showImages,
-                disabledExplanation = stringResource(R.string.settings_media_disabled_explanation),
-                requestedTarget = target?.name,
-                targetName = SettingsTarget.PROXIED_MEDIA.name,
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
@@ -590,7 +576,6 @@ private fun ChatSettingsPreview() {
             onShowLinkPreviews = {},
             onAutoLoadOnUnmetered = {},
             onAutoLoadOnMetered = {},
-            onDirectMediaOnProxiedNetworks = {},
             onShowSharedAvatars = {},
             onVoiceEncryptionDefault = {},
             onClearAudioCache = {},

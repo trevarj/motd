@@ -166,7 +166,6 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_show_link_previews, R.string.settings_show_link_previews_desc, "url metadata", SettingsSearchPage.CHAT, SettingsTarget.LINK_PREVIEWS),
         spec(R.string.settings_auto_media_unmetered, R.string.settings_auto_media_unmetered_desc, "wifi download", SettingsSearchPage.CHAT, SettingsTarget.MEDIA_UNMETERED),
         spec(R.string.settings_auto_media_metered, R.string.settings_auto_media_metered_desc, "mobile data download", SettingsSearchPage.CHAT, SettingsTarget.MEDIA_METERED),
-        spec(R.string.settings_direct_media_proxied, R.string.settings_direct_media_proxied_desc, "proxy privacy", SettingsSearchPage.CHAT, SettingsTarget.PROXIED_MEDIA),
         spec(R.string.settings_show_shared_avatars, R.string.settings_show_shared_avatars_desc, "profile images", SettingsSearchPage.CHAT, SettingsTarget.SHARED_AVATARS),
         spec(R.string.settings_auto_away, R.string.settings_auto_away_desc, "background idle", SettingsSearchPage.CHAT, SettingsTarget.AUTO_AWAY),
         spec(R.string.settings_auto_away_delay, R.string.settings_auto_away_desc, "minutes idle", SettingsSearchPage.CHAT, SettingsTarget.AUTO_AWAY_DELAY),

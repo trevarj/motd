@@ -28,7 +28,6 @@ import io.github.trevarj.motd.data.repo.CachedLinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.RetryableLinkPreviewException
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
-import io.github.trevarj.motd.ui.components.LocalDirectRemoteMediaAllowed
 import io.github.trevarj.motd.ui.components.LocalNetworkMediaHttp
 import io.github.trevarj.motd.ui.components.RoutedInlineMediaFixture
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -348,7 +347,6 @@ class RemoteMediaTimelineTest {
             MotdTheme(dynamicColor = false, layoutDensity = layoutDensity()) {
                 CompositionLocalProvider(
                     LocalAutomaticRemoteMedia provides automatic,
-                    LocalDirectRemoteMediaAllowed provides { false },
                     LocalNetworkMediaHttp provides networkMediaHttp,
                     LocalUriHandler provides (uriHandler ?: LocalUriHandler.current),
                 ) {

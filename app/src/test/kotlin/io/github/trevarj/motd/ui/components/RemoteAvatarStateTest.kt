@@ -19,14 +19,21 @@ class RemoteAvatarStateTest {
 
     @Test fun resolves_account_then_nick_with_network_isolation() {
         val state = RemoteAvatarState(enabled = true, records = listOf(alice))
-        assertEquals("https://example.com/40.png", state.url(7, "OtherNick", "ALICE", 40))
-        assertEquals("https://example.com/40.png", state.url(7, "Alice", null, 40))
-        assertNull(state.url(8, "Alice", "alice", 40))
+        assertEquals(alice, state.record(7, "OtherNick", "ALICE"))
+        assertEquals(alice, state.record(7, "Alice", null))
+        assertNull(state.record(8, "Alice", "alice"))
     }
 
     @Test fun disabled_state_returns_no_model_so_coil_cannot_request() {
         val state = RemoteAvatarState(enabled = false, records = listOf(alice))
-        assertNull(state.url(7, "Alice", "alice", 40))
+        assertNull(state.record(7, "Alice", "alice"))
+    }
+
+    @Test fun global_avatar_requires_one_source_network_even_when_urls_match() {
+        val state = RemoteAvatarState(enabled = true, records = listOf(alice, alice.copy(networkId = 8, nick = "other")))
+        assertNull(state.record(null, "Alice", "alice"))
+        assertEquals(alice, state.record(7, "Alice", "alice"))
+        assertEquals(alice, RemoteAvatarState(enabled = true, records = listOf(alice)).record(null, "Alice", null))
     }
 
     @Test fun conversation_override_precedes_shared_and_supports_local_files_and_placeholders() {

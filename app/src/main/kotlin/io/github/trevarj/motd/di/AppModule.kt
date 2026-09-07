@@ -18,7 +18,6 @@ import io.github.trevarj.motd.audio.AudioMetadataRepository
 import io.github.trevarj.motd.audio.AudioMetadataRepositoryImpl
 import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.audio.AudioPlaybackControllerImpl
-import io.github.trevarj.motd.audio.DirectMediaPolicy
 import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.audio.NetworkMediaRouteProvider
 import io.github.trevarj.motd.audio.VoiceMessageSender
@@ -222,10 +221,6 @@ internal abstract class AppModule {
     /** Proxy-aware route lookup for HTTP fetch repositories (link previews, audio metadata). */
     @Binds @Singleton
     abstract fun mediaRouteResolver(impl: NetworkMediaRouteProvider): MediaRouteResolver
-
-    /** Whether the global Coil/ExoPlayer stacks may fetch directly for one network's content. */
-    @Binds @Singleton
-    abstract fun directMediaPolicy(impl: NetworkMediaRouteProvider): DirectMediaPolicy
 
     @Binds @Singleton
     abstract fun audioPlaybackController(impl: AudioPlaybackControllerImpl): AudioPlaybackController
