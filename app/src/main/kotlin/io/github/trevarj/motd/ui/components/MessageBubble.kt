@@ -65,6 +65,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
@@ -244,10 +245,11 @@ private fun Modifier.mentionHighlight(accent: Color): Modifier =
  * italic no-bubble, plus reply/image/reactions decorations). System-event kinds are rendered by
  * [SystemEventPill] upstream, not here.
  *
- * Grouping: [showSender] draws the nick-colored name on a group's first bubble, own included — a
- * silent nick change (e.g. an identify failure bouncing you to Guest-1234) belongs on your own
- * bubble too, not just others'. Only the avatar stays other-senders-only. Own bubbles are
- * right-aligned on the primary accent; others left `surfaceContainerHigh`. Corner radii tighten on
+ * Grouping: [showSender] identifies a group's first bubble. COMFORTABLE own messages put their nick
+ * in the status footer; other sender headers remain nick-colored. A silent nick change (e.g. an
+ * identify failure bouncing you to Guest-1234) stays visible on your own messages too. Only the
+ * avatar stays other-senders-only. Own bubbles are right-aligned on the primary accent; others left
+ * `surfaceContainerHigh`. Corner radii tighten on
  * the grouped inner edge.
  */
 internal fun botDisplayName(
@@ -533,9 +535,7 @@ fun MessageBubble(
                         onLongPressLabel = actionsLabel,
                     ).padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
         ) {
-            if (showSender) {
-                // Shown for self too: a nick change (e.g. a silent identify failure bouncing you to
-                // Guest-1234) is exactly the kind of thing your own bubble should surface, not hide.
+            if (showSender && !isSelf) {
                 val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -647,10 +647,24 @@ fun MessageBubble(
             }
 
             Row(
-                modifier = Modifier.align(Alignment.End),
+                modifier = Modifier.align(Alignment.End).testTag("message_metadata"),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val metadataColor = if (failed) MaterialTheme.colorScheme.error else textColor
+                if (isSelf && showSender) {
+                    Text(
+                        text = botDisplayName(sender, isBot),
+                        color = textColor,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier =
+                            Modifier
+                                .weight(1f, fill = false)
+                                .padding(end = 6.dp)
+                                .testTag("self_sender_label"),
+                    )
+                }
                 MessageStatusIcon(
                     isSelf = isSelf,
                     pending = pending,
