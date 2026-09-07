@@ -3,9 +3,14 @@ package io.github.trevarj.motd.ui.chat
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -18,6 +23,7 @@ import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.NetworkMediaHttp
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.repo.CachedLinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.RetryableLinkPreviewException
@@ -31,10 +37,13 @@ import kotlinx.coroutines.flow.flowOf
 import okhttp3.mockwebserver.MockResponse
 import okio.Buffer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 import java.util.Base64
 import java.util.UUID
 
@@ -176,6 +185,7 @@ class RemoteMediaTimelineTest {
             assertEquals(emptyList<Long>(), fixture.selectedNetworks.toList())
             compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).assertIsDisplayed().performTouchInput { click() }
             awaitTag("inline_media_loaded")
+            compose.onNodeWithTag("media_origin_caption", useUnmergedTree = true).assertIsDisplayed().assertTextContains("media.invalid")
             compose.runOnIdle { assertEquals(emptyList<String>(), openedImages) }
             compose.onNodeWithTag("inline_media_loaded", useUnmergedTree = true).assertIsDisplayed().performTouchInput { click() }
 
@@ -185,6 +195,86 @@ class RemoteMediaTimelineTest {
                 assertEquals(listOf(fixture.networkId), fixture.selectedNetworks.toList())
                 assertEquals(0, linkLoads)
             }
+        }
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Config(qualifiers = "w411dp-h891dp")
+    fun mediaOriginPreservesTextAndPrivacyAcrossLayouts() {
+        RoutedInlineMediaFixture().use { fixture ->
+            fixture.server.enqueue(MockResponse().setResponseCode(503))
+            val url = "http://media.invalid/a-long-attachment-name-${UUID.randomUUID()}.png?token=keep%2Fexact#original"
+            val text = "Before the attachment $url after the attachment"
+            val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+            val kind = mutableStateOf(MessageKind.PRIVMSG)
+            val showImages = mutableStateOf(true)
+            val opened = mutableListOf<String>()
+            val longPressed = mutableListOf<MessageEntity>()
+            var linkLoads = 0
+            render(
+                automatic = false,
+                networkId = fixture.networkId,
+                networkMediaHttp = fixture.http,
+                text = text,
+                showImages = { showImages.value },
+                layoutDensity = { density.value },
+                messageKind = { kind.value },
+                onLongPress = longPressed::add,
+                uriHandler =
+                    object : UriHandler {
+                        override fun openUri(uri: String) {
+                            opened.add(uri)
+                        }
+                    },
+                loadPreview = { _, _ ->
+                    linkLoads++
+                    null
+                },
+            )
+
+            for (layout in LayoutDensity.entries) {
+                for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION)) {
+                    compose.runOnIdle {
+                        density.value = layout
+                        kind.value = messageKind
+                        showImages.value = true
+                    }
+                    awaitTag("inline_media_awaiting")
+                    val media = compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).assertIsDisplayed()
+                    val caption = compose.onNodeWithTag("media_origin_caption", useUnmergedTree = true)
+                    caption.assertIsDisplayed().assertTextContains("media.invalid")
+                    val prose = compose.onNodeWithText("Before the attachment", substring = true, useUnmergedTree = true)
+                    prose.assertIsDisplayed().assertTextContains("after the attachment", substring = true)
+                    compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertDoesNotExist()
+                    assertTrue(prose.fetchSemanticsNode().boundsInRoot.bottom <= media.fetchSemanticsNode().boundsInRoot.top)
+                    assertTrue(media.fetchSemanticsNode().boundsInRoot.bottom <= caption.fetchSemanticsNode().boundsInRoot.top)
+
+                    caption.performTouchInput { click() }
+                    compose.runOnIdle {
+                        assertEquals(url, opened.last())
+                        assertEquals(0, fixture.server.requestCount)
+                        assertEquals(emptyList<Long>(), fixture.selectedNetworks.toList())
+                        assertEquals(0, linkLoads)
+                    }
+                    media.assertIsDisplayed()
+                    prose.performTouchInput { longClick() }
+                    compose.runOnIdle { assertEquals(message(text).copy(kind = messageKind), longPressed.last()) }
+
+                    compose.runOnIdle { showImages.value = false }
+                    compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertIsDisplayed()
+                    caption.assertDoesNotExist()
+                    media.assertDoesNotExist()
+                }
+            }
+
+            compose.runOnIdle { showImages.value = true }
+            awaitTag("inline_media_awaiting")
+            compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).performTouchInput { click() }
+            awaitTag("inline_media_failed")
+            compose.onNodeWithTag("media_origin_caption", useUnmergedTree = true).assertIsDisplayed().assertTextContains("media.invalid")
+            compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertDoesNotExist()
+            assertEquals(1, fixture.server.requestCount)
         }
     }
 
@@ -246,21 +336,28 @@ class RemoteMediaTimelineTest {
         text: String = LINK,
         showImages: () -> Boolean = { true },
         onImageClick: (String) -> Unit = {},
+        layoutDensity: () -> LayoutDensity = { LayoutDensity.COMFORTABLE },
+        messageKind: () -> MessageKind = { MessageKind.PRIVMSG },
+        onLongPress: (MessageEntity) -> Unit = {},
+        uriHandler: UriHandler? = null,
     ) {
-        val pages = flowOf(PagingData.from(listOf(message(text))))
+        val initialMessage = message(text)
         compose.setContent {
-            MotdTheme(dynamicColor = false) {
+            val kind = messageKind()
+            val pages = remember(kind) { flowOf(PagingData.from(listOf(initialMessage.copy(kind = kind)))) }
+            MotdTheme(dynamicColor = false, layoutDensity = layoutDensity()) {
                 CompositionLocalProvider(
                     LocalAutomaticRemoteMedia provides automatic,
                     LocalDirectRemoteMediaAllowed provides { false },
                     LocalNetworkMediaHttp provides networkMediaHttp,
+                    LocalUriHandler provides (uriHandler ?: LocalUriHandler.current),
                 ) {
                     MessageList(
                         items = pages.collectAsLazyPagingItems(),
                         listState = rememberLazyListState(),
                         networkId = networkId,
                         readMarkerTime = null,
-                        onLongPress = {},
+                        onLongPress = onLongPress,
                         onReply = {},
                         onReact = { _, _ -> },
                         onImageClick = onImageClick,

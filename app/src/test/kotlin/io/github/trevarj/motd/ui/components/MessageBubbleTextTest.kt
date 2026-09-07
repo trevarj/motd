@@ -156,6 +156,43 @@ class MessageBubbleTextTest {
     }
 
     @Test
+    fun media_caption_removes_only_its_link_and_preserves_code_styles_and_other_links() {
+        val media = "https://cdn.example/photo.png"
+        val other = "https://other.example/page"
+        val body =
+            linkifiedBody(
+                text = "`$media` ${IRC_BOLD}caption$IRC_BOLD $media and $other",
+                linkColor = Color.Blue,
+                codeColor = Color.White,
+            ).withoutMediaPreviewUrl(media)
+
+        assertEquals("$media caption and $other", body.text)
+        assertEquals(
+            listOf(other),
+            body.getLinkAnnotations(0, body.length).map { (it.item as LinkAnnotation.Url).url },
+        )
+        assertTrue(
+            body.spanStyles.any {
+                it.item.fontFamily == FontFamily.Monospace && body.text.substring(it.start, it.end) == media
+            },
+        )
+        assertTrue(
+            body.spanStyles.any {
+                it.item.fontWeight == FontWeight.Bold && body.text.substring(it.start, it.end) == "caption"
+            },
+        )
+    }
+
+    @Test
+    fun media_only_body_disappears_but_another_occurrence_stays_linked() {
+        val media = "https://cdn.example/photo.png"
+        assertEquals("", linkifiedBody("  $media  ", Color.Blue).withoutMediaPreviewUrl(media).text)
+        val repeated = linkifiedBody("$media $media", Color.Blue).withoutMediaPreviewUrl(media)
+        assertEquals(media, repeated.text)
+        assertEquals(media, (repeated.getLinkAnnotations(0, repeated.length).single().item as LinkAnnotation.Url).url)
+    }
+
+    @Test
     fun reverse_hex_and_equal_colors_remain_readable() {
         val reversed = mircFormattedText("$IRC_HEX_COLOR" + "ff0000,0000ff${IRC_REVERSE}text")
         val equal = mircFormattedText("$IRC_HEX_COLOR" + "ffffff,fffffftext")

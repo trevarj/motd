@@ -5,6 +5,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.outlined.Download
@@ -22,12 +23,21 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
@@ -42,12 +52,48 @@ import coil.request.ImageRequest
 import coil.request.videoFrameMillis
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.chat.isVideoUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import java.net.URI
 
 internal enum class RemoteMediaLoadState {
     AWAITING,
     LOADING,
     LOADED,
     FAILED,
+}
+
+internal fun mediaOriginLabel(url: String): String? {
+    // Reject malformed authorities rather than letting HttpUrl repair them for display.
+    if (runCatching { URI(url).rawAuthority }.getOrNull().isNullOrEmpty()) return null
+    val parsed = url.toHttpUrlOrNull() ?: return null
+    val host = if (':' in parsed.host) "[${parsed.host}]" else parsed.host
+    val defaultPort = if (parsed.scheme == "https") 443 else 80
+    return if (parsed.port == defaultPort) host else "$host:${parsed.port}"
+}
+
+@Composable
+internal fun MediaOriginCaption(
+    url: String,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    val origin = remember(url) { mediaOriginLabel(url) } ?: return
+    val caption =
+        remember(url, origin, color) {
+            buildAnnotatedString {
+                withLink(LinkAnnotation.Url(url, styles = TextLinkStyles(SpanStyle(color = color, textDecoration = TextDecoration.None)))) {
+                    append(origin)
+                }
+            }
+        }
+    Text(
+        text = caption,
+        modifier = modifier.padding(top = 4.dp).testTag("media_origin_caption"),
+        style = MaterialTheme.typography.bodySmall,
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.MiddleEllipsis,
+    )
 }
 
 /** Inline media shared by every chat density, with cache-only first load when auto-load is off. */
@@ -265,6 +311,7 @@ private fun RemoteMediaImage(
                     tint = MaterialTheme.colorScheme.onSurface,
                     modifier =
                         Modifier
+                            .clip(RoundedCornerShape(8.dp))
                             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.86f))
                             .padding(8.dp),
                 )

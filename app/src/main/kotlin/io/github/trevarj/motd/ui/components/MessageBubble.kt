@@ -574,23 +574,6 @@ fun MessageBubble(
 
             reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
-            imageUrl?.let { url ->
-                InlineMediaPreview(
-                    url = url,
-                    networkId = networkId,
-                    onImageClick = onImageClick,
-                    onLongPress = onLongPress,
-                    // Reserve a 4:3 box until the bitmap lands so rows don't jump the reversed-list
-                    // anchor.
-                    modifier =
-                        Modifier
-                            .padding(vertical = 2.dp)
-                            .heightIn(max = 280.dp)
-                            .aspectRatio(4f / 3f)
-                            .clip(RoundedCornerShape(12.dp)),
-                )
-            }
-
             if (text.isNotBlank()) {
                 // Linkify http(s) URLs so the body is tappable even when the preview fails
                 // ; LinkAnnotation.Url uses the platform URI open handler. Known-nick
@@ -607,6 +590,7 @@ fun MessageBubble(
                 val body =
                     remember(
                         text,
+                        imageUrl,
                         linkColor,
                         mentionsActive,
                         mentionColor,
@@ -620,12 +604,34 @@ fun MessageBubble(
                             mentionColor,
                             codeBackground,
                             codeColor,
-                        )
+                        ).withoutMediaPreviewUrl(imageUrl)
                     }
-                Text(
-                    text = body,
-                    color = textColor,
-                    style = MaterialTheme.typography.bodyLarge,
+                if (body.isNotBlank()) {
+                    Text(
+                        text = body,
+                        color = textColor,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+            }
+            imageUrl?.let { url ->
+                InlineMediaPreview(
+                    url = url,
+                    networkId = networkId,
+                    onImageClick = onImageClick,
+                    onLongPress = onLongPress,
+                    // Reserve a 4:3 box until the bitmap lands so rows don't jump the reversed-list
+                    // anchor.
+                    modifier =
+                        Modifier
+                            .padding(vertical = 2.dp)
+                            .heightIn(max = 280.dp)
+                            .aspectRatio(4f / 3f)
+                            .clip(RoundedCornerShape(12.dp)),
+                )
+                MediaOriginCaption(
+                    url,
+                    color = if (isSelf || mentionHighlighted || kind == MessageKind.NOTICE) textColor else scheme.onSurfaceVariant,
                 )
             }
 
@@ -764,6 +770,7 @@ private fun ComfortableActionBubble(
             sender,
             isBot,
             text,
+            imageUrl,
             nameColor,
             bodyColor,
             linkColor,
@@ -789,7 +796,7 @@ private fun ComfortableActionBubble(
                 codeColor = codeColor,
                 senderLink = senderLink,
                 includeStar = hideAvatar,
-            )
+            ).withoutMediaPreviewUrl(imageUrl)
         }
 
     Row(
@@ -884,6 +891,7 @@ private fun ComfortableActionBubble(
                             .aspectRatio(4f / 3f)
                             .clip(RoundedCornerShape(10.dp)),
                 )
+                MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
             }
 
             if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
@@ -982,6 +990,7 @@ private fun ActionMessageRow(
             sender,
             isBot,
             text,
+            imageUrl,
             accent,
             nameColor,
             bodyColor,
@@ -1006,7 +1015,7 @@ private fun ActionMessageRow(
                 codeBackground = codeBackground,
                 codeColor = codeColor,
                 senderLink = senderLink,
-            )
+            ).withoutMediaPreviewUrl(imageUrl)
         }
 
     // The caller's modifier carries the stable per-message semantics. Keep the ACTION-specific
@@ -1081,6 +1090,7 @@ private fun ActionMessageRow(
                             .aspectRatio(4f / 3f)
                             .clip(RoundedCornerShape(10.dp)),
                 )
+                MediaOriginCaption(url, modifier = Modifier.widthIn(max = 280.dp))
             }
 
             if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
@@ -1365,6 +1375,38 @@ private fun TwoLineMessageRow(
                 )
             }
 
+            if (text.isNotBlank()) {
+                val linkColor = MaterialTheme.colorScheme.primary
+                val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
+                val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
+                // Memoized body build (linkify + mention coloring) so it doesn't re-run per frame.
+                val richBody =
+                    remember(
+                        text,
+                        imageUrl,
+                        linkColor,
+                        mentionsActive,
+                        mentionColor,
+                        codeBackground,
+                        codeColor,
+                    ) {
+                        linkifiedBody(
+                            text,
+                            linkColor,
+                            mentionsActive,
+                            mentionColor,
+                            codeBackground,
+                            codeColor,
+                        ).withoutMediaPreviewUrl(imageUrl)
+                    }
+                if (richBody.isNotBlank()) {
+                    Text(
+                        text = richBody,
+                        color = bodyColor,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+            }
             imageUrl?.let { url ->
                 InlineMediaPreview(
                     url = url,
@@ -1379,36 +1421,7 @@ private fun TwoLineMessageRow(
                             .aspectRatio(4f / 3f)
                             .clip(RoundedCornerShape(10.dp)),
                 )
-            }
-
-            if (text.isNotBlank()) {
-                val linkColor = MaterialTheme.colorScheme.primary
-                val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
-                val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
-                // Memoized body build (linkify + mention coloring) so it doesn't re-run per frame.
-                val richBody =
-                    remember(
-                        text,
-                        linkColor,
-                        mentionsActive,
-                        mentionColor,
-                        codeBackground,
-                        codeColor,
-                    ) {
-                        linkifiedBody(
-                            text,
-                            linkColor,
-                            mentionsActive,
-                            mentionColor,
-                            codeBackground,
-                            codeColor,
-                        )
-                    }
-                Text(
-                    text = richBody,
-                    color = bodyColor,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+                MediaOriginCaption(url, modifier = Modifier.widthIn(max = 280.dp))
             }
 
             if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
@@ -1682,6 +1695,25 @@ internal fun FailedIcon() {
                 .heightIn(max = 12.dp)
                 .width(12.dp),
     )
+}
+
+/** Remove only the preview's linked occurrence; code, formatting and the stored message stay intact. */
+internal fun AnnotatedString.withoutMediaPreviewUrl(url: String?): AnnotatedString {
+    if (url == null) return this
+    val link = getLinkAnnotations(0, length).firstOrNull { (it.item as? LinkAnnotation.Url)?.url == url } ?: return this
+    if (mediaOriginLabel(url) == null) return this
+    var end = link.end
+    if (link.start > 0 && this[link.start - 1] == ' ') {
+        while (end < length && this[end] == ' ') end++
+    }
+    val remaining =
+        buildAnnotatedString {
+            append(this@withoutMediaPreviewUrl.subSequence(0, link.start))
+            append(this@withoutMediaPreviewUrl.subSequence(end, this@withoutMediaPreviewUrl.length))
+        }
+    val first = remaining.indexOfFirst { !it.isWhitespace() }
+    if (first < 0) return AnnotatedString("")
+    return remaining.subSequence(first, remaining.indexOfLast { !it.isWhitespace() } + 1)
 }
 
 /**

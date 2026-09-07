@@ -118,6 +118,7 @@ internal fun CompactMessageRow(
     val line =
         remember(
             sender,
+            imageUrl,
             text,
             kind,
             isBot,
@@ -145,7 +146,7 @@ internal fun CompactMessageRow(
                 codeBackground,
                 codeColor,
                 nickFontSize = nickFontSize,
-            )
+            ).withoutMediaPreviewUrl(imageUrl)
         }
 
     Column(
@@ -207,6 +208,7 @@ internal fun CompactMessageRow(
                         .aspectRatio(4f / 3f)
                         .clip(RoundedCornerShape(8.dp)),
             )
+            MediaOriginCaption(url, modifier = Modifier.widthIn(max = 280.dp))
         }
 
         if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
