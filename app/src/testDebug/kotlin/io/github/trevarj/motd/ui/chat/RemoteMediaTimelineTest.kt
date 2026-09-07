@@ -15,17 +15,20 @@ import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.audio.AudioMetadata
+import io.github.trevarj.motd.audio.NetworkMediaHttp
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.CachedLinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.RetryableLinkPreviewException
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
+import io.github.trevarj.motd.ui.components.LocalDirectRemoteMediaAllowed
+import io.github.trevarj.motd.ui.components.LocalNetworkMediaHttp
+import io.github.trevarj.motd.ui.components.RoutedInlineMediaFixture
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.flowOf
 import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -143,26 +146,17 @@ class RemoteMediaTimelineTest {
     }
 
     @Test
-    fun coldImageDownloadAfterPrivacyGateOpensLoadsOnceWithoutGrantingSiblingLink() {
-        val server = MockWebServer().also { it.start() }
-        try {
-            server.enqueue(
-                MockResponse()
-                    .setHeader("Content-Type", "image/png")
-                    .setBody(
-                        Buffer().write(
-                            Base64.getDecoder().decode(
-                                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-                            ),
-                        ),
-                    ),
-            )
-            val url = server.url("/${UUID.randomUUID()}.png").toString()
+    fun coldImageUsesSelectedRouteWithoutDirectPermissionOrGrantingSiblingLink() {
+        RoutedInlineMediaFixture().use { fixture ->
+            fixture.server.enqueue(imageResponse())
+            val url = "http://media.invalid/${UUID.randomUUID()}.png"
             val showImages = mutableStateOf(false)
             var linkLoads = 0
             val openedImages = mutableListOf<String>()
             render(
                 automatic = false,
+                networkId = fixture.networkId,
+                networkMediaHttp = fixture.http,
                 text = "$url $LINK/${UUID.randomUUID()}",
                 showImages = { showImages.value },
                 onImageClick = openedImages::add,
@@ -175,9 +169,11 @@ class RemoteMediaTimelineTest {
             // The sibling card proves the cold URL discovery completed while images were gated.
             awaitTag("link_preview_awaiting")
             compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).assertDoesNotExist()
+            assertEquals(0, fixture.server.requestCount)
             compose.runOnIdle { showImages.value = true }
             awaitTag("inline_media_awaiting")
-            assertEquals(0, server.requestCount)
+            assertEquals(0, fixture.server.requestCount)
+            assertEquals(emptyList<Long>(), fixture.selectedNetworks.toList())
             compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).assertIsDisplayed().performTouchInput { click() }
             awaitTag("inline_media_loaded")
             compose.runOnIdle { assertEquals(emptyList<String>(), openedImages) }
@@ -185,11 +181,38 @@ class RemoteMediaTimelineTest {
 
             compose.runOnIdle {
                 assertEquals(listOf(url), openedImages)
-                assertEquals(1, server.requestCount)
+                assertEquals(1, fixture.server.requestCount)
+                assertEquals(listOf(fixture.networkId), fixture.selectedNetworks.toList())
                 assertEquals(0, linkLoads)
             }
-        } finally {
-            server.shutdown()
+        }
+    }
+
+    @Test
+    fun linkThumbnailWaitsForConsentThenUsesTheSelectedRoute() {
+        RoutedInlineMediaFixture().use { fixture ->
+            fixture.server.enqueue(imageResponse())
+            val thumbnail = "http://media.invalid/${UUID.randomUUID()}.png"
+            var linkLoads = 0
+            render(
+                automatic = false,
+                networkId = fixture.networkId,
+                networkMediaHttp = fixture.http,
+                loadPreview = { _, networkId ->
+                    assertEquals(fixture.networkId, networkId)
+                    linkLoads++
+                    PREVIEW.copy(imageUrl = thumbnail)
+                },
+            )
+
+            awaitTag("link_preview_awaiting")
+            assertEquals(0, linkLoads)
+            assertEquals(0, fixture.server.requestCount)
+            compose.onNodeWithTag("link_preview_awaiting", useUnmergedTree = true).performTouchInput { click() }
+            awaitTag("link_preview_thumbnail")
+            compose.waitUntil(10_000) { fixture.server.requestCount == 1 }
+            assertEquals(1, linkLoads)
+            assertEquals(listOf(fixture.networkId), fixture.selectedNetworks.toList())
         }
     }
 
@@ -214,6 +237,8 @@ class RemoteMediaTimelineTest {
 
     private fun render(
         automatic: Boolean,
+        networkId: Long = 1L,
+        networkMediaHttp: NetworkMediaHttp? = null,
         cachedPreview: (String, Long?) -> CachedLinkPreview? = { _, _ -> null },
         loadPreview: suspend (String, Long?) -> LinkPreview?,
         loadAudioMetadata: suspend (String, Long?) -> AudioMetadata? = { _, _ -> null },
@@ -225,11 +250,15 @@ class RemoteMediaTimelineTest {
         val pages = flowOf(PagingData.from(listOf(message(text))))
         compose.setContent {
             MotdTheme(dynamicColor = false) {
-                CompositionLocalProvider(LocalAutomaticRemoteMedia provides automatic) {
+                CompositionLocalProvider(
+                    LocalAutomaticRemoteMedia provides automatic,
+                    LocalDirectRemoteMediaAllowed provides { false },
+                    LocalNetworkMediaHttp provides networkMediaHttp,
+                ) {
                     MessageList(
                         items = pages.collectAsLazyPagingItems(),
                         listState = rememberLazyListState(),
-                        networkId = 1,
+                        networkId = networkId,
                         readMarkerTime = null,
                         onLongPress = {},
                         onReply = {},
@@ -254,6 +283,17 @@ class RemoteMediaTimelineTest {
             compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
     }
+
+    private fun imageResponse(): MockResponse =
+        MockResponse()
+            .setHeader("Content-Type", "image/png")
+            .setBody(
+                Buffer().write(
+                    Base64.getDecoder().decode(
+                        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+                    ),
+                ),
+            )
 
     private fun message(text: String) =
         MessageEntity(

@@ -118,6 +118,7 @@ fun LinkPreviewCard(
     loading: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    networkId: Long? = null,
     awaiting: Boolean = false,
     failed: Boolean = false,
 ) {
@@ -147,7 +148,7 @@ fun LinkPreviewCard(
         when (state) {
             LinkPreviewRenderState.Awaiting -> LinkPreviewAwaiting(onClick)
             LinkPreviewRenderState.Loading -> LinkPreviewSkeleton()
-            is LinkPreviewRenderState.Available -> LinkPreviewContent(state.preview, onClick)
+            is LinkPreviewRenderState.Available -> LinkPreviewContent(state.preview, networkId, onClick)
             LinkPreviewRenderState.Failed -> LinkPreviewFailed(onClick)
             LinkPreviewRenderState.Unavailable -> LinkPreviewUnavailable(onClick)
         }
@@ -157,6 +158,7 @@ fun LinkPreviewCard(
 @Composable
 private fun LinkPreviewContent(
     preview: LinkPreview,
+    networkId: Long?,
     onClick: () -> Unit,
 ) {
     Row(
@@ -169,7 +171,7 @@ private fun LinkPreviewContent(
                 .clickable { onClick() }
                 .padding(8.dp),
     ) {
-        LinkPreviewLeading(preview)
+        LinkPreviewLeading(preview, networkId)
         Column(modifier = Modifier.padding(vertical = 2.dp)) {
             preview.siteName?.let {
                 Text(
@@ -214,7 +216,10 @@ private fun LinkPreviewContent(
 }
 
 @Composable
-private fun LinkPreviewLeading(preview: LinkPreview) {
+private fun LinkPreviewLeading(
+    preview: LinkPreview,
+    networkId: Long?,
+) {
     when {
         preview.kind == LinkPreviewKind.FILE -> {
             Icon(
@@ -231,10 +236,10 @@ private fun LinkPreviewLeading(preview: LinkPreview) {
             val automatic = LocalAutomaticRemoteMedia.current
             val consent = LocalLinkMediaConsent.current.granted
             val request =
-                remember(context, preview.imageUrl, automatic, consent) {
+                remember(context, preview.imageUrl, networkId, automatic, consent) {
                     ImageRequest
                         .Builder(context)
-                        .remoteMediaData(preview.imageUrl, automatic || consent)
+                        .routedRemoteMediaData(preview.imageUrl, networkId, automatic || consent)
                         .build()
                 }
             Box(

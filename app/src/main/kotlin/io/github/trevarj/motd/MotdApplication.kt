@@ -12,6 +12,7 @@ import io.github.trevarj.motd.ai.AiExecutionCoordinator
 import io.github.trevarj.motd.ai.AiLabsRepository
 import io.github.trevarj.motd.appearance.LauncherIconController
 import io.github.trevarj.motd.audio.AudioCacheStore
+import io.github.trevarj.motd.audio.NetworkMediaHttp
 import io.github.trevarj.motd.avatar.LocalAvatarStore
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
@@ -63,6 +64,8 @@ class MotdApplication :
 
     @Inject lateinit var audioCacheStore: AudioCacheStore
 
+    @Inject lateinit var networkMediaHttp: NetworkMediaHttp
+
     @ApplicationScope
     @Inject
     lateinit var applicationScope: CoroutineScope
@@ -99,6 +102,7 @@ class MotdApplication :
     override fun newImageLoader(): ImageLoader =
         ImageLoader
             .Builder(this)
+            .okHttpClient { networkMediaHttp.client }
             .components {
                 // Coil's GIF and video modules provide their decoders but do not register them by
                 // themselves. Keep the platform decoder where available for animated formats.

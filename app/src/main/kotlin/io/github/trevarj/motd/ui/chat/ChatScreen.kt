@@ -204,7 +204,6 @@ import io.github.trevarj.motd.ui.components.ChannelWatchDialog
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
-import io.github.trevarj.motd.ui.components.LocalDirectRemoteMediaAllowed
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.typingText
@@ -309,7 +308,7 @@ fun ChatScreen(
     onOpenChannelInfo: (Long) -> Unit = {},
     onOpenSearch: (Long) -> Unit = {},
     onOpenSharePicker: () -> Unit = {},
-    onOpenImage: (String) -> Unit = {},
+    onOpenImage: (String, Long?) -> Unit = { _, _ -> },
     // /msg and /query resolve-or-create a QUERY buffer via the VM, then navigate to it.
     onOpenBuffer: (Long) -> Unit = {},
     onOpenAudioOrigin: (AudioPlaybackOrigin) -> Unit = {},
@@ -436,9 +435,6 @@ fun ChatScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
     val contentPreviews by viewModel.contentPreviews.collectAsStateWithLifecycle()
-    // The global Coil/ExoPlayer stacks fetch directly and cannot honor a per-network proxy, so
-    // media rendered through them needs the current global direct-media permission.
-    val directMediaAllowed = LocalDirectRemoteMediaAllowed.current(state.buffer?.networkId)
     val audioPlaybackState by viewModel.audioPlaybackState.collectAsStateWithLifecycle()
     val audioWaveforms by viewModel.audioWaveforms.collectAsStateWithLifecycle()
     val audioCacheStatuses by viewModel.audioCacheStatuses.collectAsStateWithLifecycle()
@@ -486,7 +482,7 @@ fun ChatScreen(
         showComposerEmoji = settings.showComposerEmoji,
         showComposerFormattingTools = settings.showComposerFormattingTools,
         visibleReplyPrefix = replyConfig.visibleChannelPrefix,
-        showImages = contentPreviews.showImages && directMediaAllowed,
+        showImages = contentPreviews.showImages,
         showLinkPreviews = contentPreviews.showLinkPreviews,
         reactionChips = reactionChipsForMessage,
         replyPreview = viewModel::replyPreview,
@@ -522,7 +518,7 @@ fun ChatScreen(
             }
         },
         onOpenSearch = onOpenSearch,
-        onOpenImage = onOpenImage,
+        onOpenImage = { onOpenImage(it, state.buffer?.networkId) },
         onInviteUser = {
             viewModel.ensureMembersObserved()
             inviteChannelOpen = true

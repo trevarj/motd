@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
+import coil.request.ImageRequest
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.CompletableDeferred
@@ -42,14 +43,18 @@ class ImageViewerGestureUiTest {
     @get:Rule val compose = createComposeRule()
 
     /** Coil decodes an in-memory bitmap without touching the network, so no fixture server. */
-    private fun bitmap(
+    private fun bitmapRequest(
         width: Int,
         height: Int,
-    ): Bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.RED) }
+    ): ImageRequest =
+        ImageRequest
+            .Builder(ApplicationProvider.getApplicationContext<Context>())
+            .data(Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.RED) })
+            .build()
 
     @Test fun zoomed_wide_image_cannot_pan_into_its_vertical_letterbox() {
         // Built once: a fresh bitmap per composition would restart the image request every frame.
-        val wideImage = bitmap(400, 100)
+        val wideImage = bitmapRequest(400, 100)
         lateinit var state: ZoomableImageState
         compose.setContent {
             state =
@@ -125,7 +130,7 @@ class ImageViewerGestureUiTest {
 
     @Test fun save_feedback_waits_for_completion_and_allows_retry() {
         val firstResult = CompletableDeferred<ImageSaveFeedback>()
-        val squareImage = bitmap(200, 200)
+        val squareImage = bitmapRequest(200, 200)
         var saveCalls = 0
         compose.setContent {
             MotdTheme(dynamicColor = false) {

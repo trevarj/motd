@@ -14,10 +14,11 @@ class DirectMediaNetworkIdsTest {
         val proxiedRoot = network(2, NetworkRole.BOUNCER_ROOT, obfsMode = ObfsMode.TOR)
         val proxiedChild = network(3, NetworkRole.BOUNCER_CHILD, parentId = 2)
         val orphanChild = network(4, NetworkRole.BOUNCER_CHILD, parentId = 99)
-        val networks = listOf(direct, proxiedRoot, proxiedChild, orphanChild)
+        val childWithoutParentId = network(5, NetworkRole.BOUNCER_CHILD)
+        val networks = listOf(direct, proxiedRoot, proxiedChild, orphanChild, childWithoutParentId)
 
-        assertEquals(setOf(1L, 4L), directMediaAllowedNetworkIds(networks, false))
-        assertEquals(setOf(1L, 2L, 3L, 4L), directMediaAllowedNetworkIds(networks, true))
+        assertEquals(setOf(1L), directMediaAllowedNetworkIds(networks, false))
+        assertEquals(setOf(1L, 2L, 3L), directMediaAllowedNetworkIds(networks, true))
     }
 
     @Test

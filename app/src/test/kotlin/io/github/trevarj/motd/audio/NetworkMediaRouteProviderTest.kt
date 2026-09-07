@@ -4,13 +4,13 @@ import com.sun.net.httpserver.HttpServer
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Test
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.util.Base64
-import javax.net.ssl.HttpsURLConnection
+import java.util.concurrent.atomic.AtomicInteger
 
 class NetworkMediaRouteProviderTest {
     @Test
@@ -58,25 +58,33 @@ class NetworkMediaRouteProviderTest {
     }
 
     @Test
-    fun `route reuses an approved bouncer leaf pin only for the same filehost`() {
+    fun `a broken proxy cannot open a direct media connection`() {
+        val requests = AtomicInteger()
+        val server =
+            HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
+                createContext("/") { exchange ->
+                    requests.incrementAndGet()
+                    exchange.sendResponseHeaders(204, -1)
+                    exchange.close()
+                }
+                start()
+            }
         val route =
             NetworkMediaRoute(
                 networkId = 1L,
                 endpoint = network(),
                 proxy = null,
-                proxyError = null,
-                authorizationHeader = null,
-                endpointPinnedSha256 = "00".repeat(32),
+                proxyError = "SOCKS unavailable",
+                authorizationHeader = "Basic private",
             )
-        val defaultVerifier = HttpsURLConnection.getDefaultHostnameVerifier()
-
-        val bouncerFileHost = route.open("https://irc.example:7443/uploads") as HttpsURLConnection
-        val unrelatedFileHost = route.open("https://uploads.example:7443/uploads") as HttpsURLConnection
-
-        assertNotSame(defaultVerifier, bouncerFileHost.hostnameVerifier)
-        assertSame(defaultVerifier, unrelatedFileHost.hostnameVerifier)
-        bouncerFileHost.disconnect()
-        unrelatedFileHost.disconnect()
+        try {
+            assertThrows(IOException::class.java) {
+                route.open("http://127.0.0.1:${server.address.port}/").apply { responseCode }.disconnect()
+            }
+            assertEquals(0, requests.get())
+        } finally {
+            server.stop(0)
+        }
     }
 
     private fun network() =

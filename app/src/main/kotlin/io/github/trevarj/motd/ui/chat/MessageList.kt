@@ -1496,15 +1496,15 @@ private fun MessageRow(
     val linkUrl = visibleUrls?.linkUrl
     val immediateAudio = visibleUrls?.audio.orEmpty()
     val automaticRemoteMedia = LocalAutomaticRemoteMedia.current
-    var manualInlineMediaConsent by rememberSaveable(msg.id, imageUrl) { mutableStateOf(false) }
-    var manualLinkMediaConsent by rememberSaveable(msg.id, linkUrl) { mutableStateOf(false) }
+    var manualInlineMediaConsent by rememberSaveable(msg.id, imageUrl, networkId) { mutableStateOf(false) }
+    var manualLinkMediaConsent by rememberSaveable(msg.id, linkUrl, networkId) { mutableStateOf(false) }
     val linkMediaAllowed = automaticRemoteMedia || manualLinkMediaConsent
     val inlineMediaConsent =
-        remember(msg.id, imageUrl, manualInlineMediaConsent) {
+        remember(msg.id, imageUrl, networkId, manualInlineMediaConsent) {
             RemoteMediaConsent(manualInlineMediaConsent) { manualInlineMediaConsent = true }
         }
     val linkMediaConsent =
-        remember(msg.id, linkUrl, manualLinkMediaConsent) {
+        remember(msg.id, linkUrl, networkId, manualLinkMediaConsent) {
             RemoteMediaConsent(manualLinkMediaConsent) { manualLinkMediaConsent = true }
         }
     val headCandidates =

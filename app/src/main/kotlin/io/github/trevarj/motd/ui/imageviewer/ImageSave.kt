@@ -6,25 +6,26 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import androidx.annotation.RequiresApi
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLConnection
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.CoroutineContext
 
 internal const val IMAGE_SAVE_MAX_BYTES = 25L * 1024L * 1024L
-private const val IMAGE_SAVE_TIMEOUT_MS = 15_000
 private const val IMAGE_SAVE_BUFFER_BYTES = 8 * 1024
 
-/** A URLConnection-shaped response boundary that makes save failures testable without Android. */
+/** A streaming response boundary that makes save failures testable without Android. */
 internal interface ImageSaveConnection {
-    val responseCode: Int?
+    val responseCode: Int
     val contentLength: Long
     val contentType: String?
 
@@ -83,7 +84,15 @@ internal class ImageSaveOperation<Location : Any>(
         require(maxBytes > 0) { "maxBytes must be positive" }
     }
 
-    suspend fun save(url: String): ImageSaveResult {
+    suspend fun save(url: String): ImageSaveResult =
+        suspendCancellableCoroutine { continuation ->
+            continuation.resumeWith(runCatching { save(url, continuation) })
+        }
+
+    private fun save(
+        url: String,
+        continuation: CancellableContinuation<ImageSaveResult>,
+    ): ImageSaveResult {
         var connection: ImageSaveConnection? = null
         var location: Location? = null
         var published = false
@@ -93,12 +102,13 @@ internal class ImageSaveOperation<Location : Any>(
             if (disconnected.compareAndSet(false, true)) connection?.disconnect()
         }
 
-        var cancellationHandle: kotlinx.coroutines.DisposableHandle? = null
         try {
+            continuation.context.ensureActive()
             val response = connectionFactory.open(url)
             connection = response
-            cancellationHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { disconnectOnce() }
-            if (response.responseCode?.let { it !in HttpURLConnection.HTTP_OK..299 } == true) {
+            continuation.invokeOnCancellation { disconnectOnce() }
+            continuation.context.ensureActive()
+            if (response.responseCode !in 200..299) {
                 return ImageSaveResult.Failed
             }
             if (response.contentLength > maxBytes) return ImageSaveResult.Failed
@@ -110,9 +120,9 @@ internal class ImageSaveOperation<Location : Any>(
             location = inserted
             val output = store.openOutputStream(inserted) ?: return ImageSaveResult.Failed
             output.use { destination ->
-                response.openInputStream().use { input -> copyBounded(input, destination) }
+                response.openInputStream().use { input -> copyBounded(input, destination, continuation.context) }
             }
-            currentCoroutineContext().ensureActive()
+            continuation.context.ensureActive()
             if (!store.publish(inserted)) return ImageSaveResult.Failed
             published = true
             return ImageSaveResult.Saved
@@ -121,20 +131,20 @@ internal class ImageSaveOperation<Location : Any>(
         } catch (_: Exception) {
             return ImageSaveResult.Failed
         } finally {
-            cancellationHandle?.dispose()
             if (!published) location?.let { inserted -> runCatching { store.delete(inserted) } }
             disconnectOnce()
         }
     }
 
-    private suspend fun copyBounded(
+    private fun copyBounded(
         input: InputStream,
         output: OutputStream,
+        context: CoroutineContext,
     ) {
         val buffer = ByteArray(IMAGE_SAVE_BUFFER_BYTES)
         var written = 0L
         while (true) {
-            currentCoroutineContext().ensureActive()
+            context.ensureActive()
             val count = input.read(buffer)
             if (count < 0) return
             if (written + count > maxBytes) throw ImageSaveTooLargeException()
@@ -198,31 +208,37 @@ private val imageMimeExtensions =
         "image/heif-sequence" to "heif",
     )
 
-internal class UrlConnectionImageSaveConnectionFactory : ImageSaveConnectionFactory {
-    override fun open(url: String): ImageSaveConnection =
-        UrlConnectionImageSaveConnection(
-            URL(url).openConnection().apply {
-                connectTimeout = IMAGE_SAVE_TIMEOUT_MS
-                readTimeout = IMAGE_SAVE_TIMEOUT_MS
-                useCaches = false
-            },
-        )
+internal class OkHttpImageSaveConnectionFactory(
+    private val calls: Call.Factory,
+) : ImageSaveConnectionFactory {
+    override fun open(url: String): ImageSaveConnection = OkHttpImageSaveConnection(calls.newCall(Request.Builder().url(url).build()))
 }
 
-private class UrlConnectionImageSaveConnection(
-    private val connection: URLConnection,
+private class OkHttpImageSaveConnection(
+    private val call: Call,
 ) : ImageSaveConnection {
-    override val responseCode: Int?
-        get() = (connection as? HttpURLConnection)?.responseCode
-    override val contentLength: Long get() = connection.contentLengthLong
-    override val contentType: String? get() = connection.contentType
+    @Volatile private var response: Response? = null
 
-    override fun header(name: String): String? = connection.getHeaderField(name)
+    private fun response(): Response =
+        response ?: call.execute().also {
+            response = it
+            if (call.isCanceled()) {
+                it.close()
+                throw IOException("Image save cancelled")
+            }
+        }
 
-    override fun openInputStream(): InputStream = connection.getInputStream()
+    override val responseCode: Int get() = response().code
+    override val contentLength: Long get() = response().body.contentLength()
+    override val contentType: String? get() = response().header("Content-Type")
+
+    override fun header(name: String): String? = response().header(name)
+
+    override fun openInputStream(): InputStream = response().body.byteStream()
 
     override fun disconnect() {
-        (connection as? HttpURLConnection)?.disconnect()
+        call.cancel()
+        response?.close()
     }
 }
 

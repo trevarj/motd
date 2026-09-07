@@ -9,7 +9,9 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.service.LocalSocksProvider
 import io.github.trevarj.motd.service.PinningTrustManager
 import io.github.trevarj.motd.service.resolveTransportProxy
+import io.github.trevarj.motd.service.sameTlsHost
 import kotlinx.coroutines.flow.first
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.Proxy
 import java.net.URL
@@ -33,6 +35,7 @@ data class NetworkMediaRoute(
         url: String,
         authenticated: Boolean = false,
     ): HttpURLConnection {
+        proxyError?.let { throw IOException(it) }
         val parsedUrl = URL(url)
         val connection =
             if (proxy != null) {
@@ -40,13 +43,8 @@ data class NetworkMediaRoute(
             } else {
                 parsedUrl.openConnection()
             } as HttpURLConnection
-        if (
-            connection is HttpsURLConnection &&
-            endpointPinnedSha256 != null &&
-            parsedUrl.host.equals(endpoint.host, ignoreCase = true)
-        ) {
-            val port = parsedUrl.port.takeIf { it >= 0 } ?: parsedUrl.defaultPort
-            val trustManager = PinningTrustManager(parsedUrl.host, port, endpointPinnedSha256)
+        val trustManager = pinningTrustManager(parsedUrl)
+        if (connection is HttpsURLConnection && trustManager != null) {
             connection.sslSocketFactory =
                 SSLContext
                     .getInstance("TLS")
@@ -61,6 +59,14 @@ data class NetworkMediaRoute(
         return connection
     }
 
+    /** Only this endpoint's approved leaf may bypass CA/hostname checks, including its filehost port. */
+    internal fun pinningTrustManager(url: URL): PinningTrustManager? {
+        val pin = endpointPinnedSha256 ?: return null
+        if (!url.protocol.equals("https", ignoreCase = true) || !sameTlsHost(endpoint.host, url.host)) return null
+        val port = url.port.takeIf { it >= 0 } ?: url.defaultPort
+        return PinningTrustManager(url.host, port, pin)
+    }
+
     override fun close() = release()
 }
 
@@ -73,10 +79,9 @@ fun interface MediaRouteResolver {
 }
 
 /**
- * Whether the app-global fetch stacks (the process Coil loader, ExoPlayer) may load network content
- * for one network. Those stacks cannot be routed per-network, so an obfuscated transport answers
- * false by default and the UI withholds that content instead of fetching it directly — unless the
- * user opts into direct media on proxied networks, trading tunnel privacy for previews that load.
+ * Whether URL-only avatar/network-icon requests may use the device connection for one network.
+ * Those legacy requests have no route tag and are withheld on obfuscated networks unless the user
+ * explicitly opts in. Tagged chat media always follows its owning network, regardless of this policy.
  */
 fun interface DirectMediaPolicy {
     suspend fun directMediaAllowed(networkId: Long): Boolean
@@ -103,7 +108,7 @@ class NetworkMediaRouteProvider
             val row = db.networkDao().byId(networkId) ?: return null
             val endpoint =
                 if (row.role == NetworkRole.BOUNCER_CHILD) {
-                    row.parentId?.let { db.networkDao().byId(it) } ?: row
+                    row.parentId?.let { db.networkDao().byId(it) } ?: return null
                 } else {
                     row
                 }
@@ -143,13 +148,12 @@ class NetworkMediaRouteProvider
             // the bouncer root, exactly as routeForNetwork does above.
             val endpoint =
                 if (row.role == NetworkRole.BOUNCER_CHILD) {
-                    row.parentId?.let { db.networkDao().byId(it) } ?: row
+                    row.parentId?.let { db.networkDao().byId(it) } ?: return false
                 } else {
                     row
                 }
             if (endpoint.obfsMode == null || endpoint.obfsMode == ObfsMode.NONE) return true
-            // Obfuscated transport: the global stacks would fetch outside the tunnel. Permit that only
-            // when the user has explicitly opted in, accepting that the device IP reaches the media host.
+            // URL-only requests would fetch outside the tunnel. Permit them only after explicit opt-in.
             return contentPreviewPrefs.config.first().directMediaOnProxiedNetworks
         }
     }
@@ -165,7 +169,7 @@ internal fun directMediaAllowedNetworkIds(
         .filter { row ->
             val endpoint =
                 if (row.role == NetworkRole.BOUNCER_CHILD) {
-                    row.parentId?.let(byId::get) ?: row
+                    row.parentId?.let(byId::get) ?: return@filter false
                 } else {
                     row
                 }

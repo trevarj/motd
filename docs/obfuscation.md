@@ -187,21 +187,35 @@ Tor hidden-service address for soju avoids exposing the bouncer's public IP.
 
 ## Media previews
 
-On embedded VLESS, SOCKS5, and Tor networks, link metadata uses the network's
-proxy by default. The restrictive Xray example above blocks arbitrary web
-destinations: a working IRC connection does not imply a linked media host is
-reachable. Allow the intended host and port, including redirect destinations,
-before the blocking rule if you want previews through that tunnel.
+Chat images, link thumbnails, video posters and playback, fullscreen images,
+and image **Save** use the owning IRC network's route, including embedded
+VLESS, SOCKS5, or Tor. Missing networks and broken routes fail closed; they
+never fall back to a direct connection. Media GET/HEAD requests are anonymous
+and do not send SASL credentials.
 
-Inline images, videos, and link thumbnails use app-global loaders that cannot
-use a per-network proxy. They stay hidden unless **Settings → Chat → Load
-previews over direct connection** is enabled. This explicitly sends preview
-requests outside the tunnel, exposing the device's IP address to media hosts;
-it does not change the route for IRC, uploads, or audio-file downloads.
+The restrictive Xray example above blocks arbitrary web destinations: a
+working IRC connection does not imply a media host is reachable. Allow the
+URL's exact host and port, including redirect destinations, before the
+blocking rule. Use the public URL host and port (for example,
+`irc.trevs.site:9443`), not an internal reverse-proxy backend port.
+Ergo filehost GET/HEAD viewing is public:
+it needs no direct bypass and grants no permission to POST uploads or send
+credentials to an unrelated host. Upload credential scope remains unchanged.
 
-When automatic loading is disabled, the download icon requests that preview;
-it does not grant permission to bypass a proxy. Failed link previews can be
-retried after the proxy or its destination rules are repaired.
+**Settings → Chat → Load previews over direct connection** still opts URL-only
+avatars and network icons into direct loading on proxied networks. It also
+allows link metadata and extensionless-audio HEAD discovery to use a direct
+connection instead of the network route. These direct requests expose the
+device's IP address to those hosts. The setting does not change routed chat
+media, image Save, IRC, or uploads.
+
+Image/link-preview visibility and automatic-loading settings for metered and
+unmetered connections still apply. When automatic loading is disabled, the
+download icon requests that preview; it does not grant permission to bypass a
+proxy. Failed link previews can be retried after the route is repaired.
+Explicitly opening a link in a browser or another app does not give that app
+motd's embedded proxy. Audio **Save** uses Android's DownloadManager, not the
+routed image-save path.
 
 ## Troubleshooting
 

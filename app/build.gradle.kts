@@ -492,6 +492,7 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
     implementation(libs.media3.datasource)
+    implementation(libs.media3.datasource.okhttp)
     implementation(libs.media3.ui)
     // Explicit for the IRC-over-WebSocket transport; already present transitively
     // via Coil, pinned to the same resolved version in libs.versions.toml so nothing new resolves.

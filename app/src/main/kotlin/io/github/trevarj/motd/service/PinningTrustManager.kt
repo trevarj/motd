@@ -1,12 +1,36 @@
 package io.github.trevarj.motd.service
 
 import android.annotation.SuppressLint
+import android.net.http.X509TrustManagerExtensions
+import okhttp3.HttpUrl
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
+
+/** Match the HTTP client's hostname syntax (including IPv6 forms) without resolving either host. */
+internal fun sameTlsHost(
+    expected: String,
+    actual: String,
+): Boolean =
+    try {
+        HttpUrl
+            .Builder()
+            .scheme("https")
+            .host(expected)
+            .build()
+            .host ==
+            HttpUrl
+                .Builder()
+                .scheme("https")
+                .host(actual)
+                .build()
+                .host
+    } catch (_: IllegalArgumentException) {
+        false
+    }
 
 /**
  * Handshake failure carrying the presented leaf-cert details so the connection layer can surface a
@@ -101,6 +125,28 @@ class PinningTrustManager(
             delegate.checkServerTrusted(chain, authType)
         } catch (_: CertificateException) {
             throw untrusted(leaf, presented, changed = false)
+        }
+    }
+
+    /**
+     * Android's X509TrustManagerExtensions uses this overload to clean OkHttp's actual handshake
+     * chain. An approved leaf is already the trust anchor; do not revalidate it against system CAs.
+     */
+    fun checkServerTrusted(
+        chain: Array<out X509Certificate>,
+        authType: String,
+        hostname: String,
+    ): List<X509Certificate> {
+        if (!sameTlsHost(host, hostname)) throw CertificateException("TLS pin belongs to another host")
+        if (pinnedSha256 != null) {
+            checkServerTrusted(chain, authType)
+            return listOf(chain.first())
+        }
+        return try {
+            X509TrustManagerExtensions(delegate).checkServerTrusted(chain, authType, hostname)
+        } catch (_: CertificateException) {
+            val leaf = chain.firstOrNull() ?: throw CertificateException("empty certificate chain")
+            throw untrusted(leaf, sha256Hex(leaf), changed = false)
         }
     }
 

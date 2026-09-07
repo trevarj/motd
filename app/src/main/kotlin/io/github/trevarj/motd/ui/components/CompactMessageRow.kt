@@ -58,6 +58,7 @@ private const val COMPACT_ROW_TINT_ALPHA = 0.10f
 @Composable
 internal fun CompactMessageRow(
     sender: String,
+    networkId: Long?,
     text: String,
     formattedTime: String,
     isSelf: Boolean,
@@ -195,6 +196,7 @@ internal fun CompactMessageRow(
         imageUrl?.let { url ->
             InlineMediaPreview(
                 url = url,
+                networkId = networkId,
                 onImageClick = onImageClick,
                 onLongPress = onLongPress,
                 modifier =
@@ -209,7 +211,7 @@ internal fun CompactMessageRow(
 
         if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
             Box(Modifier.padding(top = 2.dp)) {
-                LinkPreviewCard(preview = linkPreview, loading = linkPreviewLoading, onClick = onLinkPreviewClick)
+                LinkPreviewCard(preview = linkPreview, networkId = networkId, loading = linkPreviewLoading, onClick = onLinkPreviewClick)
             }
         }
 

@@ -26,10 +26,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * The app-global Coil/ExoPlayer stacks cannot honor a per-network proxy, so the policy denies
- * direct media for every obfuscated transport and for unknown networks (fail closed) — unless the
- * user opts into direct media on proxied networks, which lifts the obfuscated-transport denial but
- * never the unknown-network one.
+ * URL-only avatars/icons have no per-network route tag, so direct fetching is denied on obfuscated
+ * transports unless the user opts in. Unknown networks or physical bouncer endpoints always fail
+ * closed, including routed media and preview requests.
  */
 @RunWith(RobolectricTestRunner::class)
 class DirectMediaPolicyTest {
@@ -166,6 +165,24 @@ class DirectMediaPolicyTest {
         runTest {
             prefs.state.value = ContentPreviewConfig(directMediaOnProxiedNetworks = true)
             assertFalse(provider.directMediaAllowed(9_999L))
+        }
+
+    @Test
+    fun bouncer_children_without_a_physical_endpoint_fail_closed_even_with_opt_in() =
+        runTest {
+            val parent = insert(obfsMode = ObfsMode.TOR, role = NetworkRole.BOUNCER_ROOT)
+            val orphan = insert(obfsMode = null, role = NetworkRole.BOUNCER_CHILD, parentId = parent)
+            val withoutParentId = insert(obfsMode = null, role = NetworkRole.BOUNCER_CHILD)
+            db.networkDao().deleteNetworkRows(listOf(parent))
+
+            for (optIn in listOf(false, true)) {
+                prefs.state.value = prefs.state.value.copy(directMediaOnProxiedNetworks = optIn)
+                for (child in listOf(orphan, withoutParentId)) {
+                    assertNull(provider.routeForNetwork(child))
+                    assertNull(provider.routeForPreview(child))
+                    assertFalse(provider.directMediaAllowed(child))
+                }
+            }
         }
 
     private suspend fun insert(

@@ -319,6 +319,7 @@ fun MessageBubble(
         if (spacing.compact || spacing.twoLine) {
             ActionMessageRow(
                 sender = sender,
+                networkId = networkId,
                 text = text,
                 formattedTime = displayedTime,
                 isSelf = isSelf,
@@ -389,6 +390,7 @@ fun MessageBubble(
     if (spacing.compact) {
         CompactMessageRow(
             sender = sender,
+            networkId = networkId,
             text = text,
             formattedTime = displayedTime,
             isSelf = isSelf,
@@ -575,6 +577,7 @@ fun MessageBubble(
             imageUrl?.let { url ->
                 InlineMediaPreview(
                     url = url,
+                    networkId = networkId,
                     onImageClick = onImageClick,
                     onLongPress = onLongPress,
                     // Reserve a 4:3 box until the bitmap lands so rows don't jump the reversed-list
@@ -630,6 +633,7 @@ fun MessageBubble(
                 Box(Modifier.padding(top = 4.dp)) {
                     LinkPreviewCard(
                         preview = linkPreview,
+                        networkId = networkId,
                         loading = linkPreviewLoading,
                         onClick = onLinkPreviewClick,
                     )
@@ -869,6 +873,7 @@ private fun ComfortableActionBubble(
             imageUrl?.let { url ->
                 InlineMediaPreview(
                     url = url,
+                    networkId = networkId,
                     onImageClick = onImageClick,
                     onLongPress = onLongPress,
                     modifier =
@@ -885,6 +890,7 @@ private fun ComfortableActionBubble(
                 Box(Modifier.padding(top = 4.dp)) {
                     LinkPreviewCard(
                         preview = linkPreview,
+                        networkId = networkId,
                         loading = linkPreviewLoading,
                         onClick = onLinkPreviewClick,
                     )
@@ -904,6 +910,7 @@ private fun ComfortableActionBubble(
 @Composable
 private fun ActionMessageRow(
     sender: String,
+    networkId: Long?,
     text: String,
     formattedTime: String,
     isSelf: Boolean,
@@ -1063,6 +1070,7 @@ private fun ActionMessageRow(
             imageUrl?.let { url ->
                 InlineMediaPreview(
                     url = url,
+                    networkId = networkId,
                     onImageClick = onImageClick,
                     onLongPress = onLongPress,
                     modifier =
@@ -1079,6 +1087,7 @@ private fun ActionMessageRow(
                 Box(Modifier.padding(top = 4.dp)) {
                     LinkPreviewCard(
                         preview = linkPreview,
+                        networkId = networkId,
                         loading = linkPreviewLoading,
                         onClick = onLinkPreviewClick,
                     )
@@ -1359,6 +1368,7 @@ private fun TwoLineMessageRow(
             imageUrl?.let { url ->
                 InlineMediaPreview(
                     url = url,
+                    networkId = networkId,
                     onImageClick = onImageClick,
                     onLongPress = onLongPress,
                     modifier =
@@ -1405,6 +1415,7 @@ private fun TwoLineMessageRow(
                 Box(Modifier.padding(top = 4.dp)) {
                     LinkPreviewCard(
                         preview = linkPreview,
+                        networkId = networkId,
                         loading = linkPreviewLoading,
                         onClick = onLinkPreviewClick,
                     )

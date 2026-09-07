@@ -78,6 +78,23 @@ class PinningTrustManagerTest {
     }
 
     @Test
+    fun `host-aware pin validation accepts equivalent IPv6 forms but rejects another address`() {
+        val configuredHost = "[2001:0DB8:0000:0000:0000:0000:0000:0001]"
+        val trustManager = PinningTrustManager(configuredHost, port, leafSha256)
+
+        assertEquals(listOf(leaf), trustManager.checkServerTrusted(arrayOf(leaf), "RSA", "2001:db8::1"))
+        assertThrows(CertificateException::class.java) {
+            trustManager.checkServerTrusted(arrayOf(leaf), "RSA", "2001:db8::2")
+        }
+        val wrongPin = PinningTrustManager(configuredHost, port, "0".repeat(64))
+        val rejected =
+            assertThrows(CertUntrustedException::class.java) {
+                wrongPin.checkServerTrusted(arrayOf(leaf), "RSA", "2001:db8::1")
+            }
+        assertTrue(rejected.changed)
+    }
+
+    @Test
     fun `pinned leaf differing from the presented cert throws changed and notifies once`() {
         val pinned = "0".repeat(64)
 

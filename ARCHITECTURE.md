@@ -45,8 +45,17 @@ flowchart TD
 - TLS policy, Android KeyChain integration, proxy selection, and embedded
   obfuscation are injected at the `:app` boundary so `:irc` stays pure JVM.
 - IRC TCP/TLS uses okio over `Socket`/`SSLSocket`. App-side WebSocket transport
-  uses the pinned OkHttp dependency. HTTP previews and attachment uploads use
-  their existing `HttpURLConnection`-based streaming implementations.
+  uses the pinned OkHttp dependency. Link metadata and attachment uploads retain
+  their `HttpURLConnection`-based streaming implementations.
+- Tagged chat media and image Save use `NetworkMediaHttp` with
+  `routeForNetwork`, native OkHttp/Coil caching scoped by network, and Media3's
+  OkHttp adapter for streaming/range requests. The route lease lasts through
+  response consumption and is released on completion, close, or cancellation.
+  Missing/orphaned networks and broken routes fail closed; GET/HEAD requests
+  and redirects carry no credentials. HTTPS retains platform validation or
+  the route's destination-scoped certificate pin, never blanket trust.
+  URL-only avatars/icons retain their direct-media opt-in; link metadata and
+  extensionless-audio HEAD discovery use the separate `routeForPreview` policy.
 - The app ships as a single Google-free build with no product flavors; push
   delivery is UnifiedPush only. The E2E build is x86_64-compatible and
   intentionally omits the arm64-only libbox JNI.

@@ -31,7 +31,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -50,6 +54,7 @@ internal enum class RemoteMediaLoadState {
 @Composable
 internal fun InlineMediaPreview(
     url: String,
+    networkId: Long?,
     modifier: Modifier,
     onImageClick: (String) -> Unit,
     onLongPress: () -> Unit,
@@ -58,25 +63,27 @@ internal fun InlineMediaPreview(
     val consent = LocalInlineMediaConsent.current
     val networkAllowed = automatic || consent.granted
     if (isVideoUrl(url)) {
-        InlineVideoPreview(url, networkAllowed, consent.grant, modifier, onLongPress)
+        InlineVideoPreview(url, networkId, networkAllowed, consent.grant, modifier, onLongPress)
     } else {
-        InlineImagePreview(url, networkAllowed, consent.grant, modifier, onImageClick, onLongPress)
+        InlineImagePreview(url, networkId, networkAllowed, consent.grant, modifier, onImageClick, onLongPress)
     }
 }
 
 @Composable
 private fun InlineImagePreview(
     url: String,
+    networkId: Long?,
     networkAllowed: Boolean,
     requestNetwork: () -> Unit,
     modifier: Modifier,
     onImageClick: (String) -> Unit,
     onLongPress: () -> Unit,
 ) {
-    var state by remember(url) { mutableStateOf(RemoteMediaLoadState.AWAITING) }
-    var retry by rememberSaveable(url) { mutableIntStateOf(0) }
+    var state by remember(url, networkId) { mutableStateOf(RemoteMediaLoadState.AWAITING) }
+    var retry by rememberSaveable(url, networkId) { mutableIntStateOf(0) }
     RemoteMediaImage(
         url = url,
+        networkId = networkId,
         videoFrame = false,
         networkAllowed = networkAllowed,
         retry = retry,
@@ -97,33 +104,74 @@ private fun InlineImagePreview(
 @Composable
 private fun InlineVideoPreview(
     url: String,
+    networkId: Long?,
     networkAllowed: Boolean,
     requestNetwork: () -> Unit,
     modifier: Modifier,
     onLongPress: () -> Unit,
 ) {
-    var playing by rememberSaveable(url) { mutableStateOf(false) }
+    var playing by rememberSaveable(url, networkId) { mutableStateOf(false) }
     if (playing) {
         val context = LocalContext.current
+        val http = LocalNetworkMediaHttp.current
+        var playbackRetry by remember(url, networkId) { mutableIntStateOf(0) }
         val player =
-            remember(url) {
-                ExoPlayer.Builder(context).build().apply {
-                    setMediaItem(MediaItem.fromUri(url))
-                    prepare()
-                    play()
+            remember(context, url, networkId, http, playbackRetry) {
+                http?.let {
+                    ExoPlayer
+                        .Builder(context)
+                        .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(it.callFactory(networkId))))
+                        .build()
                 }
             }
-        DisposableEffect(player) { onDispose(player::release) }
-        AndroidView(
-            factory = { PlayerView(it).apply { this.player = player } },
-            update = { it.player = player },
-            modifier = modifier.testTag("inline_video_preview"),
-        )
+        var playbackFailed by remember(player) { mutableStateOf(false) }
+        if (player != null) {
+            DisposableEffect(player) {
+                val listener =
+                    object : Player.Listener {
+                        override fun onPlayerError(error: PlaybackException) {
+                            playbackFailed = true
+                        }
+                    }
+                player.addListener(listener)
+                player.setMediaItem(MediaItem.fromUri(url))
+                player.prepare()
+                player.play()
+                onDispose {
+                    player.removeListener(listener)
+                    player.release()
+                }
+            }
+        }
+        if (player == null || playbackFailed) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier =
+                    modifier
+                        .testTag("inline_video_failed")
+                        .remoteMediaClicks(
+                            state = RemoteMediaLoadState.FAILED,
+                            loadedLabel = stringResource(R.string.chat_video_play),
+                            onLoaded = {},
+                            requestNetwork = requestNetwork,
+                            retry = { playbackRetry++ },
+                            onLongPress = onLongPress,
+                        ),
+            ) {
+                MediaStatus(stringResource(R.string.chat_remote_media_failed))
+            }
+        } else {
+            AndroidView(
+                factory = { PlayerView(it).apply { this.player = player } },
+                update = { it.player = player },
+                modifier = modifier.testTag("inline_video_preview"),
+            )
+        }
         return
     }
 
-    var state by remember(url) { mutableStateOf(RemoteMediaLoadState.AWAITING) }
-    var retry by rememberSaveable(url) { mutableIntStateOf(0) }
+    var state by remember(url, networkId) { mutableStateOf(RemoteMediaLoadState.AWAITING) }
+    var retry by rememberSaveable(url, networkId) { mutableIntStateOf(0) }
     Box(
         contentAlignment = Alignment.Center,
         modifier =
@@ -132,7 +180,10 @@ private fun InlineVideoPreview(
                 .remoteMediaClicks(
                     state = state,
                     loadedLabel = stringResource(R.string.chat_video_play),
-                    onLoaded = { playing = true },
+                    onLoaded = {
+                        requestNetwork()
+                        playing = true
+                    },
                     requestNetwork = requestNetwork,
                     retry = { retry++ },
                     onLongPress = onLongPress,
@@ -140,6 +191,7 @@ private fun InlineVideoPreview(
     ) {
         RemoteMediaImage(
             url = url,
+            networkId = networkId,
             videoFrame = true,
             networkAllowed = networkAllowed,
             retry = retry,
@@ -161,6 +213,7 @@ private fun InlineVideoPreview(
 @Composable
 private fun RemoteMediaImage(
     url: String,
+    networkId: Long?,
     videoFrame: Boolean,
     networkAllowed: Boolean,
     retry: Int,
@@ -170,13 +223,12 @@ private fun RemoteMediaImage(
 ) {
     val context = LocalContext.current
     val request =
-        remember(context, url, videoFrame, networkAllowed, retry) {
+        remember(context, url, networkId, videoFrame, networkAllowed, retry) {
             ImageRequest
                 .Builder(context)
-                .remoteMediaData(url, networkAllowed)
+                .routedRemoteMediaData(url, networkId, networkAllowed, retry)
                 .apply {
                     if (videoFrame) videoFrameMillis(0)
-                    if (retry > 0) memoryCacheKey("$url#motd-retry=$retry")
                 }.build()
         }
     Box(modifier = modifier.testTag("inline_media_${state.name.lowercase()}"), contentAlignment = Alignment.Center) {

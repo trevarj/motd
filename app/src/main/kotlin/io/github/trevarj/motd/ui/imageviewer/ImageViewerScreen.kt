@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import coil.imageLoader
 import coil.request.ImageRequest
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.audio.networkMediaData
+import io.github.trevarj.motd.ui.components.LocalNetworkMediaHttp
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +66,7 @@ import me.saket.telephoto.zoomable.coil.ZoomableAsyncImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.rememberZoomableState
 import me.saket.telephoto.zoomable.spatial.CoordinateSpace
+import okhttp3.Call
 
 /** Ceiling for pinch/double-tap zoom, as a factor of the image's original size. */
 internal const val MAX_IMAGE_SCALE = 5f
@@ -134,22 +137,32 @@ internal data class ImageViewerTransform(
 @Composable
 fun ImageViewerScreen(
     url: String,
+    networkId: Long? = null,
     onBack: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val mediaHttp = LocalNetworkMediaHttp.current
+    val request =
+        remember(context, url, networkId, mediaHttp) {
+            ImageRequest
+                .Builder(context)
+                .apply {
+                    if (mediaHttp != null) networkMediaData(url, networkId)
+                }.build()
+        }
 
     ImageViewerContent(
-        model = url,
+        model = request,
         onBack = onBack,
         onShare = { shareImage(context, url) },
-        onSave = { saveImage(context, url) },
+        onSave = { saveImage(context, url, mediaHttp?.callFactory(networkId)) },
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ImageViewerContent(
-    model: Any?,
+    model: ImageRequest,
     onBack: () -> Unit,
     onShare: () -> Unit,
     onSave: suspend () -> ImageSaveFeedback,
@@ -168,9 +181,8 @@ internal fun ImageViewerContent(
     var loadFailed by remember(context, model) { mutableStateOf(false) }
     val request =
         remember(context, model) {
-            ImageRequest
-                .Builder(context)
-                .data(model)
+            model
+                .newBuilder(context)
                 .crossfade(true)
                 .listener(
                     onError = { _, _ -> loadFailed = true },
@@ -362,11 +374,13 @@ private fun shareImage(
 private suspend fun saveImage(
     context: Context,
     url: String,
+    callFactory: Call.Factory?,
 ): ImageSaveFeedback {
+    if (callFactory == null) return ImageSaveFeedback.FAILED
     val result =
         withContext(Dispatchers.IO) {
             ImageSaveOperation(
-                connectionFactory = UrlConnectionImageSaveConnectionFactory(),
+                connectionFactory = OkHttpImageSaveConnectionFactory(callFactory),
                 store = MediaStoreImageSaveStore(context.contentResolver),
             ).save(url)
         }

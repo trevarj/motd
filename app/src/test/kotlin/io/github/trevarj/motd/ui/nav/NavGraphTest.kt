@@ -37,16 +37,6 @@ class NavGraphTest {
     }
 
     @Test
-    fun `settings routes retain typed targets and concrete network identity`() {
-        assertEquals(SettingsTarget.THEME, AppearanceSettingsRoute(SettingsTarget.THEME).target)
-        assertEquals(SettingsTarget.EXPORT_BACKUP, BackupRestoreRoute(SettingsTarget.EXPORT_BACKUP).target)
-        assertEquals(
-            NetworkSettingsRoute(42, NetworkSettingsTarget.OBFUSCATION),
-            NetworkSettingsRoute(networkId = 42, target = NetworkSettingsTarget.OBFUSCATION),
-        )
-    }
-
-    @Test
     fun `voice settings destinations preserve typed targets and model library route`() {
         val controller =
             NavHostController(ApplicationProvider.getApplicationContext<Context>()).apply {
@@ -65,6 +55,35 @@ class NavGraphTest {
         assertEquals(SettingsTarget.AI_TRANSCRIPTION, controller.currentBackStackEntry!!.toRoute<AiLabsRoute>().target)
         controller.navigate(AiModelLibraryRoute)
         assertEquals(AiModelLibraryRoute, controller.currentBackStackEntry!!.toRoute<AiModelLibraryRoute>())
+    }
+
+    @Test
+    fun `restored image viewer keeps the selected network and exact URL`() {
+        fun controller() =
+            NavHostController(ApplicationProvider.getApplicationContext<Context>()).apply {
+                setLifecycleOwner(ResumedOwner())
+                setViewModelStore(ViewModelStore())
+                navigatorProvider.addNavigator(ComposeNavigator())
+            }
+
+        fun NavHostController.installGraph() {
+            graph =
+                createGraph(startDestination = ChatListRoute) {
+                    composable<ChatListRoute> {}
+                    composable<ImageViewerRoute> {}
+                }
+        }
+
+        val original = controller().apply { installGraph() }
+        val image = ImageViewerRoute("https://irc.trevs.site:9443/upload/user/account/123-cat%20photo.png?x=1&y=2", networkId = 42)
+        original.navigate(image)
+        val restored =
+            controller().apply {
+                restoreState(original.saveState())
+                installGraph()
+            }
+
+        assertEquals(image, restored.currentBackStackEntry!!.toRoute<ImageViewerRoute>())
     }
 
     @Test

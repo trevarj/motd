@@ -27,6 +27,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
+import io.github.trevarj.motd.audio.NetworkMediaHttp
 import io.github.trevarj.motd.audio.directMediaAllowedNetworkIds
 import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.avatar.AvatarPrefs
@@ -55,6 +56,7 @@ import io.github.trevarj.motd.ui.components.CertPromptViewModel
 import io.github.trevarj.motd.ui.components.CertTrustDialog
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
 import io.github.trevarj.motd.ui.components.LocalDirectRemoteMediaAllowed
+import io.github.trevarj.motd.ui.components.LocalNetworkMediaHttp
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.components.RemoteMediaNetwork
@@ -90,6 +92,8 @@ class MainActivity :
     @Inject lateinit var contentPreviewPrefs: ContentPreviewPrefs
 
     @Inject lateinit var remoteMediaNetworkMonitor: RemoteMediaNetworkMonitor
+
+    @Inject lateinit var networkMediaHttp: NetworkMediaHttp
 
     @Inject lateinit var customFontStore: CustomFontStore
 
@@ -213,6 +217,7 @@ class MainActivity :
                 CompositionLocalProvider(
                     LocalAutomaticRemoteMedia provides automaticRemoteMedia,
                     LocalDirectRemoteMediaAllowed provides directRemoteMediaAllowed,
+                    LocalNetworkMediaHttp provides networkMediaHttp,
                     LocalRemoteAvatars provides
                         RemoteAvatarState(
                             enabled = uiState.avatarConfig.showSharedAvatars && uiState.contentPreviews.showImages,

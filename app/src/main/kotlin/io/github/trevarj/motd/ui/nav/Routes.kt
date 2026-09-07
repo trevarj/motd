@@ -196,6 +196,7 @@ enum class NetworkSettingsTarget { CONNECTION, AUTHENTICATION, OBFUSCATION, AVAT
 
 @Serializable data class ImageViewerRoute(
     val url: String,
+    val networkId: Long? = null,
 )
 
 // Inbound ACTION_SEND: pick the chat that receives the shared payload.

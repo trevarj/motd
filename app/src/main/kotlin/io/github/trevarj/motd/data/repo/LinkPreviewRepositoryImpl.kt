@@ -399,7 +399,7 @@ class LinkPreviewRepositoryImpl
             private val JSON = Json { ignoreUnknownKeys = true }
             private val WIKIPEDIA_HOST = Regex("""(?:^|[.])wikipedia[.]org$""", RegexOption.IGNORE_CASE)
             private val WIKIPEDIA_WHITESPACE = Regex("""\s+""")
-            private val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
+            internal val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
             private val PERMANENT_HTTP_CODES = setOf(400, 401, 405, 406, 411, 413, 414, 415, 422)
             private val IPV4_LITERAL = Regex("""\d{1,3}(?:\.\d{1,3}){3}""")
             private val GENERIC_MEDIA_TYPES =

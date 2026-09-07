@@ -1,11 +1,25 @@
 package io.github.trevarj.motd.ui.imageviewer
 
-import kotlinx.coroutines.Job
+import io.github.trevarj.motd.audio.MediaRouteResolver
+import io.github.trevarj.motd.audio.NetworkMediaHttp
+import io.github.trevarj.motd.audio.NetworkMediaRoute
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.repo.LinkPreviewFetchPolicy
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
+import okhttp3.Credentials
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okio.Buffer
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
@@ -13,6 +27,10 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class ImageSaveOperationTest {
     @Test fun `oversized content length is rejected before insert`() =
@@ -164,9 +182,10 @@ class ImageSaveOperationTest {
             assertTrue(connection.disconnected)
         }
 
-    @Test fun `cancellation deletes the pending row exactly once`() =
-        runTest {
-            lateinit var savingJob: Job
+    @Test fun `cancellation interrupts a blocked read and deletes the pending row exactly once`() =
+        runBlocking {
+            val reading = CountDownLatch(1)
+            val closed = CountDownLatch(1)
             val input =
                 object : InputStream() {
                     override fun read(): Int = throw UnsupportedOperationException()
@@ -176,20 +195,32 @@ class ImageSaveOperationTest {
                         offset: Int,
                         length: Int,
                     ): Int {
-                        savingJob.cancel()
-                        buffer[offset] = 9
-                        return 1
+                        reading.countDown()
+                        closed.await(5, TimeUnit.SECONDS)
+                        throw IOException("stream closed")
+                    }
+
+                    override fun close() {
+                        closed.countDown()
                     }
                 }
             val connection = FakeConnection(input = input)
             val store = FakeStore()
-            savingJob = launch { operation(connection, store).save("https://example.test/image") }
+            val savingJob = launch(Dispatchers.IO) { operation(connection, store).save("https://example.test/image") }
 
-            savingJob.join()
+            try {
+                assertTrue(reading.await(5, TimeUnit.SECONDS))
+                savingJob.cancel()
+                withTimeout(2_000) { savingJob.join() }
 
-            assertTrue(savingJob.isCancelled)
-            assertEquals(1, store.deleteCalls)
-            assertTrue(connection.disconnected)
+                assertTrue(savingJob.isCancelled)
+                assertEquals(1, store.deleteCalls)
+                assertFalse(store.published)
+                assertTrue(connection.disconnected)
+            } finally {
+                closed.countDown()
+                savingJob.cancelAndJoin()
+            }
         }
 
     @Test fun `finalize failure deletes pending row and only reports failure`() =
@@ -243,6 +274,79 @@ class ImageSaveOperationTest {
             }
         }
 
+    @Test fun `save traverses the selected proxy without SASL and never falls back to the origin`() =
+        runTest {
+            val origin = MockWebServer().apply { start() }
+            val proxy = MockWebServer().apply { start() }
+            val bytes = byteArrayOf(0, 1, 2, 127, -1, 42)
+            val endpoint =
+                NetworkEntity(
+                    id = 42,
+                    name = "proxied",
+                    role = NetworkRole.DIRECT,
+                    host = origin.url("/").host,
+                    port = 6697,
+                    nick = "nick",
+                    username = "user",
+                    realname = "User",
+                    saslMechanism = "PLAIN",
+                    saslUser = "sasl-user",
+                    saslPassword = "sasl-secret",
+                )
+            val mediaHttp =
+                NetworkMediaHttp(
+                    MediaRouteResolver { id ->
+                        if (id != 42L && id != 43L) {
+                            null
+                        } else {
+                            NetworkMediaRoute(
+                                networkId = id,
+                                endpoint = endpoint,
+                                proxy = if (id == 42L) Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", proxy.port)) else null,
+                                proxyError = if (id == 43L) "Tunnel unavailable" else null,
+                                authorizationHeader = Credentials.basic("sasl-user", "sasl-secret"),
+                            )
+                        }
+                    },
+                    // Only the destination check is relaxed for the loopback HTTP proxy fixture.
+                    LinkPreviewFetchPolicy(enforceDestinationPolicy = false),
+                )
+            try {
+                origin.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody("wrong direct bytes"))
+                proxy.enqueue(MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(bytes)))
+                val url = origin.url("/upload/user/account/123-image.png").toString()
+                val store = FakeStore()
+
+                assertEquals(
+                    ImageSaveResult.Saved,
+                    ImageSaveOperation(OkHttpImageSaveConnectionFactory(mediaHttp.callFactory(42)), store).save(url),
+                )
+                assertArrayEquals(bytes, store.bytes())
+                assertTrue(store.published)
+                assertEquals(0, store.deleteCalls)
+                val request = requireNotNull(proxy.takeRequest(1, TimeUnit.SECONDS))
+                assertTrue(request.requestLine.startsWith("GET $url "))
+                assertNull(request.getHeader("Authorization"))
+                assertNull(request.getHeader("Proxy-Authorization"))
+                assertEquals(0, origin.requestCount)
+
+                for (networkId in listOf(null, 999L, 43L)) {
+                    val rejectedStore = FakeStore()
+                    assertEquals(
+                        ImageSaveResult.Failed,
+                        ImageSaveOperation(OkHttpImageSaveConnectionFactory(mediaHttp.callFactory(networkId)), rejectedStore).save(url),
+                    )
+                    assertEquals(0, rejectedStore.insertCalls)
+                    assertFalse(rejectedStore.published)
+                }
+                assertEquals(1, proxy.requestCount)
+                assertEquals(0, origin.requestCount)
+            } finally {
+                proxy.shutdown()
+                origin.shutdown()
+            }
+        }
+
     private fun operation(
         connection: FakeConnection,
         store: FakeStore,
@@ -250,7 +354,7 @@ class ImageSaveOperationTest {
     ) = ImageSaveOperation(ImageSaveConnectionFactory { connection }, store, maxBytes)
 
     private class FakeConnection(
-        override val responseCode: Int? = 200,
+        override val responseCode: Int = 200,
         override val contentLength: Long = -1,
         override val contentType: String? = "image/jpeg",
         private val contentDisposition: String? = null,
@@ -268,6 +372,7 @@ class ImageSaveOperationTest {
 
         override fun disconnect() {
             disconnected = true
+            input.close()
         }
     }
 

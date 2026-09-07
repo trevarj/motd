@@ -202,7 +202,7 @@ fun MotdNavGraph(
                             onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
                             onOpenSearch = { navController.navigate(SearchRoute(it)) },
                             onOpenSharePicker = { navController.navigate(SharePickerRoute) { launchSingleTop = true } },
-                            onOpenImage = { navController.navigate(ImageViewerRoute(it)) },
+                            onOpenImage = { url, networkId -> navController.navigate(ImageViewerRoute(url, networkId)) },
                             // /msg and /query replace the detail on wide layouts and push on phones.
                             onOpenBuffer = {
                                 navController.openChat(ChatRoute(it), replaceCurrentChat = !showBack)
@@ -461,7 +461,11 @@ fun MotdNavGraph(
             popExitTransition = { fadeOut(MotdMotion.navigationFade) },
         ) { entry ->
             val route = entry.toRoute<ImageViewerRoute>()
-            ImageViewerScreen(url = route.url, onBack = { navController.popBackStack() })
+            ImageViewerScreen(
+                url = route.url,
+                networkId = route.networkId,
+                onBack = { navController.popBackStack() },
+            )
         }
         composable<SharePickerRoute> {
             SharePickerScreen(

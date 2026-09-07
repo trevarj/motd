@@ -8,6 +8,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.audio.NetworkMediaHttp
+import io.github.trevarj.motd.audio.networkMediaData
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -86,8 +88,11 @@ class RemoteMediaNetworkMonitor
 /** Fails closed in previews/tests unless app root supplies current automatic decision. */
 val LocalAutomaticRemoteMedia = staticCompositionLocalOf { false }
 
-/** Per-IRC-network permission for app-global stacks that cannot use that network's proxy. */
+/** Permission for URL-only avatars and network icons that cannot select a route. */
 val LocalDirectRemoteMediaAllowed = staticCompositionLocalOf<(Long?) -> Boolean> { { false } }
+
+/** Routed media never falls back to the platform HTTP stack when this is absent. */
+val LocalNetworkMediaHttp = staticCompositionLocalOf<NetworkMediaHttp?> { null }
 
 internal data class RemoteMediaConsent(
     val granted: Boolean = false,
@@ -104,3 +109,10 @@ internal fun ImageRequest.Builder.remoteMediaData(
     data(data).networkCachePolicy(
         if (networkAllowed) CachePolicy.ENABLED else CachePolicy.DISABLED,
     )
+
+internal fun ImageRequest.Builder.routedRemoteMediaData(
+    url: String,
+    networkId: Long?,
+    networkAllowed: Boolean,
+    retry: Int = 0,
+): ImageRequest.Builder = remoteMediaData(url, networkAllowed).networkMediaData(url, networkId, retry)

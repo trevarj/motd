@@ -19,10 +19,10 @@ data class ContentPreviewConfig(
     val autoLoadOnUnmetered: Boolean = true,
     val autoLoadOnMetered: Boolean = true,
     /**
-     * Opt-in: on a network that uses a proxy or an embedded REALITY tunnel, fetch media previews
-     * over the device's direct connection instead of withholding them. The per-network tunnel
-     * cannot carry arbitrary media hosts, so previews otherwise never load there. Defaults off
-     * because a direct fetch reveals the device IP to the media host, outside the tunnel.
+     * Opt-in to direct URL-only avatars/icons, link metadata, and extensionless-audio HEAD
+     * discovery on proxied networks. Defaults off: direct requests expose the device IP
+     * outside the tunnel. Tagged chat images, video, thumbnails, fullscreen images, and
+     * image Save always use their owning network's route, regardless of this setting.
      */
     val directMediaOnProxiedNetworks: Boolean = false,
 )
