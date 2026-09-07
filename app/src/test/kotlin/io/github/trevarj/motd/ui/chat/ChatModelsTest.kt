@@ -780,7 +780,7 @@ class ChatModelsTest {
         assertEquals(MessageContentType.NETWORK_BATCH, messageContentType(message(kind = MessageKind.NETJOIN)))
     }
 
-    @Test fun `grouping uses account then casemapped actor and always separates direction`() {
+    @Test fun `grouping requires the same casemapped nick and separates accounts and direction`() {
         val accountOlder =
             message(
                 id = 1,
@@ -791,11 +791,12 @@ class ChatModelsTest {
         val accountCurrent =
             message(
                 id = 2,
-                sender = "NewNick",
+                sender = "OldNick",
                 senderAccount = "alice",
                 serverTime = 200,
             )
         assertFalse(showsSender(accountCurrent, accountOlder))
+        assertTrue(showsSender(accountCurrent.copy(sender = "NewNick", normalizedActor = "newnick"), accountOlder))
         assertTrue(showsSender(accountCurrent.copy(senderAccount = "other"), accountOlder))
 
         val mappedOlder = message(id = 3, sender = "nick[]", normalizedActor = "nick{}", serverTime = 300)

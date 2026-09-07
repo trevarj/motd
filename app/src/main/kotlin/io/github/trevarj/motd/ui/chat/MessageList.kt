@@ -248,6 +248,7 @@ internal fun foolCollapseTag(
 
 /**
  * True when [current] should show its sender header: it opens a new same-sender ≤3-min group.
+ * Matching accounts never hide a nick change.
  * [olderNeighbor] is the message immediately older in time (index+1 in a reversed list).
  */
 fun showsSender(
@@ -256,11 +257,12 @@ fun showsSender(
 ): Boolean {
     if (olderNeighbor == null) return true
     val sameActor =
-        if (current.senderAccount != null && olderNeighbor.senderAccount != null) {
-            current.senderAccount == olderNeighbor.senderAccount
-        } else {
-            current.normalizedActor == olderNeighbor.normalizedActor
-        }
+        current.normalizedActor == olderNeighbor.normalizedActor &&
+            (
+                current.senderAccount == null ||
+                    olderNeighbor.senderAccount == null ||
+                    current.senderAccount == olderNeighbor.senderAccount
+            )
     if (!sameActor || olderNeighbor.isSelf != current.isSelf) return true
     // An ACTION (/me) is its own utterance: it always opens a new group on either side of the
     // boundary, so a regular message following an ACTION shows its nick again instead of reading

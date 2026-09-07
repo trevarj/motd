@@ -4,7 +4,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -22,6 +24,7 @@ import io.github.trevarj.motd.data.sync.COMMAND_RESPONSE_PAYLOAD_PREFIX
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
 import io.github.trevarj.motd.ui.chat.MessageList
+import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -72,6 +75,36 @@ class MessageTimelineUiTest {
         val notice = bounds(messageTag(4))
         val action = bounds(messageTag(3))
         assertTrue("newer NOTICE must render below older ACTION in the reversed timeline", notice.top > action.top)
+    }
+
+    @Test
+    fun differentNickAfterReplyStartsANewGroupEvenWithTheSameAccount() {
+        val reply =
+            message(1, 100, MessageKind.PRIVMSG, "first reply").copy(
+                senderAccount = "shared",
+                replyToMsgid = "parent",
+            )
+        val nextReply =
+            message(2, 200, MessageKind.PRIVMSG, "second reply").copy(
+                sender = "bob",
+                normalizedActor = "bob",
+                senderAccount = "shared",
+                replyToMsgid = "parent",
+            )
+        val continuation = nextReply.copy(id = 3, msgid = "m3", serverTime = 300, text = "continued", replyToMsgid = null)
+        render(flowOf(PagingData.from(listOf(continuation, nextReply, reply))))
+
+        scrollTo(messageTag(2))
+        compose
+            .onNode(hasText("bob") and hasAnyAncestor(hasTestTag(messageTag(2))), useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose
+            .onNode(hasText("parent text") and hasAnyAncestor(hasTestTag(messageTag(2))), useUnmergedTree = true)
+            .assertIsDisplayed()
+        scrollTo(messageTag(3))
+        compose
+            .onNode(hasText("bob") and hasAnyAncestor(hasTestTag(messageTag(3))), useUnmergedTree = true)
+            .assertDoesNotExist()
     }
 
     @Test
@@ -209,6 +242,7 @@ class MessageTimelineUiTest {
                     showLinkPreviews = false,
                     onOpenLink = {},
                     onAcceptInvite = onAcceptInvite,
+                    replyPreview = { MutableStateFlow(ReplyPreviewData("parent nick", "parent text")) },
                     onDismissInvite = onDismissInvite,
                 )
             }
