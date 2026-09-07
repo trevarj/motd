@@ -1,6 +1,6 @@
 - Fixed message grouping after nick changes and reply previews from local history.
 - Restored predictive back slides and moved your nick into the Comfortable message footer.
 - Added compact source captions beneath inline media.
-- Routed media, previews, downloads, and avatars through their network proxy; removed the direct bypass.
+- Routed media, previews, image saving, and avatars through their network proxy; removed the direct bypass.
 - Added CDN VLESS support and Android DNS resolution.
 - Fixed Whisper builds to use the pinned Android toolchain.
