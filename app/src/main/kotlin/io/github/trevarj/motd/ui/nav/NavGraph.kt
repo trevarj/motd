@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
+import androidx.navigation.compose.DefaultNavTransitions
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -156,6 +157,8 @@ fun MotdNavGraph(
                 slideOutOfContainer(SlideDirection.End, MotdMotion.navigationDrawerSpatial)
             }
         },
+        predictivePopEnterTransition = { motdPredictivePopEnterTransition(it) },
+        predictivePopExitTransition = { motdPredictivePopExitTransition(it) },
     ) {
         composable<ChatListRoute> {
             var openedDefault by rememberSaveable { mutableStateOf(false) }
@@ -598,6 +601,21 @@ private fun NavHostController.openSettingsResult(destination: SettingsSearchDest
         }
     }
 }
+
+// Navigation 2.10 gives predictive back its own scale-out default instead of the pop slide.
+internal fun AnimatedContentTransitionScope<NavBackStackEntry>.motdPredictivePopEnterTransition(swipeEdge: Int): EnterTransition =
+    if (isChatInitial()) {
+        EnterTransition.None
+    } else {
+        DefaultNavTransitions.predictivePopEnterTransition.invoke(this, swipeEdge)
+    }
+
+internal fun AnimatedContentTransitionScope<NavBackStackEntry>.motdPredictivePopExitTransition(swipeEdge: Int): ExitTransition =
+    if (isChatInitial()) {
+        slideOutOfContainer(SlideDirection.End, MotdMotion.chatBackSpatial)
+    } else {
+        DefaultNavTransitions.predictivePopExitTransition.invoke(this, swipeEdge)
+    }
 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.isChatTarget(): Boolean = isChatRoutePattern(targetState.destination.route)
 
