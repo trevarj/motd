@@ -13,6 +13,9 @@ set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
+# Omit GNU build IDs so local build paths do not affect F-Droid reproducibility.
+add_link_options("LINKER:--build-id=none")
+
 # Debug APKs are the physical-device development build; keep inference optimized.
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     if(NOT DEFINED MOTD_DEBUG_OPTIMIZATION)
