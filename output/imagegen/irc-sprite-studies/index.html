@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IRC Sprite Studies</title>
+    <link rel="stylesheet" href="gallery.css" />
+  </head>
+  <body data-surface="dark">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">Raster avatar exploration</p>
+        <h1>IRC Sprite Studies</h1>
+        <p class="lede">Compare five component-based robot directions before the app artwork is chosen.</p>
+        <p><a href="/v2/index.html">Open the selected Pixel Operators set: IRC Sprites V2</a></p>
+      </div>
+      <fieldset class="surface-switch" aria-label="Preview background">
+        <legend>Background</legend>
+        <button type="button" data-surface-choice="dark" aria-pressed="true">Dark</button>
+        <button type="button" data-surface-choice="light" aria-pressed="false">Light</button>
+        <button type="button" data-surface-choice="checker" aria-pressed="false">Alpha</button>
+      </fieldset>
+    </header>
+    <main>
+      <nav id="overview" class="overview" aria-label="Compare all five sprite styles"></nav>
+      <section id="pending" class="pending" hidden>
+        <h2>Artwork is still arriving</h2>
+        <p>The gallery is ready. Refresh after <code>manifest.json</code> and the PNG components have been generated.</p>
+      </section>
+      <section id="style-grid" class="style-grid" aria-live="polite"></section>
+    </main>
+    <template id="style-template">
+      <article class="style-card">
+        <header class="card-heading">
+          <div><p class="style-number"></p><h2></h2></div>
+          <p class="style-description"></p>
+        </header>
+        <div class="comparison">
+          <figure class="reference-wrap"><img class="reference" alt="Generated style reference" /><figcaption>Reference direction</figcaption></figure>
+          <section class="preview-wrap" aria-label="Assembled sprite preview"><canvas class="hero-canvas" width="1024" height="1024"></canvas><p class="preview-caption">Live assembly · circle-safe export</p></section>
+        </div>
+        <section class="presets"><h3>Quick combinations</h3><div class="preset-list"></div></section>
+        <form class="controls" aria-label="Sprite components">
+          <label>Body <select data-part="body"></select></label>
+          <label>Head <select data-part="head"></select></label>
+          <label>Face <select data-part="face"></select></label>
+          <label>Accessory <select data-part="accessory"></select></label>
+          <label>Nick accent <input data-part="color" type="color" value="#78dce8" /></label>
+          <button class="download" type="button">Download PNG</button>
+        </form>
+        <section class="size-check"><h3>Browser-size approximations</h3><div class="sizes"></div></section>
+        <details class="components"><summary>Inspect raw components</summary><div class="component-grid"></div></details>
+      </article>
+    </template>
+    <script type="module" src="gallery.js"></script>
+  </body>
+</html>

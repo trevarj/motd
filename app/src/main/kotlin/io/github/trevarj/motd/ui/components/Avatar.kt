@@ -153,6 +153,14 @@ fun Avatar(
                 }
             }
 
+            AvatarStyle.IRC_SPRITE_V2 -> {
+                if (isChannel) {
+                    IrcChannelBadge(name, size, Modifier)
+                } else {
+                    IrcSpriteV2Avatar(name, size, Modifier)
+                }
+            }
+
             AvatarStyle.NONE -> {}
         }
         val override = conversationAvatarModel(conversationModel, null, size.value.toInt())

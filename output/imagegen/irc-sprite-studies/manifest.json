@@ -1,0 +1,759 @@
+{
+  "styles": [
+    {
+      "id": "pixel",
+      "name": "Pixel Operators",
+      "description": "Crisp pixel clusters, chunky terminal faces, limited shading, sharp silhouettes.",
+      "medium": "crisp pixel art on a 64 by 64 logical grid, enlarged with nearest-neighbor, chunky clusters, limited palette and shading",
+      "reference": "pixel/reference.png",
+      "components": {
+        "body": [
+          {
+            "id": "compact",
+            "label": "Compact chassis",
+            "src": "pixel/body-compact-v2.png",
+            "trim": true,
+            "placement": [
+              0.25,
+              0.59,
+              0.5,
+              0.3
+            ]
+          },
+          {
+            "id": "armored",
+            "label": "Armored shoulders",
+            "src": "pixel/body-armored.png",
+            "trim": true,
+            "placement": [
+              0.25,
+              0.59,
+              0.5,
+              0.3
+            ]
+          }
+        ],
+        "head": [
+          {
+            "id": "terminal",
+            "label": "Terminal",
+            "src": "pixel/head-terminal.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          },
+          {
+            "id": "rounded",
+            "label": "Rounded housing",
+            "src": "pixel/head-rounded.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          },
+          {
+            "id": "angular",
+            "label": "Angular shell",
+            "src": "pixel/head-angular.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          }
+        ],
+        "face": [
+          {
+            "id": "welcoming",
+            "label": "Welcoming",
+            "src": "pixel/face-welcoming.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          },
+          {
+            "id": "focused",
+            "label": "Focused",
+            "src": "pixel/face-focused.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          },
+          {
+            "id": "mischievous",
+            "label": "Mischievous",
+            "src": "pixel/face-mischievous.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          }
+        ],
+        "accessory": [
+          {
+            "id": "headset",
+            "label": "Headset",
+            "src": "pixel/accessory-headset.png",
+            "trim": true,
+            "placement": [
+              0.22,
+              0.18,
+              0.56,
+              0.46
+            ]
+          },
+          {
+            "id": "antenna",
+            "label": "Antennas",
+            "src": "pixel/accessory-antenna.png",
+            "trim": true,
+            "placement": [
+              0.3,
+              0.15,
+              0.4,
+              0.13
+            ]
+          }
+        ],
+        "accent": [
+          {
+            "id": "badge",
+            "label": "Nickname-color badge",
+            "src": "pixel/accent-badge.png",
+            "trim": true,
+            "placement": [
+              0.46,
+              0.75,
+              0.08,
+              0.07
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "cel",
+      "name": "Cel Hackers",
+      "description": "Bold cartoon outlines, angular chassis, clean shadow shapes, expressive screen faces.",
+      "medium": "cel-shaded cartoon illustration with bold confident outlines, angular chassis, clean two-tone shadows, expressive graphic shapes",
+      "reference": "cel/reference.png",
+      "components": {
+        "body": [
+          {
+            "id": "compact",
+            "label": "Compact chassis",
+            "src": "cel/body-compact-v2.png",
+            "trim": true,
+            "placement": [
+              0.25,
+              0.59,
+              0.5,
+              0.3
+            ]
+          },
+          {
+            "id": "armored",
+            "label": "Armored shoulders",
+            "src": "cel/body-armored.png",
+            "trim": true,
+            "placement": [
+              0.25,
+              0.59,
+              0.5,
+              0.3
+            ]
+          }
+        ],
+        "head": [
+          {
+            "id": "terminal",
+            "label": "Terminal",
+            "src": "cel/head-terminal.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          },
+          {
+            "id": "rounded",
+            "label": "Rounded housing",
+            "src": "cel/head-rounded.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          },
+          {
+            "id": "angular",
+            "label": "Angular shell",
+            "src": "cel/head-angular.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          }
+        ],
+        "face": [
+          {
+            "id": "welcoming",
+            "label": "Welcoming",
+            "src": "cel/face-welcoming.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          },
+          {
+            "id": "focused",
+            "label": "Focused",
+            "src": "cel/face-focused.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          },
+          {
+            "id": "mischievous",
+            "label": "Mischievous",
+            "src": "cel/face-mischievous.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          }
+        ],
+        "accessory": [
+          {
+            "id": "headset",
+            "label": "Headset",
+            "src": "cel/accessory-headset.png",
+            "trim": true,
+            "placement": [
+              0.22,
+              0.18,
+              0.56,
+              0.46
+            ]
+          },
+          {
+            "id": "antenna",
+            "label": "Antennas",
+            "src": "cel/accessory-antenna.png",
+            "trim": true,
+            "placement": [
+              0.3,
+              0.15,
+              0.4,
+              0.13
+            ]
+          }
+        ],
+        "accent": [
+          {
+            "id": "badge",
+            "label": "Nickname-color badge",
+            "src": "cel/accent-badge.png",
+            "trim": true,
+            "placement": [
+              0.46,
+              0.75,
+              0.08,
+              0.07
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "ink",
+      "name": "Ink Technicians",
+      "description": "Hand-inked contours, restrained hatching, imperfect hardware, bright accent details.",
+      "medium": "hand-inked illustration with lively brush-pen contours, selective coarse hatching, imperfect hardware, strong readable black and gray shapes",
+      "reference": "ink/reference.png",
+      "components": {
+        "body": [
+          {
+            "id": "compact",
+            "label": "Compact chassis",
+            "src": "ink/body-compact-v2.png",
+            "trim": true,
+            "placement": [
+              0.25,
+              0.59,
+              0.5,
+              0.3
+            ]
+          },
+          {
+            "id": "armored",
+            "label": "Armored shoulders",
+            "src": "ink/body-armored.png",
+            "trim": true,
+            "placement": [
+              0.25,
+              0.59,
+              0.5,
+              0.3
+            ]
+          }
+        ],
+        "head": [
+          {
+            "id": "terminal",
+            "label": "Terminal",
+            "src": "ink/head-terminal.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          },
+          {
+            "id": "rounded",
+            "label": "Rounded housing",
+            "src": "ink/head-rounded.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          },
+          {
+            "id": "angular",
+            "label": "Angular shell",
+            "src": "ink/head-angular.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          }
+        ],
+        "face": [
+          {
+            "id": "welcoming",
+            "label": "Welcoming",
+            "src": "ink/face-welcoming.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          },
+          {
+            "id": "focused",
+            "label": "Focused",
+            "src": "ink/face-focused.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          },
+          {
+            "id": "mischievous",
+            "label": "Mischievous",
+            "src": "ink/face-mischievous.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          }
+        ],
+        "accessory": [
+          {
+            "id": "headset",
+            "label": "Headset",
+            "src": "ink/accessory-headset.png",
+            "trim": true,
+            "placement": [
+              0.22,
+              0.18,
+              0.56,
+              0.46
+            ]
+          },
+          {
+            "id": "antenna",
+            "label": "Antennas",
+            "src": "ink/accessory-antenna.png",
+            "trim": true,
+            "placement": [
+              0.3,
+              0.15,
+              0.4,
+              0.13
+            ]
+          }
+        ],
+        "accent": [
+          {
+            "id": "badge",
+            "label": "Nickname-color badge",
+            "src": "ink/accent-badge.png",
+            "trim": true,
+            "placement": [
+              0.46,
+              0.75,
+              0.08,
+              0.07
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "gouache",
+      "name": "Gouache Machines",
+      "description": "Matte painted surfaces, brush texture, softened edges, dark equipment with luminous faces.",
+      "medium": "hand-painted opaque gouache illustration, matte charcoal and warm gray paint, visible broad brush texture, softened edges, luminous simple face",
+      "reference": "gouache/reference.png",
+      "components": {
+        "body": [
+          {
+            "id": "compact",
+            "label": "Compact chassis",
+            "src": "gouache/body-compact-v2.png",
+            "trim": true,
+            "placement": [
+              0.25,
+              0.59,
+              0.5,
+              0.3
+            ]
+          },
+          {
+            "id": "armored",
+            "label": "Armored shoulders",
+            "src": "gouache/body-armored.png",
+            "trim": true,
+            "placement": [
+              0.25,
+              0.59,
+              0.5,
+              0.3
+            ]
+          }
+        ],
+        "head": [
+          {
+            "id": "terminal",
+            "label": "Terminal",
+            "src": "gouache/head-terminal.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          },
+          {
+            "id": "rounded",
+            "label": "Rounded housing",
+            "src": "gouache/head-rounded.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          },
+          {
+            "id": "angular",
+            "label": "Angular shell",
+            "src": "gouache/head-angular.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          }
+        ],
+        "face": [
+          {
+            "id": "welcoming",
+            "label": "Welcoming",
+            "src": "gouache/face-welcoming.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          },
+          {
+            "id": "focused",
+            "label": "Focused",
+            "src": "gouache/face-focused.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          },
+          {
+            "id": "mischievous",
+            "label": "Mischievous",
+            "src": "gouache/face-mischievous.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          }
+        ],
+        "accessory": [
+          {
+            "id": "headset",
+            "label": "Headset",
+            "src": "gouache/accessory-headset.png",
+            "trim": true,
+            "placement": [
+              0.22,
+              0.18,
+              0.56,
+              0.46
+            ]
+          },
+          {
+            "id": "antenna",
+            "label": "Antennas",
+            "src": "gouache/accessory-antenna.png",
+            "trim": true,
+            "placement": [
+              0.3,
+              0.15,
+              0.4,
+              0.13
+            ]
+          }
+        ],
+        "accent": [
+          {
+            "id": "badge",
+            "label": "Nickname-color badge",
+            "src": "gouache/accent-badge.png",
+            "trim": true,
+            "placement": [
+              0.46,
+              0.75,
+              0.08,
+              0.07
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "clay",
+      "name": "Clay Console Crew",
+      "description": "Sculpted miniature robots, rounded hardware, tactile imperfections, soft studio lighting.",
+      "medium": "tactile clay stop-motion miniature rendered in 3D, rounded sculpted hardware, subtle handmade imperfections, soft studio light from upper left, restrained specular highlights",
+      "reference": "clay/reference.png",
+      "components": {
+        "body": [
+          {
+            "id": "compact",
+            "label": "Compact chassis",
+            "src": "clay/body-compact-v2.png",
+            "trim": true,
+            "placement": [
+              0.25,
+              0.59,
+              0.5,
+              0.3
+            ]
+          },
+          {
+            "id": "armored",
+            "label": "Armored shoulders",
+            "src": "clay/body-armored.png",
+            "trim": true,
+            "placement": [
+              0.25,
+              0.59,
+              0.5,
+              0.3
+            ]
+          }
+        ],
+        "head": [
+          {
+            "id": "terminal",
+            "label": "Terminal",
+            "src": "clay/head-terminal.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          },
+          {
+            "id": "rounded",
+            "label": "Rounded housing",
+            "src": "clay/head-rounded.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          },
+          {
+            "id": "angular",
+            "label": "Angular shell",
+            "src": "clay/head-angular.png",
+            "trim": true,
+            "placement": [
+              0.28,
+              0.22,
+              0.44,
+              0.4
+            ]
+          }
+        ],
+        "face": [
+          {
+            "id": "welcoming",
+            "label": "Welcoming",
+            "src": "clay/face-welcoming.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          },
+          {
+            "id": "focused",
+            "label": "Focused",
+            "src": "clay/face-focused.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          },
+          {
+            "id": "mischievous",
+            "label": "Mischievous",
+            "src": "clay/face-mischievous.png",
+            "trim": true,
+            "placement": [
+              0.38,
+              0.4,
+              0.24,
+              0.1
+            ]
+          }
+        ],
+        "accessory": [
+          {
+            "id": "headset",
+            "label": "Headset",
+            "src": "clay/accessory-headset.png",
+            "trim": true,
+            "placement": [
+              0.22,
+              0.18,
+              0.56,
+              0.46
+            ]
+          },
+          {
+            "id": "antenna",
+            "label": "Antennas",
+            "src": "clay/accessory-antenna.png",
+            "trim": true,
+            "placement": [
+              0.3,
+              0.15,
+              0.4,
+              0.13
+            ]
+          }
+        ],
+        "accent": [
+          {
+            "id": "badge",
+            "label": "Nickname-color badge",
+            "src": "clay/accent-badge.png",
+            "trim": true,
+            "placement": [
+              0.46,
+              0.75,
+              0.08,
+              0.07
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

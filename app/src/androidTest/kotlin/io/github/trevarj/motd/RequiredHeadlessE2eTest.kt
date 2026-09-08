@@ -583,6 +583,7 @@ class RequiredHeadlessE2eTest {
         ThemeSheetRobot(compose).selectAyuDarkAndTrueBlack()
         scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         compose.onAllNodesWithTag("settings_theme_sheet", useUnmergedTree = true).assertCountEquals(0)
+        SettingsRobot(compose).selectIrcSpritesV2()
         // Return from Appearance to Settings, then exercise the category and bouncer routes.
         SettingsRobot(compose).apply {
             returnToRoot()

@@ -1,0 +1,7 @@
+{
+  "mode": "built-in image_gen",
+  "id": "face-curious",
+  "raw": "raw/face-curious-v2.png",
+  "final": "assets/face-curious.png",
+  "prompt": "Use case: stylized-concept\nAsset type: a single transparent raster FACE component for Pixel Operators IRC Sprites V2.\nCreate ONLY three pale neutral ivory pixel-art face marks on genuine transparent alpha: two bold solid rounded-square robot eyes, and one shallow centered crooked smile below them. Friendly inquisitive expression: one eye is slightly taller and raised by one logical pixel, the other a little squatter, both large and clearly readable. Smile is a clean connected shallow stepped upward curve, centered, about half the total eye-group width. Exactly two eyes and one mouth. No separate eyebrows or tiny floating flecks.\nStyle: clean chunky retro pixel art, flat solid ivory marks, deliberate square pixel clusters and hard stair-step corners, no texture, no fuzzy glow, no antialias fringe, no gradients. Looks coherent and expressive at a tiny 24px robot avatar.\nComposition: front-on, horizontally balanced face group, about 2.3 times wider than tall. Compact eye-to-mouth spacing, no excessive gaps. Center the group with generous transparent margin on a square canvas.\nConstraints: FACE MARKS ONLY. No head, terminal screen, robot hardware, body, accessories, nose, pupils, outlines around the group, extra symbols, text, watermark, backdrop, or checkerboard pattern. Genuine transparent PNG alpha everywhere outside the three marks. Neutral pale ivory only; application applies the nickname hue."
+}

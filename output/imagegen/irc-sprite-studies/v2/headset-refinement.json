@@ -1,0 +1,7 @@
+{
+  "mode": "built-in image_gen",
+  "id": "accessory-headset",
+  "raw": "raw/accessory-headset-v2.png",
+  "final": "assets/accessory-headset.png",
+  "prompt": "Use case: stylized-concept\nAsset type: modular PNG accessory for Pixel Operators robot avatars.\nCreate ONLY a slim graphite and silver communication headset, straight-on front elevation. Crisp chunky pixel art, restricted grayscale stepped shading, retro terminal hardware.\nThe headset is an inverted U arch with very slender rectangular earcups at its extreme left and right ends. Crucial proportions: overall width is1.4 times overall height; the empty inner opening is80% of total width; each earcup is at most10% of total width. Arch is thin, about5% of total height. Small short microphone boom runs along lower-right outer edge, never across the central opening. The opening must be tall and broad to fit a separate square robot terminal head. Headset only: NO head, face, body, neck, or other parts. Grayscale only. Genuine transparent alpha around and inside the headset. No backdrop, lettering, logos, watermark or scenery. Symmetric earcups at same height, no perspective."
+}

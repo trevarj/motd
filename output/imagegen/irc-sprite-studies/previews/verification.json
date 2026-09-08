@@ -1,0 +1,30 @@
+{
+  "styles": [
+    {
+      "name": "Pixel Operators",
+      "combinations": 54,
+      "unique": 54
+    },
+    {
+      "name": "Cel Hackers",
+      "combinations": 54,
+      "unique": 54
+    },
+    {
+      "name": "Ink Technicians",
+      "combinations": 54,
+      "unique": 54
+    },
+    {
+      "name": "Gouache Machines",
+      "combinations": 54,
+      "unique": 54
+    },
+    {
+      "name": "Clay Console Crew",
+      "combinations": 54,
+      "unique": 54
+    }
+  ],
+  "assets": 60
+}

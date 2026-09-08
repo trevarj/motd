@@ -8,6 +8,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
+import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -55,10 +56,22 @@ class AppearanceFolderLayoutUiTest {
             .assertIsDisplayed()
     }
 
+    @Test
+    fun avatarStylePickerSelectsIrcSpritesV2() {
+        var selected: AvatarStyle? = null
+        setContent(onAvatarStyle = { selected = it })
+
+        compose.onNodeWithTag("settings_avatar_style_picker").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_avatar_style_irc_sprite_v2").performClick()
+
+        assertEquals(AvatarStyle.IRC_SPRITE_V2, selected)
+    }
+
     private fun setContent(
-        settings: Settings,
+        settings: Settings = Settings(),
         onFolderDisplayMode: (FolderDisplayMode) -> Unit = {},
         onShowFolderChatsInAll: (Boolean) -> Unit = {},
+        onAvatarStyle: (AvatarStyle) -> Unit = {},
     ) {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
@@ -74,7 +87,7 @@ class AppearanceFolderLayoutUiTest {
                     onLayoutDensity = {},
                     onFolderDisplayMode = onFolderDisplayMode,
                     onShowFolderChatsInAll = onShowFolderChatsInAll,
-                    onAvatarStyle = {},
+                    onAvatarStyle = onAvatarStyle,
                     onNickColorsEnabled = {},
                     onNickColorPalette = {},
                     onWallpaper = {},

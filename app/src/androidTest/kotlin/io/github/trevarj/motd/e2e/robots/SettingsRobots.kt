@@ -12,6 +12,13 @@ internal class SettingsRobot(
 
     fun appearance() = click("settings_category_appearance")
 
+    fun selectIrcSpritesV2() {
+        scrollToAndClick("settings_avatar_style_picker")
+        assertDisplayed("settings_avatar_style_sheet")
+        click("settings_avatar_style_irc_sprite_v2")
+        awaitTagGone("settings_avatar_style_sheet")
+    }
+
     fun returnToRoot() {
         if (!isPresent("screen_settings")) click("settings_back")
         assertDisplayed("screen_settings")

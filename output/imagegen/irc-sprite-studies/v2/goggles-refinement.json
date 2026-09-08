@@ -1,0 +1,8 @@
+{
+  "mode": "built-in image_gen",
+  "id": "accessory-goggles",
+  "raw": "raw/accessory-goggles.png",
+  "final": "assets/accessory-goggles.png",
+  "replaces": "accessory-hood",
+  "prompt": "Use case: stylized-concept\nAsset type: standalone transparent raster accessory, Pixel Operators IRC robot avatar goggles.\nCreate ONLY a pair of slim rectangular retro hacker goggles, perfectly straight-on and symmetric. Two broad rectangular lens openings with slightly clipped pixel corners, a short narrow bridge between them, tiny horizontal temple tabs at far left and right. Thin graphite frame with restrained pale silver edge highlights, chunky crisp pixel-art outlines and limited flat stepped shading. Modern practical protective eyewear, friendly terminal robot aesthetic.\nCrucial: both lens interiors are completely EMPTY TRANSPARENT ALPHA, with no glass fill, glare, highlights, pupils or tint inside. The goggles overlay a separate robot face; the eyes underneath must remain entirely visible. Each rectangular opening is wide, about1.5 times wider than high. Frame thickness only about6% of lens height. Overall pair silhouette about3.6 times wider than tall. Bridge halfway up. No straps crossing lenses.\nComposition: single isolated accessory centered with generous transparent padding on a square canvas.\nConstraints: true transparent PNG background and true transparency through both lenses; no head, face, eyes, mouth, screen, body, hood, helmet, floating symbols, lettering, logos, watermark or checkerboard pattern. Neutral grayscale only; app applies subtle nickname hue."
+}

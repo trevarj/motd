@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
@@ -15,13 +16,18 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import io.github.trevarj.motd.avatar.IrcSpriteV2Renderer
 import io.github.trevarj.motd.avatar.canonicalAvatarNick
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.identityRamp
@@ -251,6 +257,45 @@ internal fun IrcSpriteAvatar(
         primary = LocalNickColors.current.avatar(name),
         modifier = modifier,
     )
+}
+
+/** Rasterized pixel operators. Source layers and finished scenes are cached by the shared renderer. */
+@Composable
+internal fun IrcSpriteV2Avatar(
+    name: String,
+    size: Dp,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val scheme = MaterialTheme.colorScheme
+    val dark = isAppliedThemeDark()
+    val accent = LocalNickColors.current.avatar(name)
+    val base = if (dark) scheme.surfaceContainerHighest else scheme.surfaceContainerHigh
+    val sizePx = with(density) { size.roundToPx() }
+    val includeAccessory = size >= 24.dp
+    val bitmap =
+        remember(context, name, accent, base, sizePx, includeAccessory) {
+            IrcSpriteV2Renderer.render(
+                context = context,
+                name = name,
+                accent = accent.toArgb(),
+                sizePx = sizePx,
+                baseColor = base.toArgb(),
+                ringColor = accent.copy(alpha = 0.52f).toArgb(),
+                includeAccessory = includeAccessory,
+            )
+        }
+    if (bitmap == null) {
+        // A missing/corrupt optional catalog must not turn a contact list into blank space.
+        IrcSpriteAvatar(name, size, modifier)
+    } else {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = null,
+            modifier = modifier.size(size).clip(CircleShape),
+        )
+    }
 }
 
 /** Deterministic network badge whose outer [status] ring remains independent of its identity. */

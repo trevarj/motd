@@ -1579,6 +1579,8 @@
     <string name="settings_avatar_initials">Initials</string>
     <string name="settings_avatar_irc_sprite">IRC sprites</string>
     <string name="settings_avatar_irc_sprite_desc">Deterministic operator sprites and matched Devicons channel marks.</string>
+    <string name="settings_avatar_irc_sprite_v2">IRC Sprites V2</string>
+    <string name="settings_avatar_irc_sprite_v2_desc">Pixel robot operators with nickname-tinted components and matched Devicons channel marks.</string>
     <string name="settings_avatar_none">None</string>
     <string name="settings_avatar_none_desc">Hide avatars; notifications still show initials.</string>
 

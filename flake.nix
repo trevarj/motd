@@ -87,6 +87,11 @@
           CMAKE_MAKE_PROGRAM = "${pkgs.ninja}/bin/ninja";
           GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2 -Dorg.gradle.workers.max=2";
         };
+        # Standalone raster studies and browser verification, without the Android SDK.
+        devShells.sprite-studies = pkgs.mkShell {
+          packages = [ pkgs.nodejs_22 pkgs.imagemagick pkgs.chromium ];
+          FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
+        };
         devShells.emulator = pkgs.mkShell {
           packages = [ pkgs.jdk21 emulatorSdk ];
           JAVA_HOME = pkgs.jdk21.home;

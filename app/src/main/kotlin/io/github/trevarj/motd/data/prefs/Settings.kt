@@ -108,7 +108,7 @@ internal fun autoAwayMinutesFromPreference(saved: Int?): Int = saved?.takeIf { i
  * hides avatars in the UI entirely (notifications still need an icon, so they fall back to
  * initials).
  */
-enum class AvatarStyle { MONOGRAM, INITIALS, IRC_SPRITE, NONE }
+enum class AvatarStyle { MONOGRAM, INITIALS, IRC_SPRITE, NONE, IRC_SPRITE_V2 }
 
 /** Decode a saved choice while defaulting installations without one to IRC sprites. */
 internal fun avatarStyleFromPreference(saved: String?): AvatarStyle = saved?.let { runCatching { AvatarStyle.valueOf(it) }.getOrNull() } ?: AvatarStyle.IRC_SPRITE

@@ -656,6 +656,7 @@ private fun avatarStyleLabel(value: AvatarStyle): String =
             AvatarStyle.INITIALS -> R.string.settings_avatar_initials
             AvatarStyle.IRC_SPRITE -> R.string.settings_avatar_irc_sprite
             AvatarStyle.NONE -> R.string.settings_avatar_none
+            AvatarStyle.IRC_SPRITE_V2 -> R.string.settings_avatar_irc_sprite_v2
         },
     )
 
@@ -663,6 +664,7 @@ private fun avatarStyleLabel(value: AvatarStyle): String =
 private fun avatarStyleDescription(value: AvatarStyle): String? =
     when (value) {
         AvatarStyle.IRC_SPRITE -> stringResource(R.string.settings_avatar_irc_sprite_desc)
+        AvatarStyle.IRC_SPRITE_V2 -> stringResource(R.string.settings_avatar_irc_sprite_v2_desc)
         AvatarStyle.NONE -> stringResource(R.string.settings_avatar_none_desc)
         else -> null
     }

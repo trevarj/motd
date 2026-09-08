@@ -44,15 +44,36 @@ internal fun notificationAvatarBitmap(
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         when (style) {
-            AvatarStyle.MONOGRAM -> drawMonogram(canvas, paint, name, accent, dark)
+            AvatarStyle.MONOGRAM -> {
+                drawMonogram(canvas, paint, name, accent, dark)
+            }
 
-            AvatarStyle.INITIALS -> drawInitials(canvas, paint, name, accent)
+            AvatarStyle.INITIALS -> {
+                drawInitials(canvas, paint, name, accent)
+            }
 
-            AvatarStyle.IRC_SPRITE -> drawIrcSprite(canvas, paint, name, dark)
+            AvatarStyle.IRC_SPRITE -> {
+                drawIrcSprite(canvas, paint, name, dark)
+            }
+
+            AvatarStyle.IRC_SPRITE_V2 -> {
+                IrcSpriteV2Renderer
+                    .render(
+                        context = context,
+                        name = name,
+                        accent = accent,
+                        sizePx = AVATAR_SIZE_PX,
+                        baseColor = if (dark) Color.rgb(54, 52, 59) else Color.rgb(243, 241, 248),
+                        ringColor = ColorUtils.setAlphaComponent(accent, 133),
+                    )?.let { rendered -> canvas.drawBitmap(rendered, 0f, 0f, paint) }
+                    ?: drawIrcSprite(canvas, paint, name, dark)
+            }
 
             // System UI always needs a person icon; "hide avatars" is an in-app choice, so fall
             // back to the plainest treatment rather than posting a blank square.
-            AvatarStyle.NONE -> drawInitials(canvas, paint, name, accent)
+            AvatarStyle.NONE -> {
+                drawInitials(canvas, paint, name, accent)
+            }
         }
     }
 }
