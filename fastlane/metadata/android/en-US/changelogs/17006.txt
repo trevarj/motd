@@ -1,0 +1,3 @@
+- Added IRC Sprites V2 avatars with themed light and dark palettes and a tighter, head-focused crop.
+- Made "None" easier to find by placing it last in the avatar-style list.
+- Simplified contact-invite QR cards by removing the avatar.
