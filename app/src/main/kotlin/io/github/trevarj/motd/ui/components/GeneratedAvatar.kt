@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.avatar.IrcSpriteV2Renderer
+import io.github.trevarj.motd.avatar.IrcSpriteV2Theme
 import io.github.trevarj.motd.avatar.canonicalAvatarNick
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.identityRamp
@@ -275,7 +276,7 @@ internal fun IrcSpriteV2Avatar(
     val sizePx = with(density) { size.roundToPx() }
     val includeAccessory = size >= 24.dp
     val bitmap =
-        remember(context, name, accent, base, sizePx, includeAccessory) {
+        remember(context, name, accent, base, sizePx, includeAccessory, dark) {
             IrcSpriteV2Renderer.render(
                 context = context,
                 name = name,
@@ -284,6 +285,7 @@ internal fun IrcSpriteV2Avatar(
                 baseColor = base.toArgb(),
                 ringColor = accent.copy(alpha = 0.52f).toArgb(),
                 includeAccessory = includeAccessory,
+                theme = if (dark) IrcSpriteV2Theme.DARK else IrcSpriteV2Theme.LIGHT,
             )
         }
     if (bitmap == null) {

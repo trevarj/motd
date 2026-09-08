@@ -65,6 +65,7 @@ internal fun notificationAvatarBitmap(
                         sizePx = AVATAR_SIZE_PX,
                         baseColor = if (dark) Color.rgb(54, 52, 59) else Color.rgb(243, 241, 248),
                         ringColor = ColorUtils.setAlphaComponent(accent, 133),
+                        theme = if (dark) IrcSpriteV2Theme.DARK else IrcSpriteV2Theme.LIGHT,
                     )?.let { rendered -> canvas.drawBitmap(rendered, 0f, 0f, paint) }
                     ?: drawIrcSprite(canvas, paint, name, dark)
             }

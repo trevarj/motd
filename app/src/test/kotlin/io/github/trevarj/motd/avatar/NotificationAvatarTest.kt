@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.ui.theme.paletteNickColor
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -56,9 +57,47 @@ class NotificationAvatarTest {
                 64,
                 if (dark) Color.rgb(54, 52, 59) else Color.rgb(243, 241, 248),
                 ColorUtils.setAlphaComponent(accent, 133),
+                theme = if (dark) IrcSpriteV2Theme.DARK else IrcSpriteV2Theme.LIGHT,
             )
 
         assertTrue(expected != null)
         assertTrue(notificationAvatarBitmap(context, name, AvatarStyle.IRC_SPRITE_V2).sameAs(expected))
+    }
+
+    @Test fun notificationV2_followsTheSystemLightDarkPalette() {
+        fun themedContext(night: Boolean): Context {
+            val configuration = Configuration(context.resources.configuration)
+            configuration.uiMode =
+                (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                if (night) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+            return context.createConfigurationContext(configuration)
+        }
+
+        fun expected(
+            themed: Context,
+            dark: Boolean,
+        ): android.graphics.Bitmap {
+            val accent = paletteNickColor(canonicalAvatarNick("alice"), dark, NickColorPalette.CLASSIC).toArgb()
+            return requireNotNull(
+                IrcSpriteV2Renderer.render(
+                    context = themed,
+                    name = "alice",
+                    accent = accent,
+                    sizePx = 64,
+                    baseColor = if (dark) Color.rgb(54, 52, 59) else Color.rgb(243, 241, 248),
+                    ringColor = ColorUtils.setAlphaComponent(accent, 133),
+                    theme = if (dark) IrcSpriteV2Theme.DARK else IrcSpriteV2Theme.LIGHT,
+                ),
+            )
+        }
+
+        val darkContext = themedContext(night = true)
+        val lightContext = themedContext(night = false)
+        val dark = notificationAvatarBitmap(darkContext, "alice", AvatarStyle.IRC_SPRITE_V2)
+        val light = notificationAvatarBitmap(lightContext, "alice", AvatarStyle.IRC_SPRITE_V2)
+
+        assertFalse(dark.sameAs(light))
+        assertTrue(dark.sameAs(expected(darkContext, dark = true)))
+        assertTrue(light.sameAs(expected(lightContext, dark = false)))
     }
 }

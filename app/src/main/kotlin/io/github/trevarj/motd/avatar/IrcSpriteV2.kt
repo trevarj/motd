@@ -19,6 +19,8 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlin.math.floor
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 private const val ASSET_ROOT = "irc-sprites-v2/"
@@ -31,6 +33,12 @@ internal data class IrcSpriteV2Traits(
     val face: Int,
     val accessory: Int,
 )
+
+/** The raster treatment follows the resolved app theme, while trait selection remains unchanged. */
+internal enum class IrcSpriteV2Theme {
+    DARK,
+    LIGHT,
+}
 
 /**
  * Derive every part independently so expanding one catalog axis only changes that axis. The
@@ -140,6 +148,7 @@ internal object IrcSpriteV2Renderer {
     private val sourceCache = bitmapCache(6 * 1024)
     private val tintedCache = bitmapCache(8 * 1024)
     private val compositeCache = bitmapCache(8 * 1024)
+    private val panelMaskCache = object : LruCache<String, BooleanArray>(8) {}
 
     @Volatile private var catalog: IrcSpriteV2Catalog? = null
 
@@ -157,12 +166,13 @@ internal object IrcSpriteV2Renderer {
         baseColor: Int,
         ringColor: Int,
         includeAccessory: Boolean = true,
+        theme: IrcSpriteV2Theme = IrcSpriteV2Theme.DARK,
     ): Bitmap? {
         val parsed = catalog(context) ?: return null
         val traits = ircSpriteV2Traits(name, parsed.bodies.size, parsed.heads.size, parsed.faces.size, parsed.accessories.size)
-        val key = "$name:${accent and 0x00ffffff}:$sizePx:$baseColor:$ringColor:$includeAccessory:${traits.body}:${traits.head}:${traits.face}:${traits.accessory}"
+        val key = "$name:${accent and 0x00ffffff}:$sizePx:$baseColor:$ringColor:$includeAccessory:$theme:${traits.body}:${traits.head}:${traits.face}:${traits.accessory}"
         synchronized(compositeCache) { compositeCache.get(key)?.let { return it } }
-        val result = compose(context, parsed, traits, accent, sizePx.coerceAtLeast(1), baseColor, ringColor, includeAccessory)
+        val result = compose(context, parsed, traits, accent, sizePx.coerceAtLeast(1), baseColor, ringColor, includeAccessory, theme)
         synchronized(compositeCache) { compositeCache.put(key, result) }
         return result
     }
@@ -176,6 +186,7 @@ internal object IrcSpriteV2Renderer {
         baseColor: Int,
         ringColor: Int,
         includeAccessory: Boolean,
+        theme: IrcSpriteV2Theme,
     ): Bitmap {
         val output = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
@@ -193,17 +204,19 @@ internal object IrcSpriteV2Renderer {
         val transform = catalog.framing?.let { IrcSpriteV2LayerTransform.forHead(head.rect, it.zoom) }
 
         fun framed(rect: IrcSpriteV2Rect): IrcSpriteV2Rect = transform?.rect(rect) ?: rect
-        drawIfPresent(canvas, paint, context, body, framed(body.rect), accent, sizePx)
+        drawIfPresent(canvas, paint, context, catalog, body, framed(body.rect), accent, sizePx, theme)
         if (includeAccessory && accessory.behindHead) {
-            drawIfPresent(canvas, paint, context, accessory, framed(accessoryRect), accent, sizePx)
+            drawIfPresent(canvas, paint, context, catalog, accessory, framed(accessoryRect), accent, sizePx, theme)
         }
-        drawIfPresent(canvas, paint, context, head, framed(head.rect), accent, sizePx)
-        drawIfPresent(canvas, paint, context, face, framed(head.faceRect ?: face.rect), accent, sizePx)
+        drawIfPresent(canvas, paint, context, catalog, head, framed(head.rect), accent, sizePx, theme)
+        drawIfPresent(canvas, paint, context, catalog, face, framed(head.faceRect ?: face.rect), accent, sizePx, theme)
         if (includeAccessory && !accessory.behindHead) {
-            drawIfPresent(canvas, paint, context, accessory, framed(accessoryRect), accent, sizePx)
+            drawIfPresent(canvas, paint, context, catalog, accessory, framed(accessoryRect), accent, sizePx, theme)
         }
         // A catalog can grow with several accents, but V2 currently intentionally has one badge.
-        catalog.accents.firstOrNull()?.let { drawIfPresent(canvas, paint, context, it, framed(it.rect), accent, sizePx) }
+        catalog.accents.firstOrNull()?.let {
+            drawIfPresent(canvas, paint, context, catalog, it, framed(it.rect), accent, sizePx, theme)
+        }
         canvas.restore()
 
         paint.style = Paint.Style.STROKE
@@ -217,12 +230,14 @@ internal object IrcSpriteV2Renderer {
         canvas: Canvas,
         paint: Paint,
         context: Context,
+        catalog: IrcSpriteV2Catalog,
         component: IrcSpriteV2Component,
         rect: IrcSpriteV2Rect,
         accent: Int,
         sizePx: Int,
+        theme: IrcSpriteV2Theme,
     ) {
-        val bitmap = tinted(context, component, accent) ?: return
+        val bitmap = tinted(context, catalog, component, accent, theme) ?: return
         val destination =
             RectF(
                 rect.x * sizePx,
@@ -235,21 +250,105 @@ internal object IrcSpriteV2Renderer {
 
     private fun tinted(
         context: Context,
+        catalog: IrcSpriteV2Catalog,
         component: IrcSpriteV2Component,
         accent: Int,
+        theme: IrcSpriteV2Theme,
     ): Bitmap? {
-        val key = "${component.file}:${accent and 0x00ffffff}"
+        val key = "${component.file}:${accent and 0x00ffffff}:$theme"
         synchronized(tintedCache) { tintedCache.get(key)?.let { return it } }
         val source = source(context, component.file) ?: return null
         val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
         val pixels = IntArray(source.width * source.height)
         source.getPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
+        val panelMask =
+            if (theme == IrcSpriteV2Theme.LIGHT) {
+                catalog.heads
+                    .singleOrNull { it.file == component.file }
+                    ?.let { head -> headPanelMask(head, pixels, source.width, source.height) }
+            } else {
+                null
+            }
+        val faceLayer = catalog.faces.any { it.file == component.file }
         for (index in pixels.indices) {
-            pixels[index] = tintIrcSpriteV2Pixel(pixels[index], accent)
+            pixels[index] =
+                when (theme) {
+                    IrcSpriteV2Theme.DARK -> tintIrcSpriteV2Pixel(pixels[index], accent)
+                    IrcSpriteV2Theme.LIGHT -> tintIrcSpriteV2LightPixel(pixels[index], accent, faceLayer, panelMask?.get(index) == true)
+                }
         }
         output.setPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
         synchronized(tintedCache) { tintedCache.put(key, output) }
         return output
+    }
+
+    /**
+     * Finds the dark connected face panel inside a head's catalog-defined face rect. This mirrors
+     * the preview's flood fill and is cached by source file, never recomputed while drawing.
+     */
+    internal fun headPanelMask(
+        head: IrcSpriteV2Component,
+        pixels: IntArray,
+        width: Int,
+        height: Int,
+    ): BooleanArray {
+        synchronized(panelMaskCache) { panelMaskCache.get(head.file)?.let { return it } }
+        val faceRect = head.faceRect
+        if (faceRect == null) {
+            val emptyMask = BooleanArray(width * height)
+            synchronized(panelMaskCache) { panelMaskCache.put(head.file, emptyMask) }
+            return emptyMask
+        }
+        val left = floor((faceRect.x - head.rect.x) / head.rect.width * width).toInt().coerceAtLeast(0)
+        val right =
+            kotlin.math
+                .ceil((faceRect.x + faceRect.width - head.rect.x) / head.rect.width * width)
+                .toInt()
+                .minus(1)
+                .coerceAtMost(width - 1)
+        val top = floor((faceRect.y - head.rect.y) / head.rect.height * height).toInt().coerceAtLeast(0)
+        val bottom =
+            kotlin.math
+                .ceil((faceRect.y + faceRect.height - head.rect.y) / head.rect.height * height)
+                .toInt()
+                .minus(1)
+                .coerceAtMost(height - 1)
+        val centerX = (left + right) / 2f
+        val centerY = (top + bottom) / 2f
+        var seed = -1
+        var bestDistance = Float.POSITIVE_INFINITY
+        for (y in top..bottom) {
+            for (x in left..right) {
+                val index = y * width + x
+                val pixel = pixels[index]
+                val distance = (x - centerX) * (x - centerX) + (y - centerY) * (y - centerY)
+                if (Color.alpha(pixel) >= 192 && ircSpriteV2Luminance(pixel) <= 100 && distance < bestDistance) {
+                    seed = index
+                    bestDistance = distance
+                }
+            }
+        }
+        val mask = BooleanArray(width * height)
+        if (seed >= 0) {
+            val queue = ArrayDeque<Int>()
+            queue.addLast(seed)
+            mask[seed] = true
+            while (queue.isNotEmpty()) {
+                val point = queue.removeFirst()
+                val x = point % width
+                val y = point / width
+                for ((nextX, nextY) in arrayOf(x - 1 to y, x + 1 to y, x to y - 1, x to y + 1)) {
+                    if (nextX !in left..right || nextY !in top..bottom) continue
+                    val next = nextY * width + nextX
+                    val pixel = pixels[next]
+                    if (mask[next] || Color.alpha(pixel) < 192 || ircSpriteV2Luminance(pixel) > 100) continue
+                    mask[next] = true
+                    queue.addLast(next)
+                }
+            }
+        }
+        synchronized(panelMaskCache) { panelMaskCache.put(head.file, mask) }
+        return mask
     }
 
     private fun source(
@@ -300,11 +399,53 @@ internal fun tintIrcSpriteV2Pixel(
 ): Int {
     val alpha = Color.alpha(pixel)
     if (alpha == 0) return pixel
-    val luminance = (0.2126f * Color.red(pixel) + 0.7152f * Color.green(pixel) + 0.0722f * Color.blue(pixel)).roundToInt()
+    val luminance = ircSpriteV2Luminance(pixel)
 
     fun channel(componentAccent: Int): Int = (luminance * ((1f - accentStrength) + accentStrength * componentAccent / 255f)).roundToInt().coerceIn(0, 255)
     return Color.argb(alpha, channel(Color.red(accent)), channel(Color.green(accent)), channel(Color.blue(accent)))
 }
+
+/** The approved light treatment: pale nick-hued metal, ivory screens, and slate face glyphs. */
+internal fun tintIrcSpriteV2LightPixel(
+    pixel: Int,
+    accent: Int,
+    faceGlyph: Boolean,
+    screenPanel: Boolean,
+): Int {
+    val alpha = Color.alpha(pixel)
+    if (alpha == 0) return pixel
+    val luminance = ircSpriteV2Luminance(pixel)
+    return when {
+        faceGlyph -> {
+            val glyph = 42f + luminance * 0.11f
+            Color.argb(
+                alpha,
+                (glyph * 0.82f).roundToInt(),
+                (glyph * 0.95f).roundToInt(),
+                (glyph * 1.1f).roundToInt(),
+            )
+        }
+
+        screenPanel -> {
+            val ivory = 0.95f + luminance / 255f * 0.05f
+            Color.argb(
+                alpha,
+                (240f * ivory).roundToInt(),
+                (236f * ivory).roundToInt(),
+                (221f * ivory).roundToInt(),
+            )
+        }
+
+        else -> {
+            val metal = (100f + 144f * (luminance / 255f).toDouble().pow(0.55).toFloat()).roundToInt()
+
+            fun channel(componentAccent: Int): Int = (metal * (0.8f + 0.2f * componentAccent / 255f)).roundToInt().coerceIn(0, 255)
+            Color.argb(alpha, channel(Color.red(accent)), channel(Color.green(accent)), channel(Color.blue(accent)))
+        }
+    }
+}
+
+internal fun ircSpriteV2Luminance(pixel: Int): Int = (0.2126f * Color.red(pixel) + 0.7152f * Color.green(pixel) + 0.0722f * Color.blue(pixel)).roundToInt()
 
 internal fun parseIrcSpriteV2Catalog(raw: String): IrcSpriteV2Catalog {
     val root = Json.parseToJsonElement(raw).jsonObject

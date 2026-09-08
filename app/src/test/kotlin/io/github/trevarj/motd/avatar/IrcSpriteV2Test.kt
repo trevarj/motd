@@ -35,6 +35,24 @@ class IrcSpriteV2Test {
         assertNotEquals(tinted, tintIrcSpriteV2Pixel(source, Color.BLUE))
     }
 
+    @Test fun light_tint_uses_pale_metal_ivory_screens_and_dark_face_glyphs_without_losing_alpha() {
+        val source = Color.argb(127, 100, 100, 100)
+
+        val metal = tintIrcSpriteV2LightPixel(source, Color.RED, faceGlyph = false, screenPanel = false)
+        val panel = tintIrcSpriteV2LightPixel(source, Color.RED, faceGlyph = false, screenPanel = true)
+        val face = tintIrcSpriteV2LightPixel(source, Color.RED, faceGlyph = true, screenPanel = false)
+
+        assertEquals(127, Color.alpha(metal))
+        assertEquals(127, Color.alpha(panel))
+        assertEquals(127, Color.alpha(face))
+        assertTrue(Color.red(metal) > Color.red(source))
+        assertTrue(Color.red(panel) > Color.red(metal))
+        assertEquals(43, Color.red(face))
+        assertEquals(50, Color.green(face))
+        assertEquals(58, Color.blue(face))
+        assertEquals(Color.TRANSPARENT, tintIrcSpriteV2LightPixel(Color.TRANSPARENT, Color.RED, false, false))
+    }
+
     @Test fun catalog_parser_keeps_component_order_and_head_specific_placement() {
         val catalog =
             parseIrcSpriteV2Catalog(
@@ -92,6 +110,25 @@ class IrcSpriteV2Test {
         }
     }
 
+    @Test fun light_head_panel_masks_cover_each_catalog_head() {
+        val catalog = IrcSpriteV2Renderer.catalogForTest(context)!!
+
+        catalog.heads.forEach { head ->
+            val bitmap = context.assets.open("irc-sprites-v2/${head.file}").use(BitmapFactory::decodeStream)!!
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            val mask = IrcSpriteV2Renderer.headPanelMask(head, pixels, bitmap.width, bitmap.height)
+
+            assertTrue("${head.id} is missing its face panel", mask.any { it })
+            mask.forEachIndexed { index, selected ->
+                if (selected) {
+                    assertTrue(Color.alpha(pixels[index]) >= 192)
+                    assertTrue(ircSpriteV2Luminance(pixels[index]) <= 100)
+                }
+            }
+        }
+    }
+
     @Test fun packaged_catalog_loads_every_layer_and_renders_a_circular_tinted_scene() {
         val catalog = IrcSpriteV2Renderer.catalogForTest(context)!!
         assertEquals(3, catalog.bodies.size)
@@ -128,6 +165,26 @@ class IrcSpriteV2Test {
             )!!
         assertEquals(0, Color.alpha(red.getPixel(0, 0)))
         assertFalse(red.sameAs(blue))
+    }
+
+    @Test fun renderer_keeps_dark_and_light_composites_separate_and_reuses_the_dark_tint() {
+        fun render(theme: IrcSpriteV2Theme) =
+            IrcSpriteV2Renderer.render(
+                context = context,
+                name = "alice",
+                accent = Color.rgb(105, 183, 222),
+                sizePx = 64,
+                baseColor = Color.TRANSPARENT,
+                ringColor = Color.TRANSPARENT,
+                theme = theme,
+            )!!
+
+        val darkBefore = render(IrcSpriteV2Theme.DARK)
+        val light = render(IrcSpriteV2Theme.LIGHT)
+        val darkAfter = render(IrcSpriteV2Theme.DARK)
+
+        assertFalse(darkBefore.sameAs(light))
+        assertTrue(darkBefore.sameAs(darkAfter))
     }
 
     private fun centerX(rect: IrcSpriteV2Rect): Float = rect.x + rect.width / 2f
