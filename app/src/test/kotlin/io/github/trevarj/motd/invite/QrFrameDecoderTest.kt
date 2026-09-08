@@ -4,6 +4,7 @@ import android.graphics.Color
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -42,7 +43,7 @@ class QrFrameDecoderTest {
                     certSha256 = "ab".repeat(32),
                 ),
             )
-        val bitmap = brandedInviteQrBitmap(context, text, "inviter[mobile]", "inviter[mobile]", size = 512)
+        val bitmap = brandedInviteQrBitmap(context, text, "inviter[mobile]", size = 512)
         val qrInset = (bitmap.width * 0.06f).toInt()
         assertEquals(Color.rgb(0, 122, 124), bitmap.getPixel(qrInset, qrInset))
         val bytes = ByteArray(bitmap.width * bitmap.height)
@@ -53,6 +54,33 @@ class QrFrameDecoderTest {
         }
 
         assertEquals(text, decodeQrFrame(bytes, bitmap.width, bitmap.height, bitmap.width, 0))
+    }
+
+    @Test
+    fun `branded contact QR has an avatar free centered nickname footer`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val accent = Color.rgb(0, 122, 124)
+        val bitmap = brandedInviteQrBitmap(context, "https://example.test/invite", "i", accent = accent, size = 512)
+        val horizontalInset = (bitmap.width * 0.08f).toInt()
+        val footerCenterY = ((bitmap.width * 0.06f).toInt() + (bitmap.width * 0.88f).toInt() + bitmap.height) / 2
+        val footerPixels =
+            buildList {
+                for (y in footerCenterY - 24..footerCenterY + 24) {
+                    // Exclude the card's transparent rounded corners from the footer ink bounds.
+                    for (x in horizontalInset until bitmap.width - horizontalInset) {
+                        if (bitmap.getPixel(x, y) != accent) add(x to y)
+                    }
+                }
+            }
+
+        assertTrue(footerPixels.isNotEmpty())
+        val left = footerPixels.minOf { it.first }
+        val right = footerPixels.maxOf { it.first }
+        val top = footerPixels.minOf { it.second }
+        val bottom = footerPixels.maxOf { it.second }
+        assertTrue("footer should contain only the nickname, not an avatar", right - left < 24)
+        assertTrue("footer nickname should be vertically compact", bottom - top < 32)
+        assertEquals(bitmap.width / 2f, (left + right) / 2f, 3f)
     }
 
     @Test

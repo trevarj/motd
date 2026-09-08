@@ -97,7 +97,7 @@ fun CreateContactInviteContent(
             value =
                 if (text != null && nick != null) {
                     withContext(Dispatchers.Default) {
-                        brandedInviteQrBitmap(context, text, nick, nick, accent = qrAccent, onAccent = qrOnAccent)
+                        brandedInviteQrBitmap(context, text, nick, accent = qrAccent, onAccent = qrOnAccent)
                     }
                 } else {
                     null

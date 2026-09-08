@@ -151,7 +151,7 @@ class InviteUiTest {
     }
 
     @Test
-    fun contactCreatorShowsReadyNetworkNickAndThemedSpriteQr() {
+    fun contactCreatorShowsReadyNetworkNickAndThemedQr() {
         val invite = JoinInviteV2(networkName = "Ergo", host = "irc.example", port = 6697, contactNick = "current-nick")
         compose.setContent {
             MotdTheme {

@@ -17,8 +17,6 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import io.github.trevarj.motd.R
-import io.github.trevarj.motd.avatar.notificationAvatarBitmap
-import io.github.trevarj.motd.data.prefs.AvatarStyle
 
 /** Local-only QR renderer. Black/white pixels preserve scanner contrast in every app theme. */
 fun inviteQrBitmap(
@@ -47,12 +45,11 @@ fun inviteQrBitmap(
     return Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888)
 }
 
-/** Signal-style invite card: centered motd mark, then avatar/name or channel below the QR. */
+/** Signal-style invite card: centered motd mark, then its label below the QR. */
 fun brandedInviteQrBitmap(
     context: Context,
     text: String,
     label: String,
-    avatarNick: String? = null,
     accent: Int = Color.rgb(0, 122, 124),
     onAccent: Int = Color.WHITE,
     size: Int = 768,
@@ -90,23 +87,10 @@ fun brandedInviteQrBitmap(
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
     val footerCenterY = (inset + qrSize + height) / 2f
-    val avatarSize = if (avatarNick != null) size * 0.085f else 0f
-    val gap = if (avatarNick != null) size * 0.018f else 0f
-    val availableTextWidth = size * 0.78f - avatarSize - gap
+    val availableTextWidth = size * 0.78f
     val visibleLabel = TextUtils.ellipsize(label, textPaint, availableTextWidth, TextUtils.TruncateAt.END).toString()
     val textWidth = textPaint.measureText(visibleLabel)
-    val rowWidth = avatarSize + gap + textWidth
-    var x = qrCenter - rowWidth / 2f
-    if (avatarNick != null) {
-        val avatar = notificationAvatarBitmap(context, avatarNick, AvatarStyle.IRC_SPRITE)
-        canvas.drawBitmap(
-            avatar,
-            null,
-            RectF(x, footerCenterY - avatarSize / 2f, x + avatarSize, footerCenterY + avatarSize / 2f),
-            paint,
-        )
-        x += avatarSize + gap
-    }
+    val x = qrCenter - textWidth / 2f
     val baseline = footerCenterY - (textPaint.ascent() + textPaint.descent()) / 2f
     canvas.drawText(visibleLabel, x, baseline, textPaint)
     return bitmap
