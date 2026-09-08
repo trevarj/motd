@@ -20,7 +20,6 @@ jobs:
       irc: ${{ steps.classify.outputs.irc }}
       app: ${{ steps.classify.outputs.app }}
       device: ${{ steps.classify.outputs.device }}
-      package: ${{ steps.classify.outputs.package }}
       harness: ${{ steps.classify.outputs.harness }}
       debug_lint: ${{ steps.classify.outputs.debug_lint }}
     steps:
@@ -112,6 +111,8 @@ jobs:
     if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      GRADLE_OPTS: -Dorg.gradle.daemon=false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { submodules: recursive }
@@ -122,11 +123,14 @@ jobs:
       - uses: ./.github/actions/setup-native-toolchain
       - name: Verify FOSS dependency boundary
         run: |
-          if ./gradlew :app:dependencies --configuration releaseRuntimeClasspath \
+          if bash ./gradlew :app:dependencies --configuration releaseRuntimeClasspath \
             | grep -Ei 'firebase|play-services'; then
             echo "Google-only dependencies reached the FOSS runtime classpath" >&2
             exit 1
           fi
+      # Exercise cold signed packaging before lint builds additional variants.
+      - name: Build and verify signed release APK
+        run: ./tools/build-signed-release.sh --ci-key
       - name: Android lint (warnings as errors)
         id: lint
         env:
@@ -145,9 +149,8 @@ jobs:
             app/build/reports/lint-results-*.html
           if-no-files-found: ignore
           retention-days: 14
-      - name: Assemble release APK and verify AI native artifacts
-        if: needs.changes.outputs.package == 'true'
-        run: ./gradlew :app:assembleRelease :app:verifyAiNativeArtifacts --stacktrace
+      - name: Verify debug and E2E AI native artifacts
+        run: bash ./gradlew --no-daemon --no-parallel --max-workers=2 :app:verifyAiNativeArtifacts --stacktrace
 
   headless:
     needs: changes

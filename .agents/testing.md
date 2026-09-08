@@ -71,8 +71,30 @@ pushes on red CI.
 
 Require all applicable hosted `Required CI / gate` checks before merge. If an
 individual job fails, inspect that job's existing diagnostics and begin the fix
-immediately instead of waiting for aggregate `gate`; remaining coverage continues
-normally.
+immediately instead of waiting for aggregate `gate`; remaining coverage continues normally.
+
+## Signed release packaging
+
+For release-build changes or packaging-failure diagnosis, exercise the same
+bounded signed build that Required CI and publication use:
+
+```sh
+nix develop -c bash ./tools/build-signed-release.sh --ci-key
+```
+
+The explicit CI mode creates and removes a disposable keystore and refuses an
+existing signing environment. Its APK is test-signed, not for distribution.
+Without `--ci-key`, all four production signing variables are required. The helper
+builds only the release variant, verifies its native contents and cryptographic
+signature, and rejects forbidden signing-block metadata. It is not a routine UI
+handoff prerequisite or an invitation to run the full pre-push gate.
+
+Keep the existing debug/E2E artifact coverage in a separate invocation:
+
+```sh
+nix develop -c bash ./gradlew --no-daemon --no-parallel --max-workers=2 \
+  :app:verifyAiNativeArtifacts --stacktrace
+```
 
 ## Deterministic generated tests
 

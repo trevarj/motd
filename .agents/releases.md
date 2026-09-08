@@ -10,7 +10,9 @@ automation in `.github/workflows/release.yml` is authoritative.
 2. Run only the nearest local checks from [`testing.md`](testing.md). Do not
    duplicate hosted release parity or run local emulator E2E.
 3. Push the candidate commit and require the complete `Required CI` workflow—including
-   its `headless` E2E job and final `gate` job—to pass before tagging.
+   its `headless` E2E job and final `gate` job—to pass before tagging. Confirm the
+   Android job's **Build and verify signed release APK** step succeeded; a green
+   test/lint-only run or skipped packaging step is not release-build evidence.
 4. Confirm the requested semantic version and that the `v<semver>` tag does not
    already exist locally or remotely.
 5. Confirm the four signing secrets exist in GitHub: `KEYSTORE_BASE64`,
@@ -44,6 +46,17 @@ exhaustive host-driven E2E is manual-only. The release workflow verifies that
 the exact tagged SHA's latest `Required CI / gate` check succeeded, then builds,
 signs, verifies, and publishes the FOSS release without rerunning that SHA's
 tests, formatting, or lint.
+
+CI and publication both use `tools/build-signed-release.sh`. CI explicitly passes
+`--ci-key` to generate a disposable signing key; publication requires all four
+`MOTD_KEYSTORE_PATH`, `MOTD_KEYSTORE_PASSWORD`, `MOTD_KEY_ALIAS`, and
+`MOTD_KEY_PASSWORD` variables and never falls back to a disposable key. Both paths
+cryptographically verify the APK signature and check the signing-block policy.
+The release-only `:app:verifyReleaseAiNativeArtifacts` task checks the actual AGP
+release APK without pulling debug/E2E builds into the same heap. Packaging uses a
+fresh daemon, no parallel project execution, and at most two workers. The existing
+debug AAR/debug APK/E2E `:app:verifyAiNativeArtifacts` check remains a separate CI
+invocation and retains its F-Droid preassemble contract.
 
 The release description starts with the same detailed, user-facing changelog
 shown on F-Droid, followed by source/license details and GitHub's generated full

@@ -57,18 +57,21 @@ jobs:
             "$version_name" "$version_code" "$GITHUB_SHA" >> "$GITHUB_ENV"
       - uses: ./.github/actions/setup-native-toolchain
       - name: Decode keystore
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/keystore.jks"
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/keystore.jks"
       - name: Build signed release APK and verify AI native artifacts
         env:
           MOTD_KEYSTORE_PATH: ${{ runner.temp }}/keystore.jks
           MOTD_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           MOTD_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           MOTD_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease :app:verifyAiNativeArtifacts --stacktrace
-      - name: Verify F-Droid-compatible APK signing blocks
-        run: >-
-          java .github/scripts/CheckApkSigningBlocks.java
-          app/build/outputs/apk/release/app-release.apk
+        run: ./tools/build-signed-release.sh
+      - name: Remove signing keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/keystore.jks"
       - name: Prepare licensed release assets
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}

@@ -3,13 +3,20 @@ set -euo pipefail
 
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mapfile -t scripts < <(find "$E2E_DIR" -type f -name '*.sh' -print | sort)
-bash -n "${scripts[@]}"
+scripts+=("$E2E_DIR/../../tools/ci-paths.sh" "$E2E_DIR/../../tools/android-lint.sh" "$E2E_DIR/../../tools/build-signed-release.sh")
+for script in "${scripts[@]}"; do
+  bash -n "$script"
+done
 [ -x "$E2E_DIR/fast-suite.sh" ] || {
   echo "fast-suite.sh must remain executable" >&2
   exit 1
 }
 [ -x "$E2E_DIR/../../tools/ci-paths.sh" ] || {
   echo "tools/ci-paths.sh must remain executable" >&2
+  exit 1
+}
+[ -x "$E2E_DIR/../../tools/build-signed-release.sh" ] || {
+  echo "tools/build-signed-release.sh must remain executable" >&2
   exit 1
 }
 required_test="$E2E_DIR/../../app/src/androidTest/kotlin/io/github/trevarj/motd/RequiredHeadlessE2eTest.kt"
@@ -40,6 +47,7 @@ required_count="$(count_tests "$required_test" | awk -F '\t' '{ print $2 }')"
 }
 bash "$E2E_DIR/tests/android-lint-test.sh"
 bash "$E2E_DIR/tests/ci-paths-test.sh"
+bash "$E2E_DIR/tests/build-signed-release-test.sh"
 bash "$E2E_DIR/tests/fast-suite-classifier-test.sh"
 bash "$E2E_DIR/tests/fast-suite-privacy-test.sh"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then

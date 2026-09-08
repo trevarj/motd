@@ -1,9 +1,14 @@
+import com.android.build.api.artifact.SingleArtifact
+import com.android.build.api.variant.BuiltArtifactsLoader
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
+import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
@@ -150,12 +155,14 @@ abstract class VerifyAiNativeArtifacts : DefaultTask() {
 
     @TaskAction
     fun verify() {
-        verifyAar(whisperAar.get().asFile, "ai-whisper debug AAR", "libmotd_whisper.so")
-        verifyApk(debugApk.get().asFile, "app debug APK", "arm64-v8a", rejectLibbox = false)
-        verifyApk(e2eApk.get().asFile, "app e2e APK", "x86_64", rejectLibbox = true)
+        AiNativeArtifactVerifier.verifyAar(whisperAar.get().asFile, "ai-whisper debug AAR", "libmotd_whisper.so")
+        AiNativeArtifactVerifier.verifyApk(debugApk.get().asFile, "app debug APK", "arm64-v8a", rejectLibbox = false)
+        AiNativeArtifactVerifier.verifyApk(e2eApk.get().asFile, "app e2e APK", "x86_64", rejectLibbox = true)
     }
+}
 
-    private fun verifyAar(
+object AiNativeArtifactVerifier {
+    fun verifyAar(
         archive: File,
         label: String,
         libraryName: String,
@@ -178,7 +185,7 @@ abstract class VerifyAiNativeArtifacts : DefaultTask() {
         rejectModelWeights(label, entries)
     }
 
-    private fun verifyApk(
+    fun verifyApk(
         archive: File,
         label: String,
         abi: String,
@@ -292,6 +299,27 @@ abstract class VerifyAiNativeArtifacts : DefaultTask() {
 
             else -> false
         }
+    }
+}
+
+abstract class VerifyReleaseAiNativeArtifacts : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val apkDirectory: DirectoryProperty
+
+    @get:Internal
+    abstract val builtArtifactsLoader: Property<BuiltArtifactsLoader>
+
+    @TaskAction
+    fun verify() {
+        val apk =
+            builtArtifactsLoader
+                .get()
+                .load(apkDirectory.get())
+                ?.elements
+                ?.singleOrNull()
+                ?: error("Expected exactly one release APK in ${apkDirectory.get().asFile}")
+        AiNativeArtifactVerifier.verifyApk(File(apk.outputFile), "app release APK", "arm64-v8a", rejectLibbox = false)
     }
 }
 
@@ -435,6 +463,16 @@ tasks.register<VerifyAiNativeArtifacts>("verifyAiNativeArtifacts") {
     )
     debugApk.set(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
     e2eApk.set(layout.buildDirectory.file("outputs/apk/e2e/app-e2e.apk"))
+}
+
+androidComponents.onVariants(androidComponents.selector().withBuildType("release")) { variant ->
+    tasks.register<VerifyReleaseAiNativeArtifacts>("verifyReleaseAiNativeArtifacts") {
+        group = "verification"
+        description = "Verifies release APK native packaging without building debug or E2E artifacts."
+        dependsOn("assembleRelease")
+        apkDirectory.set(variant.artifacts.get(SingleArtifact.APK))
+        builtArtifactsLoader.set(variant.artifacts.getBuiltArtifactsLoader())
+    }
 }
 
 tasks.matching { it.name == "check" || it.name.startsWith("assemble") }.configureEach {
