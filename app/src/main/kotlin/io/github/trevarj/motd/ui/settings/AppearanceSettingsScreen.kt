@@ -541,7 +541,7 @@ private fun AppearanceChoiceSheet(
                 title = stringResource(R.string.settings_avatar_style),
                 selected = settings.avatarStyle,
                 options =
-                    AvatarStyle.entries.map {
+                    AvatarStyle.entries.sortedBy { it == AvatarStyle.NONE }.map {
                         ChoiceOption(it, avatarStyleLabel(it), avatarStyleDescription(it), "settings_avatar_style_${it.name.lowercase()}")
                     },
                 onSelect = onAvatar,
