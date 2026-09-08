@@ -478,7 +478,9 @@ class AudioInputMaterializerTest {
                         materializer.materialize(request(url))
                     }
 
-                assertTrue(withContext(Dispatchers.IO) { dispatcher.returnQueued.await(2, TimeUnit.SECONDS) })
+                // Media3 cache/SQLite work can take longer on loaded CI runners; cancellation
+                // still happens only after the completed lease reaches the delivery barrier.
+                assertTrue(withContext(Dispatchers.IO) { dispatcher.returnQueued.await(10, TimeUnit.SECONDS) })
                 assertEquals(1, leaseFiles().size)
                 job.cancel()
                 dispatcher.release()

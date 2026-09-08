@@ -9,6 +9,9 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.util.LruCache
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.withClip
+import androidx.core.util.lruCache
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -148,7 +151,7 @@ internal object IrcSpriteV2Renderer {
     private val sourceCache = bitmapCache(6 * 1024)
     private val tintedCache = bitmapCache(8 * 1024)
     private val compositeCache = bitmapCache(8 * 1024)
-    private val panelMaskCache = object : LruCache<String, BooleanArray>(8) {}
+    private val panelMaskCache = lruCache<String, BooleanArray>(8)
 
     @Volatile private var catalog: IrcSpriteV2Catalog? = null
 
@@ -188,36 +191,35 @@ internal object IrcSpriteV2Renderer {
         includeAccessory: Boolean,
         theme: IrcSpriteV2Theme,
     ): Bitmap {
-        val output = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val output = createBitmap(sizePx, sizePx)
         val canvas = Canvas(output)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = false }
         val clip = Path().apply { addCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f, Path.Direction.CW) }
-        canvas.save()
-        canvas.clipPath(clip)
-        canvas.drawColor(baseColor)
+        canvas.withClip(clip) {
+            canvas.drawColor(baseColor)
 
-        val body = catalog.bodies[traits.body]
-        val head = catalog.heads[traits.head]
-        val face = catalog.faces[traits.face]
-        val accessory = catalog.accessories[traits.accessory]
-        val accessoryRect = head.accessoryRects[accessory.id] ?: accessory.rect
-        val transform = catalog.framing?.let { IrcSpriteV2LayerTransform.forHead(head.rect, it.zoom) }
+            val body = catalog.bodies[traits.body]
+            val head = catalog.heads[traits.head]
+            val face = catalog.faces[traits.face]
+            val accessory = catalog.accessories[traits.accessory]
+            val accessoryRect = head.accessoryRects[accessory.id] ?: accessory.rect
+            val transform = catalog.framing?.let { IrcSpriteV2LayerTransform.forHead(head.rect, it.zoom) }
 
-        fun framed(rect: IrcSpriteV2Rect): IrcSpriteV2Rect = transform?.rect(rect) ?: rect
-        drawIfPresent(canvas, paint, context, catalog, body, framed(body.rect), accent, sizePx, theme)
-        if (includeAccessory && accessory.behindHead) {
-            drawIfPresent(canvas, paint, context, catalog, accessory, framed(accessoryRect), accent, sizePx, theme)
+            fun framed(rect: IrcSpriteV2Rect): IrcSpriteV2Rect = transform?.rect(rect) ?: rect
+            drawIfPresent(canvas, paint, context, catalog, body, framed(body.rect), accent, sizePx, theme)
+            if (includeAccessory && accessory.behindHead) {
+                drawIfPresent(canvas, paint, context, catalog, accessory, framed(accessoryRect), accent, sizePx, theme)
+            }
+            drawIfPresent(canvas, paint, context, catalog, head, framed(head.rect), accent, sizePx, theme)
+            drawIfPresent(canvas, paint, context, catalog, face, framed(head.faceRect ?: face.rect), accent, sizePx, theme)
+            if (includeAccessory && !accessory.behindHead) {
+                drawIfPresent(canvas, paint, context, catalog, accessory, framed(accessoryRect), accent, sizePx, theme)
+            }
+            // A catalog can grow with several accents, but V2 currently intentionally has one badge.
+            catalog.accents.firstOrNull()?.let {
+                drawIfPresent(canvas, paint, context, catalog, it, framed(it.rect), accent, sizePx, theme)
+            }
         }
-        drawIfPresent(canvas, paint, context, catalog, head, framed(head.rect), accent, sizePx, theme)
-        drawIfPresent(canvas, paint, context, catalog, face, framed(head.faceRect ?: face.rect), accent, sizePx, theme)
-        if (includeAccessory && !accessory.behindHead) {
-            drawIfPresent(canvas, paint, context, catalog, accessory, framed(accessoryRect), accent, sizePx, theme)
-        }
-        // A catalog can grow with several accents, but V2 currently intentionally has one badge.
-        catalog.accents.firstOrNull()?.let {
-            drawIfPresent(canvas, paint, context, catalog, it, framed(it.rect), accent, sizePx, theme)
-        }
-        canvas.restore()
 
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = (sizePx / 32f).coerceAtLeast(1f)
@@ -258,7 +260,7 @@ internal object IrcSpriteV2Renderer {
         val key = "${component.file}:${accent and 0x00ffffff}:$theme"
         synchronized(tintedCache) { tintedCache.get(key)?.let { return it } }
         val source = source(context, component.file) ?: return null
-        val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+        val output = createBitmap(source.width, source.height)
         val pixels = IntArray(source.width * source.height)
         source.getPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
         val panelMask =
@@ -382,13 +384,7 @@ internal object IrcSpriteV2Renderer {
         }
     }
 
-    private fun bitmapCache(maxSizeKb: Int): LruCache<String, Bitmap> =
-        object : LruCache<String, Bitmap>(maxSizeKb) {
-            override fun sizeOf(
-                key: String,
-                value: Bitmap,
-            ): Int = value.allocationByteCount / 1024
-        }
+    private fun bitmapCache(maxSizeKb: Int): LruCache<String, Bitmap> = lruCache(maxSizeKb, sizeOf = { _, value -> value.allocationByteCount / 1024 })
 }
 
 /** Tint a neutral source pixel while retaining its original alpha for transparent PNG layers. */

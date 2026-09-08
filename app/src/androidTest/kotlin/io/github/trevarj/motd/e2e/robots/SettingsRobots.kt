@@ -1,6 +1,11 @@
 package io.github.trevarj.motd.e2e.robots
 
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.ComposeTestRule
+import androidx.compose.ui.test.performSemanticsAction
 
 internal class SettingsRobot(
     compose: ComposeTestRule,
@@ -55,6 +60,18 @@ internal class ThemeSheetRobot(
         scrollContainerTo("settings_theme_list", "settings_theme_ayu_dark")
         click("settings_theme_ayu_dark")
         click("settings_switch_true_black")
+    }
+
+    fun dismiss() {
+        val themeSheet = hasTestTag("settings_theme_sheet")
+        val dismissAction =
+            SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and
+                (themeSheet or hasAnyAncestor(themeSheet))
+        compose
+            .onAllNodes(dismissAction, useUnmergedTree = true)[0]
+            .performSemanticsAction(SemanticsActions.Dismiss)
+        awaitTagGone("settings_theme_sheet")
+        awaitTag("settings_avatar_style_picker")
     }
 }
 

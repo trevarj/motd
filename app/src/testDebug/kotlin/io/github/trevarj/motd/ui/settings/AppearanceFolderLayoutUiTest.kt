@@ -1,11 +1,16 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarStyle
@@ -65,6 +70,23 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag("settings_avatar_style_irc_sprite_v2").performClick()
 
         assertEquals(AvatarStyle.IRC_SPRITE_V2, selected)
+    }
+
+    @Test
+    fun dismissingThemeSheetKeepsAppearanceControlsAvailable() {
+        setContent()
+
+        compose.onNodeWithTag("settings_theme_picker").performClick()
+        val themeSheet = hasTestTag("settings_theme_sheet")
+        val dismissAction =
+            SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and
+                (themeSheet or hasAnyAncestor(themeSheet))
+        compose
+            .onAllNodes(dismissAction, useUnmergedTree = true)[0]
+            .performSemanticsAction(SemanticsActions.Dismiss)
+
+        compose.onNodeWithTag("settings_theme_sheet", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("settings_avatar_style_picker").performScrollTo().assertIsDisplayed()
     }
 
     private fun setContent(
