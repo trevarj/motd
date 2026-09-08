@@ -29,6 +29,12 @@ function render(canvas, selection=state, color='#69b7de', theme='dark', detail=c
   const size=canvas.width,ctx=canvas.getContext('2d');ctx.clearRect(0,0,size,size);ctx.imageSmoothingEnabled=false;
   const head=parts.head[selection.head],accessory=parts.accessory[selection.accessory];
   ctx.save();ctx.beginPath();ctx.arc(size/2,size/2,size/2,0,Math.PI*2);ctx.clip();ctx.fillStyle=theme==='dark'?'#24262b':'#e8e9eb';ctx.fillRect(0,0,size,size);
+  // Reframe the complete assembly together so attachments keep their registration.
+  if(catalog.framing){
+    const zoom=catalog.framing.zoom??1;
+    ctx.translate(size/2,size/2);ctx.scale(zoom,zoom);
+    ctx.translate(-(head.rect[0]+head.rect[2]/2)*size,-(head.rect[1]+head.rect[3]/2)*size);
+  }
   const draw=(p,rect=p.rect,strength=.22)=>ctx.drawImage(source(p,color,strength),...rect.map(v=>v*size));
   draw(parts.body[selection.body]);
   if(detail&&accessory.behindHead)draw(accessory,head.accessoryRects[accessory.id]);

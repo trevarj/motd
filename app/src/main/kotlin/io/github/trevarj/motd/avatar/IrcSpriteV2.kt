@@ -86,12 +86,50 @@ internal data class IrcSpriteV2Component(
 
 internal data class IrcSpriteV2Catalog(
     val canvasSize: Int,
+    val framing: IrcSpriteV2Framing? = null,
     val bodies: List<IrcSpriteV2Component>,
     val heads: List<IrcSpriteV2Component>,
     val faces: List<IrcSpriteV2Component>,
     val accessories: List<IrcSpriteV2Component>,
     val accents: List<IrcSpriteV2Component>,
 )
+
+/** Optional catalog framing applied around the selected head after the neutral disc is painted. */
+internal data class IrcSpriteV2Framing(
+    val zoom: Float = 1f,
+)
+
+/** Maps every sprite-layer rect through the selected head's catalog-defined framing. */
+internal data class IrcSpriteV2LayerTransform(
+    private val headCenterX: Float,
+    private val headCenterY: Float,
+    private val zoom: Float,
+) {
+    fun rect(source: IrcSpriteV2Rect): IrcSpriteV2Rect =
+        IrcSpriteV2Rect(
+            x = coordinate(source.x, headCenterX),
+            y = coordinate(source.y, headCenterY),
+            width = source.width * zoom,
+            height = source.height * zoom,
+        )
+
+    private fun coordinate(
+        value: Float,
+        headCenter: Float,
+    ): Float = 0.5f + (value - headCenter) * zoom
+
+    companion object {
+        fun forHead(
+            head: IrcSpriteV2Rect,
+            zoom: Float,
+        ): IrcSpriteV2LayerTransform =
+            IrcSpriteV2LayerTransform(
+                headCenterX = head.x + head.width / 2f,
+                headCenterY = head.y + head.height / 2f,
+                zoom = zoom,
+            )
+    }
+}
 
 /**
  * Android bitmap compositor shared by Compose avatars and notifications. It keeps source, tinted,
@@ -152,17 +190,20 @@ internal object IrcSpriteV2Renderer {
         val face = catalog.faces[traits.face]
         val accessory = catalog.accessories[traits.accessory]
         val accessoryRect = head.accessoryRects[accessory.id] ?: accessory.rect
-        drawIfPresent(canvas, paint, context, body, body.rect, accent, sizePx)
+        val transform = catalog.framing?.let { IrcSpriteV2LayerTransform.forHead(head.rect, it.zoom) }
+
+        fun framed(rect: IrcSpriteV2Rect): IrcSpriteV2Rect = transform?.rect(rect) ?: rect
+        drawIfPresent(canvas, paint, context, body, framed(body.rect), accent, sizePx)
         if (includeAccessory && accessory.behindHead) {
-            drawIfPresent(canvas, paint, context, accessory, accessoryRect, accent, sizePx)
+            drawIfPresent(canvas, paint, context, accessory, framed(accessoryRect), accent, sizePx)
         }
-        drawIfPresent(canvas, paint, context, head, head.rect, accent, sizePx)
-        drawIfPresent(canvas, paint, context, face, head.faceRect ?: face.rect, accent, sizePx)
+        drawIfPresent(canvas, paint, context, head, framed(head.rect), accent, sizePx)
+        drawIfPresent(canvas, paint, context, face, framed(head.faceRect ?: face.rect), accent, sizePx)
         if (includeAccessory && !accessory.behindHead) {
-            drawIfPresent(canvas, paint, context, accessory, accessoryRect, accent, sizePx)
+            drawIfPresent(canvas, paint, context, accessory, framed(accessoryRect), accent, sizePx)
         }
         // A catalog can grow with several accents, but V2 currently intentionally has one badge.
-        catalog.accents.firstOrNull()?.let { drawIfPresent(canvas, paint, context, it, it.rect, accent, sizePx) }
+        catalog.accents.firstOrNull()?.let { drawIfPresent(canvas, paint, context, it, framed(it.rect), accent, sizePx) }
         canvas.restore()
 
         paint.style = Paint.Style.STROKE
@@ -272,6 +313,14 @@ internal fun parseIrcSpriteV2Catalog(raw: String): IrcSpriteV2Catalog {
     val components = root["components"]?.jsonObject ?: error("Missing components")
     return IrcSpriteV2Catalog(
         canvasSize = canvasSize,
+        framing =
+            root["framing"]?.jsonObject?.let { framing ->
+                IrcSpriteV2Framing(
+                    zoom = framing["zoom"]?.jsonPrimitive?.floatOrNull ?: 1f,
+                ).also {
+                    require(it.zoom.isFinite() && it.zoom > 0f) { "Framing zoom must be finite and positive" }
+                }
+            },
         bodies = components.requiredComponents("body"),
         heads = components.requiredComponents("head"),
         faces = components.requiredComponents("face"),

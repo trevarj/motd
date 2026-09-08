@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -59,6 +60,36 @@ class IrcSpriteV2Test {
                 .x,
         )
         assertEquals(true, catalog.accessories.single().behindHead)
+        assertNull(catalog.framing)
+    }
+
+    @Test fun active_framing_centers_each_head_and_preserves_relative_layer_placement() {
+        val catalog = IrcSpriteV2Renderer.catalogForTest(context)!!
+        val framing = requireNotNull(catalog.framing)
+        assertEquals(1.4f, framing.zoom, 0f)
+        val body = catalog.bodies.first()
+
+        catalog.heads.forEach { head ->
+            val transform = IrcSpriteV2LayerTransform.forHead(head.rect, framing.zoom)
+            val centeredHead = transform.rect(head.rect)
+            assertEquals(0.5f, centerX(centeredHead), 0.0001f)
+            assertEquals(0.5f, centerY(centeredHead), 0.0001f)
+            assertTrue(transform.rect(body.rect).bottom > 1f)
+
+            val accessory = catalog.accessories.first()
+            val attachment = head.accessoryRects.getValue(accessory.id)
+            val framedAttachment = transform.rect(attachment)
+            assertEquals(
+                (centerX(attachment) - centerX(head.rect)) * framing.zoom,
+                centerX(framedAttachment) - centerX(centeredHead),
+                0.0001f,
+            )
+            assertEquals(
+                (centerY(attachment) - centerY(head.rect)) * framing.zoom,
+                centerY(framedAttachment) - centerY(centeredHead),
+                0.0001f,
+            )
+        }
     }
 
     @Test fun packaged_catalog_loads_every_layer_and_renders_a_circular_tinted_scene() {
@@ -98,4 +129,10 @@ class IrcSpriteV2Test {
         assertEquals(0, Color.alpha(red.getPixel(0, 0)))
         assertFalse(red.sameAs(blue))
     }
+
+    private fun centerX(rect: IrcSpriteV2Rect): Float = rect.x + rect.width / 2f
+
+    private fun centerY(rect: IrcSpriteV2Rect): Float = rect.y + rect.height / 2f
+
+    private val IrcSpriteV2Rect.bottom: Float get() = y + height
 }

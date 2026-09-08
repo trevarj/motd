@@ -1,6 +1,7 @@
 {
   "version": 2,
   "canvasSize": 256,
+  "framing": {"zoom": 1.4},
   "components": {
     "body": [
       {
