@@ -16,6 +16,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -37,6 +39,7 @@ import io.github.trevarj.motd.ui.settings.SettingsGroup
 import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.settings.SwitchRow
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
 import io.github.trevarj.motd.ui.settings.SettingsTarget as SettingsTargetAnchor
 
 @Composable
@@ -83,7 +86,10 @@ private fun AboutContent(
             Image(
                 painter = painterResource(R.drawable.motd_logo_mark),
                 contentDescription = null,
-                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
+                colorFilter =
+                    ColorFilter.colorMatrix(
+                        ColorMatrix(ceramicLogoColorMatrix(MaterialTheme.colorScheme.onSurface.toArgb())),
+                    ),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.size(34.dp),
             )

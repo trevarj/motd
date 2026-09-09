@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
@@ -17,6 +19,7 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
 
 /** Local-only QR renderer. Black/white pixels preserve scanner contrast in every app theme. */
 fun inviteQrBitmap(
@@ -72,8 +75,8 @@ fun brandedInviteQrBitmap(
     paint.color = Color.WHITE
     canvas.drawCircle(qrCenter, qrCenter, logoRadius, paint)
     val logoSize = (qrSize * 0.10f).toInt()
-    ContextCompat.getDrawable(context, R.drawable.motd_logo_mark)?.apply {
-        setTint(accent)
+    ContextCompat.getDrawable(context, R.drawable.motd_logo_mark)?.mutate()?.apply {
+        colorFilter = ColorMatrixColorFilter(ColorMatrix(ceramicLogoColorMatrix(accent)))
         val left = qrCenter.toInt() - logoSize / 2
         val top = qrCenter.toInt() - logoSize / 2
         bounds = Rect(left, top, left + logoSize, top + logoSize)

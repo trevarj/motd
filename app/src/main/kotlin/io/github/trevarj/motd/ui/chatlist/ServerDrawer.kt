@@ -59,7 +59,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -92,6 +94,7 @@ import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
 
 /**
  * Server-drawer content. Stateless: takes the built [DrawerRow]s + rollups and
@@ -174,9 +177,12 @@ fun ServerDrawerContent(
                 Image(
                     painter = painterResource(R.drawable.motd_logo_mark),
                     contentDescription = null,
-                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
+                    colorFilter =
+                        ColorFilter.colorMatrix(
+                            ColorMatrix(ceramicLogoColorMatrix(MaterialTheme.colorScheme.onSurface.toArgb())),
+                        ),
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.size(26.dp),
+                    modifier = Modifier.size(26.dp).testTag("drawer_logo_mark"),
                 )
                 Text(
                     text = stringResource(R.string.app_name),

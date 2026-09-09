@@ -1,0 +1,49 @@
+{
+  "mode": "built-in imagegen edit",
+  "reference": "reference-on-white.png",
+  "polarity": "Black source; white proof derived using CSS invert(1), preserving geometry and alpha. Not separately relit white material.",
+  "status": "Matte ceramic selected. Production exports use the original raster silhouette mask and unchanged lettering, with polarity-aware theme recoloring. Unselected metal remains an unfinished study.",
+  "variants": [
+    {
+      "id": "01-crisp-flat",
+      "name": "Crisp flat",
+      "prompt": "Use case: style-transfer\nAsset type: motd logo symbol for Android and web branding.\nInput image: existing black motd symbol on white, authoritative geometry reference and edit target. The white is only a reference backdrop: REMOVE it in the output and use genuine transparent alpha, including the slash cutout.\nPrimary request: render this exact logo with uniform pure black fill, smooth precise contours, absolutely no dimensional shading or gradient.. Change only surface finish and internal shading.\nComposition: front-facing orthographic and centered on a square canvas. Match reference position and scale exactly, including all margins. Preserve the exact speech-bubble silhouette, asymmetric lower-left tail, rounded slash cutout, proportions, and orientation. The slash is an empty hole through the mark, not a raised bar.\nPalette: black artwork with restrained neutral grayscale shading only.\nBackground: genuinely transparent alpha, including the slash cutout; do not draw white, gray, checkerboard, or any backdrop.\nConstraints: readable at small icon sizes; clean antialiased edges; no lettering, colored accents, perspective tilt, added badge, external shadow, glow, watermark, or scene. Flat frontal geometry with no thick sidewalls. One symbol only.",
+      "file": "01-crisp-flat.png",
+      "generatedPath": "/home/trev/.codex/generated_images/01a08050-17fd-7531-940b-ffc362da80dd/exec-323da058-9750-4db6-942f-e607384771fa.png"
+    },
+    {
+      "id": "02-satin-ink",
+      "name": "Satin ink",
+      "prompt": "Use case: style-transfer\nAsset type: motd logo symbol for Android and web branding.\nInput image: existing black motd symbol on white, authoritative geometry reference and edit target. The white is only a reference backdrop: REMOVE it in the output and use genuine transparent alpha, including the slash cutout.\nPrimary request: render this exact logo with nearly flat black satin ink, a very subtle broad charcoal tonal sheen across the face, no visible bevel or grain.. Change only surface finish and internal shading.\nComposition: front-facing orthographic and centered on a square canvas. Match reference position and scale exactly, including all margins. Preserve the exact speech-bubble silhouette, asymmetric lower-left tail, rounded slash cutout, proportions, and orientation. The slash is an empty hole through the mark, not a raised bar.\nPalette: black artwork with restrained neutral grayscale shading only.\nBackground: genuinely transparent alpha, including the slash cutout; do not draw white, gray, checkerboard, or any backdrop.\nConstraints: readable at small icon sizes; clean antialiased edges; no lettering, colored accents, perspective tilt, added badge, external shadow, glow, watermark, or scene. Flat frontal geometry with no thick sidewalls. One symbol only.",
+      "file": "02-satin-ink.png",
+      "generatedPath": "/home/trev/.codex/generated_images/01a08050-17fd-7531-940b-ffc362da80dd/exec-16ab6e42-0972-435e-8cd3-920e63af6a29.png"
+    },
+    {
+      "id": "03-matte-ceramic",
+      "name": "Matte ceramic",
+      "prompt": "Use case: style-transfer\nAsset type: motd logo symbol for Android and web branding.\nInput image: existing black motd symbol on white, authoritative geometry reference and edit target. The white is only a reference backdrop: REMOVE it in the output and use genuine transparent alpha, including the slash cutout.\nPrimary request: render this exact logo with black matte ceramic with soft internal charcoal shading suggesting very shallow sculpted depth; velvety smooth, broad diffuse light from upper left, no gloss or grain.. Change only surface finish and internal shading.\nComposition: front-facing orthographic and centered on a square canvas. Match reference position and scale exactly, including all margins. Preserve the exact speech-bubble silhouette, asymmetric lower-left tail, rounded slash cutout, proportions, and orientation. The slash is an empty hole through the mark, not a raised bar.\nPalette: black artwork with restrained neutral grayscale shading only.\nBackground: genuinely transparent alpha, including the slash cutout; do not draw white, gray, checkerboard, or any backdrop.\nConstraints: readable at small icon sizes; clean antialiased edges; no lettering, colored accents, perspective tilt, added badge, external shadow, glow, watermark, or scene. Flat frontal geometry with no thick sidewalls. One symbol only.",
+      "file": "03-matte-ceramic.png",
+      "generatedPath": "/home/trev/.codex/generated_images/01a08050-17fd-7531-940b-ffc362da80dd/exec-b41be208-77bb-4e74-82d3-7c4cea275f36.png"
+    },
+    {
+      "id": "04-soft-bevel",
+      "name": "Soft bevel",
+      "prompt": "Use case: style-transfer\nAsset type: motd logo symbol for Android and web branding.\nInput image: existing black motd symbol on white, authoritative geometry reference and edit target. The white is only a reference backdrop: REMOVE it in the output and use genuine transparent alpha, including the slash cutout.\nPrimary request: render this exact logo with black face with a narrow gently rounded charcoal bevel tracing the interior of the outer edge and slash rim. Predominantly flat black face, gentle upper-left lighting; no silhouette expansion.. Change only surface finish and internal shading.\nComposition: front-facing orthographic and centered on a square canvas. Match reference position and scale exactly, including all margins. Preserve the exact speech-bubble silhouette, asymmetric lower-left tail, rounded slash cutout, proportions, and orientation. The slash is an empty hole through the mark, not a raised bar.\nPalette: black artwork with restrained neutral grayscale shading only.\nBackground: genuinely transparent alpha, including the slash cutout; do not draw white, gray, checkerboard, or any backdrop.\nConstraints: readable at small icon sizes; clean antialiased edges; no lettering, colored accents, perspective tilt, added badge, external shadow, glow, watermark, or scene. Flat frontal geometry with no thick sidewalls. One symbol only.",
+      "file": "04-soft-bevel.png",
+      "generatedPath": "/home/trev/.codex/generated_images/01a08050-17fd-7531-940b-ffc362da80dd/exec-b24e07e7-cf29-4850-9ef2-1b57e9aea2b6.png"
+    },
+    {
+      "id": "05-satin-metal",
+      "name": "Satin metal",
+      "prompt": "Use case: style-transfer\nAsset type: motd logo symbol for Android and web branding.\nInput image: existing black motd symbol on white, authoritative geometry reference and edit target. The white is only a reference backdrop: REMOVE it in the output and use genuine transparent alpha, including the slash cutout.\nPrimary request: render this exact logo with black satin metal with restrained directional silver-gray highlights hugging the interior of the edges, predominantly dark face, subtle upper-left studio lighting; no grain, chrome reflections, glare, or scratches.. Change only surface finish and internal shading.\nComposition: front-facing orthographic and centered on a square canvas. Match reference position and scale exactly, including all margins. Preserve the exact speech-bubble silhouette, asymmetric lower-left tail, rounded slash cutout, proportions, and orientation. The slash is an empty hole through the mark, not a raised bar.\nPalette: black artwork with restrained neutral grayscale shading only.\nBackground: genuinely transparent alpha, including the slash cutout; do not draw white, gray, checkerboard, or any backdrop.\nConstraints: readable at small icon sizes; clean antialiased edges; no lettering, colored accents, perspective tilt, added badge, external shadow, glow, watermark, or scene. Flat frontal geometry with no thick sidewalls. One symbol only.",
+      "file": "05-satin-metal.png",
+      "generatedPath": "/home/trev/.codex/generated_images/01a08050-17fd-7531-940b-ffc362da80dd/exec-b238a83e-5da5-4512-aa86-e9bc0fe2381a.png"
+    }
+  ],
+  "selected": "03-matte-ceramic",
+  "production": {
+    "master": "docs/assets/brand/motd-ceramic-master.png",
+    "exporter": "tools/export-branding.mjs",
+    "preview": "selected.html"
+  }
+}

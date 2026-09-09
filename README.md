@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/motd-lockup-dark.svg">
-    <img src="docs/assets/brand/motd-lockup-light.svg" alt="motd" width="420">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/motd-lockup-dark.png">
+    <img src="docs/assets/brand/motd-lockup-light.png" alt="motd" width="420">
   </picture>
 </p>
 

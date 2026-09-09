@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>motd · selected matte ceramic</title>
+<style>
+  *{box-sizing:border-box}body{margin:0;background:#151515;color:#eee;font:16px/1.5 'DejaVu Sans',sans-serif}main{max-width:1100px;padding:30px 20px;margin:auto}a{color:inherit}h1{letter-spacing:-.04em;font-size:36px;margin-bottom:8px}p{color:#bbb}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.panel{border:1px solid #444;border-radius:16px;overflow:hidden;padding:24px}.light{background:#fff;color:#161616}.dark{background:#101010;color:#eee}.lockup{width:100%;max-width:490px}.samples{display:flex;gap:24px;align-items:center;margin:20px 0}.sample{display:flex;align-items:center;gap:8px}.sample strong{font-size:23px}.sample.large strong{font-size:29px}canvas{width:26px;height:26px}.large canvas{width:34px;height:34px}.theme-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.theme{padding:20px;border-radius:12px}.theme canvas{width:64px;height:64px;display:block;margin:12px auto}.icons{display:flex;gap:20px;flex-wrap:wrap}.icon img{width:108px;height:108px;border-radius:50%}.small{font-size:13px}h2{margin-top:32px}.panel h2{margin-top:0}@media(max-width:650px){.grid{grid-template-columns:1fr}.theme-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.samples{flex-wrap:wrap}}
+</style>
+<main>
+  <a href="index.html">All five studies</a>
+  <h1>Matte ceramic, selected.</h1>
+  <p>Production raster exports. Original silhouette and lettering, ceramic surface shading, automatic theme-color mapping.</p>
+  <div class="grid">
+    <section class="panel light"><h2>Light surfaces</h2><img class="lockup" src="selected-lockup-light.png" alt="motd black ceramic lockup"><div class="samples"><div class="sample"><canvas data-color="29,27,32"></canvas><strong>motd</strong></div><div class="sample large"><canvas data-color="29,27,32"></canvas><strong>motd</strong></div></div><span class="small">Drawer 26dp · About 34dp</span></section>
+    <section class="panel dark"><h2>Dark surfaces</h2><img class="lockup" src="selected-lockup-dark.png" alt="motd white ceramic lockup"><div class="samples"><div class="sample"><canvas data-color="230,225,229"></canvas><strong>motd</strong></div><div class="sample large"><canvas data-color="230,225,229"></canvas><strong>motd</strong></div></div><span class="small">Same source, theme-aware shading</span></section>
+  </div>
+  <h2>Theme color proofs</h2><p>These demonstrate the same mapping used by the app. The drawer uses its text color; invite cards use their accent.</p>
+  <div class="theme-grid" id="themes"></div>
+  <h2>Launcher safe-zone proofs</h2><div class="icons"><div class="icon"><img src="selected-launcher.png" style="background:#006c70" alt="Default teal launcher"></div><div class="icon"><img src="selected-launcher-light.png" style="background:#faf4ed" alt="Light launcher with black ceramic"></div><div class="icon"><img src="selected-launcher-terminal.png" style="background:#0a0f0a" alt="Terminal green ceramic launcher"></div></div>
+  <p class="small">Browser rendering proof, not an Android screenshot. Production assets retain adaptive-icon and splash padding.</p>
+</main>
+<script type="module">
+const variants=[['Graphite',[29,27,32],'#fff'],['Ivory',[230,225,229],'#101010'],['Teal',[0,108,112],'#fff'],['Lavender',[208,188,255],'#101010'],['Amber',[255,196,105],'#101010'],['Terminal',[51,255,102],'#101010']];
+for(const [label,color,background] of variants){const panel=document.createElement('div');panel.className='theme';panel.style.background=background;panel.style.color=`rgb(${color})`;panel.textContent=label;const canvas=document.createElement('canvas');canvas.dataset.color=color.join(',');panel.append(canvas);document.querySelector('#themes').append(panel);}
+const source=new Image();source.src='selected-mark.png';await source.decode();
+const scratch=document.createElement('canvas');scratch.width=source.width;scratch.height=source.height;const ctx=scratch.getContext('2d');ctx.drawImage(source,0,0);const original=ctx.getImageData(0,0,source.width,source.height);
+for(const canvas of document.querySelectorAll('canvas')){const target=canvas.dataset.color.split(',').map(Number);const light=(.2126*target[0]+.7152*target[1]+.0722*target[2])/255>=.5;const pixels=new ImageData(new Uint8ClampedArray(original.data),original.width,original.height);for(let i=0;i<pixels.data.length;i+=4){const luminance=(.2126*original.data[i]+.7152*original.data[i+1]+.0722*original.data[i+2])/255;for(let c=0;c<3;c++)pixels.data[i+c]=Math.round(light?target[c]*(1-.8*luminance):target[c]+.8*(255-target[c])*luminance);}canvas.width=source.width;canvas.height=source.height;canvas.getContext('2d').putImageData(pixels,0,0);}
+window.selectedLogoReady=true;
+</script>
+</html>

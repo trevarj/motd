@@ -1,19 +1,29 @@
 package io.github.trevarj.motd
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.chatlist.DrawerRow
 import io.github.trevarj.motd.ui.chatlist.ServerDrawerContent
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -118,6 +128,49 @@ class ServerDrawerUiTest {
         compose.onNodeWithTag("drawer_open_feed").assertDoesNotExist()
     }
 
+    @Test
+    fun ceramicLogo_preservesThemeAwareShadingAcrossThemeRoundTrip() {
+        lateinit var selectTheme: (ColorThemePreset) -> Unit
+        compose.setContent {
+            var theme by remember { mutableStateOf(ColorThemePreset.LIGHT) }
+            selectTheme = { theme = it }
+            MotdTheme(themePreset = theme, dynamicColor = false) {
+                ServerDrawerContent(
+                    drawerRows = emptyList(),
+                    selectedNetworkId = null,
+                    allUnread = 0,
+                    allMentions = 0,
+                    scopedUnreadCount = 0,
+                    allOffline = false,
+                    onSelectNetwork = {},
+                    onConnect = {},
+                    onDisconnect = {},
+                    onServerMessages = {},
+                    onOpenNetworkSettings = {},
+                    onAddNetwork = {},
+                    onToggleOffline = {},
+                    onOpenSettings = {},
+                    onMarkAllRead = {},
+                )
+            }
+        }
+
+        fun logoPixels(): Bitmap = compose.onNodeWithTag("drawer_logo_mark").captureToImage().asAndroidBitmap()
+
+        val light = logoPixels()
+        compose.runOnUiThread { selectTheme(ColorThemePreset.DARK) }
+        val dark = logoPixels()
+        compose.runOnUiThread { selectTheme(ColorThemePreset.LIGHT) }
+        val lightAgain = logoPixels()
+
+        val lightShading = ceramicShading(light)
+        val darkShading = ceramicShading(dark)
+        assertTrue("light theme should retain ceramic highlights", lightShading > 3)
+        assertTrue("dark theme should invert ceramic highlights into shadows", darkShading < -3)
+        assertEquals(sample(light, 0.25f, 0.25f), sample(lightAgain, 0.25f, 0.25f))
+        assertEquals(sample(light, 0.80f, 0.70f), sample(lightAgain, 0.80f, 0.70f))
+    }
+
     private fun drawerRow(
         networkId: Long,
         state: IrcClientState,
@@ -131,4 +184,18 @@ class ServerDrawerUiTest {
         unread = 0,
         mentions = 0,
     )
+
+    private fun ceramicShading(bitmap: Bitmap): Int = luminance(sample(bitmap, 0.25f, 0.25f)) - luminance(sample(bitmap, 0.80f, 0.70f))
+
+    private fun sample(
+        bitmap: Bitmap,
+        xFraction: Float,
+        yFraction: Float,
+    ): Int =
+        bitmap.getPixel(
+            (bitmap.width * xFraction).toInt().coerceIn(0, bitmap.width - 1),
+            (bitmap.height * yFraction).toInt().coerceIn(0, bitmap.height - 1),
+        )
+
+    private fun luminance(color: Int): Int = (Color.red(color) * 2126 + Color.green(color) * 7152 + Color.blue(color) * 722) / 10_000
 }

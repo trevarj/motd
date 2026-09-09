@@ -25,10 +25,10 @@ required=(
   "$ROOT/screenshots/chat-list.png"
   "$ROOT/screenshots/chat.png"
   "$ROOT/screenshots/file-uploader.png"
-  "$ROOT/docs/assets/brand/motd-symbol.svg"
-  "$ROOT/docs/assets/brand/motd-lockup-light.svg"
-  "$ROOT/docs/assets/brand/motd-lockup-dark.svg"
-  "$ROOT/docs/assets/brand/motd-wordmark.svg"
+  "$ROOT/docs/assets/brand/motd-favicon.png"
+  "$ROOT/docs/assets/brand/motd-lockup-light.png"
+  "$ROOT/docs/assets/brand/motd-lockup-dark.png"
+  "$ROOT/docs/assets/brand/motd-wordmark.png"
 )
 for file in "${required[@]}"; do
   [ -s "$file" ] || {
@@ -40,7 +40,7 @@ done
 rm -rf -- "$OUT"
 mkdir -p "$OUT/assets/brand" "$OUT/screenshots"
 cp "${pages[@]/#/$SITE_DIR/}" "$SITE_DIR/styles.css" "$OUT/"
-cp "$ROOT/docs/assets/brand/"motd-{symbol,lockup-light,lockup-dark,wordmark}.svg "$OUT/assets/brand/"
+cp "$ROOT/docs/assets/brand/"motd-{favicon,lockup-light,lockup-dark,wordmark}.png "$OUT/assets/brand/"
 cp "$ROOT/screenshots/"{chat-list,chat,file-uploader}.png "$OUT/screenshots/"
 
 printf 'built documentation site: %s\n' "$OUT"

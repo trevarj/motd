@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>motd · monochrome raster logo studies</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, "DejaVu Sans", ui-sans-serif, system-ui, sans-serif; background: #f5f5f3; color: #151515; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--page); color: var(--ink); transition: background .2s, color .2s; }
+    body[data-theme="light"] { --page: #f5f5f3; --ink: #151515; --muted: #686864; --line: #d9d9d4; --panel: #fcfcfa; --button: #e7e7e1; }
+    body[data-theme="dark"] { color-scheme: dark; --page: #161616; --ink: #f2f2ed; --muted: #b6b6ae; --line: #3c3c38; --panel: #20201e; --button: #30302d; }
+    a { color: inherit; text-underline-offset: .18em; }
+    .shell { width: min(1320px, calc(100% - 40px)); margin: 0 auto; padding: 28px 0 64px; }
+    .topline { display: flex; justify-content: space-between; align-items: center; gap: 18px; border-bottom: 1px solid var(--line); padding-bottom: 22px; }
+    .eyebrow { color: var(--muted); font: 700 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; text-transform: uppercase; }
+    h1 { font-size: clamp(28px, 5vw, 50px); letter-spacing: -.055em; line-height: .97; margin: 12px 0 0; }
+    .theme-toggle { appearance: none; border: 1px solid var(--line); border-radius: 999px; background: var(--button); color: var(--ink); cursor: pointer; font: inherit; padding: 9px 13px; white-space: nowrap; }
+    .intro { max-width: 760px; color: var(--muted); line-height: 1.5; margin: 25px 0 34px; }
+    .facts { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 28px; }
+    .fact { border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 13px; padding: 7px 10px; }
+    .section-heading { align-items: end; display: flex; gap: 16px; justify-content: space-between; margin: 42px 0 16px; }
+    h2 { font-size: 20px; letter-spacing: -.025em; margin: 0; }
+    .section-heading p { color: var(--muted); font-size: 13px; margin: 0; text-align: right; }
+    .study-grid { display: grid; gap: 18px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .study { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; min-width: 0; overflow: hidden; }
+    .study-head { align-items: baseline; display: flex; gap: 12px; justify-content: space-between; padding: 18px 20px 15px; }
+    .study-head h3 { font-size: 18px; letter-spacing: -.02em; margin: 0; }
+    .study-index { color: var(--muted); font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; }
+    .surfaces { border-top: 1px solid var(--line); display: grid; grid-template-columns: 1fr 1fr; }
+    .surface { min-width: 0; padding: 20px; }
+    .surface + .surface { border-left: 1px solid #d8d8d2; }
+    .surface--light { background: #fff; color: #151515; }
+    .surface--dark { background: #101010; color: #f5f5ef; }
+    .surface-label { color: currentColor; font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .11em; opacity: .62; text-transform: uppercase; }
+    .lockup { aspect-ratio: 490 / 180; margin: 16px auto 18px; max-width: 420px; position: relative; width: 100%; }
+    .lockup-symbol { height: 98.13%; left: 4.84%; object-fit: contain; position: absolute; top: .56%; width: 36.05%; }
+    .wordmark-crop { height: 49.44%; left: 45.69%; overflow: hidden; position: absolute; top: 23.89%; width: 46.73%; }
+    .wordmark-crop img { height: 100%; max-width: none; transform: translateX(-16.5%); width: auto; }
+    .surface--dark .lockup-symbol, .surface--dark .wordmark-crop img, .surface--dark figure img { filter: invert(1); }
+    .sizes { align-items: end; display: flex; gap: clamp(13px, 3vw, 26px); justify-content: center; min-height: 112px; }
+    figure { margin: 0; text-align: center; }
+    figure img { display: block; height: var(--size); margin: 0 auto 7px; width: var(--size); }
+    figcaption { color: currentColor; font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; opacity: .64; }
+    .study-foot { align-items: center; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 9px 15px; justify-content: space-between; padding: 13px 20px; }
+    .study-foot span { color: var(--muted); font-size: 12px; }
+    .study-foot .pending { color: #a85016; font-weight: 650; }
+    .links { display: flex; gap: 12px; font-size: 12px; }
+    .links a { color: var(--ink); }
+    .original .study-head { background: color-mix(in srgb, var(--panel) 72%, var(--page)); }
+    .fine-print { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 22px 0 0; max-width: 850px; }
+    .detail { margin: 0 auto 16px; text-align: center; }
+    .detail img { display: block; height: min(192px, 100%); margin: 0 auto 7px; max-width: 100%; object-fit: contain; width: min(192px, 100%); }
+    .surface--dark .detail img { filter: invert(1); }
+    @media (max-width: 740px) { .shell { width: min(100% - 28px, 1320px); padding-top: 18px; } .topline { align-items: flex-start; } .study-grid { grid-template-columns: 1fr; } .section-heading { align-items: flex-start; flex-direction: column; } .section-heading p { text-align: left; } }
+    @media (max-width: 600px) { .surfaces { grid-template-columns: 1fr; } .surface + .surface { border-left: 0; border-top: 1px solid #d8d8d2; } }
+    @media (max-width: 430px) { .surface { padding: 14px 10px; } .study-head, .study-foot { padding-left: 14px; padding-right: 14px; } .sizes { gap: 12px; } }
+  </style>
+</head>
+<body data-theme="light">
+  <main class="shell">
+    <header class="topline">
+      <div>
+        <div class="eyebrow">Brand exploration · 01</div>
+        <h1>Monochrome, rasterized.</h1>
+      </div>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Use dark page</button>
+    </header>
+    <p class="intro">Five surface treatments based on the existing motd symbol. Each dark presentation is the corresponding black source’s CSS-inverted polarity proof, not a separately relit white-material export. Generated contours need a final fidelity pass after selection. The metal study still needs transparency cleanup.</p>
+    <div class="facts"><span class="fact">Original silhouette reference</span><span class="fact">Existing wordmark outlines</span><span class="fact">Black / white only</span><span class="fact">24 · 48 · 96 px checks</span></div>
+
+    <div class="section-heading"><h2>Comparison board</h2><p><a href="selected.html">Selected: matte ceramic · production and theme-color previews</a></p></div>
+    <section class="study-grid" id="studies" aria-label="motd raster logo treatment studies"></section>
+    <p class="fine-print">The lockup uses the spacing and proportions of <code>motd-lockup-light.svg</code>. The generated artwork changes only the symbol’s surface finish; lettering remains a deterministic raster export of the existing outlined wordmark.</p>
+  </main>
+  <script type="module" src="gallery.js"></script>
+</body>
+</html>
