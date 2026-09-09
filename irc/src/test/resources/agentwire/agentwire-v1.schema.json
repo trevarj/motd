@@ -11,33 +11,37 @@
       "type": "string",
       "format": "uuid"
     },
+    "actionKind": {
+      "enum": [
+        "sync.request", "workspace.list.request", "session.list.request",
+        "history.request", "session.create", "session.close", "session.attach", "session.detach",
+        "session.rename", "session.fork", "session.archive", "session.unarchive",
+        "settings.update", "turn.prompt", "turn.steer", "turn.cancel",
+        "queue.edit", "queue.move", "queue.delete", "queue.clear",
+        "request.respond", "request.skip"
+      ]
+    },
+    "eventKind": {
+      "enum": [
+        "agent.hello", "channel.snapshot", "binding.changed", "session.snapshot", "session.status",
+        "workspace.page", "session.page", "history.begin", "history.chunk", "history.end",
+        "action.accepted", "action.succeeded", "action.failed", "action.uncertain",
+        "queue.snapshot", "queue.item.added", "queue.item.updated", "queue.item.moved",
+        "queue.item.removed", "user.prompt", "turn.started", "turn.completed", "turn.failed",
+        "assistant.delta", "assistant.completed", "plan.updated", "tool.started", "tool.updated",
+        "tool.completed", "usage.updated", "subagent.updated", "request.opened", "request.resolved",
+        "approval.review.started", "approval.review.completed"
+      ]
+    },
     "envelope": {
       "type": "object",
       "required": ["v", "k", "t", "id", "at", "inst"],
       "properties": {
         "v": { "const": 1 },
-        "k": {
-          "enum": [
-            "sync.request", "workspace.list.request", "session.list.request",
-            "history.request", "session.create", "session.close", "session.attach", "session.detach",
-            "session.rename", "session.fork", "session.archive", "session.unarchive",
-            "settings.update", "turn.prompt", "turn.steer", "turn.cancel",
-            "queue.edit", "queue.move", "queue.delete", "queue.clear",
-            "request.respond", "request.skip", "agent.hello", "channel.snapshot",
-            "binding.changed", "session.snapshot", "session.status", "workspace.page",
-            "session.page", "history.begin", "history.chunk", "history.end", "action.accepted",
-            "action.succeeded", "action.failed", "action.uncertain", "queue.snapshot",
-            "queue.item.added", "queue.item.updated", "queue.item.moved",
-            "queue.item.removed", "user.prompt", "turn.started", "turn.completed", "turn.failed",
-            "assistant.delta", "assistant.completed", "plan.updated", "tool.started",
-            "tool.updated", "tool.completed", "usage.updated", "subagent.updated",
-            "request.opened", "request.resolved", "approval.review.started",
-            "approval.review.completed"
-          ]
-        },
+        "k": { "oneOf": [{ "$ref": "#/$defs/actionKind" }, { "$ref": "#/$defs/eventKind" }] },
         "t": { "enum": ["action", "event"] },
         "id": { "$ref": "#/$defs/uuid" },
-        "at": { "type": "integer", "minimum": 0 },
+        "at": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
         "inst": { "type": "string", "minLength": 1 },
         "epoch": { "type": "string", "minLength": 1 },
         "device": { "type": "string", "minLength": 1 },
@@ -45,7 +49,7 @@
         "tid": { "type": "string", "minLength": 1 },
         "iid": { "type": "string", "minLength": 1 },
         "rid": { "type": "string", "minLength": 1 },
-        "rev": { "type": "integer", "minimum": 0 },
+        "rev": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
         "reply": { "type": "string", "minLength": 1 },
         "hist": { "type": "boolean" },
         "data": { "type": "object" }
@@ -54,7 +58,11 @@
       "allOf": [
         {
           "if": { "properties": { "t": { "const": "action" } } },
-          "then": { "required": ["device"] }
+          "then": {
+            "required": ["device"],
+            "properties": { "k": { "$ref": "#/$defs/actionKind" } }
+          },
+          "else": { "properties": { "k": { "$ref": "#/$defs/eventKind" } } }
         }
       ]
     },
@@ -76,7 +84,14 @@
         "encoding": { "enum": ["zlib"] },
         "b64": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "t": { "const": "action" } } },
+          "then": { "properties": { "of": { "$ref": "#/$defs/actionKind" } } },
+          "else": { "properties": { "of": { "$ref": "#/$defs/eventKind" } } }
+        }
+      ]
     }
   }
 }

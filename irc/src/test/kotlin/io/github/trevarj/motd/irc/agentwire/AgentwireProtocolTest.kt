@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.irc.agentwire
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -30,7 +31,7 @@ class AgentwireProtocolTest {
         assertEquals("trev+mobile", parseAgentwireTopic("agentwire:v1;account=trev%2Bmobile;agent=agentwire;backend=codex")?.account)
         assertNull(parseAgentwireTopic("Welcome agentwire:v1;account=trev;agent=agentwire;backend=codex"))
         assertNull(parseAgentwireTopic("agentwire:v1;account=trev"))
-        assertNull(parseAgentwireTopic(resource("agentwire/fixtures/topic.txt").trimEnd()))
+        assertEquals("codex", parseAgentwireTopic(resource("agentwire/fixtures/topic.txt").trimEnd())?.backend)
         assertNull(parseAgentwireTopic("agentwire:v1;account=trev;backend=codex"))
         assertEquals("trev", parseAgentwireTopic("agentwire:v1;account=trev;agent=trev;backend=codex")?.agentAccount)
         assertNull(parseAgentwireTopic("agentwire:v1;account=%ZZ;agent=agentwire;backend=codex"))
@@ -48,7 +49,7 @@ class AgentwireProtocolTest {
         // The upgrade that made `agent=` required names the one field to add, not all three.
         assertEquals(
             AgentwireTopicParse.Invalid(AgentwireTopicDefect.MISSING_FIELD, listOf("agent")),
-            parseAgentwireTopicResult(resource("agentwire/fixtures/claude-topic.txt").trimEnd()),
+            parseAgentwireTopicResult("agentwire:v1;account=trev;backend=claude"),
         )
         assertEquals(
             AgentwireTopicParse.Invalid(AgentwireTopicDefect.MISSING_FIELD, listOf("agent", "backend")),
@@ -141,8 +142,7 @@ class AgentwireProtocolTest {
         // The backend name is opaque to the client: only the topic's shape is validated.
         assertEquals("opencode", parseAgentwireTopic("agentwire:v1;account=trev;agent=a;backend=opencode")?.backend)
         assertEquals("claude", parseAgentwireTopic("agentwire:v1;backend=claude;account=trev;agent=a")?.backend)
-        // Agentwire's own canonical claude topic still omits the agent account this client requires.
-        assertNull(parseAgentwireTopic(resource("agentwire/fixtures/claude-topic.txt").trimEnd()))
+        assertEquals("agentwire", parseAgentwireTopic(resource("agentwire/fixtures/claude-topic.txt").trimEnd())?.agentAccount)
 
         val hello = resource("agentwire/fixtures/claude-hello.json").trimEnd()
         val envelope = (decodeAgentwireValue(hello).getOrThrow() as AgentwireValue.Envelope).value
@@ -158,6 +158,21 @@ class AgentwireProtocolTest {
         assertFailure("""{"v":1,"k":"agent.hello","t":"event","id":"not-a-uuid","at":1,"inst":"x"}""")
         assertTrue(decodeAgentwireValue("""{"v":1.0,"k":"agent.hello","t":"event","id":"11111111-1111-4111-8111-111111111111","at":1.0,"inst":"x"}""").isSuccess)
         assertFailure("""{"v":1.5,"k":"agent.hello","t":"event","id":"11111111-1111-4111-8111-111111111111","at":1,"inst":"x"}""")
+    }
+
+    @Test
+    fun `imported invalid fixtures reject envelopes and fragments`() {
+        listOf(
+            "boolean-version.json",
+            "invalid-uuid.json",
+            "missing-action-device.json",
+            "null-optional-field.json",
+            "unknown-envelope-field.json",
+            "wrong-fragment-kind.json",
+            "wrong-kind-for-type.json",
+        ).forEach { name ->
+            assertFailure(resource("agentwire/fixtures/invalid/$name").trimEnd())
+        }
     }
 
     @Test
@@ -230,15 +245,14 @@ class AgentwireProtocolTest {
     }
 
     @Test
-    fun `copied canonical resources match upstream content hashes`() {
-        assertEquals("5bd092183028c0596b1f032b425814a20105c7d153d4674f9bcae4069359c009", sha(resourceBytes("agentwire/agentwire-v1.schema.json")))
-        assertEquals("966305fc7e635122c98c3b272666bf1e425c9d2a09f17fe12a7f2de959d52e7a", sha(resourceBytes("agentwire/fixtures/hello.json")))
-        assertEquals("81d2de30a1eb81f391ce003ba529555a3ba0b9aaf6556f115d3e7b232933d42b", sha(resourceBytes("agentwire/fixtures/claude-hello.json")))
-        assertEquals("2b37531bcf2780315f1735d7d35995580e2a32983fcbee07691a8d3fe0f11db4", sha(resourceBytes("agentwire/fixtures/pi-hello.json")))
-        assertEquals("e354c350de1de04cf396aa595c90c46658db9e72b381fc54b7f7559ee7f38465", sha(resourceBytes("agentwire/fixtures/prompt-action.json")))
-        assertEquals("24c6fed5b79f794b3f31f8ede35b199fbe6746bc24311b4a50d08aeacbb26c03", sha(resourceBytes("agentwire/fixtures/observed-status.json")))
-        assertEquals("be00b7e2f858801ddb9fca1b2c33d090c20d45141b0e82c5ee1f55e2078e6b23", sha(resourceBytes("agentwire/fixtures/subagent-update.json")))
-        assertEquals("058c5ad375bd89d3074349e4b01650525eb8138bd3d651d90236e72b4d4f964c", sha(resourceBytes("agentwire/fixtures/topic.txt")))
+    fun `copied canonical resources match recorded upstream content hashes`() {
+        val provenance = Json.parseToJsonElement(resource("agentwire/upstream.json")) as JsonObject
+        assertTrue((provenance["upstreamCommit"] as JsonPrimitive).content.matches(Regex("[0-9a-f]{40}")))
+        val files = provenance["files"] as JsonObject
+        files.forEach { (source, expected) ->
+            val resource = "agentwire/" + source.removePrefix("protocol/")
+            assertEquals(source, (expected as JsonPrimitive).content, sha(resourceBytes(resource)))
+        }
     }
 
     private fun event(content: String) =

@@ -1,0 +1,497 @@
+{
+  "steps": [
+    {
+      "kind": "agent.hello",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": false,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": null,
+        "subagents": [],
+        "tid": null,
+        "tools": {}
+      },
+      "tag": "{\"at\":1785400000027,\"data\":{\"actions\":[\"sync.request\",\"workspace.list.request\",\"session.list.request\",\"history.request\",\"session.create\",\"session.attach\",\"session.detach\",\"settings.update\",\"turn.prompt\",\"turn.steer\",\"turn.cancel\",\"queue.edit\",\"queue.move\",\"queue.delete\",\"queue.clear\",\"request.respond\",\"request.skip\"],\"backend\":\"claude\",\"capabilities\":[\"compressedFragments\",\"history\",\"historyChunks\",\"queues\",\"requests\",\"sessions\",\"settings\",\"steering\",\"sync\",\"turns\",\"workspaces\"],\"epoch\":\"epoch-conformance\",\"limits\":{\"contentBytes\":65536,\"historyBytes\":524288,\"historyChunkBytes\":98304,\"historyDays\":30,\"historyEvents\":200,\"queueItems\":10},\"protocol\":\"agentwire-irc-v1\",\"settings\":[\"delivery\"]},\"epoch\":\"epoch-conformance\",\"id\":\"00000027-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"agent.hello\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "channel.snapshot",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {}
+      },
+      "tag": "{\"at\":1785400000028,\"data\":{\"active\":true,\"backend\":\"claude\",\"binding\":{\"sid\":\"sess-conformance\"},\"busy\":true,\"tid\":\"turn-1\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000028-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"channel.snapshot\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "tool.started",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"preserved\"]": {
+            "event": "tool.started",
+            "iid": "preserved",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "run tests",
+            "sid": "sess-conformance",
+            "tid": "turn-1"
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000022,\"data\":{\"input\":\"pytest -q\",\"kind\":\"shell\",\"label\":\"run tests\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000022-0000-4000-8000-000000000000\",\"iid\":\"preserved\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.started\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"preserved\"]": {
+            "event": "tool.completed",
+            "iid": "preserved",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "run tests",
+            "output": "passed",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000023,\"data\":{\"output\":\"passed\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000023-0000-4000-8000-000000000000\",\"iid\":\"preserved\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "history.chunk",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"call-1\"]": {
+            "event": "tool.completed",
+            "iid": "call-1",
+            "kind": "file read",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"preserved\"]": {
+            "event": "tool.completed",
+            "iid": "preserved",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "run tests",
+            "output": "passed",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000029,\"data\":{\"events\":[{\"at\":1785400000024,\"epoch\":\"epoch-conformance\",\"hist\":true,\"id\":\"00000024-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"turn.completed\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1},{\"at\":1785400000025,\"data\":{\"kind\":\"file read\",\"success\":true},\"epoch\":\"epoch-conformance\",\"hist\":true,\"id\":\"00000025-0000-4000-8000-000000000000\",\"iid\":\"call-1\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1},{\"at\":1785400000026,\"data\":{\"input\":\"pytest -q\",\"kind\":\"shell\",\"label\":\"old replay\"},\"epoch\":\"epoch-conformance\",\"hist\":true,\"id\":\"00000026-0000-4000-8000-000000000000\",\"iid\":\"preserved\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.started\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}],\"index\":0,\"page\":\"p1\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000029-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"history.chunk\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"call-1\"]": {
+            "event": "tool.completed",
+            "iid": "call-1",
+            "kind": "file read",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"preserved\"]": {
+            "event": "tool.completed",
+            "iid": "preserved",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "run tests",
+            "output": "passed",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000025,\"data\":{\"kind\":\"file read\",\"success\":true},\"epoch\":\"epoch-conformance\",\"hist\":true,\"id\":\"00000025-0000-4000-8000-000000000000\",\"iid\":\"call-1\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "turn.completed",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"call-1\"]": {
+            "event": "tool.completed",
+            "iid": "call-1",
+            "kind": "file read",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"preserved\"]": {
+            "event": "tool.completed",
+            "iid": "preserved",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "run tests",
+            "output": "passed",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000030,\"epoch\":\"epoch-conformance\",\"id\":\"00000030-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"turn.completed\",\"sid\":\"other-session\",\"t\":\"event\",\"tid\":\"other-turn\",\"v\":1}"
+    },
+    {
+      "kind": "tool.started",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"call-1\"]": {
+            "event": "tool.completed",
+            "iid": "call-1",
+            "kind": "file read",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"preserved\"]": {
+            "event": "tool.completed",
+            "iid": "preserved",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "run tests",
+            "output": "passed",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",null,\"shared-tool\"]": {
+            "event": "tool.started",
+            "iid": "shared-tool",
+            "kind": "shell",
+            "label": "without a turn id",
+            "sid": "sess-conformance",
+            "tid": null
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000031,\"data\":{\"kind\":\"shell\",\"label\":\"without a turn id\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000031-0000-4000-8000-000000000000\",\"iid\":\"shared-tool\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.started\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"call-1\"]": {
+            "event": "tool.completed",
+            "iid": "call-1",
+            "kind": "file read",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"preserved\"]": {
+            "event": "tool.completed",
+            "iid": "preserved",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "run tests",
+            "output": "passed",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",null,\"shared-tool\"]": {
+            "event": "tool.completed",
+            "iid": "shared-tool",
+            "kind": "shell",
+            "label": "without a turn id",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": null
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000032,\"data\":{\"kind\":\"shell\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000032-0000-4000-8000-000000000000\",\"iid\":\"shared-tool\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"another-turn\",\"shared-tool\"]": {
+            "event": "tool.completed",
+            "iid": "shared-tool",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "another-turn"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"call-1\"]": {
+            "event": "tool.completed",
+            "iid": "call-1",
+            "kind": "file read",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"preserved\"]": {
+            "event": "tool.completed",
+            "iid": "preserved",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "run tests",
+            "output": "passed",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",null,\"shared-tool\"]": {
+            "event": "tool.completed",
+            "iid": "shared-tool",
+            "kind": "shell",
+            "label": "without a turn id",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": null
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000033,\"data\":{\"kind\":\"file edit\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000033-0000-4000-8000-000000000000\",\"iid\":\"shared-tool\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"another-turn\",\"v\":1}"
+    },
+    {
+      "kind": "assistant.completed",
+      "state": {
+        "active": true,
+        "assistant": [
+          {
+            "content": "First output without an item ID",
+            "iid": null
+          }
+        ],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"another-turn\",\"shared-tool\"]": {
+            "event": "tool.completed",
+            "iid": "shared-tool",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "another-turn"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"call-1\"]": {
+            "event": "tool.completed",
+            "iid": "call-1",
+            "kind": "file read",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"preserved\"]": {
+            "event": "tool.completed",
+            "iid": "preserved",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "run tests",
+            "output": "passed",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",null,\"shared-tool\"]": {
+            "event": "tool.completed",
+            "iid": "shared-tool",
+            "kind": "shell",
+            "label": "without a turn id",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": null
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000034,\"data\":{\"content\":\"First output without an item ID\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000034-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"assistant.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "assistant.completed",
+      "state": {
+        "active": true,
+        "assistant": [
+          {
+            "content": "First output without an item ID",
+            "iid": null
+          },
+          {
+            "content": "Second output without an item ID",
+            "iid": null
+          }
+        ],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"another-turn\",\"shared-tool\"]": {
+            "event": "tool.completed",
+            "iid": "shared-tool",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "another-turn"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"call-1\"]": {
+            "event": "tool.completed",
+            "iid": "call-1",
+            "kind": "file read",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"preserved\"]": {
+            "event": "tool.completed",
+            "iid": "preserved",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "run tests",
+            "output": "passed",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",null,\"shared-tool\"]": {
+            "event": "tool.completed",
+            "iid": "shared-tool",
+            "kind": "shell",
+            "label": "without a turn id",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": null
+          }
+        }
+      },
+      "tag": "{\"at\":1785400000035,\"data\":{\"content\":\"Second output without an item ID\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000035-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"assistant.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    }
+  ],
+  "topic": "agentwire:v1;account=trev;agent=agentwire;backend=claude | conformance"
+}

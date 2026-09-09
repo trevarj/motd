@@ -893,7 +893,7 @@ private fun List<AgentwireTimelineItem>.insertOrReplace(item: AgentwireTimelineI
         if (existing >= 0) {
             // The first sighting fixes the row's position: a tool that completes later must not
             // jump past everything logged while it ran, and re-sorting is what we are avoiding.
-            return toMutableList().also { it[existing] = item.copy(at = this[existing].at) }
+            return toMutableList().also { it[existing] = this[existing].mergeLifecycle(item) }
         }
     }
     var low = 0
@@ -908,6 +908,42 @@ private fun List<AgentwireTimelineItem>.insertOrReplace(item: AgentwireTimelineI
     }
 }
 
+/**
+ * Tool completion events commonly contain only outcome fields. Retain the descriptive input from
+ * their started event, and never let a late lifecycle update replace a terminal tool row.
+ */
+private fun AgentwireTimelineItem.mergeLifecycle(next: AgentwireTimelineItem): AgentwireTimelineItem {
+    if (!kind.startsWith("tool.") || !next.kind.startsWith("tool.")) return next.copy(at = at)
+    val currentRank = toolLifecycleRank(kind)
+    val nextRank = toolLifecycleRank(next.kind)
+    if (currentRank > nextRank) {
+        val mergedData = JsonObject(next.data + data)
+        return copy(
+            body = toolPreview(mergedData),
+            historical = historical && next.historical,
+            data = mergedData,
+        )
+    }
+    val mergedData = JsonObject(data + next.data)
+    return next.copy(
+        at = at,
+        title = mergedData.string("label") ?: mergedData.string("kind") ?: title,
+        body = toolPreview(mergedData),
+        running = next.running && currentRank < 2,
+        success = next.success ?: success,
+        historical = next.historical,
+        data = mergedData,
+    )
+}
+
+private fun toolLifecycleRank(kind: String): Int =
+    when (kind) {
+        "tool.started" -> 0
+        "tool.updated" -> 1
+        "tool.completed" -> 2
+        else -> -1
+    }
+
 private fun List<AgentwireTimelineItem>.capTimeline(): List<AgentwireTimelineItem> = if (size <= AGENTWIRE_TIMELINE_CAP) this else subList(size - AGENTWIRE_TIMELINE_CAP, size).toList()
 
 /**
@@ -918,33 +954,41 @@ internal fun AgentwireTimelineItem.timelineKey(): String = stableTimelineId() ?:
 
 internal fun AgentwireTimelineItem.stableTimelineId(): String? {
     if (kind == "user.prompt") return "prompt:$sid:${backendItemId ?: id}"
-    return tid?.let { turnId ->
-        when {
-            kind.startsWith("assistant.") -> {
-                backendItemId?.let { "assistant:$sid:$turnId:$it" }
-            }
+    return when {
+        kind.startsWith("tool.") -> {
+            (backendItemId ?: data.string("id"))?.let { itemId -> toolTimelineIdentity(sid, tid, itemId) }
+        }
 
-            kind.startsWith("tool.") -> {
-                (backendItemId ?: data.string("id"))?.let {
-                    "tool:$sid:$turnId:$it"
+        else -> {
+            tid?.let { turnId ->
+                when {
+                    kind.startsWith("assistant.") -> {
+                        backendItemId?.let { "assistant:$sid:$turnId:$it" }
+                    }
+
+                    kind == "plan.updated" -> {
+                        backendItemId?.let { "plan:$sid:$turnId:$it" }
+                            ?: "plan:$sid:$turnId"
+                    }
+
+                    kind.startsWith("turn.") -> {
+                        "turn:$sid:$turnId"
+                    }
+
+                    else -> {
+                        null
+                    }
                 }
-            }
-
-            kind == "plan.updated" -> {
-                backendItemId?.let { "plan:$sid:$turnId:$it" }
-                    ?: "plan:$sid:$turnId"
-            }
-
-            kind.startsWith("turn.") -> {
-                "turn:$sid:$turnId"
-            }
-
-            else -> {
-                null
             }
         }
     }
 }
+
+private fun toolTimelineIdentity(
+    sid: String?,
+    tid: String?,
+    iid: String,
+): String = "tool:" + listOf(sid, tid, iid).joinToString("|") { value -> value?.let { "${it.length}:$it" } ?: "-:" }
 
 // A history page is merged whole and only then capped, so a backfill is never truncated midway.
 private fun mergeHistoryPage(

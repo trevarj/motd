@@ -67,6 +67,35 @@ class AgentwireConformanceTest {
     }
 
     @Test
+    fun `replay corpus keeps historic activity isolated from the live turn`() {
+        val reducer = AgentwireReducer()
+        var state = activeState()
+        val steps = corpus("replay-and-isolation")
+        steps.take(4).forEach { step ->
+            val envelope = (decodeAgentwireValue(step.tag).getOrThrow() as AgentwireValue.Envelope).value
+            state = reducer.reduce(state, envelope)
+        }
+        // Production only accepts history correlated with the request it sent. The canonical
+        // replay corpus deliberately isolates reducer behavior, so establish that context here
+        // instead of weakening the live transport gate.
+        state = state.copy(historySid = "sess-conformance", historyRequestId = "history-1")
+        steps.drop(4).forEach { step ->
+            val envelope = (decodeAgentwireValue(step.tag).getOrThrow() as AgentwireValue.Envelope).value
+            state = reducer.reduce(state, envelope)
+        }
+
+        assertEquals("sess-conformance", state.activeSid)
+        assertEquals("turn-1", state.currentTid)
+        assertTrue(state.busy)
+        val expected = steps.last().state
+        assertEquals(expected.getValue("tools").jsonObject, toolProjection(state))
+        assertEquals(
+            expected.getValue("assistant").jsonArray.map { it.jsonObject.text("content") },
+            state.timeline.filter { it.kind == "assistant.completed" }.map { it.body },
+        )
+    }
+
+    @Test
     fun `an oversized envelope fragments and reassembles to the same bytes on both sides`() {
         val document = json.parseToJsonElement(resource("fragmented.json")).jsonObject
         val expected = document.getValue("envelope").jsonPrimitive.content
@@ -104,6 +133,17 @@ class AgentwireConformanceTest {
             "optional lifecycle actions are not advertised by this bridge",
             "session.fork" !in state.actions,
         )
+    }
+
+    @Test
+    fun `imported corpus records its Agentwire commit and file hashes`() {
+        val provenance = json.parseToJsonElement(upstreamResource()).jsonObject
+        assertTrue(provenance.text("upstreamCommit")?.matches(Regex("[0-9a-f]{40}")) == true)
+        val files = provenance.getValue("files").jsonObject
+        files.forEach { (source, expected) ->
+            val name = source.removePrefix("protocol/conformance/")
+            assertEquals(source, expected.jsonPrimitive.content, sha(resourceBytes(name)))
+        }
     }
 
     private fun activeState() =
@@ -145,13 +185,83 @@ class AgentwireConformanceTest {
 
     private fun JsonObject.requestIds(): List<String> = (this["requests"] as? JsonObject)?.keys?.sorted().orEmpty()
 
+    private fun toolProjection(state: AgentwireUiState): JsonObject {
+        val tools = linkedMapOf<String, AgentwireTimelineItem>()
+        (state.timeline + state.historyStaged)
+            .filter { it.kind.startsWith("tool.") && it.backendItemId != null }
+            .forEach { item ->
+                val key =
+                    json.encodeToString(
+                        JsonArray(
+                            listOf(
+                                item.sid?.let(::JsonPrimitive) ?: JsonNull,
+                                item.tid?.let(::JsonPrimitive) ?: JsonNull,
+                                JsonPrimitive(requireNotNull(item.backendItemId)),
+                            ),
+                        ),
+                    )
+                val prior = tools[key]
+                tools[key] =
+                    when {
+                        prior == null -> {
+                            item
+                        }
+
+                        toolRank(prior.kind) > toolRank(item.kind) -> {
+                            prior.copy(data = JsonObject(item.data + prior.data))
+                        }
+
+                        else -> {
+                            item.copy(data = JsonObject(prior.data + item.data))
+                        }
+                    }
+            }
+        return JsonObject(
+            tools.mapValues { (_, item) ->
+                JsonObject(
+                    item.data +
+                        mapOf(
+                            "sid" to (item.sid?.let(::JsonPrimitive) ?: JsonNull),
+                            "tid" to (item.tid?.let(::JsonPrimitive) ?: JsonNull),
+                            "iid" to JsonPrimitive(requireNotNull(item.backendItemId)),
+                            "event" to JsonPrimitive(item.kind),
+                        ),
+                )
+            },
+        )
+    }
+
+    private fun toolRank(kind: String): Int =
+        when (kind) {
+            "tool.started" -> 0
+            "tool.updated" -> 1
+            "tool.completed" -> 2
+            else -> -1
+        }
+
     private fun resource(name: String): String =
         checkNotNull(javaClass.classLoader?.getResourceAsStream("agentwire/conformance/$name")) {
             "missing conformance resource $name"
         }.readBytes().toString(Charsets.UTF_8)
 
+    private fun resourceBytes(name: String): ByteArray =
+        checkNotNull(javaClass.classLoader?.getResourceAsStream("agentwire/conformance/$name")) {
+            "missing conformance resource $name"
+        }.readBytes()
+
+    private fun upstreamResource(): String =
+        checkNotNull(javaClass.classLoader?.getResourceAsStream("agentwire/upstream.json")) {
+            "missing Agentwire provenance"
+        }.readBytes().toString(Charsets.UTF_8)
+
+    private fun sha(bytes: ByteArray): String =
+        java.security.MessageDigest
+            .getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { "%02x".format(it) }
+
     private companion object {
         const val TOPIC_BACKEND = "claude"
-        val CORPORA = listOf("claude-session", "queue-and-acks")
+        val CORPORA = listOf("claude-session", "queue-and-acks", "replay-and-isolation")
     }
 }

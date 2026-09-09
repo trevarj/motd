@@ -1,0 +1,23 @@
+{
+  "files": {
+    "protocol/agentwire-v1.schema.json": "4694e3d8d8c5cb690a1b84a8fd55f5720b4068b3c79cf1ea86e63be194b2bd43",
+    "protocol/fixtures/claude-hello.json": "81d2de30a1eb81f391ce003ba529555a3ba0b9aaf6556f115d3e7b232933d42b",
+    "protocol/fixtures/claude-topic.txt": "179a79d39410deb88a8ee05c9a618e8b3774841223dac3a1cb28348f6e872f66",
+    "protocol/fixtures/hello.json": "966305fc7e635122c98c3b272666bf1e425c9d2a09f17fe12a7f2de959d52e7a",
+    "protocol/fixtures/invalid/boolean-version.json": "04e08fd4811a21c3e224cc131fef18ad487e7501291dda925678f3ac8600c3d1",
+    "protocol/fixtures/invalid/invalid-uuid.json": "7df41913827f689c39720a6d236acc4b56ed55e30346746c4e3ab68530f81934",
+    "protocol/fixtures/invalid/missing-action-device.json": "aa70df63009fbd907965a47bc04e42a1d95ceb570756ee72c3e325d84903105d",
+    "protocol/fixtures/invalid/null-optional-field.json": "b97a29626e3e7baa03ef0d3c82cdbb58266f4b90dd411866c9b7e014eeaf7b4d",
+    "protocol/fixtures/invalid/unknown-envelope-field.json": "80b021169bb22161d85e9674aab11a5da14a5c7e4748ef85c70d02dfb96203f8",
+    "protocol/fixtures/invalid/wrong-fragment-kind.json": "583a00190ed8e6021e17438e04759a4c7aee53ebef96cf4fce25b781b9ae2b41",
+    "protocol/fixtures/invalid/wrong-kind-for-type.json": "4203e6fa5bc0566874a079d9c534c2c6ab8c50f9e21bf1e6c424eadbfb858ed8",
+    "protocol/fixtures/observed-status.json": "24c6fed5b79f794b3f31f8ede35b199fbe6746bc24311b4a50d08aeacbb26c03",
+    "protocol/fixtures/pi-hello.json": "2b37531bcf2780315f1735d7d35995580e2a32983fcbee07691a8d3fe0f11db4",
+    "protocol/fixtures/pi-topic.txt": "f9209b524550b69d675dd95c7cbbc5bcf1c8ef4889ddef699d93ab78b79849f9",
+    "protocol/fixtures/prompt-action.json": "e354c350de1de04cf396aa595c90c46658db9e72b381fc54b7f7559ee7f38465",
+    "protocol/fixtures/subagent-update.json": "be00b7e2f858801ddb9fca1b2c33d090c20d45141b0e82c5ee1f55e2078e6b23",
+    "protocol/fixtures/topic.txt": "9a68154b3a53ab9652f50279797c6a830c91d8244c88055a944539695a8cf511"
+  },
+  "format": 1,
+  "upstreamCommit": "5f1025e0af959c77f71a6615cb55583196a6df98"
+}

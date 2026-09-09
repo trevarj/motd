@@ -1,1 +1,1 @@
-agentwire:v1;account=trev;backend=claude | Agent workspace
+agentwire:v1;account=agentwire;agent=agentwire;backend=claude | Agent workspace

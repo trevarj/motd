@@ -1,309 +1,117 @@
 #!/usr/bin/env python3
-"""Regenerate motd's Agentwire conformance corpus from the upstream implementation.
+"""Import Agentwire's committed conformance inputs without a build-time Python dependency.
 
-The corpus is the cross-implementation oracle: every envelope is built and encoded by
-agentwire's own `protocol.py`, and every expected state is produced by agentwire's own
-reference renderer. A motd test that disagrees with this file disagrees with the bridge.
-
-Run it from the agentwire checkout's dev shell, pointing at this repo:
-
-    cd ~/Workspace/agentwire
-    nix develop -c sh -c 'PYTHONPATH=src python ~/Workspace/motd/test/agentwire/generate-conformance.py'
-
-Nothing in motd's build depends on Python: the generated JSON is committed and the Kotlin
-tests read it as a resource.
+Usage:
+  ./test/agentwire/generate-conformance.py --upstream ~/Workspace/agentwire \
+      --revision <signed-agentwire-commit>
+  ./test/agentwire/generate-conformance.py --upstream ~/Workspace/agentwire --check
 """
 
 from __future__ import annotations
 
-import copy
+import argparse
+import hashlib
 import json
-import pathlib
-import random
+import subprocess
+import sys
+from pathlib import Path
 
-from agentwire.protocol import Envelope, encode_envelope, fragment_envelope
-from agentwire.reference_client import ProtocolClient
-
-TOPIC = "agentwire:v1;account=trev;agent=agentwire;backend=claude | motd conformance"
-
-EPOCH = "epoch-conformance"
-INSTANCE = "11111111-1111-4111-8111-111111111111"
-SESSION = "sess-conformance"
-TURN = "turn-1"
-
-# Envelope ids are fixed so the corpus is byte-stable across regenerations.
-_next_id = 0
+ROOT = Path(__file__).resolve().parents[2]
+PROVENANCE = "agentwire/upstream.json"
+FIXTURE_ROOT = "protocol/fixtures"
+CORPUS_ROOT = "protocol/conformance"
+SCHEMA = "protocol/agentwire-v1.schema.json"
 
 
-def envelope(kind: str, **kwargs) -> Envelope:
-    """Build one canonical event. Ids and timestamps are fixed, never generated."""
-    global _next_id
-    _next_id += 1
-    identifier = f"{_next_id:08d}-0000-4000-8000-000000000000"
-    kwargs.setdefault("epoch", EPOCH)
-    return Envelope(
-        kind=kind,
-        message_type="event",
-        id=identifier,
-        at=1785400000000 + _next_id,
-        instance=INSTANCE,
-        **kwargs,
-    )
+def git(upstream: Path, *args: str) -> str:
+    return subprocess.check_output(["git", "-C", str(upstream), *args], text=True).strip()
 
 
-def claude_session() -> list[Envelope]:
-    """A realistic Claude turn: handshake, binding, prompt, tools, plan, answer, request."""
-    return [
-        envelope(
-            "agent.hello",
-            data={
-                "protocol": "agentwire-irc-v1",
-                "backend": "claude",
-                "epoch": EPOCH,
-                "capabilities": [
-                    "compressedFragments", "history", "historyChunks", "queues", "requests",
-                    "sessions", "settings", "steering", "sync", "turns", "workspaces",
-                ],
-                # The live bridge advertises `actions`, and motd gates every outbound
-                # action on it. The abridged upstream fixtures omit it, so a corpus
-                # without it would not exercise the path that matters most.
-                "actions": [
-                    "sync.request", "workspace.list.request", "session.list.request",
-                    "history.request", "session.create", "session.attach", "session.detach",
-                    "settings.update", "turn.prompt", "turn.steer", "turn.cancel",
-                    "queue.edit", "queue.move", "queue.delete", "queue.clear",
-                    "request.respond", "request.skip",
-                ],
-                "limits": {
-                    "contentBytes": 65536,
-                    "queueItems": 10,
-                    "historyEvents": 200,
-                    "historyBytes": 524288,
-                    "historyChunkBytes": 98304,
-                    "historyDays": 30,
-                },
-                # Claude takes its model from deployment config, so it accepts delivery alone.
-                "settings": ["delivery"],
-            },
-        ),
-        envelope(
-            "channel.snapshot",
-            data={
-                "active": True,
-                "backend": "claude",
-                "binding": {"sid": SESSION, "cwd": "/home/trev/Workspace/motd"},
-                "busy": False,
-                "tid": None,
-                "settings": {"delivery": "queue"},
-                "requests": [],
-                "queue": [],
-            },
-        ),
-        envelope(
-            "workspace.page",
-            data={
-                "parent": None,
-                "items": [
-                    {"path": "/home/trev/Workspace", "name": "Workspace", "hasChildren": True},
-                ],
-                "cursor": None,
-                "next": None,
-            },
-        ),
-        envelope(
-            "session.page",
-            data={
-                "scope": "live",
-                "cwd": None,
-                "items": [
-                    {
-                        "sid": SESSION,
-                        "cwd": "/home/trev/Workspace/motd",
-                        "busy": False,
-                        "flags": [],
-                        # Claude has no attachable TUI; this must stay false.
-                        "tuiAttached": False,
-                    },
-                ],
-                "cursor": None,
-                "next": None,
-            },
-        ),
-        envelope("binding.changed", session_id=SESSION, data={"sid": SESSION, "cwd": "/home/trev/Workspace/motd"}),
-        envelope(
-            "session.snapshot",
-            session_id=SESSION,
-            data={
-                "cwd": "/home/trev/Workspace/motd",
-                "busy": False,
-                "flags": [],
-                "tuiAttached": False,
-                "status": "ready",
-                "recentOutputs": [],
-            },
-        ),
-        envelope("turn.started", session_id=SESSION, turn_id=TURN, data={}),
-        envelope(
-            "user.prompt",
-            session_id=SESSION,
-            turn_id=TURN,
-            item_id="prompt-1",
-            data={"content": "why does the test fail?"},
-        ),
-        envelope(
-            "plan.updated",
-            session_id=SESSION,
-            turn_id=TURN,
-            item_id="plan-1",
-            data={
-                "plan": True,
-                "running": True,
-                "status": "inProgress",
-                "completedSteps": 0,
-                "totalSteps": 2,
-                "summary": "Read the failing test",
-            },
-        ),
-        envelope(
-            "tool.started",
-            session_id=SESSION,
-            turn_id=TURN,
-            item_id="call-1",
-            data={"kind": "file read", "label": "file read", "input": "AgentwireStateTest.kt"},
-        ),
-        envelope(
-            "tool.completed",
-            session_id=SESSION,
-            turn_id=TURN,
-            item_id="call-1",
-            data={
-                "kind": "file read",
-                "label": "file read",
-                "success": True,
-                "output": "assertEquals(expected, actual)",
-                "durationMs": 12,
-            },
-        ),
-        envelope(
-            "request.opened",
-            session_id=SESSION,
-            turn_id=TURN,
-            request_id="req-1",
-            data={
-                "type": "question",
-                "canSkip": True,
-                "inactive": False,
-                "questions": [
-                    {
-                        "id": "q1",
-                        "header": "Scope",
-                        "prompt": "Fix the test or the code?",
-                        "options": ["test", "code"],
-                        "multiple": False,
-                        "custom": False,
-                    },
-                ],
-            },
-        ),
-        envelope("request.resolved", session_id=SESSION, turn_id=TURN, request_id="req-1", data={}),
-        envelope(
-            "plan.updated",
-            session_id=SESSION,
-            turn_id=TURN,
-            item_id="plan-1",
-            data={
-                "plan": True,
-                "running": False,
-                "status": "completed",
-                "completedSteps": 2,
-                "totalSteps": 2,
-                "summary": "Read the failing test",
-            },
-        ),
-        envelope(
-            "assistant.completed",
-            session_id=SESSION,
-            turn_id=TURN,
-            item_id="msg-1",
-            data={"content": "The assertion arguments are inverted."},
-        ),
-        envelope("usage.updated", session_id=SESSION, turn_id=TURN, data={"inputTokens": 1200, "outputTokens": 340}),
-        envelope("turn.completed", session_id=SESSION, turn_id=TURN, data={}),
-        envelope("session.status", session_id=SESSION, data={"busy": False, "status": "ready"}),
-    ]
+def tracked_files(upstream: Path, revision: str) -> list[str]:
+    names = git(upstream, "ls-tree", "-r", "--name-only", revision, "--", CORPUS_ROOT, FIXTURE_ROOT, SCHEMA)
+    return [name for name in names.splitlines() if name]
 
 
-def queue_and_failure() -> list[Envelope]:
-    """Queue maintenance and the acknowledgement kinds, which the session above never reaches."""
-    return [
-        envelope(
-            "queue.snapshot",
-            session_id=SESSION,
-            data={"items": [{"iid": "q-1", "content": "run the tests", "position": 0}]},
-        ),
-        envelope(
-            "queue.item.added",
-            session_id=SESSION,
-            data={"iid": "q-2", "content": "then lint", "position": 1},
-        ),
-        envelope(
-            "queue.item.updated",
-            session_id=SESSION,
-            data={"iid": "q-2", "content": "then lint everything", "position": 1},
-        ),
-        envelope("queue.item.moved", session_id=SESSION, data={"iid": "q-2", "position": 0}),
-        envelope("queue.item.removed", session_id=SESSION, data={"iid": "q-2"}),
-        envelope("action.accepted", reply="00000000-0000-4000-8000-00000000cafe", data={}),
-        envelope("action.succeeded", reply="00000000-0000-4000-8000-00000000cafe", data={}),
-        envelope(
-            "action.failed",
-            reply="00000000-0000-4000-8000-00000000beef",
-            # Exactly what a followed Claude session answers when asked to steer.
-            data={"message": "Claude session is observed only; its turn belongs to another process"},
-        ),
-        envelope("action.uncertain", reply="00000000-0000-4000-8000-00000000f00d", data={}),
-        envelope("turn.failed", session_id=SESSION, turn_id="turn-2", data={"message": "interrupted"}),
-    ]
+def read_committed(upstream: Path, revision: str, source: str) -> bytes:
+    return subprocess.check_output(["git", "-C", str(upstream), "show", f"{revision}:{source}"])
 
 
-def main() -> int:
-    # The corpus lives in :app because its most valuable assertion compares motd's reducer with
-    # the reference renderer, and :app can reach the :irc codec while the reverse is not true.
-    out_dir = pathlib.Path(__file__).resolve().parents[2] / "app/src/test/resources/agentwire/conformance"
-    out_dir.mkdir(parents=True, exist_ok=True)
+def destination(source: str) -> Path | None:
+    if source == SCHEMA:
+        return ROOT / "irc/src/test/resources/agentwire/agentwire-v1.schema.json"
+    if source.startswith(f"{CORPUS_ROOT}/") and source.endswith(".json"):
+        return ROOT / "app/src/test/resources/agentwire/conformance" / Path(source).name
+    if source.startswith(f"{FIXTURE_ROOT}/"):
+        return ROOT / "irc/src/test/resources/agentwire/fixtures" / source.removeprefix(f"{FIXTURE_ROOT}/")
+    return None
 
-    for name, builder in (("claude-session", claude_session), ("queue-and-acks", queue_and_failure)):
-        client = ProtocolClient(device="device-conformance", instance=INSTANCE)
-        activation = client.set_topic(TOPIC)
-        assert activation is not None, "the conformance topic must activate"
-        steps = []
-        for env in builder():
-            tag = encode_envelope(env)
-            decoded = client.ingest(tag)
-            assert decoded is not None, f"reference client rejected {env.kind}"
-            # to_dict() hands back its live containers, so a snapshot has to be deep-copied or
-            # every step would record the final state.
-            steps.append({"kind": env.kind, "tag": tag, "state": copy.deepcopy(client.state.to_dict())})
-        path = out_dir / f"{name}.json"
-        path.write_text(json.dumps({"topic": TOPIC, "steps": steps}, indent=2, sort_keys=True) + "\n")
-        print(f"wrote {path} ({len(steps)} steps)")
 
-    # Deterministic incompressible text keeps this a multi-part fixture now that the
-    # protocol compresses only when doing so saves an IRC command.
-    big = envelope(
-        "assistant.completed",
-        session_id=SESSION,
-        turn_id=TURN,
-        item_id="msg-big",
-        data={"content": random.Random(0).randbytes(10_000).hex()},
-    )
-    fragments = fragment_envelope(big)
-    assert len(fragments) > 1, "expected the oversized envelope to fragment"
-    path = out_dir / "fragmented.json"
-    path.write_text(
-        json.dumps({"envelope": encode_envelope(big), "fragments": fragments}, indent=2, sort_keys=True) + "\n"
-    )
-    print(f"wrote {path} ({len(fragments)} fragments)")
+def is_clean(upstream: Path) -> bool:
+    status = git(upstream, "status", "--porcelain", "--", CORPUS_ROOT, FIXTURE_ROOT, SCHEMA)
+    return not status
+
+
+def provenance(revision: str, copies: dict[str, bytes]) -> bytes:
+    payload = {
+        "format": 1,
+        "upstreamCommit": revision,
+        "files": {source: hashlib.sha256(content).hexdigest() for source, content in sorted(copies.items())},
+    }
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
+
+
+def expected(upstream: Path, revision: str) -> dict[Path, bytes]:
+    copies = {
+        source: read_committed(upstream, revision, source)
+        for source in tracked_files(upstream, revision)
+        if destination(source) is not None
+    }
+    targets = {destination(source): content for source, content in copies.items()}
+    assert all(target is not None for target in targets)
+    irc_copies = {
+        source: content
+        for source, content in copies.items()
+        if source == SCHEMA or source.startswith(FIXTURE_ROOT)
+    }
+    app_copies = {source: content for source, content in copies.items() if source.startswith(CORPUS_ROOT)}
+    targets[ROOT / "irc/src/test/resources" / PROVENANCE] = provenance(revision, irc_copies)
+    targets[ROOT / "app/src/test/resources" / PROVENANCE] = provenance(revision, app_copies)
+    return {target: content for target, content in targets.items() if target is not None}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--upstream", type=Path, required=True)
+    parser.add_argument("--revision", help="exact committed Agentwire revision to import")
+    parser.add_argument("--check", action="store_true", help="fail when copied resources are stale")
+    args = parser.parse_args(argv)
+    upstream = args.upstream.resolve()
+    if not is_clean(upstream):
+        parser.error("Agentwire protocol inputs are dirty; commit or discard them before importing")
+    revision = args.revision
+    if args.check and revision is None:
+        local = ROOT / "irc/src/test/resources" / PROVENANCE
+        try:
+            revision = json.loads(local.read_text(encoding="utf-8"))["upstreamCommit"]
+        except (KeyError, OSError, json.JSONDecodeError) as error:
+            parser.error(f"cannot read imported provenance: {error}")
+    if revision is None:
+        parser.error("--revision is required when importing")
+    try:
+        revision = git(upstream, "rev-parse", "--verify", f"{revision}^{{commit}}")
+    except subprocess.CalledProcessError:
+        parser.error(f"unknown Agentwire commit: {revision}")
+
+    targets = expected(upstream, revision)
+    stale = [target for target, content in targets.items() if not target.is_file() or target.read_bytes() != content]
+    if args.check:
+        if stale:
+            print("stale imported Agentwire resources: " + ", ".join(map(str, stale)), file=sys.stderr)
+            return 1
+        return 0
+    for target, content in targets.items():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
     return 0
 
 

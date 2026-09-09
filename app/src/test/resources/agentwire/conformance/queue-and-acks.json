@@ -11,7 +11,7 @@
         "plan": null,
         "queue": [
           {
-            "content": "run the tests",
+            "content": "run tests",
             "iid": "q-1",
             "position": 0
           }
@@ -23,7 +23,7 @@
         "tid": null,
         "tools": {}
       },
-      "tag": "{\"at\":1785400000019,\"data\":{\"items\":[{\"content\":\"run the tests\",\"iid\":\"q-1\",\"position\":0}]},\"epoch\":\"epoch-conformance\",\"id\":\"00000019-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.snapshot\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000013,\"data\":{\"items\":[{\"content\":\"run tests\",\"iid\":\"q-1\",\"position\":0}]},\"epoch\":\"epoch-conformance\",\"id\":\"00000013-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.snapshot\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "queue.item.added",
@@ -36,7 +36,7 @@
         "plan": null,
         "queue": [
           {
-            "content": "run the tests",
+            "content": "run tests",
             "iid": "q-1",
             "position": 0
           },
@@ -53,7 +53,7 @@
         "tid": null,
         "tools": {}
       },
-      "tag": "{\"at\":1785400000020,\"data\":{\"content\":\"then lint\",\"iid\":\"q-2\",\"position\":1},\"epoch\":\"epoch-conformance\",\"id\":\"00000020-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.item.added\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000014,\"data\":{\"content\":\"then lint\",\"iid\":\"q-2\",\"position\":1},\"epoch\":\"epoch-conformance\",\"id\":\"00000014-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.item.added\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "queue.item.updated",
@@ -66,12 +66,12 @@
         "plan": null,
         "queue": [
           {
-            "content": "run the tests",
+            "content": "run tests",
             "iid": "q-1",
             "position": 0
           },
           {
-            "content": "then lint everything",
+            "content": "then lint all",
             "iid": "q-2",
             "position": 1
           }
@@ -83,7 +83,7 @@
         "tid": null,
         "tools": {}
       },
-      "tag": "{\"at\":1785400000021,\"data\":{\"content\":\"then lint everything\",\"iid\":\"q-2\",\"position\":1},\"epoch\":\"epoch-conformance\",\"id\":\"00000021-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.item.updated\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000015,\"data\":{\"content\":\"then lint all\",\"iid\":\"q-2\",\"position\":1},\"epoch\":\"epoch-conformance\",\"id\":\"00000015-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.item.updated\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "queue.item.moved",
@@ -96,7 +96,7 @@
         "plan": null,
         "queue": [
           {
-            "content": "run the tests",
+            "content": "run tests",
             "iid": "q-1",
             "position": 0
           },
@@ -112,7 +112,7 @@
         "tid": null,
         "tools": {}
       },
-      "tag": "{\"at\":1785400000022,\"data\":{\"iid\":\"q-2\",\"position\":0},\"epoch\":\"epoch-conformance\",\"id\":\"00000022-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.item.moved\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000016,\"data\":{\"iid\":\"q-2\",\"position\":0},\"epoch\":\"epoch-conformance\",\"id\":\"00000016-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.item.moved\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "queue.item.removed",
@@ -125,7 +125,7 @@
         "plan": null,
         "queue": [
           {
-            "content": "run the tests",
+            "content": "run tests",
             "iid": "q-1",
             "position": 0
           }
@@ -137,7 +137,7 @@
         "tid": null,
         "tools": {}
       },
-      "tag": "{\"at\":1785400000023,\"data\":{\"iid\":\"q-2\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000023-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.item.removed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000017,\"data\":{\"iid\":\"q-2\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000017-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.item.removed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "action.accepted",
@@ -150,7 +150,7 @@
         "plan": null,
         "queue": [
           {
-            "content": "run the tests",
+            "content": "run tests",
             "iid": "q-1",
             "position": 0
           }
@@ -162,7 +162,7 @@
         "tid": null,
         "tools": {}
       },
-      "tag": "{\"at\":1785400000024,\"epoch\":\"epoch-conformance\",\"id\":\"00000024-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"action.accepted\",\"reply\":\"00000000-0000-4000-8000-00000000cafe\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000018,\"epoch\":\"epoch-conformance\",\"id\":\"00000018-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"action.accepted\",\"reply\":\"00000000-0000-4000-8000-00000000cafe\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "action.succeeded",
@@ -175,7 +175,7 @@
         "plan": null,
         "queue": [
           {
-            "content": "run the tests",
+            "content": "run tests",
             "iid": "q-1",
             "position": 0
           }
@@ -187,7 +187,7 @@
         "tid": null,
         "tools": {}
       },
-      "tag": "{\"at\":1785400000025,\"epoch\":\"epoch-conformance\",\"id\":\"00000025-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"action.succeeded\",\"reply\":\"00000000-0000-4000-8000-00000000cafe\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000019,\"epoch\":\"epoch-conformance\",\"id\":\"00000019-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"action.succeeded\",\"reply\":\"00000000-0000-4000-8000-00000000cafe\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "action.failed",
@@ -200,7 +200,7 @@
         "plan": null,
         "queue": [
           {
-            "content": "run the tests",
+            "content": "run tests",
             "iid": "q-1",
             "position": 0
           }
@@ -212,7 +212,7 @@
         "tid": null,
         "tools": {}
       },
-      "tag": "{\"at\":1785400000026,\"data\":{\"message\":\"Claude session is observed only; its turn belongs to another process\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000026-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"action.failed\",\"reply\":\"00000000-0000-4000-8000-00000000beef\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000020,\"data\":{\"message\":\"safe failure\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000020-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"action.failed\",\"reply\":\"00000000-0000-4000-8000-00000000beef\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "action.uncertain",
@@ -225,7 +225,7 @@
         "plan": null,
         "queue": [
           {
-            "content": "run the tests",
+            "content": "run tests",
             "iid": "q-1",
             "position": 0
           }
@@ -237,33 +237,8 @@
         "tid": null,
         "tools": {}
       },
-      "tag": "{\"at\":1785400000027,\"epoch\":\"epoch-conformance\",\"id\":\"00000027-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"action.uncertain\",\"reply\":\"00000000-0000-4000-8000-00000000f00d\",\"t\":\"event\",\"v\":1}"
-    },
-    {
-      "kind": "turn.failed",
-      "state": {
-        "active": false,
-        "assistant": [],
-        "backend": null,
-        "busy": false,
-        "epoch": null,
-        "plan": null,
-        "queue": [
-          {
-            "content": "run the tests",
-            "iid": "q-1",
-            "position": 0
-          }
-        ],
-        "requests": {},
-        "settings": {},
-        "sid": null,
-        "subagents": [],
-        "tid": null,
-        "tools": {}
-      },
-      "tag": "{\"at\":1785400000028,\"data\":{\"message\":\"interrupted\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000028-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"turn.failed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-2\",\"v\":1}"
+      "tag": "{\"at\":1785400000021,\"epoch\":\"epoch-conformance\",\"id\":\"00000021-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"action.uncertain\",\"reply\":\"00000000-0000-4000-8000-00000000f00d\",\"t\":\"event\",\"v\":1}"
     }
   ],
-  "topic": "agentwire:v1;account=trev;agent=agentwire;backend=claude | motd conformance"
+  "topic": "agentwire:v1;account=trev;agent=agentwire;backend=claude | conformance"
 }

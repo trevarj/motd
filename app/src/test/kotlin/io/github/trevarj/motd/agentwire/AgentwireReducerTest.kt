@@ -1577,6 +1577,130 @@ class AgentwireReducerTest {
     }
 
     @Test
+    fun `tool lifecycle retains metadata and keys untagged tools by session and item`() {
+        val reducer = AgentwireReducer()
+        var state = AgentwireUiState(activeSid = "s1")
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "tool.started",
+                    sid = "s1",
+                    iid = "shared",
+                    data =
+                        buildJsonObject {
+                            put("kind", "shell")
+                            put("label", "run tests")
+                            put("input", "pytest -q")
+                        },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "tool.completed",
+                    sid = "s1",
+                    iid = "shared",
+                    data =
+                        buildJsonObject {
+                            put("kind", "shell")
+                            put("success", true)
+                            put("output", "passed")
+                        },
+                ),
+            )
+        listOf("turn-a", "turn-b").forEach { tid ->
+            state =
+                reducer.reduce(
+                    state,
+                    event(
+                        "tool.completed",
+                        sid = "s1",
+                        tid = tid,
+                        iid = "shared",
+                        data =
+                            buildJsonObject {
+                                put("kind", "file edit")
+                                put("success", true)
+                            },
+                    ),
+                )
+        }
+
+        assertEquals(3, state.timeline.size)
+        val untagged = state.timeline.first()
+        assertEquals("tool.completed", untagged.kind)
+        assertEquals("run tests", untagged.title)
+        assertTrue(untagged.body!!.contains("Command\npytest -q"))
+        assertTrue(untagged.body.contains("Output\npassed"))
+        assertEquals(
+            setOf("tool:2:s1|-:|6:shared", "tool:2:s1|6:turn-a|6:shared", "tool:2:s1|6:turn-b|6:shared"),
+            state.timeline.map(AgentwireTimelineItem::timelineKey).toSet(),
+        )
+    }
+
+    @Test
+    fun `historical tool updates retain terminal lifecycle while merging missing metadata`() {
+        val reducer = AgentwireReducer()
+        var state =
+            AgentwireUiState(
+                activeSid = "s1",
+                historySid = "s1",
+                historyRequestId = "history-1",
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "tool.completed",
+                    sid = "s1",
+                    tid = "t1",
+                    iid = "tool-1",
+                    reply = "history-1",
+                    history = true,
+                    data =
+                        buildJsonObject {
+                            put("kind", "shell")
+                            put("success", true)
+                            put("output", "passed")
+                        },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "history.end",
+                    sid = "s1",
+                    reply = "history-1",
+                    data = buildJsonObject { put("count", 1) },
+                ),
+            )
+        state =
+            reducer.reduce(
+                state,
+                event(
+                    "tool.started",
+                    sid = "s1",
+                    tid = "t1",
+                    iid = "tool-1",
+                    data =
+                        buildJsonObject {
+                            put("label", "run tests")
+                            put("input", "pytest -q")
+                        },
+                ),
+            )
+
+        val tool = state.timeline.single()
+        assertEquals("tool.completed", tool.kind)
+        assertEquals(true, tool.success)
+        assertTrue(tool.body!!.contains("Command\npytest -q"))
+        assertTrue(tool.body!!.contains("Output\npassed"))
+    }
+
+    @Test
     fun `the live timeline is capped and keeps the newest items`() {
         val reducer = AgentwireReducer()
         var state = AgentwireUiState()

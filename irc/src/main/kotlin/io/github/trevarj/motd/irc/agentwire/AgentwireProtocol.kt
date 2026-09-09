@@ -400,6 +400,9 @@ private fun validateFragment(root: JsonObject): AgentwireFragment {
     val of = root.nonEmptyString("of") ?: error("missing of")
     val type = root.string("t") ?: error("missing t")
     require(type == "action" || type == "event") { "invalid t" }
+    require(of in if (type == "action") AGENTWIRE_ACTION_KINDS else AGENTWIRE_EVENT_KINDS) {
+        "invalid of for t"
+    }
     val part = root.int("part") ?: error("missing part")
     val parts = root.int("parts") ?: error("missing parts")
     val bytes = root.int("bytes") ?: error("missing bytes")

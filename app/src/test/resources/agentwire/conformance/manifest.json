@@ -1,0 +1,11 @@
+{
+  "files": {
+    "claude-session.json": "1ab885477ebd2a36441c9b8388aaa06b48dd1c9f59430862b5ef9a9d0e80260f",
+    "fragmented.json": "276127c5e7ef0654eb8f784165ddef11b17d76db2227f27892e75fd94c3a1648",
+    "queue-and-acks.json": "9ae301e3f0c558ec09dbd65457ceaf5cba93caeb5535b80ed52c7c575861546f",
+    "replay-and-isolation.json": "354c86291243e8d697a6bf68641a29299e5ac55ce5c3fc239211ad09b6455817"
+  },
+  "format": 1,
+  "generatedBy": "protocol/conformance/generate.py",
+  "protocol": "agentwire-irc-v1"
+}
