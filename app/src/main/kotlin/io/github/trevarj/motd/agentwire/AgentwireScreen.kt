@@ -283,6 +283,7 @@ private fun AgentwireScreen(
     // explicit user toggle survives tool lifecycle transitions. Reset with the bound session.
     val expandedKeys = remember(state.activeSid) { mutableStateMapOf<String, Boolean>() }
     val rows = remember(state.timeline) { agentwireDisplayRows(state.timeline) }
+    val turnActivity = remember(state.timeline) { agentwireTurnActivity(state.timeline) }
     val sessionRows = agentwireDrawerRows(state)
 
     // A plain animateScrollToItem(last) parks at the TOP of a taller-than-viewport streaming
@@ -503,6 +504,12 @@ private fun AgentwireScreen(
                                                 actionStatus = state.actionStatus[row.item.id],
                                                 expandedOverride = expandedKeys[row.key],
                                                 onToggleExpanded = { expandedKeys[row.key] = it },
+                                                activity =
+                                                    if (row.item.kind in setOf("turn.started", "turn.completed", "turn.failed")) {
+                                                        row.item.sid?.let { sid -> row.item.tid?.let { tid -> turnActivity[sid to tid] } }
+                                                    } else {
+                                                        null
+                                                    },
                                             )
                                         }
 
@@ -1208,6 +1215,7 @@ internal fun AgentwireTimelineCard(
     actionStatus: String?,
     expandedOverride: Boolean?,
     onToggleExpanded: (Boolean) -> Unit,
+    activity: AgentwireActivity? = null,
 ) {
     // Tool kinds never reach this card; they render as compact rows. The override is the user's
     // explicit fold choice, hoisted so it survives the item's lifecycle transitions.
@@ -1266,6 +1274,10 @@ internal fun AgentwireTimelineCard(
                         softWrap = false,
                     )
                 }
+            }
+            activity?.let {
+                Text(it.summary(), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
+                Text(it.categorySummary(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (item.running) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
             if (!collapsible || expanded) {
@@ -1371,7 +1383,7 @@ private fun AgentwireToolRow(
 
 /** A single tool call outside a foldable run — usually the one currently running. */
 @Composable
-private fun AgentwireToolCard(
+internal fun AgentwireToolCard(
     item: AgentwireTimelineItem,
     rowKey: String,
     expandedKeys: SnapshotStateMap<String, Boolean>,
@@ -1390,7 +1402,7 @@ private fun AgentwireToolCard(
 /** Consecutive settled tools folded behind one summary header, SystemEventPill-style. */
 @SuppressLint("HardcodedText")
 @Composable
-private fun AgentwireToolRunCard(
+internal fun AgentwireToolRunCard(
     run: AgentwireDisplayRow.ToolRun,
     expandedKeys: SnapshotStateMap<String, Boolean>,
 ) {
@@ -1423,19 +1435,13 @@ private fun AgentwireToolRunCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    "Ran ${run.tools.size} tools",
+                    run.activity.summary(),
                     modifier = Modifier.weight(1f),
                     fontWeight = FontWeight.SemiBold,
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                if (run.failedCount > 0) {
-                    Text(
-                        "${run.failedCount} failed",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
             }
+            Text(run.activity.categorySummary(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (expanded) {
                 run.tools.forEach { tool ->
                     // Same key a standalone Tool row would get, so a row's body expansion

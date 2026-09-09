@@ -13,6 +13,51 @@ import java.util.Calendar
 /** Fold consecutive settled tools only when the run is at least this long. */
 internal const val MIN_TOOL_RUN = 2
 
+internal val AGENTWIRE_TOOL_CATEGORIES = listOf("commands", "edits", "reads", "web", "agents", "other")
+
+internal fun agentwireToolCategory(kind: String?): String =
+    when (kind) {
+        "shell" -> "commands"
+        "file edit" -> "edits"
+        "file read" -> "reads"
+        "web", "web search" -> "web"
+        "agent" -> "agents"
+        else -> "other"
+    }
+
+internal data class AgentwireActivity(
+    val total: Int,
+    val failed: Int,
+    val categories: Map<String, Int>,
+)
+
+internal fun AgentwireActivity.summary(): String =
+    "Observed activity: $total ${if (total == 1) "tool" else "tools"}" +
+        if (failed > 0) " · $failed failed" else ""
+
+internal fun AgentwireActivity.categorySummary(): String =
+    AGENTWIRE_TOOL_CATEGORIES
+        .filter { (categories[it] ?: 0) > 0 }
+        .joinToString(" · ") { "${it.replaceFirstChar(Char::uppercase)} ${categories.getValue(it)}" }
+
+/** Counts only the currently loaded projection, which already merges tool lifecycles. */
+internal fun agentwireToolActivity(tools: List<AgentwireTimelineItem>): AgentwireActivity {
+    val observed = tools.filter { it.kind.startsWith("tool.") && it.backendItemId != null }.distinctBy { it.timelineKey() }
+    val categories = observed.groupingBy { agentwireToolCategory(it.data.string("kind")) }.eachCount()
+    return AgentwireActivity(
+        total = observed.size,
+        failed = observed.count { it.success == false },
+        categories = AGENTWIRE_TOOL_CATEGORIES.associateWith { categories[it] ?: 0 },
+    )
+}
+
+/** Missing turn IDs remain useful in runs, but never create guessed turn boundaries. */
+internal fun agentwireTurnActivity(timeline: List<AgentwireTimelineItem>): Map<Pair<String, String>, AgentwireActivity> =
+    timeline
+        .filter { it.kind.startsWith("tool.") && it.backendItemId != null && !it.sid.isNullOrEmpty() && !it.tid.isNullOrEmpty() }
+        .groupBy { requireNotNull(it.sid) to requireNotNull(it.tid) }
+        .mapValues { (_, tools) -> agentwireToolActivity(tools) }
+
 internal sealed interface AgentwireDisplayRow {
     /** Stable LazyColumn key, derived from [AgentwireTimelineItem.timelineKey]. */
     val key: String
@@ -37,14 +82,15 @@ internal sealed interface AgentwireDisplayRow {
     ) : AgentwireDisplayRow {
         // Keyed on the first tool so the key survives the run growing at its tail (the live case).
         override val key: String get() = "run:${tools.first().timelineKey()}"
-        val failedCount: Int get() = tools.count { it.success == false }
+        val activity: AgentwireActivity get() = agentwireToolActivity(tools)
+        val failedCount: Int get() = activity.failed
     }
 }
 
 /**
  * Derive the rendered rows from the raw timeline. `request.opened` is suppressed entirely: the
  * trailing [AgentwireUiState.requests] block is the single interactive surface for pending
- * approvals, and `request.resolved` remains inline as the historical record.
+ * approvals. It still breaks a run, and `request.resolved` remains inline as the historical record.
  */
 internal fun agentwireDisplayRows(timeline: List<AgentwireTimelineItem>): List<AgentwireDisplayRow> {
     val rows = ArrayList<AgentwireDisplayRow>(timeline.size)
@@ -59,14 +105,19 @@ internal fun agentwireDisplayRows(timeline: List<AgentwireTimelineItem>): List<A
     }
     timeline.forEach { item ->
         when {
-            item.kind == "request.opened" -> {}
+            item.kind == "request.opened" -> {
+                flush()
+            }
 
-            item.kind.startsWith("tool.") && !item.running -> {
+            item.kind.startsWith("tool.") && !item.running && item.backendItemId != null -> {
+                // Adjacent tools from different explicit sessions/turns never share a run.
+                val previous = pending.lastOrNull()
+                if (previous != null && (previous.sid != item.sid || previous.tid != item.tid)) flush()
                 pending.add(item)
             }
 
             item.kind.startsWith("tool.") -> {
-                // A running tool always stays its own visible row at the tail of the fold.
+                // Running tools and events without a call identity stay visible as individual rows.
                 flush()
                 rows.add(AgentwireDisplayRow.Tool(item))
             }

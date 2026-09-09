@@ -22,7 +22,8 @@
         "sid": null,
         "subagents": [],
         "tid": null,
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
       "tag": "{\"at\":1785400000013,\"data\":{\"items\":[{\"content\":\"run tests\",\"iid\":\"q-1\",\"position\":0}]},\"epoch\":\"epoch-conformance\",\"id\":\"00000013-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.snapshot\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
@@ -53,7 +54,8 @@
         "sid": null,
         "subagents": [],
         "tid": null,
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
       "tag": "{\"at\":1785400000014,\"data\":{\"content\":\"then lint\",\"iid\":\"q-2\",\"position\":1},\"epoch\":\"epoch-conformance\",\"id\":\"00000014-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.item.added\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
@@ -84,7 +86,8 @@
         "sid": null,
         "subagents": [],
         "tid": null,
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
       "tag": "{\"at\":1785400000015,\"data\":{\"content\":\"then lint all\",\"iid\":\"q-2\",\"position\":1},\"epoch\":\"epoch-conformance\",\"id\":\"00000015-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.item.updated\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
@@ -114,7 +117,8 @@
         "sid": null,
         "subagents": [],
         "tid": null,
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
       "tag": "{\"at\":1785400000016,\"data\":{\"iid\":\"q-2\",\"position\":0},\"epoch\":\"epoch-conformance\",\"id\":\"00000016-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.item.moved\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
@@ -140,7 +144,8 @@
         "sid": null,
         "subagents": [],
         "tid": null,
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
       "tag": "{\"at\":1785400000017,\"data\":{\"iid\":\"q-2\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000017-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"queue.item.removed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
@@ -170,7 +175,8 @@
         "sid": null,
         "subagents": [],
         "tid": null,
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
       "tag": "{\"at\":1785400000018,\"epoch\":\"epoch-conformance\",\"id\":\"00000018-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"action.accepted\",\"reply\":\"00000000-0000-4000-8000-00000000cafe\",\"t\":\"event\",\"v\":1}"
     },
@@ -200,7 +206,8 @@
         "sid": null,
         "subagents": [],
         "tid": null,
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
       "tag": "{\"at\":1785400000019,\"epoch\":\"epoch-conformance\",\"id\":\"00000019-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"action.succeeded\",\"reply\":\"00000000-0000-4000-8000-00000000cafe\",\"t\":\"event\",\"v\":1}"
     },
@@ -234,7 +241,8 @@
         "sid": null,
         "subagents": [],
         "tid": null,
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
       "tag": "{\"at\":1785400000020,\"data\":{\"message\":\"safe failure\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000020-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"action.failed\",\"reply\":\"00000000-0000-4000-8000-00000000beef\",\"t\":\"event\",\"v\":1}"
     },
@@ -271,7 +279,8 @@
         "sid": null,
         "subagents": [],
         "tid": null,
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
       "tag": "{\"at\":1785400000021,\"epoch\":\"epoch-conformance\",\"id\":\"00000021-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"action.uncertain\",\"reply\":\"00000000-0000-4000-8000-00000000f00d\",\"t\":\"event\",\"v\":1}"
     }

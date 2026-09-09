@@ -16,7 +16,8 @@
         "sid": null,
         "subagents": [],
         "tid": null,
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
       "tag": "{\"at\":1785400000028,\"data\":{\"actions\":[\"sync.request\",\"workspace.list.request\",\"session.list.request\",\"history.request\",\"action.status.request\",\"diagnostics.request\",\"session.create\",\"session.attach\",\"session.detach\",\"settings.update\",\"turn.prompt\",\"turn.steer\",\"turn.cancel\",\"queue.edit\",\"queue.move\",\"queue.delete\",\"queue.clear\",\"request.respond\",\"request.skip\"],\"backend\":\"claude\",\"capabilities\":[\"actionStatus\",\"compressedFragments\",\"diagnostics\",\"history\",\"historyChunks\",\"queues\",\"requests\",\"sessions\",\"settings\",\"steering\",\"sync\",\"turns\",\"workspaces\"],\"epoch\":\"epoch-conformance\",\"limits\":{\"contentBytes\":65536,\"historyBytes\":524288,\"historyChunkBytes\":98304,\"historyDays\":30,\"historyEvents\":200,\"queueItems\":10},\"protocol\":\"agentwire-irc-v1\",\"settings\":[\"delivery\"]},\"epoch\":\"epoch-conformance\",\"id\":\"00000028-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"agent.hello\",\"t\":\"event\",\"v\":1}"
     },
@@ -36,7 +37,8 @@
         "sid": null,
         "subagents": [],
         "tid": null,
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
       "tag": "{\"at\":1785400000029,\"data\":{\"checks\":[{\"code\":\"backend.ready\",\"explanation\":\"Backend is ready.\",\"facts\":{\"ready\":true,\"sessionCount\":0},\"status\":\"ok\"},{\"code\":\"irc.outgoing\",\"explanation\":\"Outgoing messages are queued.\",\"facts\":{\"oldestQueuedMs\":15000,\"queueDepth\":2},\"nextStep\":\"Check IRC connectivity.\",\"status\":\"warning\"}],\"generatedAt\":1785400000000,\"schemaVersion\":1,\"source\":\"bridge\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000029-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"diagnostics.snapshot\",\"reply\":\"diagnostics-query\",\"t\":\"event\",\"v\":1}"
     }

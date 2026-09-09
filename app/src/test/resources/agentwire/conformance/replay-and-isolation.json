@@ -16,9 +16,10 @@
         "sid": null,
         "subagents": [],
         "tid": null,
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
-      "tag": "{\"at\":1785400000035,\"data\":{\"actions\":[\"sync.request\",\"workspace.list.request\",\"session.list.request\",\"history.request\",\"action.status.request\",\"diagnostics.request\",\"session.create\",\"session.attach\",\"session.detach\",\"settings.update\",\"turn.prompt\",\"turn.steer\",\"turn.cancel\",\"queue.edit\",\"queue.move\",\"queue.delete\",\"queue.clear\",\"request.respond\",\"request.skip\"],\"backend\":\"claude\",\"capabilities\":[\"actionStatus\",\"compressedFragments\",\"diagnostics\",\"history\",\"historyChunks\",\"queues\",\"requests\",\"sessions\",\"settings\",\"steering\",\"sync\",\"turns\",\"workspaces\"],\"epoch\":\"epoch-conformance\",\"limits\":{\"contentBytes\":65536,\"historyBytes\":524288,\"historyChunkBytes\":98304,\"historyDays\":30,\"historyEvents\":200,\"queueItems\":10},\"protocol\":\"agentwire-irc-v1\",\"settings\":[\"delivery\"]},\"epoch\":\"epoch-conformance\",\"id\":\"00000035-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"agent.hello\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000050,\"data\":{\"actions\":[\"sync.request\",\"workspace.list.request\",\"session.list.request\",\"history.request\",\"action.status.request\",\"diagnostics.request\",\"session.create\",\"session.attach\",\"session.detach\",\"settings.update\",\"turn.prompt\",\"turn.steer\",\"turn.cancel\",\"queue.edit\",\"queue.move\",\"queue.delete\",\"queue.clear\",\"request.respond\",\"request.skip\"],\"backend\":\"claude\",\"capabilities\":[\"actionStatus\",\"compressedFragments\",\"diagnostics\",\"history\",\"historyChunks\",\"queues\",\"requests\",\"sessions\",\"settings\",\"steering\",\"sync\",\"turns\",\"workspaces\"],\"epoch\":\"epoch-conformance\",\"limits\":{\"contentBytes\":65536,\"historyBytes\":524288,\"historyChunkBytes\":98304,\"historyDays\":30,\"historyEvents\":200,\"queueItems\":10},\"protocol\":\"agentwire-irc-v1\",\"settings\":[\"delivery\"]},\"epoch\":\"epoch-conformance\",\"id\":\"00000050-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"agent.hello\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "channel.snapshot",
@@ -36,9 +37,10 @@
         "sid": "sess-conformance",
         "subagents": [],
         "tid": "turn-1",
-        "tools": {}
+        "tools": {},
+        "turnActivity": []
       },
-      "tag": "{\"at\":1785400000036,\"data\":{\"active\":true,\"backend\":\"claude\",\"binding\":{\"sid\":\"sess-conformance\"},\"busy\":true,\"tid\":\"turn-1\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000036-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"channel.snapshot\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000051,\"data\":{\"active\":true,\"backend\":\"claude\",\"binding\":{\"sid\":\"sess-conformance\"},\"busy\":true,\"tid\":\"turn-1\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000051-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"channel.snapshot\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "tool.started",
@@ -66,9 +68,25 @@
             "sid": "sess-conformance",
             "tid": "turn-1"
           }
-        }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 0,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 1
+          }
+        ]
       },
-      "tag": "{\"at\":1785400000030,\"data\":{\"input\":\"pytest -q\",\"kind\":\"shell\",\"label\":\"run tests\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000030-0000-4000-8000-000000000000\",\"iid\":\"preserved\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.started\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+      "tag": "{\"at\":1785400000045,\"data\":{\"input\":\"pytest -q\",\"kind\":\"shell\",\"label\":\"run tests\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000045-0000-4000-8000-000000000000\",\"iid\":\"preserved\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.started\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
     },
     {
       "kind": "tool.completed",
@@ -98,9 +116,25 @@
             "success": true,
             "tid": "turn-1"
           }
-        }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 0,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 1
+          }
+        ]
       },
-      "tag": "{\"at\":1785400000031,\"data\":{\"output\":\"passed\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000031-0000-4000-8000-000000000000\",\"iid\":\"preserved\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+      "tag": "{\"at\":1785400000046,\"data\":{\"output\":\"passed\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000046-0000-4000-8000-000000000000\",\"iid\":\"preserved\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
     },
     {
       "kind": "history.chunk",
@@ -138,9 +172,25 @@
             "success": true,
             "tid": "turn-1"
           }
-        }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 1,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 2
+          }
+        ]
       },
-      "tag": "{\"at\":1785400000037,\"data\":{\"events\":[{\"at\":1785400000032,\"epoch\":\"epoch-conformance\",\"hist\":true,\"id\":\"00000032-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"turn.completed\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1},{\"at\":1785400000033,\"data\":{\"kind\":\"file read\",\"success\":true},\"epoch\":\"epoch-conformance\",\"hist\":true,\"id\":\"00000033-0000-4000-8000-000000000000\",\"iid\":\"call-1\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1},{\"at\":1785400000034,\"data\":{\"input\":\"pytest -q\",\"kind\":\"shell\",\"label\":\"old replay\"},\"epoch\":\"epoch-conformance\",\"hist\":true,\"id\":\"00000034-0000-4000-8000-000000000000\",\"iid\":\"preserved\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.started\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}],\"index\":0,\"page\":\"p1\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000037-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"history.chunk\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000052,\"data\":{\"events\":[{\"at\":1785400000047,\"epoch\":\"epoch-conformance\",\"hist\":true,\"id\":\"00000047-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"turn.completed\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1},{\"at\":1785400000048,\"data\":{\"kind\":\"file read\",\"success\":true},\"epoch\":\"epoch-conformance\",\"hist\":true,\"id\":\"00000048-0000-4000-8000-000000000000\",\"iid\":\"call-1\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1},{\"at\":1785400000049,\"data\":{\"input\":\"pytest -q\",\"kind\":\"shell\",\"label\":\"old replay\"},\"epoch\":\"epoch-conformance\",\"hist\":true,\"id\":\"00000049-0000-4000-8000-000000000000\",\"iid\":\"preserved\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.started\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}],\"index\":0,\"page\":\"p1\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000052-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"history.chunk\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "tool.completed",
@@ -178,9 +228,25 @@
             "success": true,
             "tid": "turn-1"
           }
-        }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 1,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 2
+          }
+        ]
       },
-      "tag": "{\"at\":1785400000033,\"data\":{\"kind\":\"file read\",\"success\":true},\"epoch\":\"epoch-conformance\",\"hist\":true,\"id\":\"00000033-0000-4000-8000-000000000000\",\"iid\":\"call-1\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+      "tag": "{\"at\":1785400000048,\"data\":{\"kind\":\"file read\",\"success\":true},\"epoch\":\"epoch-conformance\",\"hist\":true,\"id\":\"00000048-0000-4000-8000-000000000000\",\"iid\":\"call-1\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"reply\":\"history-1\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
     },
     {
       "kind": "turn.completed",
@@ -218,9 +284,25 @@
             "success": true,
             "tid": "turn-1"
           }
-        }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 1,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 2
+          }
+        ]
       },
-      "tag": "{\"at\":1785400000038,\"epoch\":\"epoch-conformance\",\"id\":\"00000038-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"turn.completed\",\"sid\":\"other-session\",\"t\":\"event\",\"tid\":\"other-turn\",\"v\":1}"
+      "tag": "{\"at\":1785400000053,\"epoch\":\"epoch-conformance\",\"id\":\"00000053-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"turn.completed\",\"sid\":\"other-session\",\"t\":\"event\",\"tid\":\"other-turn\",\"v\":1}"
     },
     {
       "kind": "tool.started",
@@ -266,9 +348,25 @@
             "sid": "sess-conformance",
             "tid": null
           }
-        }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 1,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 2
+          }
+        ]
       },
-      "tag": "{\"at\":1785400000039,\"data\":{\"kind\":\"shell\",\"label\":\"without a turn id\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000039-0000-4000-8000-000000000000\",\"iid\":\"shared-tool\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.started\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000054,\"data\":{\"kind\":\"shell\",\"label\":\"without a turn id\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000054-0000-4000-8000-000000000000\",\"iid\":\"shared-tool\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.started\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "tool.completed",
@@ -315,9 +413,25 @@
             "success": true,
             "tid": null
           }
-        }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 1,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 2
+          }
+        ]
       },
-      "tag": "{\"at\":1785400000040,\"data\":{\"kind\":\"shell\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000040-0000-4000-8000-000000000000\",\"iid\":\"shared-tool\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+      "tag": "{\"at\":1785400000055,\"data\":{\"kind\":\"shell\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000055-0000-4000-8000-000000000000\",\"iid\":\"shared-tool\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
     },
     {
       "kind": "tool.completed",
@@ -372,9 +486,39 @@
             "success": true,
             "tid": null
           }
-        }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 0,
+              "edits": 1,
+              "other": 0,
+              "reads": 0,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "another-turn",
+            "total": 1
+          },
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 1,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 2
+          }
+        ]
       },
-      "tag": "{\"at\":1785400000041,\"data\":{\"kind\":\"file edit\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000041-0000-4000-8000-000000000000\",\"iid\":\"shared-tool\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"another-turn\",\"v\":1}"
+      "tag": "{\"at\":1785400000056,\"data\":{\"kind\":\"file edit\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000056-0000-4000-8000-000000000000\",\"iid\":\"shared-tool\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"another-turn\",\"v\":1}"
     },
     {
       "kind": "assistant.completed",
@@ -434,9 +578,39 @@
             "success": true,
             "tid": null
           }
-        }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 0,
+              "edits": 1,
+              "other": 0,
+              "reads": 0,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "another-turn",
+            "total": 1
+          },
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 1,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 2
+          }
+        ]
       },
-      "tag": "{\"at\":1785400000042,\"data\":{\"content\":\"First output without an item ID\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000042-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"assistant.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+      "tag": "{\"at\":1785400000057,\"data\":{\"content\":\"First output without an item ID\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000057-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"assistant.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
     },
     {
       "kind": "assistant.completed",
@@ -500,9 +674,39 @@
             "success": true,
             "tid": null
           }
-        }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 0,
+              "edits": 1,
+              "other": 0,
+              "reads": 0,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "another-turn",
+            "total": 1
+          },
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 1,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 2
+          }
+        ]
       },
-      "tag": "{\"at\":1785400000043,\"data\":{\"content\":\"Second output without an item ID\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000043-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"assistant.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+      "tag": "{\"at\":1785400000058,\"data\":{\"content\":\"Second output without an item ID\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000058-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"assistant.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
     }
   ],
   "topic": "agentwire:v1;account=trev;agent=agentwire;backend=claude | conformance"

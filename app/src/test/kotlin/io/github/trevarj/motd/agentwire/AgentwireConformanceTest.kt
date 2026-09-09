@@ -52,6 +52,10 @@ class AgentwireConformanceTest {
             var state = activeState()
             corpus(name).forEach { step ->
                 val envelope = (decodeAgentwireValue(step.tag).getOrThrow() as AgentwireValue.Envelope).value
+                if (envelope.kind == "history.chunk") {
+                    // Establish the client request represented by this replay fixture.
+                    state = state.copy(historySid = envelope.sid, historyRequestId = envelope.reply)
+                }
                 state = reducer.reduce(state, envelope)
                 val where = "${step.kind} in $name"
                 assertEquals("$where: epoch", step.state.text("epoch"), state.epoch)
@@ -63,6 +67,7 @@ class AgentwireConformanceTest {
                 assertEquals("$where: queue", step.state.queueIds(), state.queue.map { it.iid })
                 assertEquals("$where: open requests", step.state.requestIds(), state.requests.map { it.rid }.sorted())
                 assertEquals("$where: action statuses", step.state.actionStatuses(), state.actionStatus)
+                assertEquals("$where: observed turn activity", step.state.getValue("turnActivity"), activityProjection(state))
             }
         }
     }
@@ -192,6 +197,24 @@ class AgentwireConformanceTest {
             ?.toMap()
             .orEmpty()
 
+    private fun activityProjection(state: AgentwireUiState): JsonArray =
+        JsonArray(
+            agentwireTurnActivity(state.timeline + state.historyStaged)
+                .toList()
+                .sortedWith(compareBy({ it.first.first }, { it.first.second }))
+                .map { (turn, activity) ->
+                    JsonObject(
+                        mapOf(
+                            "sid" to JsonPrimitive(turn.first),
+                            "tid" to JsonPrimitive(turn.second),
+                            "total" to JsonPrimitive(activity.total),
+                            "failed" to JsonPrimitive(activity.failed),
+                            "categories" to JsonObject(activity.categories.mapValues { JsonPrimitive(it.value) }),
+                        ),
+                    )
+                },
+        )
+
     private fun toolProjection(state: AgentwireUiState): JsonObject {
         val tools = linkedMapOf<String, AgentwireTimelineItem>()
         (state.timeline + state.historyStaged)
@@ -269,6 +292,6 @@ class AgentwireConformanceTest {
 
     private companion object {
         const val TOPIC_BACKEND = "claude"
-        val CORPORA = listOf("claude-session", "queue-and-acks", "replay-and-isolation", "action-status", "diagnostics")
+        val CORPORA = listOf("claude-session", "queue-and-acks", "replay-and-isolation", "action-status", "tool-activity", "diagnostics")
     }
 }

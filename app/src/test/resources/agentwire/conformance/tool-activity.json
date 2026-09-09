@@ -1,0 +1,1181 @@
+{
+  "steps": [
+    {
+      "kind": "agent.hello",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": false,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": null,
+        "subagents": [],
+        "tid": null,
+        "tools": {},
+        "turnActivity": []
+      },
+      "tag": "{\"at\":1785400000032,\"data\":{\"actions\":[\"sync.request\",\"workspace.list.request\",\"session.list.request\",\"history.request\",\"action.status.request\",\"diagnostics.request\",\"session.create\",\"session.attach\",\"session.detach\",\"settings.update\",\"turn.prompt\",\"turn.steer\",\"turn.cancel\",\"queue.edit\",\"queue.move\",\"queue.delete\",\"queue.clear\",\"request.respond\",\"request.skip\"],\"backend\":\"claude\",\"capabilities\":[\"actionStatus\",\"compressedFragments\",\"diagnostics\",\"history\",\"historyChunks\",\"queues\",\"requests\",\"sessions\",\"settings\",\"steering\",\"sync\",\"turns\",\"workspaces\"],\"epoch\":\"epoch-conformance\",\"limits\":{\"contentBytes\":65536,\"historyBytes\":524288,\"historyChunkBytes\":98304,\"historyDays\":30,\"historyEvents\":200,\"queueItems\":10},\"protocol\":\"agentwire-irc-v1\",\"settings\":[\"delivery\"]},\"epoch\":\"epoch-conformance\",\"id\":\"00000032-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"agent.hello\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "channel.snapshot",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {},
+        "turnActivity": []
+      },
+      "tag": "{\"at\":1785400000033,\"data\":{\"binding\":{\"sid\":\"sess-conformance\"},\"busy\":true,\"tid\":\"turn-1\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000033-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"channel.snapshot\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "user.prompt",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {},
+        "turnActivity": []
+      },
+      "tag": "{\"at\":1785400000034,\"data\":{\"content\":\"Inspect the code\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000034-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"user.prompt\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "tool.started",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.started",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "sid": "sess-conformance",
+            "tid": "turn-1"
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 0,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 1
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000030,\"data\":{\"input\":\"pytest -q\",\"kind\":\"shell\",\"label\":\"Run checks\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000030-0000-4000-8000-000000000000\",\"iid\":\"reused\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.started\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "output": "failed",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": "turn-1"
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 0,
+              "web": 0
+            },
+            "failed": 1,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 1
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000031,\"data\":{\"kind\":\"shell\",\"output\":\"failed\",\"success\":false},\"epoch\":\"epoch-conformance\",\"id\":\"00000031-0000-4000-8000-000000000000\",\"iid\":\"reused\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "output": "failed",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": "turn-1"
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 0,
+              "other": 0,
+              "reads": 0,
+              "web": 0
+            },
+            "failed": 1,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 1
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000031,\"data\":{\"kind\":\"shell\",\"output\":\"failed\",\"success\":false},\"epoch\":\"epoch-conformance\",\"id\":\"00000031-0000-4000-8000-000000000000\",\"iid\":\"reused\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"edit\"]": {
+            "diff": "+replacement",
+            "event": "tool.completed",
+            "iid": "edit",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "output": "failed",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": "turn-1"
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 1,
+              "other": 0,
+              "reads": 0,
+              "web": 0
+            },
+            "failed": 1,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 2
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000035,\"data\":{\"diff\":\"+replacement\",\"kind\":\"file edit\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000035-0000-4000-8000-000000000000\",\"iid\":\"edit\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "assistant.completed",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [
+          {
+            "content": "The first check failed. I will inspect the source.",
+            "iid": "narration"
+          }
+        ],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"edit\"]": {
+            "diff": "+replacement",
+            "event": "tool.completed",
+            "iid": "edit",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "output": "failed",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": "turn-1"
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 1,
+              "other": 0,
+              "reads": 0,
+              "web": 0
+            },
+            "failed": 1,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 2
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000036,\"data\":{\"content\":\"The first check failed. I will inspect the source.\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000036-0000-4000-8000-000000000000\",\"iid\":\"narration\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"assistant.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [
+          {
+            "content": "The first check failed. I will inspect the source.",
+            "iid": "narration"
+          }
+        ],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {},
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"edit\"]": {
+            "diff": "+replacement",
+            "event": "tool.completed",
+            "iid": "edit",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"read\"]": {
+            "event": "tool.completed",
+            "iid": "read",
+            "input": "source.py",
+            "kind": "file read",
+            "output": "source",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "output": "failed",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": "turn-1"
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 1,
+              "other": 0,
+              "reads": 1,
+              "web": 0
+            },
+            "failed": 1,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 3
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000037,\"data\":{\"input\":\"source.py\",\"kind\":\"file read\",\"output\":\"source\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000037-0000-4000-8000-000000000000\",\"iid\":\"read\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "request.opened",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [
+          {
+            "content": "The first check failed. I will inspect the source.",
+            "iid": "narration"
+          }
+        ],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {
+          "question": {
+            "questions": [
+              {
+                "id": "continue",
+                "options": [],
+                "prompt": "Continue?"
+              }
+            ],
+            "title": "Continue?",
+            "type": "question"
+          }
+        },
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"edit\"]": {
+            "diff": "+replacement",
+            "event": "tool.completed",
+            "iid": "edit",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"read\"]": {
+            "event": "tool.completed",
+            "iid": "read",
+            "input": "source.py",
+            "kind": "file read",
+            "output": "source",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "output": "failed",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": "turn-1"
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 1,
+              "other": 0,
+              "reads": 1,
+              "web": 0
+            },
+            "failed": 1,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 3
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000038,\"data\":{\"questions\":[{\"id\":\"continue\",\"options\":[],\"prompt\":\"Continue?\"}],\"title\":\"Continue?\",\"type\":\"question\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000038-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"request.opened\",\"rid\":\"question\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "tool.updated",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [
+          {
+            "content": "The first check failed. I will inspect the source.",
+            "iid": "narration"
+          }
+        ],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {
+          "question": {
+            "questions": [
+              {
+                "id": "continue",
+                "options": [],
+                "prompt": "Continue?"
+              }
+            ],
+            "title": "Continue?",
+            "type": "question"
+          }
+        },
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"edit\"]": {
+            "diff": "+replacement",
+            "event": "tool.completed",
+            "iid": "edit",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"read\"]": {
+            "event": "tool.completed",
+            "iid": "read",
+            "input": "source.py",
+            "kind": "file read",
+            "output": "source",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "output": "failed",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"web\"]": {
+            "event": "tool.updated",
+            "iid": "web",
+            "kind": "web search",
+            "label": "Search reference",
+            "sid": "sess-conformance",
+            "tid": "turn-1"
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 1,
+              "edits": 1,
+              "other": 0,
+              "reads": 1,
+              "web": 1
+            },
+            "failed": 1,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 4
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000039,\"data\":{\"kind\":\"web search\",\"label\":\"Search reference\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000039-0000-4000-8000-000000000000\",\"iid\":\"web\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.updated\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [
+          {
+            "content": "The first check failed. I will inspect the source.",
+            "iid": "narration"
+          }
+        ],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {
+          "question": {
+            "questions": [
+              {
+                "id": "continue",
+                "options": [],
+                "prompt": "Continue?"
+              }
+            ],
+            "title": "Continue?",
+            "type": "question"
+          }
+        },
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"agent\"]": {
+            "event": "tool.completed",
+            "iid": "agent",
+            "kind": "agent",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"edit\"]": {
+            "diff": "+replacement",
+            "event": "tool.completed",
+            "iid": "edit",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"read\"]": {
+            "event": "tool.completed",
+            "iid": "read",
+            "input": "source.py",
+            "kind": "file read",
+            "output": "source",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "output": "failed",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"web\"]": {
+            "event": "tool.updated",
+            "iid": "web",
+            "kind": "web search",
+            "label": "Search reference",
+            "sid": "sess-conformance",
+            "tid": "turn-1"
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 1,
+              "commands": 1,
+              "edits": 1,
+              "other": 0,
+              "reads": 1,
+              "web": 1
+            },
+            "failed": 1,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 5
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000040,\"data\":{\"kind\":\"agent\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000040-0000-4000-8000-000000000000\",\"iid\":\"agent\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [
+          {
+            "content": "The first check failed. I will inspect the source.",
+            "iid": "narration"
+          }
+        ],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {
+          "question": {
+            "questions": [
+              {
+                "id": "continue",
+                "options": [],
+                "prompt": "Continue?"
+              }
+            ],
+            "title": "Continue?",
+            "type": "question"
+          }
+        },
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"agent\"]": {
+            "event": "tool.completed",
+            "iid": "agent",
+            "kind": "agent",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"edit\"]": {
+            "diff": "+replacement",
+            "event": "tool.completed",
+            "iid": "edit",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"other\"]": {
+            "event": "tool.completed",
+            "iid": "other",
+            "kind": "MCP tool",
+            "label": "shell",
+            "output": "tests passed",
+            "sid": "sess-conformance",
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"read\"]": {
+            "event": "tool.completed",
+            "iid": "read",
+            "input": "source.py",
+            "kind": "file read",
+            "output": "source",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "output": "failed",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"web\"]": {
+            "event": "tool.updated",
+            "iid": "web",
+            "kind": "web search",
+            "label": "Search reference",
+            "sid": "sess-conformance",
+            "tid": "turn-1"
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 1,
+              "commands": 1,
+              "edits": 1,
+              "other": 1,
+              "reads": 1,
+              "web": 1
+            },
+            "failed": 1,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 6
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000041,\"data\":{\"kind\":\"MCP tool\",\"label\":\"shell\",\"output\":\"tests passed\"},\"epoch\":\"epoch-conformance\",\"id\":\"00000041-0000-4000-8000-000000000000\",\"iid\":\"other\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [
+          {
+            "content": "The first check failed. I will inspect the source.",
+            "iid": "narration"
+          }
+        ],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {
+          "question": {
+            "questions": [
+              {
+                "id": "continue",
+                "options": [],
+                "prompt": "Continue?"
+              }
+            ],
+            "title": "Continue?",
+            "type": "question"
+          }
+        },
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"agent\"]": {
+            "event": "tool.completed",
+            "iid": "agent",
+            "kind": "agent",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"edit\"]": {
+            "diff": "+replacement",
+            "event": "tool.completed",
+            "iid": "edit",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"other\"]": {
+            "event": "tool.completed",
+            "iid": "other",
+            "kind": "MCP tool",
+            "label": "shell",
+            "output": "tests passed",
+            "sid": "sess-conformance",
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"read\"]": {
+            "event": "tool.completed",
+            "iid": "read",
+            "input": "source.py",
+            "kind": "file read",
+            "output": "source",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "output": "failed",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"web\"]": {
+            "event": "tool.updated",
+            "iid": "web",
+            "kind": "web search",
+            "label": "Search reference",
+            "sid": "sess-conformance",
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",null,\"no-turn\"]": {
+            "event": "tool.completed",
+            "iid": "no-turn",
+            "kind": "shell",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": null
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 1,
+              "commands": 1,
+              "edits": 1,
+              "other": 1,
+              "reads": 1,
+              "web": 1
+            },
+            "failed": 1,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 6
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000042,\"data\":{\"kind\":\"shell\",\"success\":false},\"epoch\":\"epoch-conformance\",\"id\":\"00000042-0000-4000-8000-000000000000\",\"iid\":\"no-turn\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"v\":1}"
+    },
+    {
+      "kind": "tool.completed",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [
+          {
+            "content": "The first check failed. I will inspect the source.",
+            "iid": "narration"
+          }
+        ],
+        "backend": "claude",
+        "busy": true,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {
+          "question": {
+            "questions": [
+              {
+                "id": "continue",
+                "options": [],
+                "prompt": "Continue?"
+              }
+            ],
+            "title": "Continue?",
+            "type": "question"
+          }
+        },
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": "turn-1",
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"agent\"]": {
+            "event": "tool.completed",
+            "iid": "agent",
+            "kind": "agent",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"edit\"]": {
+            "diff": "+replacement",
+            "event": "tool.completed",
+            "iid": "edit",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"other\"]": {
+            "event": "tool.completed",
+            "iid": "other",
+            "kind": "MCP tool",
+            "label": "shell",
+            "output": "tests passed",
+            "sid": "sess-conformance",
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"read\"]": {
+            "event": "tool.completed",
+            "iid": "read",
+            "input": "source.py",
+            "kind": "file read",
+            "output": "source",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "output": "failed",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"web\"]": {
+            "event": "tool.updated",
+            "iid": "web",
+            "kind": "web search",
+            "label": "Search reference",
+            "sid": "sess-conformance",
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-2\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-2"
+          },
+          "[\"sess-conformance\",null,\"no-turn\"]": {
+            "event": "tool.completed",
+            "iid": "no-turn",
+            "kind": "shell",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": null
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 1,
+              "commands": 1,
+              "edits": 1,
+              "other": 1,
+              "reads": 1,
+              "web": 1
+            },
+            "failed": 1,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 6
+          },
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 0,
+              "edits": 1,
+              "other": 0,
+              "reads": 0,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-2",
+            "total": 1
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000043,\"data\":{\"kind\":\"file edit\",\"success\":true},\"epoch\":\"epoch-conformance\",\"id\":\"00000043-0000-4000-8000-000000000000\",\"iid\":\"reused\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"tool.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-2\",\"v\":1}"
+    },
+    {
+      "kind": "turn.completed",
+      "state": {
+        "actionStatus": {},
+        "active": true,
+        "assistant": [
+          {
+            "content": "The first check failed. I will inspect the source.",
+            "iid": "narration"
+          }
+        ],
+        "backend": "claude",
+        "busy": false,
+        "epoch": "epoch-conformance",
+        "plan": null,
+        "queue": [],
+        "requests": {
+          "question": {
+            "questions": [
+              {
+                "id": "continue",
+                "options": [],
+                "prompt": "Continue?"
+              }
+            ],
+            "title": "Continue?",
+            "type": "question"
+          }
+        },
+        "settings": {},
+        "sid": "sess-conformance",
+        "subagents": [],
+        "tid": null,
+        "tools": {
+          "[\"sess-conformance\",\"turn-1\",\"agent\"]": {
+            "event": "tool.completed",
+            "iid": "agent",
+            "kind": "agent",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"edit\"]": {
+            "diff": "+replacement",
+            "event": "tool.completed",
+            "iid": "edit",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"other\"]": {
+            "event": "tool.completed",
+            "iid": "other",
+            "kind": "MCP tool",
+            "label": "shell",
+            "output": "tests passed",
+            "sid": "sess-conformance",
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"read\"]": {
+            "event": "tool.completed",
+            "iid": "read",
+            "input": "source.py",
+            "kind": "file read",
+            "output": "source",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "input": "pytest -q",
+            "kind": "shell",
+            "label": "Run checks",
+            "output": "failed",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-1\",\"web\"]": {
+            "event": "tool.updated",
+            "iid": "web",
+            "kind": "web search",
+            "label": "Search reference",
+            "sid": "sess-conformance",
+            "tid": "turn-1"
+          },
+          "[\"sess-conformance\",\"turn-2\",\"reused\"]": {
+            "event": "tool.completed",
+            "iid": "reused",
+            "kind": "file edit",
+            "sid": "sess-conformance",
+            "success": true,
+            "tid": "turn-2"
+          },
+          "[\"sess-conformance\",null,\"no-turn\"]": {
+            "event": "tool.completed",
+            "iid": "no-turn",
+            "kind": "shell",
+            "sid": "sess-conformance",
+            "success": false,
+            "tid": null
+          }
+        },
+        "turnActivity": [
+          {
+            "categories": {
+              "agents": 1,
+              "commands": 1,
+              "edits": 1,
+              "other": 1,
+              "reads": 1,
+              "web": 1
+            },
+            "failed": 1,
+            "sid": "sess-conformance",
+            "tid": "turn-1",
+            "total": 6
+          },
+          {
+            "categories": {
+              "agents": 0,
+              "commands": 0,
+              "edits": 1,
+              "other": 0,
+              "reads": 0,
+              "web": 0
+            },
+            "failed": 0,
+            "sid": "sess-conformance",
+            "tid": "turn-2",
+            "total": 1
+          }
+        ]
+      },
+      "tag": "{\"at\":1785400000044,\"epoch\":\"epoch-conformance\",\"id\":\"00000044-0000-4000-8000-000000000000\",\"inst\":\"11111111-1111-4111-8111-111111111111\",\"k\":\"turn.completed\",\"sid\":\"sess-conformance\",\"t\":\"event\",\"tid\":\"turn-1\",\"v\":1}"
+    }
+  ],
+  "topic": "agentwire:v1;account=trev;agent=agentwire;backend=claude | conformance"
+}

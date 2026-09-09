@@ -1,13 +1,14 @@
 {
   "files": {
-    "protocol/conformance/action-status.json": "57c2e26e9d05440b03be4e875cdc6059a8e15ddf7e6d8b1f4b1a3d2edf5f0dc4",
-    "protocol/conformance/claude-session.json": "a263b59c78b1b6c4ff293becb15076f293c60d508d48fe0bd2064f48cb53e2ad",
-    "protocol/conformance/diagnostics.json": "6f543b325db62f409c69bbc82010789e25c4fda4396c8530a99da30ace5604d1",
-    "protocol/conformance/fragmented.json": "87cc7e993140057c58f6c2e8ee930a967878854d403227ed9174e2cdde172f6b",
-    "protocol/conformance/manifest.json": "305859524cbfaaceca849bfb1594704ea1cece2fdff18210a2e6f8fdf1e90a80",
-    "protocol/conformance/queue-and-acks.json": "dbbc1ccff293b853456427879ef2067cee4158474d73aeb516d0fc87dd5bee9d",
-    "protocol/conformance/replay-and-isolation.json": "d9977545842b847d48d693d8ec318e8355a6809f774f8c90b2f21c7126c18aff"
+    "protocol/conformance/action-status.json": "d1d5bd3009d74154ae03e8c226a804c66e35076eb0e358de985cc7b3dd714cb8",
+    "protocol/conformance/claude-session.json": "de2a407d02be250b20ff3024e3040f008be88836b92d14008501ad82cd226b03",
+    "protocol/conformance/diagnostics.json": "e05e34faba174b9c2a04b95b243ae1066e910a4e23a19010106a9b31c0eec7ff",
+    "protocol/conformance/fragmented.json": "8827aff26a34c9c14d2abcef034735ec7d3af528e8c6d6c6e86f89ebe4d9b12b",
+    "protocol/conformance/manifest.json": "96a8edeb5fe42f164d33143f451ed483d38c99c0e8449797ed4bdf92d1270a00",
+    "protocol/conformance/queue-and-acks.json": "d883820e163688b5a7ee015e567703ab5cd7beb4cb2f48c6c0a1b4a2211f145a",
+    "protocol/conformance/replay-and-isolation.json": "37bc7657fd6a16cf32f984b30c134225ec9c01cf63a1efc4d4a3674e166db4c4",
+    "protocol/conformance/tool-activity.json": "23ecd7668a6667c8d086508c94518a25938534772a9d0780ad605045cc50ae5a"
   },
   "format": 1,
-  "upstreamCommit": "6e21ef470b9d996816f335d6bb8aa1a8103d7e9b"
+  "upstreamCommit": "69aef7385e43fb4e69b0a337f4c0334826ab07e2"
 }
