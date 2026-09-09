@@ -157,6 +157,360 @@ class AgentwireSyncPhaseTest {
         }
 
     @Test
+    fun `trusted sync recovers an unresolved receipt through a correlated status query`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val scope = actionScope()
+            val prefs =
+                FakeAgentwirePrefs(
+                    initialReceipts =
+                        listOf(
+                            AgentwireActionReceipt(
+                                id = "00000000-0000-4000-8000-00000000cafe",
+                                kind = "turn.prompt",
+                                channel = CHANNEL,
+                                sentAt = 1,
+                                outcome = "unknown",
+                                scope = scope,
+                            ),
+                            AgentwireActionReceipt(
+                                id = "00000000-0000-4000-8000-00000000beef",
+                                kind = "turn.prompt",
+                                channel = CHANNEL,
+                                sentAt = 0,
+                                outcome = "unknown",
+                                scope = scope,
+                            ),
+                        ),
+                )
+            val viewModel = viewModel(FakeConnections(client), FakeBufferRepository(buffer(true)), prefs = prefs)
+
+            completeSync(transport, setOf("action.status.request"))
+            runCurrent()
+
+            val query = outboundEnvelopes(transport).last { it.kind == "action.status.request" }
+            assertEquals("00000000-0000-4000-8000-00000000cafe", query.data?.string("actionId"))
+            transport.feed(
+                tagMessage(
+                    BACKEND_ACCOUNT,
+                    actionStatus(query.id, "00000000-0000-4000-8000-00000000dead", "succeeded"),
+                ),
+            )
+            runCurrent()
+            assertEquals(
+                "unknown",
+                prefs.receipts.value
+                    .first { it.id.endsWith("cafe") }
+                    .outcome,
+            )
+            assertTrue(
+                viewModel.state.value.actionStatus
+                    .isEmpty(),
+            )
+
+            transport.feed(
+                tagMessage(
+                    BACKEND_ACCOUNT,
+                    actionStatus(query.id, "00000000-0000-4000-8000-00000000cafe", "succeeded"),
+                ),
+            )
+            runCurrent()
+
+            assertEquals(
+                "succeeded",
+                prefs.receipts.value
+                    .first { it.id.endsWith("cafe") }
+                    .outcome,
+            )
+            assertEquals("succeeded", viewModel.state.value.actionStatus["00000000-0000-4000-8000-00000000cafe"])
+            advanceTimeBy(999)
+            runCurrent()
+            val queries = outboundEnvelopes(transport).filter { it.kind == "action.status.request" }
+            assertEquals(1, queries.size)
+            advanceTimeBy(101)
+            runCurrent()
+            val nextQueries = outboundEnvelopes(transport).filter { it.kind == "action.status.request" }
+            assertEquals(2, nextQueries.size)
+            assertEquals("00000000-0000-4000-8000-00000000beef", nextQueries.last().data?.string("actionId"))
+            assertTrue(outboundEnvelopes(transport).none { it.kind == "turn.prompt" })
+        }
+
+    @Test
+    fun `status query failure releases recovery slot without changing its mutation`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val scope = actionScope()
+            val prefs =
+                FakeAgentwirePrefs(
+                    initialReceipts =
+                        listOf(
+                            AgentwireActionReceipt(
+                                id = "00000000-0000-4000-8000-0000000000a1",
+                                kind = "turn.prompt",
+                                channel = CHANNEL,
+                                sentAt = 1,
+                                outcome = "unknown",
+                                scope = scope,
+                            ),
+                            AgentwireActionReceipt(
+                                id = "00000000-0000-4000-8000-0000000000b2",
+                                kind = "turn.prompt",
+                                channel = CHANNEL,
+                                sentAt = 0,
+                                outcome = "unknown",
+                                scope = scope,
+                            ),
+                            AgentwireActionReceipt(
+                                id = "00000000-0000-4000-8000-0000000000c3",
+                                kind = "turn.prompt",
+                                channel = CHANNEL,
+                                sentAt = -1,
+                                outcome = "unknown",
+                                scope = scope,
+                            ),
+                        ),
+                )
+            val viewModel = viewModel(FakeConnections(readyClient(transport)), FakeBufferRepository(buffer(true)), prefs = prefs)
+
+            completeSync(transport, setOf("action.status.request"))
+            runCurrent()
+
+            val first = outboundEnvelopes(transport).last { it.kind == "action.status.request" }
+            assertEquals("00000000-0000-4000-8000-0000000000a1", first.data?.string("actionId"))
+            transport.feed(
+                tagMessage(
+                    BACKEND_ACCOUNT,
+                    actionFailed(first.id, "Status service unavailable").copy(epoch = "epoch-1"),
+                ),
+            )
+            runCurrent()
+
+            assertEquals("unknown", prefs.receipts.value.first { it.id.endsWith("a1") }.outcome)
+            assertFalse(first.id in viewModel.state.value.actionStatus)
+            advanceTimeBy(999)
+            runCurrent()
+            assertEquals(1, outboundEnvelopes(transport).count { it.kind == "action.status.request" })
+            advanceTimeBy(101)
+            runCurrent()
+            val second = outboundEnvelopes(transport).last { it.kind == "action.status.request" }
+            assertEquals("00000000-0000-4000-8000-0000000000b2", second.data?.string("actionId"))
+            transport.feed(
+                tagMessage(
+                    BACKEND_ACCOUNT,
+                    AgentwireEnvelope(
+                        kind = "action.uncertain",
+                        type = "event",
+                        id = UUID.randomUUID().toString(),
+                        at = 3,
+                        instance = "bridge",
+                        epoch = "epoch-1",
+                        reply = second.id,
+                    ),
+                ),
+            )
+            runCurrent()
+
+            assertEquals("unknown", prefs.receipts.value.first { it.id.endsWith("b2") }.outcome)
+            assertFalse(second.id in viewModel.state.value.actionStatus)
+            advanceTimeBy(999)
+            runCurrent()
+            assertEquals(2, outboundEnvelopes(transport).count { it.kind == "action.status.request" })
+            advanceTimeBy(101)
+            runCurrent()
+            val third = outboundEnvelopes(transport).last { it.kind == "action.status.request" }
+            assertEquals("00000000-0000-4000-8000-0000000000c3", third.data?.string("actionId"))
+            assertTrue(outboundEnvelopes(transport).none { it.kind == "turn.prompt" })
+        }
+
+    @Test
+    fun `transport failure after a mutation write leaves a recoverable unknown receipt`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val prefs = FakeAgentwirePrefs()
+            val viewModel = viewModel(FakeConnections(readyClient(transport)), FakeBufferRepository(buffer(true)), prefs = prefs)
+            completeSync(transport, setOf("turn.prompt"))
+            transport.throwAfterWrite = true
+
+            viewModel.submit("Keep this receipt")
+            runCurrent()
+
+            assertEquals(1, prefs.receipts.value.size)
+            assertEquals(
+                "unknown",
+                prefs.receipts.value
+                    .single()
+                    .outcome,
+            )
+        }
+
+    @Test
+    fun `disconnect marks an accepted mutation unknown then reconnect recovers it without resubmitting`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val connections = FakeConnections(client)
+            val prefs = FakeAgentwirePrefs()
+            val viewModel = viewModel(connections, FakeBufferRepository(buffer(true)), prefs = prefs)
+            completeSync(transport, setOf("turn.prompt", "action.status.request"))
+
+            viewModel.submit("Keep this once")
+            runCurrent()
+            val prompt = outboundEnvelopes(transport).single { it.kind == "turn.prompt" }
+            transport.feed(
+                tagMessage(
+                    BACKEND_ACCOUNT,
+                    AgentwireEnvelope(
+                        kind = "action.accepted",
+                        type = "event",
+                        id = UUID.randomUUID().toString(),
+                        at = 3,
+                        instance = "bridge",
+                        epoch = "epoch-1",
+                        reply = prompt.id,
+                    ),
+                ),
+            )
+            runCurrent()
+            assertEquals(
+                "accepted",
+                prefs.receipts.value
+                    .single()
+                    .outcome,
+            )
+
+            connections.connectionStates.value = mapOf(NETWORK_ID to IrcClientState.Disconnected)
+            runCurrent()
+            assertEquals(
+                "unknown",
+                prefs.receipts.value
+                    .single()
+                    .outcome,
+            )
+
+            val reconnectTransport = RecordingTransport()
+            connections.replaceClient(readyClient(reconnectTransport))
+            connections.connectionStates.value =
+                mapOf(NETWORK_ID to IrcClientState.Ready("me", AGENTWIRE_REQUIRED_CAPS, emptyMap()))
+            runCurrent()
+            assertTrue("Reconnect phase: ${viewModel.state.value.sync}; connected=${viewModel.state.value.connected}", viewModel.state.value.sync is AgentwireSyncState.Syncing)
+            // The existing handshake rate floor persists across reconnects.
+            advanceTimeBy(AGENTWIRE_SYNC_MIN_INTERVAL_MS)
+            completeSync(reconnectTransport, setOf("turn.prompt", "action.status.request"))
+            val reconnected = viewModel.state.value
+            assertEquals(AgentwireSyncState.Ready, reconnected.sync)
+            assertTrue("Status recovery capability was not retained", "action.status.request" in reconnected.actions)
+            assertEquals(CHANNEL, reconnected.channel)
+            assertEquals("epoch-1", reconnected.epoch)
+            assertEquals(listOf(prompt.id), reconnected.recentActions.map(AgentwireActionReceipt::id))
+            assertTrue(
+                "Reconnect did not write sync.request: ${outboundEnvelopes(reconnectTransport).map(AgentwireEnvelope::kind)}",
+                outboundEnvelopes(reconnectTransport).any { it.kind == "sync.request" },
+            )
+            val query = outboundEnvelopes(reconnectTransport).last { it.kind == "action.status.request" }
+            assertEquals(prompt.id, query.data?.string("actionId"))
+            reconnectTransport.feed(tagMessage(BACKEND_ACCOUNT, actionStatus(query.id, prompt.id, "succeeded")))
+            runCurrent()
+
+            assertEquals(
+                "succeeded",
+                prefs.receipts.value
+                    .single()
+                    .outcome,
+            )
+            assertEquals(1, outboundEnvelopes(transport).count { it.kind == "turn.prompt" })
+            assertTrue(outboundEnvelopes(reconnectTransport).none { it.kind == "turn.prompt" })
+        }
+
+    @Test
+    fun `topic change during receipt write sends nothing and terminalizes only that receipt`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val client = readyClient(transport)
+            val prefs =
+                FakeAgentwirePrefs(
+                    initialReceipts =
+                        listOf(
+                            AgentwireActionReceipt(
+                                id = "foreign-receipt",
+                                kind = "turn.prompt",
+                                channel = CHANNEL,
+                                sentAt = 1,
+                                outcome = "accepted",
+                                scope = "foreign-scope",
+                            ),
+                        ),
+                )
+            val buffers = FakeBufferRepository(buffer(true))
+            val viewModel = viewModel(FakeConnections(client), buffers, prefs = prefs)
+            completeSync(transport, setOf("turn.prompt"))
+            val gate = CompletableDeferred<Unit>()
+            prefs.recordGate = gate
+
+            viewModel.submit("Do not send after the topic changes")
+            runCurrent()
+            val own = prefs.receipts.value.single { it.kind == "turn.prompt" && it.scope == actionScope() }
+            buffers.buffers.value =
+                buffer(
+                    true,
+                    topic = "agentwire:v1;account=controller;agent=$BACKEND_ACCOUNT;backend=codex | Codex",
+                )
+            runCurrent()
+            gate.complete(Unit)
+            runCurrent()
+
+            assertTrue(outboundEnvelopes(transport).none { it.kind == "turn.prompt" })
+            assertEquals(
+                "failed",
+                prefs.receipts.value
+                    .single { it.id == own.id }
+                    .outcome,
+            )
+            assertEquals(
+                "accepted",
+                prefs.receipts.value
+                    .single { it.id == "foreign-receipt" }
+                    .outcome,
+            )
+        }
+
+    @Test
+    fun `receipt rows follow trust scope even when the receipt store does not emit`() =
+        runTest(dispatcher) {
+            val claudeScope = actionScope()
+            val codexScope = actionScope(backend = "codex")
+            val prefs =
+                FakeAgentwirePrefs(
+                    initialReceipts =
+                        listOf(
+                            AgentwireActionReceipt("claude", "turn.prompt", CHANNEL, sentAt = 1, outcome = "unknown", scope = claudeScope),
+                            AgentwireActionReceipt("codex", "turn.prompt", CHANNEL, sentAt = 2, outcome = "unknown", scope = codexScope),
+                        ),
+                )
+            val buffers = FakeBufferRepository(buffer(true))
+            val viewModel = viewModel(FakeConnections(readyClient(RecordingTransport())), buffers, prefs = prefs)
+            runCurrent()
+            assertEquals(
+                listOf("claude"),
+                viewModel.state.value.recentActions
+                    .map(AgentwireActionReceipt::id),
+            )
+
+            buffers.buffers.value =
+                buffer(
+                    true,
+                    topic = "agentwire:v1;account=controller;agent=$BACKEND_ACCOUNT;backend=codex | Codex",
+                )
+            runCurrent()
+
+            assertEquals(
+                listOf("codex"),
+                viewModel.state.value.recentActions
+                    .map(AgentwireActionReceipt::id),
+            )
+        }
+
+    @Test
     fun `close session sends the active managed session id`() =
         runTest(dispatcher) {
             val transport = RecordingTransport()
@@ -554,6 +908,17 @@ class AgentwireSyncPhaseTest {
 
     private fun TestScope.viewModel(client: IrcClient): AgentwireViewModel = viewModel(FakeConnections(client), FakeBufferRepository(buffer(joined = true)))
 
+    private fun actionScope(
+        networkId: Long = NETWORK_ID,
+        backend: String = "claude",
+    ): String {
+        val material = listOf(networkId.toString(), "controller", BACKEND_ACCOUNT, backend).joinToString("") { "${it.length}:$it" }
+        return java.security.MessageDigest
+            .getInstance("SHA-256")
+            .digest(material.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    }
+
     private fun buffer(
         joined: Boolean,
         topic: String = "agentwire:v1;account=controller;agent=$BACKEND_ACCOUNT;backend=claude | Claude",
@@ -666,10 +1031,33 @@ class AgentwireSyncPhaseTest {
         data = buildJsonObject { put("message", message) },
     )
 
+    private fun actionStatus(
+        reply: String,
+        actionId: String,
+        status: String,
+    ) = AgentwireEnvelope(
+        kind = "action.status",
+        type = "event",
+        id = UUID.randomUUID().toString(),
+        at = 3,
+        instance = "bridge",
+        epoch = "epoch-1",
+        reply = reply,
+        data =
+            buildJsonObject {
+                put("actionId", actionId)
+                put("status", status)
+                put("kind", "turn.prompt")
+                put("channel", CHANNEL)
+                put("receivedAt", 2)
+            },
+    )
+
     private class RecordingTransport : IrcTransport {
         private val inbound = Channel<String>(Channel.UNLIMITED)
         val sent = mutableListOf<String>()
         var sendGate: CompletableDeferred<Unit>? = null
+        var throwAfterWrite = false
 
         override suspend fun connect() = Unit
 
@@ -678,6 +1066,10 @@ class AgentwireSyncPhaseTest {
         override suspend fun send(line: String) {
             sendGate?.await()
             sent += line
+            if (throwAfterWrite) {
+                throwAfterWrite = false
+                error("transport write outcome unknown")
+            }
         }
 
         override suspend fun close() = inbound.close().let { }
@@ -713,9 +1105,12 @@ class AgentwireSyncPhaseTest {
 
     private class FakeAgentwirePrefs(
         lab: Boolean = true,
+        initialReceipts: List<AgentwireActionReceipt> = emptyList(),
     ) : AgentwirePrefs(ApplicationProvider.getApplicationContext<Context>()) {
         override val enabled: Flow<Boolean> = flowOf(lab)
+        val receipts = MutableStateFlow(initialReceipts)
         var deviceGate: CompletableDeferred<Unit>? = null
+        var recordGate: CompletableDeferred<Unit>? = null
 
         override suspend fun setEnabled(enabled: Boolean) = Unit
 
@@ -729,6 +1124,25 @@ class AgentwireSyncPhaseTest {
             cwd: String?,
             backend: String?,
         ) = Unit
+
+        override fun actionReceipts(): Flow<List<AgentwireActionReceipt>> = receipts
+
+        override suspend fun recordAction(receipt: AgentwireActionReceipt) {
+            receipts.value = receipts.value.filterNot { it.id == receipt.id } + receipt
+            recordGate?.await()
+        }
+
+        override suspend fun updateAction(
+            id: String,
+            scope: String,
+            outcome: String,
+        ) {
+            receipts.value = receipts.value.map { if (it.id == id && it.scope == scope) it.copy(outcome = outcome) else it }
+        }
+
+        override suspend fun markUnresolvedActionsUnknown(scope: String) {
+            receipts.value = receipts.value.map { if (it.scope == scope && it.outcome in setOf("sent", "accepted")) it.copy(outcome = "unknown") else it }
+        }
 
         override suspend fun deviceId(): String {
             deviceGate?.await()
@@ -771,7 +1185,7 @@ class AgentwireSyncPhaseTest {
     }
 
     private class FakeConnections(
-        private val client: IrcClient?,
+        private var client: IrcClient?,
     ) : NoopConnectionManager() {
         val joins = mutableListOf<Pair<Long, String>>()
         override val connectionStates =
@@ -780,6 +1194,10 @@ class AgentwireSyncPhaseTest {
             )
 
         override fun clientFor(networkId: Long): IrcClient? = client.takeIf { networkId == NETWORK_ID }
+
+        fun replaceClient(next: IrcClient?) {
+            client = next
+        }
 
         override suspend fun joinChannel(
             networkId: Long,

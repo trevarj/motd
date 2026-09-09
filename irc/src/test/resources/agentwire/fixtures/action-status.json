@@ -1,0 +1,1 @@
+{"v":1,"k":"action.status","t":"event","id":"00000000-0000-4000-8000-00000000a102","at":1785400000102,"inst":"agent","reply":"00000000-0000-4000-8000-00000000a101","data":{"actionId":"00000000-0000-4000-8000-00000000cafe","status":"failed","kind":"turn.prompt","channel":"#codex","receivedAt":1785400000000,"message":"safe failure"}}

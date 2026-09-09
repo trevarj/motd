@@ -3,6 +3,7 @@
     {
       "kind": "queue.snapshot",
       "state": {
+        "actionStatus": {},
         "active": false,
         "assistant": [],
         "backend": null,
@@ -28,6 +29,7 @@
     {
       "kind": "queue.item.added",
       "state": {
+        "actionStatus": {},
         "active": false,
         "assistant": [],
         "backend": null,
@@ -58,6 +60,7 @@
     {
       "kind": "queue.item.updated",
       "state": {
+        "actionStatus": {},
         "active": false,
         "assistant": [],
         "backend": null,
@@ -88,6 +91,7 @@
     {
       "kind": "queue.item.moved",
       "state": {
+        "actionStatus": {},
         "active": false,
         "assistant": [],
         "backend": null,
@@ -117,6 +121,7 @@
     {
       "kind": "queue.item.removed",
       "state": {
+        "actionStatus": {},
         "active": false,
         "assistant": [],
         "backend": null,
@@ -142,6 +147,11 @@
     {
       "kind": "action.accepted",
       "state": {
+        "actionStatus": {
+          "00000000-0000-4000-8000-00000000cafe": {
+            "status": "accepted"
+          }
+        },
         "active": false,
         "assistant": [],
         "backend": null,
@@ -167,6 +177,11 @@
     {
       "kind": "action.succeeded",
       "state": {
+        "actionStatus": {
+          "00000000-0000-4000-8000-00000000cafe": {
+            "status": "succeeded"
+          }
+        },
         "active": false,
         "assistant": [],
         "backend": null,
@@ -192,6 +207,15 @@
     {
       "kind": "action.failed",
       "state": {
+        "actionStatus": {
+          "00000000-0000-4000-8000-00000000beef": {
+            "message": "safe failure",
+            "status": "failed"
+          },
+          "00000000-0000-4000-8000-00000000cafe": {
+            "status": "succeeded"
+          }
+        },
         "active": false,
         "assistant": [],
         "backend": null,
@@ -217,6 +241,18 @@
     {
       "kind": "action.uncertain",
       "state": {
+        "actionStatus": {
+          "00000000-0000-4000-8000-00000000beef": {
+            "message": "safe failure",
+            "status": "failed"
+          },
+          "00000000-0000-4000-8000-00000000cafe": {
+            "status": "succeeded"
+          },
+          "00000000-0000-4000-8000-00000000f00d": {
+            "status": "uncertain"
+          }
+        },
         "active": false,
         "assistant": [],
         "backend": null,

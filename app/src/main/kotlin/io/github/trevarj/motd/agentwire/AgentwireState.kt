@@ -160,6 +160,7 @@ data class AgentwireTimelineItem(
 data class AgentwireUiState(
     val gate: AgentwireGate = AgentwireGate.LOADING,
     val channel: String = "",
+    val networkId: Long? = null,
     val title: String = "Agentwire",
     val controllerAccount: String? = null,
     val backendAccount: String? = null,
@@ -199,6 +200,7 @@ data class AgentwireUiState(
     /** Bound-session state: every update replaces this list wholesale. */
     val subagents: List<AgentwireSubagent> = emptyList(),
     val actionStatus: Map<String, String> = emptyMap(),
+    val recentActions: List<AgentwireActionReceipt> = emptyList(),
     val historyLoading: Boolean = false,
     val historyPage: String? = null,
     val historyRequestId: String? = null,
@@ -223,6 +225,16 @@ private fun LinkedHashSet<String>.remember(id: String): Boolean {
     if (!add(id)) return false
     while (size > AGENTWIRE_SEEN_LIMIT) remove(first())
     return true
+}
+
+/** Delivery observations are monotonic: delayed accepted/unknown never hide a terminal outcome. */
+internal fun Map<String, String>.withOutcome(
+    id: String,
+    next: String,
+): Map<String, String> {
+    val rank = mapOf("unknown" to 0, "sent" to 1, "accepted" to 2, "succeeded" to 3, "failed" to 3, "uncertain" to 3)
+    val previous = this[id]
+    return if (previous != null && (rank[next] ?: -1) < (rank[previous] ?: -1)) this else this + (id to next)
 }
 
 class AgentwireReducer {
@@ -326,7 +338,6 @@ class AgentwireReducer {
                     currentTid = null,
                     timeline = emptyList(),
                     subagents = emptyList(),
-                    actionStatus = emptyMap(),
                     historyLoading = false,
                     historyPage = null,
                     historyRequestId = null,
@@ -486,7 +497,7 @@ class AgentwireReducer {
             "action.accepted", "action.succeeded", "action.failed", "action.uncertain" -> {
                 val status = envelope.kind.substringAfter("action.")
                 state.copy(
-                    actionStatus = envelope.reply?.let { state.actionStatus + (it to status) } ?: state.actionStatus,
+                    actionStatus = envelope.reply?.let { state.actionStatus.withOutcome(it, status) } ?: state.actionStatus,
                     error =
                         when (envelope.kind) {
                             "action.failed" -> data.string("message") ?: "Action failed"
@@ -494,6 +505,12 @@ class AgentwireReducer {
                             else -> state.error
                         },
                 )
+            }
+
+            "action.status" -> {
+                val actionId = data.string("actionId")
+                val status = data.string("status")
+                if (actionId == null || status == null) state else state.copy(actionStatus = state.actionStatus.withOutcome(actionId, status))
             }
 
             "queue.snapshot" -> {

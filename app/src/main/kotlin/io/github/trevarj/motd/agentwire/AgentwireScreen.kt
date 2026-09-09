@@ -170,7 +170,7 @@ private enum class AgentwireLogFilter(
     TURNS("Turns", setOf("turn")),
 }
 
-private enum class AgentwireStatusTab { BROWSE, SETTINGS }
+private enum class AgentwireStatusTab { BROWSE, ACTIONS, SETTINGS }
 
 private const val AGENTWIRE_SEARCH_DEBOUNCE_MS = 300L
 
@@ -617,6 +617,28 @@ private fun AgentwireScreen(
         }
 
         null -> {}
+    }
+}
+
+private fun String.actionOutcomeLabel(): String =
+    when (this) {
+        "succeeded" -> "Action applied"
+        "failed" -> "Action failed"
+        "unknown", "uncertain" -> "Outcome unknown"
+        "accepted" -> "Accepted"
+        else -> "Sent"
+    }
+
+@Composable
+internal fun AgentwireActionRow(
+    receipt: AgentwireActionReceipt,
+    canCheck: Boolean,
+    onCheck: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Text("${receipt.kind} • ${receipt.outcome.actionOutcomeLabel()}")
+        Text("${receipt.channel} • sent ${receipt.sentAt}", style = MaterialTheme.typography.labelSmall)
+        if (canCheck) TextButton(onClick = onCheck) { Text("Check status") }
     }
 }
 
@@ -2066,6 +2088,11 @@ private fun AgentwireStatusSheet(
                         label = { Text("Browse") },
                     )
                     FilterChip(
+                        selected = tab == AgentwireStatusTab.ACTIONS,
+                        onClick = { tab = AgentwireStatusTab.ACTIONS },
+                        label = { Text("Actions") },
+                    )
+                    FilterChip(
                         selected = tab == AgentwireStatusTab.SETTINGS,
                         onClick = { tab = AgentwireStatusTab.SETTINGS },
                         label = { Text("Settings") },
@@ -2217,6 +2244,18 @@ private fun AgentwireStatusSheet(
                                 )
                             }
                         }
+                    }
+                }
+            } else if (tab == AgentwireStatusTab.ACTIONS) {
+                if (state.recentActions.isEmpty()) {
+                    item { Text("No recent actions") }
+                } else {
+                    items(state.recentActions, key = { it.id }) { receipt ->
+                        AgentwireActionRow(
+                            receipt = receipt,
+                            canCheck = viewModel.canCheckActionStatus(receipt),
+                            onCheck = { viewModel.checkActionStatus(receipt) },
+                        )
                     }
                 }
             } else {

@@ -39,19 +39,22 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.security.MessageDigest
 import java.util.UUID
 import javax.inject.Inject
 
 private const val AGENTWIRE_INITIAL_HISTORY_SIZE = 20
 private const val AGENTWIRE_HISTORY_PAGE_SIZE = 50
 private val AGENTWIRE_READ_ACTION_KINDS =
-    setOf("sync.request", "workspace.list.request", "session.list.request", "history.request")
+    setOf("sync.request", "workspace.list.request", "session.list.request", "history.request", "action.status.request")
 
 /**
  * Directories of a freshly arrived workspace page that the browser should open: the ones the user
@@ -121,6 +124,10 @@ class AgentwireViewModel
         private var sessionJob: Job? = null
         private var syncJob: Job? = null
         private var contextSendJob: Job? = null
+        private var recoveryJob: Job? = null
+        private var manualStatusJob: Job? = null
+        private val statusQueryMutex = Mutex()
+        private val statusQueries = HashMap<String, AgentwireActionReceipt>()
         private var client: IrcClient? = null
         private var startedOnce = false
         private var sendFailureStage = "transport"
@@ -134,6 +141,18 @@ class AgentwireViewModel
         internal val contextReview: StateFlow<AgentwireContextReview?> = _contextReview.asStateFlow()
 
         init {
+            viewModelScope.launch {
+                combine(
+                    prefs.actionReceipts(),
+                    _state.map(::receiptScope).distinctUntilChanged(),
+                ) { receipts, scope ->
+                    receipts.filter { it.scope == scope }.sortedByDescending(AgentwireActionReceipt::sentAt)
+                }.collect { receipts ->
+                    _state.update {
+                        it.copy(recentActions = receipts)
+                    }
+                }
+            }
             viewModelScope.launch {
                 assignedContext.collect { share ->
                     if (_contextReview.value?.share != share) {
@@ -220,6 +239,7 @@ class AgentwireViewModel
                             it.copy(
                                 gate = gate,
                                 channel = buffer?.displayName.orEmpty(),
+                                networkId = buffer?.networkId,
                                 title = topic?.title ?: buffer?.displayName ?: "Agentwire",
                                 controllerAccount = topic?.account,
                                 backendAccount = topic?.agentAccount,
@@ -269,6 +289,51 @@ class AgentwireViewModel
         fun returnToHarness() = _state.update { it.copy(transcriptOverride = false) }
 
         fun clearError() = _state.update { it.copy(error = null) }
+
+        /** Checks a retained receipt without creating or resubmitting an action. */
+        fun checkActionStatus(receipt: AgentwireActionReceipt) {
+            if (manualStatusJob?.isActive == true || statusQueryMutex.isLocked) return
+            manualStatusJob = viewModelScope.launch { queryActionReceipt(receipt) }
+        }
+
+        private suspend fun queryActionReceipt(receipt: AgentwireActionReceipt) {
+            statusQueryMutex.withLock {
+                if (!canCheckActionStatus(receipt)) return@withLock
+                val current = _state.value
+                val queryId = UUID.randomUUID().toString()
+                statusQueries[queryId] = receipt
+                try {
+                    val sent =
+                        sendActionInternal(
+                            "action.status.request",
+                            buildJsonObject {
+                                put("actionId", receipt.id)
+                                if (receipt.channel != current.channel) put("channel", receipt.channel)
+                            },
+                            id = queryId,
+                        )
+                    var waited = 0
+                    while (sent != null && queryId in statusQueries && waited < 100) {
+                        delay(100)
+                        waited += 1
+                    }
+                } finally {
+                    statusQueries.remove(queryId)
+                }
+                // Manual checks and reconnect recovery share one slot and one rate budget.
+                delay(1_000)
+            }
+        }
+
+        internal fun canCheckActionStatus(receipt: AgentwireActionReceipt): Boolean {
+            val current = _state.value
+            return (
+                receipt.scope == receiptScope(current) &&
+                    "action.status.request" in current.actions &&
+                    current.sync == AgentwireSyncState.Ready &&
+                    (receipt.channel == current.channel || "session.create" in current.actions)
+            )
+        }
 
         /**
          * Joins the channel the agent publishes through. Delegated through [ConnectionManager]: the
@@ -781,17 +846,26 @@ class AgentwireViewModel
         }
 
         private fun stopSession(disconnected: Boolean) {
+            val scope = receiptScope(_state.value)
             invalidateContextReview()
             sessionJob?.cancel()
             sessionJob = null
             syncJob?.cancel()
             syncJob = null
+            recoveryJob?.cancel()
+            recoveryJob = null
+            manualStatusJob?.cancel()
+            manualStatusJob = null
+            statusQueries.clear()
             client = null
             session.reset()
             if (disconnected) {
+                if (scope != null) {
+                    viewModelScope.launch { prefs.markUnresolvedActionsUnknown(scope) }
+                }
                 val uncertain =
                     _state.value.actionStatus.mapValues { (_, status) ->
-                        if (status == "sent" || status == "accepted") "outcome unknown" else status
+                        if (status == "sent" || status == "accepted") "unknown" else status
                     }
                 _state.update { it.copy(epoch = null, botAccount = null, actionStatus = uncertain) }
             }
@@ -799,6 +873,7 @@ class AgentwireViewModel
 
         private suspend fun ingest(event: SequencedIrcEvent) {
             val reviewedDestination = _contextReview.value?.destination
+            val previousActionStatus = _state.value.actionStatus
             val result = session.ingest(_state.value, event)
             if (result is AgentwireDeliveryCoordinator.Result.Rejected) {
                 result.untrustedAccount?.let(::recordUntrustedEvents)
@@ -821,6 +896,11 @@ class AgentwireViewModel
                 return
             }
             if (result is AgentwireDeliveryCoordinator.Result.ResyncRequired) {
+                recoveryJob?.cancel()
+                recoveryJob = null
+                manualStatusJob?.cancel()
+                manualStatusJob = null
+                statusQueries.clear()
                 clearLog()
                 invalidateContextReview()
                 // Deliberately no budget.anchor(): an internal restart must not extend the deadline.
@@ -859,8 +939,42 @@ class AgentwireViewModel
                 } else {
                     result.state
                 }
+            receiptScope(_state.value)?.let { scope ->
+                when (envelope.kind) {
+                    "action.accepted", "action.succeeded", "action.failed", "action.uncertain" -> {
+                        val reply = envelope.reply
+                        val pendingQuery = reply?.let(statusQueries::get)
+                        if (pendingQuery != null) {
+                            // A status query is read-only. Its lifecycle events must not appear as
+                            // mutation outcomes; terminal replies release the shared recovery slot.
+                            _state.update { it.copy(actionStatus = previousActionStatus) }
+                            if (envelope.kind in setOf("action.succeeded", "action.failed", "action.uncertain")) {
+                                statusQueries.remove(reply)
+                            }
+                        } else {
+                            reply?.let { prefs.updateAction(it, scope, envelope.kind.substringAfter("action.")) }
+                        }
+                    }
+
+                    "action.status" -> {
+                        val queryId = envelope.reply
+                        val receipt = queryId?.let(statusQueries::get)
+                        val actionId = envelope.data?.string("actionId")
+                        val outcome = envelope.data?.string("status")
+                        if (receipt != null && receipt.scope == scope && actionId == receipt.id && outcome != null) {
+                            statusQueries.remove(queryId)
+                            prefs.updateAction(actionId, scope, outcome)
+                        } else {
+                            // Reducer conformance projects status receipts, but live status replies
+                            // are authoritative only for a query we sent in this trusted session.
+                            _state.update { it.copy(actionStatus = previousActionStatus) }
+                        }
+                    }
+                }
+            }
             if (reviewedDestination != null && contextDestination() != reviewedDestination) invalidateContextReview()
             if (result.syncCompleted) listSessions(live = true)
+            if (result.syncCompleted) recoverActionOutcomes()
             if (envelope.kind == "workspace.page") {
                 agentwireDirectoriesToReopen(_state.value, envelope.data?.string("parent")).forEach {
                     expandWorkspace(it.id, it.raw.bool("hasChildren") ?: true)
@@ -886,6 +1000,31 @@ class AgentwireViewModel
             ) {
                 requestHistory(initial = true)
             }
+        }
+
+        private fun recoverActionOutcomes() {
+            manualStatusJob?.cancel()
+            manualStatusJob = null
+            recoveryJob?.cancel()
+            statusQueries.clear()
+            val current = _state.value
+            val activeClient = client ?: return
+            val scope = receiptScope(current) ?: return
+            if ("action.status.request" !in current.actions) return
+            recoveryJob =
+                viewModelScope.launch {
+                    prefs
+                        .actionReceipts()
+                        .first()
+                        .asSequence()
+                        .filter { it.scope == scope && it.outcome in setOf("sent", "accepted", "unknown") }
+                        .filter { it.channel == current.channel || "session.create" in current.actions }
+                        .forEach { receipt ->
+                            val live = _state.value
+                            if (client !== activeClient || receiptScope(live) != scope || live.sync != AgentwireSyncState.Ready) return@launch
+                            queryActionReceipt(receipt)
+                        }
+                }
         }
 
         private fun clearLog() {
@@ -973,6 +1112,25 @@ class AgentwireViewModel
             id: String = UUID.randomUUID().toString(),
             context: AgentwireContextReview? = null,
         ): String? {
+            // Capture the route before any preference or repository suspension. A resumed send
+            // must never use an epoch, session, or client from a newer binding.
+            val current = _state.value
+            if (kind != "sync.request" && kind !in current.actions) return null
+            val activeClient = client ?: return null
+            val receiptScope = receiptScope(current) ?: return null
+
+            fun destinationStillCurrent(): Boolean {
+                val live = _state.value
+                return (
+                    client === activeClient &&
+                        receiptScope(live) == receiptScope &&
+                        live.channel == current.channel &&
+                        live.epoch == current.epoch &&
+                        live.activeSid == current.activeSid &&
+                        (kind == "sync.request" || (live.sync == AgentwireSyncState.Ready && kind in live.actions))
+                )
+            }
+
             val device = prefs.deviceId()
             if (context != null) {
                 val enabled = prefs.enabled.first()
@@ -994,9 +1152,31 @@ class AgentwireViewModel
                     return null
                 }
             }
-            val current = _state.value
-            if (kind != "sync.request" && kind !in current.actions) return null
-            val activeClient = client ?: return null
+            if (!destinationStillCurrent()) return null
+            if (kind !in AGENTWIRE_READ_ACTION_KINDS) {
+                runCatching {
+                    prefs.recordAction(
+                        AgentwireActionReceipt(
+                            id = id,
+                            kind = kind,
+                            channel = current.channel,
+                            sid = sid,
+                            sentAt = System.currentTimeMillis(),
+                            outcome = "sent",
+                            scope = receiptScope,
+                        ),
+                    )
+                }.getOrElse {
+                    if (it is CancellationException) throw it
+                    _state.update { state -> state.copy(error = "Unable to record Agentwire action; nothing was sent.") }
+                    return null
+                }
+                if (!destinationStillCurrent()) {
+                    prefs.updateAction(id, receiptScope, "failed")
+                    _state.update { state -> state.copy(error = "Destination changed before Agentwire action could be sent.") }
+                    return null
+                }
+            }
             val envelope =
                 AgentwireEnvelope(
                     kind = kind,
@@ -1021,9 +1201,22 @@ class AgentwireViewModel
                     sendErrorClass = it::class.java.simpleName
                     false
                 }
+            if (!sent && kind !in AGENTWIRE_READ_ACTION_KINDS) {
+                // A false result and an exception can both follow a partial fragment write.
+                prefs.markUnresolvedActionsUnknown(receiptScope)
+            }
             if (sent && kind !in AGENTWIRE_READ_ACTION_KINDS) {
-                _state.update { it.copy(actionStatus = it.actionStatus + (id to "sent")) }
+                _state.update { state -> state.copy(actionStatus = state.actionStatus.withOutcome(id, "sent")) }
             }
             return id.takeIf { sent }
+        }
+
+        private fun receiptScope(state: AgentwireUiState): String? {
+            val controller = state.controllerAccount ?: return null
+            val agent = state.backendAccount ?: return null
+            val backend = state.backend ?: return null
+            val networkId = state.networkId ?: return null
+            val material = listOf(networkId.toString(), controller, agent, backend).joinToString("") { "${it.length}:$it" }
+            return MessageDigest.getInstance("SHA-256").digest(material.toByteArray()).joinToString("") { "%02x".format(it) }
         }
     }

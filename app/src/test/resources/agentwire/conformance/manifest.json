@@ -1,9 +1,10 @@
 {
   "files": {
-    "claude-session.json": "1ab885477ebd2a36441c9b8388aaa06b48dd1c9f59430862b5ef9a9d0e80260f",
-    "fragmented.json": "276127c5e7ef0654eb8f784165ddef11b17d76db2227f27892e75fd94c3a1648",
-    "queue-and-acks.json": "9ae301e3f0c558ec09dbd65457ceaf5cba93caeb5535b80ed52c7c575861546f",
-    "replay-and-isolation.json": "354c86291243e8d697a6bf68641a29299e5ac55ce5c3fc239211ad09b6455817"
+    "action-status.json": "b07de898ef72587f49fe8343dfd4a1c735e3e605fcbb007a8756bfe56e70e5ef",
+    "claude-session.json": "a4936f9b265800ee4f55ed10fdd70e5d78417dfaae7e288a51b510d519f3fb94",
+    "fragmented.json": "327f73ff657717b47a4b73de691ae8a649152a4552c775adaf5ca8f089bf843b",
+    "queue-and-acks.json": "dbbc1ccff293b853456427879ef2067cee4158474d73aeb516d0fc87dd5bee9d",
+    "replay-and-isolation.json": "bd0881e96ad5db76fda9ae0b7b319c56fc9d071bff008aad5cba20e31bab2c22"
   },
   "format": 1,
   "generatedBy": "protocol/conformance/generate.py",

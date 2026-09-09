@@ -7,6 +7,7 @@ import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.agentwire.AgentwireActionReceipt
 import io.github.trevarj.motd.agentwire.AgentwirePrefs
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
@@ -4386,6 +4387,18 @@ class ChatViewModelTest {
         override suspend fun setEnabled(enabled: Boolean) {
             this.enabled.value = enabled
         }
+
+        override fun actionReceipts(): Flow<List<AgentwireActionReceipt>> = flowOf(emptyList())
+
+        override suspend fun recordAction(receipt: AgentwireActionReceipt) = Unit
+
+        override suspend fun updateAction(
+            id: String,
+            scope: String,
+            outcome: String,
+        ) = Unit
+
+        override suspend fun markUnresolvedActionsUnknown(scope: String) = Unit
     }
 
     private class FakeReplyPrefs(

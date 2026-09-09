@@ -52,6 +52,7 @@ val AGENTWIRE_ACTION_KINDS =
         "workspace.list.request",
         "session.list.request",
         "history.request",
+        "action.status.request",
         "session.create",
         "session.close",
         "session.attach",
@@ -88,6 +89,7 @@ val AGENTWIRE_EVENT_KINDS =
         "action.succeeded",
         "action.failed",
         "action.uncertain",
+        "action.status",
         "queue.snapshot",
         "queue.item.added",
         "queue.item.updated",
@@ -373,6 +375,7 @@ private fun validateEnvelope(root: JsonObject): AgentwireEnvelope {
     require(rev == null || rev >= 0) { "invalid rev" }
     val history = root.optionalBoolean("hist")
     val data = root["data"]?.let { it as? JsonObject ?: error("data must be an object") }
+    validateKnownPayload(kind, type, root, data)
     return AgentwireEnvelope(
         kind,
         type,
@@ -390,6 +393,64 @@ private fun validateEnvelope(root: JsonObject): AgentwireEnvelope {
         history,
         data,
     )
+}
+
+private fun validateKnownPayload(
+    kind: String,
+    type: String,
+    root: JsonObject,
+    data: JsonObject?,
+) {
+    when {
+        type == "action" && kind == "action.status.request" -> {
+            val request = requireNotNull(data) { "action.status.request requires data" }
+            require(request.keys.all { it == "actionId" || it == "channel" }) { "unknown action status request field" }
+            requireValidUuid(request.string("actionId"), "actionId")
+            request.optionalChannel("channel")
+        }
+
+        type == "event" && kind == "action.status" -> {
+            require(root.optionalNonEmptyString("reply") != null) { "action.status requires reply" }
+            val receipt = requireNotNull(data) { "action.status requires data" }
+            requireValidUuid(receipt.string("actionId"), "actionId")
+            val status = receipt.string("status") ?: error("action.status requires status")
+            if (status == "unknown") {
+                require(receipt.keys == setOf("actionId", "status")) { "unknown action status cannot include receipt metadata" }
+            } else {
+                require(status in setOf("accepted", "succeeded", "failed", "uncertain")) { "invalid action status" }
+                require(receipt.keys.all { it in setOf("actionId", "status", "kind", "channel", "receivedAt", "message") }) {
+                    "unknown action status receipt field"
+                }
+                val receiptKind = receipt.string("kind") ?: error("known action status requires kind")
+                require(receiptKind in AGENTWIRE_ACTION_KINDS) { "invalid action status kind" }
+                receipt.requireChannel("channel")
+                val receivedAt = receipt.long("receivedAt") ?: error("known action status requires receivedAt")
+                require(receivedAt >= 0) { "invalid action status receivedAt" }
+                if ("message" in receipt) {
+                    val message = receipt.string("message") ?: error("message must be a string")
+                    require(message.length in 1..200) { "invalid action status message" }
+                }
+            }
+        }
+    }
+}
+
+private fun requireValidUuid(
+    value: String?,
+    name: String,
+) {
+    require(value != null && value.matches(uuidPattern) && runCatching { UUID.fromString(value) }.isSuccess) { "$name is not a UUID" }
+}
+
+private fun JsonObject.optionalChannel(key: String) {
+    if (key in this) requireChannel(key)
+}
+
+private fun JsonObject.requireChannel(key: String) {
+    val value = string(key) ?: error("$key must be a channel name")
+    require(value.length in 2..200 && value.matches(Regex("^[#&][^ ,:]+$")) && value.none { it == '\u0000' || it == '\r' || it == '\n' }) {
+        "invalid channel name"
+    }
 }
 
 private fun validateFragment(root: JsonObject): AgentwireFragment {

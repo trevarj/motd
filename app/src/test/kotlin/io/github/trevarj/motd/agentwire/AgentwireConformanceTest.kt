@@ -62,6 +62,7 @@ class AgentwireConformanceTest {
                 assertEquals("$where: settings", step.state.strings("settings"), state.settings)
                 assertEquals("$where: queue", step.state.queueIds(), state.queue.map { it.iid })
                 assertEquals("$where: open requests", step.state.requestIds(), state.requests.map { it.rid }.sorted())
+                assertEquals("$where: action statuses", step.state.actionStatuses(), state.actionStatus)
             }
         }
     }
@@ -185,6 +186,12 @@ class AgentwireConformanceTest {
 
     private fun JsonObject.requestIds(): List<String> = (this["requests"] as? JsonObject)?.keys?.sorted().orEmpty()
 
+    private fun JsonObject.actionStatuses(): Map<String, String> =
+        (this["actionStatus"] as? JsonObject)
+            ?.mapNotNull { (id, receipt) -> receipt.jsonObject.text("status")?.let { id to it } }
+            ?.toMap()
+            .orEmpty()
+
     private fun toolProjection(state: AgentwireUiState): JsonObject {
         val tools = linkedMapOf<String, AgentwireTimelineItem>()
         (state.timeline + state.historyStaged)
@@ -262,6 +269,6 @@ class AgentwireConformanceTest {
 
     private companion object {
         const val TOPIC_BACKEND = "claude"
-        val CORPORA = listOf("claude-session", "queue-and-acks", "replay-and-isolation")
+        val CORPORA = listOf("claude-session", "queue-and-acks", "replay-and-isolation", "action-status")
     }
 }

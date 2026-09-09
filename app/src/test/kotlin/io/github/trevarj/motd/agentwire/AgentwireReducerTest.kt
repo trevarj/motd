@@ -477,7 +477,7 @@ class AgentwireReducerTest {
         assertEquals("new", state.activeSid)
         assertEquals("/work/new", state.cwd)
         assertTrue(state.timeline.isEmpty())
-        assertTrue(state.actionStatus.isEmpty())
+        assertEquals(mapOf("old-output" to "succeeded"), state.actionStatus)
         assertFalse(state.historyLoading)
         assertFalse(state.olderHistoryAvailable)
         assertEquals(null, state.historyBeforeAt)

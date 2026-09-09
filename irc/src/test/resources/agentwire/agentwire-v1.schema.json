@@ -3,8 +3,12 @@
   "$id": "https://trevarj.github.io/agentwire/protocol/agentwire-v1.schema.json",
   "title": "Agentwire IRC protocol v1 tag value",
   "oneOf": [
-    { "$ref": "#/$defs/envelope" },
-    { "$ref": "#/$defs/fragment" }
+    {
+      "$ref": "#/$defs/envelope"
+    },
+    {
+      "$ref": "#/$defs/fragment"
+    }
   ],
   "$defs": {
     "uuid": {
@@ -13,83 +17,415 @@
     },
     "actionKind": {
       "enum": [
-        "sync.request", "workspace.list.request", "session.list.request",
-        "history.request", "session.create", "session.close", "session.attach", "session.detach",
-        "session.rename", "session.fork", "session.archive", "session.unarchive",
-        "settings.update", "turn.prompt", "turn.steer", "turn.cancel",
-        "queue.edit", "queue.move", "queue.delete", "queue.clear",
-        "request.respond", "request.skip"
+        "sync.request",
+        "workspace.list.request",
+        "session.list.request",
+        "history.request",
+        "action.status.request",
+        "session.create",
+        "session.close",
+        "session.attach",
+        "session.detach",
+        "session.rename",
+        "session.fork",
+        "session.archive",
+        "session.unarchive",
+        "settings.update",
+        "turn.prompt",
+        "turn.steer",
+        "turn.cancel",
+        "queue.edit",
+        "queue.move",
+        "queue.delete",
+        "queue.clear",
+        "request.respond",
+        "request.skip"
       ]
     },
     "eventKind": {
       "enum": [
-        "agent.hello", "channel.snapshot", "binding.changed", "session.snapshot", "session.status",
-        "workspace.page", "session.page", "history.begin", "history.chunk", "history.end",
-        "action.accepted", "action.succeeded", "action.failed", "action.uncertain",
-        "queue.snapshot", "queue.item.added", "queue.item.updated", "queue.item.moved",
-        "queue.item.removed", "user.prompt", "turn.started", "turn.completed", "turn.failed",
-        "assistant.delta", "assistant.completed", "plan.updated", "tool.started", "tool.updated",
-        "tool.completed", "usage.updated", "subagent.updated", "request.opened", "request.resolved",
-        "approval.review.started", "approval.review.completed"
+        "agent.hello",
+        "channel.snapshot",
+        "binding.changed",
+        "session.snapshot",
+        "session.status",
+        "workspace.page",
+        "session.page",
+        "history.begin",
+        "history.chunk",
+        "history.end",
+        "action.accepted",
+        "action.succeeded",
+        "action.failed",
+        "action.uncertain",
+        "action.status",
+        "queue.snapshot",
+        "queue.item.added",
+        "queue.item.updated",
+        "queue.item.moved",
+        "queue.item.removed",
+        "user.prompt",
+        "turn.started",
+        "turn.completed",
+        "turn.failed",
+        "assistant.delta",
+        "assistant.completed",
+        "plan.updated",
+        "tool.started",
+        "tool.updated",
+        "tool.completed",
+        "usage.updated",
+        "subagent.updated",
+        "request.opened",
+        "request.resolved",
+        "approval.review.started",
+        "approval.review.completed"
       ]
     },
     "envelope": {
       "type": "object",
-      "required": ["v", "k", "t", "id", "at", "inst"],
+      "required": [
+        "v",
+        "k",
+        "t",
+        "id",
+        "at",
+        "inst"
+      ],
       "properties": {
-        "v": { "const": 1 },
-        "k": { "oneOf": [{ "$ref": "#/$defs/actionKind" }, { "$ref": "#/$defs/eventKind" }] },
-        "t": { "enum": ["action", "event"] },
-        "id": { "$ref": "#/$defs/uuid" },
-        "at": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
-        "inst": { "type": "string", "minLength": 1 },
-        "epoch": { "type": "string", "minLength": 1 },
-        "device": { "type": "string", "minLength": 1 },
-        "sid": { "type": "string", "minLength": 1 },
-        "tid": { "type": "string", "minLength": 1 },
-        "iid": { "type": "string", "minLength": 1 },
-        "rid": { "type": "string", "minLength": 1 },
-        "rev": { "type": "integer", "minimum": 0, "maximum": 9223372036854775807 },
-        "reply": { "type": "string", "minLength": 1 },
-        "hist": { "type": "boolean" },
-        "data": { "type": "object" }
+        "v": {
+          "const": 1
+        },
+        "k": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/actionKind"
+            },
+            {
+              "$ref": "#/$defs/eventKind"
+            }
+          ]
+        },
+        "t": {
+          "enum": [
+            "action",
+            "event"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "inst": {
+          "type": "string",
+          "minLength": 1
+        },
+        "epoch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "device": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "iid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rev": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "reply": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hist": {
+          "type": "boolean"
+        },
+        "data": {
+          "type": "object"
+        }
       },
       "additionalProperties": false,
       "allOf": [
         {
-          "if": { "properties": { "t": { "const": "action" } } },
-          "then": {
-            "required": ["device"],
-            "properties": { "k": { "$ref": "#/$defs/actionKind" } }
+          "if": {
+            "properties": {
+              "t": {
+                "const": "action"
+              }
+            }
           },
-          "else": { "properties": { "k": { "$ref": "#/$defs/eventKind" } } }
+          "then": {
+            "required": [
+              "device"
+            ],
+            "properties": {
+              "k": {
+                "$ref": "#/$defs/actionKind"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "k": {
+                "$ref": "#/$defs/eventKind"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "t": {
+                "const": "action"
+              },
+              "k": {
+                "const": "action.status.request"
+              }
+            },
+            "required": [
+              "t",
+              "k"
+            ]
+          },
+          "then": {
+            "required": [
+              "data"
+            ],
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/actionStatusRequestData"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "t": {
+                "const": "event"
+              },
+              "k": {
+                "const": "action.status"
+              }
+            },
+            "required": [
+              "t",
+              "k"
+            ]
+          },
+          "then": {
+            "required": [
+              "data",
+              "reply"
+            ],
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/actionStatusData"
+              }
+            }
+          }
         }
       ]
     },
     "fragment": {
       "type": "object",
-      "required": ["v", "k", "id", "of", "t", "part", "parts", "bytes", "sha256", "b64"],
+      "required": [
+        "v",
+        "k",
+        "id",
+        "of",
+        "t",
+        "part",
+        "parts",
+        "bytes",
+        "sha256",
+        "b64"
+      ],
       "properties": {
-        "v": { "const": 1 },
-        "k": { "const": "fragment" },
-        "id": { "$ref": "#/$defs/uuid" },
-        "of": { "type": "string", "minLength": 1 },
-        "t": { "enum": ["action", "event"] },
-        "epoch": { "type": "string", "minLength": 1 },
-        "sid": { "type": "string", "minLength": 1 },
-        "part": { "type": "integer", "minimum": 0, "maximum": 63 },
-        "parts": { "type": "integer", "minimum": 1, "maximum": 64 },
-        "bytes": { "type": "integer", "minimum": 1, "maximum": 131072 },
-        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "encoding": { "enum": ["zlib"] },
-        "b64": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" }
+        "v": {
+          "const": 1
+        },
+        "k": {
+          "const": "fragment"
+        },
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "of": {
+          "type": "string",
+          "minLength": 1
+        },
+        "t": {
+          "enum": [
+            "action",
+            "event"
+          ]
+        },
+        "epoch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "part": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 63
+        },
+        "parts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 131072
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "encoding": {
+          "enum": [
+            "zlib"
+          ]
+        },
+        "b64": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        }
       },
       "additionalProperties": false,
       "allOf": [
         {
-          "if": { "properties": { "t": { "const": "action" } } },
-          "then": { "properties": { "of": { "$ref": "#/$defs/actionKind" } } },
-          "else": { "properties": { "of": { "$ref": "#/$defs/eventKind" } } }
+          "if": {
+            "properties": {
+              "t": {
+                "const": "action"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "of": {
+                "$ref": "#/$defs/actionKind"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "of": {
+                "$ref": "#/$defs/eventKind"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "channelName": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 200,
+      "pattern": "^[#&][^ ,:]+$",
+      "not": {
+        "pattern": "[\u0000\r\n]"
+      }
+    },
+    "actionStatusRequestData": {
+      "type": "object",
+      "required": [
+        "actionId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "actionId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "channel": {
+          "$ref": "#/$defs/channelName"
+        }
+      }
+    },
+    "actionStatusData": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "actionId",
+            "status"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "actionId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "status": {
+              "const": "unknown"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "actionId",
+            "status",
+            "kind",
+            "channel",
+            "receivedAt"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "actionId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "status": {
+              "enum": [
+                "accepted",
+                "succeeded",
+                "failed",
+                "uncertain"
+              ]
+            },
+            "kind": {
+              "$ref": "#/$defs/actionKind"
+            },
+            "channel": {
+              "$ref": "#/$defs/channelName"
+            },
+            "receivedAt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
         }
       ]
     }

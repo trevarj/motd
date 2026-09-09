@@ -1,9 +1,13 @@
 {
   "files": {
-    "protocol/agentwire-v1.schema.json": "4694e3d8d8c5cb690a1b84a8fd55f5720b4068b3c79cf1ea86e63be194b2bd43",
+    "protocol/agentwire-v1.schema.json": "4412365e7d3affa2ac9f61ccc847418230faa6c3ed92a2634953826b9f202863",
+    "protocol/fixtures/action-status-request.json": "9a93e82679664445e4407f463468ea674a0fe4383446351467d4916237bc721a",
+    "protocol/fixtures/action-status.json": "9169fc56fb65f514e25d5bf8e4b7f8e124e1fc2375ee543a5ca901fddb69314b",
     "protocol/fixtures/claude-hello.json": "81d2de30a1eb81f391ce003ba529555a3ba0b9aaf6556f115d3e7b232933d42b",
     "protocol/fixtures/claude-topic.txt": "179a79d39410deb88a8ee05c9a618e8b3774841223dac3a1cb28348f6e872f66",
     "protocol/fixtures/hello.json": "966305fc7e635122c98c3b272666bf1e425c9d2a09f17fe12a7f2de959d52e7a",
+    "protocol/fixtures/invalid/action-status-missing-id.json": "ffabe8fff0a5047527fd0ae12d277d1cf59b4369cab2a6eb8f6a78dbfe02ff51",
+    "protocol/fixtures/invalid/action-status-unknown-leaks.json": "dba539036cb039460d3495d3d2575fd3ff16970a3eeabc9e15098f34bb125798",
     "protocol/fixtures/invalid/boolean-version.json": "04e08fd4811a21c3e224cc131fef18ad487e7501291dda925678f3ac8600c3d1",
     "protocol/fixtures/invalid/invalid-uuid.json": "7df41913827f689c39720a6d236acc4b56ed55e30346746c4e3ab68530f81934",
     "protocol/fixtures/invalid/missing-action-device.json": "aa70df63009fbd907965a47bc04e42a1d95ceb570756ee72c3e325d84903105d",
@@ -19,5 +23,5 @@
     "protocol/fixtures/topic.txt": "9a68154b3a53ab9652f50279797c6a830c91d8244c88055a944539695a8cf511"
   },
   "format": 1,
-  "upstreamCommit": "5f1025e0af959c77f71a6615cb55583196a6df98"
+  "upstreamCommit": "ed3fa46f4dfefbfd250facf848287b9d01034ca3"
 }

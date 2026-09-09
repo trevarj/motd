@@ -97,6 +97,18 @@ class AgentwireProtocolTest {
     }
 
     @Test
+    fun `imported action status fixtures decode with schema-compatible payloads`() {
+        listOf("action-status-request.json", "action-status.json").forEach { name ->
+            val raw = resource("agentwire/fixtures/$name").trimEnd()
+            val envelope = (decodeAgentwireValue(raw).getOrThrow() as AgentwireValue.Envelope).value
+            assertEquals(
+                Json.parseToJsonElement(raw),
+                Json.parseToJsonElement(encodeAgentwireEnvelope(envelope)),
+            )
+        }
+    }
+
+    @Test
     fun `observed session status carries a sid the channel is not bound to`() {
         val fixture = resource("agentwire/fixtures/observed-status.json").trimEnd()
         val envelope = (decodeAgentwireValue(fixture).getOrThrow() as AgentwireValue.Envelope).value
@@ -170,6 +182,8 @@ class AgentwireProtocolTest {
             "unknown-envelope-field.json",
             "wrong-fragment-kind.json",
             "wrong-kind-for-type.json",
+            "action-status-missing-id.json",
+            "action-status-unknown-leaks.json",
         ).forEach { name ->
             assertFailure(resource("agentwire/fixtures/invalid/$name").trimEnd())
         }
