@@ -109,6 +109,18 @@ class AgentwireProtocolTest {
     }
 
     @Test
+    fun `imported diagnostics fixtures decode and unsafe reports reject`() {
+        listOf("diagnostics-request.json", "diagnostics-snapshot.json").forEach { name ->
+            assertTrue(decodeAgentwireValue(resource("agentwire/fixtures/$name").trimEnd()).isSuccess)
+        }
+        assertFailure(resource("agentwire/fixtures/invalid/diagnostics-unsafe-fact.json").trimEnd())
+        val snapshot = Json.parseToJsonElement(resource("agentwire/fixtures/diagnostics-snapshot.json")) as JsonObject
+        assertFailure(JsonObject(snapshot - "reply").toString())
+        val request = Json.parseToJsonElement(resource("agentwire/fixtures/diagnostics-request.json")) as JsonObject
+        assertFailure(JsonObject(request + ("data" to buildJsonObject { put("probe", true) })).toString())
+    }
+
+    @Test
     fun `observed session status carries a sid the channel is not bound to`() {
         val fixture = resource("agentwire/fixtures/observed-status.json").trimEnd()
         val envelope = (decodeAgentwireValue(fixture).getOrThrow() as AgentwireValue.Envelope).value

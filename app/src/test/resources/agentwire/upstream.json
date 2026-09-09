@@ -1,12 +1,13 @@
 {
   "files": {
-    "protocol/conformance/action-status.json": "b07de898ef72587f49fe8343dfd4a1c735e3e605fcbb007a8756bfe56e70e5ef",
-    "protocol/conformance/claude-session.json": "a4936f9b265800ee4f55ed10fdd70e5d78417dfaae7e288a51b510d519f3fb94",
-    "protocol/conformance/fragmented.json": "327f73ff657717b47a4b73de691ae8a649152a4552c775adaf5ca8f089bf843b",
-    "protocol/conformance/manifest.json": "1f9f40f1f3c5c27c7f9722fc0a7398dbcd6e0c448eb4c1287e32db815d62a014",
+    "protocol/conformance/action-status.json": "57c2e26e9d05440b03be4e875cdc6059a8e15ddf7e6d8b1f4b1a3d2edf5f0dc4",
+    "protocol/conformance/claude-session.json": "a263b59c78b1b6c4ff293becb15076f293c60d508d48fe0bd2064f48cb53e2ad",
+    "protocol/conformance/diagnostics.json": "6f543b325db62f409c69bbc82010789e25c4fda4396c8530a99da30ace5604d1",
+    "protocol/conformance/fragmented.json": "87cc7e993140057c58f6c2e8ee930a967878854d403227ed9174e2cdde172f6b",
+    "protocol/conformance/manifest.json": "305859524cbfaaceca849bfb1594704ea1cece2fdff18210a2e6f8fdf1e90a80",
     "protocol/conformance/queue-and-acks.json": "dbbc1ccff293b853456427879ef2067cee4158474d73aeb516d0fc87dd5bee9d",
-    "protocol/conformance/replay-and-isolation.json": "bd0881e96ad5db76fda9ae0b7b319c56fc9d071bff008aad5cba20e31bab2c22"
+    "protocol/conformance/replay-and-isolation.json": "d9977545842b847d48d693d8ec318e8355a6809f774f8c90b2f21c7126c18aff"
   },
   "format": 1,
-  "upstreamCommit": "ed3fa46f4dfefbfd250facf848287b9d01034ca3"
+  "upstreamCommit": "6e21ef470b9d996816f335d6bb8aa1a8103d7e9b"
 }

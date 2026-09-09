@@ -1,14 +1,17 @@
 {
   "files": {
-    "protocol/agentwire-v1.schema.json": "4412365e7d3affa2ac9f61ccc847418230faa6c3ed92a2634953826b9f202863",
+    "protocol/agentwire-v1.schema.json": "d6a0753b11c584d7b45926491e3df8fe4b1ade7946d4602a22a7d6a472b6d688",
     "protocol/fixtures/action-status-request.json": "9a93e82679664445e4407f463468ea674a0fe4383446351467d4916237bc721a",
     "protocol/fixtures/action-status.json": "9169fc56fb65f514e25d5bf8e4b7f8e124e1fc2375ee543a5ca901fddb69314b",
     "protocol/fixtures/claude-hello.json": "81d2de30a1eb81f391ce003ba529555a3ba0b9aaf6556f115d3e7b232933d42b",
     "protocol/fixtures/claude-topic.txt": "179a79d39410deb88a8ee05c9a618e8b3774841223dac3a1cb28348f6e872f66",
+    "protocol/fixtures/diagnostics-request.json": "08b4e33f85928a5543790cddaf83808a12325596fb4769afb5248d2daa340f5b",
+    "protocol/fixtures/diagnostics-snapshot.json": "edda0e9c92839b8be4b06a6a742e66729a475ed02296b0b976fe9711e8284a42",
     "protocol/fixtures/hello.json": "966305fc7e635122c98c3b272666bf1e425c9d2a09f17fe12a7f2de959d52e7a",
     "protocol/fixtures/invalid/action-status-missing-id.json": "ffabe8fff0a5047527fd0ae12d277d1cf59b4369cab2a6eb8f6a78dbfe02ff51",
     "protocol/fixtures/invalid/action-status-unknown-leaks.json": "dba539036cb039460d3495d3d2575fd3ff16970a3eeabc9e15098f34bb125798",
     "protocol/fixtures/invalid/boolean-version.json": "04e08fd4811a21c3e224cc131fef18ad487e7501291dda925678f3ac8600c3d1",
+    "protocol/fixtures/invalid/diagnostics-unsafe-fact.json": "4c939ba57056a8619b80aa10b6d98ecdd7b260e8a1795d2cdab4d5cc9aef8b4c",
     "protocol/fixtures/invalid/invalid-uuid.json": "7df41913827f689c39720a6d236acc4b56ed55e30346746c4e3ab68530f81934",
     "protocol/fixtures/invalid/missing-action-device.json": "aa70df63009fbd907965a47bc04e42a1d95ceb570756ee72c3e325d84903105d",
     "protocol/fixtures/invalid/null-optional-field.json": "b97a29626e3e7baa03ef0d3c82cdbb58266f4b90dd411866c9b7e014eeaf7b4d",
@@ -23,5 +26,5 @@
     "protocol/fixtures/topic.txt": "9a68154b3a53ab9652f50279797c6a830c91d8244c88055a944539695a8cf511"
   },
   "format": 1,
-  "upstreamCommit": "ed3fa46f4dfefbfd250facf848287b9d01034ca3"
+  "upstreamCommit": "6e21ef470b9d996816f335d6bb8aa1a8103d7e9b"
 }

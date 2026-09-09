@@ -269,6 +269,6 @@ class AgentwireConformanceTest {
 
     private companion object {
         const val TOPIC_BACKEND = "claude"
-        val CORPORA = listOf("claude-session", "queue-and-acks", "replay-and-isolation", "action-status")
+        val CORPORA = listOf("claude-session", "queue-and-acks", "replay-and-isolation", "action-status", "diagnostics")
     }
 }

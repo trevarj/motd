@@ -1,0 +1,27 @@
+{
+  "v": 1,
+  "id": "88888888-8888-4888-8888-888888888888",
+  "at": 1785400000000,
+  "inst": "fixture",
+  "epoch": "fixture",
+  "t": "event",
+  "k": "diagnostics.snapshot",
+  "reply": "99999999-9999-4999-8999-999999999999",
+  "data": {
+    "schemaVersion": 1,
+    "generatedAt": 1785400000000,
+    "source": "bridge",
+    "checks": [
+      {
+        "code": "backend.ready",
+        "status": "ok",
+        "explanation": "Backend is ready.",
+        "facts": {
+          "ready": true,
+          "sessionCount": 0,
+          "path": "/private"
+        }
+      }
+    ]
+  }
+}

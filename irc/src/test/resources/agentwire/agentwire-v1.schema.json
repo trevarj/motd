@@ -39,7 +39,8 @@
         "queue.delete",
         "queue.clear",
         "request.respond",
-        "request.skip"
+        "request.skip",
+        "diagnostics.request"
       ]
     },
     "eventKind": {
@@ -79,7 +80,8 @@
         "request.opened",
         "request.resolved",
         "approval.review.started",
-        "approval.review.completed"
+        "approval.review.completed",
+        "diagnostics.snapshot"
       ]
     },
     "envelope": {
@@ -241,6 +243,68 @@
             "properties": {
               "data": {
                 "$ref": "#/$defs/actionStatusData"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "t": {
+                "const": "action"
+              },
+              "k": {
+                "const": "diagnostics.request"
+              }
+            },
+            "required": [
+              "t",
+              "k"
+            ]
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "maxProperties": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "t": {
+                "const": "event"
+              },
+              "k": {
+                "const": "diagnostics.snapshot"
+              }
+            },
+            "required": [
+              "t",
+              "k"
+            ]
+          },
+          "then": {
+            "required": [
+              "data",
+              "reply"
+            ],
+            "properties": {
+              "data": {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/diagnosticsReport"
+                  },
+                  {
+                    "properties": {
+                      "source": {
+                        "const": "bridge"
+                      }
+                    }
+                  }
+                ]
               }
             }
           }
@@ -428,6 +492,142 @@
           }
         }
       ]
+    },
+    "diagnosticCheck": {
+      "type": "object",
+      "required": [
+        "code",
+        "status",
+        "explanation",
+        "facts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.]{0,79}$",
+          "not": {
+            "pattern": "[\r\n]"
+          }
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "warning",
+            "error",
+            "unknown"
+          ]
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "nextStep": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "facts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "active": {
+              "type": "boolean"
+            },
+            "authenticated": {
+              "type": "boolean"
+            },
+            "available": {
+              "type": "boolean"
+            },
+            "bound": {
+              "type": "boolean"
+            },
+            "busy": {
+              "type": "boolean"
+            },
+            "capabilitiesReady": {
+              "type": "boolean"
+            },
+            "closed": {
+              "type": "boolean"
+            },
+            "connected": {
+              "type": "boolean"
+            },
+            "private": {
+              "type": "boolean"
+            },
+            "ready": {
+              "type": "boolean"
+            },
+            "valid": {
+              "type": "boolean"
+            },
+            "oldestQueuedMs": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "pendingRequests": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "queueDepth": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "sessionCount": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            },
+            "socketCount": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 9223372036854775807
+            }
+          }
+        }
+      }
+    },
+    "diagnosticsReport": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "generatedAt",
+        "source",
+        "checks"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "generatedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "source": {
+          "enum": [
+            "doctor",
+            "bridge"
+          ]
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/diagnosticCheck"
+          }
+        }
+      }
     }
   }
 }

@@ -170,7 +170,7 @@ private enum class AgentwireLogFilter(
     TURNS("Turns", setOf("turn")),
 }
 
-private enum class AgentwireStatusTab { BROWSE, ACTIONS, SETTINGS }
+private enum class AgentwireStatusTab { BROWSE, ACTIONS, DIAGNOSTICS, SETTINGS }
 
 private const val AGENTWIRE_SEARCH_DEBOUNCE_MS = 300L
 
@@ -2031,6 +2031,9 @@ private fun AgentwireStatusSheet(
     dismiss: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(AgentwireStatusTab.BROWSE) }
+    LaunchedEffect(tab, state.canRequestDiagnostics) {
+        if (tab == AgentwireStatusTab.DIAGNOSTICS && state.canRequestDiagnostics) viewModel.refreshDiagnostics()
+    }
     var search by remember { mutableStateOf("") }
     var appliedSearch by remember { mutableStateOf("") }
     // The field echoes every keystroke; filtering the tree waits for a pause in typing.
@@ -2081,7 +2084,7 @@ private fun AgentwireStatusSheet(
         LazyColumn(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { Text("Agent session", style = MaterialTheme.typography.titleLarge) }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = tab == AgentwireStatusTab.BROWSE,
                         onClick = { tab = AgentwireStatusTab.BROWSE },
@@ -2091,6 +2094,11 @@ private fun AgentwireStatusSheet(
                         selected = tab == AgentwireStatusTab.ACTIONS,
                         onClick = { tab = AgentwireStatusTab.ACTIONS },
                         label = { Text("Actions") },
+                    )
+                    FilterChip(
+                        selected = tab == AgentwireStatusTab.DIAGNOSTICS,
+                        onClick = { tab = AgentwireStatusTab.DIAGNOSTICS },
+                        label = { Text("Diagnostics") },
                     )
                     FilterChip(
                         selected = tab == AgentwireStatusTab.SETTINGS,
@@ -2258,6 +2266,8 @@ private fun AgentwireStatusSheet(
                         )
                     }
                 }
+            } else if (tab == AgentwireStatusTab.DIAGNOSTICS) {
+                item { AgentwireDiagnosticsPanel(state, viewModel::refreshDiagnostics) }
             } else {
                 item { Text("Safe settings", style = MaterialTheme.typography.titleMedium) }
                 val supportsModels = "model" in state.supportedSettings || state.backend == "codex"
@@ -2500,6 +2510,65 @@ private fun AgentwireSessionRow(
                     }
                 }
             }
+        }
+    }
+}
+
+@SuppressLint("HardcodedText")
+@Composable
+internal fun AgentwireDiagnosticsPanel(
+    state: AgentwireUiState,
+    onRefresh: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Local connection", style = MaterialTheme.typography.titleMedium)
+        Text("Connection: ${if (state.connected) "Connected" else "Disconnected"}")
+        val topic =
+            when (state.gate) {
+                AgentwireGate.LOADING -> "Loading"
+                AgentwireGate.ACTIVE -> "Valid"
+                AgentwireGate.INVALID_TOPIC -> "Invalid"
+                AgentwireGate.BLOCKED -> "Valid; required IRC capabilities missing"
+                AgentwireGate.ORDINARY -> "Not active"
+            }
+        Text("Topic: $topic")
+        val caps =
+            when {
+                !state.connected -> "Not checked while disconnected"
+                state.missingCaps.isEmpty() -> "Available"
+                else -> "Missing ${state.missingCaps.sorted().joinToString() }"
+            }
+        Text("IRC capabilities: $caps")
+        val sync =
+            when (state.sync) {
+                AgentwireSyncState.Idle -> "Idle"
+                AgentwireSyncState.NotJoined -> "Channel not joined"
+                AgentwireSyncState.Ready -> "Ready"
+                is AgentwireSyncState.Syncing -> "Synchronizing"
+                is AgentwireSyncState.Failed -> "Failed"
+            }
+        Text("Sync: $sync")
+        Text("Bridge report", style = MaterialTheme.typography.titleMedium)
+        state.diagnosticReport?.let { report ->
+            val generated =
+                remember(report.generatedAt) {
+                    java.text.DateFormat
+                        .getDateTimeInstance()
+                        .format(java.util.Date(report.generatedAt))
+                }
+            Text("Generated $generated${if (state.diagnosticsStale) " (stale)" else ""}")
+            report.checks.forEach { check ->
+                Text("${check.status.replaceFirstChar(Char::uppercase)}: ${check.explanation}")
+                if (check.facts.isNotEmpty()) {
+                    Text(check.facts.entries.joinToString(" · ") { "${it.key}: ${it.value}" }, style = MaterialTheme.typography.labelSmall)
+                }
+                check.nextStep?.let { Text("Next step: $it") }
+            }
+        } ?: Text("No bridge diagnostic report yet.")
+        state.diagnosticsError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (!state.canRequestDiagnostics) Text("Bridge diagnostics are unavailable until a supporting bridge is synchronized.")
+        TextButton(onClick = onRefresh, enabled = state.canRequestDiagnostics && !state.diagnosticsLoading) {
+            Text(if (state.diagnosticsLoading) "Refreshing…" else "Refresh")
         }
     }
 }

@@ -178,6 +178,11 @@ data class AgentwireUiState(
     val busy: Boolean = false,
     val currentTid: String? = null,
     val actions: Set<String> = emptySet(),
+    val capabilities: Set<String> = emptySet(),
+    val diagnosticReport: io.github.trevarj.motd.irc.agentwire.AgentwireDiagnosticReport? = null,
+    val diagnosticsLoading: Boolean = false,
+    val diagnosticsStale: Boolean = false,
+    val diagnosticsError: String? = null,
     val supportedSettings: Set<String> = emptySet(),
     val settings: Map<String, String> = emptyMap(),
     val modelOptions: List<AgentwireModelOption> = emptyList(),
@@ -292,6 +297,7 @@ class AgentwireReducer {
                     epoch = envelope.epoch ?: data.string("epoch"),
                     backend = data.string("backend") ?: state.backend,
                     actions = data.stringList("actions").toSet(),
+                    capabilities = data.stringList("capabilities").toSet(),
                     supportedSettings = data.stringList("settings").toSet(),
                     modelOptions = modelOptions(data),
                     error = null,
@@ -1063,3 +1069,9 @@ internal fun JsonObject.objectStrings(key: String): Map<String, String> =
         .mapNotNull { (name, value) ->
             (value as? JsonPrimitive)?.contentOrNull?.let { name to it }
         }.toMap()
+
+/** Remote diagnostics are meaningful only after this bridge advertised support in the current sync. */
+internal val AgentwireUiState.canRequestDiagnostics: Boolean
+    get() =
+        connected && gate == AgentwireGate.ACTIVE && sync == AgentwireSyncState.Ready &&
+            "diagnostics" in capabilities && "diagnostics.request" in actions

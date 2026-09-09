@@ -14,6 +14,7 @@ import io.github.trevarj.motd.irc.agentwire.AGENTWIRE_TAG
 import io.github.trevarj.motd.irc.agentwire.AgentwireEnvelope
 import io.github.trevarj.motd.irc.agentwire.AgentwireTopicParse
 import io.github.trevarj.motd.irc.agentwire.agentwireMissingCaps
+import io.github.trevarj.motd.irc.agentwire.parseAgentwireDiagnosticReport
 import io.github.trevarj.motd.irc.agentwire.parseAgentwireTopicResult
 import io.github.trevarj.motd.irc.agentwire.readablePreview
 import io.github.trevarj.motd.irc.agentwire.sendAgentwire
@@ -54,7 +55,7 @@ import javax.inject.Inject
 private const val AGENTWIRE_INITIAL_HISTORY_SIZE = 20
 private const val AGENTWIRE_HISTORY_PAGE_SIZE = 50
 private val AGENTWIRE_READ_ACTION_KINDS =
-    setOf("sync.request", "workspace.list.request", "session.list.request", "history.request", "action.status.request")
+    setOf("sync.request", "workspace.list.request", "session.list.request", "history.request", "action.status.request", "diagnostics.request")
 
 /**
  * Directories of a freshly arrived workspace page that the browser should open: the ones the user
@@ -128,6 +129,8 @@ class AgentwireViewModel
         private var manualStatusJob: Job? = null
         private val statusQueryMutex = Mutex()
         private val statusQueries = HashMap<String, AgentwireActionReceipt>()
+        private var diagnosticsQueryId: String? = null
+        private var diagnosticsJob: Job? = null
         private var client: IrcClient? = null
         private var startedOnce = false
         private var sendFailureStage = "transport"
@@ -234,6 +237,7 @@ class AgentwireViewModel
                         ) {
                             invalidateContextReview()
                         }
+                        if (identityChanged) finishDiagnostics()
                         contextBuffer = buffer
                         _state.update {
                             it.copy(
@@ -247,6 +251,11 @@ class AgentwireViewModel
                                 topicDefect = defect,
                                 missingCaps = missing,
                                 connected = ready != null,
+                                diagnosticReport = if (identityChanged) null else it.diagnosticReport,
+                                diagnosticsStale = if (identityChanged) false else it.diagnosticsStale,
+                                diagnosticsLoading = if (identityChanged) false else it.diagnosticsLoading,
+                                diagnosticsError = if (identityChanged) null else it.diagnosticsError,
+                                capabilities = if (identityChanged) emptySet() else it.capabilities,
                             )
                         }
                         joinTarget = buffer?.let { it.networkId to it.name }
@@ -289,6 +298,36 @@ class AgentwireViewModel
         fun returnToHarness() = _state.update { it.copy(transcriptOverride = false) }
 
         fun clearError() = _state.update { it.copy(error = null) }
+
+        fun refreshDiagnostics() {
+            if (diagnosticsQueryId != null || !_state.value.canRequestDiagnostics) return
+            val id = UUID.randomUUID().toString()
+            diagnosticsQueryId = id
+            _state.update { it.copy(diagnosticsLoading = true, diagnosticsError = null) }
+            diagnosticsJob =
+                viewModelScope.launch {
+                    try {
+                        if (sendActionInternal("diagnostics.request", buildJsonObject {}, id = id) == null) {
+                            if (diagnosticsQueryId == id) finishDiagnostics("Unable to request diagnostics")
+                            return@launch
+                        }
+                        delay(10_000)
+                        if (diagnosticsQueryId == id) finishDiagnostics("Diagnostics request timed out")
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        if (diagnosticsQueryId == id) finishDiagnostics("Unable to request diagnostics")
+                    }
+                }
+        }
+
+        private fun finishDiagnostics(error: String? = null) {
+            // Clear correlation before cancellation, so a superseded request cannot finish a new one.
+            diagnosticsQueryId = null
+            diagnosticsJob?.cancel()
+            diagnosticsJob = null
+            _state.update { it.copy(diagnosticsLoading = false, diagnosticsError = error) }
+        }
 
         /** Checks a retained receipt without creating or resubmitting an action. */
         fun checkActionStatus(receipt: AgentwireActionReceipt) {
@@ -857,6 +896,8 @@ class AgentwireViewModel
             manualStatusJob?.cancel()
             manualStatusJob = null
             statusQueries.clear()
+            finishDiagnostics()
+            _state.update { it.copy(capabilities = emptySet(), diagnosticsStale = it.diagnosticReport != null) }
             client = null
             session.reset()
             if (disconnected) {
@@ -867,13 +908,22 @@ class AgentwireViewModel
                     _state.value.actionStatus.mapValues { (_, status) ->
                         if (status == "sent" || status == "accepted") "unknown" else status
                     }
-                _state.update { it.copy(epoch = null, botAccount = null, actionStatus = uncertain) }
+                _state.update {
+                    it.copy(
+                        epoch = null,
+                        botAccount = null,
+                        actionStatus = uncertain,
+                        diagnosticsStale = it.diagnosticReport != null,
+                        diagnosticsLoading = false,
+                    )
+                }
             }
         }
 
         private suspend fun ingest(event: SequencedIrcEvent) {
             val reviewedDestination = _contextReview.value?.destination
             val previousActionStatus = _state.value.actionStatus
+            val previousError = _state.value.error
             val result = session.ingest(_state.value, event)
             if (result is AgentwireDeliveryCoordinator.Result.Rejected) {
                 result.untrustedAccount?.let(::recordUntrustedEvents)
@@ -896,6 +946,7 @@ class AgentwireViewModel
                 return
             }
             if (result is AgentwireDeliveryCoordinator.Result.ResyncRequired) {
+                finishDiagnostics()
                 recoveryJob?.cancel()
                 recoveryJob = null
                 manualStatusJob?.cancel()
@@ -939,12 +990,16 @@ class AgentwireViewModel
                 } else {
                     result.state
                 }
-            receiptScope(_state.value)?.let { scope ->
+            receiptScope(_state.value)?.takeUnless { envelope.history == true }?.let { scope ->
+                // Historical envelopes never satisfy a live query or update durable outcomes.
                 when (envelope.kind) {
                     "action.accepted", "action.succeeded", "action.failed", "action.uncertain" -> {
                         val reply = envelope.reply
                         val pendingQuery = reply?.let(statusQueries::get)
-                        if (pendingQuery != null) {
+                        if (reply != null && reply == diagnosticsQueryId) {
+                            _state.update { it.copy(actionStatus = previousActionStatus, error = previousError) }
+                            if (envelope.kind != "action.accepted") finishDiagnostics("Bridge could not provide diagnostics")
+                        } else if (pendingQuery != null) {
                             // A status query is read-only. Its lifecycle events must not appear as
                             // mutation outcomes; terminal replies release the shared recovery slot.
                             _state.update { it.copy(actionStatus = previousActionStatus) }
@@ -968,6 +1023,16 @@ class AgentwireViewModel
                             // Reducer conformance projects status receipts, but live status replies
                             // are authoritative only for a query we sent in this trusted session.
                             _state.update { it.copy(actionStatus = previousActionStatus) }
+                        }
+                    }
+
+                    "diagnostics.snapshot" -> {
+                        if (diagnosticsQueryId != null && envelope.reply == diagnosticsQueryId) {
+                            val report = runCatching { parseAgentwireDiagnosticReport(requireNotNull(envelope.data)) }.getOrNull()
+                            if (report != null) {
+                                finishDiagnostics()
+                                _state.update { it.copy(diagnosticReport = report, diagnosticsStale = false) }
+                            }
                         }
                     }
                 }

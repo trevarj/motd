@@ -53,6 +53,7 @@ val AGENTWIRE_ACTION_KINDS =
         "session.list.request",
         "history.request",
         "action.status.request",
+        "diagnostics.request",
         "session.create",
         "session.close",
         "session.attach",
@@ -90,6 +91,7 @@ val AGENTWIRE_EVENT_KINDS =
         "action.failed",
         "action.uncertain",
         "action.status",
+        "diagnostics.snapshot",
         "queue.snapshot",
         "queue.item.added",
         "queue.item.updated",
@@ -431,6 +433,15 @@ private fun validateKnownPayload(
                     require(message.length in 1..200) { "invalid action status message" }
                 }
             }
+        }
+
+        type == "action" && kind == "diagnostics.request" -> {
+            require(data == null || data.isEmpty()) { "diagnostics.request data must be empty" }
+        }
+
+        type == "event" && kind == "diagnostics.snapshot" -> {
+            require(root.optionalNonEmptyString("reply") != null) { "diagnostics.snapshot requires reply" }
+            parseAgentwireDiagnosticReport(requireNotNull(data) { "diagnostics.snapshot requires data" })
         }
     }
 }

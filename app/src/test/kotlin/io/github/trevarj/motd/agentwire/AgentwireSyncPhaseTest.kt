@@ -286,7 +286,12 @@ class AgentwireSyncPhaseTest {
             )
             runCurrent()
 
-            assertEquals("unknown", prefs.receipts.value.first { it.id.endsWith("a1") }.outcome)
+            assertEquals(
+                "unknown",
+                prefs.receipts.value
+                    .first { it.id.endsWith("a1") }
+                    .outcome,
+            )
             assertFalse(first.id in viewModel.state.value.actionStatus)
             advanceTimeBy(999)
             runCurrent()
@@ -311,7 +316,12 @@ class AgentwireSyncPhaseTest {
             )
             runCurrent()
 
-            assertEquals("unknown", prefs.receipts.value.first { it.id.endsWith("b2") }.outcome)
+            assertEquals(
+                "unknown",
+                prefs.receipts.value
+                    .first { it.id.endsWith("b2") }
+                    .outcome,
+            )
             assertFalse(second.id in viewModel.state.value.actionStatus)
             advanceTimeBy(999)
             runCurrent()
@@ -321,6 +331,152 @@ class AgentwireSyncPhaseTest {
             val third = outboundEnvelopes(transport).last { it.kind == "action.status.request" }
             assertEquals("00000000-0000-4000-8000-0000000000c3", third.data?.string("actionId"))
             assertTrue(outboundEnvelopes(transport).none { it.kind == "turn.prompt" })
+        }
+
+    @Test
+    fun `diagnostic refresh coalesces and only accepts its trusted live reply`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val viewModel = viewModel(FakeConnections(readyClient(transport)), FakeBufferRepository(buffer(true)))
+            completeSync(
+                transport,
+                actions = setOf("diagnostics.request"),
+                capabilities = setOf("diagnostics"),
+            )
+
+            viewModel.refreshDiagnostics()
+            viewModel.refreshDiagnostics()
+            runCurrent()
+            val request = outboundEnvelopes(transport).single { it.kind == "diagnostics.request" }
+            assertTrue(viewModel.state.value.diagnosticsLoading)
+
+            transport.feed(tagMessage(BACKEND_ACCOUNT, diagnosticsSnapshot(UUID.randomUUID().toString())))
+            transport.feed(tagMessage("impostor", diagnosticsSnapshot(request.id)))
+            transport.feed(tagMessage(BACKEND_ACCOUNT, diagnosticsSnapshot(request.id, history = true)))
+            runCurrent()
+            assertNull(viewModel.state.value.diagnosticReport)
+            assertTrue(viewModel.state.value.diagnosticsLoading)
+
+            transport.feed(tagMessage(BACKEND_ACCOUNT, diagnosticsSnapshot(request.id)))
+            runCurrent()
+            val report = requireNotNull(viewModel.state.value.diagnosticReport)
+            assertEquals(1_785_400_000_000, report.generatedAt)
+            assertEquals("backend.ready", report.checks.single().code)
+            assertFalse(viewModel.state.value.diagnosticsLoading)
+            assertFalse(viewModel.state.value.diagnosticsStale)
+
+            viewModel.refreshDiagnostics()
+            runCurrent()
+            val refreshed = outboundEnvelopes(transport).filter { it.kind == "diagnostics.request" }
+            assertEquals(2, refreshed.size)
+            assertTrue(request.id != refreshed.last().id)
+        }
+
+    @Test
+    fun `diagnostic refresh failures retain only ephemeral stale reports`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val connections = FakeConnections(readyClient(transport))
+            val buffers = FakeBufferRepository(buffer(true))
+            val prefs = FakeAgentwirePrefs()
+            val viewModel = viewModel(connections, buffers, prefs = prefs)
+            completeSync(
+                transport,
+                actions = setOf("diagnostics.request"),
+                capabilities = setOf("diagnostics"),
+            )
+
+            viewModel.refreshDiagnostics()
+            runCurrent()
+            val rejected = outboundEnvelopes(transport).single { it.kind == "diagnostics.request" }
+            transport.feed(tagMessage(BACKEND_ACCOUNT, actionFailed(rejected.id, "Diagnostics unavailable").copy(epoch = "epoch-1")))
+            runCurrent()
+            assertFalse(viewModel.state.value.diagnosticsLoading)
+            assertEquals("Bridge could not provide diagnostics", viewModel.state.value.diagnosticsError)
+            assertTrue(prefs.receipts.value.isEmpty())
+            assertTrue(
+                viewModel.state.value.actionStatus
+                    .isEmpty(),
+            )
+            assertNull(viewModel.state.value.error)
+
+            viewModel.refreshDiagnostics()
+            runCurrent()
+            val timedOut = outboundEnvelopes(transport).last { it.kind == "diagnostics.request" }
+            advanceTimeBy(10_000)
+            runCurrent()
+            assertFalse(viewModel.state.value.diagnosticsLoading)
+            assertEquals("Diagnostics request timed out", viewModel.state.value.diagnosticsError)
+            assertTrue(prefs.receipts.value.isEmpty())
+
+            viewModel.refreshDiagnostics()
+            runCurrent()
+            val live = outboundEnvelopes(transport).last { it.kind == "diagnostics.request" }
+            assertTrue(live.id != timedOut.id)
+            transport.feed(tagMessage(BACKEND_ACCOUNT, diagnosticsSnapshot(live.id)))
+            runCurrent()
+            assertNotNull(viewModel.state.value.diagnosticReport)
+
+            connections.connectionStates.value = mapOf(NETWORK_ID to IrcClientState.Disconnected)
+            runCurrent()
+            assertNotNull(viewModel.state.value.diagnosticReport)
+            assertTrue(viewModel.state.value.diagnosticsStale)
+
+            buffers.buffers.value =
+                buffer(
+                    true,
+                    topic = "agentwire:v1;account=controller;agent=$BACKEND_ACCOUNT;backend=codex | Codex",
+                )
+            runCurrent()
+            assertNull(viewModel.state.value.diagnosticReport)
+            assertFalse(viewModel.state.value.diagnosticsStale)
+        }
+
+    @Test
+    fun `epoch resync retains a stale diagnostic report and rejects the old query reply`() =
+        runTest(dispatcher) {
+            val transport = RecordingTransport()
+            val viewModel = viewModel(FakeConnections(readyClient(transport)), FakeBufferRepository(buffer(true)))
+            completeSync(
+                transport,
+                actions = setOf("diagnostics.request"),
+                capabilities = setOf("diagnostics"),
+            )
+
+            viewModel.refreshDiagnostics()
+            runCurrent()
+            val initial = outboundEnvelopes(transport).single { it.kind == "diagnostics.request" }
+            transport.feed(tagMessage(BACKEND_ACCOUNT, diagnosticsSnapshot(initial.id)))
+            runCurrent()
+            assertNotNull(viewModel.state.value.diagnosticReport)
+
+            viewModel.refreshDiagnostics()
+            runCurrent()
+            val pending = outboundEnvelopes(transport).last { it.kind == "diagnostics.request" }
+            transport.feed(
+                tagMessage(
+                    BACKEND_ACCOUNT,
+                    actionFailed(pending.id, "stale or missing live epoch").copy(epoch = "epoch-2"),
+                ),
+            )
+            runCurrent()
+            assertTrue(viewModel.state.value.sync is AgentwireSyncState.Syncing)
+            assertNotNull(viewModel.state.value.diagnosticReport)
+            assertTrue(viewModel.state.value.diagnosticsStale)
+            assertFalse(viewModel.state.value.diagnosticsLoading)
+            assertTrue(
+                viewModel.state.value.capabilities
+                    .isEmpty(),
+            )
+
+            transport.feed(tagMessage(BACKEND_ACCOUNT, diagnosticsSnapshot(pending.id)))
+            runCurrent()
+            assertEquals(
+                1_785_400_000_000,
+                viewModel.state.value.diagnosticReport
+                    ?.generatedAt,
+            )
+            assertTrue(viewModel.state.value.diagnosticsStale)
         }
 
     @Test
@@ -844,13 +1000,14 @@ class AgentwireSyncPhaseTest {
     private suspend fun TestScope.completeSync(
         transport: RecordingTransport,
         actions: Set<String>,
+        capabilities: Set<String> = emptySet(),
         sid: String? = "session-1",
         busy: Boolean = false,
     ) {
         advanceTimeBy(10)
         runCurrent()
         val syncId = syncRequests(transport).last()
-        transport.feed(tagMessage(BACKEND_ACCOUNT, hello(syncId, actions)))
+        transport.feed(tagMessage(BACKEND_ACCOUNT, hello(syncId, actions, capabilities)))
         transport.feed(tagMessage(BACKEND_ACCOUNT, snapshot(syncId, sid, busy)))
         runCurrent()
     }
@@ -983,6 +1140,7 @@ class AgentwireSyncPhaseTest {
     private fun hello(
         reply: String,
         actions: Set<String> = emptySet(),
+        capabilities: Set<String> = emptySet(),
     ) = AgentwireEnvelope(
         kind = "agent.hello",
         type = "event",
@@ -995,6 +1153,7 @@ class AgentwireSyncPhaseTest {
             buildJsonObject {
                 put("epoch", "epoch-1")
                 put("actions", buildJsonArray { actions.forEach { add(JsonPrimitive(it)) } })
+                put("capabilities", buildJsonArray { capabilities.forEach { add(JsonPrimitive(it)) } })
             },
     )
 
@@ -1050,6 +1209,39 @@ class AgentwireSyncPhaseTest {
                 put("kind", "turn.prompt")
                 put("channel", CHANNEL)
                 put("receivedAt", 2)
+            },
+    )
+
+    private fun diagnosticsSnapshot(
+        reply: String,
+        history: Boolean = false,
+    ) = AgentwireEnvelope(
+        kind = "diagnostics.snapshot",
+        type = "event",
+        id = UUID.randomUUID().toString(),
+        at = 3,
+        instance = "bridge",
+        epoch = "epoch-1",
+        reply = reply,
+        history = history,
+        data =
+            buildJsonObject {
+                put("schemaVersion", 1)
+                put("generatedAt", 1_785_400_000_000)
+                put("source", "bridge")
+                put(
+                    "checks",
+                    buildJsonArray {
+                        add(
+                            buildJsonObject {
+                                put("code", "backend.ready")
+                                put("status", "ok")
+                                put("explanation", "Backend is ready.")
+                                put("facts", buildJsonObject { put("ready", true) })
+                            },
+                        )
+                    },
+                )
             },
     )
 

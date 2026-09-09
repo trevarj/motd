@@ -1,10 +1,11 @@
 {
   "files": {
-    "action-status.json": "b07de898ef72587f49fe8343dfd4a1c735e3e605fcbb007a8756bfe56e70e5ef",
-    "claude-session.json": "a4936f9b265800ee4f55ed10fdd70e5d78417dfaae7e288a51b510d519f3fb94",
-    "fragmented.json": "327f73ff657717b47a4b73de691ae8a649152a4552c775adaf5ca8f089bf843b",
+    "action-status.json": "57c2e26e9d05440b03be4e875cdc6059a8e15ddf7e6d8b1f4b1a3d2edf5f0dc4",
+    "claude-session.json": "a263b59c78b1b6c4ff293becb15076f293c60d508d48fe0bd2064f48cb53e2ad",
+    "diagnostics.json": "6f543b325db62f409c69bbc82010789e25c4fda4396c8530a99da30ace5604d1",
+    "fragmented.json": "87cc7e993140057c58f6c2e8ee930a967878854d403227ed9174e2cdde172f6b",
     "queue-and-acks.json": "dbbc1ccff293b853456427879ef2067cee4158474d73aeb516d0fc87dd5bee9d",
-    "replay-and-isolation.json": "bd0881e96ad5db76fda9ae0b7b319c56fc9d071bff008aad5cba20e31bab2c22"
+    "replay-and-isolation.json": "d9977545842b847d48d693d8ec318e8355a6809f774f8c90b2f21c7126c18aff"
   },
   "format": 1,
   "generatedBy": "protocol/conformance/generate.py",
