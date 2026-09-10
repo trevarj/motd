@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.content.Context
+import android.content.res.Resources
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -43,6 +45,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,6 +61,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -73,6 +78,8 @@ import io.github.trevarj.motd.bouncer.SojuLoginForm
 import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
+import io.github.trevarj.motd.data.prefs.HistorySyncDepth
+import io.github.trevarj.motd.data.sync.HistorySyncOutcome
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.onboarding.AuthForm
@@ -81,6 +88,7 @@ import io.github.trevarj.motd.ui.onboarding.ServerForm
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import java.text.NumberFormat
 
 /** Stateful entry: wires the ViewModel, seeds the edit form from the network id. */
 @Composable
@@ -97,10 +105,20 @@ fun NetworkSettingsScreen(
 ) {
     LaunchedEffect(networkId) { viewModel.init(networkId) }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    // Resources rather than Context: a LocalContext read inside the effect would not follow a
+    // configuration change (Compose lint LocalContextGetResourceValueCall).
+    val resources = LocalResources.current
+    LaunchedEffect(viewModel, resources) {
+        viewModel.historySyncResults.collect { result -> snackbarHostState.showSnackbar(historySyncResultMessage(resources, result)) }
+    }
     NetworkSettingsContent(
         state = state,
         target = target,
         onBack = onBack,
+        snackbarHostState = snackbarHostState,
+        onResyncHistory = viewModel::resyncHistory,
+        onCancelResyncHistory = viewModel::cancelResyncHistory,
         onDisplayNameChange = viewModel::editDisplayName,
         onWsUrlChange = viewModel::editWsUrl,
         onInitialAwayMessageChange = viewModel::editInitialAwayMessage,
@@ -162,9 +180,13 @@ fun NetworkSettingsContent(
     onPublishAvatar: () -> Unit = {},
     onClearAvatar: () -> Unit = {},
     onStopManagingAvatar: () -> Unit = {},
+    snackbarHostState: SnackbarHostState? = null,
+    onResyncHistory: (HistorySyncDepth) -> Unit = {},
+    onCancelResyncHistory: () -> Unit = {},
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
+    var resyncSheetOpen by remember { mutableStateOf(false) }
     val requestBack = { if (state.hasUnsavedChanges) showDiscardConfirm = true else onBack() }
     BackHandler(enabled = state.hasUnsavedChanges) { showDiscardConfirm = true }
 
@@ -172,6 +194,7 @@ fun NetworkSettingsContent(
         title = state.entity?.name ?: stringResource(R.string.network_settings_title),
         onBack = requestBack,
         modifier = Modifier.testTag("screen_network_settings"),
+        snackbarHostState = snackbarHostState,
         topActions = {
             TextButton(
                 onClick = onSave,
@@ -358,6 +381,42 @@ fun NetworkSettingsContent(
                         androidx.compose.material3.ListItemDefaults
                             .colors(containerColor = Color.Transparent),
                 )
+                if (state.entity?.role != NetworkRole.BOUNCER_ROOT) {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.network_settings_stored_messages)) },
+                        supportingContent = { Text(stringResource(R.string.network_settings_stored_messages_desc)) },
+                        trailingContent = {
+                            Text(state.storedMessages?.let { NumberFormat.getIntegerInstance().format(it) } ?: "…")
+                        },
+                        modifier = Modifier.testTag("network_settings_stored_messages"),
+                        colors =
+                            androidx.compose.material3.ListItemDefaults
+                                .colors(containerColor = Color.Transparent),
+                    )
+                    ListItem(
+                        headlineContent = {
+                            Text(
+                                stringResource(
+                                    if (state.historySyncRunning) R.string.network_settings_resync_stop else R.string.network_settings_resync_history,
+                                ),
+                            )
+                        },
+                        supportingContent = {
+                            Text(
+                                stringResource(
+                                    if (state.historySyncRunning) R.string.network_settings_resync_running else R.string.network_settings_resync_history_desc,
+                                ),
+                            )
+                        },
+                        modifier =
+                            Modifier
+                                .testTag("network_settings_resync_history")
+                                .clickable { if (state.historySyncRunning) onCancelResyncHistory() else resyncSheetOpen = true },
+                        colors =
+                            androidx.compose.material3.ListItemDefaults
+                                .colors(containerColor = Color.Transparent),
+                    )
+                }
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.network_settings_network_tools)) },
                     supportingContent = { Text(stringResource(R.string.network_settings_network_tools_desc)) },
@@ -406,6 +465,24 @@ fun NetworkSettingsContent(
         )
     }
 
+    if (resyncSheetOpen) {
+        SingleChoiceSheet(
+            title = stringResource(R.string.network_settings_resync_history_window),
+            selected = HistorySyncDepth.MONTH,
+            options =
+                HistorySyncDepth.entries.map { depth ->
+                    ChoiceOption(
+                        depth,
+                        historySyncDepthLabel(depth),
+                        summary = syncEstimateLabel(state.syncEstimates[depth]),
+                        tag = "network_settings_resync_${depth.name.lowercase()}",
+                    )
+                },
+            onSelect = onResyncHistory,
+            onDismiss = { resyncSheetOpen = false },
+            tag = "network_settings_resync_sheet",
+        )
+    }
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
@@ -876,3 +953,52 @@ private fun NetworkSettingsContentPreview() {
         )
     }
 }
+
+@Composable
+private fun historySyncDepthLabel(depth: HistorySyncDepth): String =
+    stringResource(
+        when (depth) {
+            HistorySyncDepth.WEEK -> R.string.onboarding_history_depth_week
+            HistorySyncDepth.MONTH -> R.string.onboarding_history_depth_month
+            HistorySyncDepth.QUARTER -> R.string.onboarding_history_depth_quarter
+            HistorySyncDepth.EVERYTHING -> R.string.onboarding_history_depth_everything
+        },
+    )
+
+@Composable
+private fun syncEstimateLabel(estimate: Long?): String? =
+    when {
+        estimate == null -> null
+        estimate == 0L -> stringResource(R.string.network_settings_resync_estimate_none)
+        else -> stringResource(R.string.network_settings_resync_estimate, NumberFormat.getIntegerInstance().format(estimate))
+    }
+
+private fun historySyncResultMessage(
+    resources: Resources,
+    result: HistorySyncOutcome,
+): String =
+    when (result) {
+        is HistorySyncOutcome.Fetched -> {
+            if (result.messages == 0) {
+                resources.getString(R.string.network_settings_resync_up_to_date)
+            } else {
+                resources.getString(
+                    R.string.network_settings_resync_fetched,
+                    resources.getQuantityString(R.plurals.network_settings_resync_fetched_messages, result.messages, result.messages),
+                    resources.getQuantityString(R.plurals.network_settings_resync_fetched_chats, result.chats, result.chats),
+                )
+            }
+        }
+
+        HistorySyncOutcome.Unsupported -> {
+            resources.getString(R.string.network_settings_resync_unsupported)
+        }
+
+        HistorySyncOutcome.Failed -> {
+            resources.getString(R.string.network_settings_resync_failed)
+        }
+
+        HistorySyncOutcome.Cancelled -> {
+            resources.getString(R.string.network_settings_resync_cancelled)
+        }
+    }

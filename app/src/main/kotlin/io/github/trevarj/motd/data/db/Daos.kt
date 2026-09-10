@@ -2503,6 +2503,127 @@ interface CanonicalTimelineDao {
     suspend fun pendingNotifications(limit: Int): List<TimelineEventEntity>
 }
 
+/** One room the pruner may trim: its network has completed a server-derived history sync. */
+data class PruneTarget(
+    val roomId: RoomId,
+    val type: BufferType,
+)
+
+/** A prunable room's current size, for planning a cap. */
+data class PrunableRoom(
+    val type: BufferType,
+    val rowCount: Int,
+)
+
+/** One room's locally held history: how many rows and the span they cover. */
+data class RoomSpan(
+    val roomId: RoomId,
+    val rowCount: Int,
+    val oldest: Long?,
+    val newest: Long?,
+)
+
+/**
+ * Local history retention. Pruned rows are recoverable: the mediator pages `CHATHISTORY BEFORE`
+ * the oldest retained row, so trimming a room only needs the completion flags reopened and the
+ * protocol cursor forgotten; it never touches the dismiss floor (`historyDiscardedThrough*`).
+ */
+@Dao
+interface HistoryPruneDao {
+    @Query(
+        """SELECT b.id AS roomId, b.type AS type FROM buffers b
+           JOIN network_history_cursors c ON c.networkId = b.networkId AND c.serverDerived = 1
+           WHERE b.type IN ('CHANNEL', 'QUERY') AND b.dismissed = 0 AND b.redirectToRoomId IS NULL
+             AND (:networkId IS NULL OR b.networkId = :networkId)
+           ORDER BY b.id""",
+    )
+    suspend fun targets(networkId: Long?): List<PruneTarget>
+
+    /** Same eligibility as [targets], with each room's row count. */
+    @Query(
+        """SELECT b.type AS type, (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id) AS rowCount
+           FROM buffers b
+           JOIN network_history_cursors c ON c.networkId = b.networkId AND c.serverDerived = 1
+           WHERE b.type IN ('CHANNEL', 'QUERY') AND b.dismissed = 0 AND b.redirectToRoomId IS NULL
+           ORDER BY b.id""",
+    )
+    suspend fun prunableRooms(): List<PrunableRoom>
+
+    @Query("SELECT COUNT(*) FROM messages")
+    suspend fun totalRows(): Long
+
+    @Query("SELECT COUNT(*) FROM messages m JOIN buffers b ON b.id = m.bufferId WHERE b.networkId = :networkId")
+    suspend fun networkRows(networkId: Long): Long
+
+    /** Every open chat on the network with what it holds, for sizing a manual history fetch. */
+    @Query(
+        """SELECT b.id AS roomId, COUNT(m.id) AS rowCount, MIN(m.serverTime) AS oldest, MAX(m.serverTime) AS newest
+           FROM buffers b LEFT JOIN messages m ON m.bufferId = b.id
+           WHERE b.networkId = :networkId AND b.type != 'SERVER' AND b.dismissed = 0
+             AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL
+           GROUP BY b.id ORDER BY b.id""",
+    )
+    suspend fun roomSpans(networkId: Long): List<RoomSpan>
+
+    /**
+     * Rows strictly older than this are past the room's retention: the serverTime of the row
+     * [keepOffset] places from the newest. Null when the room holds no more than that many rows.
+     */
+    @Query(
+        """SELECT serverTime FROM messages WHERE bufferId = :roomId
+           ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT 1 OFFSET :keepOffset""",
+    )
+    suspend fun pruneFloor(
+        roomId: RoomId,
+        keepOffset: Int,
+    ): Long?
+
+    /**
+     * Delete one chunk of the oldest prunable rows. Unconfirmed/failed sends, in-flight
+     * notifications, open invitations, and rows an active DCC transfer points at stay.
+     */
+    @Query(
+        """DELETE FROM messages WHERE id IN (
+               SELECT m.id FROM messages m
+               WHERE m.bufferId = :roomId AND m.serverTime < :floor
+                 AND m.pendingLabel IS NULL AND m.failed = 0 AND m.notificationClaimed = 0
+                 AND (m.kind != 'INVITE' OR m.inviteState IS NULL OR m.inviteState NOT IN ('PENDING', 'JOINING'))
+                 AND NOT EXISTS (
+                     SELECT 1 FROM dcc_transfers t WHERE t.timelineEventId = m.id
+                       AND t.state IN ('OFFERED', 'ACCEPTING', 'ACTIVE', 'PARTIAL')
+                 )
+               ORDER BY m.serverTime, m.timelineOrder, m.id
+               LIMIT :chunk)""",
+    )
+    suspend fun deleteOldest(
+        roomId: RoomId,
+        floor: Long,
+        chunk: Int,
+    ): Int
+
+    /** History below the oldest retained row is fetchable again; the room is no longer complete. */
+    @Query(
+        """UPDATE buffers SET historyComplete = 0,
+               oldestFetchedTime = (SELECT MIN(serverTime) FROM messages WHERE bufferId = :roomId)
+           WHERE id = :roomId""",
+    )
+    suspend fun reopenHistory(roomId: RoomId)
+
+    /** A cursor older than the retained rows would make BEFORE paging skip the pruned interval. */
+    @Query(
+        """UPDATE history_cursors SET historyComplete = 0, oldestMsgid = NULL, oldestServerTime = NULL
+           WHERE roomId = :roomId""",
+    )
+    suspend fun forgetOldestCursor(roomId: RoomId)
+
+    /** Gaps starting below the floor are now plain "older than what we hold", owned by the ladder. */
+    @Query("DELETE FROM history_gaps WHERE roomId = :roomId AND olderServerTime < :floor")
+    suspend fun dropGapsBelow(
+        roomId: RoomId,
+        floor: Long,
+    )
+}
+
 @Dao
 interface DccTransferDao {
     @Query("SELECT * FROM dcc_transfers WHERE id = :id")

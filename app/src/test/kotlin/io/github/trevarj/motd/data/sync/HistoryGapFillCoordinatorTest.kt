@@ -210,6 +210,37 @@ class HistoryGapFillCoordinatorTest {
     }
 
     @Test
+    fun windowFetchPagesOlderUntilTheRoomReachesTheFloor() =
+        runTest {
+            val fixture = newFixture()
+            fixture.processor.process(fixture.networkId, chatMsg("row300", 300))
+            fixture.processor.process(fixture.networkId, chatMsg("row310", 310))
+            val history =
+                FakeHistory(
+                    pageScript(
+                        ScriptedPage(listOf(chatMsg("row200", 200), chatMsg("row210", 210))),
+                        ScriptedPage(listOf(chatMsg("row100", 100), chatMsg("row110", 110))),
+                        ScriptedPage(listOf(chatMsg("row050", 50)), endOfHistory = true),
+                    ),
+                )
+            val coordinator = fixture.coordinator()
+
+            val fetch = coordinator.fetchRoomWindow(fixture.roomId, floorMs = 150, source = history, pageSize = 2)
+
+            // Two pages bring the oldest row to 100 <= 150; the third page is never requested.
+            assertEquals("window_reached", fetch.endReason)
+            assertEquals(2, fetch.pagesLoaded)
+            assertEquals(4, fetch.insertedCount)
+            assertEquals(2, history.requests.size)
+            assertEquals(6, fixture.db.messageDao().countForBuffer(fixture.roomId))
+
+            // Already at the floor: nothing is requested.
+            val again = coordinator.fetchRoomWindow(fixture.roomId, floorMs = 150, source = history, pageSize = 2)
+            assertEquals("window_reached", again.endReason)
+            assertEquals(0, again.pagesLoaded)
+        }
+
+    @Test
     fun mediatorAppendPagesTheGlobalLadderInsteadOfTheGapTheCoordinatorOwns() =
         runTest {
             // The other half of the ownership. Same fixture, same wire, driven through the mediator: it

@@ -143,7 +143,10 @@ fun ChatListSyncHeader(
                         ) {
                             SyncStateGlyph(glyphComposition, glyphProgress)
                             SyncHeaderLabel(
-                                label = stringResource(R.string.chatlist_sync_header_syncing),
+                                label =
+                                    stringResource(
+                                        if (syncing.backfill) R.string.chatlist_sync_header_backfilling else R.string.chatlist_sync_header_syncing,
+                                    ),
                                 tag = "chatlist_sync_header_label",
                             )
                             Text(

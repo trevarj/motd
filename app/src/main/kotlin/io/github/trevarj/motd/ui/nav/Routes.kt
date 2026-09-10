@@ -49,6 +49,7 @@ enum class SettingsTarget {
     APPEARANCE,
     CHAT,
     DELIVERY,
+    HISTORY,
     UPLOADS,
     BACKUP,
     LABS,
@@ -95,6 +96,9 @@ enum class SettingsTarget {
     VOICE_NOISE_REDUCTION,
     VOICE_ENCRYPTION,
     AUDIO_CACHE,
+    HISTORY_RETENTION,
+    AUTO_COMPACT,
+    COMPACT_DATABASE,
     FRIENDS,
     FOOLS,
     FOOLS_MODE,
@@ -132,6 +136,10 @@ enum class NetworkSettingsTarget { CONNECTION, AUTHENTICATION, OBFUSCATION, AVAT
 @Serializable data object DirectConnectionsRoute
 
 @Serializable data class DeliverySettingsRoute(
+    val target: SettingsTarget? = null,
+)
+
+@Serializable data class HistorySettingsRoute(
     val target: SettingsTarget? = null,
 )
 

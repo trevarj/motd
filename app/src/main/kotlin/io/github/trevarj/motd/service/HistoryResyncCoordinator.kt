@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.prefs.NoopHistorySyncPrefs
 import io.github.trevarj.motd.data.sync.AdvertisedActivity
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
+import io.github.trevarj.motd.data.sync.HistoryPruner
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
@@ -133,6 +134,8 @@ sealed interface HistorySyncStatus {
 data class SyncPassProgress(
     val total: Int,
     val settled: Int,
+    /** A user-requested window fetch rather than a reconnect catch-up; the chrome words it differently. */
+    val backfill: Boolean = false,
 )
 
 /** An open buffer offered to a network pass, carrying the ordering inputs the pass sorts on. */
@@ -200,6 +203,17 @@ interface HistoryResyncController {
      */
     fun dismissSyncStatus(bufferId: Long) = Unit
 
+    /**
+     * Run caller-driven per-room [work] (a manual window fetch) under the same chat-list chrome a
+     * reconnect pass gets: every id is queued up front, shows as syncing while its work runs, and
+     * settles when it returns. The default runs the work without publishing anything.
+     */
+    suspend fun manualPass(
+        networkId: Long,
+        bufferIds: List<Long>,
+        work: suspend (Long) -> Unit,
+    ) = bufferIds.forEach { work(it) }
+
     suspend fun reconcileBuffer(
         buffer: BufferEntity,
         client: IrcClient,
@@ -245,6 +259,9 @@ class HistoryResyncCoordinator
         // Read at sort time so the chat the user is looking at is admitted in the first fan-out wave.
         // Defaulted so test fixtures keep the shorter construction.
         private val foregroundBuffers: ForegroundBufferTracker = NoopForegroundBufferTracker,
+        // Local retention runs right after a network's sync settles: server history is proven live
+        // at that moment, so anything trimmed is fetchable again. Defaulted for test fixtures.
+        private val pruner: HistoryPruner = HistoryPruner.Noop,
     ) : HistoryResyncController {
         // Reuses the loader's transport seam so a source can drive both the coordinator's orchestration
         // and the loader's fetch primitives directly, and adds the discovery/classification metadata the
@@ -489,6 +506,7 @@ class HistoryResyncCoordinator
             networkId: Long,
             sourceIdentity: Any,
             chromeEligible: Boolean,
+            backfill: Boolean = false,
         ): SyncStatusSession =
             synchronized(retireGuard) {
                 // Drawn inside the guard, so a session created before a retirement always carries a
@@ -499,6 +517,7 @@ class HistoryResyncCoordinator
                         sourceIdentity,
                         sessionTickets.incrementAndGet(),
                         chromeEligible,
+                        backfill,
                     )
                 if (!session.networkRetired()) networkSessions[networkId] = session
                 session
@@ -563,6 +582,8 @@ class HistoryResyncCoordinator
             // that already converged, and there is nothing about it worth showing the user. True only
             // means chrome is ALLOWED — [activate] still has to prove there is work to show.
             private val chromeEligible: Boolean = true,
+            // A user-requested window fetch; published on its progress so the chat list can say so.
+            private val backfill: Boolean = false,
         ) {
             private val monitor = Any()
 
@@ -872,7 +893,7 @@ class HistoryResyncCoordinator
                             // The header is the chat list's syncing banner. A latent pass has nothing to
                             // announce; [activate] publishes the counters as they stand at that moment.
                             if (latentLocked()) return
-                            SyncPassProgress(total, settled)
+                            SyncPassProgress(total, settled, backfill)
                         }
                     _passProgress.update { it + (id to snapshot) }
                 }
@@ -1008,6 +1029,8 @@ class HistoryResyncCoordinator
             // See the [resyncNetwork] overload below: fired when the visible half of the pass has
             // converged, so the caller's entry gate does not span the paced sweep behind it.
             onCatchUpConverged: (suspend () -> Unit)? = null,
+            // A manual re-sync: discover from here instead of the stored watermark.
+            discoveryLowerMs: Long? = null,
         ): HistoryResyncState {
             if (!client.targetClassificationReady.value) {
                 withTimeoutOrNull(TARGET_CLASSIFICATION_WAIT_TIMEOUT_MS) {
@@ -1023,6 +1046,7 @@ class HistoryResyncCoordinator
                 initialLookbackMs,
                 chromeEligible,
                 onCatchUpConverged,
+                discoveryLowerMs,
             )
         }
 
@@ -1149,6 +1173,7 @@ class HistoryResyncCoordinator
             initialLookbackMs: Long? = INITIAL_SYNC_LOOKBACK_MS,
             chromeEligible: Boolean = true,
             onCatchUpConverged: (suspend () -> Unit)? = null,
+            discoveryLowerMs: Long? = null,
         ): HistoryResyncState =
             coalesced(
                 RequestSpec(
@@ -1201,8 +1226,9 @@ class HistoryResyncCoordinator
                     initialLookbackMs
                         ?.let { Instant.now().toEpochMilli() - it }
                         ?: Instant.EPOCH.toEpochMilli()
+                // A manual re-sync names its own window; the watermark still advances afterwards.
                 val lower =
-                    (previousSync ?: firstSyncLower)
+                    (discoveryLowerMs ?: previousSync ?: firstSyncLower)
                         .minus(TARGETS_FUZZ_MS)
                         .coerceAtLeast(Instant.EPOCH.toEpochMilli())
                 val upper = Instant.now().toEpochMilli() + TARGETS_FUZZ_MS
@@ -1302,6 +1328,7 @@ class HistoryResyncCoordinator
                                 (discovery.status as? WorkStatus.Incomplete)?.unprovenTieOnly == true
                         if (advanceWatermark && isCurrent() && highWater != null) {
                             syncPrefs.setLastSuccessfulSync(networkId, highWater)
+                            pruner.schedule(networkId)
                         }
                         // Strictly after the watermark, and deliberately: wave two is a paced sweep that can run
                         // for as long as the account has rooms, and the next reconnect's discovery window must
@@ -2116,6 +2143,33 @@ class HistoryResyncCoordinator
             // ingest persisted this non-terminal oldest boundary as a durable gap. Automatic reconnect
             // stops here; only user-authorized paging or manual refresh may traverse it with BEFORE.
             return WorkResult(highWater = highWater, inserted = inserted)
+        }
+
+        override suspend fun manualPass(
+            networkId: Long,
+            bufferIds: List<Long>,
+            work: suspend (Long) -> Unit,
+        ) {
+            val session = beginNetworkSession(networkId, sourceIdentity = Any(), chromeEligible = true, backfill = true)
+            session.queueAll(bufferIds)
+            // The user asked for this pass, so there is no "did discovery find anything" question to
+            // wait on before announcing it: publish the counters straight away.
+            session.activate()
+            try {
+                for (bufferId in bufferIds) {
+                    session.syncing(bufferId)
+                    work(bufferId)
+                    session.settle(bufferId, HistorySyncStatus.Idle)
+                }
+                session.finish(HistoryResyncState.UpToDate)
+            } catch (cancelled: CancellationException) {
+                // A user stop is not a failure: nothing gets an error badge.
+                session.finish(HistoryResyncState.UpToDate)
+                throw cancelled
+            } catch (failure: Throwable) {
+                session.finish(HistoryResyncState.Failed("manual_pass"))
+                throw failure
+            }
         }
 
         /** Manual eager recovery retained for explicit Missing/All Available requests. */

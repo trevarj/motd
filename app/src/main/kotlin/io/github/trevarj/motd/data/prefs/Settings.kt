@@ -92,6 +92,58 @@ enum class HistorySyncDepth(
 }
 
 /**
+ * How many of a room's newest messages stay on the device. Older rows are pruned locally and
+ * fetched again from the bouncer when the reader scrolls back — exactly what opening a channel
+ * does anyway — so only rooms on networks with server-side history are ever trimmed. Age is
+ * deliberately not a criterion: the bouncer is the archive, the device only needs enough rows to
+ * scroll through before the next fetch. Direct messages keep more than channels. [OFF] never prunes
+ * and is the default: only an explicit choice ever deletes history the app used to keep.
+ */
+enum class HistoryRetention(
+    val channelRows: Int?,
+    val queryRows: Int?,
+) {
+    OFF(null, null),
+    COMPACT(300, 2_000),
+    BALANCED(1_000, 5_000),
+    GENEROUS(5_000, 20_000),
+
+    /** Caps come from [Settings.historyRetentionCustomRows]; see [Settings.channelRetentionRows]. */
+    CUSTOM(null, null),
+}
+
+/** Direct messages keep this many times a channel's cap, for presets and custom values alike. */
+const val QUERY_RETENTION_MULTIPLIER: Int = 5
+
+/** Smallest custom cap: below this a channel cannot be scrolled before the next fetch. */
+const val MIN_CUSTOM_RETENTION_ROWS: Int = 50
+
+/**
+ * Thresholds offered for automatic compaction, in MB of reclaimable space after a prune; 0 turns
+ * it off. Coerced onto this list so a hand-edited preference can never arm a surprising rewrite.
+ */
+val AUTO_COMPACT_MB_CHOICES: List<Int> = listOf(0, 20, 50, 100, 250, 500)
+
+/** Default automatic-compaction threshold: a fast-paced account shouldn't need a weekly button press. */
+const val DEFAULT_AUTO_COMPACT_MB: Int = 50
+
+/** Snap a stored/incoming threshold onto [AUTO_COMPACT_MB_CHOICES]; anything unknown takes the default. */
+internal fun autoCompactMbFromPreference(saved: Int?): Int = saved?.takeIf { it in AUTO_COMPACT_MB_CHOICES } ?: DEFAULT_AUTO_COMPACT_MB
+
+/** Effective channel cap, or null when pruning is off. */
+val Settings.channelRetentionRows: Int?
+    get() = if (historyRetention == HistoryRetention.CUSTOM) historyRetentionCustomRows else historyRetention.channelRows
+
+/** Effective direct-message cap, or null when pruning is off. */
+val Settings.queryRetentionRows: Int?
+    get() =
+        if (historyRetention == HistoryRetention.CUSTOM) {
+            historyRetentionCustomRows * QUERY_RETENTION_MULTIPLIER
+        } else {
+            historyRetention.queryRows
+        }
+
+/**
  * Background delays offered for auto-away, in minutes. The stored value is coerced onto this list so
  * a hand-edited or future-build preference can never arm an unexpected timer.
  */
@@ -162,6 +214,12 @@ data class Settings(
     val chatSoundsEnabled: Boolean = true,
     /** Window the first history sync of a network enumerates; chosen during soju onboarding. */
     val historySyncDepth: HistorySyncDepth = HistorySyncDepth.MONTH,
+    /** Per-room cap on locally retained history; see [HistoryRetention]. Off unless the user opts in. */
+    val historyRetention: HistoryRetention = HistoryRetention.OFF,
+    /** Channel cap used by [HistoryRetention.CUSTOM]; chosen directly or derived from a size target. */
+    val historyRetentionCustomRows: Int = 1_000,
+    /** Rewrite the database file after a prune once at least this many MB are reclaimable; 0 = never. */
+    val autoCompactMb: Int = DEFAULT_AUTO_COMPACT_MB,
     /** Mark yourself away on every connected network while the app stays in the background. */
     val autoAwayEnabled: Boolean = false,
     /** How long the app must stay backgrounded before auto-away fires (minutes). */
@@ -259,6 +317,12 @@ interface SettingsRepository {
     suspend fun setChatSoundsEnabled(enabled: Boolean)
 
     suspend fun setHistorySyncDepth(d: HistorySyncDepth)
+
+    suspend fun setHistoryRetention(r: HistoryRetention) {}
+
+    suspend fun setHistoryRetentionCustomRows(rows: Int) {}
+
+    suspend fun setAutoCompactMb(mb: Int) {}
 
     suspend fun setAutoAwayEnabled(enabled: Boolean)
 
