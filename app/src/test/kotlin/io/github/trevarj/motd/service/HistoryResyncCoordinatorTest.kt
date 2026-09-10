@@ -3052,6 +3052,62 @@ class HistoryResyncCoordinatorTest {
         }
 
     @Test
+    fun manualPassPublishesProgressWhileItsWorkRunsAndReleasesItAfter() =
+        runTest {
+            val seen = mutableListOf<SyncPassProgress?>()
+            coordinator.manualPass(networkId, listOf(bufferId)) { id ->
+                assertEquals(bufferId, id)
+                seen += coordinator.passProgress.value[networkId]
+            }
+            // The chat-list bar reads pass progress; per-buffer transient statuses stay withheld
+            // under the engine's anti-flash policy and are not what a manual fetch relies on.
+            assertEquals(listOf(SyncPassProgress(total = 1, settled = 0, backfill = true)), seen)
+            assertNull(coordinator.passProgress.value[networkId])
+            assertNull(coordinator.syncStatuses.value[bufferId])
+        }
+
+    @Test
+    fun aCancelledManualPassLeavesNoProgressAndNoErrorBadge() =
+        runTest {
+            val started = CompletableDeferred<Unit>()
+            val pass =
+                async {
+                    coordinator.manualPass(networkId, listOf(bufferId)) {
+                        started.complete(Unit)
+                        awaitCancellation()
+                    }
+                }
+            started.await()
+            assertEquals(SyncPassProgress(total = 1, settled = 0, backfill = true), coordinator.passProgress.value[networkId])
+
+            pass.cancel()
+            pass.join()
+
+            assertNull(coordinator.passProgress.value[networkId])
+            assertNull(coordinator.syncStatuses.value[bufferId])
+        }
+
+    @Test
+    fun manualResyncDiscoversFromTheRequestedBoundNotTheWatermark() =
+        runTest {
+            val source = FakeSource { FakeResponse(endOfHistory = true) }
+            val watermark = System.currentTimeMillis() - 60_000
+            syncPrefs.setLastSuccessfulSync(networkId, watermark)
+
+            fun targetsLower(): Long =
+                requireNotNull(source.requests.single { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS }.bound2)
+                    .timestampBoundMillis()
+
+            coordinator.resyncNetwork(networkId, emptyList(), source)
+            assertTrue(kotlin.math.abs(targetsLower() - watermark) < 60_000)
+            source.requests.clear()
+
+            val requested = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1_000
+            coordinator.resyncNetwork(networkId, emptyList(), source, discoveryLowerMs = requested)
+            assertTrue(kotlin.math.abs(targetsLower() - requested) < 60_000)
+        }
+
+    @Test
     fun resyncSkipsTargetWhoseAdvertisedLatestIsAlreadyStored() =
         runTest {
             val source =

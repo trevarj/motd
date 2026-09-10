@@ -29,6 +29,17 @@ class ChatListSyncChromeTest {
     }
 
     @Test
+    fun a_backfill_pass_marks_the_whole_snapshot_as_backfilling() {
+        val snapshot =
+            syncChromeSnapshot(
+                passProgress = mapOf(1L to SyncPassProgress(total = 3, settled = 1), 2L to SyncPassProgress(70, 9, backfill = true)),
+                statuses = emptyMap(),
+            )
+
+        assertEquals(ChatListSyncChrome.Syncing(done = 10, total = 73, backfill = true), snapshot)
+    }
+
+    @Test
     fun a_live_pass_wins_over_buffers_still_waiting_on_another_network() {
         val snapshot =
             syncChromeSnapshot(

@@ -16,6 +16,7 @@ import io.github.trevarj.motd.audio.NetworkMediaHttp
 import io.github.trevarj.motd.avatar.LocalAvatarStore
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
+import io.github.trevarj.motd.data.sync.HistoryPrunerImpl
 import io.github.trevarj.motd.di.AppVisibilityImpl
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -66,6 +67,8 @@ class MotdApplication :
 
     @Inject lateinit var networkMediaHttp: NetworkMediaHttp
 
+    @Inject lateinit var historyPruner: HistoryPrunerImpl
+
     @ApplicationScope
     @Inject
     lateinit var applicationScope: CoroutineScope
@@ -89,6 +92,7 @@ class MotdApplication :
         pushInstanceCoordinator.start()
         pushLifecycleCoordinator.start()
         autoAwayCoordinator.start()
+        historyPruner.start()
         applicationScope.launch(Dispatchers.IO) {
             localAvatarStore.prune(database.bufferDao().localAvatarModels())
         }

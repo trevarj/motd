@@ -9,13 +9,18 @@ import io.github.trevarj.motd.avatar.SelfAvatarSetting
 import io.github.trevarj.motd.avatar.validateAvatarUrl
 import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.bouncer.parseZncLogin
+import io.github.trevarj.motd.data.db.HistoryPruneDao
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.HistorySyncDepth
 import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.data.sync.HistorySyncOutcome
+import io.github.trevarj.motd.data.sync.HistoryWindowFetcher
+import io.github.trevarj.motd.data.sync.estimateWindowFetch
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.obfs.VlessLink
@@ -23,10 +28,15 @@ import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.liberaEndpointChanged
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.ServerForm
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -34,6 +44,12 @@ import javax.inject.Inject
 data class NetworkSettingsUiState(
     val loaded: Boolean = false,
     val entity: NetworkEntity? = null,
+    /** Messages from this network held on the device; null until counted. */
+    val storedMessages: Long? = null,
+    /** Rough rows a manual fetch would add per window; null value = no estimate for that window. */
+    val syncEstimates: Map<HistorySyncDepth, Long?> = emptyMap(),
+    /** A manual fetch for this network is in flight. */
+    val historySyncRunning: Boolean = false,
     // User-facing display name (alias). Editable so a bouncer root need not show its raw host/IP.
     val displayName: String = "",
     // Opt-in IRC-over-WebSocket URL; blank = default TCP/TLS transport.
@@ -145,6 +161,8 @@ class NetworkSettingsViewModel
         private val avatarPrefs: AvatarPrefs,
         private val avatarController: AvatarController,
         private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
+        private val historyPruneDao: HistoryPruneDao? = null,
+        private val windowFetcher: HistoryWindowFetcher? = null,
     ) : ViewModel() {
         private val _state = MutableStateFlow(NetworkSettingsUiState())
         val state: StateFlow<NetworkSettingsUiState> = _state.asStateFlow()
@@ -152,9 +170,43 @@ class NetworkSettingsViewModel
         private var networkId: Long = 0
         private var pendingBouncerUpdate: NetworkEntity? = null
 
+        /** Outcomes of manual fetches for this network; the job itself lives in [HistoryWindowFetcher]. */
+        val historySyncResults: Flow<HistorySyncOutcome> =
+            (windowFetcher?.results ?: emptyFlow())
+                .filter { (id, _) -> id == networkId }
+                .map { (_, outcome) -> outcome }
+                .onEach { refreshHistoryFigures() }
+
+        /** Manual "fetch the last N days"; runs in the process scope so leaving this screen doesn't cancel it. */
+        fun resyncHistory(depth: HistorySyncDepth) {
+            windowFetcher?.fetch(networkId, depth.lookbackMs)
+        }
+
+        fun cancelResyncHistory() {
+            windowFetcher?.cancel(networkId)
+        }
+
+        /** Stored-message count and per-window fetch estimates for the tools section and the sync sheet. */
+        private fun refreshHistoryFigures() =
+            viewModelScope.launch {
+                val dao = historyPruneDao ?: return@launch
+                val spans = dao.roomSpans(networkId)
+                val now = System.currentTimeMillis()
+                _state.update {
+                    it.copy(
+                        storedMessages = dao.networkRows(networkId),
+                        syncEstimates = HistorySyncDepth.entries.associateWith { depth -> estimateWindowFetch(spans, depth.lookbackMs?.let { ms -> now - ms }) },
+                    )
+                }
+            }
+
         fun init(networkId: Long) {
             if (_state.value.loaded) return
             this.networkId = networkId
+            refreshHistoryFigures()
+            windowFetcher?.running?.let { running ->
+                viewModelScope.launch { running.collect { ids -> _state.update { it.copy(historySyncRunning = networkId in ids) } } }
+            }
             viewModelScope.launch {
                 val n = networkRepository.networkById(networkId)
                 val isZnc = networkId in bouncerKindPrefs.zncNetworkIds.first()

@@ -36,6 +36,8 @@ sealed interface ChatListSyncChrome {
     data class Syncing(
         val done: Int,
         val total: Int,
+        /** Some live pass is a user-requested window fetch, so the header says "backfilling". */
+        val backfill: Boolean = false,
     ) : ChatListSyncChrome
 
     /** Buffers are queued but no pass can run: nothing is connected yet. */
@@ -61,6 +63,7 @@ internal fun syncChromeSnapshot(
             ChatListSyncChrome.Syncing(
                 done = passProgress.values.sumOf(SyncPassProgress::settled),
                 total = passProgress.values.sumOf(SyncPassProgress::total),
+                backfill = passProgress.values.any(SyncPassProgress::backfill),
             )
         }
 

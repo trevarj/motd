@@ -58,6 +58,9 @@ internal object PrefKeys {
     val SHOW_COMPOSER_FORMATTING_TOOLS = stringPreferencesKey("show_composer_formatting_tools")
     val CHAT_SOUNDS_ENABLED = stringPreferencesKey("chat_sounds_enabled")
     val HISTORY_SYNC_DEPTH = stringPreferencesKey("history_sync_depth")
+    val HISTORY_RETENTION = stringPreferencesKey("history_retention")
+    val HISTORY_RETENTION_CUSTOM_ROWS = stringPreferencesKey("history_retention_custom_rows")
+    val AUTO_COMPACT_MB = stringPreferencesKey("auto_compact_mb")
     val AUTO_AWAY_ENABLED = stringPreferencesKey("auto_away_enabled")
     val AUTO_AWAY_MINUTES = stringPreferencesKey("auto_away_minutes")
     val AUTO_AWAY_MESSAGE = stringPreferencesKey("auto_away_message")
@@ -147,6 +150,16 @@ class DataStoreSettingsRepository
                         prefs[PrefKeys.HISTORY_SYNC_DEPTH]
                             ?.let { runCatching { HistorySyncDepth.valueOf(it) }.getOrNull() }
                             ?: HistorySyncDepth.MONTH,
+                    historyRetention =
+                        prefs[PrefKeys.HISTORY_RETENTION]
+                            ?.let { runCatching { HistoryRetention.valueOf(it) }.getOrNull() }
+                            ?: HistoryRetention.OFF,
+                    historyRetentionCustomRows =
+                        prefs[PrefKeys.HISTORY_RETENTION_CUSTOM_ROWS]
+                            ?.toIntOrNull()
+                            ?.coerceAtLeast(MIN_CUSTOM_RETENTION_ROWS)
+                            ?: 1_000,
+                    autoCompactMb = autoCompactMbFromPreference(prefs[PrefKeys.AUTO_COMPACT_MB]?.toIntOrNull()),
                     autoAwayEnabled = prefs[PrefKeys.AUTO_AWAY_ENABLED]?.toBooleanStrictOrNull() ?: false,
                     autoAwayMinutes = autoAwayMinutesFromPreference(prefs[PrefKeys.AUTO_AWAY_MINUTES]?.toIntOrNull()),
                     autoAwayMessage = prefs[PrefKeys.AUTO_AWAY_MESSAGE].orEmpty(),
@@ -317,6 +330,18 @@ class DataStoreSettingsRepository
 
         override suspend fun setHistorySyncDepth(d: HistorySyncDepth) {
             store.edit { it[PrefKeys.HISTORY_SYNC_DEPTH] = d.name }
+        }
+
+        override suspend fun setHistoryRetention(r: HistoryRetention) {
+            store.edit { it[PrefKeys.HISTORY_RETENTION] = r.name }
+        }
+
+        override suspend fun setHistoryRetentionCustomRows(rows: Int) {
+            store.edit { it[PrefKeys.HISTORY_RETENTION_CUSTOM_ROWS] = rows.coerceAtLeast(MIN_CUSTOM_RETENTION_ROWS).toString() }
+        }
+
+        override suspend fun setAutoCompactMb(mb: Int) {
+            store.edit { it[PrefKeys.AUTO_COMPACT_MB] = autoCompactMbFromPreference(mb).toString() }
         }
 
         override suspend fun setAutoAwayEnabled(enabled: Boolean) {

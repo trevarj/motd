@@ -80,6 +80,8 @@ import io.github.trevarj.motd.data.sync.ChatSoundPlayer
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator
 import io.github.trevarj.motd.data.sync.HistoryGapFiller
+import io.github.trevarj.motd.data.sync.HistoryPruner
+import io.github.trevarj.motd.data.sync.HistoryPrunerImpl
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.dcc.DccTransferController
@@ -261,6 +263,9 @@ internal abstract class AppModule {
     /** Message/mention notification hook consumed by EventProcessor (WP5 seam → MotdNotifications). */
     @Binds @Singleton
     abstract fun messageNotifier(impl: MotdNotifications): MessageNotifier
+
+    @Binds @Singleton
+    abstract fun historyPruner(impl: HistoryPrunerImpl): HistoryPruner
 
     @Binds @Singleton
     abstract fun chatSoundPlayer(impl: AndroidChatSoundPlayer): ChatSoundPlayer

@@ -102,6 +102,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.lang.ref.WeakReference
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
@@ -2180,6 +2181,21 @@ class ConnectionManagerImpl
         private fun isReadMarkerCap(cap: String): Boolean =
             cap == READ_MARKER_CAP || cap.startsWith("$READ_MARKER_CAP=") ||
                 cap == SOJU_READ_CAP || cap.startsWith("$SOJU_READ_CAP=")
+
+        override suspend fun resyncHistory(
+            networkId: Long,
+            lookbackMs: Long?,
+        ): HistoryResyncState {
+            val client = clientFor(networkId) ?: return HistoryResyncState.Failed("offline")
+            return historyResyncCoordinator.resyncNetwork(
+                networkId = networkId,
+                openBuffers = openBuffers(networkId),
+                client = client,
+                isCurrent = { clientFor(networkId) === client },
+                initialLookbackMs = lookbackMs,
+                discoveryLowerMs = lookbackMs?.let { Instant.now().toEpochMilli() - it } ?: Instant.EPOCH.toEpochMilli(),
+            )
+        }
 
         private suspend fun openBuffers(networkId: Long): List<OpenBufferTarget> = bufferDao.openTargets(networkId).map { OpenBufferTarget(it.id, it.name, it.pinned) }
 

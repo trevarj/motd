@@ -9,7 +9,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 
-enum class SettingsSearchPage { ROOT, APPEARANCE, CHAT, DELIVERY, UPLOADS, NETWORKS, BACKUP, LABS, AI_LABS, ABOUT }
+enum class SettingsSearchPage { ROOT, APPEARANCE, CHAT, DELIVERY, HISTORY, UPLOADS, NETWORKS, BACKUP, LABS, AI_LABS, ABOUT }
 
 sealed interface SettingsSearchDestination {
     data class Page(
@@ -135,6 +135,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_appearance, R.string.settings_appearance_summary, "experience display", SettingsSearchPage.APPEARANCE, SettingsTarget.APPEARANCE),
         spec(R.string.settings_chat, R.string.settings_chat_summary, "conversation messages", SettingsSearchPage.CHAT, SettingsTarget.CHAT),
         spec(R.string.settings_delivery, R.string.settings_delivery_summary, "notifications push background", SettingsSearchPage.DELIVERY, SettingsTarget.DELIVERY),
+        spec(R.string.settings_history, R.string.settings_history_summary, "messages storage database prune size", SettingsSearchPage.HISTORY, SettingsTarget.HISTORY),
         spec(R.string.settings_uploads, R.string.settings_uploads_summary, "attachments paste files", SettingsSearchPage.UPLOADS, SettingsTarget.UPLOADS),
         spec(R.string.settings_backup_restore, R.string.settings_backup_restore_summary, "data export import", SettingsSearchPage.BACKUP, SettingsTarget.BACKUP),
         spec(R.string.settings_labs, R.string.settings_labs_summary, "experimental", SettingsSearchPage.LABS, SettingsTarget.LABS),
@@ -181,6 +182,9 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_friends, R.string.settings_people, "people nicks", SettingsSearchPage.CHAT, SettingsTarget.FRIENDS),
         spec(R.string.settings_fools, R.string.settings_people, "ignore people nicks", SettingsSearchPage.CHAT, SettingsTarget.FOOLS),
         spec(R.string.settings_fools_mode, R.string.settings_fools_hide_desc, "collapse hide", SettingsSearchPage.CHAT, SettingsTarget.FOOLS_MODE),
+        spec(R.string.settings_history_retention, R.string.settings_history_retention_desc, "prune storage database size old messages", SettingsSearchPage.HISTORY, SettingsTarget.HISTORY_RETENTION),
+        spec(R.string.settings_auto_compact, R.string.settings_auto_compact_desc, "vacuum automatic storage database size free space", SettingsSearchPage.HISTORY, SettingsTarget.AUTO_COMPACT),
+        spec(R.string.settings_compact_database, R.string.settings_local_history_section, "vacuum storage database size free space", SettingsSearchPage.HISTORY, SettingsTarget.COMPACT_DATABASE),
         spec(R.string.settings_delivery_socket, R.string.settings_delivery_socket_desc, "persistent connection", SettingsSearchPage.DELIVERY, SettingsTarget.PERSISTENT_DELIVERY),
         spec(R.string.settings_delivery_push, R.string.settings_delivery_push_desc, "unified push distributor", SettingsSearchPage.DELIVERY, SettingsTarget.UNIFIED_PUSH),
         spec(R.string.settings_start_on_boot, R.string.settings_start_on_boot_desc, "restart reconnect", SettingsSearchPage.DELIVERY, SettingsTarget.START_ON_BOOT),

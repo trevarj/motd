@@ -15,6 +15,7 @@ import io.github.trevarj.motd.data.db.ChatFolderDao
 import io.github.trevarj.motd.data.db.DccTransferDao
 import io.github.trevarj.motd.data.db.HistoryCursorDao
 import io.github.trevarj.motd.data.db.HistoryGapDao
+import io.github.trevarj.motd.data.db.HistoryPruneDao
 import io.github.trevarj.motd.data.db.MemberDao
 import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.MotdDatabase
@@ -77,4 +78,6 @@ internal object DbModule {
     @Provides fun provideHistoryCursorDao(db: MotdDatabase): HistoryCursorDao = db.historyCursorDao()
 
     @Provides fun provideHistoryGapDao(db: MotdDatabase): HistoryGapDao = db.historyGapDao()
+
+    @Provides fun provideHistoryPruneDao(db: MotdDatabase): HistoryPruneDao = db.historyPruneDao()
 }

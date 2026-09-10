@@ -220,6 +220,16 @@ interface ConnectionManager {
      */
     suspend fun checkpointHistory(focusBufferId: Long? = null)
 
+    /**
+     * Re-run one network's discovery pass over the last [lookbackMs] (null: everything), the way its
+     * first sync did: chats active in that window are found and seeded with their latest page, and
+     * older messages keep loading as the user scrolls. Ignores the stored watermark for this pass.
+     */
+    suspend fun resyncHistory(
+        networkId: Long,
+        lookbackMs: Long?,
+    ): HistoryResyncState = HistoryResyncState.Failed("unavailable")
+
     /** Accepted means every chunk is durably represented, not necessarily written to the wire. */
     suspend fun sendMessage(
         bufferId: Long,

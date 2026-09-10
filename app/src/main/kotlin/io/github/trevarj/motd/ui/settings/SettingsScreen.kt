@@ -34,6 +34,7 @@ fun SettingsScreen(
     onOpenAppearance: () -> Unit = {},
     onOpenChat: () -> Unit = {},
     onOpenDelivery: () -> Unit = {},
+    onOpenHistory: () -> Unit = {},
     onOpenNetworks: () -> Unit = {},
     onOpenUploads: () -> Unit = {},
     onOpenBackupRestore: () -> Unit = {},
@@ -50,6 +51,7 @@ fun SettingsScreen(
         onOpenAppearance = onOpenAppearance,
         onOpenChat = onOpenChat,
         onOpenDelivery = onOpenDelivery,
+        onOpenHistory = onOpenHistory,
         onOpenNetworks = onOpenNetworks,
         onOpenUploads = onOpenUploads,
         onOpenBackupRestore = onOpenBackupRestore,
@@ -73,6 +75,7 @@ fun SettingsContent(
     onOpenLabs: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenSearchResult: (SettingsSearchDestination) -> Unit,
+    onOpenHistory: () -> Unit = {},
 ) {
     var searching by rememberSaveable { mutableStateOf(state.query.isNotEmpty()) }
     val resources = LocalResources.current
@@ -150,6 +153,7 @@ fun SettingsContent(
                 onOpenAppearance = onOpenAppearance,
                 onOpenChat = onOpenChat,
                 onOpenDelivery = onOpenDelivery,
+                onOpenHistory = onOpenHistory,
                 onOpenNetworks = onOpenNetworks,
                 onOpenUploads = onOpenUploads,
                 onOpenBackupRestore = onOpenBackupRestore,
@@ -171,6 +175,7 @@ private fun SettingsRoot(
     onOpenBackupRestore: () -> Unit,
     onOpenLabs: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenHistory: () -> Unit = {},
 ) {
     val context = LocalContext.current
     SettingsGroup(title = stringResource(R.string.settings_group_connections)) {
@@ -223,6 +228,14 @@ private fun SettingsRoot(
         )
     }
     SettingsGroup(title = stringResource(R.string.settings_group_data_support)) {
+        SettingsNavigationRow(
+            title = stringResource(R.string.settings_history),
+            summary = stringResource(R.string.settings_history_summary),
+            value = historyRetentionValue(state.settings),
+            modifier = Modifier.testTag("settings_category_history"),
+            onClick = onOpenHistory,
+        )
+        SettingsDivider()
         SettingsNavigationRow(
             title = stringResource(R.string.settings_backup_restore),
             summary = stringResource(R.string.settings_backup_restore_summary),

@@ -44,6 +44,7 @@ import io.github.trevarj.motd.ui.settings.BackupRestoreScreen
 import io.github.trevarj.motd.ui.settings.ChatSettingsScreen
 import io.github.trevarj.motd.ui.settings.DeliverySettingsScreen
 import io.github.trevarj.motd.ui.settings.DirectConnectionsScreen
+import io.github.trevarj.motd.ui.settings.HistorySettingsScreen
 import io.github.trevarj.motd.ui.settings.ManageNicksScreen
 import io.github.trevarj.motd.ui.settings.NetworkSettingsScreen
 import io.github.trevarj.motd.ui.settings.NetworkToolsScreen
@@ -281,6 +282,7 @@ fun MotdNavGraph(
                 onOpenAppearance = { navController.navigate(AppearanceSettingsRoute()) },
                 onOpenChat = { navController.navigate(ChatSettingsRoute()) },
                 onOpenDelivery = { navController.navigate(DeliverySettingsRoute()) },
+                onOpenHistory = { navController.navigate(HistorySettingsRoute()) },
                 onOpenNetworks = { navController.navigate(NetworksSettingsRoute()) },
                 onOpenUploads = { navController.navigate(UploadsSettingsRoute()) },
                 onOpenBackupRestore = { navController.navigate(BackupRestoreRoute()) },
@@ -313,6 +315,12 @@ fun MotdNavGraph(
         composable<DeliverySettingsRoute> { entry ->
             DeliverySettingsScreen(
                 target = entry.toRoute<DeliverySettingsRoute>().target,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable<HistorySettingsRoute> { entry ->
+            HistorySettingsScreen(
+                target = entry.toRoute<HistorySettingsRoute>().target,
                 onBack = { navController.popBackStack() },
             )
         }
@@ -595,6 +603,7 @@ private fun NavHostController.openSettingsResult(destination: SettingsSearchDest
                 SettingsSearchPage.APPEARANCE -> navigate(AppearanceSettingsRoute(target))
                 SettingsSearchPage.CHAT -> navigate(ChatSettingsRoute(target))
                 SettingsSearchPage.DELIVERY -> navigate(DeliverySettingsRoute(target))
+                SettingsSearchPage.HISTORY -> navigate(HistorySettingsRoute(target))
                 SettingsSearchPage.UPLOADS -> navigate(UploadsSettingsRoute(target))
                 SettingsSearchPage.NETWORKS -> navigate(NetworksSettingsRoute(target))
                 SettingsSearchPage.BACKUP -> navigate(BackupRestoreRoute(target))

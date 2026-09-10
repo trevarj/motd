@@ -74,6 +74,8 @@ abstract class MotdDatabase : RoomDatabase() {
 
     abstract fun historyGapDao(): HistoryGapDao
 
+    abstract fun historyPruneDao(): HistoryPruneDao
+
     abstract fun connectionGenerationDao(): ConnectionGenerationDao
 
     abstract fun appStateDao(): AppStateDao

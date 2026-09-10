@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.history.PageProgress
 import io.github.trevarj.motd.data.history.Pageability
 import io.github.trevarj.motd.data.history.newestPageableGap
 import io.github.trevarj.motd.data.history.olderPageability
+import io.github.trevarj.motd.data.history.openGapFloor
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -154,6 +155,93 @@ class HistoryGapFillCoordinator
 
         /** Gap ids with a fill in flight, for the spinner on their divider rows. */
         val fillsInFlight: StateFlow<Set<Long>> = filling.asStateFlow()
+
+        /**
+         * Eagerly page [roomId] older until its oldest local row is at or below [floorMs] — the
+         * "fetch the last N days" a discovery pass deliberately never does (that pass seeds one newest
+         * page per chat and leaves the rest to scrolling). A room already reaching the floor costs
+         * nothing; a room mid gap-fill is skipped rather than raced.
+         */
+        suspend fun fetchRoomWindow(
+            roomId: RoomId,
+            floorMs: Long,
+            pageSize: Int = WINDOW_PAGE_SIZE,
+        ): GapFill =
+            fetchRoomWindow(roomId, floorMs, historyFor(roomId), pageSize).also { fetch ->
+                diagnostics.record("chat_history", "window_fetch_ended") {
+                    mapOf(
+                        "room_id" to roomId,
+                        "floor" to floorMs,
+                        "pages_loaded" to fetch.pagesLoaded,
+                        "inserted" to fetch.insertedCount,
+                        "end_reason" to fetch.endReason,
+                        "error_class" to fetch.error?.let { it::class.simpleName },
+                    )
+                }
+            }
+
+        internal suspend fun fetchRoomWindow(
+            roomId: RoomId,
+            floorMs: Long,
+            source: HistorySource,
+            pageSize: Int = PAGE_SIZE,
+            pageBudget: Int = WINDOW_PAGE_BUDGET,
+        ): GapFill {
+            val lock = roomLocks.computeIfAbsent(roomId) { Mutex() }
+            if (!lock.tryLock()) return GapFill(null, 0, 0, "already_filling")
+            try {
+                val room = bufferDao.observeById(roomId) ?: return GapFill(null, 0, 0, "missing_room")
+                if (room.type == BufferType.SERVER) return GapFill(null, 0, 0, "server_room")
+                var pages = 0
+                var inserted = 0
+                try {
+                    while (true) {
+                        // The floor is measured on what the store holds, so a room that already reaches it
+                        // — or reached it with this page — is done without another request.
+                        val oldest = oldestLocalRow(roomId)
+                        val oldestTime = oldest?.serverTime
+                        if (oldestTime != null && oldestTime <= floorMs) return GapFill(null, pages, inserted, "window_reached")
+                        val gaps = historyGapDao.forRoom(roomId)
+                        val start =
+                            olderPageability(null, historyComplete(roomId), cursorOldest(roomId), oldest, progress = null, gapFloor = openGapFloor(gaps))
+                        val next =
+                            when (start) {
+                                is Pageability.End -> return GapFill(null, pages, inserted, start.reason)
+                                Pageability.SeedLatest -> return GapFill(null, pages, inserted, "no_local_boundary")
+                                is Pageability.Page -> start
+                            }
+                        val result =
+                            loader.loadPage(room.networkId, roomId, room.ircTarget, HistoryPageLoader.Direction.OLDER, source, pageSize, boundary = next.boundary)
+                        pages++
+                        val page =
+                            when (result) {
+                                is HistoryPageLoader.PageResult.Loaded -> result
+                                HistoryPageLoader.PageResult.Unsupported -> return GapFill(null, pages, inserted, HISTORY_UNSUPPORTED)
+                                is HistoryPageLoader.PageResult.Unavailable -> return GapFill(null, pages, inserted, "history_unavailable", result.cause)
+                                is HistoryPageLoader.PageResult.Failed -> return GapFill(null, pages, inserted, "page_failed", result.cause)
+                            }
+                        inserted += page.insertedCount
+                        val verdict =
+                            olderPageability(
+                                null,
+                                historyComplete(roomId),
+                                cursorOldest(roomId),
+                                oldestLocalRow(roomId),
+                                PageProgress(previous = next.boundary, insertedCount = page.insertedCount),
+                                gapFloor = openGapFloor(historyGapDao.forRoom(roomId)),
+                            )
+                        if (verdict is Pageability.End) return GapFill(null, pages, inserted, verdict.reason)
+                        if (pages >= pageBudget) return GapFill(null, pages, inserted, "page_budget")
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    return GapFill(null, pages, inserted, "error", error)
+                }
+            } finally {
+                lock.unlock()
+            }
+        }
 
         /** Fill the named gap. Each call grants a fresh page budget. */
         suspend fun fillGap(
@@ -403,6 +491,16 @@ class HistoryGapFillCoordinator
              * progress, so the budget is a ceiling and rarely the reason a fill ends.
              */
             internal const val PAGE_BUDGET = 3
+
+            /**
+             * Rows per request for a manual window fetch. Scrolling keeps the small [PAGE_SIZE] so a
+             * page lands before the reader reaches it; a backfill is round-trip bound, so it asks for
+             * as much as servers usually allow. The loader clamps to the advertised CHATHISTORY limit.
+             */
+            internal const val WINDOW_PAGE_SIZE = 500
+
+            /** Pages one manual window fetch may spend per room: "everything" stays bounded. */
+            internal const val WINDOW_PAGE_BUDGET = 400
 
             private const val PAGE_SIZE = 50
 
