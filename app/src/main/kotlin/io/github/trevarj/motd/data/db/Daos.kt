@@ -2473,17 +2473,36 @@ interface CanonicalTimelineDao {
     )
     suspend fun releaseNotification(eventId: TimelineEventId)
 
+    // Both recovery scans are floored at the later of `newest event - :window` and the serverTime
+    // of the :maxRows-th newest event (so at most :maxRows rows plus ties), walking a bounded index range instead of the whole
+    // table: `notificationHandled` only ever flips to 1 one row at a time, so on a large archive
+    // nearly every row matches the flag predicates and an unbounded scan costs seconds at every
+    // process start. The row cap keeps a flooding channel from making the time window unbounded;
+    // anchoring on stored serverTimes rather than the wall clock keeps the floor meaningful when the
+    // device clock or the server's timestamps are off.
     @Query(
         """UPDATE messages SET notificationClaimed = 0, notificationClaimOwner = NULL
-           WHERE notificationHandled = 0 AND notificationClaimed = 1
+           WHERE serverTime >= MAX(
+                     (SELECT MAX(serverTime) FROM messages) - :window,
+                     COALESCE((SELECT serverTime FROM messages
+                               ORDER BY serverTime DESC LIMIT 1 OFFSET :maxRows - 1), 0))
+             AND notificationHandled = 0 AND notificationClaimed = 1
              AND (notificationClaimOwner IS NULL OR notificationClaimOwner != :currentOwner)""",
     )
-    suspend fun releaseInterruptedNotificationClaims(currentOwner: String)
+    suspend fun releaseInterruptedNotificationClaims(
+        currentOwner: String,
+        window: Long,
+        maxRows: Int,
+    )
 
     @Query(
         """SELECT m.* FROM messages m
            JOIN buffers b ON b.id = m.bufferId
-           WHERE m.notificationHandled = 0 AND m.notificationClaimed = 0
+           WHERE m.serverTime >= MAX(
+                     (SELECT MAX(serverTime) FROM messages) - :window,
+                     COALESCE((SELECT serverTime FROM messages
+                               ORDER BY serverTime DESC LIMIT 1 OFFSET :maxRows - 1), 0))
+             AND m.notificationHandled = 0 AND m.notificationClaimed = 0
              AND m.isSelf = 0 AND m.failed = 0
              AND EXISTS (
                  SELECT 1 FROM event_observations o
@@ -2500,7 +2519,11 @@ interface CanonicalTimelineDao {
            ORDER BY m.serverTime, m.timelineOrder, m.id
            LIMIT :limit""",
     )
-    suspend fun pendingNotifications(limit: Int): List<TimelineEventEntity>
+    suspend fun pendingNotifications(
+        limit: Int,
+        window: Long,
+        maxRows: Int,
+    ): List<TimelineEventEntity>
 }
 
 @Dao

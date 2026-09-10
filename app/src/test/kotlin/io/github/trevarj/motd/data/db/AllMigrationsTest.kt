@@ -492,7 +492,7 @@ class AllMigrationsTest {
                 )
                 assertEquals(
                     listOf("me: mention"),
-                    migrated.canonicalTimelineDao().pendingNotifications(10).map { it.text },
+                    migrated.canonicalTimelineDao().pendingNotifications(10, window = Long.MAX_VALUE / 2, maxRows = Int.MAX_VALUE).map { it.text },
                 )
                 assertEquals(
                     listOf("me: mention"),
