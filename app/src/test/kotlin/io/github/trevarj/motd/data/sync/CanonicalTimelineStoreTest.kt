@@ -557,7 +557,7 @@ class CanonicalTimelineStoreTest {
                 listOf(older.event.id),
                 setup.db
                     .canonicalTimelineDao()
-                    .pendingNotifications(10)
+                    .pendingNotifications(10, window = Long.MAX_VALUE / 2, maxRows = Int.MAX_VALUE)
                     .map { it.id },
             )
             setup.db.close()
@@ -576,10 +576,12 @@ class CanonicalTimelineStoreTest {
 
             setup.db.canonicalTimelineDao().releaseInterruptedNotificationClaims(
                 NotificationClaimSession.owner,
+                window = Long.MAX_VALUE / 2,
+                maxRows = Int.MAX_VALUE,
             )
             assertEquals(false, setup.store.claimNotification(event.event.id))
 
-            setup.db.canonicalTimelineDao().releaseInterruptedNotificationClaims("next-process")
+            setup.db.canonicalTimelineDao().releaseInterruptedNotificationClaims("next-process", window = Long.MAX_VALUE / 2, maxRows = Int.MAX_VALUE)
             assertEquals(true, setup.store.claimNotification(event.event.id))
             setup.db.close()
         }

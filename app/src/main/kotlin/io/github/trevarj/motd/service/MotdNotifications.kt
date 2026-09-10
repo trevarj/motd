@@ -149,8 +149,8 @@ class MotdNotifications
         /** Rebuild interrupted chat/invitation presentation directly from canonical database state. */
         internal suspend fun recoverCanonicalNotifications() {
             val dao = db.canonicalTimelineDao()
-            dao.releaseInterruptedNotificationClaims(NotificationClaimSession.owner)
-            for (event in dao.pendingNotifications(MAX_RECOVERY_NOTIFICATIONS)) {
+            dao.releaseInterruptedNotificationClaims(NotificationClaimSession.owner, RECOVERY_WINDOW_MS, RECOVERY_SCAN_ROWS)
+            for (event in dao.pendingNotifications(MAX_RECOVERY_NOTIFICATIONS, RECOVERY_WINDOW_MS, RECOVERY_SCAN_ROWS)) {
                 if (dao.claimNotification(event.id, NotificationClaimSession.owner) != 1) continue
                 try {
                     val buffer = db.bufferDao().observeById(event.bufferId)
@@ -904,6 +904,12 @@ class MotdNotifications
                 )
             private const val V10_NOTIFICATION_RESET = "v10_notification_reset"
             private const val MAX_RECOVERY_NOTIFICATIONS = 200
+
+            /** Recovery only re-presents events this close to the newest stored one; older ones are stale. */
+            private const val RECOVERY_WINDOW_MS = 48L * 60 * 60 * 1000
+
+            /** ...and never looks past this many of the newest events, however busy the last 48h were. */
+            private const val RECOVERY_SCAN_ROWS = 5_000
 
             // Deep-link extras carried by a message notification's content intent (tap → open + jump).
             const val ACTION_OPEN_BUFFER = "io.github.trevarj.motd.OPEN_BUFFER"
