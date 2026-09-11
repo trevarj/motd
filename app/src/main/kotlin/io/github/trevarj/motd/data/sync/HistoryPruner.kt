@@ -217,6 +217,11 @@ class HistoryPrunerImpl
             roomId: RoomId,
             keepRows: Int,
         ): Int {
+            // The floor is the N-th newest serverTime, so a deleted row can share no retained row's
+            // serverTime — including a localReadAnchorEventId row pruned below the read anchor: the
+            // unread queries compare serverTime first and the order/id tiebreakers only matter at
+            // exactly the anchor's serverTime, so the pruned anchor row degrades to a time-only
+            // anchor and `unreadCountIncomplete` honestly reports "+N". Verified, not asserted.
             val floor = dao.pruneFloor(roomId, keepOffset = keepRows - 1) ?: return 0
             var deleted = 0
             // Short transactions: every row also drops its FTS entry, aliases, and observations, and

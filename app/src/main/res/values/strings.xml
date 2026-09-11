@@ -961,7 +961,7 @@
     <string name="settings_history_projected">After pruning</string>
     <string name="settings_history_projected_off">Never pruned</string>
     <string name="settings_history_apply">Apply</string>
-    <string name="settings_local_history_section">Keep on this device</string>
+    <string name="settings_local_history_section">Storage</string>
     <string name="network_settings_stored_messages">Messages on this device</string>
     <string name="network_settings_stored_messages_desc">Stored locally from this network</string>
     <string name="network_settings_resync_estimate">≈ %1$s messages, from your current history</string>
@@ -977,6 +977,7 @@
         <item quantity="one">%d message</item>
         <item quantity="other">%d messages</item>
     </plurals>
+    <string name="network_settings_resync_partial">History sync interrupted after fetching %1$s</string>
     <plurals name="network_settings_resync_fetched_chats">
         <item quantity="one">%d chat</item>
         <item quantity="other">%d chats</item>
@@ -1009,6 +1010,7 @@
     <string name="settings_compact_database_running">Compacting database…</string>
     <string name="settings_compact_database_running_desc">Rewriting the file. Chats stay usable; the size updates when it finishes.</string>
     <string name="settings_compact_database_desc">Using %1$s. Prunes now and rewrites the file so freed space returns to the device.</string>
+    <string name="settings_compact_database_search_desc">Rewrite the database file to return free space to the device.</string>
     <string name="settings_database_compacted">Freed %1$s</string>
     <string name="settings_database_compact_failed">Couldn\'t compact the database</string>
     <string name="settings_appearance_messages_section">Messages</string>

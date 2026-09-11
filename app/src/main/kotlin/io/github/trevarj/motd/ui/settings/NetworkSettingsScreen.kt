@@ -990,6 +990,13 @@ private fun historySyncResultMessage(
             }
         }
 
+        is HistorySyncOutcome.Partial -> {
+            resources.getString(
+                R.string.network_settings_resync_partial,
+                resources.getQuantityString(R.plurals.network_settings_resync_fetched_messages, result.messages, result.messages),
+            )
+        }
+
         HistorySyncOutcome.Unsupported -> {
             resources.getString(R.string.network_settings_resync_unsupported)
         }

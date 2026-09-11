@@ -49,6 +49,12 @@ class SettingsUiModelsTest {
         }
 
     @Test
+    fun `history size planner accepts both decimal separators`() {
+        assertEquals(12.5, parseMegabytes("12.5")!!, 0.0)
+        assertEquals(12.5, parseMegabytes("12,5")!!, 0.0)
+    }
+
+    @Test
     fun `theme groups expose every exact light and dark selection once`() {
         val selectableThemes = ColorThemePreset.entries.filter { it != ColorThemePreset.AMOLED }.toSet()
         val grouped = listOf(ColorThemePreset.SYSTEM) + LIGHT_THEME_PRESETS + DARK_THEME_PRESETS

@@ -189,6 +189,9 @@ class HistoryGapFillCoordinator
         ): GapFill {
             val lock = roomLocks.computeIfAbsent(roomId) { Mutex() }
             if (!lock.tryLock()) return GapFill(null, 0, 0, "already_filling")
+            // ponytail: a divider tap during this walk drops with no per-seam spinner — [filling]
+            // is keyed by gap id and this walk pins no gap, and the global "Backfilling…" sync bar
+            // is the feedback. Room-keyed seam spinners if this ever confuses users.
             try {
                 val room = bufferDao.observeById(roomId) ?: return GapFill(null, 0, 0, "missing_room")
                 if (room.type == BufferType.SERVER) return GapFill(null, 0, 0, "server_room")

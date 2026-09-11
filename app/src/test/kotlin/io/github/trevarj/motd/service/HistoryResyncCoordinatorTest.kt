@@ -3057,12 +3057,14 @@ class HistoryResyncCoordinatorTest {
             val seen = mutableListOf<SyncPassProgress?>()
             coordinator.manualPass(networkId, listOf(bufferId)) { id ->
                 assertEquals(bufferId, id)
-                seen += coordinator.passProgress.value[networkId]
+                seen +=
+                    coordinator.passProgress.value.values
+                        .singleOrNull()
             }
             // The chat-list bar reads pass progress; per-buffer transient statuses stay withheld
             // under the engine's anti-flash policy and are not what a manual fetch relies on.
             assertEquals(listOf(SyncPassProgress(total = 1, settled = 0, backfill = true)), seen)
-            assertNull(coordinator.passProgress.value[networkId])
+            assertEquals(emptyMap<Long, SyncPassProgress>(), coordinator.passProgress.value)
             assertNull(coordinator.syncStatuses.value[bufferId])
         }
 
@@ -3078,12 +3080,16 @@ class HistoryResyncCoordinatorTest {
                     }
                 }
             started.await()
-            assertEquals(SyncPassProgress(total = 1, settled = 0, backfill = true), coordinator.passProgress.value[networkId])
+            assertEquals(
+                SyncPassProgress(total = 1, settled = 0, backfill = true),
+                coordinator.passProgress.value.values
+                    .single(),
+            )
 
             pass.cancel()
             pass.join()
 
-            assertNull(coordinator.passProgress.value[networkId])
+            assertEquals(emptyMap<Long, SyncPassProgress>(), coordinator.passProgress.value)
             assertNull(coordinator.syncStatuses.value[bufferId])
         }
 
@@ -3105,6 +3111,56 @@ class HistoryResyncCoordinatorTest {
             val requested = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1_000
             coordinator.resyncNetwork(networkId, emptyList(), source, discoveryLowerMs = requested)
             assertTrue(kotlin.math.abs(targetsLower() - requested) < 60_000)
+        }
+
+    @Test
+    fun aBackfillPassDoesNotTakeTheSlotAReconnectPassOwns() =
+        runTest {
+            val otherBuffer = insertChannels(listOf("#other")).single()
+            val release = CompletableDeferred<Unit>()
+            // The reconnect pass parks on its first per-buffer LATEST fetch, so the manual pass
+            // can overlap it while it owns the network's session slot.
+            val source =
+                FakeSource(supportsConcurrent = true) { request ->
+                    when (request.subcommand) {
+                        ChatHistoryRequest.Subcommand.TARGETS -> {
+                            FakeResponse(endOfHistory = true)
+                        }
+
+                        else -> {
+                            release.await()
+                            FakeResponse(endOfHistory = true)
+                        }
+                    }
+                }
+            val catchUp =
+                async {
+                    coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan", otherBuffer to "#other"), source)
+                }
+            coordinator.passProgress.first { it[networkId]?.total == 2 }
+
+            // The manual backfill publishes its own header while the reconnect pass is mid-flight:
+            // before the fix it took the network slot, so both entries could not coexist.
+            val backfillRelease = CompletableDeferred<Unit>()
+            val backfill = async { coordinator.manualPass(networkId, listOf(otherBuffer)) { backfillRelease.await() } }
+            val overlapping =
+                withTimeout(5_000) {
+                    coordinator.passProgress.first { progress ->
+                        progress[networkId]?.total == 2 && progress.values.any(SyncPassProgress::backfill)
+                    }
+                }
+            assertEquals(2, overlapping.size)
+            assertEquals(SyncPassProgress(total = 2, settled = 0), overlapping.getValue(networkId))
+            assertEquals(SyncPassProgress(total = 1, settled = 0, backfill = true), overlapping.values.single(SyncPassProgress::backfill))
+
+            // The reconnect pass still owns its header through the overlap, settles, and releases it.
+            release.complete(Unit)
+            assertTrue(catchUp.await() is HistoryResyncState.UpToDate)
+            assertNull(coordinator.syncStatuses.value[bufferId])
+            backfillRelease.complete(Unit)
+            backfill.await()
+            assertNull(coordinator.syncStatuses.value[otherBuffer])
+            assertEquals(emptyMap<Long, SyncPassProgress>(), coordinator.passProgress.value)
         }
 
     @Test

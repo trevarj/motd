@@ -28,6 +28,12 @@ sealed interface HistorySyncOutcome {
         val chats: Int,
     ) : HistorySyncOutcome
 
+    /** Some rooms landed rows before another room's wire fetch failed. */
+    data class Partial(
+        val messages: Int,
+        val chats: Int,
+    ) : HistorySyncOutcome
+
     data object Unsupported : HistorySyncOutcome
 
     data object Failed : HistorySyncOutcome
@@ -109,13 +115,30 @@ class HistoryWindowFetcher
             val floor = lookbackMs?.let { System.currentTimeMillis() - it } ?: 0L
             var inserted = (discovery as? HistoryResyncState.Updated)?.inserted ?: (discovery as? HistoryResyncState.Incomplete)?.inserted ?: 0
             var chats = 0
+            // Rooms that never reached their floor are why this run exists; rooms that tried and
+            // could not (transport died, server refused) mean the fetch is lying if it reports
+            // success. Counted so a disconnect mid-run reads as a failure, not "already up to date".
+            var failedRooms = 0
             val rooms = dao.roomSpans(networkId).map { it.roomId }
             resync.manualPass(networkId, rooms) { roomId ->
                 val fetch = gapFill.fetchRoomWindow(roomId, floor)
                 if (fetch.pagesLoaded > 0) chats++
                 inserted += fetch.insertedCount
+                if (fetch.endReason in FAILED_END_REASONS) failedRooms++
             }
-            return HistorySyncOutcome.Fetched(messages = inserted, chats = chats)
+            // Whatever landed stays regardless; the outcome only says how the run ended.
+            return historySyncOutcome(inserted, chats, failedRooms)
+        }
+
+        private companion object {
+            /** GapFill end reasons that mean the walk was defeated, not finished. */
+            val FAILED_END_REASONS =
+                setOf(
+                    "history_unavailable",
+                    "history_unsupported",
+                    "page_failed",
+                    "error",
+                )
         }
 
         /** Atomically claim [networkId]; false when a fetch for it is already running. */
@@ -126,4 +149,16 @@ class HistoryWindowFetcher
                 if (compareAndSet(current, current + networkId)) return true
             }
         }
+    }
+
+/** A hollow success after a wire failure is not "up to date"; partial progress remains success. */
+internal fun historySyncOutcome(
+    messages: Int,
+    chats: Int,
+    failedRooms: Int,
+): HistorySyncOutcome =
+    when {
+        failedRooms == 0 -> HistorySyncOutcome.Fetched(messages, chats)
+        messages == 0 -> HistorySyncOutcome.Failed
+        else -> HistorySyncOutcome.Partial(messages, chats)
     }
