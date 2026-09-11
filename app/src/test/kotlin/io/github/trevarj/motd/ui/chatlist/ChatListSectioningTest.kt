@@ -1,10 +1,8 @@
 package io.github.trevarj.motd.ui.chatlist
 
-import android.content.Context
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Unarchive
-import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatFolderEntity
 import io.github.trevarj.motd.data.db.ChatListRow
@@ -540,6 +538,6 @@ class ChatListSectioningTest {
 }
 
 internal fun fakeDickordLabsPrefs(enabledFlow: Flow<Boolean> = flowOf(false)) =
-    object : DickordLabsPrefs(ApplicationProvider.getApplicationContext<Context>()) {
+    object : DickordLabsPrefs() {
         override val enabled = enabledFlow
     }

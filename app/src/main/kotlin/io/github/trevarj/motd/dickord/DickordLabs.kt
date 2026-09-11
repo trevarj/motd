@@ -55,18 +55,25 @@ internal suspend fun ConnectionManager.requestDickordChannelSnapshot(networkId: 
 }
 
 @Singleton
-open class DickordLabsPrefs
+open class DickordLabsPrefs {
+    private lateinit var store: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences>
+
     @Inject
     constructor(
         @ApplicationContext context: Context,
     ) {
-        private val store = context.dickordLabsDataStore
-        open val enabled: Flow<Boolean> = store.data.map { it[ENABLED] ?: false }
-
-        open suspend fun setEnabled(enabled: Boolean) {
-            store.edit { it[ENABLED] = enabled }
-        }
+        store = context.dickordLabsDataStore
     }
+
+    protected constructor()
+
+    open val enabled: Flow<Boolean>
+        get() = store.data.map { it[ENABLED] ?: false }
+
+    open suspend fun setEnabled(enabled: Boolean) {
+        store.edit { it[ENABLED] = enabled }
+    }
+}
 
 internal val LocalDickordLabsEnabled = staticCompositionLocalOf { false }
 
