@@ -9,8 +9,9 @@ import org.junit.Test
 
 class AvatarProtocolTest {
     @Test fun builds_subscribe_sync_publish_and_remove_commands() {
-        assertEquals("METADATA * SUB avatar", subscribeAvatarMessage().serialize())
-        assertEquals("METADATA #chat SYNC", syncAvatarMessage("#chat").serialize())
+        assertEquals("METADATA * SUB avatar", subscribeMetadataMessage(AVATAR_KEY).serialize())
+        assertEquals("METADATA * UNSUB avatar", unsubscribeMetadataMessage(AVATAR_KEY).serialize())
+        assertEquals("METADATA #chat SYNC", syncMetadataMessage("#chat").serialize())
         assertEquals(
             "METADATA * SET avatar https://example.com/a/{size}.png",
             publishAvatarMessage("https://example.com/a/{size}.png").serialize(),
@@ -46,6 +47,14 @@ class AvatarProtocolTest {
         )
     }
 
+    @Test fun rejectsIncompleteAvatarMetadata() {
+        listOf(
+            IrcMessage(command = "METADATA", params = listOf("#chat", AVATAR_KEY, "*")),
+            IrcMessage(command = "761", params = listOf("me", "#chat", AVATAR_KEY, "*")),
+            IrcMessage(command = "766", params = listOf("me", "#chat", AVATAR_KEY)),
+        ).forEach { assertNull(parseAvatarMetadata(it)) }
+    }
+
     @Test fun ignores_other_keys_and_treats_invalid_avatar_values_as_removal() {
         assertNull(
             parseAvatarMetadata(
@@ -75,12 +84,12 @@ class AvatarProtocolTest {
                 "batch",
                 "draft/metadata-2=before-connect,max-keys=0,max-value-bytes=1",
             )
-        assertTrue(supportsAvatarSubscription(receiveOnly))
+        assertTrue(supportsMetadataSubscription(receiveOnly))
         assertFalse(supportsAvatarMutation(receiveOnly))
         assertFalse(supportsAvatarPublishing(receiveOnly))
 
         val capable = setOf("draft/metadata-2=max-subs=4,max-keys=2,max-value-bytes=128")
-        assertTrue(supportsAvatarSubscription(capable))
+        assertTrue(supportsMetadataSubscription(capable))
         assertTrue(supportsAvatarMutation(capable))
         assertTrue(supportsAvatarPublishing(capable, "https://example.com/avatar.png"))
         assertFalse(supportsAvatarPublishing(capable, "https://example.com/${"x".repeat(128)}"))
@@ -93,11 +102,11 @@ class AvatarProtocolTest {
     }
 
     @Test fun absent_limits_allow_and_zero_or_malformed_limits_deny() {
-        assertTrue(supportsAvatarSubscription(setOf("draft/metadata-2")))
+        assertTrue(supportsMetadataSubscription(setOf("draft/metadata-2")))
         assertTrue(supportsAvatarPublishing(setOf("draft/metadata-2")))
-        assertFalse(supportsAvatarSubscription(setOf("draft/metadata-2=max-subs=0")))
+        assertFalse(supportsMetadataSubscription(setOf("draft/metadata-2=max-subs=0")))
         assertFalse(supportsAvatarPublishing(setOf("draft/metadata-2=max-value-bytes=oops")))
-        assertFalse(supportsAvatarSubscription(setOf("batch")))
+        assertFalse(supportsMetadataSubscription(setOf("batch")))
         assertFalse(supportsAvatarMutation(setOf("batch")))
         assertFalse(supportsAvatarPublishing(setOf("batch")))
     }

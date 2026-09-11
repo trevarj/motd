@@ -57,6 +57,7 @@ class AiLabsScreenUiTest {
                     onBack = {},
                     onGesturesChanged = {},
                     onAgentwireChanged = {},
+                    onDickordChanged = {},
                     onOpenAi = { opened++ },
                     target = SettingsTarget.AI,
                 )
@@ -66,6 +67,31 @@ class AiLabsScreenUiTest {
         compose.onNodeWithTag("labs_ai", useUnmergedTree = true).assertExists().performClick()
         compose.onNodeWithTag("settings_target_highlight_AI", useUnmergedTree = true).assertExists()
         assertEquals(1, opened)
+    }
+
+    @Test
+    fun `Labs parent exposes the anchored Dickord switch`() {
+        var changed: Boolean? = null
+        compose.setContent {
+            MotdTheme {
+                LabsContent(
+                    state = LabsUiState(dickordEnabled = true),
+                    onBack = {},
+                    onGesturesChanged = {},
+                    onAgentwireChanged = {},
+                    onDickordChanged = { changed = it },
+                    target = SettingsTarget.DICKORD,
+                )
+            }
+        }
+
+        compose
+            .onNodeWithTag("labs_dickord_switch_row", useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsOn()
+            .performClick()
+        compose.onNodeWithTag("settings_target_highlight_DICKORD", useUnmergedTree = true).assertExists()
+        assertEquals(false, changed)
     }
 
     @Test

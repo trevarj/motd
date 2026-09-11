@@ -2346,7 +2346,7 @@ class HistoryResyncCoordinator
             historyGapId: Long? = null,
         ): io.github.trevarj.motd.data.sync.PersistedHistoryPage {
             if (db.bufferDao().rawById(expectedRoomId) == null) throw StaleConnectionException()
-            return processor.persistHistoryPageResult(
+            return loader.persistHistoryPageResult(
                 networkId,
                 request,
                 page,

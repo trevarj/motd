@@ -131,6 +131,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -189,6 +190,7 @@ fun ChatListScreen(
     onOpenSettings: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onOpenFeed: () -> Unit = {},
+    onOpenDickord: () -> Unit = {},
     onOpenManageFolders: (Long?) -> Unit = {},
     onOpenFolderEditor: (Long) -> Unit = {},
     onOpenOnboarding: () -> Unit = {},
@@ -248,6 +250,7 @@ fun ChatListScreen(
         onOpenSettings = onOpenSettings,
         onOpenSearch = onOpenSearch,
         onOpenFeed = onOpenFeed,
+        onOpenDickord = onOpenDickord,
         onOpenManageFolders = onOpenManageFolders,
         onOpenFolderEditor = onOpenFolderEditor,
         onAssignFolder = viewModel::assignFolder,
@@ -330,6 +333,7 @@ fun ChatListContent(
     onOpenSettings: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenFeed: () -> Unit = {},
+    onOpenDickord: () -> Unit = {},
     onOpenManageFolders: (Long?) -> Unit = {},
     onOpenFolderEditor: (Long) -> Unit = {},
     onAssignFolder: (Collection<Long>, Long?, (Boolean) -> Unit) -> Unit = { _, _, done -> done(false) },
@@ -377,7 +381,12 @@ fun ChatListContent(
     val visibleRows = if (archiveMode) state.archivedRows else state.rows
     val folderTabs = if (state.folderDisplayMode == FolderDisplayMode.TABS) presentFolderTabs(state.rows, state.folders) else emptyList()
     val allTabRows = state.rows.filter { state.showFolderChatsInAll || it.folderId == null }
-    val showAllTab = allTabRows.isNotEmpty() || state.archivedRows.isNotEmpty() || state.invitations.any(ChatListInvitation::actionable) || folderTabs.isEmpty()
+    val showAllTab =
+        state.dickordEnabled ||
+            allTabRows.isNotEmpty() ||
+            state.archivedRows.isNotEmpty() ||
+            state.invitations.any(ChatListInvitation::actionable) ||
+            folderTabs.isEmpty()
     var selectedFolderId by rememberSaveable { mutableStateOf<Long?>(null) }
     val effectiveFolderId =
         selectedFolderId
@@ -794,11 +803,12 @@ fun ChatListContent(
                         )
                     }
 
-                    if (!archiveMode && !invitationMode && folderTabs.isNotEmpty()) {
+                    if (!archiveMode && !invitationMode && (folderTabs.isNotEmpty() || state.dickordEnabled)) {
                         FolderTabStrip(
                             folders = folderTabs,
                             allSummary = summarizeFolder(allTabRows),
                             showAllTab = showAllTab,
+                            dickordSummary = state.dickordUnreadSummary,
                             selectedFolderId = effectiveFolderId,
                             onSelect = { folderId ->
                                 if (folderId != effectiveFolderId) {
@@ -807,39 +817,38 @@ fun ChatListContent(
                                     tabChangeSignal++
                                 }
                             },
+                            onOpenDickord = {
+                                selectedIds = emptyList()
+                                onOpenDickord()
+                            },
                         )
                     }
 
                     val hasInvitationRoute = state.invitations.any(ChatListInvitation::actionable)
+                    val portalOnly =
+                        !archiveMode &&
+                            state.dickordEnabled &&
+                            (state.dickordUnreadSummary?.visibleCount ?: 0) > 0
                     if (!invitationMode && !shouldRenderChatList(archiveMode, state.rows, state.archivedRows) && !hasInvitationRoute && !state.loading) {
                         val noNetworks = !archiveMode && state.networks.isEmpty()
                         EmptyState(
                             icon = if (archiveMode) Icons.Outlined.Archive else Icons.Outlined.Forum,
                             title =
                                 stringResource(
-                                    if (noNetworks) {
-                                        R.string.chatlist_no_networks_title
-                                    } else if (archiveMode) {
-                                        R.string.chatlist_archived_empty_title
-                                    } else if (state.selectedNetworkId != null) {
-                                        R.string.chatlist_scoped_empty_title
-                                    } else {
-                                        R.string.chatlist_empty_title
+                                    when {
+                                        portalOnly -> R.string.dickord_portal_list_hint
+                                        noNetworks -> R.string.chatlist_no_networks_title
+                                        archiveMode -> R.string.chatlist_archived_empty_title
+                                        state.selectedNetworkId != null -> R.string.chatlist_scoped_empty_title
+                                        else -> R.string.chatlist_empty_title
                                     },
                                 ),
                             message =
-                                if (archiveMode) {
-                                    null
-                                } else if (noNetworks) {
-                                    stringResource(R.string.chatlist_no_networks_message)
-                                } else {
-                                    stringResource(
-                                        if (state.selectedNetworkId != null) {
-                                            R.string.chatlist_scoped_empty_message
-                                        } else {
-                                            R.string.chatlist_empty_message
-                                        },
-                                    )
+                                when {
+                                    archiveMode || portalOnly -> null
+                                    noNetworks -> stringResource(R.string.chatlist_no_networks_message)
+                                    state.selectedNetworkId != null -> stringResource(R.string.chatlist_scoped_empty_message)
+                                    else -> stringResource(R.string.chatlist_empty_message)
                                 },
                             actionLabel = if (noNetworks) stringResource(R.string.drawer_add_network) else null,
                             onAction = if (noNetworks) onOpenAddNetwork else null,
@@ -1031,10 +1040,14 @@ private fun FolderTabStrip(
     folders: List<PresentedChatFolder>,
     allSummary: ChatFolderSummary,
     showAllTab: Boolean,
+    dickordSummary: ChatFolderSummary?,
     selectedFolderId: Long?,
     onSelect: (Long?) -> Unit,
+    onOpenDickord: () -> Unit,
 ) {
-    val selectedIndex = folders.indexOfFirst { it.folder.id == selectedFolderId }.let { if (it < 0) 0 else it + if (showAllTab) 1 else 0 }
+    val selectedFolderIndex = folders.indexOfFirst { it.folder.id == selectedFolderId }
+    val leadingTabCount = (if (showAllTab) 1 else 0) + (if (dickordSummary != null) 1 else 0)
+    val selectedIndex = if (selectedFolderIndex < 0) 0 else selectedFolderIndex + leadingTabCount
     PrimaryScrollableTabRow(
         selectedTabIndex = selectedIndex,
         edgePadding = 0.dp,
@@ -1050,6 +1063,26 @@ private fun FolderTabStrip(
                         name = stringResource(R.string.folders_all),
                         summary = allSummary,
                         icon = { Icon(Icons.Outlined.Forum, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                    )
+                },
+            )
+        }
+        dickordSummary?.let { summary ->
+            Tab(
+                selected = false,
+                onClick = onOpenDickord,
+                modifier = Modifier.testTag("chatlist_folder_tab_discord"),
+                text = {
+                    FolderTabLabel(
+                        name = stringResource(R.string.dickord_badge),
+                        summary = summary,
+                        icon = {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_discord),
+                                contentDescription = null,
+                                modifier = Modifier.width(24.dp).height(18.dp),
+                            )
+                        },
                     )
                 },
             )
@@ -1236,8 +1269,12 @@ private fun ChatList(
     scrollToTopSignal: Int,
 ) {
     // Pinned rows escape folders; non-empty folders follow in manual order, then legacy tiers.
-    val presentation = presentChatFolders(rows, folders, friends, fools, activeBufferId)
+    val presentation =
+        remember(rows, folders, friends, fools, activeBufferId) {
+            presentChatFolders(rows, folders, friends, fools, activeBufferId)
+        }
     val sections = presentation.remaining
+
     // Fools section is collapsed by default; state is local to the screen (accepted).
     var foolsExpanded by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
@@ -1258,7 +1295,15 @@ private fun ChatList(
     // the new order: the promoted row surfaces in place and the rows it displaced spring down
     // via their placement animation. Scroll state is peeked without observation because this is
     // a same-frame decision, not a recomposition dependency.
-    val topItemKey = chatListTopItemKey(invitationMode, invitations, actionableInvitationCount, sections, presentation.folders, presentation.pinned)
+    val topItemKey =
+        chatListTopItemKey(
+            invitationMode,
+            invitations,
+            actionableInvitationCount,
+            sections,
+            presentation.folders,
+            presentation.pinned,
+        )
     val topItemTracker = remember { ChatListTopItemTracker(topItemKey) }
     if (topItemTracker.key != topItemKey) {
         val repin =

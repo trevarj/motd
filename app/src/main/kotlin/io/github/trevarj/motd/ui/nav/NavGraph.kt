@@ -6,12 +6,22 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
@@ -21,12 +31,18 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.trevarj.motd.agentwire.AgentwireGateScreen
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
+import io.github.trevarj.motd.dickord.DickordPortalRowLookup
+import io.github.trevarj.motd.dickord.DickordPortalScreen
+import io.github.trevarj.motd.dickord.DickordPortalViewModel
+import io.github.trevarj.motd.dickord.isDickordPortalConversation
 import io.github.trevarj.motd.ui.about.AboutScreen
 import io.github.trevarj.motd.ui.channelinfo.ChannelInfoScreen
 import io.github.trevarj.motd.ui.channellist.ChannelListScreen
+import io.github.trevarj.motd.ui.chat.ChatForegroundLifecycleGate
 import io.github.trevarj.motd.ui.chat.ChatScreen
 import io.github.trevarj.motd.ui.chatlist.AutoGroupScreen
 import io.github.trevarj.motd.ui.chatlist.ChatListScreen
+import io.github.trevarj.motd.ui.chatlist.ChatListViewModel
 import io.github.trevarj.motd.ui.chatlist.FolderEditorScreen
 import io.github.trevarj.motd.ui.chatlist.ManageFoldersScreen
 import io.github.trevarj.motd.ui.feed.GlobalFeedScreen
@@ -160,12 +176,14 @@ fun MotdNavGraph(
         predictivePopEnterTransition = { motdPredictivePopEnterTransition(it) },
         predictivePopExitTransition = { motdPredictivePopExitTransition(it) },
     ) {
-        composable<ChatListRoute> {
+        composable<ChatListRoute> { entry ->
+            val chatListViewModel: ChatListViewModel = hiltViewModel(entry)
             var openedDefault by rememberSaveable { mutableStateOf(false) }
             ChatWorkspace(
                 listPane = { twoPane ->
                     ChatListPane(
                         navController = navController,
+                        viewModel = chatListViewModel,
                         suppressOnboarding = pendingJoinInvite != null,
                         onDefaultBufferAvailable = { bufferId ->
                             if (twoPane && !openedDefault) {
@@ -177,48 +195,126 @@ fun MotdNavGraph(
                 },
             )
         }
-        composable<ChatRoute> { entry ->
-            val route = entry.toRoute<ChatRoute>()
+        composable<DickordPortalRoute> { entry ->
+            val chatListEntry =
+                remember(entry, navController) {
+                    navController.getBackStackEntry(requireNotNull(ChatListRoute::class.qualifiedName))
+                }
+            val portalViewModel: DickordPortalViewModel = hiltViewModel(chatListEntry)
+            val chatListViewModel: ChatListViewModel = hiltViewModel(chatListEntry)
+            val portalState by portalViewModel.state.collectAsStateWithLifecycle()
+            DickordPortalDestinationActiveEffect(entry, portalState.enabled, portalViewModel)
+            LaunchedEffect(portalState.loading, portalState.enabled) {
+                if (!portalState.loading && !portalState.enabled) navController.returnToChatList()
+            }
             ChatWorkspace(
                 listPane = {
-                    ChatListPane(
+                    DickordPortalPane(
                         navController = navController,
-                        selectedBufferId = route.bufferId,
-                        replaceCurrentChat = true,
+                        portalViewModel = portalViewModel,
+                        chatListViewModel = chatListViewModel,
                     )
                 },
-                detailPane = { showBack ->
-                    AgentwireGateScreen(
-                        onBack = { navController.popBackStack() },
-                        showBack = showBack,
-                        showComposerEmoji = showComposerEmoji,
-                        showComposerFormattingTools = showComposerFormattingTools,
-                    ) {
-                        ChatScreen(
-                            bufferId = route.bufferId,
-                            appearance = appearance,
+            )
+        }
+        composable<ChatRoute> { entry ->
+            val route = entry.toRoute<ChatRoute>()
+            val chatListEntry =
+                remember(entry, navController) {
+                    navController.getBackStackEntry(requireNotNull(ChatListRoute::class.qualifiedName))
+                }
+            val portalViewModel: DickordPortalViewModel = hiltViewModel(chatListEntry)
+            val chatListViewModel: ChatListViewModel = hiltViewModel(chatListEntry)
+            val portalState by portalViewModel.state.collectAsStateWithLifecycle()
+            val rowLookup by
+                remember(portalViewModel, route.bufferId) {
+                    portalViewModel.canonicalRow(route.bufferId)
+                }.collectAsStateWithLifecycle(initialValue = DickordPortalRowLookup.Loading)
+            val foundRow = (rowLookup as? DickordPortalRowLookup.Found)?.row
+            val portalOwned =
+                portalState.enabled &&
+                    foundRow?.let { isDickordPortalConversation(it.type, it.displayName) } == true
+            DickordPortalDestinationActiveEffect(entry, portalOwned, portalViewModel)
+
+            LaunchedEffect(portalOwned, foundRow?.bufferId, foundRow?.archived) {
+                if (portalOwned) portalViewModel.setShowArchived(checkNotNull(foundRow).archived)
+            }
+            val routeGroupKey =
+                portalState.groups
+                    .firstOrNull { group ->
+                        group.conversations.any { it.row.bufferId == foundRow?.bufferId }
+                    }?.key
+            LaunchedEffect(portalOwned, routeGroupKey) {
+                if (portalOwned && routeGroupKey != null) portalViewModel.selectGroup(routeGroupKey)
+            }
+
+            if (portalState.loading || (portalState.enabled && rowLookup is DickordPortalRowLookup.Loading)) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else {
+                ChatWorkspace(
+                    listPane = {
+                        if (portalOwned) {
+                            DickordPortalPane(
+                                navController = navController,
+                                portalViewModel = portalViewModel,
+                                chatListViewModel = chatListViewModel,
+                                selectedBufferId = requireNotNull(foundRow).bufferId,
+                                replaceCurrentChat = true,
+                            )
+                        } else {
+                            ChatListPane(
+                                navController = navController,
+                                viewModel = chatListViewModel,
+                                selectedBufferId = route.bufferId,
+                                replaceCurrentChat = true,
+                            )
+                        }
+                    },
+                    detailPane = { showBack ->
+                        AgentwireGateScreen(
                             onBack = { navController.popBackStack() },
                             showBack = showBack,
-                            onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
-                            onOpenSearch = { navController.navigate(SearchRoute(it)) },
-                            onOpenSharePicker = { navController.navigate(SharePickerRoute) { launchSingleTop = true } },
-                            onOpenImage = { url, networkId -> navController.navigate(ImageViewerRoute(url, networkId)) },
-                            // /msg and /query replace the detail on wide layouts and push on phones.
-                            onOpenBuffer = {
-                                navController.openChat(ChatRoute(it), replaceCurrentChat = !showBack)
-                            },
-                            onOpenAudioOrigin = { origin ->
-                                navController.openChat(
-                                    ChatRoute(origin.bufferId, origin.msgid, origin.serverTime, origin.eventId),
-                                    replaceCurrentChat = !showBack,
-                                )
-                            },
-                            onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
-                            onOpenAccountSetup = { navController.navigate(AccountSetupRoute(it)) },
-                        )
-                    }
-                },
-            )
+                            showComposerEmoji = showComposerEmoji,
+                            showComposerFormattingTools = showComposerFormattingTools,
+                        ) {
+                            ChatScreen(
+                                bufferId = route.bufferId,
+                                appearance = appearance,
+                                onBack = { navController.popBackStack() },
+                                showBack = showBack,
+                                onOpenConversationList =
+                                    if (portalOwned && showBack) {
+                                        { navController.openDickordNavigator() }
+                                    } else {
+                                        null
+                                    },
+                                onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
+                                onOpenSearch = { navController.navigate(SearchRoute(it)) },
+                                onOpenSharePicker = {
+                                    navController.navigate(SharePickerRoute) { launchSingleTop = true }
+                                },
+                                onOpenImage = { url, networkId ->
+                                    navController.navigate(ImageViewerRoute(url, networkId))
+                                },
+                                // /msg and /query replace the detail on wide layouts and push on phones.
+                                onOpenBuffer = {
+                                    navController.openChat(ChatRoute(it), replaceCurrentChat = !showBack)
+                                },
+                                onOpenAudioOrigin = { origin ->
+                                    navController.openChat(
+                                        ChatRoute(origin.bufferId, origin.msgid, origin.serverTime, origin.eventId),
+                                        replaceCurrentChat = !showBack,
+                                    )
+                                },
+                                onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
+                                onOpenAccountSetup = { navController.navigate(AccountSetupRoute(it)) },
+                            )
+                        }
+                    },
+                )
+            }
         }
         composable<OnboardingRoute> {
             // Finish lands on a fresh ChatList and clears onboarding (plus any duplicate
@@ -522,14 +618,63 @@ fun MotdNavGraph(
 }
 
 @Composable
+private fun DickordPortalDestinationActiveEffect(
+    entry: NavBackStackEntry,
+    enabled: Boolean,
+    viewModel: DickordPortalViewModel,
+) {
+    DisposableEffect(entry, enabled, viewModel) {
+        val gate =
+            ChatForegroundLifecycleGate(
+                onResume = {
+                    if (enabled) viewModel.setEntryActive(entry.id, true)
+                },
+                onPause = { viewModel.setEntryActive(entry.id, false) },
+            )
+        val observer = LifecycleEventObserver { _, event -> gate.onEvent(event) }
+        entry.lifecycle.addObserver(observer)
+        gate.sync(entry.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+        onDispose {
+            entry.lifecycle.removeObserver(observer)
+            gate.dispose()
+        }
+    }
+}
+
+@Composable
+private fun DickordPortalPane(
+    navController: NavHostController,
+    portalViewModel: DickordPortalViewModel,
+    chatListViewModel: ChatListViewModel,
+    selectedBufferId: Long? = null,
+    replaceCurrentChat: Boolean = false,
+) {
+    DickordPortalScreen(
+        viewModel = portalViewModel,
+        selectedBufferId = selectedBufferId,
+        onBack = navController::returnToChatList,
+        onOpenConversation = {
+            navController.openChat(ChatRoute(it), replaceCurrentChat)
+        },
+        onConversationInfo = { navController.navigate(ChannelInfoRoute(it)) },
+        onMarkRead = { chatListViewModel.markSelectedRead(listOf(it)) },
+        onSetMuted = { bufferId, muted -> chatListViewModel.setMuted(bufferId, muted) },
+        onSetPinned = { bufferId, pinned -> chatListViewModel.setPinned(bufferId, pinned) },
+        onSetArchived = { bufferId, archived -> chatListViewModel.setArchived(bufferId, archived) },
+    )
+}
+
+@Composable
 private fun ChatListPane(
     navController: NavHostController,
+    viewModel: ChatListViewModel,
     selectedBufferId: Long? = null,
     replaceCurrentChat: Boolean = false,
     suppressOnboarding: Boolean = false,
     onDefaultBufferAvailable: (Long) -> Unit = {},
 ) {
     ChatListScreen(
+        viewModel = viewModel,
         onOpenBuffer = {
             navController.openChat(ChatRoute(it), replaceCurrentChat)
         },
@@ -547,6 +692,9 @@ private fun ChatListPane(
         onOpenSettings = { navController.navigate(SettingsRoute()) },
         onOpenSearch = { navController.navigate(SearchRoute()) },
         onOpenFeed = { navController.navigate(GlobalFeedRoute) },
+        onOpenDickord = {
+            navController.navigate(DickordPortalRoute) { launchSingleTop = true }
+        },
         onOpenManageFolders = { navController.navigate(ManageFoldersRoute(it)) },
         onOpenFolderEditor = { navController.navigate(FolderEditorRoute(it)) },
         onOpenOnboarding = { navController.navigate(OnboardingRoute) },
@@ -571,8 +719,30 @@ internal fun NavHostController.openChat(
     route: ChatRoute,
     replaceCurrentChat: Boolean,
 ) {
+    val replace =
+        replaceCurrentChat &&
+            currentBackStackEntry?.let { isChatRoutePattern(it.destination.route) } == true
     navigate(route) {
-        if (replaceCurrentChat) popUpTo<ChatRoute> { inclusive = true }
+        if (replace) popUpTo<ChatRoute> { inclusive = true }
+    }
+}
+
+internal fun NavHostController.openDickordNavigator() {
+    val currentIsChat =
+        currentBackStackEntry?.let { isChatRoutePattern(it.destination.route) } == true
+    val portalRouteName = DickordPortalRoute::class.qualifiedName
+    if (currentIsChat && previousBackStackEntry?.destination?.route == portalRouteName) {
+        popBackStack()
+        return
+    }
+    navigate(DickordPortalRoute) {
+        if (currentIsChat) popUpTo<ChatRoute> { inclusive = true }
+    }
+}
+
+internal fun NavHostController.returnToChatList() {
+    if (!popBackStack(requireNotNull(ChatListRoute::class.qualifiedName), inclusive = false)) {
+        navigate(ChatListRoute) { launchSingleTop = true }
     }
 }
 

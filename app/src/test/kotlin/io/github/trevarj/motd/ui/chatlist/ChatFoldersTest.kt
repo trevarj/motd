@@ -39,6 +39,27 @@ class ChatFoldersTest {
     }
 
     @Test
+    fun portalPartitionPreservesRawIdentityAndStoredAssignments() {
+        val regular = row(1, "#motd")
+        val pinnedPortal = row(2, "#discord.guild.pinned", pinned = true, dickord = "{broken")
+        val folderPortal = row(3, "#DiScOrD.guild.foldered", folderId = 7)
+        val archivedPortal = row(4, "#discord.guild.archived", archived = true)
+        val control = row(5, "#DISCORD.CONTROL", folderId = 7)
+        val queryLookalike = row(6, "#discord.not-a-channel", BufferType.QUERY)
+        val rows = listOf(regular, pinnedPortal, folderPortal, archivedPortal, control, queryLookalike)
+
+        val enabled = ordinaryChatListRows(rows, dickordEnabled = true)
+
+        assertEquals(listOf(regular, control, queryLookalike), enabled)
+        assertEquals(listOf("#motd", "#DISCORD.CONTROL", "#discord.not-a-channel"), enabled.map(ChatListRow::displayName))
+        assertTrue(pinnedPortal.pinned)
+        assertEquals(7L, folderPortal.folderId)
+        assertTrue(archivedPortal.archived)
+        assertEquals("{broken", pinnedPortal.dickordChannelJson)
+        assertEquals(rows, ordinaryChatListRows(rows, dickordEnabled = false))
+    }
+
+    @Test
     fun tabsKeepStoredOrderDropEmptyScopedFoldersAndRetainPins() {
         val first = ChatFolderEntity(id = 7, displayName = "First", normalizedName = "first", ordering = 0)
         val second = ChatFolderEntity(id = 8, displayName = "Second", normalizedName = "second", ordering = 1)
@@ -154,6 +175,7 @@ class ChatFoldersTest {
         unread: Int = 0,
         mentions: Int = 0,
         incomplete: Boolean = false,
+        dickord: String? = null,
     ) = ChatListRow(
         bufferId = id,
         networkId = network,
@@ -170,5 +192,6 @@ class ChatFoldersTest {
         unreadCount = unread,
         mentionCount = mentions,
         unreadCountIncomplete = incomplete,
+        dickordChannelJson = dickord,
     )
 }

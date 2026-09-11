@@ -35,6 +35,10 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.dickord.DickordLabsPrefs
+import io.github.trevarj.motd.dickord.dickordChannelLabel
+import io.github.trevarj.motd.dickord.dickordNickLabel
+import io.github.trevarj.motd.dickord.isDickordChannel
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.ServerTimeSource
@@ -78,6 +82,7 @@ class MotdNotifications
         private val db: MotdDatabase,
         private val foregroundBufferTracker: ForegroundBufferTracker,
         private val settingsRepository: SettingsRepository,
+        private val dickordLabsPrefs: DickordLabsPrefs = DickordLabsPrefs(context),
         private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
         @param:ApplicationScope private val applicationScope: CoroutineScope? = null,
     ) : MessageNotifier {
@@ -87,6 +92,7 @@ class MotdNotifications
         // notification id is messageNotificationId(bufferId)).
         private val history = HashMap<Long, NotificationCompat.MessagingStyle>()
         private val historyKeys = HashMap<Long, MutableList<NotificationMessageKey>>()
+        private val dickordBatches = HashMap<Long, Boolean>()
 
         init {
             ensureChannels()
@@ -376,12 +382,21 @@ class MotdNotifications
             }
             if (!decision) return
 
+            val dickordEnabled = runCatching { dickordLabsPrefs.enabled.first() }.getOrDefault(false)
+
             val channel = if (hasMention) CHANNEL_MENTIONS else CHANNEL_MESSAGES
             val title = buffer?.displayName ?: message.target
+            val dickordBatch =
+                synchronized(history) {
+                    dickordBatches.getOrPut(bufferId) {
+                        dickordEnabled && isDickordChannel(title)
+                    }
+                }
             val person =
                 notificationPerson(
                     networkId,
                     message.source.nick,
+                    dickordNickLabel(message.source.nick, dickordBatch),
                     settings.avatarStyle,
                     identityRules,
                 )
@@ -412,7 +427,7 @@ class MotdNotifications
                         history.getOrPut(bufferId) {
                             NotificationCompat
                                 .MessagingStyle(Person.Builder().setName("me").build())
-                                .setConversationTitle(title)
+                                .setConversationTitle(dickordChannelLabel(title, dickordBatch))
                                 .setGroupConversation(type == BufferType.CHANNEL)
                         }
                     restored.forEach { row ->
@@ -425,6 +440,7 @@ class MotdNotifications
                                 notificationPerson(
                                     networkId,
                                     row.sender,
+                                    dickordNickLabel(row.sender, dickordBatch),
                                     settings.avatarStyle,
                                     identityRules,
                                 ),
@@ -570,12 +586,13 @@ class MotdNotifications
         private fun notificationPerson(
             networkId: Long,
             name: String,
+            displayName: String,
             style: AvatarStyle,
             identityRules: IrcIdentityRules,
         ): Person =
             Person
                 .Builder()
-                .setName(name)
+                .setName(displayName)
                 .setKey("irc:$networkId:${identityRules.normalize(name)}")
                 .setIcon(notificationAvatarIcon(context, name, style))
                 .build()
@@ -605,6 +622,7 @@ class MotdNotifications
             synchronized(history) {
                 history.remove(bufferId)
                 historyKeys.remove(bufferId)
+                dickordBatches.remove(bufferId)
             }
             manager.cancel(messageNotificationId(bufferId))
             diagnostics.record("notifications", "message_notification_cleared") {
@@ -623,6 +641,7 @@ class MotdNotifications
             synchronized(history) {
                 history.remove(loserId)
                 historyKeys.remove(loserId)
+                dickordBatches.remove(loserId)
             }
             manager.cancel(messageNotificationId(loserId))
             diagnostics.record("notifications", "room_notification_retired") {

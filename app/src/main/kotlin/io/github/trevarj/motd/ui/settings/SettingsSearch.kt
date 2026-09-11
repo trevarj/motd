@@ -195,6 +195,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.backup_import_title, R.string.backup_import_guidance, "restore merge replace", SettingsSearchPage.BACKUP, SettingsTarget.IMPORT_BACKUP),
         spec(R.string.labs_gestures, R.string.labs_gestures_desc, "orb radial menu", SettingsSearchPage.LABS, SettingsTarget.GESTURES),
         spec(R.string.labs_agentwire, R.string.labs_agentwire_desc, "harness", SettingsSearchPage.LABS, SettingsTarget.AGENTWIRE),
+        spec(R.string.labs_dickord, R.string.labs_dickord_desc, "dickord discord bridge relay filehost attachments portal servers channels direct messages", SettingsSearchPage.LABS, SettingsTarget.DICKORD),
         spec(R.string.labs_global_feed, R.string.labs_global_feed_desc, "merged stream", SettingsSearchPage.LABS, SettingsTarget.GLOBAL_FEED),
         spec(R.string.ai_model_library, R.string.ai_model_library_summary, "import whisper ggml speech model", SettingsSearchPage.AI_LABS, SettingsTarget.AI_MODELS),
         spec(R.string.ai_transcription, R.string.ai_transcription_summary, "voice speech audio text whisper", SettingsSearchPage.AI_LABS, SettingsTarget.AI_TRANSCRIPTION),

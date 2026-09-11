@@ -19,9 +19,11 @@ import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.di.ForegroundBufferTrackerImpl
+import io.github.trevarj.motd.dickord.DickordLabsPrefs
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -174,6 +176,50 @@ class MotdNotificationsFoolTest {
                     ?.person
                     ?.icon,
             )
+        }
+
+    @Test
+    fun dickordNotificationCleansPresentationButKeepsRawPersonIdentity() =
+        runTest {
+            val dickordBufferId =
+                db.bufferDao().insert(
+                    BufferEntity(
+                        networkId = networkId,
+                        name = "#discord.me.chat.alice",
+                        displayName = "#discord.me.chat.alice",
+                        type = BufferType.CHANNEL,
+                    ),
+                )
+            notifications =
+                MotdNotifications(
+                    context,
+                    db,
+                    ForegroundBufferTrackerImpl(),
+                    repo,
+                    dickordLabsPrefs =
+                        object : DickordLabsPrefs(context) {
+                            override val enabled = flowOf(true)
+                        },
+                )
+
+            notifications.onIncoming(
+                networkId = networkId,
+                bufferId = dickordBufferId,
+                type = BufferType.CHANNEL,
+                hasMention = true,
+                message = chat("Alice/discord", "me: hello"),
+            )
+
+            val posted =
+                shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+                    .activeNotifications
+                    .single()
+                    .notification
+            val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted)
+            val person = style?.messages?.single()?.person
+            assertEquals("#me.chat.alice", style?.conversationTitle.toString())
+            assertEquals("Alice", person?.name.toString())
+            assertEquals("irc:$networkId:alice/discord", person?.key)
         }
 
     @Test

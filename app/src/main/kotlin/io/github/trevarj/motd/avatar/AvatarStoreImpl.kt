@@ -24,14 +24,25 @@ class AvatarStoreImpl
         ) {
             val valid = validateAvatarUrl(url) ?: return
             val normalizedNick = canonicalAvatarNick(nick)
-            val identity = avatarIdentity(normalizedNick, account)
+            val normalizedAccount = account?.takeUnless { it == "*" }
+            val identity = avatarIdentity(normalizedNick, normalizedAccount)
+            val existing = dao.find(networkId, identity, normalizedNick)
+            if (
+                existing != null &&
+                existing.identity == identity &&
+                existing.nick == normalizedNick &&
+                existing.account == normalizedAccount &&
+                existing.url == valid
+            ) {
+                return
+            }
             dao.replaceIdentity(
                 AvatarRecordEntity(
                     networkId = networkId,
                     scopedIdentity = "$networkId:$identity",
                     identity = identity,
                     nick = normalizedNick,
-                    account = account?.takeUnless { it == "*" },
+                    account = normalizedAccount,
                     url = valid,
                     updatedAt = System.currentTimeMillis(),
                 ),

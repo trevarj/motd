@@ -161,6 +161,18 @@ internal fun uploadDestinations(
             UploadDestination(backend.label, config.forBackend(backend))
         }
 
+internal fun preferredUploadConfig(
+    source: AttachmentSource,
+    configured: PasteBackendConfig,
+    sojuFileHostAvailable: Boolean,
+    preferSojuFileHost: Boolean,
+): PasteBackendConfig =
+    if (preferSojuFileHost && sojuFileHostAvailable && source !is AttachmentSource.Text) {
+        configured.forBackend(AttachmentBackend.SOJU_FILEHOST)
+    } else {
+        configured
+    }
+
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun AttachmentSheets(
@@ -168,6 +180,7 @@ fun AttachmentSheets(
     currentDraft: String,
     networkId: Long?,
     sojuFileHostAvailable: Boolean,
+    preferSojuFileHost: Boolean = false,
     startWithCurrentDraft: Boolean = false,
     // Inbound share hand-off: skip source selection and confirm this file directly.
     sharedFile: PendingShare.File? = null,
@@ -216,11 +229,17 @@ fun AttachmentSheets(
         if (!open) return@LaunchedEffect
         capturePath?.let(::File)?.let { captured ->
             if (captured.length() > 0L) {
+                val source = AttachmentSource.LocalFile(captured, captured.name, "image/jpeg", captured.length())
                 flow =
                     AttachmentFlow.Confirm(
-                        AttachmentSource.LocalFile(captured, captured.name, "image/jpeg", captured.length()),
+                        source,
                         false,
-                        defaultConfig,
+                        preferredUploadConfig(
+                            source = source,
+                            configured = defaultConfig,
+                            sojuFileHostAvailable = sojuFileHostAvailable,
+                            preferSojuFileHost = preferSojuFileHost,
+                        ),
                     )
             } else {
                 captured.delete()
@@ -241,7 +260,11 @@ fun AttachmentSheets(
                         } else {
                             AttachmentSource.Document(sharedFile.uri, meta.first, mime, meta.second)
                         }
-                    AttachmentFlow.Confirm(source, false, defaultConfig)
+                    AttachmentFlow.Confirm(
+                        source,
+                        false,
+                        preferredUploadConfig(source, defaultConfig, sojuFileHostAvailable, preferSojuFileHost),
+                    )
                 }
 
                 startWithCurrentDraft && currentDraft.isNotBlank() -> {
@@ -270,7 +293,12 @@ fun AttachmentSheets(
             } else {
                 AttachmentSource.Document(uri, meta.first, context.contentResolver.getType(uri), meta.second)
             }
-        flow = AttachmentFlow.Confirm(source, false, defaultConfig)
+        flow =
+            AttachmentFlow.Confirm(
+                source,
+                false,
+                preferredUploadConfig(source, defaultConfig, sojuFileHostAvailable, preferSojuFileHost),
+            )
     }
 
     fun startUpload(request: AttachmentFlow.Confirm) {
@@ -310,7 +338,12 @@ fun AttachmentSheets(
                 return@rememberLauncherForActivityResult
             }
             val source = AttachmentSource.LocalFile(file, file.name, "image/jpeg", file.length())
-            flow = AttachmentFlow.Confirm(source, false, defaultConfig)
+            flow =
+                AttachmentFlow.Confirm(
+                    source,
+                    false,
+                    preferredUploadConfig(source, defaultConfig, sojuFileHostAvailable, preferSojuFileHost),
+                )
         }
 
     fun launchCamera() {
@@ -396,11 +429,17 @@ fun AttachmentSheets(
                     photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 },
                 onPhoto = { photo ->
+                    val source = AttachmentSource.Photo(photo.uri, photo.name, photo.mimeType, photo.size)
                     flow =
                         AttachmentFlow.Confirm(
-                            AttachmentSource.Photo(photo.uri, photo.name, photo.mimeType, photo.size),
+                            source,
                             false,
-                            defaultConfig,
+                            preferredUploadConfig(
+                                source = source,
+                                configured = defaultConfig,
+                                sojuFileHostAvailable = sojuFileHostAvailable,
+                                preferSojuFileHost = preferSojuFileHost,
+                            ),
                         )
                 },
                 onDismiss = { flow = AttachmentFlow.Sources },

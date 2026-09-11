@@ -1,6 +1,7 @@
 package io.github.trevarj.motd
 
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
@@ -12,19 +13,23 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
+import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.sync.COMMAND_RESPONSE_PAYLOAD_PREFIX
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
+import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.ui.chat.MessageList
 import io.github.trevarj.motd.ui.chat.ReplyTarget
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
@@ -236,6 +241,77 @@ class MessageTimelineUiTest {
     }
 
     @Test
+    fun dickordModeCleansTimelineLabelsAndAudioOrigin() {
+        val expanded =
+            message(2, 400_000, MessageKind.PRIVMSG, "listen https://files.example/clip.mp3")
+                .copy(
+                    sender = "Alice/discord",
+                    normalizedActor = "alice/discord",
+                    replyToMsgid = "parent",
+                )
+        val collapsed =
+            message(1, 100, MessageKind.PRIVMSG, "hidden")
+                .copy(sender = "Carol/discord", normalizedActor = "carol/discord")
+        var played: AudioPlaybackRequest? = null
+        render(
+            flowOf(PagingData.from(listOf(expanded, collapsed))),
+            replyPreview = { MutableStateFlow(ReplyPreviewData("Bob/discord", "parent text")) },
+            dickordEnabled = true,
+            conversationName = "#discord.me.chat.alice",
+            richContentReady = true,
+            fools = setOf("Alice/discord", "Carol/discord"),
+            foolExpanded = { it == expanded.id },
+            onAudioToggle = { played = it },
+        )
+
+        scrollTo(messageTag(expanded.id))
+        compose
+            .onNode(hasText("Alice") and hasAnyAncestor(hasTestTag(messageTag(expanded.id))), useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose
+            .onNode(hasText("Bob") and hasAnyAncestor(hasTestTag("chat_reply_preview")), useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose
+            .onNodeWithText(RuntimeEnvironment.getApplication().getString(R.string.chat_fool_collapse, "Alice"))
+            .assertIsDisplayed()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Download audio", useUnmergedTree = true).performClick()
+        compose.runOnIdle { assertEquals("Alice", played?.origin?.sender) }
+
+        scrollTo(messageTag(collapsed.id))
+        compose
+            .onNodeWithText(RuntimeEnvironment.getApplication().getString(R.string.chat_fool_hidden, "Carol"))
+            .assertIsDisplayed()
+        listOf("Alice/discord", "Bob/discord", "Carol/discord").forEach {
+            compose.onNodeWithText(it, useUnmergedTree = true).assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun dickordLabelsStayRawWhileModeIsDisabled() {
+        val row =
+            message(1, 100, MessageKind.PRIVMSG, "child")
+                .copy(
+                    sender = "Alice/discord",
+                    normalizedActor = "alice/discord",
+                    replyToMsgid = "parent",
+                )
+        render(
+            flowOf(PagingData.from(listOf(row))),
+            replyPreview = { MutableStateFlow(ReplyPreviewData("Bob/discord", "parent text")) },
+            conversationName = "#discord.me.chat.alice",
+        )
+
+        scrollTo(messageTag(row.id))
+        compose.onNodeWithText("Alice/discord", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Bob/discord", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Alice", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("Bob", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
     fun pagingReplacementKeepsTheVisibleMessageAnchorStable() {
         val systemRun =
             listOf(
@@ -284,29 +360,43 @@ class MessageTimelineUiTest {
         onDismissInvite: (Long) -> Unit = {},
         replyPreview: (ReplyTarget) -> StateFlow<ReplyPreviewData?> = { MutableStateFlow(ReplyPreviewData("parent nick", "parent text")) },
         onReplyPreviewClick: (ReplyTarget) -> Unit = {},
+        dickordEnabled: Boolean = false,
+        conversationName: String? = null,
+        richContentReady: Boolean = false,
+        fools: Set<String> = emptySet(),
+        foolExpanded: (Long) -> Boolean = { false },
+        onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
     ) {
         compose.setContent {
-            MotdTheme(dynamicColor = false) {
-                MessageList(
-                    items = pages.collectAsLazyPagingItems(context = Dispatchers.Unconfined),
-                    listState = rememberLazyListState(),
-                    networkId = 1,
-                    readMarkerTime = marker,
-                    onLongPress = {},
-                    onReply = {},
-                    onReact = { _, _ -> },
-                    onImageClick = {},
-                    onRetry = {},
-                    loadPreview = { _, _ -> null },
-                    richContentReady = false,
-                    showImages = false,
-                    showLinkPreviews = false,
-                    onOpenLink = {},
-                    onAcceptInvite = onAcceptInvite,
-                    replyPreview = replyPreview,
-                    onReplyPreviewClick = onReplyPreviewClick,
-                    onDismissInvite = onDismissInvite,
-                )
+            CompositionLocalProvider(LocalDickordLabsEnabled provides dickordEnabled) {
+                MotdTheme(dynamicColor = false) {
+                    MessageList(
+                        items = pages.collectAsLazyPagingItems(context = Dispatchers.Unconfined),
+                        listState = rememberLazyListState(),
+                        networkId = 1,
+                        bufferId = 1,
+                        conversationName = conversationName,
+                        readMarkerTime = marker,
+                        onLongPress = {},
+                        onReply = {},
+                        onReact = { _, _ -> },
+                        onImageClick = {},
+                        onRetry = {},
+                        loadPreview = { _, _ -> null },
+                        richContentReady = richContentReady,
+                        showImages = false,
+                        showLinkPreviews = false,
+                        onOpenLink = {},
+                        onAudioToggle = onAudioToggle,
+                        fools = fools,
+                        foolsMode = FoolsMode.COLLAPSE,
+                        foolExpanded = foolExpanded,
+                        onAcceptInvite = onAcceptInvite,
+                        replyPreview = replyPreview,
+                        onReplyPreviewClick = onReplyPreviewClick,
+                        onDismissInvite = onDismissInvite,
+                    )
+                }
             }
         }
         compose.waitUntil(10_000) {

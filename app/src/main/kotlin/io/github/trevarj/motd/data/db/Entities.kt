@@ -347,6 +347,8 @@ data class RoomEntity(
      * permanent unread dot for a message that will never arrive.
      */
     val advertisedLatestTime: Long? = null,
+    /** Original validated `dickord/channel` JSON; hierarchy is derived only for presentation. */
+    val dickordChannelJson: String? = null,
 )
 
 /** Compatibility name retained while callers migrate to the canonical room vocabulary. */

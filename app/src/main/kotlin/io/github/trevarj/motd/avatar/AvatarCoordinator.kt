@@ -6,6 +6,9 @@ import io.github.trevarj.motd.data.db.BufferDao
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.di.ApplicationScope
+import io.github.trevarj.motd.dickord.DICKORD_AVATAR_TAG
+import io.github.trevarj.motd.dickord.isDickordChannel
+import io.github.trevarj.motd.dickord.isDickordRelayNick
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.ConnectionManager
@@ -37,6 +40,11 @@ sealed interface ConversationAvatarOutcome {
 
 interface AvatarController {
     suspend fun setShowSharedAvatars(show: Boolean)
+
+    suspend fun ingestDickordAvatars(
+        networkId: Long,
+        events: List<IrcEvent>,
+    ) = Unit
 
     suspend fun setSelfAvatar(
         networkId: Long,
@@ -115,12 +123,14 @@ class AvatarCoordinator
             networkId: Long,
             client: IrcClient,
         ) {
-            if (!client.hasCap(AVATAR_CAP)) return
-            if (prefs.config.first().showSharedAvatars && supportsAvatarSubscription(client.caps)) {
-                client.send(subscribeAvatarMessage())
-            } else {
-                client.send(unsubscribeAvatarMessage())
-            }
+            if (!client.hasCap(METADATA_CAP)) return
+            client.send(
+                if (prefs.config.first().showSharedAvatars && supportsMetadataSubscription(client.caps)) {
+                    subscribeMetadataMessage(AVATAR_KEY)
+                } else {
+                    unsubscribeMetadataMessage(AVATAR_KEY)
+                },
+            )
             when (val self = prefs.selfSetting(networkId).first()) {
                 SelfAvatarSetting.Unmanaged -> {}
 
@@ -142,6 +152,9 @@ class AvatarCoordinator
             networkId: Long,
             event: IrcEvent,
         ) {
+            if (event.hasDickordAvatarObservation() && prefs.config.first().showSharedAvatars) {
+                ingestDickordAvatarsEnabled(networkId, event)
+            }
             when (event) {
                 is IrcEvent.Raw -> {
                     handleRaw(networkId, event)
@@ -160,13 +173,13 @@ class AvatarCoordinator
                         connections
                             .get()
                             .clientFor(networkId)
-                            ?.takeIf { supportsAvatarSubscription(it.caps) }
-                            ?.send(syncAvatarMessage(event.channel))
+                            ?.takeIf { supportsMetadataSubscription(it.caps) }
+                            ?.send(syncMetadataMessage(event.channel))
                     }
                 }
 
                 is IrcEvent.CapsChanged -> {
-                    if (event.added.any { it == AVATAR_CAP || it.startsWith("$AVATAR_CAP=") }) {
+                    if (event.added.any { it == METADATA_CAP || it.startsWith("$METADATA_CAP=") }) {
                         connections.get().clientFor(networkId)?.let { onReady(networkId, it) }
                     }
                 }
@@ -174,6 +187,73 @@ class AvatarCoordinator
                 else -> {}
             }
         }
+
+        override suspend fun ingestDickordAvatars(
+            networkId: Long,
+            events: List<IrcEvent>,
+        ) {
+            if (events.none { it.hasDickordAvatarObservation() }) return
+            if (!prefs.config.first().showSharedAvatars) return
+            events.forEach { ingestDickordAvatarsEnabled(networkId, it) }
+        }
+
+        private suspend fun ingestDickordAvatarsEnabled(
+            networkId: Long,
+            event: IrcEvent,
+        ) {
+            if (!event.hasDickordAvatarObservation()) return
+            when (event) {
+                is IrcEvent.ChatMessage -> {
+                    val avatar = event.ctx.clientTags[DICKORD_AVATAR_TAG] ?: return
+                    if (avatar.isEmpty()) {
+                        store.remove(networkId, event.source.nick, account = null)
+                    } else {
+                        validateAvatarUrl(avatar)?.let {
+                            store.upsert(networkId, event.source.nick, account = null, url = it)
+                        }
+                    }
+                }
+
+                is IrcEvent.HistoryBatch -> {
+                    event.events.forEach { ingestDickordAvatarsEnabled(networkId, it) }
+                }
+
+                is IrcEvent.PlaybackBatch -> {
+                    event.items.forEach { ingestDickordAvatarsEnabled(networkId, it.event) }
+                }
+
+                is IrcEvent.ReplayBatch -> {
+                    event.events.forEach { ingestDickordAvatarsEnabled(networkId, it) }
+                }
+
+                else -> {}
+            }
+        }
+
+        private fun IrcEvent.hasDickordAvatarObservation(): Boolean =
+            when (this) {
+                is IrcEvent.ChatMessage -> {
+                    DICKORD_AVATAR_TAG in ctx.clientTags &&
+                        isDickordChannel(target) &&
+                        isDickordRelayNick(source.nick)
+                }
+
+                is IrcEvent.HistoryBatch -> {
+                    events.any { it.hasDickordAvatarObservation() }
+                }
+
+                is IrcEvent.PlaybackBatch -> {
+                    items.any { it.event.hasDickordAvatarObservation() }
+                }
+
+                is IrcEvent.ReplayBatch -> {
+                    events.any { it.hasDickordAvatarObservation() }
+                }
+
+                else -> {
+                    false
+                }
+            }
 
         private suspend fun handleRaw(
             networkId: Long,
@@ -213,8 +293,8 @@ class AvatarCoordinator
                         connections
                             .get()
                             .clientFor(networkId)
-                            ?.takeIf { supportsAvatarSubscription(it.caps) }
-                            ?.send(syncAvatarMessage(metadata.target))
+                            ?.takeIf { supportsMetadataSubscription(it.caps) }
+                            ?.send(syncMetadataMessage(metadata.target))
                     } finally {
                         delayedSyncs.remove(key)
                     }
@@ -228,12 +308,12 @@ class AvatarCoordinator
                 .get()
                 .connectionStates.value.keys) {
                 connections.get().clientFor(networkId)?.let { client ->
-                    if (!client.hasCap(AVATAR_CAP)) return@let
+                    if (!client.hasCap(METADATA_CAP)) return@let
                     client.send(
-                        if (show && supportsAvatarSubscription(client.caps)) {
-                            subscribeAvatarMessage()
+                        if (show && supportsMetadataSubscription(client.caps)) {
+                            subscribeMetadataMessage(AVATAR_KEY)
                         } else {
-                            unsubscribeAvatarMessage()
+                            unsubscribeMetadataMessage(AVATAR_KEY)
                         },
                     )
                 }

@@ -76,15 +76,36 @@ class ChatSubtitleTest {
         assertEquals("42 members", chatSubtitle(state, context))
     }
 
+    @Test
+    fun portalChannelUsesDickordSubtitleOnlyWhileTheLabOwnsIt() {
+        val state = channelState(memberCount = 42, displayName = "#discord.server.general")
+
+        assertEquals(
+            ChatSubtitleModel.Text(context.getString(R.string.dickord_channel_subtitle)),
+            chatSubtitleModel(state, context, dickordEnabled = true),
+        )
+    }
+
+    @Test
+    fun dickordControlChannelKeepsOrdinaryChannelSubtitle() {
+        val state = channelState(memberCount = 42, displayName = "#discord.control")
+
+        assertEquals(
+            ChatSubtitleModel.Text("42 members"),
+            chatSubtitleModel(state, context, dickordEnabled = true),
+        )
+    }
+
     private fun channelState(
         memberCount: Int,
         typingNicks: List<String> = emptyList(),
+        displayName: String = "#motd",
     ) = ChatState(
         buffer =
             BufferEntity(
                 networkId = 1,
-                name = "#motd",
-                displayName = "#motd",
+                name = displayName.lowercase(),
+                displayName = displayName,
                 type = BufferType.CHANNEL,
             ),
         connState = IrcClientState.Ready("me", emptySet(), emptyMap()),

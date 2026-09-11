@@ -1310,7 +1310,10 @@ class ChatViewModel
 
         // --- composer actions ---
 
-        fun setReply(message: MessageEntity?) {
+        fun setReply(
+            message: MessageEntity?,
+            checkRoster: Boolean = true,
+        ) {
             replySenderNotInChannel.value = false
             // The selected parent is already in memory. Seed its lookup so the optimistic outgoing row
             // renders the real quote on its first frame instead of flashing the unresolved placeholder.
@@ -1332,6 +1335,7 @@ class ChatViewModel
                 currentReplyToEventId = message?.id
                 draftCommands.trySend(DraftCommand.Persist(advanceDraftRevisionLocked()))
             }
+            if (!checkRoster) return
 
             val sender = message?.sender?.takeIf { it.isNotBlank() && !message.isSelf } ?: return
             val room = buffer.value ?: return
@@ -1859,15 +1863,20 @@ class ChatViewModel
          * Open the nick sheet for [nick]. WHOX populates cached identity while WHOIS supplies richer
          * request-scoped details. Both labeled and serialized unlabeled WHOIS stay sheet-only.
          */
-        fun openNickSheet(nick: String) {
+        fun openNickSheet(
+            nick: String,
+            loadIrcDetails: Boolean = true,
+        ) {
+            nickDetailsJob?.cancel()
+            nickDetailsJob = null
+            _nickSheet.value = NickSheetState(nick = nick)
+            if (!loadIrcDetails) return
             // Moderation visibility depends on our prefixes in the channel roster. Load it on this
             // explicit interaction, not on every channel entry.
             ensureMembersObserved()
-            _nickSheet.value = NickSheetState(nick = nick)
             val networkId = state.value.buffer?.networkId ?: return
             val client = connectionManager.clientFor(networkId)
             val normalizedNick = identityRules.value.normalize(nick)
-            nickDetailsJob?.cancel()
             nickDetailsJob =
                 viewModelScope.launch {
                     userDao.observeByNick(networkId, normalizedNick).collect { cached ->

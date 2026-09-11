@@ -21,6 +21,8 @@ import io.github.trevarj.motd.data.repo.ChatFolderRepository
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
+import io.github.trevarj.motd.dickord.DickordLabsPrefs
+import io.github.trevarj.motd.dickord.isDickordPortalConversation
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.AppVisibility
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
@@ -136,11 +138,18 @@ data class ChatListState(
     val allMentions: Int = 0, // "All chats" mention rollup
     /** Global Feed lab flag; off hides both entry points into the feed. */
     val globalFeedEnabled: Boolean = false,
+    /** Lab-gated portal navigation state emitted atomically with the ordinary row partition. */
+    val dickordEnabled: Boolean = false,
+    val dickordUnreadSummary: ChatFolderSummary? = null,
 ) {
     val allUnreadIncomplete: Boolean
-        get() = rows.any { !it.muted && it.unreadCountIncomplete }
+        get() =
+            drawerRows.takeIf(List<DrawerRow>::isNotEmpty)?.any(DrawerRow::unreadIncomplete)
+                ?: rows.any { !it.muted && it.unreadCountIncomplete }
     val allMentionsIncomplete: Boolean
-        get() = rows.any { !it.muted && it.mentionCountIncomplete }
+        get() =
+            drawerRows.takeIf(List<DrawerRow>::isNotEmpty)?.any(DrawerRow::mentionsIncomplete)
+                ?: rows.any { !it.muted && it.mentionCountIncomplete }
 
     /** Effective unread count for the current drawer scope; muted activity stays row-local. */
     val scopedUnreadCount: Int
@@ -185,6 +194,7 @@ class ChatListViewModel
         private val settingsRepository: SettingsRepository,
         onboardingPrefs: OnboardingPrefs,
         globalFeedPrefs: GlobalFeedPrefs,
+        dickordLabsPrefs: DickordLabsPrefs,
         private val savedStateHandle: SavedStateHandle,
         private val appVisibility: AppVisibility,
     ) : ViewModel() {
@@ -270,13 +280,15 @@ class ChatListViewModel
             combine(chatListRows, bufferRepository.observeInvitations(), chatFolders?.observeFolders() ?: kotlinx.coroutines.flow.flowOf(emptyList())) { rows, invitations, folders ->
                 Triple(rows, invitations, folders)
             }
-        private val settingsAndOnboarding =
+        private val settingsAndLabs =
             combine(
                 settingsRepository.settings,
                 onboardingPrefs.completed,
                 globalFeedPrefs.enabled,
-                ::Triple,
-            )
+                dickordLabsPrefs.enabled,
+            ) { settings, onboardingComplete, globalFeedEnabled, dickordEnabled ->
+                Triple(settings, onboardingComplete, globalFeedEnabled) to dickordEnabled
+            }
 
         val state: StateFlow<ChatListState> =
             combine(
@@ -285,11 +297,12 @@ class ChatListViewModel
                 connectionManager.connectionStates.combine(connectionManager.presenceStates) { connection, presence ->
                     connection to presence
                 },
-                settingsAndOnboarding,
+                settingsAndLabs,
                 selectionAndOrder,
-            ) { listData, networks, connectionAndPresence, settingsAndOnboarding, selectionAndOrder ->
+            ) { listData, networks, connectionAndPresence, settingsAndLabs, selectionAndOrder ->
                 val (rows, invitationEvents, folders) = listData
                 val (connection, presence) = connectionAndPresence
+                val (settingsAndOnboarding, dickordEnabled) = settingsAndLabs
                 val (settings, onboardingComplete, globalFeedEnabled) = settingsAndOnboarding
                 val (selected, pending) = selectionAndOrder
                 // If the selected network was deleted, fall back to the unified list.
@@ -307,7 +320,8 @@ class ChatListViewModel
                 }
 
                 val scopedRows = scopeRows(rows, validSelection, networks)
-                val (activeRows, archivedRows) = partitionArchivedRows(scopedRows)
+                val ordinaryScopedRows = ordinaryChatListRows(scopedRows, dickordEnabled)
+                val (activeRows, archivedRows) = partitionArchivedRows(ordinaryScopedRows)
                 val scopedBufferIds = scopedRows.mapTo(mutableSetOf(), ChatListRow::bufferId)
                 ChatListState(
                     rows = activeRows,
@@ -340,6 +354,17 @@ class ChatListViewModel
                     allUnread = rows.filterNot { it.muted || it.archived }.sumOf { it.unreadCount },
                     allMentions = rows.filterNot { it.muted || it.archived }.sumOf { it.mentionCount },
                     globalFeedEnabled = globalFeedEnabled,
+                    dickordEnabled = dickordEnabled,
+                    dickordUnreadSummary =
+                        if (dickordEnabled) {
+                            summarizeFolder(
+                                rows.filter { row ->
+                                    !row.archived && isDickordPortalConversation(row.type, row.displayName)
+                                },
+                            )
+                        } else {
+                            null
+                        },
                 )
             }.stateIn(
                 scope = viewModelScope,
@@ -676,3 +701,14 @@ internal fun settledArchiveOverrideIds(
     val byId = rows.associateBy(ChatListRow::bufferId)
     return overrides.filter { (id, archived) -> byId[id]?.archived == archived }.keys
 }
+
+/** Portal-owned rows leave only the ordinary projection; disabling the Lab is an identity no-op. */
+internal fun ordinaryChatListRows(
+    rows: List<ChatListRow>,
+    dickordEnabled: Boolean,
+): List<ChatListRow> =
+    if (dickordEnabled) {
+        rows.filterNot { row -> isDickordPortalConversation(row.type, row.displayName) }
+    } else {
+        rows
+    }

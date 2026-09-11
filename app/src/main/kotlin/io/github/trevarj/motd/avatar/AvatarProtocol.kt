@@ -2,7 +2,7 @@ package io.github.trevarj.motd.avatar
 
 import io.github.trevarj.motd.irc.proto.IrcMessage
 
-const val AVATAR_CAP = "draft/metadata-2"
+const val METADATA_CAP = "draft/metadata-2"
 const val AVATAR_KEY = "avatar"
 
 data class MetadataCapabilityLimits(
@@ -14,7 +14,7 @@ data class MetadataCapabilityLimits(
 /** Parse only limits defined by the metadata draft; absent limits remain unrestricted. */
 fun metadataCapabilityLimits(caps: Set<String>): MetadataCapabilityLimits? {
     val advertised =
-        caps.firstOrNull { it == AVATAR_CAP || it.startsWith("$AVATAR_CAP=") }
+        caps.firstOrNull { it == METADATA_CAP || it.startsWith("$METADATA_CAP=") }
             ?: return null
     if ('=' !in advertised) return MetadataCapabilityLimits()
     val values =
@@ -33,7 +33,7 @@ fun metadataCapabilityLimits(caps: Set<String>): MetadataCapabilityLimits? {
     )
 }
 
-fun supportsAvatarSubscription(caps: Set<String>): Boolean = metadataCapabilityLimits(caps)?.let { it.maxSubscriptions != 0 } == true
+fun supportsMetadataSubscription(caps: Set<String>): Boolean = metadataCapabilityLimits(caps)?.let { it.maxSubscriptions != 0 } == true
 
 fun supportsAvatarMutation(caps: Set<String>): Boolean = metadataCapabilityLimits(caps)?.let { it.maxKeys != 0 } == true
 
@@ -46,6 +46,12 @@ fun supportsAvatarPublishing(
     val requiredBytes = (url ?: MINIMUM_AVATAR_URL).encodeToByteArray().size
     return limits.maxValueBytes?.let { it >= requiredBytes } != false
 }
+
+data class MetadataValueEvent(
+    val target: String,
+    val key: String,
+    val value: String?,
+)
 
 sealed interface AvatarMetadataEvent {
     data class Changed(
@@ -63,11 +69,11 @@ sealed interface AvatarMetadataEvent {
     ) : AvatarMetadataEvent
 }
 
-fun subscribeAvatarMessage() = IrcMessage(command = "METADATA", params = listOf("*", "SUB", AVATAR_KEY))
+fun subscribeMetadataMessage(key: String) = IrcMessage(command = "METADATA", params = listOf("*", "SUB", key))
 
-fun unsubscribeAvatarMessage() = IrcMessage(command = "METADATA", params = listOf("*", "UNSUB", AVATAR_KEY))
+fun unsubscribeMetadataMessage(key: String) = IrcMessage(command = "METADATA", params = listOf("*", "UNSUB", key))
 
-fun syncAvatarMessage(target: String) = IrcMessage(command = "METADATA", params = listOf(target, "SYNC"))
+fun syncMetadataMessage(target: String) = IrcMessage(command = "METADATA", params = listOf(target, "SYNC"))
 
 fun publishAvatarMessage(url: String?) = metadataAvatarMessage("*", url)
 
@@ -89,38 +95,30 @@ fun avatarMetadataRejected(response: List<IrcMessage>): Boolean =
         message.command == "FAIL" || message.command == "ERROR" || message.command.toIntOrNull() in 764..772
     }
 
-fun parseAvatarMetadata(message: IrcMessage): AvatarMetadataEvent? {
-    return when (message.command) {
+fun parseMetadataValue(message: IrcMessage): MetadataValueEvent? =
+    when (message.command) {
         "METADATA" -> {
-            val target = message.params.getOrNull(0) ?: return null
-            if (message.params.getOrNull(1) != AVATAR_KEY) return null
-            val value = message.params.getOrNull(3) ?: return null
-            validateAvatarUrl(value)?.let { AvatarMetadataEvent.Changed(target, it) }
-                ?: AvatarMetadataEvent.Removed(target)
+            MetadataValueEvent(
+                target = message.params.getOrNull(0) ?: return null,
+                key = message.params.getOrNull(1) ?: return null,
+                value = message.params.getOrNull(3) ?: return null,
+            )
         }
 
         "761" -> {
-            val target = message.params.getOrNull(1) ?: return null
-            if (message.params.getOrNull(2) != AVATAR_KEY) return null
-            val value = message.params.getOrNull(4) ?: return null
-            validateAvatarUrl(value)?.let { AvatarMetadataEvent.Changed(target, it) }
-                ?: AvatarMetadataEvent.Removed(target)
+            MetadataValueEvent(
+                target = message.params.getOrNull(1) ?: return null,
+                key = message.params.getOrNull(2) ?: return null,
+                value = message.params.getOrNull(4) ?: return null,
+            )
         }
 
         "766" -> {
-            val target = message.params.getOrNull(1) ?: return null
-            if (message.params.getOrNull(2) != AVATAR_KEY) return null
-            AvatarMetadataEvent.Removed(target)
-        }
-
-        "774" -> {
-            AvatarMetadataEvent.SyncLater(
+            message.params.getOrNull(3) ?: return null
+            MetadataValueEvent(
                 target = message.params.getOrNull(1) ?: return null,
-                retryAfterSeconds =
-                    message.params
-                        .getOrNull(2)
-                        ?.toLongOrNull()
-                        ?.coerceAtLeast(0) ?: 0,
+                key = message.params.getOrNull(2) ?: return null,
+                value = null,
             )
         }
 
@@ -128,6 +126,22 @@ fun parseAvatarMetadata(message: IrcMessage): AvatarMetadataEvent? {
             null
         }
     }
+
+fun parseAvatarMetadata(message: IrcMessage): AvatarMetadataEvent? {
+    if (message.command == "774") {
+        return AvatarMetadataEvent.SyncLater(
+            target = message.params.getOrNull(1) ?: return null,
+            retryAfterSeconds =
+                message.params
+                    .getOrNull(2)
+                    ?.toLongOrNull()
+                    ?.coerceAtLeast(0) ?: 0,
+        )
+    }
+    val metadata = parseMetadataValue(message)?.takeIf { it.key == AVATAR_KEY } ?: return null
+    return metadata.value?.let(::validateAvatarUrl)?.let {
+        AvatarMetadataEvent.Changed(metadata.target, it)
+    } ?: AvatarMetadataEvent.Removed(metadata.target)
 }
 
 private const val MINIMUM_AVATAR_URL = "https://a.b"

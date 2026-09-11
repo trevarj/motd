@@ -262,6 +262,24 @@
     <string name="labs_agentwire_desc">Show the experimental agent harness in channels activated by an Agentwire v1 topic. Off by default.</string>
     <string name="labs_agentwire_repo">Repo</string>
     <string name="labs_agentwire_url" translatable="false">https://github.com/trevarj/agentwire</string>
+    <string name="labs_dickord_section">Bridges</string>
+    <string name="labs_dickord">Dickord mode</string>
+    <string name="labs_dickord_desc">Open Discord-style server and DM navigation for your Dickord chats, using your Motd theme.</string>
+    <string name="dickord_badge">Discord</string>
+    <string name="dickord_dms">DMs</string>
+    <string name="dickord_channel_subtitle">Discord via Dickord</string>
+    <string name="dickord_relay_identity">Discord relay identity</string>
+    <string name="dickord_portal_refresh">Refresh bridge details</string>
+    <string name="dickord_portal_channels">Channels</string>
+    <string name="dickord_portal_exit">Back to Motd</string>
+    <string name="dickord_portal_pending">Bridge details</string>
+    <string name="dickord_portal_waiting">Waiting for bridge details</string>
+    <string name="dickord_portal_conversation_pending">Conversation %1$d</string>
+    <string name="dickord_portal_empty">No bridged conversations</string>
+    <string name="dickord_portal_no_dms">No bridged DMs</string>
+    <string name="dickord_portal_offline">Bridge offline — showing saved chats</string>
+    <string name="dickord_portal_list_hint">Discord conversations are in the Discord tab.</string>
+    <string name="dickord_portal_info">Conversation info</string>
     <string name="labs_feed_section">Feed</string>
     <string name="labs_global_feed">Global Feed</string>
     <string name="labs_global_feed_desc">Merge every channel and DM into one stream, opened from the drawer or the chat list. Off by default.</string>

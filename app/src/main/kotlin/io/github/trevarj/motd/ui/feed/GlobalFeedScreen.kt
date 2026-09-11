@@ -33,6 +33,9 @@ import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
+import io.github.trevarj.motd.dickord.dickordChannelLabel
+import io.github.trevarj.motd.dickord.dickordNickLabel
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.messageContentType
 import io.github.trevarj.motd.ui.chat.showsSender
@@ -159,6 +162,8 @@ private fun GlobalFeedLineRow(
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit,
 ) {
     val message = row.message
+    val dickordEnabled = LocalDickordLabsEnabled.current
+    val displaySender = dickordNickLabel(message.sender, dickordEnabled)
     // Rows arrive from many networks: each carries its own advertised casemap/chantypes, so mention
     // detection is decided per row rather than from one screen-wide default.
     val identityRules =
@@ -173,7 +178,12 @@ private fun GlobalFeedLineRow(
     Column(modifier = Modifier.fillMaxWidth().testTag("feed_row_${message.id}")) {
         if (!sameBuffer) {
             Text(
-                text = conversationTag(row.bufferDisplayName, row.networkName, showNetwork),
+                text =
+                    conversationTag(
+                        dickordChannelLabel(row.bufferDisplayName, dickordEnabled),
+                        row.networkName,
+                        showNetwork,
+                    ),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -183,6 +193,7 @@ private fun GlobalFeedLineRow(
         }
         MessageBubble(
             sender = message.sender,
+            displaySender = displaySender,
             senderAccount = message.senderAccount,
             // Same rule as MessageList: the stored IRC-formatted body wins when there is one.
             text = message.ircFormattedText ?: message.text,

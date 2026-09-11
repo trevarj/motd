@@ -271,6 +271,7 @@ class ChatListReorderTest {
 
                     override suspend fun setEnabled(enabled: Boolean) = Unit
                 },
+            dickordLabsPrefs = fakeDickordLabsPrefs(),
             savedStateHandle = SavedStateHandle(),
             appVisibility = AlwaysOnScreen,
         )

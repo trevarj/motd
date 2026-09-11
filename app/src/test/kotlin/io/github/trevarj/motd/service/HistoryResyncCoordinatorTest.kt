@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.paging.PagingSource
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.avatar.AvatarController
+import io.github.trevarj.motd.avatar.NoopAvatarController
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.HistoryCursorEntity
@@ -20,6 +22,7 @@ import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
+import io.github.trevarj.motd.dickord.DICKORD_AVATAR_TAG
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
@@ -280,6 +283,61 @@ class HistoryResyncCoordinatorTest {
             }
         }
     }
+
+    @Test
+    fun pendingHistoryScansAvatarTagsBeforePersistingThePage() =
+        runTest {
+            val target = "#discord.guild.general"
+            val discordBufferId =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = target, displayName = target, type = BufferType.CHANNEL),
+                )
+            val tagged =
+                message("discord-avatar", 100, target).let { event ->
+                    event.copy(
+                        ctx =
+                            event.ctx.copy(
+                                clientTags =
+                                    mapOf(
+                                        DICKORD_AVATAR_TAG to
+                                            "https://cdn.discordapp.com/avatars/1/hash.png?size=256",
+                                    ),
+                            ),
+                        source = Prefix("Alice/discord"),
+                    )
+                }
+            var scannedEvents = emptyList<IrcEvent>()
+            var rowsAtScan: Int? = null
+            val avatars =
+                object : AvatarController by NoopAvatarController {
+                    override suspend fun ingestDickordAvatars(
+                        networkId: Long,
+                        events: List<IrcEvent>,
+                    ) {
+                        scannedEvents = events
+                        rowsAtScan = db.messageDao().countForBuffer(discordBufferId)
+                    }
+                }
+            val loader = HistoryPageLoader(processor, avatarController = avatars)
+            coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader)
+            val source =
+                FakeSource {
+                    FakeResponse(events = listOf(tagged), endOfHistory = true)
+                }
+
+            val result =
+                coordinator.reconcilePendingMessage(
+                    networkId,
+                    discordBufferId,
+                    target,
+                    source,
+                )
+
+            assertEquals(HistoryResyncState.Updated(1), result)
+            assertEquals(listOf(tagged), scannedEvents)
+            assertEquals(0, rowsAtScan)
+            assertEquals(1, db.messageDao().countForBuffer(discordBufferId))
+        }
 
     @Test
     fun transientNewDmPush_isIncludedInReconnectHistoryCatchup() =

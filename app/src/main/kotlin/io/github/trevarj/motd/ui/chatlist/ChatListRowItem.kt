@@ -59,6 +59,10 @@ import io.github.trevarj.motd.audio.parseAudioAttachments
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
+import io.github.trevarj.motd.dickord.dickordChannelLabel
+import io.github.trevarj.motd.dickord.dickordNickLabel
+import io.github.trevarj.motd.dickord.isDickordChannel
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.Avatar
@@ -199,10 +203,17 @@ fun ChatListRowItem(
     selected: Boolean = false,
     active: Boolean = false,
     syncIndicator: ChatListSyncIndicator = ChatListSyncIndicator.NONE,
+    displayTitle: String? = null,
+    showDickordBadge: Boolean = true,
+    avatarName: String = row.displayName,
+    avatarIsChannel: Boolean = row.type == BufferType.CHANNEL,
+    avatarModel: String? = row.avatarOverrideModel,
 ) {
     // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
     val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
     val spacing = LocalSpacing.current
+    val dickordEnabled = LocalDickordLabsEnabled.current
+    val activeDickordChannel = dickordEnabled && isDickordChannel(row.displayName)
     // Chat-list time always shows regardless of the in-chat "show timestamps" toggle.
     val context = LocalContext.current
     val timestampConfig = LocalTimestampConfig.current
@@ -269,10 +280,10 @@ fun ChatListRowItem(
     ) {
         if (!hideAvatar) {
             PresenceAvatar(
-                name = row.displayName,
-                isChannel = row.type == BufferType.CHANNEL,
+                name = avatarName,
+                isChannel = avatarIsChannel,
                 networkId = row.networkId,
-                conversationModel = row.avatarOverrideModel,
+                conversationModel = avatarModel,
                 presence = queryPresence,
                 size = spacing.chatListAvatar,
             )
@@ -301,7 +312,7 @@ fun ChatListRowItem(
                         Modifier.weight(1f, fill = false)
                     }
                 Text(
-                    text = row.displayName,
+                    text = displayTitle ?: dickordChannelLabel(row.displayName, dickordEnabled),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = if (isUnread) FontWeight.Bold else FontWeight.Medium,
                     color =
@@ -352,6 +363,14 @@ fun ChatListRowItem(
                 // Network belongs to buffer identity, so it rides the title line (trailing the
                 // status icons); keeping it off the preview line avoids a two-chip collision
                 // with the sender label.
+                if (showDickordBadge && activeDickordChannel) {
+                    Spacer(Modifier.width(6.dp))
+                    NetworkChip(
+                        name = stringResource(R.string.dickord_badge),
+                        dimmed = true,
+                        emphasized = isUnread,
+                    )
+                }
                 if (showNetworkChip) {
                     Spacer(Modifier.width(6.dp))
                     NetworkChip(
@@ -379,7 +398,7 @@ fun ChatListRowItem(
                 val sender = chatListPreviewSender(row.type, lastMessage, row.lastMessageSender)
                 if (sender != null) {
                     SenderLabel(
-                        sender = sender,
+                        sender = dickordNickLabel(sender, dickordEnabled),
                         color =
                             LocalNickColors.current.nick(
                                 sender,

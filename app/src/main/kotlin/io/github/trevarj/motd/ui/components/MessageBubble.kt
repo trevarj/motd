@@ -266,6 +266,7 @@ fun MessageBubble(
     isSelf: Boolean,
     kind: MessageKind,
     showSender: Boolean,
+    displaySender: String = sender,
     modifier: Modifier = Modifier,
     isBot: Boolean = false,
     hasMention: Boolean = false,
@@ -321,6 +322,7 @@ fun MessageBubble(
         if (spacing.compact || spacing.twoLine) {
             ActionMessageRow(
                 sender = sender,
+                displaySender = displaySender,
                 networkId = networkId,
                 text = text,
                 formattedTime = displayedTime,
@@ -352,6 +354,7 @@ fun MessageBubble(
         } else {
             ComfortableActionBubble(
                 sender = sender,
+                displaySender = displaySender,
                 text = text,
                 formattedTime = displayedTime,
                 isSelf = isSelf,
@@ -392,6 +395,7 @@ fun MessageBubble(
     if (spacing.compact) {
         CompactMessageRow(
             sender = sender,
+            displaySender = displaySender,
             networkId = networkId,
             text = text,
             formattedTime = displayedTime,
@@ -430,6 +434,7 @@ fun MessageBubble(
     if (spacing.twoLine) {
         TwoLineMessageRow(
             sender = sender,
+            displaySender = displaySender,
             networkId = networkId,
             senderAccount = senderAccount,
             text = text,
@@ -542,7 +547,7 @@ fun MessageBubble(
                     modifier = if (onSenderClick != null) Modifier.clickable(onClick = onSenderClick) else Modifier,
                 ) {
                     Text(
-                        text = botDisplayName(sender, isBot),
+                        text = botDisplayName(displaySender, isBot),
                         color = nameColor,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
@@ -653,7 +658,7 @@ fun MessageBubble(
                 val metadataColor = if (failed) MaterialTheme.colorScheme.error else textColor
                 if (isSelf && showSender) {
                     Text(
-                        text = botDisplayName(sender, isBot),
+                        text = botDisplayName(displaySender, isBot),
                         color = textColor,
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 1,
@@ -695,6 +700,7 @@ fun MessageBubble(
 @Composable
 private fun ComfortableActionBubble(
     sender: String,
+    displaySender: String,
     text: String,
     formattedTime: String,
     isSelf: Boolean,
@@ -728,7 +734,7 @@ private fun ComfortableActionBubble(
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val actionDescription = stringResource(R.string.chat_action_message)
-    val actionLabel = remember(sender, text) { actionAccessibilityLabel(sender, text) }
+    val actionLabel = remember(displaySender, text) { actionAccessibilityLabel(displaySender, text) }
     val semanticColors = LocalMotdSemanticColors.current
     val rowColor =
         if (hasMention) {
@@ -781,7 +787,7 @@ private fun ComfortableActionBubble(
     val hideAvatar = avatarsHidden()
     val actionLine =
         remember(
-            sender,
+            displaySender,
             isBot,
             text,
             imageUrl,
@@ -797,7 +803,7 @@ private fun ComfortableActionBubble(
             hideAvatar,
         ) {
             buildActionLine(
-                sender = botDisplayName(sender, isBot),
+                sender = botDisplayName(displaySender, isBot),
                 text = text,
                 accentColor = bodyColor,
                 nameColor = nameColor,
@@ -932,6 +938,7 @@ private fun ComfortableActionBubble(
 @Composable
 private fun ActionMessageRow(
     sender: String,
+    displaySender: String,
     networkId: Long?,
     text: String,
     formattedTime: String,
@@ -962,7 +969,7 @@ private fun ActionMessageRow(
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val actionDescription = stringResource(R.string.chat_action_message)
-    val actionLabel = remember(sender, text) { actionAccessibilityLabel(sender, text) }
+    val actionLabel = remember(displaySender, text) { actionAccessibilityLabel(displaySender, text) }
     val spacing = LocalSpacing.current
     val semanticColors = LocalMotdSemanticColors.current
     val accent =
@@ -1001,7 +1008,7 @@ private fun ActionMessageRow(
         }
     val actionLine =
         remember(
-            sender,
+            displaySender,
             isBot,
             text,
             imageUrl,
@@ -1017,7 +1024,7 @@ private fun ActionMessageRow(
             senderLink,
         ) {
             buildActionLine(
-                sender = botDisplayName(sender, isBot),
+                sender = botDisplayName(displaySender, isBot),
                 text = text,
                 accentColor = accent,
                 nameColor = nameColor,
@@ -1248,6 +1255,7 @@ private fun Modifier.actionAccentRail(accent: Color): Modifier =
 @Composable
 private fun TwoLineMessageRow(
     sender: String,
+    displaySender: String,
     networkId: Long?,
     senderAccount: String?,
     text: String,
@@ -1329,7 +1337,7 @@ private fun TwoLineMessageRow(
                     )
                 }
                 Text(
-                    text = botDisplayName(sender, isBot),
+                    text = botDisplayName(displaySender, isBot),
                     color = nameColor,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,

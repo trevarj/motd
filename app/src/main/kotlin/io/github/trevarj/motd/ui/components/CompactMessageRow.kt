@@ -58,6 +58,7 @@ private const val COMPACT_ROW_TINT_ALPHA = 0.10f
 @Composable
 internal fun CompactMessageRow(
     sender: String,
+    displaySender: String,
     networkId: Long?,
     text: String,
     formattedTime: String,
@@ -117,7 +118,7 @@ internal fun CompactMessageRow(
     val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
     val line =
         remember(
-            sender,
+            displaySender,
             imageUrl,
             text,
             kind,
@@ -133,7 +134,7 @@ internal fun CompactMessageRow(
             nickFontSize,
         ) {
             buildCompactLine(
-                sender,
+                displaySender,
                 text,
                 kind,
                 nameColor,

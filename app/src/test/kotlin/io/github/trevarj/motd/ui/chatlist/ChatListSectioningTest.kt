@@ -1,13 +1,19 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import android.content.Context
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Unarchive
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.ChatFolderEntity
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.InvitationEventRow
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
+import io.github.trevarj.motd.dickord.DickordLabsPrefs
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -496,17 +502,26 @@ class ChatListSectioningTest {
 
         fun sections(rows: List<ChatListRow>) = sectionChatList(rows, setOf("ally"), setOf("troll"))
         val all = sections(listOf(pinned, friend, regular, fool))
+        val folder =
+            PresentedChatFolder(
+                folder = ChatFolderEntity(id = 7, displayName = "Real", normalizedName = "real", ordering = 0),
+                children = listOf(regular),
+                summary = summarizeFolder(listOf(regular)),
+                temporarilyExpanded = false,
+            )
 
         assertEquals(1L, chatListTopItemKey(false, emptyList(), 0, all))
         assertEquals("friends-header", chatListTopItemKey(false, emptyList(), 0, sections(listOf(friend, regular, fool))))
         assertEquals(3L, chatListTopItemKey(false, emptyList(), 0, sections(listOf(regular, fool))))
         assertEquals("fools-header", chatListTopItemKey(false, emptyList(), 0, sections(listOf(fool))))
         assertEquals(null, chatListTopItemKey(false, emptyList(), 0, sections(emptyList())))
+        assertEquals("folder-7", chatListTopItemKey(false, emptyList(), 0, sections(listOf(friend, regular, fool)), listOf(folder)))
+        assertEquals(1L, chatListTopItemKey(false, emptyList(), 0, all, listOf(folder)))
         // An actionable invitations folder leads every chat tier.
-        assertEquals("invitations-folder", chatListTopItemKey(false, listOf(invitation(7)), 1, all))
+        assertEquals("invitations-folder", chatListTopItemKey(false, listOf(invitation(7)), 1, all, listOf(folder)))
         // Invitation mode presents invitation rows (or the empty state), never chat rows.
-        assertEquals("invitation-7", chatListTopItemKey(true, listOf(invitation(7)), 1, all))
-        assertEquals("invitations-empty", chatListTopItemKey(true, emptyList(), 0, all))
+        assertEquals("invitation-7", chatListTopItemKey(true, listOf(invitation(7)), 1, all, listOf(folder)))
+        assertEquals("invitations-empty", chatListTopItemKey(true, emptyList(), 0, all, listOf(folder)))
     }
 
     @Test
@@ -523,3 +538,8 @@ class ChatListSectioningTest {
         assertFalse(shouldRepinChatListTop(1L, null, canScrollBackward = false, scrollInProgress = false))
     }
 }
+
+internal fun fakeDickordLabsPrefs(enabledFlow: Flow<Boolean> = flowOf(false)) =
+    object : DickordLabsPrefs(ApplicationProvider.getApplicationContext<Context>()) {
+        override val enabled = enabledFlow
+    }

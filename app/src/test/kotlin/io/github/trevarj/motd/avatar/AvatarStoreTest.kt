@@ -42,6 +42,18 @@ class AvatarStoreTest {
             )
         }
 
+    @Test fun identical_upsert_does_not_rewrite_the_existing_record() =
+        runTest {
+            val url = "https://example.com/alice.png"
+            store.upsert(1, "Alice", null, url)
+            val first = store.records.first().single()
+            while (System.currentTimeMillis() <= first.updatedAt) Thread.yield()
+
+            store.upsert(1, "ALICE", null, url)
+
+            assertEquals(first, store.records.first().single())
+        }
+
     @Test fun account_and_nick_changes_rekey_without_leaving_stale_rows() =
         runTest {
             store.upsert(1, "Alice", null, "https://example.com/a.png")

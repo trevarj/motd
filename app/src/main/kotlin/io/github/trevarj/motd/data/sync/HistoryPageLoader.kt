@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.data.sync
 
+import io.github.trevarj.motd.avatar.AvatarController
+import io.github.trevarj.motd.avatar.NoopAvatarController
 import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
@@ -52,6 +54,7 @@ class HistoryPageLoader
         // Opt-in fetch journal (availability gates, per-page outcomes, wire timeouts). Fields carry
         // classification, ids, counts, timestamps, and msgid PRESENCE only — never message content.
         private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
+        private val avatarController: AvatarController = NoopAvatarController,
     ) {
         /**
          * Minimal seam over the live history transport (availability + a single labeled request),
@@ -162,6 +165,23 @@ class HistoryPageLoader
         // carries a [PageResult]. Erased to Any only because one map cannot express that.
         private val inFlight = ConcurrentHashMap<FlightKey, CompletableDeferred<Any>>()
         internal var requestTimeoutMs: Long = REQUEST_TIMEOUT_MS
+
+        internal suspend fun persistHistoryPageResult(
+            networkId: Long,
+            request: ChatHistoryRequest,
+            response: ChatHistoryResponse.Messages,
+            expectedRoomId: RoomId?,
+            historyGapId: Long? = null,
+        ): PersistedHistoryPage {
+            avatarController.ingestDickordAvatars(networkId, response.events)
+            return processor.persistHistoryPageResult(
+                networkId,
+                request,
+                response,
+                expectedRoomId,
+                historyGapId,
+            )
+        }
 
         /**
          * Forget the wire gate for [networkId]; the network's connection is gone.
@@ -422,7 +442,7 @@ class HistoryPageLoader
                             IllegalStateException("CHATHISTORY AROUND returned a TARGETS response"),
                         )
                 val persisted =
-                    processor.persistHistoryPageResult(
+                    persistHistoryPageResult(
                         networkId,
                         issued,
                         page,
@@ -523,7 +543,7 @@ class HistoryPageLoader
                         throw LatestFlightTimeoutException()
                     }
                 val persisted =
-                    processor.persistHistoryPageResult(
+                    persistHistoryPageResult(
                         networkId,
                         request,
                         result,
@@ -603,7 +623,7 @@ class HistoryPageLoader
             // Room transaction, so Paging sees one invalidation instead of up to 50 row-by-row refreshes
             // while the user is entering or flinging through a channel.
             val persisted =
-                processor.persistHistoryPageResult(
+                persistHistoryPageResult(
                     networkId,
                     fetched.request,
                     result,
@@ -674,7 +694,7 @@ class HistoryPageLoader
                 )
             }
             val persisted =
-                processor.persistHistoryPageResult(
+                persistHistoryPageResult(
                     networkId,
                     fetched.request,
                     result,

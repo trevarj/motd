@@ -328,6 +328,7 @@ interface BufferDao {
             b.archived AS archived,
             b.avatarOverrideModel AS avatarOverrideModel,
             b.folderId AS folderId,
+            b.dickordChannelJson AS dickordChannelJson,
             lm.text AS lastMessageText,
             lm.sender AS lastMessageSender,
             lm.serverTime AS lastMessageTime,
@@ -670,6 +671,12 @@ interface BufferDao {
     suspend fun setAvatarOverride(
         requestedId: RoomId,
         model: String?,
+    ): Int
+
+    @Query("UPDATE buffers SET dickordChannelJson = :json WHERE id = :id AND type = 'CHANNEL'")
+    suspend fun setDickordChannelJson(
+        id: RoomId,
+        json: String?,
     ): Int
 
     @Query("SELECT avatarOverrideModel FROM buffers WHERE avatarOverrideModel LIKE 'file://%'")
@@ -1066,6 +1073,7 @@ data class ChatListRow(
     val archived: Boolean = false,
     val avatarOverrideModel: String? = null,
     val folderId: Long? = null,
+    val dickordChannelJson: String? = null,
     val unreadCountIncomplete: Boolean = false,
     val mentionCountIncomplete: Boolean = false,
     /**

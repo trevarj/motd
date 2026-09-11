@@ -188,6 +188,12 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
+import io.github.trevarj.motd.dickord.decodeDickordChannelDescriptor
+import io.github.trevarj.motd.dickord.dickordNickLabel
+import io.github.trevarj.motd.dickord.isDickordPortalConversation
+import io.github.trevarj.motd.dickord.isDickordRelayNick
+import io.github.trevarj.motd.dickord.isDiscordDirectMessage
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -204,6 +210,8 @@ import io.github.trevarj.motd.ui.components.ChannelWatchDialog
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
+import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
+import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.typingText
@@ -317,7 +325,9 @@ fun ChatScreen(
     onOpenAccountSetup: (Long) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
     voiceViewModel: VoiceMessageViewModel = hiltViewModel(),
+    onOpenConversationList: (() -> Unit)? = null,
 ) {
+    val dickordEnabled = LocalDickordLabsEnabled.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val onHeaderBack =
@@ -328,6 +338,18 @@ fun ChatScreen(
                     hideKeyboard = { keyboardController?.hide() },
                     onBack = onBack,
                 )
+            }
+        }
+    val onConversationList =
+        onOpenConversationList?.let { navigate ->
+            remember(focusManager, keyboardController, navigate) {
+                {
+                    dismissKeyboardBeforeNavigating(
+                        clearFocus = focusManager::clearFocus,
+                        hideKeyboard = { keyboardController?.hide() },
+                        onBack = navigate,
+                    )
+                }
             }
         }
     var mentionRequest by remember { mutableStateOf<Pair<Long, String>?>(null) }
@@ -508,13 +530,25 @@ fun ChatScreen(
         nearestUnreadMentionBelow = viewModel::nearestUnreadMentionBelow,
         onBack = onHeaderBack,
         showBack = showBack,
+        onOpenConversationList = onConversationList,
         // Channel titles open Channel Info; query titles describe the other user. SERVER buffers
         // have neither channel nor peer details, so their title remains inert.
         onOpenChannelInfo = { id ->
             when (titleTarget) {
-                ChatTitleTarget.CHANNEL_INFO -> onOpenChannelInfo(id)
-                ChatTitleTarget.NICK_DETAILS -> state.buffer?.displayName?.let(viewModel::openNickSheet)
-                ChatTitleTarget.NONE -> Unit
+                ChatTitleTarget.CHANNEL_INFO -> {
+                    onOpenChannelInfo(id)
+                }
+
+                ChatTitleTarget.NICK_DETAILS -> {
+                    state.buffer?.displayName?.let { rawNick ->
+                        viewModel.openNickSheet(
+                            rawNick,
+                            loadIrcDetails = !(dickordEnabled && isDickordRelayNick(rawNick)),
+                        )
+                    }
+                }
+
+                ChatTitleTarget.NONE -> {}
             }
         },
         onOpenSearch = onOpenSearch,
@@ -529,7 +563,13 @@ fun ChatScreen(
         nickNormalizer = nickNormalizer,
         onSubmit = { raw -> viewModel.submit(raw, onOpenBuffer = onOpenBuffer, onOpenChannelList = onOpenChannelList) },
         onTyping = viewModel::sendTyping,
-        onSetReply = viewModel::setReply,
+        onSetReply = { message ->
+            viewModel.setReply(
+                message,
+                checkRoster =
+                    !(dickordEnabled && message != null && isDickordRelayNick(message.sender)),
+            )
+        },
         onReact = viewModel::react,
         onRedact = viewModel::redact,
         onRetry = viewModel::retry,
@@ -599,7 +639,12 @@ fun ChatScreen(
         onReresolveJump = viewModel::reresolveJumpOnce,
         onReresolveInitial = viewModel::reresolveInitialOnce,
         isServerBuffer = isServerBuffer,
-        onSenderClick = viewModel::openNickSheet,
+        onSenderClick = { rawNick ->
+            viewModel.openNickSheet(
+                rawNick,
+                loadIrcDetails = !(dickordEnabled && isDickordRelayNick(rawNick)),
+            )
+        },
         uiEvent = uiEvents.firstOrNull(),
         onUiEventAcknowledged = viewModel::acknowledgeUiEvent,
         onRetryReplyJump = viewModel::retryReplyJump,
@@ -660,6 +705,7 @@ fun ChatScreen(
                 norm(sheet.nick) == norm(state.buffer?.displayName.orEmpty())
         NickActionSheet(
             nick = sheet.nick,
+            relayIdentity = dickordEnabled && isDickordRelayNick(sheet.nick),
             networkId = state.buffer?.networkId,
             isSelf = isSelf,
             isFriend = identityRules.matchesConfiguredNick(sheet.nick, settings.friends),
@@ -969,7 +1015,35 @@ fun ChatContent(
     watchingThisBuffer: Boolean = false,
     onStartChannelWatch: (ChannelWatchDuration) -> Unit = {},
     onStopChannelWatch: () -> Unit = {},
+    onOpenConversationList: (() -> Unit)? = null,
 ) {
+    val dickordEnabled = LocalDickordLabsEnabled.current
+    val buffer = state.buffer
+    val activeDickordChannel =
+        dickordEnabled &&
+            buffer != null &&
+            isDickordPortalConversation(buffer.type, buffer.displayName)
+    val dickordDescriptor =
+        if (activeDickordChannel) {
+            decodeDickordChannelDescriptor(buffer.dickordChannelJson)
+        } else {
+            null
+        }
+    val conversationLabel =
+        when {
+            buffer == null -> {
+                null
+            }
+
+            activeDickordChannel -> {
+                dickordDescriptor?.channelName
+                    ?: stringResource(R.string.dickord_portal_conversation_pending, buffer.id)
+            }
+
+            else -> {
+                buffer.displayName
+            }
+        }
     val listState = rememberLazyListState()
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
     var liveEntryIds by remember(state.buffer?.id) { mutableStateOf(emptySet<Long>()) }
@@ -2155,7 +2229,6 @@ fun ChatContent(
             }
         }
     }
-    val buffer = state.buffer
     val titleTarget = chatTitleTarget(buffer?.type)
     val titleClickLabel =
         when (titleTarget) {
@@ -2247,24 +2320,37 @@ fun ChatContent(
                         ) {
                             val hideAvatar = avatarsHidden()
                             if (!hideAvatar) {
-                                Avatar(
-                                    name = buffer?.displayName ?: "",
-                                    size = MotdSizes.headerAvatar,
-                                    isChannel = buffer?.type == BufferType.CHANNEL,
-                                    networkId = buffer?.networkId,
-                                    conversationModel = buffer?.avatarOverrideModel,
-                                )
+                                val remoteAvatars = LocalRemoteAvatars.current
+                                val dickordDirectMessage =
+                                    dickordDescriptor?.let { isDiscordDirectMessage(it.channelType) } == true
+                                CompositionLocalProvider(
+                                    LocalRemoteAvatars provides
+                                        if (dickordDirectMessage) RemoteAvatarState() else remoteAvatars,
+                                ) {
+                                    Avatar(
+                                        name = if (dickordDirectMessage) conversationLabel.orEmpty() else buffer?.displayName.orEmpty(),
+                                        size = MotdSizes.headerAvatar,
+                                        isChannel = !dickordDirectMessage && buffer?.type == BufferType.CHANNEL,
+                                        networkId = buffer?.networkId,
+                                        conversationModel =
+                                            if (dickordDirectMessage) {
+                                                dickordDescriptor.channelIconUrl.takeIf { remoteAvatars.enabled }
+                                            } else {
+                                                buffer?.avatarOverrideModel
+                                            },
+                                    )
+                                }
                             }
                             // The 10dp gap only separates the title from the avatar beside it.
                             Column(modifier = Modifier.padding(start = if (hideAvatar) 0.dp else 10.dp).weight(1f)) {
                                 Text(
-                                    text = buffer?.displayName ?: "",
+                                    text = conversationLabel.orEmpty(),
                                     style = MaterialTheme.typography.titleMedium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 AnimatedContent(
-                                    targetState = chatSubtitleModel(state, ctx),
+                                    targetState = chatSubtitleModel(state, ctx, dickordEnabled),
                                     transitionSpec = {
                                         fadeIn(MotdMotion.microFadeIn) togetherWith
                                             fadeOut(MotdMotion.microFadeOut)
@@ -2308,6 +2394,14 @@ fun ChatContent(
                         }
                     },
                     actions = {
+                        onOpenConversationList?.let { openConversationList ->
+                            TextButton(
+                                onClick = openConversationList,
+                                modifier = Modifier.testTag("chat_open_conversation_list"),
+                            ) {
+                                Text(stringResource(R.string.dickord_portal_channels))
+                            }
+                        }
                         IconButton(onClick = { buffer?.let { onOpenSearch(it.id) } }) {
                             Icon(
                                 Icons.Outlined.Search,
@@ -2628,7 +2722,7 @@ fun ChatContent(
                                             listShift = flightListShift,
                                             networkId = state.buffer?.networkId,
                                             bufferId = state.buffer?.id,
-                                            conversationName = state.buffer?.displayName,
+                                            conversationName = conversationLabel,
                                             directMessage = state.buffer?.type == BufferType.QUERY,
                                             collapseSystemEvents = !isServerBuffer,
                                             // Frozen read-marker so the "New messages" divider stays put.
@@ -2842,7 +2936,7 @@ fun ChatContent(
                             exit = shrinkVertically(animationSpec = MotdMotion.contentSize) + fadeOut(MotdMotion.microFadeOut),
                         ) {
                             PartedChannelBanner(
-                                channel = state.buffer?.displayName.orEmpty(),
+                                channel = conversationLabel.orEmpty(),
                                 onRejoin = onRejoin,
                             )
                         }
@@ -2887,13 +2981,25 @@ fun ChatContent(
                             // the send tap rather than after persistence clears the durable draft.
                             reply =
                                 outgoingFlight?.let { flight ->
-                                    flight.replyText?.let { ComposerReply(flight.replySender.orEmpty(), it) }
-                                } ?: state.replyTo?.let { ComposerReply(it.sender, it.text) },
+                                    flight.replyText?.let {
+                                        ComposerReply(
+                                            dickordNickLabel(flight.replySender.orEmpty(), activeDickordChannel),
+                                            it,
+                                        )
+                                    }
+                                } ?: state.replyTo?.let {
+                                    ComposerReply(dickordNickLabel(it.sender, activeDickordChannel), it.text)
+                                },
                             replyVisible = outgoingFlight?.replyText == null,
                             replyWarning =
                                 state.replyTo
                                     ?.takeIf { state.replySenderNotInChannel && outgoingFlight == null }
-                                    ?.let { stringResource(R.string.chat_reply_sender_not_in_channel, it.sender) },
+                                    ?.let {
+                                        stringResource(
+                                            R.string.chat_reply_sender_not_in_channel,
+                                            dickordNickLabel(it.sender, activeDickordChannel),
+                                        )
+                                    },
                             onCancelReply = { onSetReply(null) },
                             // SERVER buffers send raw commands; hint that in the placeholder.
                             // Held blank while a flight is airborne: the ghost is born over the input box
@@ -2991,6 +3097,7 @@ fun ChatContent(
                 (state.connState as? IrcClientState.Ready)
                     ?.isupport
                     ?.let(::sojuFileHostAdvertised) == true,
+            preferSojuFileHost = activeDickordChannel,
             startWithCurrentDraft = uploadCurrentDraftDirectly,
             sharedFile = sharedFile,
             directFileTransferAvailable =
@@ -3613,6 +3720,7 @@ internal fun chatSubtitle(
 internal fun chatSubtitleModel(
     state: ChatState,
     context: android.content.Context,
+    dickordEnabled: Boolean = false,
 ): ChatSubtitleModel? {
     when (val connection = state.connState) {
         null -> return null
@@ -3631,10 +3739,24 @@ internal fun chatSubtitleModel(
 
         is IrcClientState.Ready -> Unit
     }
+    val buffer = state.buffer
+    val activeDickordChannel =
+        dickordEnabled &&
+            buffer != null &&
+            isDickordPortalConversation(buffer.type, buffer.displayName)
     if (state.typingNicks.isNotEmpty()) {
-        return ChatSubtitleModel.Text(typingText(context, state.typingNicks))
+        val typingNicks =
+            if (activeDickordChannel) {
+                state.typingNicks.map { dickordNickLabel(it, activeDickordChannel) }
+            } else {
+                state.typingNicks
+            }
+        return ChatSubtitleModel.Text(typingText(context, typingNicks))
     }
-    val buffer = state.buffer ?: return null
+    if (activeDickordChannel) {
+        return ChatSubtitleModel.Text(context.getString(R.string.dickord_channel_subtitle))
+    }
+    if (buffer == null) return null
     return if (buffer.type == BufferType.CHANNEL && state.memberCount != null) {
         val n = state.memberCount
         ChatSubtitleModel.Text(context.resources.getQuantityString(R.plurals.chat_member_count, n, n))

@@ -68,6 +68,31 @@ class AttachmentUiModelsTest {
         assertEquals("server policy", backendRetention(PasteBackendConfig(backend = AttachmentBackend.SOJU_FILEHOST)))
     }
 
+    @Test fun dickordBinaryMediaPrefersAdvertisedFileHostOnly() {
+        val configured = PasteBackendConfig(backend = AttachmentBackend.CRAFTERBIN)
+        val photo = AttachmentSource.Photo(Uri.EMPTY, "photo.jpg", "image/jpeg", 1)
+        val document = AttachmentSource.Document(Uri.EMPTY, "file.bin", "application/octet-stream", 1)
+
+        listOf(photo, document).forEach { source ->
+            assertEquals(
+                AttachmentBackend.SOJU_FILEHOST,
+                preferredUploadConfig(source, configured, sojuFileHostAvailable = true, preferSojuFileHost = true).backend,
+            )
+        }
+        assertEquals(
+            configured,
+            preferredUploadConfig(photo, configured, sojuFileHostAvailable = false, preferSojuFileHost = true),
+        )
+        assertEquals(
+            configured,
+            preferredUploadConfig(photo, configured, sojuFileHostAvailable = true, preferSojuFileHost = false),
+        )
+        assertEquals(
+            configured,
+            preferredUploadConfig(AttachmentSource.Text("paste"), configured, sojuFileHostAvailable = true, preferSojuFileHost = true),
+        )
+    }
+
     @Test fun byteFormattingUsesReadableUnits() {
         assertEquals("900 B", formatBytes(900))
         assertEquals("1.5 KiB", formatBytes(1536))

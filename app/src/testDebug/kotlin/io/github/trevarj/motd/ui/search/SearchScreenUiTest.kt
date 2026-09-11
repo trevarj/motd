@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.search
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -9,14 +10,18 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -72,21 +77,97 @@ class SearchScreenUiTest {
         compose.onAllNodesWithText("beta-only result").assertCountEquals(1)
     }
 
-    private fun group(hit: SearchHit) =
-        SearchGroup(
-            bufferId = hit.message.bufferId,
-            bufferDisplayName = "#kotlin",
-            networkName = "Libera",
-            bufferType = BufferType.CHANNEL,
-            networkId = 1,
-            avatarOverrideModel = null,
-            hits = listOf(hit),
-        )
+    @Test
+    fun dickordLabels_enabled_arePresentationOnly() {
+        val rawHit =
+            hit(
+                id = 2,
+                msgid = "dickord",
+                text = "discord result",
+                sender = "Alice/discord",
+                bufferDisplayName = "#discord.me.chat.alice",
+            )
+        var opened: SearchHit? = null
+        compose.setContent {
+            CompositionLocalProvider(LocalDickordLabsEnabled provides true) {
+                MotdTheme {
+                    SearchContent(
+                        state =
+                            SearchUiState(
+                                rawQuery = "discord",
+                                bufferMatches = listOf(bufferMatch("#discord.me.chat.alice")),
+                                groups = listOf(group(rawHit, "#discord.me.chat.alice")),
+                            ),
+                        onQueryChange = {},
+                        onScopeChange = {},
+                        onBack = {},
+                        onOpenHit = { opened = it },
+                    )
+                }
+            }
+        }
+
+        compose.onAllNodesWithText("#me.chat.alice").assertCountEquals(2)
+        compose.onAllNodesWithText("Alice").assertCountEquals(1)
+        compose.onAllNodesWithText("#discord.me.chat.alice").assertCountEquals(0)
+        compose.onAllNodesWithText("Alice/discord").assertCountEquals(0)
+
+        compose.onNodeWithTag("search_result_dickord").performClick()
+        compose.runOnIdle { assertEquals("Alice/discord", opened?.message?.sender) }
+    }
+
+    @Test
+    fun dickordLabels_disabled_remainRaw() {
+        val rawHit =
+            hit(
+                id = 3,
+                msgid = "dickord-disabled",
+                text = "discord result",
+                sender = "Alice/discord",
+                bufferDisplayName = "#discord.me.chat.alice",
+            )
+        compose.setContent {
+            MotdTheme {
+                SearchContent(
+                    state =
+                        SearchUiState(
+                            rawQuery = "discord",
+                            bufferMatches = listOf(bufferMatch("#discord.me.chat.alice")),
+                            groups = listOf(group(rawHit, "#discord.me.chat.alice")),
+                        ),
+                    onQueryChange = {},
+                    onScopeChange = {},
+                    onBack = {},
+                    onOpenHit = {},
+                )
+            }
+        }
+
+        compose.onAllNodesWithText("#discord.me.chat.alice").assertCountEquals(2)
+        compose.onAllNodesWithText("Alice/discord").assertCountEquals(1)
+        compose.onAllNodesWithText("#me.chat.alice").assertCountEquals(0)
+        compose.onAllNodesWithText("Alice").assertCountEquals(0)
+    }
+
+    private fun group(
+        hit: SearchHit,
+        bufferDisplayName: String = "#kotlin",
+    ) = SearchGroup(
+        bufferId = hit.message.bufferId,
+        bufferDisplayName = bufferDisplayName,
+        networkName = "Libera",
+        bufferType = BufferType.CHANNEL,
+        networkId = 1,
+        avatarOverrideModel = null,
+        hits = listOf(hit),
+    )
 
     private fun hit(
         id: Long,
         msgid: String,
         text: String,
+        sender: String = "alice",
+        bufferDisplayName: String = "#kotlin",
     ) = SearchHit(
         message =
             MessageEntity(
@@ -94,14 +175,30 @@ class SearchScreenUiTest {
                 bufferId = 1,
                 serverTime = 1_000L,
                 msgid = msgid,
-                sender = "alice",
+                sender = sender,
                 kind = MessageKind.PRIVMSG,
                 text = text,
                 dedupKey = "key-$id",
             ),
-        bufferDisplayName = "#kotlin",
+        bufferDisplayName = bufferDisplayName,
         networkName = "Libera",
         bufferType = BufferType.CHANNEL,
         networkId = 1,
     )
+
+    private fun bufferMatch(displayName: String) =
+        ChatListRow(
+            bufferId = 1,
+            networkId = 1,
+            networkName = "Libera",
+            displayName = displayName,
+            type = BufferType.CHANNEL,
+            pinned = false,
+            muted = false,
+            lastMessageText = null,
+            lastMessageSender = null,
+            lastMessageTime = null,
+            unreadCount = 0,
+            mentionCount = 0,
+        )
 }

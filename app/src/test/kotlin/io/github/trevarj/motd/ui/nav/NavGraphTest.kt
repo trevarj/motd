@@ -139,6 +139,114 @@ class NavGraphTest {
         }
     }
 
+    @Test
+    fun `replacement request over portal preserves portal and earlier chat with all jump fields`() {
+        val controller = portalController()
+        val earlier = ChatRoute(5)
+        val target =
+            ChatRoute(
+                bufferId = 7,
+                jumpToMsgid = "msgid-7",
+                jumpToTime = 1_725_000_000_000,
+                jumpToEventId = 77,
+            )
+
+        controller.navigate(earlier)
+        controller.navigate(DickordPortalRoute)
+        controller.openChat(target, replaceCurrentChat = true)
+
+        assertEquals(target, controller.currentBackStackEntry!!.toRoute<ChatRoute>())
+        assertTrue(controller.popBackStack())
+        assertEquals(DickordPortalRoute, controller.currentBackStackEntry!!.toRoute<DickordPortalRoute>())
+        assertTrue(controller.popBackStack())
+        assertEquals(earlier, controller.currentBackStackEntry!!.toRoute<ChatRoute>())
+    }
+
+    @Test
+    fun `share completion over portal preserves portal and earlier chat`() {
+        val controller = portalController()
+        controller.navigate(ChatRoute(5))
+        controller.navigate(DickordPortalRoute)
+        controller.navigate(SharePickerRoute)
+
+        controller.completeShareNavigation(bufferId = 7, preserveSourceChat = false)
+
+        assertEquals(7L, controller.currentBackStackEntry!!.toRoute<ChatRoute>().bufferId)
+        assertTrue(controller.popBackStack())
+        assertEquals(DickordPortalRoute, controller.currentBackStackEntry!!.toRoute<DickordPortalRoute>())
+        assertTrue(controller.popBackStack())
+        assertEquals(5L, controller.currentBackStackEntry!!.toRoute<ChatRoute>().bufferId)
+    }
+
+    @Test
+    fun `portal chat returns to its immediately preceding navigator`() {
+        val controller = portalController()
+        controller.navigate(DickordPortalRoute)
+        controller.openChat(ChatRoute(7), replaceCurrentChat = false)
+
+        controller.openDickordNavigator()
+
+        assertEquals(DickordPortalRoute, controller.currentBackStackEntry!!.toRoute<DickordPortalRoute>())
+        assertTrue(controller.popBackStack())
+        assertEquals(ChatListRoute, controller.currentBackStackEntry!!.toRoute<ChatListRoute>())
+    }
+
+    @Test
+    fun `opening navigator replaces only current chat across an unrelated source`() {
+        val controller = portalController()
+        controller.navigate(ChatRoute(5))
+        controller.navigate(SearchRoute())
+        controller.navigate(ChatRoute(7, jumpToMsgid = "search-hit", jumpToTime = 99, jumpToEventId = 11))
+
+        controller.openDickordNavigator()
+
+        assertEquals(DickordPortalRoute, controller.currentBackStackEntry!!.toRoute<DickordPortalRoute>())
+        assertTrue(controller.popBackStack())
+        assertEquals(SearchRoute(), controller.currentBackStackEntry!!.toRoute<SearchRoute>())
+        assertTrue(controller.popBackStack())
+        assertEquals(5L, controller.currentBackStackEntry!!.toRoute<ChatRoute>().bufferId)
+    }
+
+    @Test
+    fun `disabled portal restoration returns to chat list root`() {
+        val controller = portalController()
+        controller.navigate(ChatRoute(5))
+        controller.navigate(DickordPortalRoute)
+
+        controller.returnToChatList()
+
+        assertEquals(ChatListRoute, controller.currentBackStackEntry!!.toRoute<ChatListRoute>())
+        assertFalse(controller.popBackStack())
+    }
+
+    @Test
+    fun `search jump keeps every target field and returns to search`() {
+        val controller = portalController()
+        val target = ChatRoute(7, jumpToMsgid = "search-hit", jumpToTime = 99, jumpToEventId = 11)
+        controller.navigate(SearchRoute())
+
+        controller.navigate(target)
+
+        assertEquals(target, controller.currentBackStackEntry!!.toRoute<ChatRoute>())
+        assertTrue(controller.popBackStack())
+        assertEquals(SearchRoute(), controller.currentBackStackEntry!!.toRoute<SearchRoute>())
+    }
+
+    private fun portalController() =
+        NavHostController(ApplicationProvider.getApplicationContext<Context>()).apply {
+            setLifecycleOwner(ResumedOwner())
+            setViewModelStore(ViewModelStore())
+            navigatorProvider.addNavigator(ComposeNavigator())
+            graph =
+                createGraph(startDestination = ChatListRoute) {
+                    composable<ChatListRoute> {}
+                    composable<ChatRoute> {}
+                    composable<DickordPortalRoute> {}
+                    composable<SearchRoute> {}
+                    composable<SharePickerRoute> {}
+                }
+        }
+
     private class ResumedOwner : LifecycleOwner {
         private val registry = LifecycleRegistry(this).apply { currentState = Lifecycle.State.RESUMED }
         override val lifecycle: Lifecycle = registry

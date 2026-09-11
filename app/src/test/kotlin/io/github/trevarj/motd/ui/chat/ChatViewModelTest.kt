@@ -808,6 +808,43 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun `reply without roster check keeps its draft and skips member lookup`() =
+        runTest {
+            val manager =
+                FakeConnectionManager(network.id).apply {
+                    rosterStates.value = mapOf(channel.id to RosterLoadState.LOADED)
+                }
+            val buffers = FakeBufferRepository(channel)
+            val vm =
+                viewModel(
+                    channel,
+                    manager,
+                    buffers = buffers,
+                    replyPrefs = FakeReplyPrefs(ReplyConfig(visibleChannelPrefix = true)),
+                )
+            vm.state.first { it.buffer != null }
+            vm.composerDraft.first { it.hydrated }
+            vm.replyConfig.first { it.visibleChannelPrefix }
+            val memberNickObservations = buffers.memberNickObservations
+            val parent = message(channel.id, "parent", msgid = "parent-1", sender = "Alice/discord", id = 88)
+            vm.saveDraft("answer")
+
+            vm.setReply(parent, checkRoster = false)
+            advanceUntilIdle()
+
+            val state = vm.state.value
+            assertEquals(parent, state.replyTo)
+            assertFalse(state.replySenderNotInChannel)
+            assertEquals(
+                ReplyPreviewData("Alice/discord", "parent"),
+                vm.replyPreview(ReplyTarget(msgid = "parent-1", eventId = 88)).value,
+            )
+            assertEquals("answer", db.composerDraftDao().byRoom(channel.id)?.text)
+            assertEquals(parent.id, db.composerDraftDao().byRoom(channel.id)?.replyToEventId)
+            assertEquals(memberNickObservations, buffers.memberNickObservations)
+        }
+
+    @Test
     fun `reply does not warn for unknown or non-loaded roster or later roster load`() =
         runTest {
             val manager = FakeConnectionManager(network.id)
@@ -1084,6 +1121,46 @@ class ChatViewModelTest {
 
             assertEquals("alice", vm.nickSheet.value?.nick)
             assertTrue(manager.commandOrigins.isEmpty())
+        }
+
+    @Test
+    fun `nick sheet without IRC details keeps raw identity and cancels cached lookup`() =
+        runTest {
+            val manager = FakeConnectionManager(network.id, state = IrcClientState.Disconnected)
+            val buffers = FakeBufferRepository(channel)
+            val vm = viewModel(channel, manager, buffers = buffers)
+            vm.state.first { it.buffer != null }
+            val rawNick = "Alice/discord"
+            db.userDao().upsert(
+                UserEntity(
+                    networkId = network.id,
+                    nick = IrcIdentityRules().normalize(rawNick),
+                    account = "old",
+                ),
+            )
+            vm.openNickSheet(rawNick)
+            vm.nickSheet.first { it?.cached?.account == "old" }
+            runCurrent()
+            val clientRequests = manager.clientForCalls
+            val memberRequests = manager.memberRequests.size
+            val memberObservations = buffers.memberObservations
+
+            vm.openNickSheet(rawNick, loadIrcDetails = false)
+
+            assertEquals(NickSheetState(rawNick), vm.nickSheet.value)
+            assertEquals(clientRequests, manager.clientForCalls)
+            db.userDao().upsert(
+                UserEntity(
+                    networkId = network.id,
+                    nick = IrcIdentityRules().normalize(rawNick),
+                    account = "new",
+                ),
+            )
+            advanceUntilIdle()
+            assertEquals(NickSheetState(rawNick), vm.nickSheet.value)
+            assertEquals(clientRequests, manager.clientForCalls)
+            assertEquals(memberRequests, manager.memberRequests.size)
+            assertEquals(memberObservations, buffers.memberObservations)
         }
 
     @Test
@@ -3944,6 +4021,7 @@ class ChatViewModelTest {
         val messageStarted = CompletableDeferred<Unit>()
         val typingSent = CompletableDeferred<Unit>()
         val memberRequests = mutableListOf<Long>()
+        var clientForCalls = 0
 
         fun replaceClient(client: IrcClient?) {
             currentClient = client
@@ -3971,7 +4049,10 @@ class ChatViewModelTest {
                 )
         }
 
-        override fun clientFor(networkId: Long): IrcClient? = currentClient
+        override fun clientFor(networkId: Long): IrcClient? {
+            clientForCalls += 1
+            return currentClient
+        }
 
         override fun historyAvailabilityFor(networkId: Long): HistoryAvailability = historyAvailability
 
@@ -4147,6 +4228,8 @@ class ChatViewModelTest {
         val presenceWrites = mutableListOf<Pair<Long, PresenceMode?>>()
         var presenceWriteResult = true
         val memberNicks = MutableStateFlow<List<String>>(emptyList())
+        var memberObservations = 0
+        var memberNickObservations = 0
 
         fun update(value: BufferEntity) {
             buffer.value = value
@@ -4156,9 +4239,15 @@ class ChatViewModelTest {
 
         override fun observeBuffer(id: Long): Flow<BufferEntity?> = buffer.takeIf { id == routeId || id == current.id } ?: flowOf(null)
 
-        override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())
+        override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> {
+            memberObservations += 1
+            return flowOf(emptyList())
+        }
 
-        override fun observeMemberNicks(bufferId: Long): Flow<List<String>> = memberNicks
+        override fun observeMemberNicks(bufferId: Long): Flow<List<String>> {
+            memberNickObservations += 1
+            return memberNicks
+        }
 
         override suspend fun setPinned(
             id: Long,

@@ -264,6 +264,7 @@ class ChatListDeleteTest {
 
                 override suspend fun setEnabled(enabled: Boolean) = Unit
             },
+        dickordLabsPrefs = fakeDickordLabsPrefs(),
         savedStateHandle = SavedStateHandle(),
         appVisibility = AlwaysOnScreen,
     )

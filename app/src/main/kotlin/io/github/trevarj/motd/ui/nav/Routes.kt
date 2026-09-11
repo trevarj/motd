@@ -5,6 +5,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable data object ChatListRoute
 
+@Serializable data object DickordPortalRoute
+
 @Serializable data class ChatRoute(
     val bufferId: Long,
     val jumpToMsgid: String? = null, // search deep-jump target
@@ -114,6 +116,7 @@ enum class SettingsTarget {
     IMPORT_BACKUP,
     GESTURES,
     AGENTWIRE,
+    DICKORD,
     GLOBAL_FEED,
     DIAGNOSTICS,
     LICENSE,

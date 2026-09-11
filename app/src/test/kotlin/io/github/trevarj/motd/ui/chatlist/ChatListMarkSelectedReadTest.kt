@@ -253,6 +253,7 @@ class ChatListMarkSelectedReadTest {
 
                             override suspend fun setEnabled(enabled: Boolean) = Unit
                         },
+                    dickordLabsPrefs = fakeDickordLabsPrefs(),
                     savedStateHandle = SavedStateHandle(),
                     appVisibility = FakeAppVisibility(),
                 )
@@ -314,6 +315,7 @@ class ChatListMarkSelectedReadTest {
 
                             override suspend fun setEnabled(enabled: Boolean) = Unit
                         },
+                    dickordLabsPrefs = fakeDickordLabsPrefs(),
                     savedStateHandle = SavedStateHandle(),
                     appVisibility = FakeAppVisibility(),
                 )

@@ -23,6 +23,7 @@ import io.github.trevarj.motd.data.db.TimelineEventEntity
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.dickord.DICKORD_CHANNEL_TAG
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
@@ -3370,6 +3371,198 @@ class EventProcessorTest {
                 ),
             )
             assertNull(serverBuffer())
+        }
+
+    @Test
+    fun dickordDescriptorSeedTagCreatesRawChannelWithoutVisibleMessage() =
+        runTest {
+            val json =
+                """{"v":1,"guild_id":"123","guild_name":"Guild","channel_id":"456","channel_type":0,"parent_id":null}"""
+
+            processor.process(
+                networkId,
+                IrcEvent.TagMessage(
+                    ctx = ctx().copy(clientTags = mapOf(DICKORD_CHANNEL_TAG to json)),
+                    source = Prefix("seed-service"),
+                    target = "#Discord.Guild.General",
+                    typing = null,
+                    reactEmoji = null,
+                    reactTargetMsgid = null,
+                ),
+            )
+
+            val buffer = db.bufferDao().byName(networkId, "#discord.guild.general")!!
+            assertEquals("#discord.guild.general", buffer.name)
+            assertEquals("#Discord.Guild.General", buffer.displayName)
+            assertEquals(json, buffer.dickordChannelJson)
+            assertTrue(pagingList(buffer.id).isEmpty())
+        }
+
+    @Test
+    fun dickordDescriptorTagsOnHistoricalAndLiveChatUpdateRawChannelWithoutChangingMessages() =
+        runTest {
+            val historicalJson =
+                """{"v":1,"guild_id":"123","guild_name":"Guild","channel_id":"456","channel_type":0,"parent_id":null}"""
+            val liveJson =
+                """{"v":1,"guild_id":"123","guild_name":"Guild","channel_id":"789","channel_type":0,"parent_id":null}"""
+            processor.process(
+                networkId,
+                IrcEvent.HistoryBatch(
+                    "#Discord.Guild.General",
+                    listOf(
+                        IrcEvent.ChatMessage(
+                            ctx =
+                                ctx(msgid = "history", time = 1_000).copy(
+                                    batchId = "history",
+                                    clientTags = mapOf(DICKORD_CHANNEL_TAG to historicalJson),
+                                ),
+                            kind = IrcEvent.ChatKind.PRIVMSG,
+                            source = Prefix("Alice/discord"),
+                            target = "#Discord.Guild.General",
+                            text = "historical raw text",
+                            isSelf = false,
+                            replyToMsgid = null,
+                        ),
+                    ),
+                ),
+            )
+
+            val buffer = db.bufferDao().byName(networkId, "#discord.guild.general")!!
+            assertEquals(historicalJson, buffer.dickordChannelJson)
+
+            processor.process(
+                networkId,
+                IrcEvent.ChatMessage(
+                    ctx =
+                        ctx(msgid = "live", time = 2_000).copy(
+                            clientTags = mapOf(DICKORD_CHANNEL_TAG to liveJson),
+                        ),
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    source = Prefix("Bob/discord"),
+                    target = "#DISCORD.GUILD.GENERAL",
+                    text = "live raw text",
+                    isSelf = false,
+                    replyToMsgid = null,
+                ),
+            )
+
+            assertEquals(liveJson, db.bufferDao().observeById(buffer.id)?.dickordChannelJson)
+            assertEquals("#Discord.Guild.General", db.bufferDao().observeById(buffer.id)?.displayName)
+            val messages = pagingList(buffer.id).associateBy { it.msgid }
+            assertEquals("Alice/discord", messages.getValue("history").sender)
+            assertEquals("historical raw text", messages.getValue("history").text)
+            assertEquals("Bob/discord", messages.getValue("live").sender)
+            assertEquals("live raw text", messages.getValue("live").text)
+        }
+
+    @Test
+    fun invalidOrEmptyDickordDescriptorTagsPreserveExistingValue() =
+        runTest {
+            val currentJson =
+                """{"v":1,"guild_id":"123","guild_name":"Guild","channel_id":"456","channel_type":0,"parent_id":null}"""
+            val bufferId =
+                db.bufferDao().insert(
+                    BufferEntity(
+                        networkId = networkId,
+                        name = "#discord.guild.general",
+                        displayName = "#Discord.Guild.General",
+                        type = BufferType.CHANNEL,
+                        joined = false,
+                        dickordChannelJson = currentJson,
+                    ),
+                )
+            processor.process(
+                networkId,
+                IrcEvent.TagMessage(
+                    ctx =
+                        ctx().copy(
+                            clientTags =
+                                mapOf(
+                                    DICKORD_CHANNEL_TAG to
+                                        """{"v":2,"guild_id":"123","guild_name":"Bad","channel_id":"789","channel_type":0,"parent_id":null}""",
+                                ),
+                        ),
+                    source = Prefix("seed-service"),
+                    target = "#Discord.Guild.General",
+                    typing = null,
+                    reactEmoji = null,
+                    reactTargetMsgid = null,
+                ),
+            )
+            assertEquals(currentJson, db.bufferDao().observeById(bufferId)?.dickordChannelJson)
+
+            processor.process(
+                networkId,
+                IrcEvent.ChatMessage(
+                    ctx = ctx(msgid = "empty").copy(clientTags = mapOf(DICKORD_CHANNEL_TAG to "")),
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    source = Prefix("Alice/discord"),
+                    target = "#Discord.Guild.General",
+                    text = "empty descriptor",
+                    isSelf = false,
+                    replyToMsgid = null,
+                ),
+            )
+            processor.process(
+                networkId,
+                IrcEvent.HistoryBatch(
+                    "#Discord.Guild.General",
+                    listOf(
+                        IrcEvent.ChatMessage(
+                            ctx =
+                                ctx(msgid = "malformed", time = 2_000).copy(
+                                    batchId = "history",
+                                    clientTags = mapOf(DICKORD_CHANNEL_TAG to "{"),
+                                ),
+                            kind = IrcEvent.ChatKind.PRIVMSG,
+                            source = Prefix("Bob/discord"),
+                            target = "#Discord.Guild.General",
+                            text = "malformed descriptor",
+                            isSelf = false,
+                            replyToMsgid = null,
+                        ),
+                    ),
+                ),
+            )
+
+            assertEquals(currentJson, db.bufferDao().observeById(bufferId)?.dickordChannelJson)
+        }
+
+    @Test
+    fun dickordDescriptorTagsRejectNonDickordTargets() =
+        runTest {
+            val json =
+                """{"v":1,"guild_id":"123","guild_name":"Guild","channel_id":"456","channel_type":0,"parent_id":null}"""
+            val target = "#discorded.guild.general"
+            processor.process(
+                networkId,
+                IrcEvent.TagMessage(
+                    ctx = ctx().copy(clientTags = mapOf(DICKORD_CHANNEL_TAG to json)),
+                    source = Prefix("seed-service"),
+                    target = target,
+                    typing = null,
+                    reactEmoji = null,
+                    reactTargetMsgid = null,
+                ),
+            )
+            assertNull(db.bufferDao().byName(networkId, target))
+
+            processor.process(
+                networkId,
+                IrcEvent.ChatMessage(
+                    ctx = ctx(msgid = "ordinary").copy(clientTags = mapOf(DICKORD_CHANNEL_TAG to json)),
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    source = Prefix("Alice/discord"),
+                    target = target,
+                    text = "ordinary raw text",
+                    isSelf = false,
+                    replyToMsgid = null,
+                ),
+            )
+
+            val buffer = db.bufferDao().byName(networkId, target)!!
+            assertNull(buffer.dickordChannelJson)
+            assertEquals("ordinary raw text", pagingList(buffer.id).single().text)
         }
 
     @Test

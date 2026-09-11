@@ -3,12 +3,15 @@ package io.github.trevarj.motd.data.sync
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.avatar.AvatarController
+import io.github.trevarj.motd.avatar.NoopAvatarController
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.dickord.DICKORD_AVATAR_TAG
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
@@ -160,6 +163,68 @@ class HistoryPageLoaderTest {
         gapId = gapId,
         boundary = boundary,
     )
+
+    @Test
+    fun correlatedHistoryScansAvatarTagsBeforePersistingThePage() =
+        runTest {
+            val target = "#discord.guild.general"
+            val discordBufferId =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = target, displayName = target, type = BufferType.CHANNEL),
+                )
+            val tagged =
+                chatMsg("discord-avatar", 100).copy(
+                    ctx =
+                        MessageContext(
+                            msgid = "discord-avatar",
+                            serverTime = 100,
+                            account = null,
+                            batchId = "batch",
+                            label = null,
+                            clientTags =
+                                mapOf(
+                                    DICKORD_AVATAR_TAG to
+                                        "https://cdn.discordapp.com/avatars/1/hash.png?size=256",
+                                ),
+                        ),
+                    source = Prefix("Alice/discord"),
+                    target = target,
+                )
+            var scannedNetworkId: Long? = null
+            var rowsAtScan: Int? = null
+            var scannedEvents = emptyList<IrcEvent>()
+            val avatars =
+                object : AvatarController by NoopAvatarController {
+                    override suspend fun ingestDickordAvatars(
+                        networkId: Long,
+                        events: List<IrcEvent>,
+                    ) {
+                        scannedNetworkId = networkId
+                        scannedEvents = events
+                        rowsAtScan = db.messageDao().countForBuffer(discordBufferId)
+                    }
+                }
+            val hookedLoader = HistoryPageLoader(processor, avatarController = avatars)
+            val history =
+                FakeHistory(
+                    responseFor = { messages(listOf(tagged), endOfHistory = true) },
+                )
+
+            val result =
+                hookedLoader.loadPage(
+                    networkId,
+                    discordBufferId,
+                    target,
+                    HistoryPageLoader.Direction.LATEST,
+                    history,
+                )
+
+            assertTrue(result is HistoryPageLoader.PageResult.Loaded)
+            assertEquals(networkId, scannedNetworkId)
+            assertEquals(listOf(tagged), scannedEvents)
+            assertEquals(0, rowsAtScan)
+            assertEquals(1, db.messageDao().countForBuffer(discordBufferId))
+        }
 
     @Test
     fun msgidRejectionFallsBackToAdvertisedTimestampAndPersistsFallbackRequest() =

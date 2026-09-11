@@ -43,6 +43,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.dickord.dickordNickLabel
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.channelinfo.BanTargetDialog
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
@@ -53,8 +54,9 @@ import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 /**
  * Shared nick bottom sheet, used from the chat timeline and ChannelInfo. Stateless:
- * the header shows WHOIS details when available; the moderation block appears only when
- * [canModerate] and the nick is not self (Confirmed #7). Kick/Ban open a confirm dialog.
+ * the header normally shows WHOIS details when available; the moderation block appears only when
+ * [canModerate] and the nick is not self (Confirmed #7). [relayIdentity] keeps only actions Motd
+ * can honor for a synthetic relay nick.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -88,9 +90,11 @@ fun NickActionSheet(
     conversationModel: String? = null,
     canEditConversationAvatar: Boolean = false,
     onEditConversationAvatar: () -> Unit = {},
+    relayIdentity: Boolean = false,
 ) {
     var kickTarget by remember { mutableStateOf(false) }
     var banTarget by remember { mutableStateOf(false) }
+    val canEditAvatar = canEditConversationAvatar && !relayIdentity
 
     // Root tag disambiguates from MessageActionSheet when both could be open.
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("nick_sheet")) {
@@ -98,8 +102,14 @@ fun NickActionSheet(
         Column(modifier = Modifier.padding(bottom = 24.dp)) {
             // Header: avatar + nick + whois summary (or the fallback line when whois is unavailable).
             ListItem(
-                headlineContent = { Text(nick) },
-                supportingContent = { WhoisSummary(whois, presence) },
+                headlineContent = { Text(dickordNickLabel(nick, relayIdentity)) },
+                supportingContent = {
+                    if (relayIdentity) {
+                        Text(stringResource(R.string.dickord_relay_identity))
+                    } else {
+                        WhoisSummary(whois, presence)
+                    }
+                },
                 leadingContent =
                     if (avatarsHidden()) {
                         null
@@ -111,7 +121,7 @@ fun NickActionSheet(
                                 networkId = networkId,
                                 conversationModel = conversationModel,
                                 modifier =
-                                    if (canEditConversationAvatar) {
+                                    if (canEditAvatar) {
                                         Modifier.testTag("nick_sheet_avatar").clickable(onClick = onEditConversationAvatar)
                                     } else {
                                         Modifier
@@ -120,7 +130,7 @@ fun NickActionSheet(
                         }
                     },
             )
-            if (canEditConversationAvatar) {
+            if (canEditAvatar) {
                 NickAction(
                     Icons.Outlined.Edit,
                     stringResource(R.string.avatar_editor_action),
@@ -131,11 +141,13 @@ fun NickActionSheet(
             HorizontalDivider()
 
             // Purpose-built nick-sheet labels shared by chat timeline and ChannelInfo.
-            NickAction(Icons.AutoMirrored.Outlined.Message, stringResource(R.string.nick_sheet_message), onMessage)
+            if (!relayIdentity) {
+                NickAction(Icons.AutoMirrored.Outlined.Message, stringResource(R.string.nick_sheet_message), onMessage)
+            }
             if (showMention) {
                 NickAction(Icons.Outlined.AlternateEmail, stringResource(R.string.nick_sheet_mention), onMention)
             }
-            if (!isSelf) {
+            if (!relayIdentity && !isSelf) {
                 onInviteToChannel?.let { invite ->
                     NickAction(
                         Icons.Outlined.GroupAdd,
@@ -144,6 +156,8 @@ fun NickActionSheet(
                         tag = "nick_sheet_invite_to_channel",
                     )
                 }
+            }
+            if (!isSelf) {
                 NickAction(
                     if (isFriend) Icons.Filled.Star else Icons.Outlined.StarBorder,
                     stringResource(if (isFriend) R.string.nick_sheet_remove_friend else R.string.nick_sheet_add_friend),
@@ -157,7 +171,7 @@ fun NickActionSheet(
                 NickAction(Icons.Outlined.Block, stringResource(R.string.nick_sheet_ignore_network), onIgnoreNetwork)
             }
 
-            if (canModerate && !isSelf) {
+            if (!relayIdentity && canModerate && !isSelf) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                 NickAction(Icons.Filled.Shield, stringResource(R.string.nick_sheet_give_op), onClick = { onOp(true) })
                 NickAction(Icons.Filled.Shield, stringResource(R.string.nick_sheet_take_op), onClick = { onOp(false) })
@@ -169,7 +183,7 @@ fun NickActionSheet(
         }
     }
 
-    if (kickTarget) {
+    if (!relayIdentity && kickTarget) {
         NickKickDialog(
             nick = nick,
             kickLen = modeCatalog?.kickLen,
@@ -183,7 +197,7 @@ fun NickActionSheet(
 
     // The old dialog had a title and no body: it never said the ban persists, and never showed the
     // nick!*@* mask a nick change trivially evades. The shared picker states both.
-    if (banTarget) {
+    if (!relayIdentity && banTarget) {
         BanTargetDialog(
             dialogTag = "nick_sheet_ban_dialog",
             // Naming the target beats the generic "Ban someone" when the sheet already has a nick.

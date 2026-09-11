@@ -48,6 +48,7 @@ fun LabsScreen(
         onGesturesChanged = viewModel::setGesturesEnabled,
         onAgentwireChanged = viewModel::setAgentwireEnabled,
         onGlobalFeedChanged = viewModel::setGlobalFeedEnabled,
+        onDickordChanged = viewModel::setDickordEnabled,
         onOpenGestureMenu = onOpenGestureMenu,
         onOpenAi = onOpenAi,
         target = target,
@@ -61,6 +62,7 @@ fun LabsContent(
     onGesturesChanged: (Boolean) -> Unit,
     onAgentwireChanged: (Boolean) -> Unit,
     onGlobalFeedChanged: (Boolean) -> Unit = {},
+    onDickordChanged: (Boolean) -> Unit,
     onOpenGestureMenu: () -> Unit = {},
     onOpenAi: () -> Unit = {},
     target: SettingsTarget? = null,
@@ -85,6 +87,17 @@ fun LabsContent(
                     summary = stringResource(R.string.labs_ai_desc),
                     modifier = Modifier.testTag("labs_ai"),
                     onClick = onOpenAi,
+                )
+            }
+        }
+        SettingsTargetAnchor(target?.name, SettingsTarget.DICKORD.name) { targetModifier ->
+            SettingsGroup(title = stringResource(R.string.labs_dickord_section), modifier = targetModifier) {
+                SwitchRow(
+                    title = stringResource(R.string.labs_dickord),
+                    subtitle = stringResource(R.string.labs_dickord_desc),
+                    checked = state.dickordEnabled,
+                    onCheckedChange = onDickordChanged,
+                    switchTag = "labs_dickord_switch",
                 )
             }
         }
@@ -160,6 +173,7 @@ private fun LabsScreenPreview() {
             onGesturesChanged = {},
             onAgentwireChanged = {},
             onGlobalFeedChanged = {},
+            onDickordChanged = {},
         )
     }
 }

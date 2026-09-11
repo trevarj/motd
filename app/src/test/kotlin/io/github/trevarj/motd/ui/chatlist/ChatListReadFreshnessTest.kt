@@ -4,6 +4,8 @@ import androidx.lifecycle.SavedStateHandle
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
+import io.github.trevarj.motd.data.db.InvitationEventRow
+import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
@@ -19,6 +21,7 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.AppVisibility
@@ -64,8 +67,11 @@ import org.junit.Test
 class ChatListReadFreshnessTest {
     private class FakeBufferRepository(
         private val rows: Flow<List<ChatListRow>>,
+        private val invitations: Flow<List<InvitationEventRow>> = flowOf(emptyList()),
     ) : BufferRepository {
         override fun observeChatList(): Flow<List<ChatListRow>> = rows
+
+        override fun observeInvitations(): Flow<List<InvitationEventRow>> = invitations
 
         override fun observeBuffer(id: Long): Flow<BufferEntity?> = flowOf(null)
 
@@ -207,8 +213,10 @@ class ChatListReadFreshnessTest {
     private fun vm(
         rows: Flow<List<ChatListRow>>,
         visibility: AppVisibility,
+        dickordEnabled: Flow<Boolean> = flowOf(false),
+        invitations: Flow<List<InvitationEventRow>> = flowOf(emptyList()),
     ) = ChatListViewModel(
-        bufferRepository = FakeBufferRepository(rows),
+        bufferRepository = FakeBufferRepository(rows, invitations),
         networkRepository = FakeNetworkRepository(),
         connectionManager = FakeConnectionManager(),
         historyResync =
@@ -250,6 +258,7 @@ class ChatListReadFreshnessTest {
 
                 override suspend fun setEnabled(enabled: Boolean) = Unit
             },
+        dickordLabsPrefs = fakeDickordLabsPrefs(dickordEnabled),
         savedStateHandle = SavedStateHandle(),
         appVisibility = visibility,
     )
@@ -326,5 +335,92 @@ class ChatListReadFreshnessTest {
             visibility.set(true)
             runCurrent()
             assertEquals(9, unreadCount(viewModel))
+        }
+
+    @Test
+    fun `Dickord flag partitions every ordinary list without mutating rows`() =
+        runTest {
+            val ordinary = unreadRow(2).copy(bufferId = 1)
+            val portal =
+                unreadRow(4).copy(
+                    bufferId = 2,
+                    displayName = "#DiScOrD.guild.general",
+                    pinned = true,
+                    folderId = 9,
+                )
+            val archivedPortal =
+                unreadRow(8).copy(
+                    bufferId = 3,
+                    displayName = "#discord.guild.old",
+                    archived = true,
+                    folderId = 10,
+                )
+            val control = unreadRow(1).copy(bufferId = 4, displayName = "#discord.control")
+            val invitationEvents =
+                flowOf(
+                    listOf(
+                        InvitationEventRow(
+                            messageId = 11,
+                            bufferId = portal.bufferId,
+                            networkId = portal.networkId,
+                            networkName = portal.networkName,
+                            text = "alice invited you",
+                            eventPayload = InvitePayloadV1("alice", "me", portal.displayName).encode(),
+                            inviteState = InviteState.PENDING,
+                            serverTime = 10,
+                        ),
+                    ),
+                )
+            val rows = MutableStateFlow(listOf(ordinary, portal, archivedPortal, control))
+            val enabled = MutableStateFlow(false)
+            val viewModel = vm(rows, FakeAppVisibility(onScreen = true), enabled, invitationEvents)
+            val pane = composePane(viewModel)
+
+            assertEquals(
+                listOf(1L, 2L, 4L),
+                viewModel.state.value.rows
+                    .map(ChatListRow::bufferId),
+            )
+            assertEquals(
+                listOf(3L),
+                viewModel.state.value.archivedRows
+                    .map(ChatListRow::bufferId),
+            )
+            assertEquals(null, viewModel.state.value.dickordUnreadSummary)
+
+            enabled.value = true
+            runCurrent()
+
+            val active = viewModel.state.value
+            assertEquals(listOf(1L, 4L), active.rows.map(ChatListRow::bufferId))
+            assertEquals(emptyList<Long>(), active.archivedRows.map(ChatListRow::bufferId))
+            assertEquals(listOf(portal.bufferId), active.invitations.map(ChatListInvitation::bufferId))
+            assertEquals(1, active.dickordUnreadSummary?.visibleCount)
+            assertEquals(4, active.dickordUnreadSummary?.unreadCount)
+            assertEquals(7, active.allUnread)
+            assertEquals(true, portal.pinned)
+            assertEquals(9L, portal.folderId)
+            assertEquals("#DiScOrD.guild.general", portal.displayName)
+
+            enabled.value = false
+            runCurrent()
+
+            assertEquals(
+                listOf(1L, 2L, 4L),
+                viewModel.state.value.rows
+                    .map(ChatListRow::bufferId),
+            )
+            assertEquals(
+                listOf(3L),
+                viewModel.state.value.archivedRows
+                    .map(ChatListRow::bufferId),
+            )
+            assertEquals(
+                9L,
+                viewModel.state.value.rows
+                    .first { it.bufferId == 2L }
+                    .folderId,
+            )
+            pane.cancel()
         }
 }

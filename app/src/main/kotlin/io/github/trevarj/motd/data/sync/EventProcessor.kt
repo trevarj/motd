@@ -34,6 +34,9 @@ import io.github.trevarj.motd.data.repo.NetworkIgnoreCache
 import io.github.trevarj.motd.data.repo.ignoredBy
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.dickord.DICKORD_CHANNEL_TAG
+import io.github.trevarj.motd.dickord.decodeDickordChannelDescriptor
+import io.github.trevarj.motd.dickord.isDickordChannel
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
@@ -662,6 +665,11 @@ class EventProcessor
                 )
                 return
             }
+            if (origin == EventOrigin.LIVE || origin.isHistorical) {
+                validDickordChannelTag(route.bufferName, e.ctx.clientTags)?.let { json ->
+                    persistDickordChannelTag(route.bufferId, json, origin)
+                }
+            }
             val bufferId = route.bufferId
             val bufferName = route.bufferName
             val type = route.type
@@ -857,6 +865,15 @@ class EventProcessor
             historyTarget: String?,
         ) {
             val st = stateFor(networkId)
+            if (origin == EventOrigin.LIVE || origin.isHistorical) {
+                validDickordChannelTag(e.target, e.ctx.clientTags)?.let { json ->
+                    persistDickordChannelTag(
+                        ensureBuffer(networkId, e.target, BufferType.CHANNEL, st),
+                        json,
+                        origin,
+                    )
+                }
+            }
             val route = resolveReactionRoute(networkId, e.source.nick, e.target, historyTarget, st)
             // Peer typing is routed to the tracker, never persisted.
             if (origin == EventOrigin.LIVE && !route.sourceIsSelf) {
@@ -3636,6 +3653,25 @@ class EventProcessor
                     .joinToString(" ")
                     .trim()
             insertSystem(bufferId, serverCtx(), MessageKind.SERVER_INFO, "", text)
+        }
+
+        private fun validDickordChannelTag(
+            rawTarget: String,
+            tags: Map<String, String>,
+        ): String? {
+            if (!isDickordChannel(rawTarget)) return null
+            return tags[DICKORD_CHANNEL_TAG]?.takeIf { decodeDickordChannelDescriptor(it) != null }
+        }
+
+        private suspend fun persistDickordChannelTag(
+            bufferId: RoomId,
+            json: String,
+            origin: EventOrigin,
+        ) {
+            val buffer = bufferDao.observeById(bufferId) ?: return
+            if (buffer.dickordChannelJson == json) return
+            if (origin.isHistorical && decodeDickordChannelDescriptor(buffer.dickordChannelJson) != null) return
+            bufferDao.setDickordChannelJson(buffer.id, json)
         }
 
         /** Consume Raw `draft/unreact` at the sole reaction-persistence boundary. */

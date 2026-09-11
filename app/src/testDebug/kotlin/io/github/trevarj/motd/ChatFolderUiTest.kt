@@ -10,6 +10,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
@@ -22,6 +23,9 @@ import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
 import io.github.trevarj.motd.ui.chatlist.ChatListInvitation
 import io.github.trevarj.motd.ui.chatlist.ChatListState
+import io.github.trevarj.motd.ui.chatlist.ordinaryChatListRows
+import io.github.trevarj.motd.ui.chatlist.partitionArchivedRows
+import io.github.trevarj.motd.ui.chatlist.summarizeFolder
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -57,6 +61,122 @@ class ChatFolderUiTest {
         compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_folder_7").performTouchInput { longClick() }
         assertEquals(7L, edited)
+    }
+
+    @Test
+    fun discord_tab_navigates_from_inline_and_clears_selection() {
+        val portal = row(41, "#discord.guild.general", folderId = 7, mentions = 3)
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows = listOf(row(1, "#dev", folderId = 7), row(2, "#ordinary", folderId = null)),
+                    folders = listOf(folder()),
+                    dickordEnabled = true,
+                    dickordUnreadSummary = summarizeFolder(listOf(portal)),
+                    loading = false,
+                ),
+            )
+        var opens = 0
+        setContent(state) {
+            onOpenDickord = { opens++ }
+        }
+
+        compose.onNodeWithTag("chatlist_folder_tabs").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
+        compose.onNodeWithTag("chatlist_folder_tab_discord").assert(hasText("Discord")).assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_folder_7").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_2").performTouchInput { longClick() }
+        compose.onNodeWithTag("chatlist_selection_top_app_bar").assertIsDisplayed()
+
+        compose.onNodeWithTag("chatlist_folder_tab_discord").performClick()
+
+        compose.onAllNodesWithTag("chatlist_selection_top_app_bar").assertCountEquals(0)
+        compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
+        compose.runOnIdle { assertEquals(1, opens) }
+    }
+
+    @Test
+    fun discord_tab_keeps_all_and_correct_folder_selection_in_tabs_and_empty_lists() {
+        val portal = row(41, "#discord.guild.general", folderId = null)
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows = listOf(row()),
+                    folders = listOf(folder()),
+                    folderDisplayMode = FolderDisplayMode.TABS,
+                    showFolderChatsInAll = false,
+                    dickordEnabled = true,
+                    dickordUnreadSummary = summarizeFolder(emptyList()),
+                    loading = false,
+                ),
+            )
+        setContent(state)
+
+        compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
+        compose.onNodeWithTag("chatlist_folder_tab_discord").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
+
+        state.value =
+            ChatListState(
+                dickordEnabled = true,
+                dickordUnreadSummary = summarizeFolder(emptyList()),
+                loading = false,
+            )
+        compose.onNodeWithTag("chatlist_folder_tabs").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
+        compose.onNodeWithTag("chatlist_folder_tab_discord").assertIsDisplayed()
+
+        state.value =
+            state.value.copy(
+                dickordUnreadSummary = summarizeFolder(listOf(portal)),
+            )
+        compose.onNodeWithText("Discord conversations are in the Discord tab.").assertIsDisplayed()
+    }
+
+    @Test
+    fun enabled_partition_hides_pinned_foldered_and_archived_portal_rows_and_disabled_restores_them() {
+        val pinned = row(41, "#discord.guild.pinned", folderId = 7, pinned = true)
+        val foldered = row(42, "#DiScOrD.guild.foldered", folderId = 7)
+        val archived = row(43, "#discord.guild.archived", folderId = 7, archived = true)
+        val source = listOf(pinned, foldered, archived)
+
+        fun projected(
+            rows: List<ChatListRow>,
+            enabled: Boolean,
+        ): ChatListState {
+            val (activeRows, archivedRows) = partitionArchivedRows(ordinaryChatListRows(rows, enabled))
+            return ChatListState(
+                rows = activeRows,
+                archivedRows = archivedRows,
+                folders = listOf(folder().copy(expanded = true)),
+                dickordEnabled = enabled,
+                dickordUnreadSummary = if (enabled) summarizeFolder(rows.filterNot(ChatListRow::archived)) else null,
+                loading = false,
+            )
+        }
+
+        val state = mutableStateOf(projected(source, enabled = true))
+        setContent(state)
+
+        compose.onNodeWithTag("chatlist_folder_tab_discord").assertIsDisplayed()
+        compose.onAllNodesWithTag("chatlist_row_41").assertCountEquals(0)
+        compose.onAllNodesWithTag("chatlist_row_42").assertCountEquals(0)
+        compose.onAllNodesWithTag("chatlist_archived_folder").assertCountEquals(0)
+        compose.onAllNodesWithTag("chatlist_folder_7").assertCountEquals(0)
+
+        state.value = projected(source, enabled = false)
+        compose.onAllNodesWithTag("chatlist_folder_tab_discord").assertCountEquals(0)
+        compose.onNodeWithTag("chatlist_row_41").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_42").assertIsDisplayed()
+
+        state.value = projected(listOf(archived), enabled = false)
+        compose.onNodeWithTag("chatlist_archived_folder").performClick()
+        compose.onNodeWithTag("chatlist_row_43").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(true, pinned.pinned)
+            assertEquals(7L, foldered.folderId)
+            assertEquals(true, archived.archived)
+        }
     }
 
     @Test
@@ -156,6 +276,47 @@ class ChatFolderUiTest {
         compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
         compose.onNodeWithTag("chatlist_archived_folder").performClick()
         compose.onNodeWithTag("chatlist_row_3").assertIsDisplayed()
+    }
+
+    @Test
+    fun portal_channel_invitation_survives_lab_toggle_and_remains_actionable() {
+        val portal = row(41, "#discord.guild.invited", folderId = null)
+        val invitation =
+            invitation().copy(
+                bufferId = portal.bufferId,
+                channel = portal.displayName,
+                text = "alice invited you to ${portal.displayName}",
+            )
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    invitations = listOf(invitation),
+                    dickordEnabled = true,
+                    dickordUnreadSummary = summarizeFolder(listOf(portal)),
+                    loading = false,
+                ),
+            )
+        var accepted: Long? = null
+        var ignored: Long? = null
+        setContent(state) {
+            onAcceptInvitation = { accepted = it }
+            onIgnoreInvitation = { ignored = it }
+        }
+
+        compose.onNodeWithTag("chatlist_invitations_folder").performClick()
+        compose.onNodeWithTag("chatlist_invitation_11").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_invitation_join_11").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_invitation_ignore_11").assertIsDisplayed()
+
+        state.value = state.value.copy(dickordEnabled = false, dickordUnreadSummary = null)
+
+        compose.onNodeWithTag("chatlist_invitation_11").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(null, accepted)
+            assertEquals(null, ignored)
+        }
+        compose.onNodeWithTag("chatlist_invitation_join_11").performClick()
+        compose.runOnIdle { assertEquals(11L, accepted) }
     }
 
     @Test
@@ -290,9 +451,10 @@ class ChatFolderUiTest {
             MotdTheme(dynamicColor = false) {
                 ChatListContent(
                     state = state.value,
-                    onOpenBuffer = {},
+                    onOpenBuffer = configured.onOpenBuffer,
                     onOpenSettings = {},
                     onOpenSearch = {},
+                    onOpenDickord = configured.onOpenDickord,
                     onSetPinned = { _, _ -> },
                     onSetMuted = { _, _ -> },
                     onSetArchived = configured.onSetArchived,
@@ -301,12 +463,18 @@ class ChatFolderUiTest {
                     onAssignFolder = configured.onAssignFolder,
                     onSetFolderExpanded = configured.onSetFolderExpanded,
                     onOpenFolderEditor = configured.onOpenFolderEditor,
+                    onAcceptInvitation = configured.onAcceptInvitation,
+                    onIgnoreInvitation = configured.onIgnoreInvitation,
                 )
             }
         }
     }
 
     private class Callbacks {
+        var onOpenBuffer: (Long) -> Unit = {}
+        var onOpenDickord: () -> Unit = {}
+        var onAcceptInvitation: (Long) -> Unit = {}
+        var onIgnoreInvitation: (Long) -> Unit = {}
         var onSetArchived: (Collection<Long>, Boolean) -> Unit = { _, _ -> }
         var onAssignFolder: (Collection<Long>, Long?, (Boolean) -> Unit) -> Unit = { _, _, done -> done(false) }
         var onSetFolderExpanded: (Long, Boolean) -> Unit = { _, _ -> }
@@ -336,14 +504,17 @@ class ChatFolderUiTest {
         name: String = "#dev",
         folderId: Long? = 7,
         mentions: Int = 0,
+        pinned: Boolean = false,
+        archived: Boolean = false,
     ) = ChatListRow(
         bufferId = id,
         networkId = 1,
         networkName = "net",
         displayName = name,
         type = BufferType.CHANNEL,
-        pinned = false,
+        pinned = pinned,
         muted = false,
+        archived = archived,
         folderId = folderId,
         lastMessageText = "hello",
         lastMessageSender = "alice",

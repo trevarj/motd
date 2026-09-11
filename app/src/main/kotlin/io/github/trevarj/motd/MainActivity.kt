@@ -42,6 +42,8 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.di.NotificationPermissionStatus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.dickord.DickordLabsPrefs
+import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.gesture.radial.GestureOrbHost
 import io.github.trevarj.motd.invite.JoinInviteCodec
 import io.github.trevarj.motd.service.ConnectionManager
@@ -105,6 +107,8 @@ class MainActivity :
 
     @Inject lateinit var diagnostics: DiagnosticLogger
 
+    @Inject lateinit var dickordLabsPrefs: DickordLabsPrefs
+
     // POST_NOTIFICATIONS is a delivery concern: report its result immediately to Settings state.
     private val requestNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -159,6 +163,8 @@ class MainActivity :
             // boundary so applying a palette never resets the user to the start destination.
             val navController = rememberNavController()
             val uiState by rootUiState.collectAsStateWithLifecycle()
+            val dickordEnabled by
+                dickordLabsPrefs.enabled.collectAsStateWithLifecycle(initialValue = false)
             val remoteMediaNetwork by
                 remoteMediaNetworkMonitor.network.collectAsStateWithLifecycle(
                     initialValue = RemoteMediaNetwork.UNAVAILABLE,
@@ -198,6 +204,7 @@ class MainActivity :
                 bubbleCornerStyle = appearance.bubbleCornerStyle,
             ) {
                 CompositionLocalProvider(
+                    LocalDickordLabsEnabled provides dickordEnabled,
                     LocalAutomaticRemoteMedia provides automaticRemoteMedia,
                     LocalNetworkMediaHttp provides networkMediaHttp,
                     LocalRemoteAvatars provides

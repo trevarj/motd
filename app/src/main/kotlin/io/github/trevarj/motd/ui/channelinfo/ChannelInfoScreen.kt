@@ -73,6 +73,9 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
+import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
+import io.github.trevarj.motd.dickord.decodeDickordChannelDescriptor
+import io.github.trevarj.motd.dickord.isDickordPortalConversation
 import io.github.trevarj.motd.service.ChannelWatchDuration
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.ui.chat.AttachmentSheets
@@ -824,6 +827,17 @@ private fun ChannelHeader(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         val name = buffer?.displayName ?: ""
+        val displayName =
+            if (
+                buffer != null &&
+                LocalDickordLabsEnabled.current &&
+                isDickordPortalConversation(buffer.type, buffer.displayName)
+            ) {
+                decodeDickordChannelDescriptor(buffer.dickordChannelJson)?.channelName
+                    ?: stringResource(R.string.dickord_portal_conversation_pending, buffer.id)
+            } else {
+                name
+            }
         val hideAvatar = avatarsHidden()
         if (!hideAvatar) {
             Avatar(
@@ -836,7 +850,7 @@ private fun ChannelHeader(
             )
         }
         Text(
-            text = name,
+            text = displayName,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             // The 12dp gap only exists to separate the name from the avatar above it.

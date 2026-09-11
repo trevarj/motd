@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.agentwire.AgentwirePrefs
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
+import io.github.trevarj.motd.dickord.DickordLabsPrefs
 import io.github.trevarj.motd.gesture.GestureMenuConfig
 import io.github.trevarj.motd.gesture.GesturePrefs
 import io.github.trevarj.motd.gesture.radial.OrbPlacement
@@ -30,6 +31,7 @@ class LabsViewModelTest {
     private val gestures = FakeGesturePrefs()
     private val agentwire = FakeAgentwirePrefs()
     private val globalFeed = FakeGlobalFeedPrefs()
+    private val dickord = FakeDickordLabsPrefs()
 
     @Before fun setUp() {
         Dispatchers.setMain(dispatcher)
@@ -39,12 +41,17 @@ class LabsViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun vm() = LabsViewModel(gestures, agentwire, globalFeed)
+    private fun vm() = LabsViewModel(gestures, agentwire, globalFeed, dickord)
 
     @Test fun everyLabStartsOff() =
         runTest {
             assertEquals(
-                LabsUiState(gesturesEnabled = false, agentwireEnabled = false, globalFeedEnabled = false),
+                LabsUiState(
+                    gesturesEnabled = false,
+                    agentwireEnabled = false,
+                    globalFeedEnabled = false,
+                    dickordEnabled = false,
+                ),
                 vm().state.first(),
             )
         }
@@ -62,6 +69,19 @@ class LabsViewModelTest {
             )
             assertEquals(false, gestures.enabled.first())
             assertEquals(false, agentwire.enabled.first())
+        }
+
+    @Test fun dickordToggle_reflectsExistingStorageAndWritesOnlyTheDickordStore() =
+        runTest {
+            dickord.flag.value = true
+            val model = vm()
+            assertEquals(true, model.state.first { it.dickordEnabled }.dickordEnabled)
+
+            model.setDickordEnabled(false)
+            assertEquals(false, model.state.first { !it.dickordEnabled }.dickordEnabled)
+            assertEquals(false, gestures.enabled.first())
+            assertEquals(false, agentwire.enabled.first())
+            assertEquals(false, globalFeed.enabled.first())
         }
 
     @Test fun gestureToggle_writesOnlyTheGestureStore() =
@@ -138,5 +158,14 @@ class LabsViewModelTest {
         }
 
         override suspend fun deviceId(): String = "device-under-test"
+    }
+
+    private class FakeDickordLabsPrefs : DickordLabsPrefs(ApplicationProvider.getApplicationContext<Context>()) {
+        val flag = MutableStateFlow(false)
+        override val enabled: Flow<Boolean> = flag
+
+        override suspend fun setEnabled(enabled: Boolean) {
+            flag.value = enabled
+        }
     }
 }

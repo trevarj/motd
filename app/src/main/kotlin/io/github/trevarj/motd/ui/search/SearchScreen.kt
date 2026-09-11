@@ -73,6 +73,9 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.repo.SearchCoverage
+import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
+import io.github.trevarj.motd.dickord.dickordChannelLabel
+import io.github.trevarj.motd.dickord.dickordNickLabel
 import io.github.trevarj.motd.ui.chatlist.relativeChatTime
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.EmptyState
@@ -385,6 +388,7 @@ private fun SearchResults(
     onOpenHit: (SearchHit) -> Unit,
     onOpenBufferMatch: (Long) -> Unit = {},
 ) {
+    val dickordEnabled = LocalDickordLabsEnabled.current
     LazyColumn(modifier = Modifier.fillMaxSize().testTag("search_results")) {
         if (bufferMatches.isNotEmpty()) {
             item(key = "buffer_matches_header") {
@@ -427,7 +431,7 @@ private fun SearchResults(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = group.bufferDisplayName,
+                        text = dickordChannelLabel(group.bufferDisplayName, dickordEnabled),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold,
@@ -465,6 +469,7 @@ private fun BufferMatchChip(
     row: ChatListRow,
     onClick: () -> Unit,
 ) {
+    val dickordEnabled = LocalDickordLabsEnabled.current
     Column(
         modifier =
             Modifier
@@ -481,7 +486,7 @@ private fun BufferMatchChip(
             size = 48.dp,
         )
         Text(
-            text = row.displayName,
+            text = dickordChannelLabel(row.displayName, dickordEnabled),
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -545,6 +550,7 @@ private fun SearchRow(
     val is24HourDevice = remember(context) { DateFormat.is24HourFormat(context) }
     val is24Hour = resolveIs24Hour(timestampConfig.format, is24HourDevice)
     val formatTimestamp = rememberMessageTimeFormatter()
+    val displaySender = dickordNickLabel(sender, LocalDickordLabsEnabled.current)
     Row(
         modifier =
             Modifier
@@ -568,7 +574,7 @@ private fun SearchRow(
         Column(modifier = Modifier.weight(1f)) {
             val nickColors = LocalNickColors.current
             Text(
-                text = sender,
+                text = displaySender,
                 style = MaterialTheme.typography.labelMedium,
                 color = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant),
             )

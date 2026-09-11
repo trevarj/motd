@@ -106,6 +106,8 @@ import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
 import io.github.trevarj.motd.dcc.DccEndpointRisk
 import io.github.trevarj.motd.dcc.dccEndpointRisk
 import io.github.trevarj.motd.dcc.resolveDccAddress
+import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
+import io.github.trevarj.motd.dickord.dickordNickLabel
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.DaySeparator
@@ -381,6 +383,7 @@ fun MessageList(
     onLoadGap: (Long) -> Unit = {},
     highlightEventId: Long? = null,
 ) {
+    val dickordEnabled = LocalDickordLabsEnabled.current
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
     // Keep the user's expanded JOIN/PART runs above the volatile Paging rows. A history sync may
     // briefly replace or rechunk those rows, but overlapping event identities remain stable.
@@ -553,6 +556,7 @@ fun MessageList(
                 ) {
                     FoolPlaceholderRow(
                         msg = msg,
+                        dickordEnabled = dickordEnabled,
                         older = older,
                         readMarkerTime = readMarkerTime,
                         readMarkerLabel = readMarkerLabel,
@@ -593,6 +597,7 @@ fun MessageList(
                         conversationName = conversationName,
                         directMessage = directMessage,
                         fallbackSender = conversationName.takeUnless { collapseSystemEvents },
+                        dickordEnabled = dickordEnabled,
                         older = older,
                         formatTime = formatMessageTime,
                         readMarkerTime = readMarkerTime,
@@ -1366,6 +1371,7 @@ private fun MessageRow(
     conversationName: String?,
     directMessage: Boolean,
     fallbackSender: String?,
+    dickordEnabled: Boolean,
     older: MessageEntity?,
     formatTime: (Long) -> String,
     readMarkerTime: TimelineAnchor?,
@@ -1434,7 +1440,8 @@ private fun MessageRow(
     // both the gap spacer and the bubble's grouped-corner/header logic below.
     val spacing = LocalSpacing.current
     val showSender = showsSender(msg, older)
-    val displaySender = msg.sender.ifBlank { fallbackSender.orEmpty() }
+    val rawSender = msg.sender.ifBlank { fallbackSender.orEmpty() }
+    val displaySender = dickordNickLabel(rawSender, dickordEnabled)
     val gap = bubbleGap(showSender, older != null, spacing)
 
     // Outermost boundary of the row: the history break comes before the read marker, because the
@@ -1474,11 +1481,16 @@ private fun MessageRow(
     // A reply relationship remains visible even if its parent is not in local history yet. The
     // reactive lookup replaces this marker when the referenced local or server identity resolves.
     val reply =
-        resolvedReply ?: replyTarget?.let {
-            ReplyPreviewData(
-                sender = stringResource(R.string.chat_action_reply),
-                text = stringResource(R.string.chat_reply_target_unavailable),
-            )
+        (
+            resolvedReply ?: replyTarget?.let {
+                ReplyPreviewData(
+                    sender = stringResource(R.string.chat_action_reply),
+                    text = stringResource(R.string.chat_reply_target_unavailable),
+                )
+            }
+        )?.let { preview ->
+            val displayReplySender = dickordNickLabel(preview.sender, dickordEnabled)
+            if (displayReplySender == preview.sender) preview else preview.copy(sender = displayReplySender)
         }
 
     // URL discovery is unnecessary for the overwhelming majority of IRC lines. Completed parses
@@ -1620,7 +1632,13 @@ private fun MessageRow(
     // place — Compose skips zero-height spacers in measurement.
     if (gap > 0.dp) Spacer(Modifier.height(gap))
 
-    onCollapseFool?.let { FoolCollapseChip(sender = msg.sender, tag = foolCollapseTag(msg.msgid, msg.id), onCollapse = it) }
+    onCollapseFool?.let {
+        FoolCollapseChip(
+            sender = displaySender,
+            tag = foolCollapseTag(msg.msgid, msg.id),
+            onCollapse = it,
+        )
+    }
 
     SwipeToReplyContainer(
         // Keep the stable automation id and mention state on one semantics node. SwipeToReply adds
@@ -1644,7 +1662,8 @@ private fun MessageRow(
                         // Per-message handle for long-press/react/reply/deep-jump. Prefer the stable
                         // server msgid; pending rows fall back to the local id for E2E selection.
                         modifier = Modifier,
-                        sender = displaySender,
+                        sender = rawSender,
+                        displaySender = displaySender,
                         networkId = networkId,
                         senderAccount = msg.senderAccount,
                         text = renderedMessageText,
@@ -1730,7 +1749,7 @@ private fun MessageRow(
                         bufferId = bufferId,
                         networkId = networkId,
                         conversation = conversationName,
-                        sender = msg.sender,
+                        sender = dickordNickLabel(msg.sender, dickordEnabled),
                         isSelf = msg.isSelf,
                         directMessage = directMessage,
                         eventId = msg.id,
@@ -1798,6 +1817,7 @@ private fun MessageRow(
 @Composable
 private fun FoolPlaceholderRow(
     msg: MessageEntity,
+    dickordEnabled: Boolean,
     older: MessageEntity?,
     readMarkerTime: TimelineAnchor?,
     readMarkerLabel: String?,
@@ -1846,7 +1866,11 @@ private fun FoolPlaceholderRow(
             )
             Spacer(Modifier.size(6.dp))
             Text(
-                text = stringResource(R.string.chat_fool_hidden, msg.sender),
+                text =
+                    stringResource(
+                        R.string.chat_fool_hidden,
+                        dickordNickLabel(msg.sender, dickordEnabled),
+                    ),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

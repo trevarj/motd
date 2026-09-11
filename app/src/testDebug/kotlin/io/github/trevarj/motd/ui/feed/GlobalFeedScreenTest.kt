@@ -26,6 +26,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.Dispatchers
@@ -99,10 +100,14 @@ class GlobalFeedScreenTest {
     private fun setContent(
         stream: Flow<PagingData<SearchHit>>,
         showNetwork: () -> Boolean = { false },
+        dickordEnabled: Boolean = false,
     ) {
         compose.setContent {
             // Motion off: the caption waits on a Lottie clock a stub composition never advances.
-            CompositionLocalProvider(LocalLottieMotionEnabled provides false) {
+            CompositionLocalProvider(
+                LocalLottieMotionEnabled provides false,
+                LocalDickordLabsEnabled provides dickordEnabled,
+            ) {
                 MotdTheme(dynamicColor = false) {
                     GlobalFeedContent(
                         rows = stream.collectAsLazyPagingItems(context = Dispatchers.Unconfined),
@@ -147,6 +152,41 @@ class GlobalFeedScreenTest {
             // Canonical row id for identity, serverTime only as the scroll anchor.
             assertEquals(Triple(7L, 11L, 1_700_000_000_000L), opened)
         }
+    }
+
+    @Test
+    fun dickordModeCleansConversationAndSenderLabels() {
+        setContent(
+            flowOf(
+                PagingData.from(
+                    listOf(row(id = 12L, buffer = "#discord.me.chat.alice", sender = "Alice/discord")),
+                ),
+            ),
+            dickordEnabled = true,
+        )
+
+        awaitTag("feed_row_12")
+        compose.onNodeWithText("#me.chat.alice").assertIsDisplayed()
+        compose.onNodeWithText("Alice").assertIsDisplayed()
+        compose.onNodeWithText("#discord.me.chat.alice").assertDoesNotExist()
+        compose.onNodeWithText("Alice/discord").assertDoesNotExist()
+    }
+
+    @Test
+    fun dickordLabelsStayRawWhileModeIsDisabled() {
+        setContent(
+            flowOf(
+                PagingData.from(
+                    listOf(row(id = 13L, buffer = "#discord.me.chat.alice", sender = "Alice/discord")),
+                ),
+            ),
+        )
+
+        awaitTag("feed_row_13")
+        compose.onNodeWithText("#discord.me.chat.alice").assertIsDisplayed()
+        compose.onNodeWithText("Alice/discord").assertIsDisplayed()
+        compose.onNodeWithText("#me.chat.alice").assertDoesNotExist()
+        compose.onNodeWithText("Alice").assertDoesNotExist()
     }
 
     @Test
