@@ -15,7 +15,6 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.DefaultNavTransitions
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -615,24 +614,31 @@ private fun NavHostController.openSettingsResult(destination: SettingsSearchDest
     }
 }
 
-// Navigation 2.10 gives predictive back its own scale-out default instead of the pop slide.
+// Pre-2.10, predictive back fell back to the pop transitions. Navigation 2.10 instead consults
+// only the predictive lambdas during a swipe (a fade/scale-out default), skipping both our pop
+// slide and any destination-level pop transition — including the viewer's in-place fade — so each
+// predictive pop must reproduce the pop transition the destination would otherwise get.
 internal fun AnimatedContentTransitionScope<NavBackStackEntry>.motdPredictivePopEnterTransition(swipeEdge: Int): EnterTransition =
-    if (isChatInitial()) {
-        EnterTransition.None
-    } else {
-        DefaultNavTransitions.predictivePopEnterTransition.invoke(this, swipeEdge)
+    when {
+        isChatInitial() -> EnterTransition.None
+        isImageViewerInitial() -> fadeIn(MotdMotion.navigationFade)
+        else -> slideIntoContainer(SlideDirection.End, MotdMotion.navigationDrawerSpatial)
     }
 
 internal fun AnimatedContentTransitionScope<NavBackStackEntry>.motdPredictivePopExitTransition(swipeEdge: Int): ExitTransition =
-    if (isChatInitial()) {
-        slideOutOfContainer(SlideDirection.End, MotdMotion.chatBackSpatial)
-    } else {
-        DefaultNavTransitions.predictivePopExitTransition.invoke(this, swipeEdge)
+    when {
+        isChatInitial() -> slideOutOfContainer(SlideDirection.End, MotdMotion.chatBackSpatial)
+        isImageViewerInitial() -> fadeOut(MotdMotion.navigationFade)
+        else -> slideOutOfContainer(SlideDirection.End, MotdMotion.navigationDrawerSpatial)
     }
 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.isChatTarget(): Boolean = isChatRoutePattern(targetState.destination.route)
 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.isChatInitial(): Boolean = isChatRoutePattern(initialState.destination.route)
+
+// The viewer deliberately dismisses in place rather than sliding, so its pop must key on the
+// destination being left.
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.isImageViewerInitial(): Boolean = initialState.destination.route == ImageViewerRoute::class.qualifiedName
 
 internal fun isChatRoutePattern(route: String?): Boolean {
     val chatRouteName = ChatRoute::class.qualifiedName ?: return false

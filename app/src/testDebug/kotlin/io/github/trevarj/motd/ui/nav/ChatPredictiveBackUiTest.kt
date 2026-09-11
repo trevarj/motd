@@ -127,6 +127,74 @@ class ChatPredictiveBackUiTest {
         }
     }
 
+    @Test
+    fun predictiveBackSlidesSiblingScreensWithoutShrinking() {
+        lateinit var controller: NavHostController
+        lateinit var screenCoordinates: LayoutCoordinates
+        lateinit var listCoordinates: LayoutCoordinates
+        val input = DirectNavigationEventInput()
+        compose.setContent {
+            val dispatcher = checkNotNull(LocalNavigationEventDispatcherOwner.current).navigationEventDispatcher
+            DisposableEffect(dispatcher) {
+                dispatcher.addInput(input)
+                onDispose { dispatcher.removeInput(input) }
+            }
+            controller = rememberNavController()
+            NavHost(
+                navController = controller,
+                startDestination = ChatListRoute,
+                modifier = Modifier.size(240.dp, 400.dp),
+                enterTransition = { slideIntoContainer(SlideDirection.Start, MotdMotion.navigationDrawerSpatial) },
+                exitTransition = { ExitTransition.KeepUntilTransitionsFinished },
+                popEnterTransition = { slideIntoContainer(SlideDirection.End, MotdMotion.navigationDrawerSpatial) },
+                popExitTransition = { slideOutOfContainer(SlideDirection.End, MotdMotion.navigationDrawerSpatial) },
+                predictivePopEnterTransition = { motdPredictivePopEnterTransition(it) },
+                predictivePopExitTransition = { motdPredictivePopExitTransition(it) },
+            ) {
+                composable<ChatListRoute> {
+                    Box(Modifier.fillMaxSize().onGloballyPositioned { listCoordinates = it })
+                }
+                composable<SettingsRoute> {
+                    Box(Modifier.fillMaxSize().onGloballyPositioned { screenCoordinates = it })
+                }
+            }
+        }
+        compose.runOnIdle { controller.navigate(SettingsRoute()) }
+        compose.waitForIdle()
+        val initial = compose.runOnIdle { screenCoordinates.unclippedBoundsInRoot() }
+
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread {
+            input.backStarted(NavigationEvent(swipeEdge = NavigationEvent.EDGE_LEFT))
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnUiThread {
+            input.backProgressed(NavigationEvent(swipeEdge = NavigationEvent.EDGE_LEFT, progress = 0.35f))
+        }
+        compose.mainClock.advanceTimeBy(100)
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(100)
+        compose.waitForIdle()
+        compose.runOnUiThread {
+            val moving = screenCoordinates.unclippedBoundsInRoot()
+            // Must slide right, not scale out (the Navigation 2.10 predictive default shrinks).
+            assertTrue("Settings must slide right during predictive back", moving.left > initial.left)
+            assertEquals(initial.width, moving.width, 0.5f)
+            assertEquals(initial.height, moving.height, 0.5f)
+        }
+
+        compose.runOnUiThread { input.backCancelled() }
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        compose.runOnUiThread {
+            assertEquals(
+                SettingsRoute::class.qualifiedName,
+                controller.currentDestination?.route?.substringBefore('?'),
+            )
+        }
+    }
+
     private fun LayoutCoordinates.unclippedBoundsInRoot(): Rect =
         Rect(
             localToRoot(Offset.Zero),
