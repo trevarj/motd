@@ -10,9 +10,12 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -60,6 +63,8 @@ class DickordPortalViewModel
         private val showArchived = MutableStateFlow(savedStateHandle.get<Boolean>(KEY_SHOW_ARCHIVED) ?: false)
         private val activeEntryIds = MutableStateFlow<Set<String>>(emptySet())
         private val requestedReadyNetworks = mutableSetOf<Long>()
+        private val _refreshResults = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
+        internal val refreshResults: SharedFlow<Boolean> = _refreshResults.asSharedFlow()
 
         internal val state: StateFlow<DickordPortalState> =
             combine(
@@ -129,7 +134,8 @@ class DickordPortalViewModel
         fun refresh() {
             val networkIds = dickordOwningNetworkIds(rows.value.orEmpty())
             viewModelScope.launch {
-                networkIds.forEach { connectionManager.requestDickordChannelSnapshot(it) }
+                val requested = networkIds.map { connectionManager.requestDickordChannelSnapshot(it) }.any { it }
+                _refreshResults.emit(requested)
             }
         }
 

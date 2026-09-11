@@ -237,6 +237,7 @@ class DickordPortalUiTest {
                     onSelectGroup = { state = state.copy(selectedGroupKey = it) },
                     onShowArchived = { calls += "showArchived:$it" },
                     onRefresh = { calls += "refresh" },
+                    onMarkAllRead = { calls += "read-all" },
                     onMarkRead = { calls += "read:$it" },
                     onSetMuted = { id, value -> calls += "mute:$id:$value" },
                     onSetPinned = { id, value -> calls += "pin:$id:$value" },
@@ -247,6 +248,8 @@ class DickordPortalUiTest {
         }
 
         compose.onNodeWithTag("dickord_portal_refresh").performClick()
+        compose.onNodeWithTag("dickord_portal_more").performClick()
+        compose.onNodeWithTag("dickord_portal_mark_all_read").performClick()
         compose.onNodeWithTag("dickord_portal_more").performClick()
         compose.onNodeWithTag("dickord_portal_archive").performClick()
         invokeMenu("dickord_menu_mark_read")
@@ -259,6 +262,7 @@ class DickordPortalUiTest {
             assertEquals(
                 listOf(
                     "refresh",
+                    "read-all",
                     "showArchived:false",
                     "read:11",
                     "mute:11:false",

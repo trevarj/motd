@@ -74,6 +74,17 @@ class ChatListSectioningTest {
     )
 
     @Test
+    fun `Discord mark-all selects active unmuted portal rows only`() {
+        val active = row(id = 1, name = "#discord.guild.general", type = BufferType.CHANNEL, unreadCount = 3)
+        val muted = row(id = 2, name = "#discord.guild.quiet", type = BufferType.CHANNEL, unreadCount = 2).copy(muted = true)
+        val archived = row(id = 3, name = "#discord.guild.old", type = BufferType.CHANNEL, unreadCount = 4).copy(archived = true)
+        val control = row(id = 4, name = "#discord.control", type = BufferType.CHANNEL, unreadCount = 1)
+        val ordinary = row(id = 5, name = "#general", type = BufferType.CHANNEL, unreadCount = 5)
+
+        assertEquals(listOf(1L), dickordUnreadBufferIds(listOf(active, muted, archived, control, ordinary)))
+    }
+
+    @Test
     fun `archived rows are excluded before active sectioning`() {
         val active = row(id = 1, name = "#active", type = BufferType.CHANNEL)
         val archived = row(id = 2, name = "alice", type = BufferType.QUERY).copy(archived = true)

@@ -658,6 +658,7 @@ private fun DickordPortalPane(
         },
         onConversationInfo = { navController.navigate(ChannelInfoRoute(it)) },
         onMarkRead = { chatListViewModel.markSelectedRead(listOf(it)) },
+        onMarkAllRead = chatListViewModel::markDickordRead,
         onSetMuted = { bufferId, muted -> chatListViewModel.setMuted(bufferId, muted) },
         onSetPinned = { bufferId, pinned -> chatListViewModel.setPinned(bufferId, pinned) },
         onSetArchived = { bufferId, archived -> chatListViewModel.setArchived(bufferId, archived) },

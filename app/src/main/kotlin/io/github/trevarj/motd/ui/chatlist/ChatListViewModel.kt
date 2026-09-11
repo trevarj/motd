@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -645,6 +646,14 @@ class ChatListViewModel
             viewModelScope.launch { markChatsRead(bufferIds, readMarkerRepository, connectionManager) }
         }
 
+        /** Mark every active Discord portal conversation read across bridge networks. */
+        fun markDickordRead() {
+            viewModelScope.launch {
+                val bufferIds = dickordUnreadBufferIds(bufferRepository.observeChatList().first())
+                if (bufferIds.isNotEmpty()) markChatsRead(bufferIds, readMarkerRepository, connectionManager)
+            }
+        }
+
         /**
          * Mark an explicit selection read, muted rows included: mark-all deliberately skips muted
          * chats, but a user hand-selecting one is opting it in on purpose.
@@ -701,6 +710,13 @@ internal fun settledArchiveOverrideIds(
     val byId = rows.associateBy(ChatListRow::bufferId)
     return overrides.filter { (id, archived) -> byId[id]?.archived == archived }.keys
 }
+
+internal fun dickordUnreadBufferIds(rows: List<ChatListRow>): List<Long> =
+    unreadBufferIds(
+        rows.filter { row ->
+            !row.archived && isDickordPortalConversation(row.type, row.displayName)
+        },
+    )
 
 /** Portal-owned rows leave only the ordinary projection; disabling the Lab is an identity no-op. */
 internal fun ordinaryChatListRows(

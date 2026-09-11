@@ -45,6 +45,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,6 +59,7 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -103,14 +106,24 @@ internal fun DickordPortalScreen(
     onOpenConversation: (Long) -> Unit,
     onConversationInfo: (Long) -> Unit,
     onMarkRead: (Long) -> Unit,
+    onMarkAllRead: () -> Unit,
     onSetMuted: (Long, Boolean) -> Unit,
     onSetPinned: (Long, Boolean) -> Unit,
     onSetArchived: (Long, Boolean) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val refreshRequested = stringResource(R.string.dickord_portal_refresh_requested)
+    val refreshUnavailable = stringResource(R.string.dickord_portal_refresh_unavailable)
+    LaunchedEffect(viewModel, refreshRequested, refreshUnavailable) {
+        viewModel.refreshResults.collect { requested ->
+            snackbarHostState.showSnackbar(if (requested) refreshRequested else refreshUnavailable)
+        }
+    }
     DickordPortalContent(
         state = state,
         selectedBufferId = selectedBufferId,
+        snackbarHostState = snackbarHostState,
         onBack = onBack,
         onSelectGroup = viewModel::selectGroup,
         onShowArchived = viewModel::setShowArchived,
@@ -118,6 +131,7 @@ internal fun DickordPortalScreen(
         onOpenConversation = onOpenConversation,
         onConversationInfo = onConversationInfo,
         onMarkRead = onMarkRead,
+        onMarkAllRead = onMarkAllRead,
         onSetMuted = onSetMuted,
         onSetPinned = onSetPinned,
         onSetArchived = onSetArchived,
@@ -130,6 +144,7 @@ internal fun DickordPortalScreen(
 internal fun DickordPortalContent(
     state: DickordPortalState,
     selectedBufferId: Long? = null,
+    snackbarHostState: SnackbarHostState? = null,
     onBack: () -> Unit = {},
     onSelectGroup: (String) -> Unit = {},
     onShowArchived: (Boolean) -> Unit = {},
@@ -137,6 +152,7 @@ internal fun DickordPortalContent(
     onOpenConversation: (Long) -> Unit = {},
     onConversationInfo: (Long) -> Unit = {},
     onMarkRead: (Long) -> Unit = {},
+    onMarkAllRead: () -> Unit = {},
     onSetMuted: (Long, Boolean) -> Unit = { _, _ -> },
     onSetPinned: (Long, Boolean) -> Unit = { _, _ -> },
     onSetArchived: (Long, Boolean) -> Unit = { _, _ -> },
@@ -160,6 +176,9 @@ internal fun DickordPortalContent(
 
     Scaffold(
         modifier = Modifier.fillMaxSize().testTag("screen_dickord_portal"),
+        snackbarHost = {
+            if (snackbarHostState != null) SnackbarHost(snackbarHostState)
+        },
         topBar = {
             DickordPortalHeader(
                 title = selectedTitle,
@@ -167,6 +186,7 @@ internal fun DickordPortalContent(
                 onBack = onBack,
                 onShowArchived = onShowArchived,
                 onRefresh = onRefresh,
+                onMarkAllRead = onMarkAllRead,
             )
         },
     ) { padding ->
@@ -462,6 +482,7 @@ private fun DickordPortalHeader(
     onBack: () -> Unit,
     onShowArchived: (Boolean) -> Unit,
     onRefresh: () -> Unit,
+    onMarkAllRead: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     TopAppBar(
@@ -500,6 +521,15 @@ private fun DickordPortalHeader(
                     Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.chatlist_more_actions))
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.drawer_mark_all_read)) },
+                        leadingIcon = { Icon(Icons.Outlined.DoneAll, contentDescription = null) },
+                        modifier = Modifier.testTag("dickord_portal_mark_all_read"),
+                        onClick = {
+                            menuOpen = false
+                            onMarkAllRead()
+                        },
+                    )
                     DropdownMenuItem(
                         text = {
                             Text(

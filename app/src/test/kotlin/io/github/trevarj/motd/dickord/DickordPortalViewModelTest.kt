@@ -28,8 +28,10 @@ import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -171,6 +173,10 @@ class DickordPortalViewModelTest {
             val ready = client.state.value as IrcClientState.Ready
             val connections = FakeConnections(mapOf(1L to ready), mapOf(1L to client))
             val viewModel = viewModel(FakePrefs(true), FakeBuffers(listOf(row(10))), connections)
+            val refreshResults = mutableListOf<Boolean>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                viewModel.refreshResults.collect { refreshResults += it }
+            }
             runCurrent()
 
             viewModel.setEntryActive("ordinary-route", false)
@@ -185,6 +191,7 @@ class DickordPortalViewModelTest {
             viewModel.refresh()
             runCurrent()
             assertEquals(2, transport.snapshotRequests())
+            assertEquals(listOf(true, true), refreshResults)
         }
 
     @Test
