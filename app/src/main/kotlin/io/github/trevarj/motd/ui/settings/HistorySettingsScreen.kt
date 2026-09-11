@@ -41,6 +41,7 @@ import io.github.trevarj.motd.data.sync.DatabaseProfile
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import java.text.NumberFormat
+import java.util.Locale
 
 @Composable
 fun HistorySettingsScreen(
@@ -249,7 +250,9 @@ private fun RetentionPlanner(
             onValueChange = { text ->
                 dirty = true
                 sizeText = text
-                val target = text.toDoubleOrNull()
+                // The field formats with a dot but the keyboard/locale may type a comma: accept
+                // both, so a decimal works in every locale rather than silently doing nothing.
+                val target = parseMegabytes(text)
                 if (profile != null && target != null) {
                     rowsText = profile.channelRowsFor((target * MEGABYTE).toLong()).coerceAtLeast(MIN_CUSTOM_RETENTION_ROWS).toString()
                 }
@@ -283,7 +286,9 @@ private fun RetentionPlanner(
 
 private const val MEGABYTE = 1_000_000.0
 
-private fun megabytes(bytes: Long): String = "%.1f".format(bytes / MEGABYTE)
+private fun megabytes(bytes: Long): String = "%.1f".format(Locale.ROOT, bytes / MEGABYTE)
+
+internal fun parseMegabytes(text: String): Double? = text.replace(',', '.').toDoubleOrNull()
 
 private fun formatRows(rows: Number): String = NumberFormat.getIntegerInstance().format(rows)
 

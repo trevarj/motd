@@ -171,7 +171,7 @@ interface HistoryResyncController {
     val syncStatuses: StateFlow<Map<Long, HistorySyncStatus>>
         get() = EMPTY_SYNC_STATUSES
 
-    /** Live per-network pass progress; a network without a live pass carries no entry. */
+    /** Live pass progress; keys are opaque session identifiers. */
     val passProgress: StateFlow<Map<Long, SyncPassProgress>>
         get() = EMPTY_PASS_PROGRESS
 
@@ -364,6 +364,11 @@ class HistoryResyncCoordinator
         // final give-up verdict can still be painted onto whatever that pass left behind.
         private val networkSessions = ConcurrentHashMap<Long, SyncStatusSession>()
 
+        // Manual backfills never take [networkSessions]: a minutes-long pass must not evict a
+        // reconnect session that still needs to settle its badges. One per network, enforced by
+        // HistoryWindowFetcher.
+        private val backfillSessions = ConcurrentHashMap<Long, SyncStatusSession>()
+
         // Connections the caller took offline deliberately, keyed by network. A pass runs in this
         // coordinator's own scope, so it outlives the caller that started it: this tombstone is how a
         // pass still winding down for a retired connection learns that nothing it publishes may reach
@@ -486,6 +491,8 @@ class HistoryResyncCoordinator
             retiredNetworks[networkId] = NetworkRetirement(sourceIdentity, sessionTickets.get())
             networkSessions.remove(networkId)?.retire()
             clearAwaitingConnection(networkId)
+            backfillSessions.remove(networkId)?.retire()
+            // Also clears a stale predecessor entry when no current session survived to retire it.
             _passProgress.update { it - networkId }
             // The loader's wire gates are keyed by network and live for the process, so a retirement is
             // also the only moment anything can drop one. Without this the gate a deleted network built
@@ -587,11 +594,20 @@ class HistoryResyncCoordinator
         ) {
             private val monitor = Any()
 
-            // Registration order; an entry lives here until that buffer settles.
-            private val generations = LinkedHashMap<Long, Long>()
+            // Backfills never take the per-network session slot (see [manualPass]), so their
+            // aggregate progress publishes under their own key instead of the network's: the
+            // negated session ticket, a value no network id (always a positive Room PK) and no
+            // other live pass can mint. The chat list sums across all entries.
+            private val progressKey: Long? get() = if (backfill) -ticket else null
+
+            /** The key this session's aggregate progress publishes under; the network slot when not a backfill. */
+            private fun progressKeyOrNetwork(id: Long): Long = progressKey ?: id
 
             // Buffers whose requests are on the wire right now; each wears the whole-pass verdict.
             private val inFlight = LinkedHashSet<Long>()
+
+            // Registration order; an entry lives here until that buffer settles.
+            private val generations = LinkedHashMap<Long, Long>()
 
             // Registered buffers the server permanently refuses. They own a generation (so this pass
             // can still settle them) but their transient Queued/Syncing publications are suppressed:
@@ -876,12 +892,15 @@ class HistoryResyncCoordinator
              * predecessor could read "still mine", watch the successor register and publish its own
              * (n, 0) header into that gap, and then overwrite that header with a stale count — or, from
              * [releaseProgress], delete it outright, leaving a live pass with no header at all for as
-             * long as it had nothing further to emit.
+             * long as it had nothing further to emit. A backfill session skips the ownership check
+             * (it owns its key outright) but keeps the guard for the same atomicity.
              */
             private fun publishProgress() {
                 synchronized(retireGuard) {
                     val id = networkId ?: return
-                    if (!ownsNetworkSlot()) return
+                    // A backfill owns its key outright — it never took the per-network slot, so no
+                    // reconnect pass can evict its header, and it can never delete a live pass's.
+                    if (progressKey == null && !ownsNetworkSlot()) return
                     val snapshot =
                         synchronized(monitor) {
                             // A retired pass publishes nothing at all. Its terminal already cleared this
@@ -895,7 +914,7 @@ class HistoryResyncCoordinator
                             if (latentLocked()) return
                             SyncPassProgress(total, settled, backfill)
                         }
-                    _passProgress.update { it + (id to snapshot) }
+                    _passProgress.update { it + (progressKeyOrNetwork(id) to snapshot) }
                 }
             }
 
@@ -903,8 +922,8 @@ class HistoryResyncCoordinator
             private fun releaseProgress() {
                 synchronized(retireGuard) {
                     val id = networkId ?: return
-                    if (!ownsNetworkSlot()) return
-                    _passProgress.update { it - id }
+                    if (progressKey == null && !ownsNetworkSlot()) return
+                    _passProgress.update { it - progressKeyOrNetwork(id) }
                 }
             }
         }
@@ -2150,12 +2169,18 @@ class HistoryResyncCoordinator
             bufferIds: List<Long>,
             work: suspend (Long) -> Unit,
         ) {
-            val session = beginNetworkSession(networkId, sourceIdentity = Any(), chromeEligible = true, backfill = true)
-            session.queueAll(bufferIds)
-            // The user asked for this pass, so there is no "did discovery find anything" question to
-            // wait on before announcing it: publish the counters straight away.
-            session.activate()
+            // NOT beginNetworkSession: backfills use their own progress key and registry so a
+            // reconnect pass can keep its slot, terminal, and header through the overlap.
+            val session =
+                synchronized(retireGuard) {
+                    SyncStatusSession(networkId, Any(), sessionTickets.incrementAndGet(), chromeEligible = true, backfill = true)
+                        .also { backfillSessions[networkId] = it }
+                }
             try {
+                session.queueAll(bufferIds)
+                // The user asked for this pass, so there is no "did discovery find anything" question to
+                // wait on before announcing it: publish the counters straight away.
+                session.activate()
                 for (bufferId in bufferIds) {
                     session.syncing(bufferId)
                     work(bufferId)
@@ -2169,6 +2194,8 @@ class HistoryResyncCoordinator
             } catch (failure: Throwable) {
                 session.finish(HistoryResyncState.Failed("manual_pass"))
                 throw failure
+            } finally {
+                synchronized(retireGuard) { backfillSessions.remove(networkId, session) }
             }
         }
 

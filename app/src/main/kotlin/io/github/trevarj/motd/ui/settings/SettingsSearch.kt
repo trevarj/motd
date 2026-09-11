@@ -184,7 +184,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_fools_mode, R.string.settings_fools_hide_desc, "collapse hide", SettingsSearchPage.CHAT, SettingsTarget.FOOLS_MODE),
         spec(R.string.settings_history_retention, R.string.settings_history_retention_desc, "prune storage database size old messages", SettingsSearchPage.HISTORY, SettingsTarget.HISTORY_RETENTION),
         spec(R.string.settings_auto_compact, R.string.settings_auto_compact_desc, "vacuum automatic storage database size free space", SettingsSearchPage.HISTORY, SettingsTarget.AUTO_COMPACT),
-        spec(R.string.settings_compact_database, R.string.settings_local_history_section, "vacuum storage database size free space", SettingsSearchPage.HISTORY, SettingsTarget.COMPACT_DATABASE),
+        spec(R.string.settings_compact_database, R.string.settings_compact_database_search_desc, "vacuum storage database size free space", SettingsSearchPage.HISTORY, SettingsTarget.COMPACT_DATABASE),
         spec(R.string.settings_delivery_socket, R.string.settings_delivery_socket_desc, "persistent connection", SettingsSearchPage.DELIVERY, SettingsTarget.PERSISTENT_DELIVERY),
         spec(R.string.settings_delivery_push, R.string.settings_delivery_push_desc, "unified push distributor", SettingsSearchPage.DELIVERY, SettingsTarget.UNIFIED_PUSH),
         spec(R.string.settings_start_on_boot, R.string.settings_start_on_boot_desc, "restart reconnect", SettingsSearchPage.DELIVERY, SettingsTarget.START_ON_BOOT),
