@@ -5,10 +5,8 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.audio.NetworkMediaRoute
-import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.irc.event.IrcClientState
-import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.service.ConnectionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -281,23 +279,16 @@ class AttachmentUploaderImpl
                     ?: throw UploadException("No route for this network.")
             if (route.proxyError != null) throw UploadException(route.proxyError)
             return route.use {
-                // Bind the endpoint to the IRC host or user-configured VLESS ingress BEFORE opening
-                // anything: both requests authenticate, and OPTIONS would leak the header first.
-                val tunnelHost =
-                    route.endpoint
-                        .takeIf { it.obfsMode == ObfsMode.EMBEDDED_REALITY }
-                        ?.let { VlessLink.parse(it.obfsLink.orEmpty()).getOrNull()?.host }
+                // An embedded IRC peer already received this same credential. Its public FILEHOST
+                // cannot share the private destination name used inside the tunnel, so its own
+                // authenticated ISUPPORT advertisement is the authority. Direct connections still
+                // require the advertised host to match the configured IRC host.
                 val endpoint =
-                    if (
-                        route.endpoint.role == NetworkRole.BOUNCER_ROOT &&
-                        route.endpoint.obfsMode == ObfsMode.EMBEDDED_REALITY
-                    ) {
-                        // This Soju already received the same credential over IRC. Its external
-                        // FILEHOST cannot share the internal Docker host used through REALITY.
+                    if (route.endpoint.obfsMode == ObfsMode.EMBEDDED_REALITY) {
                         httpsUploadUri(ready.isupport[SOJU_FILEHOST_TOKEN])?.toString()
                             ?: throw UploadException("This IRC network is not advertising a Soju file host.")
                     } else {
-                        when (val advertised = sojuFileHostEndpoint(ready.isupport, route.endpoint.host, tunnelHost)) {
+                        when (val advertised = sojuFileHostEndpoint(ready.isupport, route.endpoint.host)) {
                             is SojuFileHostEndpoint.Usable -> {
                                 advertised.url
                             }

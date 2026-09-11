@@ -9,6 +9,7 @@ import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.normalizedConfig
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.dickord.isDickordPortalConversation
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.SendAcceptance
 import kotlinx.coroutines.flow.Flow
@@ -65,7 +66,8 @@ class VoiceMessageSenderImpl
                 val buffer =
                     db.bufferDao().observeById(request.bufferId)
                         ?: throw VoiceSendException("Conversation no longer exists.")
-                val encrypted = if (request.encrypt) crypto.encrypt(request.file) else null
+                val delivery = request.forConversation(buffer.type, buffer.displayName)
+                val encrypted = if (delivery.encrypt) crypto.encrypt(request.file) else null
                 val uploadFile = encrypted?.file ?: request.file
                 val uploadMime = encrypted?.mimeType ?: request.mimeType
                 val uploadName = voiceFileName(request, encrypted != null)
@@ -77,7 +79,7 @@ class VoiceMessageSenderImpl
                             name = uploadName,
                             mimeType = uploadMime,
                             sizeBytes = uploadFile.length(),
-                            destination = request.destination,
+                            destination = delivery.destination,
                             progress = { sent, total -> send(VoiceSendProgress.Uploading(sent, total)) },
                         )
                     } finally {
@@ -200,6 +202,19 @@ class VoiceMessageSenderImpl
         private companion object {
             const val MAX_IRC_WIRE_BYTES = 480
         }
+    }
+
+internal fun VoiceSendRequest.forConversation(
+    type: io.github.trevarj.motd.data.db.BufferType,
+    displayName: String,
+): VoiceSendRequest =
+    if (isDickordPortalConversation(type, displayName)) {
+        copy(
+            encrypt = false,
+            destination = PasteBackendConfig(backend = AttachmentBackend.SOJU_FILEHOST),
+        )
+    } else {
+        this
     }
 
 internal fun voiceExpiryFor(

@@ -2,8 +2,11 @@ package io.github.trevarj.motd.audio
 
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.PasteBackendConfig
+import io.github.trevarj.motd.data.db.BufferType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Test
 import java.time.Instant
 
@@ -42,6 +45,27 @@ class VoiceMessageSenderTest {
             assertNull(voiceExpiryFor(litterbox(expiry), uploadedAt))
         }
         assertNull(voiceExpiryFor(PasteBackendConfig(backend = AttachmentBackend.UGUU), Long.MAX_VALUE))
+    }
+
+    @Test fun dickordConversationsForceNativeUnencryptedDelivery() {
+        val request =
+            VoiceSendRequest(
+                bufferId = 7,
+                file = java.io.File("voice.ogg"),
+                durationMs = 1_000,
+                mimeType = "audio/ogg",
+                extension = ".ogg",
+                sizeBytes = 1,
+                encrypt = true,
+                destination = PasteBackendConfig(backend = AttachmentBackend.CRAFTERBIN),
+            )
+
+        val resolved = request.forConversation(BufferType.CHANNEL, "#discord.me.chat.crispy")
+
+        assertFalse(resolved.encrypt)
+        assertEquals(AttachmentBackend.SOJU_FILEHOST, resolved.destination?.backend)
+        assertSame(request, request.forConversation(BufferType.CHANNEL, "#discord.control"))
+        assertSame(request, request.forConversation(BufferType.CHANNEL, "#ordinary"))
     }
 
     private fun litterbox(expiry: String) =

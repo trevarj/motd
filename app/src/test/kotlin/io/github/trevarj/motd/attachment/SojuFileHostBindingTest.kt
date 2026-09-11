@@ -84,6 +84,17 @@ class SojuFileHostBindingTest {
         assertTrue("the upload never reached the configured VLESS host", probe.connections() > 0)
     }
 
+    @Test fun embeddedDirectNetworkMayUseItsAdvertisedFileHost() {
+        assertThrows(IOException::class.java) {
+            uploadText(
+                advertised = "https://127.0.0.1:${probe.port}/uploads",
+                networkHost = "soju",
+                vlessHost = "192.0.2.1",
+            )
+        }
+        assertTrue("the upload never reached the embedded peer's advertised file host", probe.connections() > 0)
+    }
+
     @Test fun embeddedBouncerMayUseItsExternalFileHost() {
         assertThrows(IOException::class.java) {
             uploadText(
