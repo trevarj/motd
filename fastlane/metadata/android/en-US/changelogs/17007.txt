@@ -1,0 +1,5 @@
+- Added Discord portal navigation for servers, channels, and DMs, with exact names, icons, refresh feedback, and unread management.
+- Added native Discord voice-message delivery.
+- Improved Agentwire recovery, diagnostics, and tool summaries.
+- Bounded local history retention and notification recovery work.
+- Restored predictive-back slide transitions and refreshed the app icon.
