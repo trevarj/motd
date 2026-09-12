@@ -270,7 +270,7 @@
     <string name="dickord_channel_subtitle">Discord via Dickord</string>
     <string name="dickord_relay_identity">Discord relay identity</string>
     <string name="dickord_portal_refresh">Refresh bridge details</string>
-    <string name="dickord_portal_refresh_requested">Bridge details refresh requested</string>
+    <string name="dickord_portal_refresh_requested">Refresh request sent</string>
     <string name="dickord_portal_refresh_unavailable">Could not refresh bridge details</string>
     <string name="dickord_portal_channels">Channels</string>
     <string name="dickord_portal_exit">Back to Motd</string>
