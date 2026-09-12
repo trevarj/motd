@@ -61,6 +61,7 @@ class AgentwireActivityUiTest {
         val tool = tool("running", "shell", "Running command").copy(kind = "tool.started", running = true)
         val base = tool.copy(running = false, success = null)
         val activity = agentwireToolActivity(listOf(tool))
+        val expanded = mutableStateMapOf<String, Boolean>()
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 Column {
@@ -68,7 +69,7 @@ class AgentwireActivityUiTest {
                     AgentwireTimelineCard(base.copy(kind = "assistant.completed", title = "Assistant", body = "Inspecting source"), null, null, {})
                     AgentwireTimelineCard(base.copy(kind = "plan.updated", title = "Plan", body = "Read then check"), null, null, {})
                     AgentwireTimelineCard(base.copy(kind = "turn.started", title = "Turn running"), null, null, {}, activity)
-                    AgentwireToolCard(tool, "tool:running", mutableStateMapOf())
+                    AgentwireToolCard(tool, "tool:running", expanded)
                 }
             }
         }
