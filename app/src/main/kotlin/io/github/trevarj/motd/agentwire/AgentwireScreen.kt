@@ -1,7 +1,11 @@
 package io.github.trevarj.motd.agentwire
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -62,6 +66,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -70,6 +76,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -78,6 +85,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -86,6 +94,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -99,12 +108,25 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.withResumed
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.attachment.PasteBackendConfig
+import io.github.trevarj.motd.audio.AudioAttachment
+import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.irc.agentwire.AgentwireTopicDefect
 import io.github.trevarj.motd.irc.format.markdownToIrcFormatting
+import io.github.trevarj.motd.ui.chat.ChatForegroundLifecycleGate
 import io.github.trevarj.motd.ui.chat.ScrollToBottomFab
+import io.github.trevarj.motd.ui.chat.VoiceComposerPanel
+import io.github.trevarj.motd.ui.chat.VoiceMessageUiState
+import io.github.trevarj.motd.ui.chat.VoiceMessageViewModel
+import io.github.trevarj.motd.ui.chat.VoiceRecordingPermissionGate
 import io.github.trevarj.motd.ui.chat.shouldShowNewestFab
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.mircFormattedText
@@ -122,6 +144,7 @@ fun AgentwireGateScreen(
     showComposerEmoji: Boolean,
     showComposerFormattingTools: Boolean,
     viewModel: AgentwireViewModel = hiltViewModel(),
+    voiceViewModel: VoiceMessageViewModel = hiltViewModel(),
     ordinaryChat: @Composable () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -140,6 +163,64 @@ fun AgentwireGateScreen(
         }
 
         else -> {
+            val voiceState by voiceViewModel.state.collectAsStateWithLifecycle()
+            val playbackState by voiceViewModel.playbackState.collectAsStateWithLifecycle()
+            val contextReview by viewModel.contextReview.collectAsStateWithLifecycle()
+            val context = LocalContext.current
+            val lifecycleOwner = LocalLifecycleOwner.current
+            val voiceScope = rememberCoroutineScope()
+            val canStartVoice by rememberUpdatedState(
+                AgentwireRecordingGate(
+                    state = state,
+                    composerText = composer.text,
+                    voiceState = voiceState,
+                    contextReviewing = contextReview?.destination != null,
+                    onStopRecording = voiceViewModel::stopRecording,
+                ),
+            )
+            val voicePermissionGate =
+                remember(context, lifecycleOwner, voiceViewModel) {
+                    VoiceRecordingPermissionGate(
+                        permissionGranted = {
+                            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                                PackageManager.PERMISSION_GRANTED
+                        },
+                        onStart = { locked ->
+                            voiceScope.launch {
+                                // Permission results can arrive before the destination resumes.
+                                lifecycleOwner.lifecycle.withResumed {
+                                    if (canStartVoice) voiceViewModel.startAgentwireRecording(locked)
+                                }
+                            }
+                        },
+                        onDenied = voiceViewModel::recordingPermissionDenied,
+                    )
+                }
+            val microphonePermission =
+                rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                    voicePermissionGate.onPermissionResult(granted)
+                }
+
+            fun startVoiceRecording(locked: Boolean) {
+                if (voicePermissionGate.start(locked)) {
+                    microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+
+            DisposableEffect(lifecycleOwner, voiceViewModel) {
+                val gate =
+                    ChatForegroundLifecycleGate(
+                        onResume = {},
+                        onPause = voiceViewModel::stopForBackground,
+                    )
+                val observer = LifecycleEventObserver { _, event -> gate.onEvent(event) }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                gate.sync(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+                onDispose {
+                    lifecycleOwner.lifecycle.removeObserver(observer)
+                    gate.dispose()
+                }
+            }
             AgentwireScreen(
                 state = state,
                 viewModel = viewModel,
@@ -150,9 +231,44 @@ fun AgentwireGateScreen(
                 showBack = showBack,
                 showComposerEmoji = showComposerEmoji,
                 showComposerFormattingTools = showComposerFormattingTools,
+                contextReview = contextReview,
+                voiceState = voiceState,
+                playbackState = playbackState,
+                onVoiceHoldStart = { startVoiceRecording(locked = false) },
+                onVoiceAccessibilityStart = { startVoiceRecording(locked = true) },
+                onVoiceHoldStop = voiceViewModel::stopRecording,
+                onVoiceHoldCancel = voiceViewModel::cancelRecording,
+                onVoiceLock = voiceViewModel::lockRecording,
+                onVoiceDelete = voiceViewModel::deleteStaged,
+                onVoiceSend = {
+                    voiceViewModel.sendAgentwire(destinationAvailable = viewModel.state.value.voiceDestinationAvailable())
+                },
+                onVoicePreview = voiceViewModel::toggleStagedPreview,
+                onVoicePreviewSeek = voiceViewModel::seekStagedPreview,
+                onVoiceDestinationSelected = voiceViewModel::setDestination,
+                onVoiceErrorDismissed = voiceViewModel::clearError,
+                onVoiceNoticeDismissed = voiceViewModel::clearNotice,
             )
         }
     }
+}
+
+private fun AgentwireUiState.voiceDestinationAvailable(): Boolean = gate == AgentwireGate.ACTIVE && connected && activeSid != null
+
+@Composable
+internal fun AgentwireRecordingGate(
+    state: AgentwireUiState,
+    composerText: String,
+    voiceState: VoiceMessageUiState,
+    contextReviewing: Boolean,
+    onStopRecording: () -> Unit,
+): Boolean {
+    val eligible = state.voiceDestinationAvailable() && composerText.isBlank() && voiceState.staged == null && !contextReviewing
+    val stopRecording by rememberUpdatedState(onStopRecording)
+    LaunchedEffect(eligible, voiceState.recording != null) {
+        if (!eligible && voiceState.recording != null) stopRecording()
+    }
+    return eligible
 }
 
 private enum class AgentwireSheet { STATUS, QUEUE, QUESTION, LOG }
@@ -267,11 +383,31 @@ private fun AgentwireScreen(
     showBack: Boolean,
     showComposerEmoji: Boolean,
     showComposerFormattingTools: Boolean,
+    contextReview: AgentwireContextReview?,
+    voiceState: VoiceMessageUiState,
+    playbackState: AudioPlaybackState,
+    onVoiceHoldStart: () -> Unit,
+    onVoiceAccessibilityStart: () -> Unit,
+    onVoiceHoldStop: () -> Unit,
+    onVoiceHoldCancel: () -> Unit,
+    onVoiceLock: () -> Unit,
+    onVoiceDelete: () -> Unit,
+    onVoiceSend: () -> Unit,
+    onVoicePreview: (AudioAttachment) -> Unit,
+    onVoicePreviewSeek: (AudioAttachment, Long) -> Unit,
+    onVoiceDestinationSelected: (PasteBackendConfig?) -> Unit,
+    onVoiceErrorDismissed: () -> Unit,
+    onVoiceNoticeDismissed: () -> Unit,
 ) {
     var sheet by remember { mutableStateOf<AgentwireSheet?>(null) }
     var questionRequestId by remember { mutableStateOf<String?>(null) }
     var overflow by remember { mutableStateOf(false) }
-    val contextReview by viewModel.contextReview.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(voiceState.notice) {
+        val notice = voiceState.notice ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(notice)
+        onVoiceNoticeDismissed()
+    }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val stamp = agentwireTimelineStamp(state.timeline, state.requests.size)
@@ -360,6 +496,7 @@ private fun AgentwireScreen(
         },
     ) {
         Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
             topBar = {
                 Column {
@@ -564,6 +701,7 @@ private fun AgentwireScreen(
                                     state = state,
                                     sessionName = sessionRows.firstOrNull { it.attached }?.title,
                                     canReview = viewModel.canReviewContext(),
+                                    voiceRecording = voiceState.recording != null,
                                     onReview = viewModel::reviewContext,
                                     onKeep = viewModel::keepContextForLater,
                                     onDiscard = viewModel::discardContext,
@@ -576,7 +714,8 @@ private fun AgentwireScreen(
                                 CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
                                     AgentwireContextComposer(
                                         review = reviewedContext,
-                                        viewModel = viewModel,
+                                        onEdit = viewModel::editContext,
+                                        onSend = viewModel::submitContext,
                                         showComposerEmoji = showComposerEmoji,
                                         showComposerFormattingTools = showComposerFormattingTools,
                                     )
@@ -588,6 +727,19 @@ private fun AgentwireScreen(
                                     showComposerEmoji = showComposerEmoji,
                                     showComposerFormattingTools = showComposerFormattingTools,
                                     onValueChange = onComposerChange,
+                                    voiceState = voiceState,
+                                    playbackState = playbackState,
+                                    onVoiceHoldStart = onVoiceHoldStart,
+                                    onVoiceAccessibilityStart = onVoiceAccessibilityStart,
+                                    onVoiceHoldStop = onVoiceHoldStop,
+                                    onVoiceHoldCancel = onVoiceHoldCancel,
+                                    onVoiceLock = onVoiceLock,
+                                    onVoiceDelete = onVoiceDelete,
+                                    onVoiceSend = onVoiceSend,
+                                    onVoicePreview = onVoicePreview,
+                                    onVoicePreviewSeek = onVoicePreviewSeek,
+                                    onVoiceDestinationSelected = onVoiceDestinationSelected,
+                                    onVoiceErrorDismissed = onVoiceErrorDismissed,
                                     onSend = {
                                         viewModel.submit(composer.text) {
                                             onComposerAccepted(composer)
@@ -1071,11 +1223,12 @@ private fun AgentwireBlocked(
 }
 
 @Composable
-private fun AgentwireContextCard(
+internal fun AgentwireContextCard(
     review: AgentwireContextReview,
     state: AgentwireUiState,
     sessionName: String?,
     canReview: Boolean,
+    voiceRecording: Boolean,
     onReview: () -> Unit,
     onKeep: () -> Unit,
     onDiscard: () -> Unit,
@@ -1118,7 +1271,11 @@ private fun AgentwireContextCard(
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = onReview, enabled = canReview && !review.sending, modifier = Modifier.weight(1f)) {
+                    Button(
+                        onClick = onReview,
+                        enabled = canReview && !review.sending && !voiceRecording,
+                        modifier = Modifier.weight(1f).testTag("agentwire_context_review_start"),
+                    ) {
                         Text(
                             if (state.activeSid == null) {
                                 stringResource(R.string.agentwire_context_resume)
@@ -1142,9 +1299,10 @@ private fun AgentwireContextCard(
 }
 
 @Composable
-private fun AgentwireContextComposer(
+internal fun AgentwireContextComposer(
     review: AgentwireContextReview,
-    viewModel: AgentwireViewModel,
+    onEdit: (String) -> Boolean,
+    onSend: () -> Unit,
     showComposerEmoji: Boolean,
     showComposerFormattingTools: Boolean,
 ) {
@@ -1154,8 +1312,8 @@ private fun AgentwireContextComposer(
     }
     Composer(
         value = value,
-        onValueChange = { if (viewModel.editContext(it.text)) value = it },
-        onSend = viewModel::submitContext,
+        onValueChange = { if (onEdit(it.text)) value = it },
+        onSend = onSend,
         enabled = !review.sending,
         modifier = Modifier.testTag("agentwire_context_composer"),
         placeholder = stringResource(R.string.agentwire_context_placeholder),
@@ -1167,7 +1325,7 @@ private fun AgentwireContextComposer(
 
 @SuppressLint("HardcodedText")
 @Composable
-private fun AgentwireComposer(
+internal fun AgentwireComposer(
     value: TextFieldValue,
     state: AgentwireUiState,
     showComposerEmoji: Boolean,
@@ -1175,9 +1333,37 @@ private fun AgentwireComposer(
     onValueChange: (TextFieldValue) -> Unit,
     onSend: () -> Unit,
     onCancel: () -> Unit,
+    voiceState: VoiceMessageUiState,
+    playbackState: AudioPlaybackState,
+    onVoiceHoldStart: () -> Unit,
+    onVoiceAccessibilityStart: () -> Unit,
+    onVoiceHoldStop: () -> Unit,
+    onVoiceHoldCancel: () -> Unit,
+    onVoiceLock: () -> Unit,
+    onVoiceDelete: () -> Unit,
+    onVoiceSend: () -> Unit,
+    onVoicePreview: (AudioAttachment) -> Unit,
+    onVoicePreviewSeek: (AudioAttachment, Long) -> Unit,
+    onVoiceDestinationSelected: (PasteBackendConfig?) -> Unit,
+    onVoiceErrorDismissed: () -> Unit,
 ) {
     Surface(shadowElevation = 4.dp) {
         Column(Modifier.fillMaxWidth()) {
+            VoiceComposerPanel(
+                state = voiceState,
+                playbackState = playbackState,
+                onDelete = onVoiceDelete,
+                onCancelRecording = onVoiceHoldCancel,
+                onStopRecording = onVoiceHoldStop,
+                onSend = onVoiceSend,
+                onPreview = onVoicePreview,
+                onPreviewSeek = onVoicePreviewSeek,
+                onToggleEncryption = {},
+                onDestinationSelected = onVoiceDestinationSelected,
+                onErrorDismissed = onVoiceErrorDismissed,
+                encryptionEnabled = false,
+                sendEnabled = state.voiceDestinationAvailable(),
+            )
             if (state.busy) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp),
@@ -1200,9 +1386,16 @@ private fun AgentwireComposer(
                 placeholder = if (state.busy) "Queue or steer the running turn" else "Message the agent",
                 showEmojiTool = showComposerEmoji,
                 showFormattingTools = showComposerFormattingTools,
-                // Voice and attachments stay on the shared composer boundary. They can be enabled
-                // when Agentwire defines safe attachment payloads instead of inventing a wire form.
-                voiceEnabled = false,
+                voiceEnabled =
+                    state.voiceDestinationAvailable() &&
+                        voiceState.staged == null &&
+                        value.text.isBlank(),
+                voiceRecording = voiceState.recording != null,
+                onVoiceHoldStart = onVoiceHoldStart,
+                onVoiceAccessibilityStart = onVoiceAccessibilityStart,
+                onVoiceHoldStop = onVoiceHoldStop,
+                onVoiceHoldCancel = onVoiceHoldCancel,
+                onVoiceLock = onVoiceLock,
             )
         }
     }

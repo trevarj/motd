@@ -4007,6 +4007,8 @@ internal fun VoiceComposerPanel(
     onToggleEncryption: () -> Unit,
     onDestinationSelected: (io.github.trevarj.motd.attachment.PasteBackendConfig?) -> Unit,
     onErrorDismissed: () -> Unit,
+    encryptionEnabled: Boolean = true,
+    sendEnabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     var destinationSheet by remember { mutableStateOf(false) }
@@ -4158,26 +4160,34 @@ internal fun VoiceComposerPanel(
                         waveform = staged.waveform,
                         modifier = Modifier.fillMaxWidth().testTag("voice_preview_scrubber"),
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Lock, null)
-                        Spacer(Modifier.width(8.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Encrypt upload", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                            Text(
-                                if (staged.encrypted) {
-                                    "The host cannot listen. IRC servers and bouncers can see the key in the link."
-                                } else {
-                                    "Standard audio link. The host and anyone with the link can play it in any client."
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    if (encryptionEnabled) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Lock, null)
+                            Spacer(Modifier.width(8.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Encrypt upload", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                Text(
+                                    if (staged.encrypted) {
+                                        "The host cannot listen. IRC servers and bouncers can see the key in the link."
+                                    } else {
+                                        "Standard audio link. The host and anyone with the link can play it in any client."
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = staged.encrypted,
+                                onCheckedChange = { onToggleEncryption() },
+                                enabled = progress == null,
+                                modifier = Modifier.testTag("voice_encryption_toggle"),
                             )
                         }
-                        Switch(
-                            checked = staged.encrypted,
-                            onCheckedChange = { onToggleEncryption() },
-                            enabled = progress == null,
-                            modifier = Modifier.testTag("voice_encryption_toggle"),
+                    } else {
+                        Text(
+                            "Agent voice notes are sent unencrypted so Agentwire can transcribe them on the workstation.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -4214,7 +4224,7 @@ internal fun VoiceComposerPanel(
                         null,
                         -> {}
                     }
-                    Button(onClick = onSend, enabled = progress == null, modifier = Modifier.fillMaxWidth().testTag("voice_send")) {
+                    Button(onClick = onSend, enabled = sendEnabled && progress == null, modifier = Modifier.fillMaxWidth().testTag("voice_send")) {
                         Icon(Icons.Outlined.CloudUpload, null)
                         Spacer(Modifier.width(6.dp))
                         Text("Send")

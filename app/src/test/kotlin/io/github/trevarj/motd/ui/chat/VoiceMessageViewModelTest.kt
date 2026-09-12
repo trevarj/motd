@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
 import android.content.Context
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.SavedStateHandle
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.ai.AiExecutionUnavailableException
@@ -48,8 +49,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -57,6 +61,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -69,6 +75,314 @@ import java.util.UUID
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class VoiceMessageViewModelTest {
+    @Test
+    fun `Agentwire sends a fifteen minute wire duration unencrypted without changing ordinary chat defaults`() =
+        voiceTest {
+            val sent = mutableListOf<VoiceSendRequest>()
+            val sender =
+                object : VoiceMessageSender {
+                    override fun send(request: VoiceSendRequest): Flow<VoiceSendProgress> =
+                        flow {
+                            sent += request
+                            emit(VoiceSendProgress.Complete("https://files.test/voice.ogg"))
+                        }
+                }
+            val vm =
+                fixture(
+                    Harness(),
+                    recorder = RecordingRecorder().apply { completedDurationMs = 900_999L },
+                    sender = sender,
+                    config = VoiceConfig(encryptionDefault = true),
+                )
+
+            vm.startAgentwireRecording(locked = false)
+            assertEquals(
+                false,
+                vm.state.value.recording
+                    ?.locked,
+            )
+            vm.lockRecording()
+            assertEquals(
+                true,
+                vm.state.value.recording
+                    ?.locked,
+            )
+            vm.stopRecording()
+            val agentNote = requireNotNull(vm.state.value.staged)
+            assertFalse(agentNote.encrypted)
+            vm.sendAgentwire(destinationAvailable = false)
+            runCurrent()
+            assertNotNull(vm.state.value.error)
+            assertEquals(agentNote, vm.state.value.staged)
+            assertTrue(agentNote.file.exists())
+            assertTrue(sent.isEmpty())
+            vm.sendAgentwire(destinationAvailable = true)
+            runCurrent()
+
+            assertFalse(sent.single().encrypt)
+            assertNull(vm.state.value.staged)
+            assertFalse(agentNote.file.exists())
+            vm.startRecording(locked = true)
+            vm.stopRecording()
+            assertEquals(
+                true,
+                vm.state.value.staged
+                    ?.encrypted,
+            )
+            vm.deleteStaged()
+        }
+
+    @Test
+    fun `Agentwire preserves incompatible ordinary notes for recovery through the IRC transcript`() =
+        voiceTest {
+            for ((encrypted, durationMs) in listOf(true to 1_000L, false to 901_000L)) {
+                val sent = mutableListOf<VoiceSendRequest>()
+                val sender =
+                    object : VoiceMessageSender {
+                        override fun send(request: VoiceSendRequest): Flow<VoiceSendProgress> =
+                            flow {
+                                sent += request
+                                emit(VoiceSendProgress.Complete("https://files.test/voice.ogg"))
+                            }
+                    }
+                val vm =
+                    fixture(
+                        Harness(),
+                        recorder = RecordingRecorder().apply { completedDurationMs = durationMs },
+                        sender = sender,
+                        config = VoiceConfig(encryptionDefault = encrypted),
+                    )
+                vm.startRecording(locked = true)
+                vm.stopRecording()
+                val original = requireNotNull(vm.state.value.staged)
+
+                vm.sendAgentwire(destinationAvailable = true)
+                runCurrent()
+                assertNotNull(vm.state.value.error)
+                assertNull(vm.state.value.progress)
+                assertEquals(original, vm.state.value.staged)
+                assertTrue(original.file.exists())
+                assertTrue(sent.isEmpty())
+
+                vm.clearError()
+                vm.send()
+                runCurrent()
+                assertNull(vm.state.value.error)
+                assertNull(vm.state.value.staged)
+                assertEquals(1, sent.size)
+                assertFalse(original.file.exists())
+            }
+        }
+
+    @Test
+    fun `Agentwire auto stops at fifteen minutes while ordinary chat retains thirty`() =
+        voiceTest {
+            val recorder = RecordingRecorder()
+            val vm = fixture(Harness(), recorder = recorder, config = VoiceConfig(encryptionDefault = true))
+
+            recorder.ageMs = 14 * 60_000L
+            vm.startAgentwireRecording(locked = true)
+            recordingTick()
+            assertNotNull(vm.state.value.recording)
+            vm.cancelRecording()
+
+            recorder.ageMs = 15 * 60_000L
+            vm.startAgentwireRecording(locked = true)
+            recordingTick()
+            assertNull(vm.state.value.recording)
+            assertEquals(
+                false,
+                vm.state.value.staged
+                    ?.encrypted,
+            )
+            vm.deleteStaged()
+
+            recorder.ageMs = 29 * 60_000L
+            vm.startRecording(locked = true)
+            recordingTick()
+            assertNotNull(vm.state.value.recording)
+            vm.cancelRecording()
+
+            recorder.ageMs = 30 * 60_000L
+            vm.startRecording(locked = true)
+            recordingTick()
+            assertNull(vm.state.value.recording)
+            assertEquals(
+                true,
+                vm.state.value.staged
+                    ?.encrypted,
+            )
+            vm.deleteStaged()
+        }
+
+    @Test
+    fun `failed Agentwire start leaves neither encryption nor duration overrides`() =
+        voiceTest {
+            val recorder = RecordingRecorder().apply { startFailure = IOException("Microphone unavailable") }
+            val vm = fixture(Harness(), recorder = recorder, config = VoiceConfig(encryptionDefault = true))
+            vm.startAgentwireRecording(locked = true)
+            assertNull(vm.state.value.recording)
+            assertNotNull(vm.state.value.error)
+
+            recorder.startFailure = null
+            recorder.ageMs = 15 * 60_000L
+            vm.startRecording(locked = true)
+            recordingTick()
+            assertNotNull(vm.state.value.recording)
+            vm.stopRecording()
+            assertEquals(
+                true,
+                vm.state.value.staged
+                    ?.encrypted,
+            )
+            vm.deleteStaged()
+        }
+
+    @Test
+    fun `cancel and too short stop clear both Agentwire overrides`() =
+        voiceTest {
+            val recorder = RecordingRecorder()
+            val vm = fixture(Harness(), recorder = recorder, config = VoiceConfig(encryptionDefault = true))
+            for (cancel in listOf(true, false)) {
+                recorder.ageMs = 0L
+                vm.startAgentwireRecording(locked = true)
+                if (cancel) {
+                    vm.cancelRecording()
+                } else {
+                    recorder.tooShort = true
+                    vm.stopRecording()
+                    recorder.tooShort = false
+                }
+                assertNull(vm.state.value.recording)
+                assertNull(vm.state.value.staged)
+
+                recorder.ageMs = 15 * 60_000L
+                vm.startRecording(locked = true)
+                recordingTick()
+                assertNotNull(vm.state.value.recording)
+                vm.stopRecording()
+                assertEquals(
+                    true,
+                    vm.state.value.staged
+                        ?.encrypted,
+                )
+                vm.deleteStaged()
+            }
+        }
+
+    @Test
+    fun `duplicate starts cannot change an active recording policy or replace a staged note`() =
+        voiceTest {
+            val recorder = RecordingRecorder().apply { ageMs = 15 * 60_000L }
+            val vm = fixture(Harness(), recorder = recorder, config = VoiceConfig(encryptionDefault = true))
+            vm.startRecording(locked = false)
+            vm.startAgentwireRecording(locked = true)
+            recordingTick()
+            assertEquals(
+                false,
+                vm.state.value.recording
+                    ?.locked,
+            )
+            vm.stopRecording()
+            val original = requireNotNull(vm.state.value.staged)
+            assertTrue(original.encrypted)
+
+            vm.startAgentwireRecording(locked = true)
+            assertNull(vm.state.value.recording)
+            assertEquals(original, vm.state.value.staged)
+            assertTrue(original.file.exists())
+            vm.deleteStaged()
+
+            vm.startAgentwireRecording(locked = false)
+            vm.startRecording(locked = true)
+            recordingTick()
+            assertNull(vm.state.value.recording)
+            assertEquals(
+                false,
+                vm.state.value.staged
+                    ?.encrypted,
+            )
+            vm.deleteStaged()
+        }
+
+    @Test
+    fun `permission denial stays visible and granted Agentwire recording stages on destination pause`() =
+        voiceTest {
+            val vm = fixture(Harness(), recorder = RecordingRecorder(), config = VoiceConfig(encryptionDefault = true))
+            val permission =
+                VoiceRecordingPermissionGate(
+                    permissionGranted = { false },
+                    onStart = vm::startAgentwireRecording,
+                    onDenied = vm::recordingPermissionDenied,
+                )
+            assertTrue(permission.start(locked = true))
+            assertNull(vm.state.value.recording)
+            permission.onPermissionResult(false)
+            assertEquals(VOICE_PERMISSION_DENIED_ERROR, vm.state.value.error)
+            assertNull(vm.state.value.recording)
+            vm.clearError()
+
+            assertTrue(permission.start(locked = true))
+            permission.onPermissionResult(true)
+            assertEquals(
+                true,
+                vm.state.value.recording
+                    ?.locked,
+            )
+            val lifecycle =
+                ChatForegroundLifecycleGate(
+                    onResume = {},
+                    onPause = vm::stopForBackground,
+                )
+            lifecycle.sync(true)
+            lifecycle.onEvent(Lifecycle.Event.ON_PAUSE)
+            val staged = requireNotNull(vm.state.value.staged)
+            assertNull(vm.state.value.recording)
+            assertFalse(staged.encrypted)
+            lifecycle.onEvent(Lifecycle.Event.ON_STOP)
+            lifecycle.dispose()
+            assertEquals(staged, vm.state.value.staged)
+            vm.deleteStaged()
+
+            vm.startRecording(locked = true)
+            vm.stopRecording()
+            assertEquals(
+                true,
+                vm.state.value.staged
+                    ?.encrypted,
+            )
+            vm.deleteStaged()
+        }
+
+    @Test
+    fun `staged preview follows playback state and rejects a deleted recordings controls`() =
+        voiceTest {
+            val playback = FakePlaybackController()
+            val vm = fixture(Harness(), recorder = RecordingRecorder(), playback = playback)
+            vm.startAgentwireRecording(locked = true)
+            vm.stopRecording()
+            val oldPreview = preview(requireNotNull(vm.state.value.staged))
+            vm.toggleStagedPreview(oldPreview)
+            assertTrue(vm.playbackState.value.playing)
+            vm.seekStagedPreview(oldPreview, 500L)
+            assertEquals(500L, vm.playbackState.value.positionMs)
+            vm.deleteStaged()
+            assertNull(vm.playbackState.value.activeId)
+
+            vm.startAgentwireRecording(locked = true)
+            vm.stopRecording()
+            val newPreview = preview(requireNotNull(vm.state.value.staged))
+            vm.toggleStagedPreview(newPreview)
+            vm.toggleStagedPreview(oldPreview)
+            vm.seekStagedPreview(oldPreview, 900L)
+            assertEquals(newPreview.playbackId, vm.playbackState.value.activeId)
+            assertTrue(vm.playbackState.value.playing)
+            assertEquals(0L, vm.playbackState.value.positionMs)
+            vm.toggleStagedPreview(newPreview)
+            assertFalse(vm.playbackState.value.playing)
+            vm.deleteStaged()
+        }
+
     @Test
     fun `cache hits preserve received and self stored URL request identity`() =
         voiceTest {
@@ -485,25 +799,47 @@ class VoiceMessageViewModelTest {
         }
     }
 
-    private suspend fun TestScope.fixture(harness: Harness): VoiceMessageViewModel {
+    private suspend fun TestScope.fixture(
+        harness: Harness,
+        recorder: VoiceRecorder = FakeRecorder,
+        sender: VoiceMessageSender = FakeSender,
+        playback: AudioPlaybackController = FakePlaybackController(),
+        config: VoiceConfig = VoiceConfig(),
+    ): VoiceMessageViewModel {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = VoicePrefs(context)
-        prefs.replace(VoiceConfig())
+        prefs.replace(config)
         val vm =
             VoiceMessageViewModel(
                 savedStateHandle = SavedStateHandle(mapOf("bufferId" to 9L)),
-                recorder = FakeRecorder,
-                sender = FakeSender,
+                recorder = recorder,
+                sender = sender,
                 prefs = prefs,
                 activityTracker =
                     io.github.trevarj.motd.audio
                         .AudioActivityTracker(),
-                playbackController = FakePlaybackController(),
+                playbackController = playback,
                 transcriptionCalls = harness.calls(),
             )
         runCurrent()
+        vm.state.first { it.config == config }
         return vm
     }
+
+    private fun TestScope.recordingTick() {
+        runCurrent()
+        advanceTimeBy(250L)
+        runCurrent()
+    }
+
+    private fun preview(staged: StagedVoiceMessage) =
+        AudioAttachment(
+            url = staged.file.toURI().toString(),
+            title = "Voice message",
+            mimeType = staged.mimeType,
+            durationMs = staged.durationMs,
+            voice = true,
+        )
 
     private fun request(
         url: String,
@@ -601,6 +937,56 @@ class VoiceMessageViewModelTest {
 
     private enum class Phase { PREPARING, WAITING, TRANSCRIBING }
 
+    private class RecordingRecorder : VoiceRecorder {
+        var ageMs = 0L
+        var startFailure: Exception? = null
+        var tooShort = false
+        var completedDurationMs: Long? = null
+        private var active: ActiveVoiceRecording? = null
+
+        override fun start(
+            profile: VoiceRecordingProfile,
+            nowMs: Long,
+        ): ActiveVoiceRecording {
+            startFailure?.let { throw it }
+            return ActiveVoiceRecording(
+                file =
+                    File
+                        .createTempFile(
+                            "voice-recording-",
+                            ".ogg",
+                            ApplicationProvider.getApplicationContext<Context>().cacheDir,
+                        ).apply { writeText("audio") },
+                startedAtMs = nowMs - ageMs,
+                mimeType = "audio/ogg",
+                extension = "ogg",
+            ).also { active = it }
+        }
+
+        override fun currentAmplitude(): Int = 10
+
+        override fun stop(nowMs: Long): CompletedVoiceRecording? {
+            val recording = active ?: return null
+            active = null
+            if (tooShort) {
+                recording.file.delete()
+                return null
+            }
+            return CompletedVoiceRecording(
+                file = recording.file,
+                durationMs = completedDurationMs ?: (nowMs - recording.startedAtMs).coerceAtLeast(1_000L),
+                mimeType = recording.mimeType,
+                extension = recording.extension,
+                sizeBytes = recording.file.length(),
+            )
+        }
+
+        override fun cancel() {
+            active?.file?.delete()
+            active = null
+        }
+    }
+
     private object FakeRecorder : VoiceRecorder {
         override fun start(
             profile: VoiceRecordingProfile,
@@ -619,7 +1005,7 @@ class VoiceMessageViewModelTest {
     }
 
     private class FakePlaybackController : AudioPlaybackController {
-        override val state: StateFlow<AudioPlaybackState> = MutableStateFlow(AudioPlaybackState())
+        override val state = MutableStateFlow(AudioPlaybackState())
         override val waveforms: StateFlow<Map<String, AudioWaveform>> = MutableStateFlow(emptyMap())
         override val cacheStatuses: StateFlow<Map<String, AudioCacheStatus>> = MutableStateFlow(emptyMap())
 
@@ -628,15 +1014,27 @@ class VoiceMessageViewModelTest {
             speed: Float,
         ) = Unit
 
-        override fun toggle(request: AudioPlaybackRequest) = Unit
+        override fun toggle(request: AudioPlaybackRequest) {
+            val attachment = request.attachment
+            state.value =
+                if (state.value.activeId == attachment.playbackId) {
+                    state.value.copy(playing = !state.value.playing)
+                } else {
+                    AudioPlaybackState(activeId = attachment.playbackId, attachment = attachment, playing = true)
+                }
+        }
 
         override fun inspectCache(attachment: AudioAttachment) = Unit
 
         override fun toggleActive() = Unit
 
-        override fun pause() = Unit
+        override fun pause() {
+            state.value = state.value.copy(playing = false)
+        }
 
-        override fun dismiss(itemId: String) = Unit
+        override fun dismiss(itemId: String) {
+            if (state.value.activeId == itemId) state.value = AudioPlaybackState()
+        }
 
         override fun cancelLoading() = Unit
 
@@ -645,7 +1043,9 @@ class VoiceMessageViewModelTest {
         override fun seekTo(
             itemId: String,
             positionMs: Long,
-        ) = Unit
+        ) {
+            if (state.value.activeId == itemId) state.value = state.value.copy(positionMs = positionMs)
+        }
 
         override fun setSpeed(
             itemId: String,

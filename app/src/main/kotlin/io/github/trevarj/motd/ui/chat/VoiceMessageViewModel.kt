@@ -24,6 +24,7 @@ import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.normalizedConfig
 import io.github.trevarj.motd.audio.AudioActivityTracker
+import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioInputException
 import io.github.trevarj.motd.audio.AudioInputFailureKind
 import io.github.trevarj.motd.audio.AudioInputMaterializer
@@ -231,8 +232,11 @@ class VoiceMessageViewModel
                 ),
             )
         val state: StateFlow<VoiceMessageUiState> = _state.asStateFlow()
+        val playbackState = playbackController.state
         private val config = prefs.config.stateIn(viewModelScope, SharingStarted.Eagerly, VoiceConfig())
         private var recordingStartedAtMs: Long = 0L
+        private var recordingEncryptionOverride: Boolean? = null
+        private var recordingLimitMs: Long = MAX_RECORDING_MS
         private var timerJob: Job? = null
         private var sendJob: Job? = null
         private val recordingAmplitudes = mutableListOf<Int>()
@@ -265,8 +269,16 @@ class VoiceMessageViewModel
             }
         }
 
-        fun startRecording(locked: Boolean) {
-            if (_state.value.recording != null) return
+        fun startRecording(locked: Boolean) = startRecording(locked, encryptionOverride = null, limitMs = MAX_RECORDING_MS)
+
+        fun startAgentwireRecording(locked: Boolean) = startRecording(locked, encryptionOverride = false, limitMs = AGENTWIRE_RECORDING_MS)
+
+        private fun startRecording(
+            locked: Boolean,
+            encryptionOverride: Boolean?,
+            limitMs: Long,
+        ) {
+            if (_state.value.recording != null || _state.value.staged != null) return
             playbackController.pause()
             val active =
                 try {
@@ -280,6 +292,8 @@ class VoiceMessageViewModel
                     _state.update { it.copy(error = error.message ?: "Could not start recording.") }
                     return
                 }
+            recordingEncryptionOverride = encryptionOverride
+            recordingLimitMs = limitMs
             recordingStartedAtMs = active.startedAtMs
             recordingAmplitudes.clear()
             activityTracker.setRecording(true)
@@ -305,7 +319,7 @@ class VoiceMessageViewModel
                         delay(RECORDING_TICK_MS)
                         val elapsed = System.currentTimeMillis() - recordingStartedAtMs
                         recorder.currentAmplitude()?.let(recordingAmplitudes::add)
-                        if (elapsed >= MAX_RECORDING_MS) {
+                        if (elapsed >= recordingLimitMs) {
                             stopRecording()
                             break
                         }
@@ -327,6 +341,9 @@ class VoiceMessageViewModel
         }
 
         fun stopRecording() {
+            val encryptionOverride = recordingEncryptionOverride
+            recordingEncryptionOverride = null
+            recordingLimitMs = MAX_RECORDING_MS
             if (_state.value.recording == null) return
             timerJob?.cancel()
             timerJob = null
@@ -336,7 +353,7 @@ class VoiceMessageViewModel
             _state.update { current ->
                 current.copy(
                     recording = null,
-                    staged = completed?.toStaged(current.config),
+                    staged = completed?.toStaged(current.config, encryptionOverride),
                     error = if (completed == null) "Recording was too short." else null,
                 )
             }
@@ -348,6 +365,8 @@ class VoiceMessageViewModel
         }
 
         fun cancelRecording() {
+            recordingEncryptionOverride = null
+            recordingLimitMs = MAX_RECORDING_MS
             timerJob?.cancel()
             timerJob = null
             recorder.cancel()
@@ -362,6 +381,21 @@ class VoiceMessageViewModel
                 staged.file.delete()
             }
             _state.update { it.copy(staged = null, progress = null, error = null) }
+        }
+
+        fun toggleStagedPreview(attachment: AudioAttachment) {
+            val staged = _state.value.staged ?: return
+            if (attachment.playbackId != "voice:${staged.file.toURI()}") return
+            playbackController.toggle(AudioPlaybackRequest(attachment, null))
+        }
+
+        fun seekStagedPreview(
+            attachment: AudioAttachment,
+            positionMs: Long,
+        ) {
+            val staged = _state.value.staged ?: return
+            if (attachment.playbackId != "voice:${staged.file.toURI()}") return
+            playbackController.seekTo(attachment.playbackId, positionMs)
         }
 
         fun toggleEncryption() {
@@ -605,6 +639,28 @@ class VoiceMessageViewModel
                 throw VoiceTranscriptCacheException()
             }
 
+        fun sendAgentwire(destinationAvailable: Boolean) {
+            val staged = _state.value.staged ?: return
+            if (!destinationAvailable) {
+                _state.update {
+                    it.copy(error = "Agentwire is unavailable. This recording is kept; reconnect and bind a session before sending.")
+                }
+                return
+            }
+            // The canonical IRC duration is whole seconds, including a final auto-stop tick.
+            if (staged.encrypted || staged.durationMs / 1_000L > AGENTWIRE_RECORDING_MS / 1_000L) {
+                _state.update {
+                    it.copy(
+                        error =
+                            "Agentwire requires an unencrypted voice note of 15 minutes or less. " +
+                                "This recording is kept; send it from the IRC transcript, or delete it and record a new Agentwire note.",
+                    )
+                }
+                return
+            }
+            send()
+        }
+
         fun send() {
             val staged = _state.value.staged ?: return
             sendJob?.cancel()
@@ -656,14 +712,17 @@ class VoiceMessageViewModel
             playbackController.dismiss("voice:${file.toURI()}")
         }
 
-        private fun CompletedVoiceRecording.toStaged(config: VoiceConfig): StagedVoiceMessage =
+        private fun CompletedVoiceRecording.toStaged(
+            config: VoiceConfig,
+            encryptionOverride: Boolean?,
+        ): StagedVoiceMessage =
             StagedVoiceMessage(
                 file = file,
                 durationMs = durationMs,
                 mimeType = mimeType,
                 extension = extension,
                 sizeBytes = sizeBytes,
-                encrypted = config.encryptionDefault,
+                encrypted = encryptionOverride ?: config.encryptionDefault,
                 destination = config.rememberedDestination,
                 waveform = waveform,
             )
@@ -671,6 +730,7 @@ class VoiceMessageViewModel
         private companion object {
             const val RECORDING_TICK_MS = 250L
             const val MAX_RECORDING_MS = 30L * 60L * 1000L
+            const val AGENTWIRE_RECORDING_MS = 15L * 60L * 1000L
         }
     }
 
