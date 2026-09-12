@@ -74,6 +74,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
@@ -658,6 +659,23 @@ fun MessageList(
         // Append spinner / end-of-history / error affordances. This item sits at the
         // top of the reversed list, i.e. visually above the oldest message where APPEND loads more.
         item(key = "append-state", contentType = "loadstate") {
+            // Paging 3.5.1 can lose a replacement source's boundary request during APPEND.
+            // At the composed tail, re-arm that exhausted generation once both loaders are idle.
+            // Our cached REFRESH does not fetch from the network; it releases the next APPEND.
+            val loads = items.loadState
+            LaunchedEffect(items, loads.source, loads.mediator) {
+                val current = items.loadState
+                val remoteAppend = current.mediator?.append
+                if (
+                    current.source.refresh is LoadState.NotLoading &&
+                    current.mediator?.refresh is LoadState.NotLoading &&
+                    current.source.append.endOfPaginationReached &&
+                    remoteAppend is LoadState.NotLoading &&
+                    !remoteAppend.endOfPaginationReached
+                ) {
+                    items.refresh()
+                }
+            }
             ChatHistoryFooter(
                 // Debounced here, at the one existing item: PagingSource generation churn flicks the
                 // raw state within a few frames and no new list item may be added for it (the jump
