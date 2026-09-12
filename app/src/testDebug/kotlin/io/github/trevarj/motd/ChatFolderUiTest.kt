@@ -96,6 +96,23 @@ class ChatFolderUiTest {
     }
 
     @Test
+    fun incomplete_all_summary_uses_activity_dot_instead_of_question_mark() {
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows = listOf(row(incomplete = true)),
+                    folders = listOf(folder()),
+                    folderDisplayMode = FolderDisplayMode.TABS,
+                    loading = false,
+                ),
+            )
+        setContent(state)
+
+        compose.onNodeWithTag("chatlist_folder_tab_all").assert(hasText("•")).assert(!hasText("?"))
+        compose.onNodeWithTag("chatlist_row_advertised_activity_dot", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
     fun discord_tab_keeps_all_and_correct_folder_selection_in_tabs_and_empty_lists() {
         val portal = row(41, "#discord.guild.general", folderId = null)
         val state =
@@ -506,6 +523,7 @@ class ChatFolderUiTest {
         mentions: Int = 0,
         pinned: Boolean = false,
         archived: Boolean = false,
+        incomplete: Boolean = false,
     ) = ChatListRow(
         bufferId = id,
         networkId = 1,
@@ -521,5 +539,7 @@ class ChatFolderUiTest {
         lastMessageTime = id,
         unreadCount = 0,
         mentionCount = mentions,
+        unreadCountIncomplete = incomplete,
+        mentionCountIncomplete = incomplete,
     )
 }

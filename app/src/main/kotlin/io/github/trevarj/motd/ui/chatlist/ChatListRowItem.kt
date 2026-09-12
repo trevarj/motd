@@ -147,7 +147,7 @@ internal fun chatListBadgeState(row: ChatListRow): ChatListBadgeState =
             unread = row.unreadCount.takeIf { it > 0 },
             mentionsIncomplete = row.mentionCountIncomplete,
             unreadIncomplete = row.unreadCountIncomplete,
-            advertisedActivity = row.advertisedUnread && row.unreadCount == 0,
+            advertisedActivity = (row.advertisedUnread || row.unreadCountIncomplete) && row.unreadCount == 0,
         )
     }
 

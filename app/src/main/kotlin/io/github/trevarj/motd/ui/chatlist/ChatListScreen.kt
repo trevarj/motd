@@ -1126,7 +1126,7 @@ private fun FolderTabLabel(
         val badge = if (summary.mentionCount > 0) summary.mentionCount else summary.unreadCount
         when {
             badge > 0 -> Badge { Text(if (badge > 999) "999+" else badge.toString()) }
-            summary.unreadIncomplete || summary.mentionIncomplete -> Badge { Text("?") }
+            summary.unreadIncomplete || summary.mentionIncomplete -> Text("•", color = activityColor)
             summary.advertisedActivity -> Text("•", color = activityColor)
         }
     }
@@ -1894,7 +1894,7 @@ private fun ChatFolderHeader(
             val badge = if (folder.summary.mentionCount > 0) folder.summary.mentionCount else folder.summary.unreadCount
             when {
                 badge > 0 -> Badge { Text(if (badge > 999) "999+" else badge.toString()) }
-                folder.summary.unreadIncomplete || folder.summary.mentionIncomplete -> Badge { Text("?") }
+                folder.summary.unreadIncomplete || folder.summary.mentionIncomplete -> Text("•", color = tint)
                 folder.summary.advertisedActivity -> Text("•", color = tint)
             }
         }
