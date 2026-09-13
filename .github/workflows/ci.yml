@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Permit full release-candidate validation even after a test-only follow-up.
+  workflow_dispatch:
 
 permissions:
   contents: read
