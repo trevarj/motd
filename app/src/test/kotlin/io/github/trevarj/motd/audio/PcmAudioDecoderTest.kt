@@ -1,10 +1,12 @@
 package io.github.trevarj.motd.audio
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
@@ -21,8 +23,6 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.CoroutineContext
 import kotlin.math.abs
@@ -248,8 +248,9 @@ class PcmAudioDecoderTest {
         runTest {
             val input = temporaryFolder.newFile("delivery-cancel.bin")
             val outputRoot = temporaryFolder.newFolder("delivery-cancel-output")
+            // Queue decoding so withContext must suspend before the completed WAV can return.
             val decoder =
-                decoder(outputRoot, ioDispatcher = Dispatchers.IO) { _, _, consume ->
+                decoder(outputRoot, ioDispatcher = StandardTestDispatcher(testScheduler)) { _, _, consume ->
                     consume(
                         DecodedPcmFormat(16_000, 1, PcmSampleEncoding.SIGNED_16, ByteOrder.LITTLE_ENDIAN),
                         pcm16(1, 2, 3),
@@ -258,7 +259,7 @@ class PcmAudioDecoderTest {
             val dispatcher = HoldReturnDispatcher()
             val job = launch(dispatcher) { decoder.decode(input) }
 
-            assertTrue(withContext(Dispatchers.IO) { dispatcher.returnQueued.await(2, TimeUnit.SECONDS) })
+            dispatcher.returnQueued.await()
             assertEquals(1, outputRoot.listFiles().orEmpty().size)
             job.cancel()
             dispatcher.release()
@@ -323,7 +324,7 @@ class PcmAudioDecoderTest {
         private val entered = AtomicBoolean()
         private val released = AtomicBoolean()
         private val queued = ConcurrentLinkedQueue<Runnable>()
-        val returnQueued = CountDownLatch(1)
+        val returnQueued = CompletableDeferred<Unit>()
 
         override fun dispatch(
             context: CoroutineContext,
@@ -333,7 +334,7 @@ class PcmAudioDecoderTest {
                 block.run()
             } else {
                 queued += block
-                returnQueued.countDown()
+                returnQueued.complete(Unit)
             }
         }
 

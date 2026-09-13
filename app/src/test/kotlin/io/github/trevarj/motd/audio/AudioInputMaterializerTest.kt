@@ -11,9 +11,11 @@ import com.sun.net.httpserver.HttpServer
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import okhttp3.mockwebserver.MockResponse
@@ -468,7 +470,8 @@ class AudioInputMaterializerTest {
     @Test
     fun `cancellation after materialization but before dispatcher delivery closes the produced lease`() =
         runTest {
-            withFixture {
+            // Queue IO so withContext must suspend before even a warm cache hit can finish.
+            withFixture(ioDispatcher = StandardTestDispatcher(testScheduler)) {
                 val url = "https://cache.invalid/delivery-race"
                 val source = File(root, "delivery-source.media").apply { writeText("complete") }
                 mediaCache.putComplete(url, source)
@@ -478,9 +481,7 @@ class AudioInputMaterializerTest {
                         materializer.materialize(request(url))
                     }
 
-                // Media3 cache/SQLite work can take longer on loaded CI runners; cancellation
-                // still happens only after the completed lease reaches the delivery barrier.
-                assertTrue(withContext(Dispatchers.IO) { dispatcher.returnQueued.await(10, TimeUnit.SECONDS) })
+                dispatcher.returnQueued.await()
                 assertEquals(1, leaseFiles().size)
                 job.cancel()
                 dispatcher.release()
@@ -571,9 +572,10 @@ class AudioInputMaterializerTest {
     private suspend fun <T> withFixture(
         resolver: MediaRouteResolver = MediaRouteResolver { null },
         cleartextPermitted: (String) -> Boolean = { true },
+        ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
         block: suspend Fixture.() -> T,
     ): T {
-        val fixture = Fixture(resolver, cleartextPermitted)
+        val fixture = Fixture(resolver, cleartextPermitted, ioDispatcher)
         return try {
             fixture.block()
         } finally {
@@ -661,7 +663,7 @@ class AudioInputMaterializerTest {
         private val entered = AtomicBoolean()
         private val released = AtomicBoolean()
         private val queued = ConcurrentLinkedQueue<Runnable>()
-        val returnQueued = CountDownLatch(1)
+        val returnQueued = CompletableDeferred<Unit>()
 
         override fun dispatch(
             context: CoroutineContext,
@@ -671,7 +673,7 @@ class AudioInputMaterializerTest {
                 block.run()
             } else {
                 queued += block
-                returnQueued.countDown()
+                returnQueued.complete(Unit)
             }
         }
 
@@ -684,6 +686,7 @@ class AudioInputMaterializerTest {
     private class Fixture(
         resolver: MediaRouteResolver,
         cleartextPermitted: (String) -> Boolean,
+        ioDispatcher: CoroutineDispatcher,
     ) : AutoCloseable {
         val root: File = Files.createTempDirectory("audio-materializer-test-").toFile()
         private val base = ApplicationProvider.getApplicationContext<Context>()
@@ -701,7 +704,7 @@ class AudioInputMaterializerTest {
                 crypto = crypto,
                 cacheStore = cacheStore,
                 mediaCache = mediaCache,
-                ioDispatcher = Dispatchers.IO,
+                ioDispatcher = ioDispatcher,
                 cleartextPermitted = cleartextPermitted,
             )
 
