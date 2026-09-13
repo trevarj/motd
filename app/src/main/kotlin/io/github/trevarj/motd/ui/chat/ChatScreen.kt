@@ -4007,9 +4007,9 @@ internal fun VoiceComposerPanel(
     onToggleEncryption: () -> Unit,
     onDestinationSelected: (io.github.trevarj.motd.attachment.PasteBackendConfig?) -> Unit,
     onErrorDismissed: () -> Unit,
+    modifier: Modifier = Modifier,
     encryptionEnabled: Boolean = true,
     sendEnabled: Boolean = true,
-    modifier: Modifier = Modifier,
 ) {
     var destinationSheet by remember { mutableStateOf(false) }
     // Hold the last non-null panel models so the exit animation still has content to draw after

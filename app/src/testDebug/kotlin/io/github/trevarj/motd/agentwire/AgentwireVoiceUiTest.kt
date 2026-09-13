@@ -207,7 +207,7 @@ class AgentwireVoiceUiTest {
         var reviewing by mutableStateOf(false)
         compose.setContent {
             MotdTheme(dynamicColor = false) {
-                AgentwireRecordingGate(
+                agentwireRecordingGate(
                     state = fixture.agent,
                     composerText = fixture.value.text,
                     voiceState = fixture.voice,

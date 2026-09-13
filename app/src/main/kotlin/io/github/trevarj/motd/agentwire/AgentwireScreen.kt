@@ -170,7 +170,7 @@ fun AgentwireGateScreen(
             val lifecycleOwner = LocalLifecycleOwner.current
             val voiceScope = rememberCoroutineScope()
             val canStartVoice by rememberUpdatedState(
-                AgentwireRecordingGate(
+                agentwireRecordingGate(
                     state = state,
                     composerText = composer.text,
                     voiceState = voiceState,
@@ -256,7 +256,7 @@ fun AgentwireGateScreen(
 private fun AgentwireUiState.voiceDestinationAvailable(): Boolean = gate == AgentwireGate.ACTIVE && connected && activeSid != null
 
 @Composable
-internal fun AgentwireRecordingGate(
+internal fun agentwireRecordingGate(
     state: AgentwireUiState,
     composerText: String,
     voiceState: VoiceMessageUiState,
