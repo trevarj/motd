@@ -318,11 +318,16 @@ fun AttachmentSheets(
 
     val filePicker =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
-            it?.let { uri -> select(uri, false) }
+            if (it == null) flow = AttachmentFlow.Sources else select(it, false)
         }
     val directFilePicker =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
-            it?.let(onDirectFile)
+            if (it == null) {
+                flow = AttachmentFlow.Sources
+            } else {
+                onDirectFile(it)
+                closeSourceSheet()
+            }
         }
     val photoPicker =
         rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) {
@@ -382,20 +387,18 @@ fun AttachmentSheets(
                 onDismiss = ::closeSourceSheet,
                 onPhoto = { flow = AttachmentFlow.Photos },
                 onFile = {
-                    closeSourceSheet()
+                    flow = AttachmentFlow.Idle
                     filePicker.launch(arrayOf(if (imageOnly) "image/*" else "*/*"))
                 },
                 directFileTransferAvailable = directFileTransferAvailable,
                 onDirectFile = {
-                    closeSourceSheet()
+                    flow = AttachmentFlow.Idle
                     directFilePicker.launch(arrayOf("*/*"))
                 },
                 onCurrentDraft = {
-                    closeSourceSheet()
                     flow = AttachmentFlow.Confirm(AttachmentSource.Text(currentDraft), true, defaultConfig)
                 },
                 onNewText = {
-                    closeSourceSheet()
                     pasteText = ""
                     flow = AttachmentFlow.EditText
                 },
