@@ -33,14 +33,16 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.dickord.DICKORD_PORTAL_DMS_KEY
 import io.github.trevarj.motd.dickord.DickordChannelDescriptor
 import io.github.trevarj.motd.dickord.DickordPortalContent
-import io.github.trevarj.motd.dickord.DickordPortalConversation
 import io.github.trevarj.motd.dickord.DickordPortalGroup
 import io.github.trevarj.motd.dickord.DickordPortalState
+import io.github.trevarj.motd.dickord.presentDickordPortal
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.PinningTrustManager
 import io.github.trevarj.motd.ui.chatlist.DrawerRow
 import io.github.trevarj.motd.ui.chatlist.ServerDrawerContent
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
@@ -265,12 +267,11 @@ class AvatarRoutingTest {
     }
 
     @Test
-    fun portalDirectDmUsesOnlyItsExplicitIconThroughTheOwningNetwork() {
+    fun portalDirectAndGroupDmIconsDecodeAndRouteThroughTheOwningNetwork() {
         Fixture().use { fixture ->
             val automatic = mutableStateOf(true)
             val sharedImages = mutableStateOf(false)
             val explicitIcon = fixture.url("dm-icon")
-            val iconUrl = mutableStateOf<String?>(explicitIcon)
             val unrelatedAvatar =
                 AvatarRecord(
                     networkId = 8,
@@ -281,34 +282,33 @@ class AvatarRoutingTest {
                     updatedAt = 1,
                 )
             val conversation =
-                DickordPortalConversation(
-                    row =
-                        ChatListRow(
-                            bufferId = 81,
-                            networkId = 8,
-                            networkName = "Bridge",
-                            displayName = "#discord.dm.alice",
-                            type = BufferType.CHANNEL,
-                            pinned = false,
-                            muted = false,
-                            lastMessageText = null,
-                            lastMessageSender = null,
-                            lastMessageTime = null,
-                            unreadCount = 0,
-                            mentionCount = 0,
-                            archived = false,
-                        ),
-                    descriptor =
-                        DickordChannelDescriptor(
-                            v = 1,
-                            guildId = null,
-                            guildName = null,
-                            channelId = "801",
-                            channelType = 1,
-                            parentId = null,
-                            channelName = "Alice Smith",
-                            channelIconUrl = explicitIcon,
-                        ),
+                ChatListRow(
+                    bufferId = 81,
+                    networkId = 8,
+                    networkName = "Bridge",
+                    displayName = "#discord.dm.alice",
+                    type = BufferType.CHANNEL,
+                    pinned = false,
+                    muted = false,
+                    lastMessageText = null,
+                    lastMessageSender = null,
+                    lastMessageTime = null,
+                    unreadCount = 0,
+                    mentionCount = 0,
+                    archived = false,
+                )
+            val descriptor =
+                mutableStateOf(
+                    DickordChannelDescriptor(
+                        v = 1,
+                        guildId = null,
+                        guildName = null,
+                        channelId = "801",
+                        channelType = 1,
+                        parentId = null,
+                        channelName = "Alice Smith",
+                        channelIconUrl = explicitIcon,
+                    ),
                 )
             compose.setContent {
                 MotdTheme(dynamicColor = false, avatarStyle = AvatarStyle.INITIALS) {
@@ -322,20 +322,9 @@ class AvatarRoutingTest {
                                     loading = false,
                                     enabled = true,
                                     groups =
-                                        listOf(
-                                            DickordPortalGroup(
-                                                key = DICKORD_PORTAL_DMS_KEY,
-                                                networkId = null,
-                                                guildId = null,
-                                                displayName = null,
-                                                iconUrl = null,
-                                                conversations =
-                                                    listOf(
-                                                        conversation.copy(
-                                                            descriptor = conversation.descriptor?.copy(channelIconUrl = iconUrl.value),
-                                                        ),
-                                                    ),
-                                            ),
+                                        presentDickordPortal(
+                                            listOf(conversation.copy(dickordChannelJson = Json.encodeToString(descriptor.value))),
+                                            archived = false,
                                         ),
                                     selectedGroupKey = DICKORD_PORTAL_DMS_KEY,
                                     offline = false,
@@ -353,7 +342,7 @@ class AvatarRoutingTest {
 
             compose.runOnIdle {
                 sharedImages.value = true
-                iconUrl.value = null
+                descriptor.value = descriptor.value.copy(channelIconUrl = null)
             }
             compose.waitForIdle()
             assertNull(fixture.server.takeRequest(250, TimeUnit.MILLISECONDS))
@@ -361,7 +350,7 @@ class AvatarRoutingTest {
 
             compose.runOnIdle {
                 automatic.value = false
-                iconUrl.value = explicitIcon
+                descriptor.value = descriptor.value.copy(channelIconUrl = explicitIcon)
             }
             compose.waitUntil(10_000) { compose.runOnIdle { fixture.errors.size == 1 } }
             assertEquals(0, fixture.server.requestCount)
@@ -380,6 +369,32 @@ class AvatarRoutingTest {
             val request = fixture.server.takeRequest(5, TimeUnit.SECONDS)!!
             assertEquals("/dm-icon.png", request.path)
             assertNull(request.getHeader("Authorization"))
+
+            val groupIcon = fixture.url("group-dm-icon")
+            compose.runOnIdle {
+                sharedImages.value = false
+                descriptor.value =
+                    descriptor.value.copy(
+                        channelType = 3,
+                        channelName = "Weekend plans",
+                        channelIconUrl = groupIcon,
+                    )
+            }
+            compose.waitForIdle()
+            compose.onNodeWithText("Weekend plans").assertIsDisplayed()
+            compose.onNodeWithTag("dickord_conversation_81").assertHasClickAction()
+            assertNull(fixture.server.takeRequest(250, TimeUnit.MILLISECONDS))
+            assertEquals(listOf(8L), fixture.selectedNetworks.toList())
+
+            fixture.server.enqueue(fixture.imageResponse())
+            compose.runOnIdle { sharedImages.value = true }
+            compose.waitUntil(10_000) { compose.runOnIdle { fixture.loaded.size == 2 || fixture.errors.isNotEmpty() } }
+            assertEquals(emptyList<String>(), fixture.errors.toList())
+            assertEquals(listOf(explicitIcon, groupIcon), fixture.loaded.toList())
+            assertEquals(listOf(8L, 8L), fixture.selectedNetworks.toList())
+            val groupRequest = fixture.server.takeRequest(5, TimeUnit.SECONDS)!!
+            assertEquals("/group-dm-icon.png", groupRequest.path)
+            assertNull(groupRequest.getHeader("Authorization"))
         }
     }
 

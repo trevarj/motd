@@ -46,7 +46,7 @@ class DickordPortalModelsTest {
 
     @Test
     fun `active and archived presentations are disjoint and DMs always lead`() {
-        val active = row(1, descriptor = dm("11", "Alice", "https://cdn.discordapp.com/avatars/7/icon.png"))
+        val active = row(1, descriptor = dm("11", "Friends", "https://cdn.discordapp.com/channel-icons/11/icon.png?size=256", channelType = 3))
         val archived = row(2, archived = true, descriptor = dm("12", "Bob"))
 
         val activeGroups = presentDickordPortal(listOf(active, archived), archived = false)
@@ -54,16 +54,7 @@ class DickordPortalModelsTest {
 
         assertEquals(DICKORD_PORTAL_DMS_KEY, activeGroups.first().key)
         assertEquals(DICKORD_PORTAL_DMS_KEY, archivedGroups.first().key)
-        assertEquals(listOf(1L), activeGroups.flatMap { it.conversations }.map { it.row.bufferId })
-        assertEquals(
-            "https://cdn.discordapp.com/avatars/7/icon.png",
-            activeGroups
-                .first()
-                .conversations
-                .single()
-                .descriptor
-                ?.channelIconUrl,
-        )
+        assertEquals(listOf(1L), activeGroups.first().conversations.map { it.row.bufferId })
         assertEquals(listOf(2L), archivedGroups.flatMap { it.conversations }.map { it.row.bufferId })
         assertTrue(presentDickordPortal(emptyList(), archived = false).first().conversations.isEmpty())
     }
@@ -180,6 +171,7 @@ class DickordPortalModelsTest {
         channelId: String,
         channelName: String,
         iconUrl: String? = null,
+        channelType: Int = 1,
     ): String =
         Json.encodeToString(
             DickordChannelDescriptor(
@@ -187,7 +179,7 @@ class DickordPortalModelsTest {
                 guildId = null,
                 guildName = null,
                 channelId = channelId,
-                channelType = 1,
+                channelType = channelType,
                 parentId = null,
                 channelName = channelName,
                 channelIconUrl = iconUrl,

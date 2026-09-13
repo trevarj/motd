@@ -89,9 +89,10 @@ class DickordLabsTest {
             ),
         )
         assertEquals(
-            DickordChannelDescriptor(1, null, null, "456", 3, null, "Alice Smith, Bob"),
+            DickordChannelDescriptor(1, null, null, "456", 3, null, "Alice Smith, Bob")
+                .copy(channelIconUrl = "https://cdn.discordapp.com/channel-icons/456/icon.png?size=256"),
             decodeDickordChannelDescriptor(
-                """{"v":1,"guild_id":null,"guild_name":null,"channel_id":"456","channel_type":3,"parent_id":null,"channel_name":"Alice Smith, Bob","guild_icon_url":null}""",
+                """{"v":1,"guild_id":null,"guild_name":null,"channel_id":"456","channel_type":3,"parent_id":null,"channel_name":"Alice Smith, Bob","guild_icon_url":null,"channel_icon_url":"https://cdn.discordapp.com/channel-icons/456/icon.png?size=256"}""",
             ),
         )
         val direct =
@@ -138,17 +139,18 @@ class DickordLabsTest {
                 channelIconUrl = boundedUrl,
             )
         assertEquals(boundedDirect, decodeDickordChannelDescriptor(Json.encodeToString(boundedDirect)))
+        val boundedGroup = boundedDirect.copy(channelType = 3)
+        assertEquals(boundedGroup, decodeDickordChannelDescriptor(Json.encodeToString(boundedGroup)))
 
         listOf(boundedUrl + "x", "", "not a URL", "http://example.com/a.png", "https://user:pass@example.com/a.png")
             .forEach { url ->
                 assertNull(decodeDickordChannelDescriptor(Json.encodeToString(descriptor.copy(guildIconUrl = url))))
                 assertNull(decodeDickordChannelDescriptor(Json.encodeToString(boundedDirect.copy(channelIconUrl = url))))
+                assertNull(decodeDickordChannelDescriptor(Json.encodeToString(boundedGroup.copy(channelIconUrl = url))))
             }
 
         assertNull(decodeDickordChannelDescriptor(Json.encodeToString(descriptor.copy(channelIconUrl = boundedUrl))))
-        listOf(3, 18).forEach { type ->
-            assertNull(decodeDickordChannelDescriptor(Json.encodeToString(boundedDirect.copy(channelType = type))))
-        }
+        assertNull(decodeDickordChannelDescriptor(Json.encodeToString(boundedDirect.copy(channelType = 18))))
         listOf(1, 3, 18).forEach { type ->
             val directMessage = descriptor.copy(guildId = null, guildName = null, channelType = type)
             assertNull(decodeDickordChannelDescriptor(Json.encodeToString(directMessage)))

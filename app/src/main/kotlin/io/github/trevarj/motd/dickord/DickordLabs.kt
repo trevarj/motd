@@ -114,7 +114,7 @@ internal fun decodeDickordChannelDescriptor(raw: String?): DickordChannelDescrip
             descriptor.guildId == null &&
                 descriptor.guildName == null &&
                 descriptor.guildIconUrl == null &&
-                (descriptor.channelType == 1 || descriptor.channelIconUrl == null)
+                (descriptor.channelType == 1 || descriptor.channelType == 3 || descriptor.channelIconUrl == null)
         } else {
             descriptor.guildId?.isDiscordSnowflake() == true &&
                 descriptor.guildName?.isValidDiscordName() == true &&
