@@ -658,7 +658,12 @@ fun MessageList(
 
         // Append spinner / end-of-history / error affordances. This item sits at the
         // top of the reversed list, i.e. visually above the oldest message where APPEND loads more.
-        item(key = "append-state", contentType = "loadstate") {
+        // The empty-state item must not become a scroll anchor for the populated footer:
+        // keeping its key would move index 0 to the oldest end when the first page arrives.
+        item(
+            key = if (items.itemCount == 0) "empty-append-state" else "append-state",
+            contentType = "loadstate",
+        ) {
             // Paging 3.5.1 can lose a replacement source's boundary request during APPEND.
             // At the composed tail, re-arm that exhausted generation once both loaders are idle.
             // Our cached REFRESH does not fetch from the network; it releases the next APPEND.

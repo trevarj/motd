@@ -312,6 +312,31 @@ class MessageTimelineUiTest {
     }
 
     @Test
+    fun firstPagingRowsKeepNewestVisibleAfterAnEmptyTimelineWasMeasured() {
+        val pages = MutableStateFlow(PagingData.empty<MessageEntity>())
+        render(pages)
+        // Let the real LazyColumn measure its empty presentation before Paging publishes rows.
+        // Reusing the empty footer's key at the loaded history tail must not move this viewport.
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_timeline").assertIsDisplayed()
+
+        compose.runOnIdle {
+            pages.value =
+                PagingData.from(
+                    (24L downTo 1L).map { id ->
+                        message(id, id * 1_000, MessageKind.PRIVMSG, "Message $id\nConversation context.")
+                    },
+                )
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+
+        // No scrollTo helper: an assertion must not repair the position being tested.
+        compose.onNodeWithTag(messageTag(24), useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
     fun pagingReplacementKeepsTheVisibleMessageAnchorStable() {
         val systemRun =
             listOf(
