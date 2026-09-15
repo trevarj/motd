@@ -2,8 +2,17 @@ package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.ImportExport
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Lan
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -187,6 +196,7 @@ private fun SettingsRoot(
     SettingsGroup(title = stringResource(R.string.settings_group_connections)) {
         SettingsNavigationRow(
             title = stringResource(R.string.settings_networks),
+            icon = Icons.Outlined.Lan,
             summary = stringResource(R.string.settings_networks_summary),
             value = pluralStringResource(R.plurals.settings_network_count, state.networks.size, state.networks.size),
             modifier = Modifier.testTag("settings_category_networks"),
@@ -196,6 +206,7 @@ private fun SettingsRoot(
     SettingsGroup(title = stringResource(R.string.settings_group_experience)) {
         SettingsNavigationRow(
             title = stringResource(R.string.settings_appearance),
+            icon = Icons.Outlined.Palette,
             summary = stringResource(R.string.settings_appearance_summary),
             value = themePresetLabel(state.appearance.theme),
             modifier = Modifier.testTag("settings_category_appearance"),
@@ -204,6 +215,7 @@ private fun SettingsRoot(
         SettingsDivider()
         SettingsNavigationRow(
             title = stringResource(R.string.settings_chat),
+            icon = Icons.Outlined.ChatBubbleOutline,
             summary = stringResource(R.string.settings_chat_summary),
             modifier = Modifier.testTag("settings_category_chat"),
             onClick = onOpenChat,
@@ -212,6 +224,7 @@ private fun SettingsRoot(
     SettingsGroup(title = stringResource(R.string.settings_group_services)) {
         SettingsNavigationRow(
             title = stringResource(R.string.settings_delivery),
+            icon = Icons.AutoMirrored.Outlined.Send,
             summary = stringResource(R.string.settings_delivery_summary),
             value =
                 stringResource(
@@ -235,6 +248,7 @@ private fun SettingsRoot(
         SettingsDivider()
         SettingsNavigationRow(
             title = stringResource(R.string.settings_uploads),
+            icon = Icons.Outlined.CloudUpload,
             summary = stringResource(R.string.settings_uploads_summary),
             value = attachmentBackendLabel(state.uploads.backend),
             modifier = Modifier.testTag("settings_category_uploads"),
@@ -244,6 +258,7 @@ private fun SettingsRoot(
     SettingsGroup(title = stringResource(R.string.settings_group_data_support)) {
         SettingsNavigationRow(
             title = stringResource(R.string.settings_history),
+            icon = Icons.Outlined.History,
             summary = stringResource(R.string.settings_history_summary),
             value = historyRetentionValue(state.settings),
             modifier = Modifier.testTag("settings_category_history"),
@@ -252,6 +267,7 @@ private fun SettingsRoot(
         SettingsDivider()
         SettingsNavigationRow(
             title = stringResource(R.string.settings_backup_restore),
+            icon = Icons.Outlined.ImportExport,
             summary = stringResource(R.string.settings_backup_restore_summary),
             modifier = Modifier.testTag("settings_category_backup_restore"),
             onClick = onOpenBackupRestore,
@@ -259,6 +275,7 @@ private fun SettingsRoot(
         SettingsDivider()
         SettingsNavigationRow(
             title = stringResource(R.string.settings_labs),
+            icon = Icons.Outlined.Science,
             summary = stringResource(R.string.settings_labs_summary),
             modifier = Modifier.testTag("settings_category_labs"),
             onClick = onOpenLabs,
@@ -266,6 +283,7 @@ private fun SettingsRoot(
         SettingsDivider()
         SettingsNavigationRow(
             title = stringResource(R.string.settings_about),
+            icon = Icons.Outlined.Info,
             summary = stringResource(R.string.settings_about_summary, appVersion(context)),
             modifier = Modifier.testTag("settings_category_about"),
             onClick = onOpenAbout,
