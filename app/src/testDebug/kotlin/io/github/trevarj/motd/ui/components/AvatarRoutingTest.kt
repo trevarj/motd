@@ -1,14 +1,20 @@
 package io.github.trevarj.motd.ui.components
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -54,6 +60,7 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
 import java.security.KeyStore
 import java.security.cert.X509Certificate
 import java.util.Base64
@@ -161,6 +168,35 @@ class AvatarRoutingTest {
             compose.onNodeWithTag("local_avatar").assertIsDisplayed()
             assertEquals(0, fixture.server.requestCount)
             assertEquals(emptyList<Long>(), fixture.selectedNetworks.toList())
+        }
+    }
+
+    @Test
+    fun transparentLocalAvatarReplacesGeneratedFallbackAfterLoading() {
+        Fixture().use { fixture ->
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val file = File.createTempFile("transparent-avatar", ".png", context.filesDir)
+            try {
+                val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+                file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                bitmap.recycle()
+                val local = Uri.fromFile(file).toString()
+                val background = Color.Magenta
+                compose.setContent {
+                    MotdTheme(dynamicColor = false, avatarStyle = AvatarStyle.INITIALS) {
+                        CompositionLocalProvider(LocalAutomaticRemoteMedia provides false) {
+                            Box(Modifier.background(background)) {
+                                Avatar("alice", conversationModel = local, modifier = Modifier.testTag("transparent_avatar"))
+                            }
+                        }
+                    }
+                }
+                compose.waitUntil(10_000) { compose.runOnIdle { fixture.loaded.contains(local) } }
+                val pixels = compose.onNodeWithTag("transparent_avatar").captureToImage().toPixelMap()
+                assertEquals(background, pixels[pixels.width / 2, pixels.height / 2])
+            } finally {
+                file.delete()
+            }
         }
     }
 

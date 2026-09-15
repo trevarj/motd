@@ -9,7 +9,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -135,40 +138,42 @@ fun Avatar(
     if (style == AvatarStyle.NONE) return
     val nick = LocalNickColors.current.avatar(name)
     val shape: Shape = if (isChannel) MotdShapes.channelAvatar else CircleShape
+    val override = conversationAvatarModel(conversationModel, null, size.value.toInt())
+    val record = if (override == null) LocalRemoteAvatars.current.record(networkId, name, account) else null
+    val owner = if (override != null) networkId else record?.networkId
+    val url = override ?: record?.url?.let { expandAvatarUrl(it, size.value.toInt()) }
+    var imageLoaded by remember(url, owner) { mutableStateOf(false) }
     Box(modifier = modifier.size(size), contentAlignment = Alignment.Center) {
-        when (style) {
-            AvatarStyle.MONOGRAM -> {
-                MonogramAvatar(name, nick, size, isChannel, shape, Modifier)
-            }
-
-            AvatarStyle.INITIALS -> {
-                InitialsAvatar(name, nick, size, isChannel, shape, Modifier)
-            }
-
-            AvatarStyle.IRC_SPRITE -> {
-                if (isChannel) {
-                    IrcChannelBadge(name, size, Modifier)
-                } else {
-                    IrcSpriteAvatar(name, size, Modifier)
+        if (!imageLoaded) {
+            when (style) {
+                AvatarStyle.MONOGRAM -> {
+                    MonogramAvatar(name, nick, size, isChannel, shape, Modifier)
                 }
-            }
 
-            AvatarStyle.IRC_SPRITE_V2 -> {
-                if (isChannel) {
-                    IrcChannelBadge(name, size, Modifier)
-                } else {
-                    IrcSpriteV2Avatar(name, size, Modifier)
+                AvatarStyle.INITIALS -> {
+                    InitialsAvatar(name, nick, size, isChannel, shape, Modifier)
                 }
-            }
 
-            AvatarStyle.NONE -> {}
+                AvatarStyle.IRC_SPRITE -> {
+                    if (isChannel) {
+                        IrcChannelBadge(name, size, Modifier)
+                    } else {
+                        IrcSpriteAvatar(name, size, Modifier)
+                    }
+                }
+
+                AvatarStyle.IRC_SPRITE_V2 -> {
+                    if (isChannel) {
+                        IrcChannelBadge(name, size, Modifier)
+                    } else {
+                        IrcSpriteV2Avatar(name, size, Modifier)
+                    }
+                }
+
+                AvatarStyle.NONE -> {}
+            }
         }
-        val override = conversationAvatarModel(conversationModel, null, size.value.toInt())
-        val record = if (override == null) LocalRemoteAvatars.current.record(networkId, name, account) else null
-        val owner = if (override != null) networkId else record?.networkId
-        (override ?: record?.url?.let { expandAvatarUrl(it, size.value.toInt()) })?.let { url ->
-            // The deterministic local avatar stays underneath, so failed/cancelled loads fall
-            // back without erasing valid metadata or flashing an empty avatar.
+        url?.let { url ->
             val context = LocalContext.current
             val automaticRemoteMedia = LocalAutomaticRemoteMedia.current
             val request =
@@ -187,6 +192,9 @@ fun Avatar(
                 model = request,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                onLoading = { imageLoaded = false },
+                onSuccess = { imageLoaded = true },
+                onError = { imageLoaded = false },
                 modifier = Modifier.size(size).clip(shape),
             )
         }
