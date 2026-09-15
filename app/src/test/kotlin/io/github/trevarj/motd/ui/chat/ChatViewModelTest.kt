@@ -75,9 +75,7 @@ import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.transport.IrcTransport
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.service.CertPrompt
-import io.github.trevarj.motd.service.ChannelWatch
 import io.github.trevarj.motd.service.ChannelWatchDuration
-import io.github.trevarj.motd.service.ChannelWatchImpl
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.ForegroundBufferTracker
@@ -85,6 +83,10 @@ import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistoryResyncCoordinator
 import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.HistorySyncStatus
+import io.github.trevarj.motd.service.NotificationMode
+import io.github.trevarj.motd.service.NotificationScope
+import io.github.trevarj.motd.service.NotificationSettings
+import io.github.trevarj.motd.service.NotificationSettingsImpl
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.RosterLoadState
@@ -94,6 +96,7 @@ import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
 import io.github.trevarj.motd.ui.share.SharePickerViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -1521,13 +1524,14 @@ class ChatViewModelTest {
         }
 
     @Test
-    fun `stale redirect route starts and stops a canonical channel watch`() =
+    fun `stale redirect route edits canonical channel policy and watch without changing its sibling`() =
         runTest {
-            val canonical = channel.copy(id = 42)
-            val watch =
-                ChannelWatchImpl(
+            val canonical = channel.copy(id = 42, muted = true)
+            val clock = AppClock { testScheduler.currentTime }
+            val notificationSettings =
+                NotificationSettingsImpl(
                     scope = backgroundScope,
-                    clock = AppClock { testScheduler.currentTime },
+                    clock = clock,
                     onExpired = {},
                 )
             val vm =
@@ -1535,20 +1539,159 @@ class ChatViewModelTest {
                     buffer = canonical,
                     manager = FakeConnectionManager(network.id),
                     routeBufferId = channel.id,
-                    channelWatch = watch,
+                    notificationSettings = notificationSettings,
+                    clock = clock,
                 )
             vm.state.first { it.buffer != null }
+            backgroundScope.launch { vm.channelNotifications.collect() }
+            notificationSettings.setServer(canonical.networkId, NotificationMode.ALL)
+            notificationSettings.startWatch(99, null)
+            val sibling = notificationSettings.resolve(canonical.networkId, 99)
 
-            vm.startChannelWatch(ChannelWatchDuration.FOREVER)
+            vm.setChannelNotificationMode(NotificationMode.OFF).join()
+            vm.startWatch(ChannelWatchDuration.FOREVER).join()
             runCurrent()
 
-            assertTrue(watch.isActive(canonical.id))
-            assertEquals(canonical.id, vm.activeWatch.value?.bufferId)
+            val watched = vm.channelNotifications.value
+            assertEquals(NotificationMode.OFF, notificationSettings.resolve(canonical.networkId, canonical.id)?.mode)
+            assertEquals(NotificationMode.OFF, watched.mode)
+            assertEquals(NotificationMode.OFF, watched.channelOverride)
+            assertEquals(NotificationScope.CHANNEL, watched.source)
+            assertEquals(NotificationMode.ALL, watched.parentMode)
+            assertEquals(canonical.id, watched.watch?.bufferId)
+            assertTrue(watched.muted)
+            assertNull(notificationSettings.resolve(canonical.networkId, channel.id)?.watch)
+            assertEquals(NotificationScope.SERVER, notificationSettings.resolve(canonical.networkId, channel.id)?.source)
 
-            vm.stopChannelWatch()
+            vm.stopWatch().join()
+            runCurrent()
+            assertNull(vm.channelNotifications.value.watch)
+            assertEquals(NotificationMode.OFF, vm.channelNotifications.value.mode)
+            assertEquals(sibling, notificationSettings.resolve(canonical.networkId, 99))
+
+            vm.setChannelNotificationMode(null).join()
+            runCurrent()
+            assertEquals(NotificationMode.ALL, vm.channelNotifications.value.mode)
+            assertEquals(NotificationScope.SERVER, vm.channelNotifications.value.source)
+            assertNull(vm.channelNotifications.value.channelOverride)
+            assertTrue(vm.channelNotifications.value.muted)
+            assertEquals(sibling, notificationSettings.resolve(canonical.networkId, 99))
+            assertTrue(vm.uiEvents.value.isEmpty())
+        }
+
+    @Test
+    fun `failed expiry save does not leave the chat watch indicator active`() =
+        runTest {
+            val clock = AppClock { testScheduler.currentTime }
+            var failSave = false
+            val settings =
+                NotificationSettingsImpl(
+                    scope = backgroundScope,
+                    clock = clock,
+                    onExpired = {},
+                    save = { if (failSave) throw java.io.IOException("disk full") },
+                )
+            val vm =
+                viewModel(
+                    buffer = channel,
+                    manager = FakeConnectionManager(network.id),
+                    notificationSettings = settings,
+                    clock = clock,
+                )
+            vm.state.first { it.buffer != null }
+            backgroundScope.launch { vm.channelNotifications.collect() }
+            vm.startWatch(ChannelWatchDuration.MIN_15)
+            runCurrent()
+            assertEquals(
+                channel.id,
+                vm.channelNotifications.value.watch
+                    ?.bufferId,
+            )
+            assertEquals(15, vm.channelNotifications.value.minutesLeft)
+            val persisted = settings.state.value
+            failSave = true
+
+            advanceTimeBy(checkNotNull(ChannelWatchDuration.MIN_15.millis))
             runCurrent()
 
-            assertNull(vm.activeWatch.value)
+            assertEquals(persisted, settings.state.value)
+            assertNull(vm.channelNotifications.value.watch)
+            assertEquals(NotificationMode.MENTIONS, vm.channelNotifications.value.mode)
+        }
+
+    @Test
+    fun `failed notification writes queue feedback and preserve the known policy and sibling watches`() =
+        runTest {
+            val clock = AppClock { testScheduler.currentTime }
+            var failSave = false
+            val notificationSettings =
+                NotificationSettingsImpl(
+                    scope = backgroundScope,
+                    clock = clock,
+                    onExpired = {},
+                    save = { if (failSave) throw java.io.IOException("disk full") },
+                )
+            notificationSettings.setChannel(channel.id, NotificationMode.OFF)
+            notificationSettings.startWatch(channel.id, null)
+            notificationSettings.startWatch(99, null)
+            val vm =
+                viewModel(
+                    channel,
+                    FakeConnectionManager(network.id),
+                    notificationSettings = notificationSettings,
+                    clock = clock,
+                )
+            vm.state.first { it.buffer != null }
+            backgroundScope.launch { vm.channelNotifications.collect() }
+            runCurrent()
+            val before = vm.channelNotifications.value
+            val persisted = notificationSettings.state.value
+            failSave = true
+
+            vm.setChannelNotificationMode(NotificationMode.ALL).join()
+            vm.startWatch(ChannelWatchDuration.MIN_15).join()
+            vm.stopWatch().join()
+            runCurrent()
+
+            assertEquals(persisted, notificationSettings.state.value)
+            assertEquals(before, vm.channelNotifications.value)
+            assertEquals(List(3) { ChatUiEvent.NotificationSettingsWriteFailed }, vm.uiEvents.value.map { it.value })
+            val first = vm.uiEvents.value.first()
+            vm.acknowledgeUiEvent(first.id)
+            assertEquals(List(2) { ChatUiEvent.NotificationSettingsWriteFailed }, vm.uiEvents.value.map { it.value })
+        }
+
+    @Test
+    fun `notification exceptions report failure but cancellation does not enqueue feedback`() =
+        runTest {
+            var failure: Exception = java.io.IOException("failed write")
+            val notificationSettings =
+                object : NotificationSettings by NotificationSettings.Noop {
+                    override suspend fun setChannel(
+                        bufferId: Long,
+                        mode: NotificationMode?,
+                    ): Boolean = throw failure
+
+                    override suspend fun startWatch(
+                        bufferId: Long,
+                        durationMs: Long?,
+                    ): Boolean = throw failure
+
+                    override suspend fun stopWatch(bufferId: Long): Boolean = throw failure
+                }
+            val vm = viewModel(channel, FakeConnectionManager(network.id), notificationSettings = notificationSettings)
+            vm.state.first { it.buffer != null }
+            vm.setChannelNotificationMode(NotificationMode.OFF).join()
+            assertEquals(listOf(ChatUiEvent.NotificationSettingsWriteFailed), vm.uiEvents.value.map { it.value })
+
+            failure = CancellationException("leaving screen")
+            val start = vm.startWatch(ChannelWatchDuration.FOREVER)
+            start.join()
+            val stop = vm.stopWatch()
+            stop.join()
+            assertTrue(start.isCancelled)
+            assertTrue(stop.isCancelled)
+            assertEquals(listOf(ChatUiEvent.NotificationSettingsWriteFailed), vm.uiEvents.value.map { it.value })
         }
 
     @Test
@@ -3874,7 +4017,8 @@ class ChatViewModelTest {
         replyPrefs: ReplyPrefs = FakeReplyPrefs(),
         agentwirePrefs: AgentwirePrefs = FakeAgentwirePrefs(),
         shares: PendingShareStore = PendingShareStore(),
-        channelWatch: ChannelWatch = ChannelWatch.Noop,
+        notificationSettings: NotificationSettings = NotificationSettings.Noop,
+        clock: AppClock = AppClock(System::currentTimeMillis),
     ): ChatViewModel {
         val routeState = mutableMapOf<String, Any>("bufferId" to routeBufferId)
         jumpToMsgid?.let { routeState["jumpToMsgid"] = it }
@@ -3913,7 +4057,8 @@ class ChatViewModelTest {
             audioMetadataRepository = FakeAudioMetadataRepository(),
             audioPlaybackController = FakeAudioPlaybackController(),
             gapFiller = gapFiller,
-            channelWatch = channelWatch,
+            notificationSettings = notificationSettings,
+            clock = clock,
         )
     }
 

@@ -13,6 +13,7 @@ import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkBufferToolRow
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
+import io.github.trevarj.motd.data.db.NotificationChannelRow
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.history.TimelineSeam
@@ -136,6 +137,9 @@ interface BufferRepository {
 
     /** Joined channel picker rows, scoped to one IRC network. */
     fun observeJoinedChannels(networkId: Long): Flow<List<JoinedChannelRow>> = flowOf(emptyList())
+
+    /** Canonical stored channels, including offline and archived notification scopes. */
+    fun observeNotificationChannels(): Flow<List<NotificationChannelRow>> = flowOf(emptyList())
 
     /** Joined channel produced by EventProcessor after an authoritative self-JOIN. */
     suspend fun joinedBufferId(

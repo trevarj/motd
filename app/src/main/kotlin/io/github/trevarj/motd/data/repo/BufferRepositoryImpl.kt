@@ -76,6 +76,8 @@ class BufferRepositoryImpl
 
         override fun observeJoinedChannels(networkId: Long) = bufferDao.observeJoinedChannels(networkId).distinctUntilChanged()
 
+        override fun observeNotificationChannels() = bufferDao.observeNotificationChannels().distinctUntilChanged()
+
         override suspend fun joinedBufferId(
             networkId: Long,
             normalizedChannel: String,

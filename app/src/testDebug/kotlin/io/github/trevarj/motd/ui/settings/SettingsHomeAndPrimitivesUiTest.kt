@@ -19,6 +19,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.NetworkEntity
@@ -48,6 +49,7 @@ class SettingsHomeAndPrimitivesUiTest {
     fun root_groups_search_and_exact_result_callback() {
         var state by mutableStateOf(SettingsHomeUiState(networks = listOf(network(4, "Libera"))))
         var opened: SettingsSearchDestination? = null
+        var notificationsOpened = false
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 SettingsContent(
@@ -57,6 +59,7 @@ class SettingsHomeAndPrimitivesUiTest {
                     onOpenAppearance = {},
                     onOpenChat = {},
                     onOpenDelivery = {},
+                    onOpenNotifications = { notificationsOpened = true },
                     onOpenNetworks = {},
                     onOpenUploads = {},
                     onOpenBackupRestore = {},
@@ -70,6 +73,12 @@ class SettingsHomeAndPrimitivesUiTest {
         compose.onNodeWithText("Connections").assert(isHeading())
         compose.onNodeWithText("Experience").assert(isHeading())
         compose.onNodeWithText("Services").assert(isHeading())
+        compose
+            .onNodeWithTag("settings_category_notifications")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle { assertTrue(notificationsOpened) }
         compose.onNodeWithTag("settings_search_action").performClick()
         compose.onNodeWithTag("settings_search_prompt").assertIsDisplayed()
         compose.onNodeWithTag("settings_category_networks").assertDoesNotExist()
@@ -97,6 +106,16 @@ class SettingsHomeAndPrimitivesUiTest {
         compose.runOnIdle {
             assertEquals(SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.PRESENCE), opened)
         }
+
+        compose.onNodeWithTag("settings_search_field").performTextReplacement("watch")
+        compose
+            .onNodeWithTag("settings_search_result_page_NOTIFICATIONS_NOTIFICATIONS")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle {
+            assertEquals(SettingsSearchDestination.Page(SettingsSearchPage.NOTIFICATIONS, SettingsTarget.NOTIFICATIONS), opened)
+        }
     }
 
     @Test
@@ -112,6 +131,7 @@ class SettingsHomeAndPrimitivesUiTest {
                     onOpenAppearance = {},
                     onOpenChat = {},
                     onOpenDelivery = {},
+                    onOpenNotifications = {},
                     onOpenNetworks = { networksOpened = true },
                     onOpenUploads = {},
                     onOpenBackupRestore = {},

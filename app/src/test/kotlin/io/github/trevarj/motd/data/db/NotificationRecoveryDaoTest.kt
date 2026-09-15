@@ -32,21 +32,31 @@ class NotificationRecoveryDaoTest {
     private suspend fun liveMention(
         serverTime: Long,
         text: String,
+    ): TimelineEventId =
+        observed(
+            message(bufferId, text, serverTime = serverTime, dedupKey = text, hasMention = true)
+                .copy(notificationEligible = true, notificationEligibilityResolved = true),
+            ObservationOrigin.LIVE,
+        )
+
+    private suspend fun observed(
+        event: TimelineEventEntity,
+        origin: ObservationOrigin,
     ): TimelineEventId {
         val dao = db.canonicalTimelineDao()
-        val id = dao.insertEvent(message(bufferId, text, serverTime = serverTime, dedupKey = text, hasMention = true))
+        val id = dao.insertEvent(event)
         dao.insertObservation(
             EventObservationEntity(
                 networkId = networkId,
                 timelineEventId = id,
-                origin = ObservationOrigin.LIVE,
+                origin = origin,
                 connectionGeneration = null,
                 receiveOrder = id,
                 batchId = null,
                 timeProvenance = TimeProvenance.SERVER_TAG,
-                semanticFingerprint = text.toByteArray(),
+                semanticFingerprint = event.text.toByteArray(),
                 batchExactOrdinal = null,
-                observedAt = serverTime,
+                observedAt = event.serverTime,
             ),
         )
         return id
@@ -88,5 +98,33 @@ class NotificationRecoveryDaoTest {
 
             assertEquals(listOf(middle, newest), dao.pendingNotifications(10, window = Long.MAX_VALUE / 2, maxRows = 2).map { it.id })
             assertEquals(0, dao.claimNotification(oldest, "me"))
+        }
+
+    @Test
+    fun recoveryUsesFrozenEligibilityAndTheLivePushBoundaryWhileHistoryRemainsContext() =
+        runTest {
+            val queryId = db.bufferDao().insert(buffer(networkId, "alice").copy(type = BufferType.QUERY))
+            val eligible =
+                message(bufferId, "eligible", serverTime = 1_000, dedupKey = "eligible")
+                    .copy(notificationEligible = true, notificationEligibilityResolved = true)
+            val liveAll = observed(eligible.copy(text = "live all"), ObservationOrigin.LIVE)
+            val pushAll = observed(eligible.copy(text = "push all"), ObservationOrigin.PUSH)
+            val history = observed(eligible.copy(text = "history", notificationEligibilityResolved = false), ObservationOrigin.HISTORY)
+            val unresolved = observed(eligible.copy(text = "unresolved", notificationEligibilityResolved = false), ObservationOrigin.LIVE)
+            observed(eligible.copy(text = "frozen off", hasMention = true, notificationEligible = false), ObservationOrigin.LIVE)
+            val pushMention = observed(eligible.copy(text = "push mention", hasMention = true), ObservationOrigin.PUSH)
+            val pushDm = observed(eligible.copy(bufferId = queryId, text = "push dm"), ObservationOrigin.PUSH)
+            val pushWatch = observed(eligible.copy(text = "push watched", notificationWatched = true), ObservationOrigin.PUSH)
+            observed(eligible.copy(text = "self", isSelf = true), ObservationOrigin.LIVE)
+            observed(eligible.copy(text = "failed", failed = true), ObservationOrigin.LIVE)
+
+            assertEquals(
+                listOf(liveAll, pushMention, pushDm, pushWatch),
+                db.canonicalTimelineDao().pendingNotifications(20, window = Long.MAX_VALUE / 2, maxRows = Int.MAX_VALUE).map { it.id },
+            )
+            assertEquals(
+                listOf(pushWatch, pushMention, unresolved, history, pushAll, liveAll),
+                db.messageDao().recentNotifiable(bufferId, Long.MIN_VALUE, Long.MIN_VALUE, -1, 20).map { it.id },
+            )
         }
 }

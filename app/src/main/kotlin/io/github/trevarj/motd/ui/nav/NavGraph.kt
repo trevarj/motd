@@ -65,6 +65,7 @@ import io.github.trevarj.motd.ui.settings.NetworkSettingsScreen
 import io.github.trevarj.motd.ui.settings.NetworkToolsScreen
 import io.github.trevarj.motd.ui.settings.NetworksSettingsScreen
 import io.github.trevarj.motd.ui.settings.NickListKind
+import io.github.trevarj.motd.ui.settings.NotificationSettingsScreen
 import io.github.trevarj.motd.ui.settings.SettingsScreen
 import io.github.trevarj.motd.ui.settings.SettingsSearchDestination
 import io.github.trevarj.motd.ui.settings.SettingsSearchPage
@@ -377,6 +378,7 @@ fun MotdNavGraph(
                 onOpenAppearance = { navController.navigate(AppearanceSettingsRoute()) },
                 onOpenChat = { navController.navigate(ChatSettingsRoute()) },
                 onOpenDelivery = { navController.navigate(DeliverySettingsRoute()) },
+                onOpenNotifications = { navController.navigate(NotificationSettingsRoute()) },
                 onOpenHistory = { navController.navigate(HistorySettingsRoute()) },
                 onOpenNetworks = { navController.navigate(NetworksSettingsRoute()) },
                 onOpenUploads = { navController.navigate(UploadsSettingsRoute()) },
@@ -410,6 +412,12 @@ fun MotdNavGraph(
         composable<DeliverySettingsRoute> { entry ->
             DeliverySettingsScreen(
                 target = entry.toRoute<DeliverySettingsRoute>().target,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable<NotificationSettingsRoute> { entry ->
+            NotificationSettingsScreen(
+                target = entry.toRoute<NotificationSettingsRoute>().target,
                 onBack = { navController.popBackStack() },
             )
         }
@@ -773,6 +781,7 @@ private fun NavHostController.openSettingsResult(destination: SettingsSearchDest
                 SettingsSearchPage.APPEARANCE -> navigate(AppearanceSettingsRoute(target))
                 SettingsSearchPage.CHAT -> navigate(ChatSettingsRoute(target))
                 SettingsSearchPage.DELIVERY -> navigate(DeliverySettingsRoute(target))
+                SettingsSearchPage.NOTIFICATIONS -> navigate(NotificationSettingsRoute(target))
                 SettingsSearchPage.HISTORY -> navigate(HistorySettingsRoute(target))
                 SettingsSearchPage.UPLOADS -> navigate(UploadsSettingsRoute(target))
                 SettingsSearchPage.NETWORKS -> navigate(NetworksSettingsRoute(target))

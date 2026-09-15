@@ -15,6 +15,7 @@ import io.github.trevarj.motd.data.db.RoomAliasNamespace
 import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
+import io.github.trevarj.motd.service.NotificationRoomMergeListener
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -22,11 +23,12 @@ import javax.inject.Singleton
 @Singleton
 class BufferStore
     @Inject
-    constructor(
+    internal constructor(
         private val db: MotdDatabase,
         private val notifier: MessageNotifier = MessageNotifier.Noop,
         private val canonicalTimeline: CanonicalTimelineStore = CanonicalTimelineStore(db),
         private val chatFolders: ChatFolderRepository = ChatFolderRepository(db),
+        private val notificationRoomMergeListener: NotificationRoomMergeListener = NotificationRoomMergeListener.Noop,
     ) {
         suspend fun getOrCreate(
             networkId: Long,
@@ -724,6 +726,7 @@ class BufferStore
                         state.delete(key)
                         return@forEach
                     }
+                notificationRoomMergeListener.onRoomsMerged(winnerId, loserId)
                 notifier.onRoomsMerged(winnerId, loserId)
                 state.delete(key)
             }

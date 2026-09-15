@@ -9,7 +9,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 
-enum class SettingsSearchPage { ROOT, APPEARANCE, CHAT, DELIVERY, HISTORY, UPLOADS, NETWORKS, BACKUP, LABS, AI_LABS, ABOUT }
+enum class SettingsSearchPage { ROOT, APPEARANCE, CHAT, DELIVERY, NOTIFICATIONS, HISTORY, UPLOADS, NETWORKS, BACKUP, LABS, AI_LABS, ABOUT }
 
 sealed interface SettingsSearchDestination {
     data class Page(
@@ -135,6 +135,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_appearance, R.string.settings_appearance_summary, "experience display", SettingsSearchPage.APPEARANCE, SettingsTarget.APPEARANCE),
         spec(R.string.settings_chat, R.string.settings_chat_summary, "conversation messages", SettingsSearchPage.CHAT, SettingsTarget.CHAT),
         spec(R.string.settings_delivery, R.string.settings_delivery_summary, "notifications push background", SettingsSearchPage.DELIVERY, SettingsTarget.DELIVERY),
+        spec(R.string.settings_notifications, R.string.settings_notifications_summary, "notifications alerts mentions mute watch all messages", SettingsSearchPage.NOTIFICATIONS, SettingsTarget.NOTIFICATIONS),
         spec(R.string.settings_history, R.string.settings_history_summary, "messages storage database prune size", SettingsSearchPage.HISTORY, SettingsTarget.HISTORY),
         spec(R.string.settings_uploads, R.string.settings_uploads_summary, "attachments paste files", SettingsSearchPage.UPLOADS, SettingsTarget.UPLOADS),
         spec(R.string.settings_backup_restore, R.string.settings_backup_restore_summary, "data export import", SettingsSearchPage.BACKUP, SettingsTarget.BACKUP),

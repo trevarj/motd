@@ -51,6 +51,7 @@ enum class SettingsTarget {
     APPEARANCE,
     CHAT,
     DELIVERY,
+    NOTIFICATIONS,
     HISTORY,
     UPLOADS,
     BACKUP,
@@ -139,6 +140,10 @@ enum class NetworkSettingsTarget { CONNECTION, AUTHENTICATION, OBFUSCATION, AVAT
 @Serializable data object DirectConnectionsRoute
 
 @Serializable data class DeliverySettingsRoute(
+    val target: SettingsTarget? = null,
+)
+
+@Serializable data class NotificationSettingsRoute(
     val target: SettingsTarget? = null,
 )
 

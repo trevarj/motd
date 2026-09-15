@@ -1466,6 +1466,8 @@ sealed interface ChatUiEvent {
     data object ConversationLayoutWriteFailed : ChatUiEvent
 
     data object PresenceModeWriteFailed : ChatUiEvent
+
+    data object NotificationSettingsWriteFailed : ChatUiEvent
 }
 
 /** Database-backed conversation layout and the global or buffer-specific default it may inherit. */

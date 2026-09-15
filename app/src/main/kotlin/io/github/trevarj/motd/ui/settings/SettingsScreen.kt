@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.settings
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,6 +35,7 @@ fun SettingsScreen(
     onOpenAppearance: () -> Unit = {},
     onOpenChat: () -> Unit = {},
     onOpenDelivery: () -> Unit = {},
+    onOpenNotifications: () -> Unit = {},
     onOpenHistory: () -> Unit = {},
     onOpenNetworks: () -> Unit = {},
     onOpenUploads: () -> Unit = {},
@@ -51,6 +53,7 @@ fun SettingsScreen(
         onOpenAppearance = onOpenAppearance,
         onOpenChat = onOpenChat,
         onOpenDelivery = onOpenDelivery,
+        onOpenNotifications = onOpenNotifications,
         onOpenHistory = onOpenHistory,
         onOpenNetworks = onOpenNetworks,
         onOpenUploads = onOpenUploads,
@@ -69,6 +72,7 @@ fun SettingsContent(
     onOpenAppearance: () -> Unit,
     onOpenChat: () -> Unit,
     onOpenDelivery: () -> Unit,
+    onOpenNotifications: () -> Unit,
     onOpenNetworks: () -> Unit,
     onOpenUploads: () -> Unit,
     onOpenBackupRestore: () -> Unit,
@@ -153,6 +157,7 @@ fun SettingsContent(
                 onOpenAppearance = onOpenAppearance,
                 onOpenChat = onOpenChat,
                 onOpenDelivery = onOpenDelivery,
+                onOpenNotifications = onOpenNotifications,
                 onOpenHistory = onOpenHistory,
                 onOpenNetworks = onOpenNetworks,
                 onOpenUploads = onOpenUploads,
@@ -170,6 +175,7 @@ private fun SettingsRoot(
     onOpenAppearance: () -> Unit,
     onOpenChat: () -> Unit,
     onOpenDelivery: () -> Unit,
+    onOpenNotifications: () -> Unit,
     onOpenNetworks: () -> Unit,
     onOpenUploads: () -> Unit,
     onOpenBackupRestore: () -> Unit,
@@ -217,6 +223,14 @@ private fun SettingsRoot(
                 ),
             modifier = Modifier.testTag("settings_category_delivery"),
             onClick = onOpenDelivery,
+        )
+        SettingsDivider()
+        SettingsNavigationRow(
+            title = stringResource(R.string.settings_notifications),
+            icon = Icons.Outlined.Notifications,
+            summary = stringResource(R.string.settings_notifications_summary),
+            modifier = Modifier.testTag("settings_category_notifications"),
+            onClick = onOpenNotifications,
         )
         SettingsDivider()
         SettingsNavigationRow(

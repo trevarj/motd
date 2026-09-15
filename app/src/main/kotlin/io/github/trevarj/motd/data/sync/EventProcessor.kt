@@ -53,8 +53,9 @@ import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.replyReference
 import io.github.trevarj.motd.irc.proto.unreactionValue
-import io.github.trevarj.motd.service.ChannelWatch
 import io.github.trevarj.motd.service.IrcEventSink
+import io.github.trevarj.motd.service.NotificationMode
+import io.github.trevarj.motd.service.NotificationSettings
 import kotlinx.coroutines.CancellationException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -128,7 +129,7 @@ class EventProcessor
         private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
         private val canonicalTimeline: CanonicalTimelineStore = CanonicalTimelineStore(db),
         private val networkIgnoreCache: NetworkIgnoreCache = NetworkIgnoreCache(db.networkIgnoreDao()),
-        private val channelWatch: ChannelWatch = ChannelWatch.Noop,
+        private val notificationSettings: NotificationSettings = NotificationSettings.Noop,
     ) : IrcEventSink {
         private val networkDao get() = db.networkDao()
         private val networkIdentityDao get() = db.networkIdentityDao()
@@ -708,11 +709,17 @@ class EventProcessor
             val hasMention =
                 !sourceIsSelf && type != BufferType.SERVER &&
                     (replyMentionsSelf || st.containsSelfMention(storedText))
-            val watchedChat =
-                !sourceIsSelf && type == BufferType.CHANNEL &&
-                    (e.kind == IrcEvent.ChatKind.PRIVMSG || e.kind == IrcEvent.ChatKind.ACTION) &&
-                    (origin == EventOrigin.LIVE || (origin == EventOrigin.PUSH && hasMention)) &&
-                    channelWatch.isActive(bufferId)
+            val resolvedNotifications = notificationSettings.resolve(networkId, bufferId)
+            val decision =
+                incomingNotificationDecision(
+                    type = type,
+                    kind = e.kind,
+                    origin = origin,
+                    hasMention = hasMention,
+                    consoleNotice = consoleNotice,
+                    mode = resolvedNotifications?.mode ?: NotificationMode.OFF,
+                    watchActive = !sourceIsSelf && resolvedNotifications?.watch != null,
+                )
             val identitySender = st.normalize(e.source.nick)
 
             traceMessageDecision("message_classified", networkId, bufferId, e, origin) {
@@ -736,7 +743,9 @@ class EventProcessor
                     isSelf = sourceIsSelf,
                     isBot = e.isBot,
                     hasMention = hasMention,
-                    notificationWatched = watchedChat,
+                    notificationEligible = !sourceIsSelf && decision.eligible,
+                    notificationEligibilityResolved = decision.eligibilityResolved,
+                    notificationWatched = decision.bypassesMute,
                     replyToMsgid = e.replyToMsgid,
                     dedupKey = SemanticIdentity.keyFor(e.ctx, identitySender, ircFormattedText ?: storedText),
                     serverTimeAuthoritative = e.ctx.serverTimeSource == ServerTimeSource.TAG,
@@ -827,9 +836,18 @@ class EventProcessor
                         }
                     }
                 }
-                if (origin.notifies &&
-                    !sourceIsSelf &&
-                    shouldNotifyIncoming(type, hasMention, consoleNotice, watchedChat)
+                if (!canonical.isSelf &&
+                    shouldPresentIncoming(
+                        IncomingNotificationDecision(
+                            canonical.notificationEligible,
+                            canonical.notificationEligibilityResolved,
+                            canonical.notificationWatched,
+                        ),
+                        type,
+                        origin,
+                        canonical.hasMention,
+                        consoleNotice,
+                    )
                 ) {
                     presentNotification(canonical.id) {
                         maybeNotify(
@@ -846,10 +864,9 @@ class EventProcessor
                                         account = canonical.senderAccount,
                                     ),
                                 text = canonical.text,
-                                isSelf = sourceIsSelf,
+                                isSelf = canonical.isSelf,
                                 replyToMsgid = canonical.replyToMsgid,
                             ),
-                            consoleNotice = consoleNotice,
                             watchedChat = canonical.notificationWatched,
                         )
                     }
@@ -3832,6 +3849,8 @@ class EventProcessor
                                         ircFormattedText = event.ircFormattedText,
                                         isSelf = true,
                                         hasMention = false,
+                                        notificationEligible = false,
+                                        notificationEligibilityResolved = false,
                                         replyToMsgid = replyToMsgid,
                                         replyToEventId = replyToEventId,
                                         channelContext = channelContext,
@@ -4455,13 +4474,9 @@ class EventProcessor
             hasMention: Boolean,
             eventId: TimelineEventId,
             e: IrcEvent.ChatMessage,
-            consoleNotice: Boolean = false,
             watchedChat: Boolean = false,
         ) {
             if (e.isSelf) return
-            // Never raise a notification for a SERVER buffer: a motd line containing the user's nick
-            // must not fire a mention. The bouncer console's own NOTICEs are the one exemption.
-            if (!shouldNotifyIncoming(type, hasMention, consoleNotice, watchedChat)) return
             notifier.onCanonicalIncoming(networkId, bufferId, type, hasMention, eventId, e, watchedChat)
         }
 
@@ -4661,13 +4676,41 @@ interface MessageNotifier {
     }
 }
 
-internal fun shouldNotifyIncoming(
+internal data class IncomingNotificationDecision(
+    val eligible: Boolean,
+    val eligibilityResolved: Boolean,
+    val bypassesMute: Boolean,
+)
+
+internal fun incomingNotificationDecision(
     type: BufferType,
+    kind: IrcEvent.ChatKind,
+    origin: EventOrigin,
     hasMention: Boolean,
     consoleNotice: Boolean,
-    watchedChat: Boolean,
-): Boolean {
-    if (consoleNotice) return true
-    if (type == BufferType.SERVER) return false
-    return type == BufferType.QUERY || hasMention || watchedChat
+    mode: NotificationMode,
+    watchActive: Boolean,
+): IncomingNotificationDecision {
+    val channelChat = kind == IrcEvent.ChatKind.PRIVMSG || kind == IrcEvent.ChatKind.ACTION
+    val watched =
+        watchActive && type == BufferType.CHANNEL &&
+            ((origin == EventOrigin.LIVE && channelChat) || (origin == EventOrigin.PUSH && hasMention))
+    val eligible =
+        consoleNotice || watched ||
+            (
+                mode != NotificationMode.OFF && type != BufferType.SERVER &&
+                    (type == BufferType.QUERY || hasMention || (mode == NotificationMode.ALL && channelChat))
+            )
+    return IncomingNotificationDecision(eligible, eligibilityResolved = origin.notifies, bypassesMute = watched)
 }
+
+internal fun shouldPresentIncoming(
+    decision: IncomingNotificationDecision,
+    type: BufferType,
+    origin: EventOrigin,
+    hasMention: Boolean,
+    consoleNotice: Boolean,
+): Boolean =
+    decision.eligibilityResolved && decision.eligible && origin.notifies &&
+        (type != BufferType.SERVER || consoleNotice) &&
+        (origin == EventOrigin.LIVE || type == BufferType.QUERY || hasMention || consoleNotice)

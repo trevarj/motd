@@ -37,7 +37,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 40,
+    version = 41,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1039,6 +1039,28 @@ val MIGRATION_39_40 =
         }
     }
 
+/** v40 -> v41 freezes notification policy at the first notify-capable observation. */
+val MIGRATION_40_41 =
+    object : Migration(40, 41) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN notificationEligible INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE messages ADD COLUMN notificationEligibilityResolved INTEGER NOT NULL DEFAULT 0")
+            db.execSQL(
+                """UPDATE messages SET notificationEligible = 1
+                   WHERE isSelf = 0 AND failed = 0 AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+                     AND (bufferId IN (SELECT id FROM buffers WHERE type = 'QUERY')
+                          OR hasMention = 1 OR notificationWatched = 1)""",
+            )
+            db.execSQL(
+                """UPDATE messages SET notificationEligibilityResolved = 1
+                   WHERE EXISTS (
+                       SELECT 1 FROM event_observations o
+                       WHERE o.timelineEventId = messages.id AND o.origin IN ('LIVE', 'PUSH')
+                   )""",
+            )
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1091,6 +1113,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_37_38,
         MIGRATION_38_39,
         MIGRATION_39_40,
+        MIGRATION_40_41,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"

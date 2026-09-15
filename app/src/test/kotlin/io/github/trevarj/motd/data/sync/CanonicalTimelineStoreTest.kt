@@ -514,13 +514,169 @@ class CanonicalTimelineStoreTest {
         }
 
     @Test
+    fun ordinaryEnrichmentPreservesTheFirstResolvedFalseEvenWhenTheDuplicateWasWatched() =
+        runTest {
+            val setup = openSetup("canonical-frozen-notification.db")
+            val first =
+                tagged(setup.networkId, setup.roomId, "frozen", 80_000, "me: policy off")
+                    .let {
+                        it.copy(
+                            origin = ObservationOrigin.LIVE,
+                            event = it.event.copy(hasMention = true, notificationEligibilityResolved = true),
+                        )
+                    }
+            val original = setup.store.ingest(first).event
+            setup.store.ingest(
+                first.copy(
+                    origin = ObservationOrigin.PUSH,
+                    event = first.event.copy(notificationEligible = true, notificationWatched = true),
+                ),
+            )
+            setup.store.ingest(
+                first.copy(
+                    origin = ObservationOrigin.HISTORY,
+                    event = first.event.copy(notificationEligible = true, notificationEligibilityResolved = false),
+                ),
+            )
+
+            val stored = rows(setup.db, setup.roomId).single()
+            assertEquals(original.id, stored.id)
+            assertEquals(false, stored.notificationEligible)
+            assertEquals(true, stored.notificationEligibilityResolved)
+            assertEquals(false, stored.notificationWatched)
+            assertEquals(
+                emptyList<Long>(),
+                setup.db
+                    .canonicalTimelineDao()
+                    .pendingNotifications(10, window = Long.MAX_VALUE / 2, maxRows = Int.MAX_VALUE)
+                    .map { it.id },
+            )
+            setup.db.close()
+        }
+
+    @Test
+    fun rowCoalescenceUnionsIndependentResolvedDecisionsInEitherIdOrder() =
+        runTest {
+            listOf(false, true).forEach { winnerEligible ->
+                val setup = openSetup("canonical-notification-union-$winnerEligible.db")
+                val otherRoom = setup.db.bufferDao().insert(room(setup.networkId, "#other"))
+                val observation =
+                    ObservationSpec(ObservationOrigin.LIVE, null, 80_000, TimeProvenance.SERVER_TAG)
+                        .observation(setup.networkId, setup.roomId)
+                val winner =
+                    setup.store
+                        .ingest(
+                            observation.copy(
+                                event =
+                                    observation.event.copy(
+                                        notificationEligible = winnerEligible,
+                                        notificationEligibilityResolved = true,
+                                        notificationWatched = winnerEligible,
+                                    ),
+                            ),
+                        ).event
+                val loser =
+                    setup.store
+                        .ingest(
+                            observation.copy(
+                                event =
+                                    observation.event.copy(
+                                        bufferId = otherRoom,
+                                        notificationEligible = !winnerEligible,
+                                        notificationEligibilityResolved = true,
+                                        notificationWatched = !winnerEligible,
+                                    ),
+                            ),
+                        ).event
+                assertNotEquals(winner.id, loser.id)
+
+                setup.store.moveEventsToRoom(setup.networkId, otherRoom, setup.roomId)
+
+                val stored = rows(setup.db, setup.roomId).single()
+                assertEquals(winner.id, stored.id)
+                assertEquals(true, stored.notificationEligible)
+                assertEquals(true, stored.notificationEligibilityResolved)
+                assertEquals(true, stored.notificationWatched)
+                assertEquals(winner.id, setup.db.canonicalTimelineDao().canonicalEventId(loser.id))
+                assertEquals(
+                    listOf(winner.id),
+                    setup.db
+                        .canonicalTimelineDao()
+                        .pendingNotifications(10, window = Long.MAX_VALUE / 2, maxRows = Int.MAX_VALUE)
+                        .map { it.id },
+                )
+                setup.db.close()
+            }
+        }
+
+    @Test
+    fun rowCoalescenceKeepsWinnerContextUnlessTheOtherRowResolvedItsDecision() =
+        runTest {
+            listOf(false, true).forEach { loserResolved ->
+                val setup = openSetup("canonical-notification-context-merge-$loserResolved.db")
+                val otherRoom = setup.db.bufferDao().insert(room(setup.networkId, "#other"))
+                val observation =
+                    ObservationSpec(ObservationOrigin.HISTORY, null, 80_000, TimeProvenance.SERVER_TAG)
+                        .observation(setup.networkId, setup.roomId)
+                val winner =
+                    setup.store
+                        .ingest(
+                            observation.copy(event = observation.event.copy(notificationEligible = true)),
+                        ).event
+                setup.store.ingest(
+                    observation.copy(
+                        origin = if (loserResolved) ObservationOrigin.LIVE else ObservationOrigin.HISTORY,
+                        event = observation.event.copy(bufferId = otherRoom, notificationEligibilityResolved = loserResolved),
+                    ),
+                )
+
+                setup.store.moveEventsToRoom(setup.networkId, otherRoom, setup.roomId)
+
+                val stored = rows(setup.db, setup.roomId).single()
+                assertEquals(winner.id, stored.id)
+                assertEquals(!loserResolved, stored.notificationEligible)
+                assertEquals(loserResolved, stored.notificationEligibilityResolved)
+                assertEquals(false, stored.notificationWatched)
+                setup.db.close()
+            }
+        }
+
+    @Test
+    fun unresolvedHistoryKeepsWinnerContextUntilTheFirstResolvedObservation() =
+        runTest {
+            val setup = openSetup("canonical-notification-context.db")
+            val history = tagged(setup.networkId, setup.roomId, "context", 80_000, "context")
+            val original = setup.store.ingest(history).event
+            setup.store.ingest(history.copy(event = history.event.copy(notificationEligible = true)))
+            assertEquals(false, rows(setup.db, setup.roomId).single().notificationEligible)
+
+            setup.store.ingest(
+                history.copy(
+                    origin = ObservationOrigin.PUSH,
+                    event = history.event.copy(notificationEligible = true, notificationEligibilityResolved = true),
+                ),
+            )
+            setup.store.ingest(history)
+            val stored = rows(setup.db, setup.roomId).single()
+            assertEquals(original.id, stored.id)
+            assertEquals(true, stored.notificationEligible)
+            assertEquals(true, stored.notificationEligibilityResolved)
+            setup.db.close()
+        }
+
+    @Test
     fun notificationClaimReleaseFollowsEventCoalescenceRedirect() =
         runTest {
             val setup = openSetup("canonical-notification-claim-redirect.db")
             val older =
                 setup.store.ingest(
                     tagged(setup.networkId, setup.roomId, "claim-msgid", 80_000, "server variant")
-                        .let { it.copy(origin = ObservationOrigin.PUSH, event = it.event.copy(hasMention = true)) },
+                        .let {
+                            it.copy(
+                                origin = ObservationOrigin.PUSH,
+                                event = it.event.copy(hasMention = true, notificationEligible = true, notificationEligibilityResolved = true),
+                            )
+                        },
                 )
             val claimed =
                 setup.store.ingest(
@@ -570,7 +726,12 @@ class CanonicalTimelineStoreTest {
             val event =
                 setup.store.ingest(
                     tagged(setup.networkId, setup.roomId, "active-claim", 81_000, "active")
-                        .let { it.copy(origin = ObservationOrigin.PUSH, event = it.event.copy(hasMention = true)) },
+                        .let {
+                            it.copy(
+                                origin = ObservationOrigin.PUSH,
+                                event = it.event.copy(hasMention = true, notificationEligible = true, notificationEligibilityResolved = true),
+                            )
+                        },
                 )
             assertEquals(true, setup.store.claimNotification(event.event.id))
 

@@ -171,6 +171,31 @@ class MessageNotificationIdCollisionTest {
         }
 
     @Test
+    fun watchEndedNotificationsKeepIndependentTapTargetsThroughStartupCleanup() =
+        runTest {
+            val channels =
+                listOf("#first", "#second").map { name ->
+                    db.bufferDao().insert(
+                        BufferEntity(networkId = networkId, name = name, displayName = name, type = BufferType.CHANNEL),
+                    )
+                }
+            val messageId = MotdNotifications.messageNotificationId(channels.first())
+            post(messageId, MotdNotifications.CHANNEL_MESSAGES)
+            channels.forEach { notifications.watchEnded(it) }
+            notifications.retireLegacyMessageNotifications()
+
+            assertEquals(
+                channels.map { MotdNotifications.watchEndedNotificationId(it) }.toSet() + messageId,
+                shadowManager.activeNotifications.map { it.id }.toSet(),
+            )
+            for (id in channels) {
+                val notification =
+                    shadowManager.activeNotifications.single { it.id == MotdNotifications.watchEndedNotificationId(id) }.notification
+                assertEquals(id, shadowOf(notification.contentIntent).savedIntent.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1))
+            }
+        }
+
+    @Test
     fun legacySweepRetiresRawIdMessageNotificationsAndSparesEverythingElse() {
         postStatusNotification()
         post(5, MotdNotifications.CHANNEL_MESSAGES) // pre-upgrade raw id

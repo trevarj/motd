@@ -145,6 +145,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
@@ -201,12 +202,14 @@ import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.ChannelWatchDuration
 import io.github.trevarj.motd.service.HistorySyncStatus
+import io.github.trevarj.motd.service.NotificationMode
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AvatarEditorSheet
-import io.github.trevarj.motd.ui.components.ChannelWatchDialog
+import io.github.trevarj.motd.ui.components.ChannelNotificationPresentation
+import io.github.trevarj.motd.ui.components.ChannelNotificationSheet
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
@@ -214,6 +217,7 @@ import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.avatarsHidden
+import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.ConversationTypography
@@ -375,7 +379,7 @@ fun ChatScreen(
     val memberNicks by viewModel.memberNicks.collectAsStateWithLifecycle()
     val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
     val joinedChannels by viewModel.joinedChannels.collectAsStateWithLifecycle()
-    val activeWatch by viewModel.activeWatch.collectAsStateWithLifecycle()
+    val channelNotifications by viewModel.channelNotifications.collectAsStateWithLifecycle()
     val voiceState by voiceViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val voicePermissionGate =
@@ -557,9 +561,10 @@ fun ChatScreen(
             viewModel.ensureMembersObserved()
             inviteChannelOpen = true
         },
-        watchingThisBuffer = activeWatch?.bufferId == state.buffer?.id,
-        onStartChannelWatch = viewModel::startChannelWatch,
-        onStopChannelWatch = viewModel::stopChannelWatch,
+        channelNotifications = channelNotifications,
+        onChannelNotificationMode = viewModel::setChannelNotificationMode,
+        onStartWatch = viewModel::startWatch,
+        onStopWatch = viewModel::stopWatch,
         nickNormalizer = nickNormalizer,
         onSubmit = { raw -> viewModel.submit(raw, onOpenBuffer = onOpenBuffer, onOpenChannelList = onOpenChannelList) },
         onTyping = viewModel::sendTyping,
@@ -1012,9 +1017,10 @@ fun ChatContent(
     contextPreparing: Boolean = false,
     onPrepareCatchUpContext: () -> Unit = {},
     onPrepareThreadContext: (Long) -> Unit = {},
-    watchingThisBuffer: Boolean = false,
-    onStartChannelWatch: (ChannelWatchDuration) -> Unit = {},
-    onStopChannelWatch: () -> Unit = {},
+    channelNotifications: ChannelNotificationPresentation = ChannelNotificationPresentation(),
+    onChannelNotificationMode: (NotificationMode?) -> Unit = {},
+    onStartWatch: (ChannelWatchDuration) -> Unit = {},
+    onStopWatch: () -> Unit = {},
     onOpenConversationList: (() -> Unit)? = null,
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
@@ -1233,7 +1239,7 @@ fun ChatContent(
     var longDraftPrompt by rememberSaveable { mutableStateOf(false) }
     var overflowOpen by rememberSaveable { mutableStateOf(false) }
     var conversationLayoutSheetOpen by rememberSaveable { mutableStateOf(false) }
-    var watchDialogOpen by rememberSaveable { mutableStateOf(false) }
+    var notificationSheetOpen by rememberSaveable { mutableStateOf(false) }
     var presenceModeSheetOpen by rememberSaveable { mutableStateOf(false) }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
     var highlightEventId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -1422,6 +1428,10 @@ fun ChatContent(
 
                 ChatUiEvent.PresenceModeWriteFailed -> {
                     stringResource(R.string.chat_presence_write_failed)
+                }
+
+                ChatUiEvent.NotificationSettingsWriteFailed -> {
+                    stringResource(R.string.notification_settings_save_failed)
                 }
 
                 is ChatUiEvent.ReplyJumpUnavailable -> {
@@ -2451,12 +2461,18 @@ fun ChatContent(
                                 )
                             }
                             if (buffer?.type == BufferType.CHANNEL) {
+                                val notificationOverride = channelNotifications.channelOverride != null || channelNotifications.watch != null
                                 DropdownMenuItem(
-                                    modifier = Modifier.testTag("chat_watch"),
-                                    text = { Text(stringResource(R.string.channelinfo_notifications)) },
+                                    modifier = Modifier.testTag("chat_watch").semantics { selected = notificationOverride },
+                                    text = {
+                                        Column {
+                                            Text(stringResource(R.string.channelinfo_notifications))
+                                            Text(channelNotifications.summary(), style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    },
                                     leadingIcon = {
                                         Icon(
-                                            if (watchingThisBuffer) {
+                                            if (notificationOverride) {
                                                 Icons.Outlined.NotificationsActive
                                             } else {
                                                 Icons.Outlined.Notifications
@@ -2466,7 +2482,7 @@ fun ChatContent(
                                     },
                                     onClick = {
                                         overflowOpen = false
-                                        watchDialogOpen = true
+                                        notificationSheetOpen = true
                                     },
                                 )
                             }
@@ -3272,12 +3288,13 @@ fun ChatContent(
             onDismiss = { conversationLayoutSheetOpen = false },
         )
     }
-    if (watchDialogOpen) {
-        ChannelWatchDialog(
-            watchActive = watchingThisBuffer,
-            onStart = onStartChannelWatch,
-            onStop = onStopChannelWatch,
-            onDismiss = { watchDialogOpen = false },
+    if (notificationSheetOpen && buffer?.type == BufferType.CHANNEL) {
+        ChannelNotificationSheet(
+            presentation = channelNotifications,
+            onMode = onChannelNotificationMode,
+            onStart = onStartWatch,
+            onStop = onStopWatch,
+            onDismiss = { notificationSheetOpen = false },
             tagPrefix = "chat",
         )
     }

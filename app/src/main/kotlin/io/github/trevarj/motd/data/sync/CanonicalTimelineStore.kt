@@ -270,6 +270,9 @@ class CanonicalTimelineStore
                         ircFormattedText = firstPlan.ircFormattedText,
                         pendingLabel = firstPlan.label,
                         dedupKey = SemanticIdentity.pendingKey(firstPlan.label),
+                        notificationEligible = false,
+                        notificationEligibilityResolved = false,
+                        notificationWatched = false,
                         failed = false,
                     )
                 dao.updateEvent(first)
@@ -286,6 +289,8 @@ class CanonicalTimelineStore
                                 ircFormattedText = plan.ircFormattedText,
                                 pendingLabel = plan.label,
                                 dedupKey = SemanticIdentity.pendingKey(plan.label),
+                                notificationEligible = false,
+                                notificationEligibilityResolved = false,
                                 notificationWatched = false,
                                 notificationHandled = false,
                                 notificationClaimed = false,
@@ -700,7 +705,19 @@ class CanonicalTimelineStore
             val winner = if (first.id <= second.id) first else second
             val loser = if (winner.id == first.id) second else first
             if (compatible(winner, loser) == null) return first
-            val merged = enrich(enrich(winner, loser, provenanceOf(loser)), incoming, provenanceOf(incoming))
+            // Independent canonical rows may each have captured a different notify-capable decision.
+            // Union those decisions only here, never when enriching a duplicate observation.
+            val combined = enrich(winner, loser, provenanceOf(loser))
+            val coalesced =
+                if (winner.notificationEligibilityResolved && loser.notificationEligibilityResolved) {
+                    combined.copy(
+                        notificationEligible = winner.notificationEligible || loser.notificationEligible,
+                        notificationWatched = winner.notificationWatched || loser.notificationWatched,
+                    )
+                } else {
+                    combined
+                }
+            val merged = enrich(coalesced, incoming, provenanceOf(incoming))
             if (merged != winner) dao.updateEvent(merged)
             db.historyGapDao().repointEventBoundary(
                 loser.id,
@@ -773,6 +790,8 @@ class CanonicalTimelineStore
             selfAttributionAuthoritative: Boolean = false,
         ): TimelineEventEntity {
             val authoritative = provenance == TimeProvenance.SERVER_TAG
+            val notification =
+                if (!existing.notificationEligibilityResolved && incoming.notificationEligibilityResolved) incoming else existing
             return existing.copy(
                 bufferId = existing.bufferId,
                 msgid = existing.msgid ?: incoming.msgid,
@@ -822,7 +841,9 @@ class CanonicalTimelineStore
                     } else {
                         existing.timeProvenance
                     },
-                notificationWatched = existing.notificationWatched || incoming.notificationWatched,
+                notificationEligible = notification.notificationEligible,
+                notificationEligibilityResolved = notification.notificationEligibilityResolved,
+                notificationWatched = notification.notificationWatched,
                 notificationHandled = existing.notificationHandled || incoming.notificationHandled,
                 notificationClaimed = existing.notificationClaimed || incoming.notificationClaimed,
                 notificationClaimOwner = existing.notificationClaimOwner ?: incoming.notificationClaimOwner,

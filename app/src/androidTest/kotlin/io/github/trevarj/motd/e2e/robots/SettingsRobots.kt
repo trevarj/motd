@@ -15,7 +15,12 @@ internal class SettingsRobot(
         click("chatlist_open_settings")
     }
 
-    fun appearance() = click("settings_category_appearance")
+    fun notifications() {
+        scrollToAndClick("settings_category_notifications")
+        assertDisplayed("screen_notification_settings")
+    }
+
+    fun appearance() = scrollToAndClick("settings_category_appearance")
 
     fun selectIrcSpritesV2() {
         scrollToAndClick("settings_avatar_style_picker")
@@ -49,7 +54,7 @@ internal class SettingsRobot(
         assertDisplayed("settings_search_result_page_CHAT_PRESENCE")
     }
 
-    fun networks() = click("settings_category_networks")
+    fun networks() = scrollToAndClick("settings_category_networks")
 }
 
 internal class ThemeSheetRobot(

@@ -99,14 +99,15 @@ import io.github.trevarj.motd.push.WebPushCryptoFacade
 import io.github.trevarj.motd.service.AndroidChatSoundPlayer
 import io.github.trevarj.motd.service.AppVisibility
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
-import io.github.trevarj.motd.service.ChannelWatch
-import io.github.trevarj.motd.service.ChannelWatchImpl
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistoryResyncCoordinator
 import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.MotdNotifications
+import io.github.trevarj.motd.service.NotificationRoomMergeListener
+import io.github.trevarj.motd.service.NotificationSettings
+import io.github.trevarj.motd.service.NotificationSettingsImpl
 import io.github.trevarj.motd.service.PendingChannelCloseCoordinator
 import io.github.trevarj.motd.service.ReadMarkerRepository
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
@@ -271,7 +272,10 @@ internal abstract class AppModule {
     abstract fun chatSoundPlayer(impl: AndroidChatSoundPlayer): ChatSoundPlayer
 
     @Binds @Singleton
-    abstract fun channelWatch(impl: ChannelWatchImpl): ChannelWatch
+    abstract fun notificationSettings(impl: NotificationSettingsImpl): NotificationSettings
+
+    @Binds @Singleton
+    abstract fun notificationRoomMergeListener(impl: NotificationSettingsImpl): NotificationRoomMergeListener
 
     @Binds @Singleton
     abstract fun diagnosticLogger(impl: FileDiagnosticLogger): DiagnosticLogger

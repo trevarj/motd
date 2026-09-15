@@ -1,12 +1,16 @@
 package io.github.trevarj.motd.service
 
+import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.sync.EventOrigin
+import io.github.trevarj.motd.data.sync.incomingNotificationDecision
+import io.github.trevarj.motd.irc.event.IrcEvent
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Truth table for [shouldPostNotification]. The `(DM || mention)` gate is applied
- * upstream in EventProcessor, so every case here already qualifies as a DM or mention.
+ * Truth table for [shouldPostNotification]. Persisted scope/watch eligibility is applied
+ * upstream in EventProcessor; ALL and MENTIONS never bypass mute, only a watch does.
  *
  * Precedence: already-read > foreground > mute > fool; friend status never bypasses a mute.
  */
@@ -114,6 +118,32 @@ class NotificationDecisionTest {
                 watched = true,
             ),
         )
+    }
+
+    @Test
+    fun `all and mentions policy respect mute without a watch`() {
+        listOf(NotificationMode.ALL, NotificationMode.MENTIONS).forEach { mode ->
+            val decision =
+                incomingNotificationDecision(
+                    type = BufferType.CHANNEL,
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    origin = EventOrigin.LIVE,
+                    hasMention = true,
+                    consoleNotice = false,
+                    mode = mode,
+                    watchActive = false,
+                )
+            assertTrue(decision.eligible)
+            assertFalse(
+                shouldPostNotification(
+                    foreground = false,
+                    muted = true,
+                    senderIsFriend = false,
+                    senderIsFool = false,
+                    watched = decision.bypassesMute,
+                ),
+            )
+        }
     }
 
     @Test

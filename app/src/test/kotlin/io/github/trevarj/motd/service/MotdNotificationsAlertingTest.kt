@@ -156,9 +156,9 @@ class MotdNotificationsAlertingTest {
     fun pushFirstWatchedMention_onMutedChannel_alertsOnlyOnce() =
         runTest {
             val channelId = mutedChannel()
-            val watch = ChannelWatchImpl(backgroundScope, AppClock { 0L }, onExpired = {})
-            watch.start(channelId, null)
-            val processor = EventProcessor(db, TypingTrackerImpl(), notifications, channelWatch = watch)
+            val watch = NotificationSettingsImpl(backgroundScope, AppClock { 0L }, onExpired = {})
+            watch.startWatch(channelId, null)
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = watch)
             processor.onRegistered(networkId, "me", emptyMap())
             val message = chat("alert-peer", "me: watched ping", msgid = "watched-push").copy(target = "#chan")
 
@@ -180,9 +180,9 @@ class MotdNotificationsAlertingTest {
     fun interruptedWatchedMessages_afterWatchEnds_restoreHistoryAndRecoverSilentlyOnce() =
         runTest {
             val channelId = mutedChannel()
-            val watch = ChannelWatchImpl(backgroundScope, AppClock { 0L }, onExpired = {})
-            watch.start(channelId, null)
-            val live = EventProcessor(db, TypingTrackerImpl(), notifications, channelWatch = watch)
+            val watch = NotificationSettingsImpl(backgroundScope, AppClock { 0L }, onExpired = {})
+            watch.startWatch(channelId, null)
+            val live = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = watch)
             live.onRegistered(networkId, "me", emptyMap())
             live.process(
                 networkId,
@@ -190,7 +190,7 @@ class MotdNotificationsAlertingTest {
             )
             assertAlerting(postedNotifications().single().notification)
 
-            val interrupted = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, channelWatch = watch)
+            val interrupted = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, notificationSettings = watch)
             interrupted.onRegistered(networkId, "me", emptyMap())
             interrupted.process(
                 networkId,
@@ -204,7 +204,7 @@ class MotdNotificationsAlertingTest {
                 networkId,
                 chat("alert-peer", "me: interrupted mention", "watch-mention", 4_000).copy(target = "#chan"),
             )
-            watch.stop()
+            watch.stopWatch(channelId)
             notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
 
             notifications.recoverCanonicalNotifications()
@@ -230,17 +230,17 @@ class MotdNotificationsAlertingTest {
         runTest {
             val winnerId = mutedChannel("#renamed")
             val channelId = mutedChannel()
-            val watch = ChannelWatchImpl(backgroundScope, AppClock { 0L }, onExpired = {})
-            val processor = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, channelWatch = watch)
+            val watch = NotificationSettingsImpl(backgroundScope, AppClock { 0L }, onExpired = {})
+            val processor = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, notificationSettings = watch)
             processor.onRegistered(networkId, "me", emptyMap())
             val message = chat("alert-peer", "survives coalescence").copy(target = "#chan")
             processor.process(
                 networkId,
                 IrcEvent.HistoryBatch("#renamed", listOf(message.copy(target = "#renamed"))),
             )
-            watch.start(channelId, null)
+            watch.startWatch(channelId, null)
             processor.process(networkId, message)
-            watch.stop()
+            watch.stopWatch(channelId)
             processor.process(
                 networkId,
                 IrcEvent.HistoryBatch(
@@ -263,11 +263,58 @@ class MotdNotificationsAlertingTest {
         }
 
     @Test
+    fun inheritedAll_recoveryRestoresContextSilentlyOnceWithoutBypassingMute() =
+        runTest {
+            val channelId =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "#all", displayName = "#all", type = BufferType.CHANNEL),
+                )
+            val mutedId = mutedChannel("#muted")
+            val settings = NotificationSettingsImpl(backgroundScope, AppClock { 0L }, onExpired = {})
+            settings.setServer(networkId, NotificationMode.ALL)
+            val live = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
+            live.onRegistered(networkId, "me", emptyMap())
+            live.process(
+                networkId,
+                IrcEvent.HistoryBatch("#all", listOf(chat("alert-peer", "history context", "all-history").copy(target = "#all"))),
+            )
+            live.process(networkId, chat("alert-peer", "first all", "all-first", 2_000).copy(target = "#all"))
+            live.process(networkId, chat("alert-peer", "muted first", "all-muted-first", 2_000).copy(target = "#muted"))
+            assertEquals(1, postedNotifications().size)
+            assertAlerting(postedNotifications().single().notification)
+
+            val interrupted = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, notificationSettings = settings)
+            interrupted.onRegistered(networkId, "me", emptyMap())
+            interrupted.process(networkId, chat("alert-peer", "interrupted all", "all-interrupted", 3_000).copy(target = "#all"))
+            interrupted.process(networkId, chat("alert-peer", "muted interrupted", "all-muted", 3_000).copy(target = "#muted"))
+            settings.setServer(networkId, NotificationMode.OFF)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+
+            notifications.recoverCanonicalNotifications()
+
+            val recovered = postedNotifications().single().notification
+            assertSilent(recovered)
+            val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(recovered)
+            assertEquals(listOf("history context", "first all", "interrupted all"), style?.messages?.map { it.text.toString() })
+            val unmuted = requireNotNull(db.messageDao().byMsgid(channelId, "all-interrupted"))
+            val muted = requireNotNull(db.messageDao().byMsgid(mutedId, "all-muted"))
+            assertEquals(true, unmuted.notificationEligible)
+            assertEquals(true, unmuted.notificationHandled)
+            assertEquals(false, unmuted.notificationWatched)
+            assertEquals(true, muted.notificationEligible)
+            assertEquals(true, muted.notificationHandled)
+            assertEquals(false, muted.notificationWatched)
+            context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
+            notifications.recoverCanonicalNotifications()
+            assertEquals(0, postedNotifications().size)
+        }
+
+    @Test
     fun currentWatch_doesNotMakeEarlierMessagesOrPlaybackRecoverable() =
         runTest {
             val channelId = mutedChannel()
-            val watch = ChannelWatchImpl(backgroundScope, AppClock { 0L }, onExpired = {})
-            val processor = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, channelWatch = watch)
+            val watch = NotificationSettingsImpl(backgroundScope, AppClock { 0L }, onExpired = {})
+            val processor = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, notificationSettings = watch)
             processor.onRegistered(networkId, "me", emptyMap())
             processor.process(
                 networkId,
@@ -277,7 +324,7 @@ class MotdNotificationsAlertingTest {
                 networkId,
                 chat("alert-peer", "me: before watch", "unwatched-mention").copy(target = "#chan"),
             )
-            watch.start(channelId, null)
+            watch.startWatch(channelId, null)
             processor.processPush(
                 networkId,
                 chat("alert-peer", "pushed ordinary", "watched-push-ordinary").copy(target = "#chan"),

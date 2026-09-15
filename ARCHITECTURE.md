@@ -74,13 +74,13 @@ flowchart TD
   the normal harness, converting supported Markdown to IRC formatting for display
   while retaining the original text. Agentwire uses its own backend credentials,
   not a motd subscription gateway. Search remains keyword-based; there is no semantic index.
-- Channel watch follows one canonical channel across redirects until its saved
-  deadline (or until stopped). It admits live PRIVMSG/ACTION notifications and
-  overrides mute, including already-qualifying push mentions; it does not request
-  additional push deliveries or notify for history/replay. Self, ignore, fool,
-  foreground, and read suppression remain. Original watch eligibility is stored
-  with each event so interrupted notification recovery stays silent and does not
-  reinterpret old messages using a later watch.
+- `NotificationSettings` resolves device-local global, exact-network, and canonical-channel
+  policies. The first LIVE/PUSH observation freezes each event's eligibility and watch mute
+  bypass; HISTORY/REPLAY supply notification context without resolving that decision.
+  Watches admit live channel PRIVMSG/ACTION and pushed highlights despite policy or mute;
+  ordinary `ALL` policy never bypasses mute or broadens push delivery. Self, ignore, fool,
+  foreground, and read suppression remain. Interrupted notification recovery reads the stored
+  decision, never later settings, and always presents silently.
 
 ## Where to work
 

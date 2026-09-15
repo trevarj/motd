@@ -77,6 +77,7 @@ import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.dickord.decodeDickordChannelDescriptor
 import io.github.trevarj.motd.dickord.isDickordPortalConversation
 import io.github.trevarj.motd.service.ChannelWatchDuration
+import io.github.trevarj.motd.service.NotificationMode
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.ui.chat.AttachmentSheets
 import io.github.trevarj.motd.ui.chat.InviteSheetTarget
@@ -86,12 +87,15 @@ import io.github.trevarj.motd.ui.chat.NickActionSheet
 import io.github.trevarj.motd.ui.chat.lagTone
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AvatarEditorSheet
-import io.github.trevarj.motd.ui.components.ChannelWatchDialog
+import io.github.trevarj.motd.ui.components.ChannelNotificationPresentation
+import io.github.trevarj.motd.ui.components.ChannelNotificationSheet
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.botDisplayName
+import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.launch
 
 /** Stateful entry: wires the ViewModel and drives navigation/leave. */
 @Composable
@@ -110,15 +114,24 @@ fun ChannelInfoScreen(
     val leaveMutation by viewModel.leaveMutation.collectAsStateWithLifecycle()
     val inviteFeedback by viewModel.inviteFeedback.collectAsStateWithLifecycle()
     val presenceStates by viewModel.presenceStates.collectAsStateWithLifecycle()
-    val notifyLevel by viewModel.notifyLevel.collectAsStateWithLifecycle()
-
-    LaunchedEffect(viewModel, onBack) {
-        viewModel.operationEvents.collect { event ->
-            if (event is ChannelInfoOperationEvent.LeaveAccepted) onBack()
-        }
-    }
+    val notificationSummary by viewModel.notificationSummary.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(viewModel, onBack, resources) {
+        viewModel.operationEvents.collect { event ->
+            when (event) {
+                ChannelInfoOperationEvent.LeaveAccepted -> {
+                    onBack()
+                }
+
+                ChannelInfoOperationEvent.NotificationSettingsWriteFailed -> {
+                    launch {
+                        snackbarHostState.showSnackbar(resources.getString(R.string.notification_settings_save_failed))
+                    }
+                }
+            }
+        }
+    }
     MuteBacklogUndoEffect(
         suppressions = viewModel.muteBacklogSuppressions,
         hostState = snackbarHostState,
@@ -242,7 +255,8 @@ fun ChannelInfoScreen(
         onQueryChange = viewModel::setQuery,
         onEditAvatar = { avatarEditorOpen = true },
         onCreateInvite = { onCreateInvite(bufferId) },
-        notifyLevel = notifyLevel,
+        notificationSummary = notificationSummary,
+        onChannelNotificationMode = viewModel::setChannelNotificationMode,
         onStartWatch = viewModel::startWatch,
         onStopWatch = viewModel::stopWatch,
     )
@@ -405,7 +419,8 @@ fun ChannelInfoContent(
     onQueryChange: (String) -> Unit = {},
     onEditAvatar: () -> Unit = {},
     onCreateInvite: () -> Unit = {},
-    notifyLevel: ChannelNotifyLevel = ChannelNotifyLevel.MentionsOnly,
+    notificationSummary: ChannelNotificationPresentation = ChannelNotificationPresentation(),
+    onChannelNotificationMode: (NotificationMode?) -> Unit = {},
     onStartWatch: (ChannelWatchDuration) -> Unit = {},
     onStopWatch: () -> Unit = {},
 ) {
@@ -465,8 +480,8 @@ fun ChannelInfoContent(
                 )
             }
             if (buffer?.type == BufferType.CHANNEL) {
-                item(key = "notify_level") {
-                    NotifyLevelRow(level = notifyLevel, onClick = { showNotifyPicker = true })
+                item(key = "notifications") {
+                    NotificationSummaryRow(presentation = notificationSummary, onClick = { showNotifyPicker = true })
                 }
             }
             // Non-ops get no section at all rather than a wall of disabled controls; the gate
@@ -639,9 +654,10 @@ fun ChannelInfoContent(
         }
     }
 
-    if (showNotifyPicker) {
-        ChannelWatchDialog(
-            watchActive = notifyLevel is ChannelNotifyLevel.All,
+    if (showNotifyPicker && buffer?.type == BufferType.CHANNEL) {
+        ChannelNotificationSheet(
+            presentation = notificationSummary,
+            onMode = onChannelNotificationMode,
             onStart = onStartWatch,
             onStop = onStopWatch,
             onDismiss = { showNotifyPicker = false },
@@ -920,48 +936,20 @@ private fun ChannelHeader(
 }
 
 @Composable
-private fun NotifyLevelRow(
-    level: ChannelNotifyLevel,
+private fun NotificationSummaryRow(
+    presentation: ChannelNotificationPresentation,
     onClick: () -> Unit,
 ) {
-    val supporting =
-        when (level) {
-            ChannelNotifyLevel.MentionsOnly -> {
-                stringResource(R.string.channelinfo_notify_mentions)
-            }
-
-            ChannelNotifyLevel.Muted -> {
-                stringResource(R.string.channelinfo_notify_muted)
-            }
-
-            is ChannelNotifyLevel.All -> {
-                val minutesLeft = level.minutesLeft
-                if (minutesLeft == null) {
-                    stringResource(
-                        if (level.overridesMute) {
-                            R.string.channelinfo_notify_all_forever_overrides_mute
-                        } else {
-                            R.string.channelinfo_notify_all_forever
-                        },
-                    )
-                } else {
-                    stringResource(
-                        if (level.overridesMute) {
-                            R.string.channelinfo_notify_overrides_mute
-                        } else {
-                            R.string.channelinfo_notify_all
-                        },
-                        minutesLeft,
-                    )
-                }
-            }
-        }
     ListItem(
         headlineContent = { Text(stringResource(R.string.channelinfo_notifications)) },
-        supportingContent = { Text(supporting) },
+        supportingContent = { Text(presentation.summary()) },
         leadingContent = {
             Icon(
-                if (level is ChannelNotifyLevel.Muted) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications,
+                if (presentation.available && presentation.watch == null && (presentation.muted || presentation.mode == NotificationMode.OFF)) {
+                    Icons.Outlined.NotificationsOff
+                } else {
+                    Icons.Outlined.Notifications
+                },
                 contentDescription = null,
             )
         },

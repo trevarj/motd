@@ -19,6 +19,7 @@ import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
+import io.github.trevarj.motd.service.NotificationRoomMergeListener
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -509,6 +510,7 @@ class BufferStoreCanonicalTest {
     fun nestedRoomMergeRetirementRunsOnlyAfterOuterCommit() =
         runTest {
             val retirements = mutableListOf<Pair<Long, Long>>()
+            val settingsMerges = mutableListOf<Pair<Long, Long>>()
             val notifyingStore =
                 BufferStore(
                     db,
@@ -528,6 +530,20 @@ class BufferStoreCanonicalTest {
                             retirements += winnerId to loserId
                         }
                     },
+                    notificationRoomMergeListener =
+                        object : NotificationRoomMergeListener {
+                            override suspend fun onRoomsMerged(
+                                winnerId: Long,
+                                loserId: Long,
+                            ) {
+                                assertFalse(db.inTransaction())
+                                assertEquals(winnerId, db.bufferDao().canonicalId(loserId))
+                                assertTrue(
+                                    db.appStateDao().keysLike("$ROOM_MERGE_PRESENTATION_PREFIX%").isNotEmpty(),
+                                )
+                                settingsMerges += winnerId to loserId
+                            }
+                        },
                 )
             val winner = notifyingStore.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
             val loser = notifyingStore.getOrCreate(networkId, "bob", "Bob", BufferType.QUERY)
@@ -542,6 +558,7 @@ class BufferStoreCanonicalTest {
 
             assertTrue(failed.isFailure)
             assertTrue(retirements.isEmpty())
+            assertTrue(settingsMerges.isEmpty())
             assertEquals(loser.id, db.bufferDao().observeById(loser.id)?.id)
             assertTrue(
                 db.appStateDao().keysLike("$ROOM_MERGE_PRESENTATION_PREFIX%").isEmpty(),
@@ -549,8 +566,12 @@ class BufferStoreCanonicalTest {
 
             db.withTransaction { notifyingStore.mergeRooms(winner.id, loser.id) }
             assertTrue(retirements.isEmpty())
+            assertTrue(settingsMerges.isEmpty())
             notifyingStore.drainCommittedRoomMerges()
             assertEquals(listOf(winner.id to loser.id), retirements)
+            assertEquals(listOf(winner.id to loser.id), settingsMerges)
+            notifyingStore.drainCommittedRoomMerges()
+            assertEquals(listOf(winner.id to loser.id), settingsMerges)
         }
 
     @Test

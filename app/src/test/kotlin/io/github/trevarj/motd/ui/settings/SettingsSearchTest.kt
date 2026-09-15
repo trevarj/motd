@@ -44,6 +44,18 @@ class SettingsSearchTest {
     }
 
     @Test
+    fun `notification policy searches open the notifications page rather than delivery`() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        val destination = SettingsSearchDestination.Page(SettingsSearchPage.NOTIFICATIONS, SettingsTarget.NOTIFICATIONS)
+
+        assertEquals(destination, searchSettings("notifications", entries).first().destination)
+        listOf("alerts", "mentions", "mute", "watch", "all messages").forEach { query ->
+            assertTrue("notification scope must be searchable by $query", searchSettings(query, entries).any { it.destination == destination })
+        }
+        assertEquals(listOf(destination), searchSettings("watch all messages", entries).map { it.destination })
+    }
+
+    @Test
     fun `voice search opens local transcription targets without retired features or model data`() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
 
@@ -143,6 +155,8 @@ class SettingsSearchTest {
 
     private fun resolve(id: Int): String =
         when (id) {
+            R.string.settings_notifications -> "Notifications"
+            R.string.settings_notifications_summary -> "Global, server, and channel alerts and watches"
             R.string.settings_composer_formatting_tools -> "Formatting tools"
             R.string.settings_composer_formatting_tools_desc -> "Show rich text controls"
             R.string.backup_export_title -> "Export configuration"

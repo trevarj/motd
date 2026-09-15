@@ -495,6 +495,15 @@ interface BufferDao {
     )
     fun observeJoinedChannels(networkId: Long): Flow<List<JoinedChannelRow>>
 
+    /** Stored channels remain configurable while unjoined or archived. */
+    @Query(
+        """SELECT id AS bufferId, networkId, displayName, joined, archived, muted
+           FROM buffers WHERE type = 'CHANNEL'
+             AND pendingCloseAt IS NULL AND redirectToRoomId IS NULL
+           ORDER BY networkId, displayName COLLATE NOCASE, id""",
+    )
+    fun observeNotificationChannels(): Flow<List<NotificationChannelRow>>
+
     /**
      * History-resync targets. The soju console is the one SERVER row soju answers CHATHISTORY for, so
      * it is admitted here — role-scoped, since elsewhere that nick is an ordinary user's query — and
@@ -1054,6 +1063,15 @@ data class JoinedChannelRow(
     val avatarOverrideModel: String? = null,
 )
 
+data class NotificationChannelRow(
+    val bufferId: Long,
+    val networkId: Long,
+    val displayName: String,
+    val joined: Boolean,
+    val archived: Boolean,
+    val muted: Boolean,
+)
+
 /** Projection for the chat list screen. */
 data class ChatListRow(
     val bufferId: Long,
@@ -1258,8 +1276,7 @@ interface MessageDao {
                   ))
               )
              AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
-             AND (:queryRoom = 1 OR hasMention = 1
-                  OR (notificationWatched = 1 AND kind IN ('PRIVMSG', 'ACTION')))
+             AND notificationEligible = 1
            ORDER BY serverTime DESC, timelineOrder DESC, id DESC
            LIMIT :limit""",
     )
@@ -1267,7 +1284,6 @@ interface MessageDao {
         bufferId: Long,
         afterTime: Long,
         afterEventId: TimelineEventId,
-        queryRoom: Boolean,
         excludeEventId: Long,
         limit: Int,
     ): List<MessageEntity>
@@ -2519,8 +2535,12 @@ interface CanonicalTimelineDao {
              AND (
                  (m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
                     AND b.type != 'SERVER'
-                    AND (b.type = 'QUERY' OR m.hasMention = 1
-                         OR (m.notificationWatched = 1 AND m.kind IN ('PRIVMSG', 'ACTION'))))
+                    AND m.notificationEligibilityResolved = 1 AND m.notificationEligible = 1
+                    AND EXISTS (
+                        SELECT 1 FROM event_observations o WHERE o.timelineEventId = m.id
+                          AND (o.origin = 'LIVE' OR (o.origin = 'PUSH'
+                               AND (b.type = 'QUERY' OR m.hasMention = 1 OR m.notificationWatched = 1)))
+                    ))
                  OR (m.kind = 'INVITE' AND m.inviteState IN ('PENDING', 'FAILED'))
                  OR (m.kind = 'DCC_TRANSFER' AND m.eventPayload IS NOT NULL)
              )

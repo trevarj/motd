@@ -578,6 +578,8 @@ class RequiredHeadlessE2eTest {
         val (bootstrap, network) = launchBootstrapped()
         SettingsRobot(compose).apply {
             open()
+            notifications()
+            returnToRoot()
             appearance()
         }
         ThemeSheetRobot(compose).selectAyuDarkAndTrueBlack()

@@ -13,12 +13,14 @@ import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
-import io.github.trevarj.motd.service.ChannelWatch
-import io.github.trevarj.motd.service.ChannelWatchImpl
-import io.github.trevarj.motd.service.ChannelWatchState
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
+import io.github.trevarj.motd.service.NotificationMode
+import io.github.trevarj.motd.service.NotificationSettings
+import io.github.trevarj.motd.service.NotificationSettingsImpl
+import io.github.trevarj.motd.service.NotificationSettingsState
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -26,8 +28,10 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class EventProcessorChannelWatchTest {
     private class RecordingNotifier : MessageNotifier {
         val incoming = mutableListOf<IrcEvent.ChatMessage>()
@@ -57,21 +61,14 @@ class EventProcessorChannelWatchTest {
         }
     }
 
-    private class StickyWatch(
-        private val watched: Long,
-    ) : ChannelWatch {
-        override val state: StateFlow<ChannelWatchState?> =
-            MutableStateFlow(ChannelWatchState(watched, Long.MAX_VALUE))
-
-        override suspend fun isActive(bufferId: Long): Boolean = bufferId == watched
-
-        override suspend fun start(
-            bufferId: Long,
-            durationMs: Long?,
-        ) = Unit
-
-        override suspend fun stop() = Unit
-    }
+    private suspend fun TestScope.watching(vararg ids: Long): NotificationSettings =
+        NotificationSettingsImpl(
+            scope = backgroundScope,
+            clock = AppClock { testScheduler.currentTime },
+            onExpired = {},
+        ).apply {
+            for (id in ids) startWatch(id, null)
+        }
 
     private lateinit var db: MotdDatabase
     private lateinit var notifier: RecordingNotifier
@@ -107,7 +104,7 @@ class EventProcessorChannelWatchTest {
         db.close()
     }
 
-    private fun processor(watch: ChannelWatch = ChannelWatch.Noop) = EventProcessor(db, TypingTrackerImpl(), notifier, channelWatch = watch)
+    private fun processor(settings: NotificationSettings = NotificationSettings.Noop) = EventProcessor(db, TypingTrackerImpl(), notifier, notificationSettings = settings)
 
     private fun chat(
         kind: IrcEvent.ChatKind,
@@ -131,7 +128,7 @@ class EventProcessorChannelWatchTest {
             idle.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "hello", "m1"))
             assertEquals(0, notifier.incoming.size)
 
-            val watched = processor(StickyWatch(bufferId))
+            val watched = processor(watching(bufferId))
             watched.onRegistered(networkId, "me", emptyMap())
             watched.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "still hello", "m2"))
             assertEquals(1, notifier.incoming.size)
@@ -147,7 +144,7 @@ class EventProcessorChannelWatchTest {
                     BufferEntity(networkId = networkId, name = "#old", displayName = "#old", type = BufferType.CHANNEL),
                 )
             val watch =
-                ChannelWatchImpl(
+                NotificationSettingsImpl(
                     scope = backgroundScope,
                     clock = AppClock { 0 },
                     onExpired = {},
@@ -156,7 +153,7 @@ class EventProcessorChannelWatchTest {
                 )
             val watched = processor(watch)
             watched.onRegistered(networkId, "me", emptyMap())
-            watch.start(sourceId, null)
+            watch.startWatch(sourceId, null)
 
             watched.process(
                 networkId,
@@ -169,6 +166,7 @@ class EventProcessorChannelWatchTest {
                 ),
             )
             assertEquals(bufferId, buffers.canonicalId(sourceId))
+            watch.state.first { it is NotificationSettingsState.Ready && bufferId in it.config.watches }
 
             watched.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "hello", "first-after-rename"))
 
@@ -194,7 +192,7 @@ class EventProcessorChannelWatchTest {
     @Test
     fun `watched channel action notifies without a mention`() =
         runTest {
-            val watched = processor(StickyWatch(bufferId))
+            val watched = processor(watching(bufferId))
             watched.onRegistered(networkId, "me", emptyMap())
             watched.process(networkId, chat(IrcEvent.ChatKind.ACTION, "waves", "a1"))
             assertEquals(1, notifier.incoming.size)
@@ -203,7 +201,7 @@ class EventProcessorChannelWatchTest {
     @Test
     fun `watched channel notice does not notify without a mention`() =
         runTest {
-            val watched = processor(StickyWatch(bufferId))
+            val watched = processor(watching(bufferId))
             watched.onRegistered(networkId, "me", emptyMap())
             watched.process(networkId, chat(IrcEvent.ChatKind.NOTICE, "server-ish", "n1"))
             assertEquals(0, notifier.incoming.size)
@@ -212,9 +210,180 @@ class EventProcessorChannelWatchTest {
     @Test
     fun `push playback of a watched channel does not notify without a mention`() =
         runTest {
-            val watched = processor(StickyWatch(bufferId))
+            val watched = processor(watching(bufferId))
             watched.onRegistered(networkId, "me", emptyMap())
             watched.processPush(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "replayed", "p1"))
             assertEquals(0, notifier.incoming.size)
+        }
+
+    @Test
+    fun `two watched channels notify independently and stopping one keeps the other`() =
+        runTest {
+            val secondId =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "#other", displayName = "#other", type = BufferType.CHANNEL),
+                )
+            val settings = watching(bufferId, secondId)
+            val processor = processor(settings)
+            processor.onRegistered(networkId, "me", emptyMap())
+
+            processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "first", "two-1"))
+            processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "second", "two-2").copy(target = "#other"))
+            settings.stopWatch(bufferId)
+            processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "stopped", "two-3"))
+            processor.process(networkId, chat(IrcEvent.ChatKind.ACTION, "still watched", "two-4").copy(target = "#other"))
+
+            assertEquals(listOf("first", "second", "still watched"), notifier.incoming.map { it.text })
+            assertEquals(listOf(true, true, true), notifier.watchedFlags)
+        }
+
+    @Test
+    fun `global server and channel policies control live chat without granting mute bypass`() =
+        runTest {
+            db.bufferDao().insert(
+                BufferEntity(networkId = networkId, name = "#other", displayName = "#other", type = BufferType.CHANNEL),
+            )
+            val settings = watching()
+            settings.setGlobal(NotificationMode.OFF)
+            settings.setServer(networkId, NotificationMode.ALL)
+            settings.setChannel(bufferId, NotificationMode.MENTIONS)
+            val processor = processor(settings)
+            processor.onRegistered(networkId, "me", emptyMap())
+
+            processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "channel ordinary", "scope-1"))
+            processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "me: channel mention", "scope-2"))
+            processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "server all", "scope-3").copy(target = "#other"))
+            processor.process(networkId, chat(IrcEvent.ChatKind.NOTICE, "ordinary notice", "scope-4").copy(target = "#other"))
+            processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "direct all", "scope-5").copy(target = "me"))
+            settings.setChannel(bufferId, NotificationMode.OFF)
+            processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "me: channel off", "scope-6"))
+            settings.setGlobal(NotificationMode.ALL)
+            settings.setServer(networkId, NotificationMode.OFF)
+            processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "server off", "scope-7").copy(target = "#other"))
+            processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "direct off", "scope-8").copy(target = "me"))
+            settings.setChannel(bufferId, NotificationMode.ALL)
+            processor.process(networkId, chat(IrcEvent.ChatKind.ACTION, "channel all", "scope-9"))
+            settings.setServer(networkId, null)
+            processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "global all", "scope-10").copy(target = "#other"))
+
+            assertEquals(
+                listOf("me: channel mention", "server all", "direct all", "channel all", "global all"),
+                notifier.incoming.map { it.text },
+            )
+            assertEquals(List(5) { false }, notifier.watchedFlags)
+        }
+
+    @Test
+    fun `off push stays suppressed after enabling policy and watch before live duplicate`() =
+        runTest {
+            val settings = watching()
+            settings.setGlobal(NotificationMode.OFF)
+            val processor = processor(settings)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val message = chat(IrcEvent.ChatKind.PRIVMSG, "me: frozen off", "off-push")
+            processor.processPush(networkId, message)
+
+            settings.setGlobal(NotificationMode.ALL)
+            settings.startWatch(bufferId, null)
+            processor.process(networkId, message)
+
+            val stored = requireNotNull(db.messageDao().byMsgid(bufferId, "off-push"))
+            assertEquals(false, stored.notificationEligible)
+            assertEquals(true, stored.notificationEligibilityResolved)
+            assertEquals(false, stored.notificationWatched)
+            assertEquals(emptyList<IrcEvent.ChatMessage>(), notifier.incoming)
+            assertEquals(emptyList<Long>(), pendingIds())
+        }
+
+    @Test
+    fun `off live cannot become recoverable through later enabled history`() =
+        runTest {
+            val settings = watching()
+            settings.setGlobal(NotificationMode.OFF)
+            val processor = processor(settings)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val message = chat(IrcEvent.ChatKind.PRIVMSG, "me: live off", "off-live")
+            processor.process(networkId, message)
+
+            settings.setGlobal(NotificationMode.MENTIONS)
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(message)))
+
+            val stored = requireNotNull(db.messageDao().byMsgid(bufferId, "off-live"))
+            assertEquals(false, stored.notificationEligible)
+            assertEquals(true, stored.notificationEligibilityResolved)
+            assertEquals(emptyList<Long>(), pendingIds())
+            assertEquals(emptyList<IrcEvent.ChatMessage>(), notifier.incoming)
+        }
+
+    @Test
+    fun `history first captures the policy of the first later live or push observation`() =
+        runTest {
+            val settings = watching()
+            val processor = processor(settings)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val suppressed = chat(IrcEvent.ChatKind.PRIVMSG, "me: history enabled", "history-enabled")
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(suppressed)))
+            assertEquals(true, db.messageDao().byMsgid(bufferId, "history-enabled")?.notificationEligible)
+            assertEquals(false, db.messageDao().byMsgid(bufferId, "history-enabled")?.notificationEligibilityResolved)
+            assertEquals(emptyList<Long>(), pendingIds())
+
+            settings.setGlobal(NotificationMode.OFF)
+            processor.processPush(networkId, suppressed)
+            val admitted = chat(IrcEvent.ChatKind.PRIVMSG, "history disabled", "history-disabled")
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(admitted)))
+            assertEquals(false, db.messageDao().byMsgid(bufferId, "history-disabled")?.notificationEligible)
+            assertEquals(false, db.messageDao().byMsgid(bufferId, "history-disabled")?.notificationEligibilityResolved)
+
+            settings.setGlobal(NotificationMode.ALL)
+            processor.process(networkId, suppressed)
+            processor.process(networkId, admitted)
+            settings.setGlobal(NotificationMode.OFF)
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(admitted)))
+
+            assertEquals(listOf("history disabled"), notifier.incoming.map { it.text })
+            assertEquals(false, db.messageDao().byMsgid(bufferId, "history-enabled")?.notificationEligible)
+            assertEquals(true, db.messageDao().byMsgid(bufferId, "history-enabled")?.notificationEligibilityResolved)
+            assertEquals(true, db.messageDao().byMsgid(bufferId, "history-disabled")?.notificationEligible)
+            assertEquals(true, db.messageDao().byMsgid(bufferId, "history-disabled")?.notificationEligibilityResolved)
+        }
+
+    @Test
+    fun `all policy ordinary push waits for live and uses its stored eligibility`() =
+        runTest {
+            val settings = watching()
+            settings.setGlobal(NotificationMode.ALL)
+            val processor = processor(settings)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val message = chat(IrcEvent.ChatKind.PRIVMSG, "ordinary pushed", "all-push")
+            processor.processPush(networkId, message)
+            assertEquals(emptyList<IrcEvent.ChatMessage>(), notifier.incoming)
+            assertEquals(emptyList<Long>(), pendingIds())
+
+            settings.setGlobal(NotificationMode.OFF)
+            processor.process(networkId, message)
+
+            assertEquals(listOf("ordinary pushed"), notifier.incoming.map { it.text })
+            assertEquals(listOf(false), notifier.watchedFlags)
+        }
+
+    private suspend fun pendingIds(): List<Long> = db.canonicalTimelineDao().pendingNotifications(10, window = Long.MAX_VALUE / 2, maxRows = Int.MAX_VALUE).map { it.id }
+
+    @Test
+    fun `unavailable settings persist incoming messages without alerts`() =
+        runTest {
+            val settings =
+                NotificationSettingsImpl(
+                    scope = backgroundScope,
+                    clock = AppClock { testScheduler.currentTime },
+                    onExpired = {},
+                    load = { throw IOException("private preference data") },
+                )
+            val processor = processor(settings)
+            processor.onRegistered(networkId, "me", emptyMap())
+
+            processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "me: silent", "unavailable"))
+
+            assertEquals(1, db.messageDao().countForBuffer(bufferId))
+            assertEquals(emptyList<IrcEvent.ChatMessage>(), notifier.incoming)
         }
 }

@@ -58,6 +58,7 @@ import io.github.trevarj.motd.data.visibility.MessageContextResult
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dcc.DccTransferController
+import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.HistoryAvailability
@@ -66,21 +67,23 @@ import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
-import io.github.trevarj.motd.service.ChannelWatch
 import io.github.trevarj.motd.service.ChannelWatchDuration
-import io.github.trevarj.motd.service.ChannelWatchState
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistorySyncStatus
+import io.github.trevarj.motd.service.NotificationMode
+import io.github.trevarj.motd.service.NotificationSettings
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.service.SendRejectionReason
 import io.github.trevarj.motd.service.TypingTracker
+import io.github.trevarj.motd.ui.components.ChannelNotificationPresentation
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
+import io.github.trevarj.motd.ui.components.deriveChannelNotificationPresentation
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
@@ -92,6 +95,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -273,7 +277,8 @@ class ChatViewModel
         // consumer is the composable, not this class; Noop default for hand-built call sites, as
         // gapFiller above.
         val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
-        private val channelWatch: ChannelWatch = ChannelWatch.Noop,
+        private val notificationSettings: NotificationSettings = NotificationSettings.Noop,
+        private val clock: AppClock = AppClock(System::currentTimeMillis),
         contentPreviewPrefs: ContentPreviewPrefs,
     ) : ViewModel() {
         val contentPreviews: StateFlow<ContentPreviewConfig> =
@@ -294,15 +299,24 @@ class ChatViewModel
         private val route: ChatRoute = savedStateHandle.toRoute<ChatRoute>()
         val bufferId: Long = route.bufferId
 
-        val activeWatch: StateFlow<ChannelWatchState?> = channelWatch.state
+        fun setChannelNotificationMode(mode: NotificationMode?) = updateChannelNotifications { notificationSettings.setChannel(it, mode) }
 
-        fun startChannelWatch(duration: ChannelWatchDuration) {
-            viewModelScope.launch { channelWatch.start(operationalBufferId.value, duration.millis) }
-        }
+        fun startWatch(duration: ChannelWatchDuration) = updateChannelNotifications { notificationSettings.startWatch(it, duration.millis) }
 
-        fun stopChannelWatch() {
-            viewModelScope.launch { channelWatch.stop() }
-        }
+        fun stopWatch() = updateChannelNotifications(notificationSettings::stopWatch)
+
+        private fun updateChannelNotifications(action: suspend (Long) -> Boolean) =
+            viewModelScope.launch {
+                val written =
+                    try {
+                        action(operationalBufferId.value)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        false
+                    }
+                if (!written) uiEventQueue.enqueue(ChatUiEvent.NotificationSettingsWriteFailed)
+            }
 
         /** This screen was opened by a deep link/notification tap rather than by a plain room open. */
         private val routeHasDeepJump: Boolean =
@@ -794,6 +808,31 @@ class ChatViewModel
                 .map { it?.id ?: bufferId }
                 .distinctUntilChanged()
                 .stateIn(viewModelScope, SharingStarted.Eagerly, bufferId)
+
+        val channelNotifications: StateFlow<ChannelNotificationPresentation> =
+            combine(buffer, notificationSettings.state) { room, settings -> room to settings }
+                .flatMapLatest { (room, settings) ->
+                    if (room?.type != BufferType.CHANNEL) {
+                        flowOf(ChannelNotificationPresentation(loading = room == null))
+                    } else {
+                        flow {
+                            while (true) {
+                                val presentation =
+                                    deriveChannelNotificationPresentation(
+                                        settingsState = settings,
+                                        networkId = room.networkId,
+                                        bufferId = room.id,
+                                        muted = room.muted,
+                                        nowMillis = clock.nowMillis(),
+                                    )
+                                emit(presentation)
+                                if (presentation.minutesLeft == null) break
+                                delay(30_000L)
+                            }
+                        }
+                    }
+                }.distinctUntilChanged()
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChannelNotificationPresentation())
 
         suspend fun prepareCatchUpContext(): AgentContextPreparation {
             val snapshot = _unreadEntrySnapshot.value ?: return AgentContextPreparation.NO_CONTEXT

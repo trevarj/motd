@@ -56,8 +56,8 @@ import javax.inject.Singleton
  *
  * Precedence (highest first): already-read and foreground buffers suppress everything; an explicit
  * buffer mute wins unless the message qualified under a watch; a fool sender is fully silenced.
- * The DM, mention, or watched-channel qualification lives upstream in
- * [io.github.trevarj.motd.data.sync.EventProcessor.maybeNotify].
+ * Notification policy eligibility is captured upstream by
+ * [io.github.trevarj.motd.data.sync.incomingNotificationDecision].
  */
 fun shouldPostNotification(
     foreground: Boolean,
@@ -129,7 +129,7 @@ class MotdNotifications
                     .filter {
                         it.notification.channelId in MESSAGE_CHANNELS &&
                             !isMessageNotificationId(it.id) &&
-                            it.id != WATCH_ENDED_ID
+                            !isWatchEndedNotificationId(it.id)
                     }.forEach { legacy ->
                         manager.cancel(legacy.id)
                         diagnostics.record("notifications", "legacy_message_id_retired") {
@@ -148,7 +148,7 @@ class MotdNotifications
                         return@forEach
                     }
                 onRoomsMerged(winnerId, loserId)
-                state.delete(key)
+                // BufferStore deletes the marker after notifying both settings and presentation.
             }
         }
 
@@ -407,7 +407,6 @@ class MotdNotifications
                             bufferId = bufferId,
                             afterTime = effectiveReadAnchor?.serverTime ?: Long.MIN_VALUE,
                             afterEventId = effectiveReadAnchor?.eventId ?: Long.MIN_VALUE,
-                            queryRoom = type == BufferType.QUERY,
                             excludeEventId = canonicalEventId ?: -1L,
                             limit = MAX_NOTIFICATION_MESSAGES - 1,
                         )
@@ -726,10 +725,11 @@ class MotdNotifications
         suspend fun watchEnded(bufferId: Long) {
             val name = db.bufferDao().observeById(bufferId)?.displayName ?: return
             val text = context.getString(io.github.trevarj.motd.R.string.notification_watch_ended, name)
+            val notificationId = watchEndedNotificationId(bufferId)
             val contentIntent =
                 PendingIntent.getActivity(
                     context,
-                    WATCH_ENDED_ID,
+                    notificationId,
                     Intent(context, MainActivity::class.java)
                         .setAction(ACTION_OPEN_BUFFER)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -751,7 +751,7 @@ class MotdNotifications
                         context,
                         android.Manifest.permission.POST_NOTIFICATIONS,
                     ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (canPost) manager.notify(WATCH_ENDED_ID, notification)
+            if (canPost) manager.notify(notificationId, notification)
         }
 
         override suspend fun onInvitationResolved(messageId: Long) {
@@ -958,9 +958,13 @@ class MotdNotifications
             /** Failure notices are keyed by buffer too, and must not alias any other range. */
             internal fun sendFailureNotificationId(bufferId: Long): Int = 0x20000000 or (bufferId xor (bufferId ushr 32)).toInt().and(0x0fffffff)
 
+            internal fun watchEndedNotificationId(bufferId: Long): Int = WATCH_ENDED_NAMESPACE or (bufferId xor (bufferId ushr 32)).toInt().and(0x0fffffff)
+
+            private fun isWatchEndedNotificationId(id: Int): Boolean = (id and NAMESPACE_MASK) == WATCH_ENDED_NAMESPACE
+
             private const val MESSAGE_ID_NAMESPACE = 0x10000000
             private const val NAMESPACE_MASK = -0x10000000 // 0xf0000000
-            private const val WATCH_ENDED_ID = 0x30000001
+            private const val WATCH_ENDED_NAMESPACE = 0x30000000
         }
     }
 

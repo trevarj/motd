@@ -470,6 +470,9 @@ data class TimelineEventEntity(
         } else {
             TimeProvenance.LOCAL_CLOCK
         },
+    /** Policy captured at ingestion; only the first LIVE/PUSH observation resolves it permanently. */
+    @ColumnInfo(defaultValue = "0") val notificationEligible: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val notificationEligibilityResolved: Boolean = false,
     /** Qualified under a watch at ingestion; recovery must not consult the current watch. */
     @ColumnInfo(defaultValue = "0") val notificationWatched: Boolean = false,
     val notificationHandled: Boolean = false,

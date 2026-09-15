@@ -167,7 +167,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40)
+                .addMigrations(*ALL_MIGRATIONS)
                 .build()
         try {
             migrated.openHelper.writableDatabase
@@ -237,7 +237,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40)
+                .addMigrations(*ALL_MIGRATIONS)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -311,7 +311,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40)
+                .addMigrations(*ALL_MIGRATIONS)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -388,7 +388,7 @@ class AllMigrationsTest {
         val migrated =
             Room
                 .databaseBuilder(context, MotdDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40)
+                .addMigrations(*ALL_MIGRATIONS)
                 .build()
         try {
             val sqlite = migrated.openHelper.writableDatabase
@@ -502,7 +502,6 @@ class AllMigrationsTest {
                             bufferId = 1,
                             afterTime = Long.MIN_VALUE,
                             afterEventId = Long.MIN_VALUE,
-                            queryRoom = false,
                             excludeEventId = -1,
                             limit = 10,
                         ).map { it.text },
@@ -546,10 +545,10 @@ class AllMigrationsTest {
         const val DB_NAME = "all-migrations-test.db"
 
         /**
-         * Mirrors `version = 40` on `@Database`. Room's annotation is CLASS-retained, so the
+         * Mirrors `version = 41` on `@Database`. Room's annotation is CLASS-retained, so the
          * declared version cannot be read reflectively; the exported schema JSON is the runtime
          * witness for it instead.
          */
-        const val DECLARED_VERSION = 40
+        const val DECLARED_VERSION = 41
     }
 }
