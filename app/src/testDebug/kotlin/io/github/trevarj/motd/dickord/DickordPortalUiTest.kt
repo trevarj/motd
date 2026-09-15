@@ -8,13 +8,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.test.assertContentDescriptionEquals
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -24,6 +27,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
+import androidx.test.platform.app.InstrumentationRegistry
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
@@ -74,6 +79,96 @@ class DickordPortalUiTest {
             assertEquals(listOf(11L, 21L), opened)
             assertEquals(DICKORD_PORTAL_DMS_KEY, state.value.selectedGroupKey)
         }
+    }
+
+    @Test
+    fun serverUnreadCountsAggregateUnmutedChannelsAndClearWhenRead() {
+        val initial = portalState()
+        val server = initial.groups.first { it.guildId == "100" }
+        val muted =
+            channel(13, 7, "Bridge A", "muted", "103", muted = true)
+                .let { it.copy(row = it.row.copy(unreadCountIncomplete = true, advertisedUnread = true)) }
+        val state =
+            render(
+                initial.copy(
+                    groups = initial.groups.map { if (it == server) it.copy(conversations = it.conversations + muted) else it },
+                ),
+            )
+        val resources = InstrumentationRegistry.getInstrumentation().targetContext.resources
+        val serverMatcher = hasAnyAncestor(hasTestTag("dickord_server_7_100"))
+        compose
+            .onNode(serverMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_unread, 4, 4)), useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose
+            .onNode(
+                hasAnyAncestor(hasTestTag("dickord_server_8_200")) and
+                    hasContentDescription(resources.getQuantityString(R.plurals.badge_unread, 2, 2)),
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
+
+        compose.runOnIdle {
+            state.value =
+                state.value.copy(
+                    groups =
+                        state.value.groups.map { group ->
+                            if (group.key != server.key) {
+                                group
+                            } else {
+                                group.copy(
+                                    conversations =
+                                        group.conversations.mapIndexed { index, conversation ->
+                                            conversation.copy(
+                                                row = conversation.row.copy(unreadCount = if (index == 0) 2 else 0, unreadCountIncomplete = index == 0),
+                                            )
+                                        },
+                                )
+                            }
+                        },
+                )
+        }
+        compose
+            .onNode(serverMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_unread_at_least, 2, 2)), useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose.runOnIdle {
+            state.value =
+                state.value.copy(
+                    groups =
+                        state.value.groups.map { group ->
+                            group.copy(conversations = group.conversations.map { it.copy(row = it.row.copy(unreadCount = 0, unreadCountIncomplete = true)) })
+                        },
+                )
+        }
+        val pendingMatcher = serverMatcher and hasContentDescription(resources.getString(R.string.badge_unread_pending))
+        compose.onNode(pendingMatcher, useUnmergedTree = true).assertIsDisplayed()
+        compose.runOnIdle {
+            state.value =
+                state.value.copy(
+                    groups =
+                        state.value.groups.map { group ->
+                            group.copy(
+                                conversations = group.conversations.map { it.copy(row = it.row.copy(unreadCountIncomplete = false, advertisedUnread = true)) },
+                            )
+                        },
+                )
+        }
+        compose.onNode(pendingMatcher, useUnmergedTree = true).assertIsDisplayed()
+        compose.runOnIdle {
+            state.value =
+                state.value.copy(
+                    groups =
+                        state.value.groups.map { group ->
+                            group.copy(
+                                conversations =
+                                    group.conversations.map {
+                                        if (it.row.muted) it else it.copy(row = it.row.copy(unreadCount = 0, unreadCountIncomplete = false, advertisedUnread = false))
+                                    },
+                            )
+                        },
+                )
+        }
+        compose.onNode(serverMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_unread_at_least, 2, 2)), useUnmergedTree = true).assertDoesNotExist()
+        compose.onNode(serverMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_unread, 0, 0)), useUnmergedTree = true).assertDoesNotExist()
+        compose.onNode(pendingMatcher, useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test
@@ -132,12 +227,12 @@ class DickordPortalUiTest {
         compose
             .onNodeWithTag("dickord_server_7_100")
             .assertHeightIsAtLeast(48.dp)
-            .assertContentDescriptionEquals("Example Server — Bridge A")
+            .assert(hasContentDescription("Example Server — Bridge A"))
             .performClick()
             .assertIsSelected()
         compose
             .onNodeWithTag("dickord_server_8_200")
-            .assertContentDescriptionEquals("Example Server — Bridge B")
+            .assert(hasContentDescription("Example Server — Bridge B"))
             .performClick()
             .assertIsSelected()
         compose.onAllNodesWithText("E", useUnmergedTree = true).assertCountEquals(2)

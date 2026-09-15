@@ -246,11 +246,23 @@ private fun DickordServerRail(
             ) {
                 items(groups.filter { it.guildId != null }, key = DickordPortalGroup::key) { group ->
                     val label = group.serverLabel(duplicateServerNames)
+                    var unreadCount = 0L
+                    var unreadIncomplete = false
+                    var advertisedUnread = false
+                    for (conversation in group.conversations) {
+                        if (conversation.row.muted) continue
+                        unreadCount += conversation.row.unreadCount
+                        unreadIncomplete = unreadIncomplete || conversation.row.unreadCountIncomplete
+                        advertisedUnread = advertisedUnread || conversation.row.advertisedUnread
+                    }
                     PortalRailAction(
                         label = label,
                         tag = "dickord_server_${group.networkId}_${group.guildId}",
                         selected = selectedKey == group.key,
                         onClick = { onSelectGroup(group.key) },
+                        unreadCount = unreadCount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                        unreadIncomplete = unreadIncomplete,
+                        advertisedUnread = advertisedUnread,
                     ) {
                         DickordServerArtwork(group = group, label = group.displayName.orEmpty())
                     }
@@ -279,6 +291,9 @@ private fun PortalRailAction(
     tag: String,
     selected: Boolean,
     onClick: () -> Unit,
+    unreadCount: Int = 0,
+    unreadIncomplete: Boolean = false,
+    advertisedUnread: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
     TooltipBox(
@@ -318,6 +333,17 @@ private fun PortalRailAction(
                 contentAlignment = Alignment.Center,
             ) {
                 Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center, content = content)
+            }
+            if (unreadCount > 0) {
+                UnreadBadge(
+                    count = unreadCount,
+                    lowerBound = unreadIncomplete,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 4.dp),
+                )
+            } else if (unreadIncomplete || advertisedUnread) {
+                AdvertisedActivityDot(
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 4.dp),
+                )
             }
         }
     }
