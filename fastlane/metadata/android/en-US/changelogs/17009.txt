@@ -1,0 +1,4 @@
+- Added scoped notification controls and settings category icons.
+- Improved Discord portals with server unread activity and group-DM icons; hid standalone Dickord audio links.
+- Fixed upload destinations staying current, including Soju uploads.
+- Fixed loaded profile pictures not replacing generated avatars.
