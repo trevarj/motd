@@ -231,11 +231,23 @@ private fun DickordServerRail(
         modifier = Modifier.width(72.dp).fillMaxHeight().testTag("dickord_server_rail"),
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            var dmUnreadCount = 0L
+            var dmUnreadIncomplete = false
+            var dmAdvertisedUnread = false
+            for (conversation in groups.firstOrNull { it.key == DICKORD_PORTAL_DMS_KEY }?.conversations.orEmpty()) {
+                if (conversation.row.muted) continue
+                dmUnreadCount += conversation.row.unreadCount
+                dmUnreadIncomplete = dmUnreadIncomplete || conversation.row.unreadCountIncomplete
+                dmAdvertisedUnread = dmAdvertisedUnread || conversation.row.advertisedUnread
+            }
             PortalRailAction(
                 label = dmsLabel,
                 tag = "dickord_group_dms",
                 selected = selectedKey == DICKORD_PORTAL_DMS_KEY,
                 onClick = { onSelectGroup(DICKORD_PORTAL_DMS_KEY) },
+                unreadCount = dmUnreadCount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                unreadIncomplete = dmUnreadIncomplete,
+                advertisedUnread = dmAdvertisedUnread,
             ) {
                 Icon(Icons.Outlined.Forum, contentDescription = null)
             }

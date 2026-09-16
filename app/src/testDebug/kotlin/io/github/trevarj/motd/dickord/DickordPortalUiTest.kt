@@ -172,6 +172,56 @@ class DickordPortalUiTest {
     }
 
     @Test
+    fun dmUnreadCountsAggregateUnmutedConversationsAndClearWhenRead() {
+        val initial = portalState()
+        val alice = dm(21, 7, "Bridge A", "Alice Smith", "301")
+        val bob = dm(22, 8, "Bridge B", "Bob", "302")
+        val muted =
+            dm(23, 7, "Bridge A", "Muted", "303")
+                .let { it.copy(row = it.row.copy(muted = true, unreadCountIncomplete = true, advertisedUnread = true)) }
+        val state =
+            render(
+                initial.copy(
+                    groups = initial.groups.map { if (it.key == DICKORD_PORTAL_DMS_KEY) dmsGroup(alice, bob, muted) else it },
+                ),
+            )
+
+        fun updateDms(vararg conversations: DickordPortalConversation) {
+            compose.runOnIdle {
+                state.value =
+                    state.value.copy(
+                        groups = state.value.groups.map { if (it.key == DICKORD_PORTAL_DMS_KEY) dmsGroup(*conversations, muted) else it },
+                    )
+            }
+        }
+        val resources = InstrumentationRegistry.getInstrumentation().targetContext.resources
+        val dmMatcher = hasAnyAncestor(hasTestTag("dickord_group_dms"))
+        val countMatcher = dmMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_unread, 4, 4))
+        val lowerBoundMatcher = dmMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_unread_at_least, 4, 4))
+        val pendingMatcher = dmMatcher and hasContentDescription(resources.getString(R.string.badge_unread_pending))
+        compose.onNode(countMatcher, useUnmergedTree = true).assertIsDisplayed()
+
+        updateDms(alice, bob.copy(row = bob.row.copy(unreadCountIncomplete = true)))
+        compose.onNode(lowerBoundMatcher, useUnmergedTree = true).assertIsDisplayed()
+
+        val readAlice = alice.copy(row = alice.row.copy(unreadCount = 0))
+        val readBob = bob.copy(row = bob.row.copy(unreadCount = 0))
+        updateDms(readAlice, readBob.copy(row = readBob.row.copy(unreadCountIncomplete = true)))
+        compose.onNode(pendingMatcher, useUnmergedTree = true).assertIsDisplayed()
+
+        updateDms(readAlice, readBob.copy(row = readBob.row.copy(advertisedUnread = true)))
+        compose.onNode(pendingMatcher, useUnmergedTree = true).assertIsDisplayed()
+
+        updateDms(readAlice, readBob)
+        compose.onNode(countMatcher, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNode(lowerBoundMatcher, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNode(pendingMatcher, useUnmergedTree = true).assertDoesNotExist()
+        compose
+            .onNode(dmMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_unread_at_least, 2, 2)), useUnmergedTree = true)
+            .assertDoesNotExist()
+    }
+
+    @Test
     fun portalChromeSpansBothPanesAndKeepsActionsInsideSafeBounds() {
         var safeTop = 0.dp
         var safeBottom = 0.dp
