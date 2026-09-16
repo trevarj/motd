@@ -19,9 +19,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -33,23 +37,32 @@ import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.UiDispatcherResetRule
+import io.github.trevarj.motd.attachment.AVAILABLE_ATTACHMENT_BACKENDS
+import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.AttachmentUploader
 import io.github.trevarj.motd.attachment.PasteBackendConfig
+import io.github.trevarj.motd.attachment.SOJU_FILEHOST_TOKEN
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
+import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
+import io.github.trevarj.motd.audio.AudioWaveform
+import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -156,6 +169,82 @@ class AttachmentConfirmationSheetUiTest {
     }
 
     @Test
+    fun dickordPhotoUsesLateFileHostAdvertisementAndPreservesExplicitDestination() {
+        var connection by mutableStateOf(IrcClientState.Ready("me", emptySet(), emptyMap()))
+        showConditionalAttachments(
+            sojuFileHostAvailable = { sojuFileHostAdvertised(connection.isupport) },
+            preferSojuFileHost = true,
+        )
+        compose.onNodeWithText(context.getString(R.string.upload_photo)).performScrollTo().performClick()
+        compose.onNodeWithTag("attachment_photos_browse").performClick()
+        returnFromFilePicker(Uri.parse("content://attachments/dickord-photo.jpg"))
+        compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).assertIsDisplayed()
+
+        compose.runOnIdle {
+            connection = connection.copy(isupport = mapOf(SOJU_FILEHOST_TOKEN to "https://irc.example/uploads"))
+        }
+        compose.onNodeWithText(AttachmentBackend.SOJU_FILEHOST.label).assertIsDisplayed()
+        compose.onNodeWithTag("attachment_upload").assertIsEnabled()
+
+        compose.onNodeWithText(context.getString(R.string.upload_destination_change)).performClick()
+        compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).performScrollTo().performClick()
+        compose.runOnIdle { connection = connection.copy(isupport = emptyMap()) }
+        compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).assertIsDisplayed()
+        compose.runOnIdle {
+            connection = connection.copy(isupport = mapOf(SOJU_FILEHOST_TOKEN to "https://irc.example/uploads"))
+        }
+        compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).assertIsDisplayed()
+
+        compose.onNodeWithText(context.getString(R.string.upload_destination_change)).performClick()
+        compose.onNodeWithText(AttachmentBackend.SOJU_FILEHOST.label).performScrollTo().performClick()
+        compose.onNodeWithText(AttachmentBackend.SOJU_FILEHOST.label).assertIsDisplayed()
+        compose.onNodeWithTag("attachment_upload").assertIsEnabled()
+        compose.onNodeWithText(AttachmentBackend.TERMBIN.label).assertDoesNotExist()
+    }
+
+    @Test
+    fun voiceDestinationsOfferEveryBinaryBackendOnceAndSelectDefaultSoju() {
+        val config = PasteBackendConfig()
+        var selected: PasteBackendConfig? = config
+        compose.setContent {
+            MotdTheme {
+                VoiceDestinationSheet(
+                    staged =
+                        StagedVoiceMessage(
+                            file = File("voice.ogg"),
+                            durationMs = 1_000,
+                            mimeType = "audio/ogg",
+                            extension = "ogg",
+                            sizeBytes = 1,
+                            encrypted = false,
+                            destination = config,
+                            waveform = AudioWaveform.EMPTY,
+                        ),
+                    config = config,
+                    onSelect = { selected = it },
+                    onDismiss = {},
+                )
+            }
+        }
+
+        val offered =
+            compose
+                .onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag("voice_destination_sheet")))
+                .fetchSemanticsNodes()
+                .map { it.config[SemanticsProperties.Text].first().text }
+        assertEquals(
+            AVAILABLE_ATTACHMENT_BACKENDS.filter { it.acceptsBinary }.associate { it.label to 1 },
+            offered.groupingBy { it }.eachCount(),
+        )
+        compose
+            .onNodeWithText(AttachmentBackend.SOJU_FILEHOST.label)
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        compose.runOnIdle { assertNull(selected) }
+    }
+
+    @Test
     fun photoKeepsUploadActionVisible() {
         val file =
             ApplicationProvider
@@ -188,6 +277,8 @@ class AttachmentConfirmationSheetUiTest {
     private fun showConditionalAttachments(
         currentDraft: String = "",
         directFileTransferAvailable: Boolean = false,
+        sojuFileHostAvailable: () -> Boolean = { false },
+        preferSojuFileHost: Boolean = false,
     ) {
         val viewModel =
             AttachmentViewModel(
@@ -233,7 +324,8 @@ class AttachmentConfirmationSheetUiTest {
                                 open = open,
                                 currentDraft = currentDraft,
                                 networkId = null,
-                                sojuFileHostAvailable = false,
+                                sojuFileHostAvailable = sojuFileHostAvailable(),
+                                preferSojuFileHost = preferSojuFileHost,
                                 directFileTransferAvailable = directFileTransferAvailable,
                                 onDismiss = { open = false },
                                 onInsertUrl = {},

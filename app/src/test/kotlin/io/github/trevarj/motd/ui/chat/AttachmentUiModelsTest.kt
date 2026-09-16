@@ -5,40 +5,40 @@ import io.github.trevarj.motd.attachment.AVAILABLE_ATTACHMENT_BACKENDS
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.PasteBackendConfig
+import io.github.trevarj.motd.attachment.forBackend
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 class AttachmentUiModelsTest {
-    @Test fun textOffersTermbinAndCompatibleDestinations() {
-        val options = uploadDestinations(AttachmentSource.Text("hello"), PasteBackendConfig())
-        assertEquals(
-            AVAILABLE_ATTACHMENT_BACKENDS.filterNot { it == AttachmentBackend.SOJU_FILEHOST }.map { it.label },
-            options.map { it.label },
-        )
-    }
-
-    @Test fun sojuFileHostIsOnlyOfferedWhenAdvertised() {
-        val source = AttachmentSource.Text("hello")
-        assertFalse(
-            uploadDestinations(source, PasteBackendConfig()).any {
-                it.config.backend == AttachmentBackend.SOJU_FILEHOST
-            },
-        )
-        assertTrue(
-            uploadDestinations(source, PasteBackendConfig(), sojuFileHostAvailable = true).any {
-                it.config.backend == AttachmentBackend.SOJU_FILEHOST
-            },
-        )
-    }
-
-    @Test fun filesNeverOfferTermbin() {
-        val source = AttachmentSource.Document(Uri.EMPTY, "file.bin", null, null)
-        assertFalse(uploadDestinations(source, PasteBackendConfig()).any { it.label == "Termbin" })
+    @Test fun everySourceOffersEachCompatibleDestinationExactlyOnce() {
+        val sources =
+            listOf(
+                AttachmentSource.Text("hello"),
+                AttachmentSource.Photo(Uri.EMPTY, "photo.jpg", "image/jpeg", 1),
+                AttachmentSource.Document(Uri.EMPTY, "file.bin", "application/octet-stream", 1),
+                AttachmentSource.LocalFile(File("capture.jpg"), "capture.jpg", "image/jpeg", 1),
+                AttachmentSource.LocalFile(File("voice.ogg"), "voice.ogg", "audio/ogg", 1),
+            )
+        for (source in sources) {
+            for (sojuAvailable in listOf(false, true)) {
+                val expected =
+                    AVAILABLE_ATTACHMENT_BACKENDS.filterNot {
+                        it == AttachmentBackend.SOJU_FILEHOST && !sojuAvailable ||
+                            it == AttachmentBackend.TERMBIN && source !is AttachmentSource.Text
+                    }
+                val offered = uploadDestinations(source, PasteBackendConfig(), sojuAvailable).map { it.config.backend }
+                assertEquals(
+                    "$source, sojuAvailable=$sojuAvailable",
+                    expected.associateWith { 1 },
+                    offered.groupingBy { it }.eachCount(),
+                )
+            }
+        }
     }
 
     @Test fun configuredCustomEndpointIsAvailable() {
@@ -72,11 +72,21 @@ class AttachmentUiModelsTest {
         val configured = PasteBackendConfig(backend = AttachmentBackend.CRAFTERBIN)
         val photo = AttachmentSource.Photo(Uri.EMPTY, "photo.jpg", "image/jpeg", 1)
         val document = AttachmentSource.Document(Uri.EMPTY, "file.bin", "application/octet-stream", 1)
+        val camera = AttachmentSource.LocalFile(File("capture.jpg"), "capture.jpg", "image/jpeg", 1)
 
-        listOf(photo, document).forEach { source ->
+        listOf(photo, document, camera).forEach { source ->
             assertEquals(
                 AttachmentBackend.SOJU_FILEHOST,
                 preferredUploadConfig(source, configured, sojuFileHostAvailable = true, preferSojuFileHost = true).backend,
+            )
+            assertEquals(
+                AttachmentBackend.CRAFTERBIN,
+                preferredUploadConfig(
+                    source,
+                    configured.forBackend(AttachmentBackend.TERMBIN),
+                    sojuFileHostAvailable = false,
+                    preferSojuFileHost = true,
+                ).backend,
             )
         }
         assertEquals(

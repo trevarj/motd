@@ -47,6 +47,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
@@ -166,6 +168,7 @@ import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
@@ -4279,26 +4282,33 @@ internal fun VoiceComposerPanel(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun VoiceDestinationSheet(
+internal fun VoiceDestinationSheet(
     staged: StagedVoiceMessage,
     config: io.github.trevarj.motd.attachment.PasteBackendConfig,
     onSelect: (io.github.trevarj.motd.attachment.PasteBackendConfig?) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
         SheetSystemBars()
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .testTag("voice_destination_sheet"),
+        ) {
             Text("Voice destination", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-            androidx.compose.material3.ListItem(
-                headlineContent = { Text("Soju file host", fontWeight = FontWeight.SemiBold) },
-                supportingContent = { Text("Use the file host advertised by this IRC network") },
-                modifier = Modifier.clickable { onSelect(null) },
-            )
-            uploadDestinations(staged.source, config).forEach { destination ->
+            uploadDestinations(staged.source, config, sojuFileHostAvailable = true).forEach { destination ->
+                val soju = destination.config.backend == AttachmentBackend.SOJU_FILEHOST
                 androidx.compose.material3.ListItem(
                     headlineContent = { Text(destination.label, fontWeight = FontWeight.SemiBold) },
-                    supportingContent = { Text(backendRetention(destination.config)) },
-                    modifier = Modifier.clickable { onSelect(destination.config) },
+                    supportingContent = {
+                        Text(if (soju) "Use the file host advertised by this IRC network" else backendRetention(destination.config))
+                    },
+                    modifier = Modifier.clickable { onSelect(destination.config.takeUnless { soju }) },
                 )
             }
             Spacer(Modifier.height(20.dp))

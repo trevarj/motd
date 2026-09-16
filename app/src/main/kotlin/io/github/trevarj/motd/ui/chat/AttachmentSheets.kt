@@ -132,7 +132,8 @@ private sealed interface AttachmentFlow {
     data class Confirm(
         val source: AttachmentSource,
         val replaceDraft: Boolean,
-        val config: PasteBackendConfig,
+        // Follow live preferences and FILEHOST until the user explicitly chooses a destination.
+        val config: PasteBackendConfig? = null,
     ) : AttachmentFlow
 }
 
@@ -167,10 +168,18 @@ internal fun preferredUploadConfig(
     sojuFileHostAvailable: Boolean,
     preferSojuFileHost: Boolean,
 ): PasteBackendConfig =
-    if (preferSojuFileHost && sojuFileHostAvailable && source !is AttachmentSource.Text) {
-        configured.forBackend(AttachmentBackend.SOJU_FILEHOST)
-    } else {
-        configured
+    when {
+        preferSojuFileHost && sojuFileHostAvailable && source !is AttachmentSource.Text -> {
+            configured.forBackend(AttachmentBackend.SOJU_FILEHOST)
+        }
+
+        !configured.backend.supports(source) -> {
+            configured.forBackend(AttachmentBackend.CRAFTERBIN)
+        }
+
+        else -> {
+            configured
+        }
     }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -230,17 +239,7 @@ fun AttachmentSheets(
         capturePath?.let(::File)?.let { captured ->
             if (captured.length() > 0L) {
                 val source = AttachmentSource.LocalFile(captured, captured.name, "image/jpeg", captured.length())
-                flow =
-                    AttachmentFlow.Confirm(
-                        source,
-                        false,
-                        preferredUploadConfig(
-                            source = source,
-                            configured = defaultConfig,
-                            sojuFileHostAvailable = sojuFileHostAvailable,
-                            preferSojuFileHost = preferSojuFileHost,
-                        ),
-                    )
+                flow = AttachmentFlow.Confirm(source, false)
             } else {
                 captured.delete()
                 capturePath = null
@@ -260,15 +259,11 @@ fun AttachmentSheets(
                         } else {
                             AttachmentSource.Document(sharedFile.uri, meta.first, mime, meta.second)
                         }
-                    AttachmentFlow.Confirm(
-                        source,
-                        false,
-                        preferredUploadConfig(source, defaultConfig, sojuFileHostAvailable, preferSojuFileHost),
-                    )
+                    AttachmentFlow.Confirm(source, false)
                 }
 
                 startWithCurrentDraft && currentDraft.isNotBlank() -> {
-                    AttachmentFlow.Confirm(AttachmentSource.Text(currentDraft), true, defaultConfig)
+                    AttachmentFlow.Confirm(AttachmentSource.Text(currentDraft), true)
                 }
 
                 else -> {
@@ -293,20 +288,24 @@ fun AttachmentSheets(
             } else {
                 AttachmentSource.Document(uri, meta.first, context.contentResolver.getType(uri), meta.second)
             }
-        flow =
-            AttachmentFlow.Confirm(
-                source,
-                false,
-                preferredUploadConfig(source, defaultConfig, sojuFileHostAvailable, preferSojuFileHost),
-            )
+        flow = AttachmentFlow.Confirm(source, false)
     }
 
+    fun uploadConfig(request: AttachmentFlow.Confirm): PasteBackendConfig =
+        request.config ?: preferredUploadConfig(
+            request.source,
+            defaultConfig,
+            sojuFileHostAvailable,
+            preferSojuFileHost,
+        )
+
     fun startUpload(request: AttachmentFlow.Confirm) {
-        lastAttempt = request
+        val config = uploadConfig(request)
+        lastAttempt = request.copy(config = config)
         flow = AttachmentFlow.Idle
         viewModel.upload(
             request.source,
-            request.config,
+            config,
             AttachmentUploadContext(networkId),
         ) { record ->
             if (request.replaceDraft) onReplaceDraft(record.url) else onInsertUrl(record.url)
@@ -343,12 +342,7 @@ fun AttachmentSheets(
                 return@rememberLauncherForActivityResult
             }
             val source = AttachmentSource.LocalFile(file, file.name, "image/jpeg", file.length())
-            flow =
-                AttachmentFlow.Confirm(
-                    source,
-                    false,
-                    preferredUploadConfig(source, defaultConfig, sojuFileHostAvailable, preferSojuFileHost),
-                )
+            flow = AttachmentFlow.Confirm(source, false)
         }
 
     fun launchCamera() {
@@ -396,7 +390,7 @@ fun AttachmentSheets(
                     directFilePicker.launch(arrayOf("*/*"))
                 },
                 onCurrentDraft = {
-                    flow = AttachmentFlow.Confirm(AttachmentSource.Text(currentDraft), true, defaultConfig)
+                    flow = AttachmentFlow.Confirm(AttachmentSource.Text(currentDraft), true)
                 },
                 onNewText = {
                     pasteText = ""
@@ -433,17 +427,7 @@ fun AttachmentSheets(
                 },
                 onPhoto = { photo ->
                     val source = AttachmentSource.Photo(photo.uri, photo.name, photo.mimeType, photo.size)
-                    flow =
-                        AttachmentFlow.Confirm(
-                            source,
-                            false,
-                            preferredUploadConfig(
-                                source = source,
-                                configured = defaultConfig,
-                                sojuFileHostAvailable = sojuFileHostAvailable,
-                                preferSojuFileHost = preferSojuFileHost,
-                            ),
-                        )
+                    flow = AttachmentFlow.Confirm(source, false)
                 },
                 onDismiss = { flow = AttachmentFlow.Sources },
             )
@@ -455,7 +439,7 @@ fun AttachmentSheets(
                 onTextChange = { pasteText = it },
                 onDismiss = ::closeSourceSheet,
                 onContinue = {
-                    flow = AttachmentFlow.Confirm(AttachmentSource.Text(pasteText), false, defaultConfig)
+                    flow = AttachmentFlow.Confirm(AttachmentSource.Text(pasteText), false)
                 },
             )
         }
@@ -463,7 +447,7 @@ fun AttachmentSheets(
         is AttachmentFlow.Confirm -> {
             ConfirmationSheet(
                 source = current.source,
-                config = current.config,
+                config = uploadConfig(current),
                 sojuFileHostAvailable = sojuFileHostAvailable,
                 onChangeDestination = {
                     backendPickerRequest = current
@@ -481,7 +465,7 @@ fun AttachmentSheets(
     backendPickerRequest?.let { request ->
         BackendPickerSheet(
             source = request.source,
-            config = request.config,
+            config = uploadConfig(request),
             sojuFileHostAvailable = sojuFileHostAvailable,
             onSelect = { selected ->
                 flow = request.copy(config = selected)
