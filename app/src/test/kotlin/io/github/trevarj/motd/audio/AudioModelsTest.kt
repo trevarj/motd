@@ -89,6 +89,35 @@ class AudioModelsTest {
         assertEquals("before $text", displayTextForAudioMessage("before $text", attachments))
     }
 
+    @Test fun hidesStandaloneAudioUrlOnlyWhenRequested() {
+        val url = "https://files.example/clip.mp3"
+        val attachments = parseAudioAttachments(url)
+
+        assertEquals(url, displayTextForAudioMessage(url, attachments))
+        assertEquals("", displayTextForAudioMessage(url, attachments, suppressStandaloneUrl = true))
+        assertEquals("", displayTextForAudioMessage(" \n$url\t ", attachments, suppressStandaloneUrl = true))
+        listOf("listen $url", "$url caption", "`$url`", "$url $url").forEach { text ->
+            assertEquals(text, displayTextForAudioMessage(text, attachments, suppressStandaloneUrl = true))
+        }
+        assertEquals(url, displayTextForAudioMessage(url, emptyList(), suppressStandaloneUrl = true))
+        assertEquals(
+            url,
+            displayTextForAudioMessage(
+                url,
+                attachments + AudioAttachment("https://files.example/other.mp3"),
+                suppressStandaloneUrl = true,
+            ),
+        )
+        assertEquals(
+            url,
+            displayTextForAudioMessage(
+                url,
+                listOf(AudioAttachment("https://files.example/other.mp3")),
+                suppressStandaloneUrl = true,
+            ),
+        )
+    }
+
     @Test fun findsOnlyExtensionlessHttpsHeadCandidates() {
         val candidates =
             extensionlessAudioCandidates(

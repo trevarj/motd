@@ -241,6 +241,44 @@ class MessageTimelineUiTest {
     }
 
     @Test
+    fun dickordStandaloneAudioRendersOnlyThePlayer() {
+        val url = "https://files.example/clip.mp3"
+        val row = message(1, 100, MessageKind.PRIVMSG, url)
+        render(
+            flowOf(PagingData.from(listOf(row))),
+            dickordEnabled = true,
+            conversationName = "#discord.me.chat.alice",
+            directMessage = true,
+            richContentReady = true,
+        )
+
+        scrollTo(messageTag(row.id))
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithText(url, useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun standaloneAudioKeepsUrlWhileDickordIsDisabled() {
+        val url = "https://files.example/clip.mp3"
+        val row = message(1, 100, MessageKind.PRIVMSG, url)
+        render(
+            flowOf(PagingData.from(listOf(row))),
+            conversationName = "#discord.me.chat.alice",
+            richContentReady = true,
+        )
+
+        scrollTo(messageTag(row.id))
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithText(url, useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
     fun dickordModeCleansTimelineLabelsAndAudioOrigin() {
         val expanded =
             message(2, 400_000, MessageKind.PRIVMSG, "listen https://files.example/clip.mp3")
@@ -277,6 +315,7 @@ class MessageTimelineUiTest {
         compose.waitUntil(10_000) {
             compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
+        compose.onNodeWithText(expanded.text, useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Download audio", useUnmergedTree = true).performClick()
         compose.runOnIdle { assertEquals("Alice", played?.origin?.sender) }
 
@@ -387,6 +426,7 @@ class MessageTimelineUiTest {
         onReplyPreviewClick: (ReplyTarget) -> Unit = {},
         dickordEnabled: Boolean = false,
         conversationName: String? = null,
+        directMessage: Boolean = false,
         richContentReady: Boolean = false,
         fools: Set<String> = emptySet(),
         foolExpanded: (Long) -> Boolean = { false },
@@ -401,6 +441,7 @@ class MessageTimelineUiTest {
                         networkId = 1,
                         bufferId = 1,
                         conversationName = conversationName,
+                        directMessage = directMessage,
                         readMarkerTime = marker,
                         onLongPress = {},
                         onReply = {},

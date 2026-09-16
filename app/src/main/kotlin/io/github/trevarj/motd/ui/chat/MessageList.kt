@@ -90,6 +90,7 @@ import io.github.trevarj.motd.audio.CachedAudioMetadata
 import io.github.trevarj.motd.audio.displayTextForAudioMessage
 import io.github.trevarj.motd.audio.extensionlessAudioCandidates
 import io.github.trevarj.motd.audio.toAttachment
+import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.DccDirection
 import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.DccTransferProtocol
@@ -109,6 +110,7 @@ import io.github.trevarj.motd.dcc.dccEndpointRisk
 import io.github.trevarj.motd.dcc.resolveDccAddress
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.dickord.dickordNickLabel
+import io.github.trevarj.motd.dickord.isDickordPortalConversation
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.DaySeparator
@@ -1586,15 +1588,17 @@ private fun MessageRow(
         remember(immediateAudio, headAudio) {
             (immediateAudio + headAudio).distinctBy { it.url }
         }
+    val suppressStandaloneAudioUrl =
+        dickordEnabled && conversationName != null &&
+            isDickordPortalConversation(BufferType.CHANNEL, conversationName)
     val messageText =
-        remember(msg.text, audioAttachments) {
-            displayTextForAudioMessage(msg.text, audioAttachments)
+        remember(msg.text, audioAttachments, suppressStandaloneAudioUrl) {
+            displayTextForAudioMessage(msg.text, audioAttachments, suppressStandaloneAudioUrl)
         }
     val renderedMessageText =
         if (messageText == msg.text) msg.ircFormattedText ?: messageText else messageText
-    val standaloneVoice =
-        audioAttachments.size == 1 && audioAttachments.single().voice &&
-            messageText.isBlank() && reply == null
+    val standaloneAudio =
+        audioAttachments.size == 1 && messageText.isBlank() && reply == null
 
     // A cached completion is rendered synchronously even while scrolling. A cache miss waits for
     // idle, then joins the repository's process-owned single-flight fetch. Null is a definitive
@@ -1741,10 +1745,10 @@ private fun MessageRow(
                 }
             }
             if (headCandidates.isNotEmpty()) {
-                // An extensionless URL may resolve into a standalone voice message after HEAD
+                // An extensionless URL may resolve into standalone audio after HEAD
                 // metadata arrives. Shrink the provisional bubble while the player grows.
                 AnimatedVisibility(
-                    visible = !standaloneVoice,
+                    visible = !standaloneAudio,
                     enter =
                         expandVertically(
                             animationSpec = MotdMotion.contentSize,
@@ -1758,7 +1762,7 @@ private fun MessageRow(
                 ) {
                     messageBubble()
                 }
-            } else if (!standaloneVoice) {
+            } else if (!standaloneAudio) {
                 messageBubble()
             }
             val audioOrigin =
@@ -1789,7 +1793,7 @@ private fun MessageRow(
                 cacheStatuses = audioCacheStatuses,
                 networkId = networkId,
                 isSelf = msg.isSelf,
-                formattedTime = if (standaloneVoice) formattedTime else null,
+                formattedTime = if (standaloneAudio) formattedTime else null,
                 pending = msg.pendingLabel != null,
                 failed = msg.failed,
                 origin = audioOrigin,
@@ -1804,7 +1808,7 @@ private fun MessageRow(
                 onInspectCache = onAudioCacheInspect,
                 onSeek = onAudioSeek,
                 onLongPress = { onLongPress(msg) },
-                reactions = if (standaloneVoice) reactions else emptyList(),
+                reactions = if (standaloneAudio) reactions else emptyList(),
                 onReact = { emoji -> onReact(msg, emoji) },
             )
         }
