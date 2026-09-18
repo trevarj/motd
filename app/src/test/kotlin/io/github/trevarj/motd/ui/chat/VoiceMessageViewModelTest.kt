@@ -384,6 +384,44 @@ class VoiceMessageViewModelTest {
         }
 
     @Test
+    fun `linked OGG reaches transcription without voice metadata`() =
+        voiceTest {
+            val harness = Harness()
+            val vm = fixture(harness)
+            val attachment = AudioAttachment(url = "https://files.test/song.ogg")
+            val request = request(attachment.url).copy(attachment = attachment)
+
+            vm.transcribe(request)
+            advanceUntilIdle()
+
+            assertEquals(listOf(request), harness.materializedRequests)
+            assertEquals(1, harness.nativeCalls)
+            assertEquals(
+                VoiceTranscriptState.Ready("transcribed", cached = false),
+                vm.state.value.transcripts[attachment.playbackId],
+            )
+            assertTrue(harness.createdFiles.none(File::exists))
+        }
+
+    @Test
+    fun `ordinary non OGG audio is rejected before materialization`() =
+        voiceTest {
+            val harness = Harness()
+            val vm = fixture(harness)
+            val attachment = AudioAttachment(url = "https://files.test/song.mp3")
+
+            vm.transcribe(request(attachment.url).copy(attachment = attachment))
+            advanceUntilIdle()
+
+            assertEquals(
+                VoiceTranscriptState.Failed(VoiceTranscriptFailureKind.INVALID_AUDIO),
+                vm.state.value.transcripts[attachment.playbackId],
+            )
+            assertTrue(harness.materializedRequests.isEmpty())
+            assertEquals(0, harness.nativeCalls)
+        }
+
+    @Test
     fun `cache hits preserve received and self stored URL request identity`() =
         voiceTest {
             val harness = Harness().apply { cachedText = "already local" }

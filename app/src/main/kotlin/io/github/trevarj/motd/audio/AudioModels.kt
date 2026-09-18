@@ -61,6 +61,11 @@ data class AudioAttachment(
     val waveform: AudioWaveform? = audioWaveformFromUrl(url),
 ) {
     val playbackId: String = "${if (voice) "voice" else "audio"}:$url"
+    val supportsTranscription: Boolean
+        get() =
+            voice ||
+                mimeType?.substringBefore(';')?.trim().equals("audio/ogg", ignoreCase = true) ||
+                audioMimeTypeForUrl(url) == "audio/ogg"
 }
 
 data class AudioMetadata(

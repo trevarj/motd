@@ -528,7 +528,7 @@ fun AudioDetailsSheet(
                 Text("Save")
             }
         }
-        if (attachment.voice && transcriptionEnabled) {
+        if (attachment.supportsTranscription && transcriptionEnabled) {
             Spacer(Modifier.height(8.dp))
             VoiceTranscriptionDetails(
                 ready = transcriptionReady,

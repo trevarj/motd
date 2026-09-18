@@ -447,8 +447,9 @@ class VoiceMessageViewModel
             val configuration = transcriptionConfiguration
             val modelId = configuration.modelId
             val settings = configuration.settings
+            val supportsTranscription = request.attachment.supportsTranscription
             if (
-                !request.attachment.voice ||
+                !supportsTranscription ||
                 !configuration.ready ||
                 modelId == null ||
                 settings == null
@@ -463,7 +464,7 @@ class VoiceMessageViewModel
                                         (
                                             playbackId to
                                                 VoiceTranscriptState.Failed(
-                                                    if (request.attachment.voice) {
+                                                    if (supportsTranscription) {
                                                         VoiceTranscriptFailureKind.FEATURE_UNAVAILABLE
                                                     } else {
                                                         VoiceTranscriptFailureKind.INVALID_AUDIO

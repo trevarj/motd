@@ -222,8 +222,34 @@ class AudioPlayerUiTest {
     }
 
     @Test
-    fun transcription_is_hidden_for_non_voice_audio() {
-        showDetails(audio(), transcriptionEnabled = true, transcriptionReady = true)
+    fun linked_ogg_audio_can_request_transcription() {
+        val attachment = audio()
+        val origin = audioOrigin(isSelf = false)
+        var request: AudioPlaybackRequest? = null
+        var force = true
+        showDetails(
+            attachment = attachment,
+            origin = origin,
+            onTranscribe = { value, rerun ->
+                request = value
+                force = rerun
+            },
+        )
+
+        compose.onNodeWithTag("audio_transcription_start").performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals(AudioPlaybackRequest(attachment, 7, origin), request)
+            assertFalse(force)
+        }
+    }
+
+    @Test
+    fun transcription_is_hidden_for_non_voice_non_ogg_audio() {
+        showDetails(
+            AudioAttachment(url = "https://files.example/song.mp3"),
+            transcriptionEnabled = true,
+            transcriptionReady = true,
+        )
 
         compose.onNodeWithTag("audio_transcription_section").assertDoesNotExist()
     }
