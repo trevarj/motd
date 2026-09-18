@@ -1,0 +1,3 @@
+- Added an unread badge for Dickord direct messages.
+- Added local transcription for linked OGG audio files.
+- Fixed duplicate audio links in wrapped Dickord messages.
