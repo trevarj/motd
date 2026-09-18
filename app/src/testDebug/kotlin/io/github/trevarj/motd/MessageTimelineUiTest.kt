@@ -241,9 +241,9 @@ class MessageTimelineUiTest {
     }
 
     @Test
-    fun dickordStandaloneAudioRendersOnlyThePlayer() {
-        val url = "https://files.example/clip.mp3"
-        val row = message(1, 100, MessageKind.PRIVMSG, url)
+    fun dickordWrappedStandaloneAudioRendersOnlyThePlayer() {
+        val url = "https://files.example/voice.ogg"
+        val row = message(1, 100, MessageKind.PRIVMSG, "<$url>")
         render(
             flowOf(PagingData.from(listOf(row))),
             dickordEnabled = true,
@@ -257,7 +257,7 @@ class MessageTimelineUiTest {
             compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).assertCountEquals(1)
-        compose.onNodeWithText(url, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test

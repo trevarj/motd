@@ -118,6 +118,20 @@ class AudioModelsTest {
         )
     }
 
+    @Test fun hidesWrappedStandaloneAudioUrlOnlyWhenRequested() {
+        val url = "https://files.example/voice.ogg"
+        val wrapped = "<$url>"
+        val attachments = parseAudioAttachments(wrapped)
+
+        assertEquals(listOf(url), attachments.map { it.url })
+        assertEquals(wrapped, displayTextForAudioMessage(wrapped, attachments))
+        assertEquals("", displayTextForAudioMessage(wrapped, attachments, suppressStandaloneUrl = true))
+        val caption = "listen $wrapped"
+        assertEquals(caption, displayTextForAudioMessage(caption, attachments, suppressStandaloneUrl = true))
+        val mismatch = "<https://files.example/other.ogg>"
+        assertEquals(mismatch, displayTextForAudioMessage(mismatch, attachments, suppressStandaloneUrl = true))
+    }
+
     @Test fun findsOnlyExtensionlessHttpsHeadCandidates() {
         val candidates =
             extensionlessAudioCandidates(
