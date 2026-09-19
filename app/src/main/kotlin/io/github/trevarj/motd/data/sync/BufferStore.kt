@@ -344,6 +344,7 @@ class BufferStore
                             historyDiscardedThroughTime = discardedBoundary?.historyDiscardedThroughTime,
                             layoutDensityOverride = winner.layoutDensityOverride ?: loser.layoutDensityOverride,
                             presenceModeOverride = winner.presenceModeOverride ?: loser.presenceModeOverride,
+                            historySyncModeOverride = winner.historySyncModeOverride ?: loser.historySyncModeOverride,
                             avatarOverrideModel = winner.avatarOverrideModel ?: loser.avatarOverrideModel,
                             folderId = winner.folderId ?: loser.folderId,
                         )

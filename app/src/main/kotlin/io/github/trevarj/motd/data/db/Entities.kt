@@ -6,6 +6,7 @@ import androidx.room.ForeignKey
 import androidx.room.Fts4
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -318,6 +319,8 @@ data class RoomEntity(
     val layoutDensityOverride: LayoutDensity? = null,
     /** Null inherits the global presence-event preference for this durable conversation. */
     val presenceModeOverride: PresenceMode? = null,
+    /** Null inherits the global history-sync policy; explicit BALANCED remains an override. */
+    val historySyncModeOverride: HistorySyncMode? = null,
     /** User-selected HTTPS URL or app-owned file URI. SERVER rooms always leave this null. */
     val avatarOverrideModel: String? = null,
     /** Local-only flat folder assignment. Pinned rows temporarily escape presentation only. */

@@ -13,6 +13,7 @@ import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistoryRetention
 import io.github.trevarj.motd.data.prefs.HistorySyncDepth
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -228,6 +229,8 @@ class HistoryPrunerTest {
         override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
 
         override suspend fun setHistorySyncDepth(d: HistorySyncDepth) = Unit
+
+        override suspend fun setHistorySyncMode(mode: HistorySyncMode): Unit = error("Unexpected history sync mode write")
 
         override suspend fun setAutoAwayEnabled(enabled: Boolean) = Unit
 

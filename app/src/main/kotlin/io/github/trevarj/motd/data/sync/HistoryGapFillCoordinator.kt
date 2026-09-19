@@ -15,6 +15,8 @@ import io.github.trevarj.motd.data.history.Pageability
 import io.github.trevarj.motd.data.history.newestPageableGap
 import io.github.trevarj.motd.data.history.olderPageability
 import io.github.trevarj.motd.data.history.openGapFloor
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -23,20 +25,28 @@ import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.IrcDisconnectedException
 import io.github.trevarj.motd.service.ConnectionManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Demand-driven fills for an INTERIOR history gap: the same older-direction cascade
- * [ChatHistoryRemoteMediator.append] runs, with the demand source swapped from "Paging ran out of
- * local rows" to "this seam is on screen and owes history" — whether the timeline decided that on
- * its own or the user tapped the divider.
+ * Interior gap fills share the older-direction cascade used by [ChatHistoryRemoteMediator.append].
+ * Demand comes from a visible seam, an explicit tap, or the current Ready session's Aggressive
+ * policy; the mediator still owns paging below the oldest retained island.
  *
  * Why this cannot live in the mediator: a Paging3 `RemoteMediator` is only asked to APPEND when the
  * local `PagingSource` runs dry. Once the timeline is presented UNBOUNDED — every retained row
@@ -50,8 +60,8 @@ import javax.inject.Singleton
  * `advancedFrom` asymmetry all come from [olderPageability]; gap selection comes from
  * [newestPageableGap] over [GapAnchorResolver]; the wire request, msgid→timestamp fallback,
  * per-network serialization, and the persist through the sole IRC→Room writer all come from
- * [HistoryPageLoader]. This class contributes exactly three things the mediator's Paging-driven
- * entry got for free: a demand source, a per-room single flight, and a page budget.
+ * [HistoryPageLoader]. This class adds demand scheduling, a per-room single flight, and a bounded
+ * page quantum.
  *
  * Two deliberate differences from the mediator's cascade, both consequences of being gap-scoped:
  *  - the gap is pinned for the whole fill, so a page that closes it ends the fill rather than
@@ -69,6 +79,8 @@ class HistoryGapFillCoordinator
         private val historyGapDao: HistoryGapDao,
         private val loader: HistoryPageLoader,
         private val diagnostics: DiagnosticLogger,
+        private val settingsRepository: SettingsRepository,
+        private val pruner: HistoryPruner,
     ) {
         /**
          * Minimal seam over the live history transport, resolved per call so a network that reaches
@@ -84,9 +96,7 @@ class HistoryGapFillCoordinator
         /** Which gap a fill works on. Chosen once per fill and then pinned by id. */
         internal sealed interface GapSelection {
             /**
-             * The caller names its gap outright. This is the only selection production uses: the
-             * timeline decides which seam to work on from what the user can see, so the gap is already
-             * chosen by the time it gets here.
+             * The caller names the seam selected by the viewport or the proactive room scheduler.
              */
             data class ById(
                 val gapId: Long,
@@ -125,9 +135,9 @@ class HistoryGapFillCoordinator
              *  - [GapFillProgress.STALLED] is the anti-livelock stop with zero durable inserts. The seam
              *    is open, still recoverable, and its boundary is where it was, so the interval is still
              *    owed;
-             *  - [GapFillProgress.DROPPED] is a [gapId] of null, i.e. no gap was ever pinned — the
-             *    room's single flight was already taken, the gap had closed, or the room cannot hold
-             *    one. Nothing was even asked of the wire.
+             *  - [GapFillProgress.DROPPED] means no gap was pinned, or saved policy stopped automatic
+             *    work before any inserts. Contention, a missing seam, and policy deferral leave the
+             *    interval retryable without reporting a failure.
              *
              * Every other end (budget spent, gap closed, interval proven gone) moved history or settled
              * the question.
@@ -137,6 +147,7 @@ class HistoryGapFillCoordinator
                     when {
                         error != null || endReason == HISTORY_UNSUPPORTED -> GapFillProgress.FAILED
                         gapId == null -> GapFillProgress.DROPPED
+                        insertedCount == 0 && endReason == "policy_stopped" -> GapFillProgress.DROPPED
                         insertedCount == 0 && endReason == NO_APPEND_PROGRESS -> GapFillProgress.STALLED
                         else -> GapFillProgress.MOVED
                     }
@@ -155,6 +166,167 @@ class HistoryGapFillCoordinator
 
         /** Gap ids with a fill in flight, for the spinner on their divider rows. */
         val fillsInFlight: StateFlow<Set<Long>> = filling.asStateFlow()
+
+        private data class ProactiveRoom(
+            val gapIds: Set<Long>,
+            val activation: Any,
+        )
+
+        private class ProactiveHistoryStopped : CancellationException()
+
+        /** One Ready session's paced, round-robin drain of retained interior gaps. */
+        suspend fun fillProactively(
+            networkId: Long,
+            source: HistoryPageLoader.HistorySource,
+            isCurrent: () -> Boolean,
+        ): Unit =
+            coroutineScope {
+                val latest = MutableStateFlow<Map<RoomId, ProactiveRoom>>(emptyMap())
+                val observation =
+                    launch {
+                        combine(
+                            historyGapDao.observeSyncGaps(networkId),
+                            settingsRepository.settings.map { it.historySyncMode }.distinctUntilChanged(),
+                        ) { gaps, mode ->
+                            gaps.filter { (it.historySyncModeOverride ?: mode) == HistorySyncMode.AGGRESSIVE }
+                        }.distinctUntilChanged().collect { gaps ->
+                            val previous = latest.value
+                            latest.value =
+                                gaps.groupBy { it.roomId }.mapValues { (roomId, rows) ->
+                                    ProactiveRoom(
+                                        rows.mapTo(mutableSetOf()) { it.gapId },
+                                        previous[roomId]?.activation ?: Any(),
+                                    )
+                                }
+                        }
+                    }
+                val blocked = mutableMapOf<RoomId, MutableSet<Long>>()
+                var previous = emptyMap<RoomId, ProactiveRoom>()
+                var lastRoomId = Long.MIN_VALUE
+                var inserted = false
+
+                fun pruneInserted() {
+                    if (inserted) {
+                        pruner.schedule(networkId)
+                        inserted = false
+                    }
+                }
+                try {
+                    while (isCurrent()) {
+                        currentCoroutineContext().ensureActive()
+                        val snapshot = latest.value
+                        // The observer preserves activation identity even when a room leaves and
+                        // re-enters Aggressive while another room's quantum is still on the wire.
+                        blocked.keys.removeAll { snapshot[it]?.activation !== previous[it]?.activation }
+                        blocked.forEach { (roomId, ids) -> ids.retainAll(snapshot[roomId]?.gapIds.orEmpty()) }
+                        previous = snapshot
+                        val candidates =
+                            snapshot.asSequence().filter { (roomId, room) ->
+                                room.gapIds.any { it !in blocked[roomId].orEmpty() }
+                            }
+                        val next = candidates.firstOrNull { it.key > lastRoomId } ?: candidates.firstOrNull()
+                        if (next == null) {
+                            pruneInserted()
+                            latest.first { it != snapshot }
+                            continue
+                        }
+                        val roomId = next.key
+                        val stopped = blocked.getOrPut(roomId) { mutableSetOf() }
+                        val gaps =
+                            historyGapDao.forRoom(roomId).filter {
+                                it.recoverable && it.id in next.value.gapIds && it.id !in stopped
+                            }
+                        val gapId = newestPageableGap(gapAnchors.resolve(roomId, gaps))?.gap?.id
+                        lastRoomId = roomId
+                        if (gapId == null) {
+                            stopped += next.value.gapIds
+                            continue
+                        }
+                        try {
+                            val result =
+                                fill(
+                                    roomId,
+                                    GapSelection.ById(gapId),
+                                    proactiveSource(networkId, roomId, source, isCurrent),
+                                    waitForRoom = true,
+                                    onInserted = { inserted = true },
+                                )
+                            if (result.endReason != "page_budget") stopped += gapId
+                        } catch (_: ProactiveHistoryStopped) {
+                            // Only this activation is stopped; manual fills never consult this set.
+                            stopped += gapId
+                            pruneInserted()
+                        }
+                        delay(PROACTIVE_PACE_MS)
+                    }
+                } finally {
+                    observation.cancel()
+                    pruneInserted()
+                }
+            }
+
+        private fun proactiveSource(
+            networkId: Long,
+            roomId: RoomId,
+            source: HistoryPageLoader.HistorySource,
+            isCurrent: () -> Boolean,
+        ): HistorySource =
+            object : HistorySource {
+                private suspend fun checkAllowed() {
+                    val mode = settingsRepository.settings.first().historySyncMode
+                    val room = bufferDao.rawById(roomId)
+                    currentCoroutineContext().ensureActive()
+                    if (!isCurrent() ||
+                        room == null ||
+                        room.networkId != networkId ||
+                        (room.type != BufferType.CHANNEL && room.type != BufferType.QUERY) ||
+                        room.redirectToRoomId != null ||
+                        room.pendingCloseAt != null ||
+                        room.dismissed ||
+                        (room.historySyncModeOverride ?: mode) != HistorySyncMode.AGGRESSIVE
+                    ) {
+                        throw ProactiveHistoryStopped()
+                    }
+                }
+
+                override suspend fun availability(): HistoryAvailability {
+                    checkAllowed()
+                    return source.availability()
+                }
+
+                override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                    checkAllowed()
+                    if (source.availability() !is HistoryAvailability.Ready || !isCurrent()) throw ProactiveHistoryStopped()
+                    return source.chathistory(req)
+                }
+            }
+
+        private class AutomaticHistoryStopped : CancellationException()
+
+        private fun automaticSource(
+            roomId: RoomId,
+            source: HistorySource,
+        ): HistorySource =
+            object : HistorySource by source {
+                private suspend fun checkAllowed() {
+                    val mode = settingsRepository.settings.first().historySyncMode
+                    val room = bufferDao.observeById(roomId)
+                    currentCoroutineContext().ensureActive()
+                    if (room == null || (room.type != BufferType.SERVER && (room.historySyncModeOverride ?: mode) == HistorySyncMode.LAZY)) {
+                        throw AutomaticHistoryStopped()
+                    }
+                }
+
+                override suspend fun availability(): HistoryAvailability {
+                    checkAllowed()
+                    return source.availability()
+                }
+
+                override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                    checkAllowed()
+                    return source.chathistory(req)
+                }
+            }
 
         /**
          * Eagerly page [roomId] older until its oldest local row is at or below [floorMs] — the
@@ -250,7 +422,8 @@ class HistoryGapFillCoordinator
         suspend fun fillGap(
             roomId: RoomId,
             gapId: Long,
-        ): GapFill = fill(roomId, GapSelection.ById(gapId), historyFor(roomId))
+            automatic: Boolean = false,
+        ): GapFill = fill(roomId, GapSelection.ById(gapId), historyFor(roomId), automatic = automatic)
 
         internal suspend fun fill(
             roomId: RoomId,
@@ -258,13 +431,21 @@ class HistoryGapFillCoordinator
             source: HistorySource,
             pageSize: Int = PAGE_SIZE,
             pageBudget: Int = PAGE_BUDGET,
+            waitForRoom: Boolean = false,
+            automatic: Boolean = false,
+            onInserted: () -> Unit = {},
         ): GapFill {
-            // tryLock rather than withLock, and taken before the first suspension point: a second tap on
-            // a room already filling must be DROPPED, not queued behind the first only to then page from
-            // a boundary that fill already moved. The divider's spinner is the feedback for it.
+            // Manual taps drop behind an active fill; proactive work waits cancellably for its turn.
             val lock = roomLocks.computeIfAbsent(roomId) { Mutex() }
-            if (!lock.tryLock()) return ended(roomId, GapFill(null, 0, 0, "already_filling"))
+            if (waitForRoom) {
+                lock.lock()
+            } else if (!lock.tryLock()) {
+                return ended(roomId, GapFill(null, 0, 0, "already_filling"))
+            }
             try {
+                // The proactive source rechecks canonical room eligibility and saved policy here,
+                // after the mutex wait, and again inside every wire permit (including fallbacks).
+                if (waitForRoom) source.availability()
                 val room =
                     bufferDao.observeById(roomId)
                         ?: return ended(roomId, GapFill(null, 0, 0, "missing_room"))
@@ -287,7 +468,16 @@ class HistoryGapFillCoordinator
                 try {
                     return ended(
                         roomId,
-                        cascade(room.networkId, roomId, room.ircTarget, gapId, source, pageSize, pageBudget),
+                        cascade(
+                            room.networkId,
+                            roomId,
+                            room.ircTarget,
+                            gapId,
+                            if (automatic) automaticSource(room.id, source) else source,
+                            pageSize,
+                            pageBudget,
+                            onInserted,
+                        ),
                     )
                 } finally {
                     filling.update { it - gapId }
@@ -313,6 +503,7 @@ class HistoryGapFillCoordinator
             source: HistorySource,
             pageSize: Int,
             pageBudget: Int,
+            onInserted: () -> Unit,
         ): GapFill {
             var pages = 0
             var inserted = 0
@@ -372,6 +563,7 @@ class HistoryGapFillCoordinator
                             }
                         }
                     inserted += page.insertedCount
+                    if (page.insertedCount > 0) onInserted()
                     // Re-read AFTER the persist, deliberately: this page may have shrunk the gap, closed
                     // it, or proven its remainder empty, and each of those is an input to terminality.
                     val remaining =
@@ -386,13 +578,12 @@ class HistoryGapFillCoordinator
                             PageProgress(previous = next.boundary, insertedCount = page.insertedCount),
                         )
                     if (verdict is Pageability.End) return GapFill(gapId, pages, inserted, verdict.reason)
-                    // Terminality first, budget second: a seam that finished on its own is finished, and
-                    // reporting the budget instead would invite a pointless retry. The budget itself is
-                    // what keeps a 10k-message gap from being fetched unprompted — before the divider
-                    // existed nothing ever did that, and an uncapped loop here would be a regression. The
-                    // seam stays visible and the next tap resumes from the boundary this fill reached.
+                    // Terminality first, budget second: only a spent quantum invites another
+                    // proactive turn. Manual callers still grant a fresh quantum on each demand.
                     if (pages >= pageBudget) return GapFill(gapId, pages, inserted, "page_budget")
                 }
+            } catch (_: AutomaticHistoryStopped) {
+                return GapFill(gapId, pages, inserted, "policy_stopped")
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -484,10 +675,8 @@ class HistoryGapFillCoordinator
              * Pages one fill may fetch for one gap (~150 rows at the default page size), matching the
              * scale a scroll-driven cascade reached before the divider existed.
              *
-             * This is no longer what stops a gap draining — the caller's demand is, since it only asks
-             * again when the reader scrolls further toward the seam. What the budget still is, is the
-             * QUANTUM of one such ask: how much a single approach to a seam fetches before handing
-             * control back. Three pages rather than one because a gap fill's first page frequently lands
+             * One quantum hands control back to the viewport or the proactive round-robin scheduler.
+             * Three pages rather than one because a gap fill's first page frequently lands
              * on rows the client already holds (the boundary cohort, and the whole page on a
              * timestamp-only wire), so a one-page quantum could leave a seam that did not visibly move.
              * The cascade still stops early the moment the gap closes, is proven empty, or stops making
@@ -506,6 +695,7 @@ class HistoryGapFillCoordinator
             internal const val WINDOW_PAGE_BUDGET = 400
 
             private const val PAGE_SIZE = 50
+            private const val PROACTIVE_PACE_MS = 500L
 
             /** The network cannot serve history at all; classified as a failure rather than an end. */
             internal const val HISTORY_UNSUPPORTED = "history_unsupported"

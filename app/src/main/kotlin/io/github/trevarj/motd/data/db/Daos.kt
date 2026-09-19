@@ -11,6 +11,7 @@ import androidx.room.SkipQueryVerification
 import androidx.room.Transaction
 import androidx.room.Update
 import androidx.sqlite.db.SupportSQLiteQuery
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import kotlinx.coroutines.flow.Flow
@@ -521,6 +522,14 @@ interface BufferDao {
     suspend fun openTargets(networkId: Long): List<BufferTargetRow>
 
     @Query(
+        """SELECT id AS roomId, historySyncModeOverride
+           FROM buffers WHERE networkId = :networkId AND type IN ('CHANNEL', 'QUERY')
+             AND pendingCloseAt IS NULL AND redirectToRoomId IS NULL
+           ORDER BY id""",
+    )
+    fun observeHistorySyncOverrides(networkId: Long): Flow<List<HistorySyncOverrideRow>>
+
+    @Query(
         """SELECT id AS bufferId, displayName AS displayName, type AS type, muted AS muted
            FROM buffers WHERE networkId = :networkId AND type IN ('CHANNEL', 'QUERY')
              AND dismissed = 0 AND pendingCloseAt IS NULL AND redirectToRoomId IS NULL
@@ -668,6 +677,20 @@ interface BufferDao {
     suspend fun setPresenceModeOverride(
         requestedId: RoomId,
         mode: PresenceMode?,
+    ): Int
+
+    /** Write through durable redirects; SERVER rows reject conversation history-sync overrides. */
+    @Query(
+        """UPDATE buffers SET historySyncModeOverride = :mode
+           WHERE id = (
+               SELECT COALESCE(redirectToRoomId, id)
+               FROM buffers
+               WHERE id = :requestedId
+           ) AND type IN ('CHANNEL', 'QUERY')""",
+    )
+    suspend fun setHistorySyncModeOverride(
+        requestedId: RoomId,
+        mode: HistorySyncMode?,
     ): Int
 
     /** Write through durable redirects; SERVER rows reject conversation avatar overrides. */
@@ -1054,6 +1077,11 @@ interface BufferDao {
     @Query("DELETE FROM history_gaps WHERE roomId = :bufferId")
     suspend fun deleteHistoryGapsForBuffer(bufferId: RoomId)
 }
+
+data class HistorySyncOverrideRow(
+    val roomId: RoomId,
+    val historySyncModeOverride: HistorySyncMode?,
+)
 
 /** Minimal joined-channel projection for outgoing IRC invitations. */
 data class JoinedChannelRow(
@@ -2772,10 +2800,26 @@ interface HistoryBackfillCursorDao {
     suspend fun markComplete(networkId: Long)
 }
 
+data class HistorySyncGapRow(
+    val roomId: RoomId,
+    val gapId: Long,
+    val historySyncModeOverride: HistorySyncMode?,
+)
+
 @Dao
 interface HistoryGapDao {
     @Query("SELECT * FROM history_gaps WHERE roomId = :roomId ORDER BY olderServerTime")
     suspend fun forRoom(roomId: RoomId): List<HistoryGapEntity>
+
+    @Query(
+        """SELECT g.roomId, g.id AS gapId, b.historySyncModeOverride
+           FROM history_gaps g JOIN buffers b ON b.id = g.roomId
+           WHERE b.networkId = :networkId AND b.type IN ('CHANNEL', 'QUERY')
+             AND g.recoverable = 1 AND b.dismissed = 0
+             AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL
+           ORDER BY g.roomId, g.id""",
+    )
+    fun observeSyncGaps(networkId: Long): Flow<List<HistorySyncGapRow>>
 
     /**
      * Whether any stored gap's open edge interval overlaps ([lowerTime], [upperTime]).

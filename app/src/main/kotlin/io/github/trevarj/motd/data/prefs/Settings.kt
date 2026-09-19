@@ -77,6 +77,10 @@ internal fun nickColorPaletteFromPreference(saved: String?): NickColorPalette =
         else -> NickColorPalette.THEME
     }
 
+enum class HistorySyncMode { BALANCED, AGGRESSIVE, LAZY }
+
+internal fun historySyncModeFromPreference(saved: String?): HistorySyncMode = saved?.let { runCatching { HistorySyncMode.valueOf(it) }.getOrNull() } ?: HistorySyncMode.BALANCED
+
 /**
  * How far back the first history sync of a network enumerates. A bounded window keeps onboarding
  * responsive on a large bouncer account; EVERYTHING enumerates from epoch in one pass, so nothing
@@ -214,6 +218,8 @@ data class Settings(
     val chatSoundsEnabled: Boolean = true,
     /** Window the first history sync of a network enumerates; chosen during soju onboarding. */
     val historySyncDepth: HistorySyncDepth = HistorySyncDepth.MONTH,
+    /** Global automatic history policy; CHANNEL/QUERY conversations may override it. */
+    val historySyncMode: HistorySyncMode = HistorySyncMode.BALANCED,
     /** Per-room cap on locally retained history; see [HistoryRetention]. Off unless the user opts in. */
     val historyRetention: HistoryRetention = HistoryRetention.OFF,
     /** Channel cap used by [HistoryRetention.CUSTOM]; chosen directly or derived from a size target. */
@@ -317,6 +323,8 @@ interface SettingsRepository {
     suspend fun setChatSoundsEnabled(enabled: Boolean)
 
     suspend fun setHistorySyncDepth(d: HistorySyncDepth)
+
+    suspend fun setHistorySyncMode(mode: HistorySyncMode)
 
     suspend fun setHistoryRetention(r: HistoryRetention) {}
 

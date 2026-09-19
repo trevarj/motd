@@ -350,6 +350,7 @@ internal fun <T> SingleChoiceSheet(
     onSelect: (T) -> Unit,
     onDismiss: () -> Unit,
     tag: String,
+    footer: @Composable () -> Unit = {},
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag(tag)) {
         SheetSystemBars()
@@ -368,6 +369,7 @@ internal fun <T> SingleChoiceSheet(
                     modifier = option.tag?.let(Modifier::testTag) ?: Modifier,
                 )
             }
+            footer()
             Spacer(Modifier.height(20.dp))
         }
     }

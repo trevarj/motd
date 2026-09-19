@@ -8,4 +8,9 @@ class ConvertersTest {
     fun unknownLayoutDensityFallsBackToGlobalInheritance() {
         assertEquals(null, Converters().stringToLayoutDensity("FUTURE_LAYOUT"))
     }
+
+    @Test
+    fun unknownHistorySyncModeFallsBackToGlobalInheritance() {
+        assertEquals(null, Converters().stringToHistorySyncMode("FUTURE_MODE"))
+    }
 }

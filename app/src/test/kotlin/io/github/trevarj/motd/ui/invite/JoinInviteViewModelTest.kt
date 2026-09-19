@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.CertTrustStore
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.InviteEnrollmentStore
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
@@ -317,6 +318,11 @@ class JoinInviteViewModelTest {
             id: Long,
             mode: PresenceMode?,
         ): Boolean = true
+
+        override suspend fun setHistorySyncModeOverride(
+            id: Long,
+            mode: HistorySyncMode?,
+        ): Boolean = error("Unexpected history sync mode override write")
 
         override suspend fun deleteBuffer(id: Long) = Unit
     }

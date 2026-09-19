@@ -6,8 +6,10 @@ import io.github.trevarj.motd.data.db.HistoryBackfillCursorEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.ircTarget
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
 import io.github.trevarj.motd.data.prefs.NoopHistorySyncPrefs
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.sync.AdvertisedActivity
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
@@ -254,7 +256,7 @@ class HistoryResyncCoordinator
         private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
         // The single wire-fetch primitive: every CHATHISTORY request the coordinator issues goes through
         // this shared singleton so reconnect/manual traversals share the loader's per-network wire gate
-        // with scroll-driven Paging. Defaulted so tests keep the four-argument construction.
+        // with scroll-driven Paging. Defaulted for test fixtures.
         private val loader: HistoryPageLoader = HistoryPageLoader(processor),
         // Read at sort time so the chat the user is looking at is admitted in the first fan-out wave.
         // Defaulted so test fixtures keep the shorter construction.
@@ -262,6 +264,7 @@ class HistoryResyncCoordinator
         // Local retention runs right after a network's sync settles: server history is proven live
         // at that moment, so anything trimmed is fetchable again. Defaulted for test fixtures.
         private val pruner: HistoryPruner = HistoryPruner.Noop,
+        private val settingsRepository: SettingsRepository,
     ) : HistoryResyncController {
         // Reuses the loader's transport seam so a source can drive both the coordinator's orchestration
         // and the loader's fetch primitives directly, and adds the discovery/classification metadata the
@@ -331,6 +334,7 @@ class HistoryResyncCoordinator
             val status: WorkStatus,
             val highWater: Long?,
             val retryRecommended: Boolean,
+            val policyDeferred: Boolean = false,
         )
 
         /** One target's contribution to a pass; skips and refused targets contribute the neutral value. */
@@ -339,6 +343,7 @@ class HistoryResyncCoordinator
             val status: WorkStatus = WorkStatus.Complete,
             val highWater: Long? = null,
             val retryRecommended: Boolean = false,
+            val policyDeferred: Boolean = false,
         )
 
         private data class TargetDiscovery(
@@ -1095,6 +1100,7 @@ class HistoryResyncCoordinator
             source: HistorySource,
             isCurrent: () -> Boolean,
         ) {
+            if (!isCurrent() || settingsRepository.settings.first().historySyncMode == HistorySyncMode.LAZY) return
             val cursorDao = db.historyBackfillCursorDao()
             val cursor = cursorDao.byNetwork(networkId) ?: return
             if (cursor.complete) return
@@ -1104,6 +1110,18 @@ class HistoryResyncCoordinator
             }
             val ready = source.availability() as? HistoryAvailability.Ready ?: return
             if (!source.canClassifyTargets()) return
+            val guardedSource =
+                object : HistorySource by source {
+                    override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                        if (req.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
+                            checkBackfillPolicy(isCurrent)
+                        }
+                        return source.chathistory(req)
+                    }
+                }
+            // ponytail: replay TARGETS after a policy change rather than persist a deferred queue;
+            // one Lazy chat may cause re-enumeration, while room cursors skip completed seeds.
+            var checkpointAllowed = true
             diagnostics.record("history", "backfill_started") {
                 mapOf("network_id" to networkId, "upper_bound" to cursor.upperBound)
             }
@@ -1111,14 +1129,15 @@ class HistoryResyncCoordinator
                 try {
                     discoverTargets(
                         networkId = networkId,
-                        source = source,
+                        source = guardedSource,
                         upper = cursor.upperBound,
                         lower = Instant.EPOCH.toEpochMilli(),
                         onPageEnd = { page, nextUpper ->
                             // Seed before persisting the boundary: a killed process may re-enumerate a
                             // page (target dedup absorbs that) but can never skip one unseeded.
-                            seedBackfillPage(networkId, page, source, isCurrent)
-                            cursorDao.advance(networkId, nextUpper)
+                            val seeded = seedBackfillPage(networkId, page, guardedSource, isCurrent)
+                            checkpointAllowed = checkpointAllowed && seeded
+                            if (checkpointAllowed) cursorDao.advance(networkId, nextUpper)
                         },
                         betweenPages = {
                             if (!isCurrent()) throw StaleConnectionException()
@@ -1126,6 +1145,8 @@ class HistoryResyncCoordinator
                         },
                         allowConcurrent = ready.supportsConcurrentRequests,
                     )
+                } catch (_: BackfillPolicyStopped) {
+                    return
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: StaleConnectionException) {
@@ -1142,18 +1163,22 @@ class HistoryResyncCoordinator
             // The terminal page gets no onPageEnd; this final sweep seeds it, and targets already
             // seeded earlier skip cheaply on their stored room cursor.
             try {
-                seedBackfillPage(networkId, discovery.targets, source, isCurrent)
+                val seeded = seedBackfillPage(networkId, discovery.targets, guardedSource, isCurrent)
+                checkpointAllowed = checkpointAllowed && seeded
+            } catch (_: BackfillPolicyStopped) {
+                return
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 return
             }
-            if (discovery.status == WorkStatus.Complete) cursorDao.markComplete(networkId)
+            val complete = discovery.status == WorkStatus.Complete && checkpointAllowed
+            if (complete) cursorDao.markComplete(networkId)
             diagnostics.record("history", "backfill_finished") {
                 mapOf(
                     "network_id" to networkId,
                     "targets" to discovery.targets.size,
-                    "complete" to (discovery.status == WorkStatus.Complete),
+                    "complete" to complete,
                 )
             }
         }
@@ -1163,16 +1188,38 @@ class HistoryResyncCoordinator
             page: List<ChatHistoryTarget>,
             source: HistorySource,
             isCurrent: () -> Boolean,
+        ): Boolean {
+            if (page.isEmpty()) return true
+            val pass =
+                syncTargets(
+                    networkId = networkId,
+                    targets = mergeSyncTargets(emptyList(), page, source),
+                    source = source,
+                    isCurrent = isCurrent,
+                    hasDiscoveryWatermark = true,
+                    paceBetweenTargetsMs = BACKFILL_SEED_PACE_MS,
+                    automaticBackfill = true,
+                )
+            return !pass.policyDeferred
+        }
+
+        private class BackfillPolicyStopped : CancellationException()
+
+        private suspend fun checkBackfillPolicy(
+            isCurrent: () -> Boolean,
+            roomId: RoomId? = null,
         ) {
-            if (page.isEmpty()) return
-            syncTargets(
-                networkId = networkId,
-                targets = mergeSyncTargets(emptyList(), page, source),
-                source = source,
-                isCurrent = isCurrent,
-                hasDiscoveryWatermark = true,
-                paceBetweenTargetsMs = BACKFILL_SEED_PACE_MS,
-            )
+            currentCoroutineContext().ensureActive()
+            if (!isCurrent()) throw StaleConnectionException()
+            val mode = settingsRepository.settings.first().historySyncMode
+            if (mode == HistorySyncMode.LAZY) throw BackfillPolicyStopped()
+            val room = roomId?.let { db.bufferDao().observeById(it) }
+            if (room != null && (room.type == BufferType.CHANNEL || room.type == BufferType.QUERY) &&
+                (room.historySyncModeOverride ?: mode) == HistorySyncMode.LAZY
+            ) {
+                throw BackfillPolicyStopped()
+            }
+            if (!isCurrent()) throw StaleConnectionException()
         }
 
         /**
@@ -1780,6 +1827,7 @@ class HistoryResyncCoordinator
             // Null publishes nothing: the paced background backfill must stay invisible.
             session: SyncStatusSession? = null,
             paceBetweenTargetsMs: Long = 0,
+            automaticBackfill: Boolean = false,
         ): TargetPass {
             val ready =
                 when (val availability = source.availability()) {
@@ -1820,6 +1868,7 @@ class HistoryResyncCoordinator
                                                         paceBeforeFetchMs = 0,
                                                         allowConcurrent = true,
                                                         fanOut = fanOut,
+                                                        automaticBackfill = automaticBackfill,
                                                     )
                                             }
                                         } ?: break
@@ -1844,6 +1893,7 @@ class HistoryResyncCoordinator
                             session = session,
                             paceBeforeFetchMs = paceBetweenTargetsMs,
                             allowConcurrent = false,
+                            automaticBackfill = automaticBackfill,
                         )
                     }
                 }
@@ -1856,6 +1906,7 @@ class HistoryResyncCoordinator
                     },
                 highWater = maxHighWater(*outcomes.map { it.highWater }.toTypedArray()),
                 retryRecommended = outcomes.any { it.retryRecommended },
+                policyDeferred = outcomes.any { it.policyDeferred },
             )
         }
 
@@ -1876,6 +1927,7 @@ class HistoryResyncCoordinator
             allowConcurrent: Boolean,
             // Present only for a concurrent pass; the sequential driver has no width to adapt.
             fanOut: AdaptiveFanOut? = null,
+            automaticBackfill: Boolean = false,
         ): TargetOutcome {
             if (!isCurrent()) throw StaleConnectionException()
             val target = targetSpec.name
@@ -1883,6 +1935,9 @@ class HistoryResyncCoordinator
                 targetSpec.knownBufferId ?: if (source.isChannelTarget(target)) {
                     return TargetOutcome()
                 } else {
+                    if (automaticBackfill && settingsRepository.settings.first().historySyncMode == HistorySyncMode.LAZY) {
+                        return TargetOutcome(policyDeferred = true)
+                    }
                     processor.ensureHistoryQuery(networkId, target, source.normalizeTarget(target))
                 }
             // A target discovered mid-pass registers here; without this it would sync with no
@@ -1914,16 +1969,30 @@ class HistoryResyncCoordinator
             if (paceBeforeFetchMs > 0) delay(paceBeforeFetchMs)
             val targetResult =
                 try {
+                    val seedSource =
+                        if (automaticBackfill) {
+                            checkBackfillPolicy(isCurrent, roomId = canonicalRoomId)
+                            object : HistorySource by source {
+                                override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                                    checkBackfillPolicy(isCurrent, roomId = canonicalRoomId)
+                                    return source.chathistory(req)
+                                }
+                            }
+                        } else {
+                            source
+                        }
                     syncRecentTarget(
                         networkId = networkId,
                         bufferId = canonicalRoomId,
                         target = target,
-                        source = source,
+                        source = seedSource,
                         isCurrent = isCurrent,
                         discoveredLatestMessageTime = targetSpec.latestMessageTime,
                         session = session,
                         allowConcurrent = allowConcurrent,
                     )
+                } catch (_: BackfillPolicyStopped) {
+                    return TargetOutcome(policyDeferred = true)
                 } catch (refused: IrcCommandException) {
                     // A target-scoped permanent refusal (services such as ChanServ typically answer
                     // FAIL CHATHISTORY INVALID_TARGET) must not abort the pass: letting it escape

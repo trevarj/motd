@@ -16,6 +16,10 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
+import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -34,9 +38,15 @@ import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -45,6 +55,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.IOException
 import java.io.OutputStream
 
 /**
@@ -67,7 +78,7 @@ import java.io.OutputStream
  * Everything else here covers what the coordinator adds on top: the per-gap page budget, the
  * per-room single flight, and the divider's in-flight state.
  */
-@OptIn(ExperimentalPagingApi::class)
+@OptIn(ExperimentalPagingApi::class, ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class HistoryGapFillCoordinatorTest {
     private val fixtures = mutableListOf<Fixture>()
@@ -802,6 +813,297 @@ class HistoryGapFillCoordinatorTest {
             assertTrue(history.requests.isEmpty())
         }
 
+    @Test
+    fun balancedLeavesStoredGapsUntilTheSameSessionBecomesAggressive() =
+        runTest {
+            val fixture = newFixture()
+            val gapId = fixture.seedProactiveGap()
+            val history = proactiveHistory()
+            val coordinator = fixture.coordinator()
+            val worker = launch { coordinator.fillProactively(fixture.networkId, history) { true } }
+            try {
+                advanceUntilIdle()
+                assertTrue(history.requests.isEmpty())
+                assertEquals(
+                    listOf(gapId),
+                    fixture.db
+                        .historyGapDao()
+                        .forRoom(fixture.roomId)
+                        .map { it.id },
+                )
+                assertEquals(2, rowCount(fixture))
+
+                fixture.setMode(HistorySyncMode.AGGRESSIVE)
+                runCurrent()
+                assertEquals(HistoryGapFillCoordinator.PAGE_BUDGET, history.requests.size)
+                assertEquals(152, rowCount(fixture))
+                advanceTimeBy(499)
+                runCurrent()
+                assertEquals(3, history.requests.size)
+                advanceTimeBy(1)
+                runCurrent()
+
+                assertEquals(
+                    listOf(301, 251, 201, 151, 101).map { "msgid=#chan:$it" },
+                    history.requests.map { it.bound1 },
+                )
+                assertEquals(202, rowCount(fixture))
+                assertTrue(
+                    fixture.db
+                        .historyGapDao()
+                        .forRoom(fixture.roomId)
+                        .isEmpty(),
+                )
+                advanceUntilIdle()
+                assertEquals(5, history.requests.size)
+            } finally {
+                worker.cancelAndJoin()
+            }
+        }
+
+    @Test
+    fun lazyLetsTheDelegatedPagePersistButStopsTheNextAutomaticRequest() =
+        runTest {
+            val fixture = newFixture()
+            val gapId = fixture.seedProactiveGap()
+            fixture.setMode(HistorySyncMode.AGGRESSIVE)
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val history =
+                proactiveHistory {
+                    entered.complete(Unit)
+                    release.await()
+                }
+            val coordinator = fixture.coordinator()
+            val worker = launch { coordinator.fillProactively(fixture.networkId, history) { true } }
+            try {
+                runCurrent()
+                assertTrue(entered.isCompleted)
+                fixture.setMode(HistorySyncMode.LAZY)
+                runCurrent()
+                release.complete(Unit)
+                advanceUntilIdle()
+
+                assertEquals(1, history.requests.size)
+                assertEquals(52, rowCount(fixture))
+                assertTrue(
+                    fixture.db
+                        .historyGapDao()
+                        .forRoom(fixture.roomId)
+                        .single()
+                        .recoverable,
+                )
+                // A policy stop neither marks the seam failed nor disables explicit gap taps.
+                val manual = coordinator.fill(fixture.roomId, byId(gapId), history, pageBudget = 10)
+                assertEquals("gap_filled", manual.endReason)
+                assertEquals(202, rowCount(fixture))
+            } finally {
+                worker.cancelAndJoin()
+            }
+        }
+
+    @Test
+    fun aggressiveRoomsTakeTurnsInsteadOfDrainingOneRoomFirst() =
+        runTest {
+            val fixture = newFixture()
+            fixture.seedProactiveGap()
+            fixture.seedProactiveGap("#other")
+            fixture.setMode(HistorySyncMode.AGGRESSIVE)
+            val history = proactiveHistory()
+            val coordinator = fixture.coordinator()
+            val worker = launch { coordinator.fillProactively(fixture.networkId, history) { true } }
+            try {
+                advanceUntilIdle()
+                assertEquals(
+                    List(3) { "#chan" } + List(3) { "#other" } + List(2) { "#chan" } + List(2) { "#other" },
+                    history.requests.map { it.target },
+                )
+                assertEquals(202, rowCount(fixture))
+                val other = requireNotNull(fixture.db.bufferDao().byName(fixture.networkId, "#other"))
+                assertEquals(202, fixture.db.messageDao().countForBuffer(other.id))
+                assertTrue(
+                    fixture.db
+                        .historyGapDao()
+                        .forRoom(fixture.roomId)
+                        .isEmpty(),
+                )
+                assertTrue(
+                    fixture.db
+                        .historyGapDao()
+                        .forRoom(other.id)
+                        .isEmpty(),
+                )
+            } finally {
+                worker.cancelAndJoin()
+            }
+        }
+
+    @Test
+    fun aggressiveNeverRequestsMissingOrIneligibleStoredRooms() =
+        runTest {
+            val fixture = newFixture()
+            fixture.seedProactiveGap()
+            fixture.db.bufferDao().deleteBufferRow(fixture.roomId)
+            val canonical =
+                fixture.db.bufferDao().insert(
+                    BufferEntity(networkId = fixture.networkId, name = "#canonical", displayName = "#canonical", type = BufferType.CHANNEL),
+                )
+            val base = BufferEntity(networkId = fixture.networkId, name = "unused", displayName = "unused", type = BufferType.CHANNEL)
+            val rooms =
+                listOf(
+                    base.copy(name = "dismissed", displayName = "dismissed", type = BufferType.QUERY, dismissed = true),
+                    base.copy(name = "console", displayName = "console", type = BufferType.SERVER),
+                    base.copy(name = "#closing", displayName = "#closing", pendingCloseAt = 1),
+                    base.copy(name = "#redirect", displayName = "#redirect", redirectToRoomId = canonical),
+                    base.copy(name = "#unrecoverable", displayName = "#unrecoverable"),
+                )
+            for (room in rooms) {
+                val roomId = fixture.db.bufferDao().insert(room)
+                fixture.db.historyGapDao().insert(
+                    HistoryGapEntity(
+                        roomId = roomId,
+                        olderMsgid = "old",
+                        olderServerTime = 100,
+                        newerMsgid = "new",
+                        newerServerTime = 301,
+                        recoverable = room.name != "#unrecoverable",
+                    ),
+                )
+            }
+            fixture.setMode(HistorySyncMode.AGGRESSIVE)
+            val history = FakeHistory({ error("ineligible room reached the wire") })
+            val coordinator = fixture.coordinator()
+            val worker = launch { coordinator.fillProactively(fixture.networkId, history) { true } }
+            try {
+                advanceUntilIdle()
+                assertTrue(history.requests.isEmpty())
+            } finally {
+                worker.cancelAndJoin()
+            }
+        }
+
+    @Test
+    fun aProactiveRequestQueuedForTheWireRechecksPolicyAfterAdmission() =
+        runTest {
+            val fixture = newFixture()
+            val gapId = fixture.seedProactiveGap()
+            fixture.setMode(HistorySyncMode.AGGRESSIVE)
+            val manualRoom =
+                fixture.db.bufferDao().insert(
+                    BufferEntity(networkId = fixture.networkId, name = "#manual", displayName = "#manual", type = BufferType.CHANNEL),
+                )
+            val wireEntered = CompletableDeferred<Unit>()
+            val releaseWire = CompletableDeferred<Unit>()
+            val manualHistory =
+                FakeHistory(
+                    pageScript(ScriptedPage(emptyList(), endOfHistory = true)),
+                    onRequest = {
+                        wireEntered.complete(Unit)
+                        releaseWire.await()
+                    },
+                )
+            val holder =
+                async {
+                    fixture.loader.loadPage(
+                        fixture.networkId,
+                        manualRoom,
+                        "#manual",
+                        HistoryPageLoader.Direction.LATEST,
+                        manualHistory,
+                    )
+                }
+            val history = proactiveHistory()
+            val coordinator = fixture.coordinator()
+            val worker =
+                launch {
+                    wireEntered.await()
+                    coordinator.fillProactively(fixture.networkId, history) { true }
+                }
+            try {
+                runCurrent()
+                assertEquals(listOf("#manual"), manualHistory.requests.map { it.target })
+                assertEquals(setOf(gapId), coordinator.fillsInFlight.value)
+                assertTrue(history.requests.isEmpty())
+
+                fixture.setMode(HistorySyncMode.LAZY)
+                runCurrent()
+                releaseWire.complete(Unit)
+                holder.await()
+                advanceUntilIdle()
+
+                assertTrue(history.requests.isEmpty())
+                assertTrue(coordinator.fillsInFlight.value.isEmpty())
+                assertEquals(2, rowCount(fixture))
+                assertEquals(
+                    listOf(gapId),
+                    fixture.db
+                        .historyGapDao()
+                        .forRoom(fixture.roomId)
+                        .map { it.id },
+                )
+            } finally {
+                worker.cancelAndJoin()
+                holder.cancelAndJoin()
+            }
+        }
+
+    @Test
+    fun failedAndStalledGapsStayBlockedUntilTheirAggressiveActivationChanges() =
+        runTest {
+            val fixture = newFixture()
+            fixture.seedProactiveGap()
+            fixture.seedProactiveGap("#failed")
+            fixture.setMode(HistorySyncMode.AGGRESSIVE)
+            val history =
+                FakeHistory(
+                    script = { request ->
+                        val time = if (request.target == "#chan") 301L else 100L
+                        ScriptedPage(listOf(chatMsg("${request.target}:$time", time, request.target)))
+                    },
+                    failureFor = { request -> if (request.target == "#failed") IOException("wire failed") else null },
+                )
+            val coordinator = fixture.coordinator()
+            val worker = launch { coordinator.fillProactively(fixture.networkId, history) { true } }
+            try {
+                advanceUntilIdle()
+                assertEquals(listOf("#chan", "#failed"), history.requests.map { it.target })
+
+                fixture.seedProactiveGap("#fresh")
+                advanceUntilIdle()
+                assertEquals(listOf("#chan", "#failed", "#fresh"), history.requests.map { it.target })
+                assertTrue(
+                    fixture.db
+                        .historyGapDao()
+                        .forRoom(fixture.roomId)
+                        .single()
+                        .recoverable,
+                )
+
+                fixture.setMode(HistorySyncMode.LAZY)
+                runCurrent()
+                fixture.setMode(HistorySyncMode.AGGRESSIVE)
+                advanceUntilIdle()
+                assertEquals(2, history.requests.count { it.target == "#chan" })
+                assertEquals(2, history.requests.count { it.target == "#failed" })
+                assertEquals(1, history.requests.count { it.target == "#fresh" })
+            } finally {
+                worker.cancelAndJoin()
+            }
+        }
+
+    private fun proactiveHistory(onRequest: (suspend (ChatHistoryRequest) -> Unit)? = null) =
+        FakeHistory(
+            script = { request ->
+                val boundary = requireNotNull(request.bound1).substringAfterLast(':').toInt()
+                ScriptedPage(
+                    (maxOf(100, boundary - request.limit) until boundary).map {
+                        chatMsg("${request.target}:$it", it.toLong(), request.target)
+                    },
+                )
+            },
+            onRequest = onRequest,
+        )
+
     // =============================================================================================
     // Fixture
     // =============================================================================================
@@ -838,10 +1140,18 @@ class HistoryGapFillCoordinatorTest {
                     ApplicationProvider.getApplicationContext<Context>(),
                     MotdDatabase::class.java,
                 ).allowMainThreadQueries()
+                .setQueryExecutor { it.run() }
+                .setTransactionExecutor { it.run() }
                 .build()
         val diagnostics = RecordingDiagnostics()
         val processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
         val loader = HistoryPageLoader(processor, diagnostics)
+        val settings = MutableStateFlow(Settings())
+
+        fun setMode(mode: HistorySyncMode) {
+            settings.value = settings.value.copy(historySyncMode = mode)
+        }
+
         var networkId = 0L
         var roomId = 0L
 
@@ -870,6 +1180,25 @@ class HistoryGapFillCoordinatorTest {
             roomId = db.bufferDao().byName(networkId, "#chan")!!.id
         }
 
+        suspend fun seedProactiveGap(target: String = "#chan"): Long {
+            val room =
+                db.bufferDao().byName(networkId, target)
+                    ?: BufferEntity(networkId = networkId, name = target, displayName = target, type = BufferType.CHANNEL).let {
+                        it.copy(id = db.bufferDao().insert(it))
+                    }
+            processor.process(networkId, chatMsg("$target:100", 100, target))
+            processor.process(networkId, chatMsg("$target:301", 301, target))
+            return db.historyGapDao().insert(
+                HistoryGapEntity(
+                    roomId = room.id,
+                    olderMsgid = "$target:100",
+                    olderServerTime = 100,
+                    newerMsgid = "$target:301",
+                    newerServerTime = 301,
+                ),
+            )
+        }
+
         fun coordinator() =
             HistoryGapFillCoordinator(
                 NoClientConnectionManager,
@@ -879,6 +1208,11 @@ class HistoryGapFillCoordinatorTest {
                 db.historyGapDao(),
                 loader,
                 diagnostics,
+                settingsRepository =
+                    object : SettingsRepository by DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>()) {
+                        override val settings = this@Fixture.settings
+                    },
+                pruner = HistoryPruner.Noop,
             )
 
         fun mediator(
@@ -990,11 +1324,12 @@ class HistoryGapFillCoordinatorTest {
 private fun chatMsg(
     msgid: String,
     time: Long,
+    target: String = "#chan",
 ) = IrcEvent.ChatMessage(
     ctx = MessageContext(msgid, time, null, "b", null),
     kind = IrcEvent.ChatKind.PRIVMSG,
     source = Prefix("alice"),
-    target = "#chan",
+    target = target,
     text = msgid,
     isSelf = false,
     replyToMsgid = null,

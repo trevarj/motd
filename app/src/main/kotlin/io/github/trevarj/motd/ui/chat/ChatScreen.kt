@@ -72,6 +72,7 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.PeopleOutline
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
@@ -215,11 +216,13 @@ import io.github.trevarj.motd.ui.components.ChannelNotificationPresentation
 import io.github.trevarj.motd.ui.components.ChannelNotificationSheet
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
+import io.github.trevarj.motd.ui.components.HistorySyncModeSheet
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.avatarsHidden
+import io.github.trevarj.motd.ui.components.historySyncModeLabel
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.share.PendingShare
@@ -666,6 +669,7 @@ fun ChatScreen(
         conversationLayout = state.conversationLayout,
         onConversationLayoutSelected = viewModel::setConversationLayoutOverride,
         onPresenceModeSelected = viewModel::setPresenceModeOverride,
+        onHistorySyncModeSelected = viewModel::setHistorySyncModeOverride,
         diagnostics = viewModel.diagnostics,
         avatarEvents = viewModel.avatarEvents,
     )
@@ -1009,6 +1013,7 @@ fun ChatContent(
     conversationLayout: ConversationLayoutState = ConversationLayoutState(),
     onConversationLayoutSelected: (io.github.trevarj.motd.data.prefs.LayoutDensity?) -> Unit = {},
     onPresenceModeSelected: (io.github.trevarj.motd.data.prefs.PresenceMode?) -> Unit = {},
+    onHistorySyncModeSelected: (io.github.trevarj.motd.data.prefs.HistorySyncMode?) -> Unit = {},
     // Opt-in journal for the timeline's own Paging generations. Noop by default so previews and
     // hand-built call sites need nothing; the required E2E gate arms the real one for the journey.
     diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
@@ -1244,6 +1249,7 @@ fun ChatContent(
     var conversationLayoutSheetOpen by rememberSaveable { mutableStateOf(false) }
     var notificationSheetOpen by rememberSaveable { mutableStateOf(false) }
     var presenceModeSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var historySyncModeSheetOpen by rememberSaveable { mutableStateOf(false) }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
     var highlightEventId by rememberSaveable { mutableStateOf<Long?>(null) }
     // Global fool expand/collapse toggle: when true every collapsed fool row in the
@@ -1431,6 +1437,10 @@ fun ChatContent(
 
                 ChatUiEvent.PresenceModeWriteFailed -> {
                     stringResource(R.string.chat_presence_write_failed)
+                }
+
+                ChatUiEvent.HistorySyncModeWriteFailed -> {
+                    stringResource(R.string.settings_history_sync_write_failed)
                 }
 
                 ChatUiEvent.NotificationSettingsWriteFailed -> {
@@ -2509,6 +2519,33 @@ fun ChatContent(
                                     conversationLayoutSheetOpen = true
                                 },
                             )
+                            if (buffer?.type == BufferType.CHANNEL || buffer?.type == BufferType.QUERY) {
+                                val historySync = state.conversationHistorySync
+                                DropdownMenuItem(
+                                    modifier = Modifier.testTag("chat_history_sync_menu"),
+                                    text = {
+                                        Column {
+                                            Text(stringResource(R.string.settings_history_sync_mode))
+                                            Text(
+                                                if (historySync.override == null) {
+                                                    stringResource(
+                                                        R.string.chat_history_sync_inherit,
+                                                        stringResource(historySyncModeLabel(historySync.global)),
+                                                    )
+                                                } else {
+                                                    stringResource(historySyncModeLabel(historySync.effective))
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        }
+                                    },
+                                    leadingIcon = { Icon(Icons.Outlined.Sync, contentDescription = null) },
+                                    onClick = {
+                                        overflowOpen = false
+                                        historySyncModeSheetOpen = true
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 modifier = Modifier.testTag("chat_presence_menu"),
                                 text = {
@@ -3268,6 +3305,18 @@ fun ChatContent(
                 }
             },
             modifier = Modifier.testTag("message_redact_dialog"),
+        )
+    }
+
+    if (historySyncModeSheetOpen) {
+        HistorySyncModeSheet(
+            selected = state.conversationHistorySync.override,
+            global = state.conversationHistorySync.global,
+            includeInherit = true,
+            unsupported = historyAvailability == HistoryAvailability.Unsupported,
+            onSelect = onHistorySyncModeSelected,
+            onDismiss = { historySyncModeSheetOpen = false },
+            tag = "chat_history_sync_sheet",
         )
     }
 

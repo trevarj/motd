@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.repo.BufferRepository
@@ -207,6 +208,11 @@ class SearchViewModelTest {
             id: Long,
             mode: PresenceMode?,
         ): Boolean = true
+
+        override suspend fun setHistorySyncModeOverride(
+            id: Long,
+            mode: HistorySyncMode?,
+        ): Boolean = error("Unexpected history sync mode override write")
 
         override suspend fun deleteBuffer(id: Long) = Unit
     }

@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.history.HistoryLadderStalled
 import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.history.seamAbove
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.sync.GapFillProgress
@@ -207,6 +208,8 @@ internal data class SeamLoadingGate(
     val onScreen: Boolean,
     val historyReady: Boolean,
     val entrySettled: Boolean,
+    /** Lazy mode blocks speculative viewport prefetch; explicit divider taps bypass this gate. */
+    val automaticAllowed: Boolean = true,
     /**
      * History is not merely unresolved but out of reach — the network is offline or does not serve
      * CHATHISTORY — so a seam should say so rather than spin. Distinct from `!historyReady`, which
@@ -214,7 +217,7 @@ internal data class SeamLoadingGate(
      */
     val historyUnreachable: Boolean = false,
 ) {
-    val armable: Boolean get() = onScreen && historyReady && entrySettled
+    val armable: Boolean get() = onScreen && historyReady && entrySettled && automaticAllowed
 }
 
 /** Is history out of reach for good enough reasons to tell the reader about? */
@@ -363,10 +366,11 @@ internal val SeamDecision.journalName: String
  * a transport to page against", and the next Ready emission re-evaluates, so a room opened while its
  * connection negotiates still loads once it settles; [SeamLoadingGate.historyUnreachable] is the
  * separate question of whether to SAY so, and it is what stops an offline seam spinning at a
- * transport that is not coming back. [SeamLoadingGate.entrySettled]
- * is an ordering constraint and is not optional: normal entry FREEZES what was unread when the room
- * opened, from the store, and a fill that rewrites the store first would land that frozen boundary
- * on rows this class had just fetched. Entry resolves first, then history loads underneath it.
+ * transport that is not coming back. [SeamLoadingGate.entrySettled] is an ordering constraint and
+ * is not optional: normal entry FREEZES what was unread when the room opened, from the store, and a
+ * fill that rewrites the store first would land that frozen boundary on rows this class had just
+ * fetched. Entry resolves first, then history loads underneath it. [SeamLoadingGate.automaticAllowed]
+ * applies the saved sync policy only to speculative viewport demand.
  *
  * A tap bypasses the gate. The user is looking at an idle or failed divider; nothing about a pending
  * entry or a stale availability snapshot makes their tap wrong.
@@ -1467,6 +1471,8 @@ sealed interface ChatUiEvent {
 
     data object PresenceModeWriteFailed : ChatUiEvent
 
+    data object HistorySyncModeWriteFailed : ChatUiEvent
+
     data object NotificationSettingsWriteFailed : ChatUiEvent
 }
 
@@ -1484,6 +1490,13 @@ data class ConversationPresenceState(
     val override: PresenceMode? = null,
 ) {
     val effective: PresenceMode get() = override ?: global
+}
+
+data class ConversationHistorySyncState(
+    val global: HistorySyncMode = HistorySyncMode.BALANCED,
+    val override: HistorySyncMode? = null,
+) {
+    val effective: HistorySyncMode get() = override ?: global
 }
 
 data class QueuedChatUiEvent(

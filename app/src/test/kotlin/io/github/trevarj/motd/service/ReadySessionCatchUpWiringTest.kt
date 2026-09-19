@@ -5,9 +5,12 @@ import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.transport.IrcTransport
 import io.github.trevarj.motd.irc.transport.TransportFactory
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.launch
@@ -15,6 +18,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -31,6 +35,7 @@ class ReadySessionCatchUpWiringTest {
         var catchUps = 0
         var backfills = 0
         var gateReleases = 0
+        var proactiveStarts = 0
     }
 
     private fun TestScope.session(
@@ -46,6 +51,7 @@ class ReadySessionCatchUpWiringTest {
             releaseGate = { recorder.gateReleases++ },
             catchUp = { recorder.catchUps++ },
             backfill = { recorder.backfills++ },
+            proactive = { recorder.proactiveStarts++ },
         )
     }
 
@@ -65,6 +71,7 @@ class ReadySessionCatchUpWiringTest {
             // unreachable for the whole Ready session.
             assertEquals(1, recorder.gateReleases)
             assertEquals(0, recorder.catchUps)
+            assertEquals(0, recorder.proactiveStarts)
 
             // chathistory is in the PRE-bind CAP REQ set, so it never appears in the post-welcome
             // deferred set the entry decision settles on. Only the re-arm can still catch this.
@@ -75,6 +82,7 @@ class ReadySessionCatchUpWiringTest {
 
             assertEquals(1, recorder.catchUps)
             assertEquals(1, recorder.backfills)
+            assertEquals(1, recorder.proactiveStarts)
             // The re-arm stands in for the entry catch-up; it does not release the gate a second time.
             assertEquals(1, recorder.gateReleases)
             session.join()
@@ -107,6 +115,7 @@ class ReadySessionCatchUpWiringTest {
             assertEquals(1, recorder.catchUps)
             assertEquals(1, recorder.gateReleases)
             assertEquals(1, recorder.backfills)
+            assertEquals(1, recorder.proactiveStarts)
             session.join()
         }
 
@@ -124,6 +133,7 @@ class ReadySessionCatchUpWiringTest {
             assertEquals(1, recorder.catchUps)
             assertEquals(1, recorder.backfills)
             assertEquals(1, recorder.gateReleases)
+            assertEquals(1, recorder.proactiveStarts)
         }
 
     @Test
@@ -145,9 +155,64 @@ class ReadySessionCatchUpWiringTest {
 
             assertEquals(0, recorder.catchUps)
             assertEquals(0, recorder.backfills)
+            assertEquals(0, recorder.proactiveStarts)
             // Nor may a superseded session release the gate the live one owns.
             assertEquals(0, recorder.gateReleases)
             session.join()
+        }
+
+    @Test
+    fun `proactive work starts after overflow without holding entry and dies with its session`() =
+        runTest {
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch message-tags server-time draft/chathistory")
+            val overflow = CompletableDeferred<Unit>()
+            val entryReleased = CompletableDeferred<Unit>()
+            val observerStopped = CompletableDeferred<Unit>()
+            var proactiveStarts = 0
+            var backfills = 0
+            val session =
+                launch {
+                    runHistoryCatchUpSession(
+                        client = client,
+                        isCurrent = { true },
+                        liveClient = { client },
+                        releaseGate = { entryReleased.complete(Unit) },
+                        catchUp = {
+                            // Visible-wave convergence releases entry before paced overflow settles.
+                            entryReleased.complete(Unit)
+                            overflow.await()
+                        },
+                        backfill = { backfills++ },
+                        proactive = {
+                            try {
+                                proactiveStarts++
+                                awaitCancellation()
+                            } finally {
+                                observerStopped.complete(Unit)
+                            }
+                        },
+                    )
+                }
+            try {
+                runCurrent()
+                assertTrue(entryReleased.isCompleted)
+                assertEquals(0, proactiveStarts)
+                assertEquals(0, backfills)
+
+                overflow.complete(Unit)
+                runCurrent()
+                assertEquals(1, proactiveStarts)
+                assertEquals(1, backfills)
+
+                transport.feed(":srv CAP me NEW :draft/chathistory")
+                transport.feed(":srv CAP me ACK :draft/chathistory")
+                runCurrent()
+                assertEquals(1, proactiveStarts)
+            } finally {
+                session.cancelAndJoin()
+            }
+            assertTrue(observerStopped.isCompleted)
         }
 
     private suspend fun TestScope.readyClient(

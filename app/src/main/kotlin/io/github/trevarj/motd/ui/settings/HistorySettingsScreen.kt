@@ -3,10 +3,13 @@ package io.github.trevarj.motd.ui.settings
 import android.text.format.Formatter
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -33,11 +36,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AUTO_COMPACT_MB_CHOICES
 import io.github.trevarj.motd.data.prefs.HistoryRetention
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.MIN_CUSTOM_RETENTION_ROWS
 import io.github.trevarj.motd.data.prefs.QUERY_RETENTION_MULTIPLIER
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.channelRetentionRows
 import io.github.trevarj.motd.data.sync.DatabaseProfile
+import io.github.trevarj.motd.ui.components.HistorySyncModeSheet
+import io.github.trevarj.motd.ui.components.historySyncModeLabel
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import java.text.NumberFormat
@@ -59,6 +65,7 @@ fun HistorySettingsScreen(
     // that a LocalContext read inside an effect would not follow a configuration change.
     val resources = LocalResources.current
     val compactFailed = stringResource(R.string.settings_database_compact_failed)
+    val syncWriteFailed = stringResource(R.string.settings_history_sync_write_failed)
     LaunchedEffect(viewModel, resources, compactFailed) {
         viewModel.databaseCompactEvents.collect { event ->
             val message =
@@ -74,12 +81,18 @@ fun HistorySettingsScreen(
             snackbarHostState.showSnackbar(message)
         }
     }
+    LaunchedEffect(viewModel, syncWriteFailed) {
+        viewModel.historySyncSaveErrors.collect {
+            snackbarHostState.showSnackbar(syncWriteFailed)
+        }
+    }
     HistorySettingsContent(
         settings = settings,
         databaseSizeBytes = databaseSizeBytes,
         databaseProfile = databaseProfile,
         onBack = onBack,
         onHistoryRetention = viewModel::setHistoryRetention,
+        onHistorySyncMode = viewModel::setHistorySyncMode,
         onHistoryRetentionCustomRows = viewModel::setHistoryRetentionCustomRows,
         onAutoCompactMb = viewModel::setAutoCompactMb,
         onCompactDatabase = viewModel::compactDatabase,
@@ -96,6 +109,7 @@ fun HistorySettingsContent(
     databaseProfile: DatabaseProfile?,
     onBack: () -> Unit,
     onHistoryRetention: (HistoryRetention) -> Unit,
+    onHistorySyncMode: (HistorySyncMode) -> Unit,
     onHistoryRetentionCustomRows: (Int) -> Unit,
     onCompactDatabase: () -> Unit,
     onAutoCompactMb: (Int) -> Unit = {},
@@ -105,6 +119,7 @@ fun HistorySettingsContent(
 ) {
     val context = LocalContext.current
     var retentionSheetOpen by remember { mutableStateOf(false) }
+    var historySyncSheetOpen by remember { mutableStateOf(false) }
     var autoCompactSheetOpen by remember { mutableStateOf(false) }
     val effectiveRows = settings.channelRetentionRows
     SettingsScaffold(
@@ -112,6 +127,23 @@ fun HistorySettingsContent(
         onBack = onBack,
         snackbarHostState = snackbarHostState,
     ) {
+        SettingsGroup {
+            SettingsTarget(
+                if (target == SettingsTarget.HISTORY) SettingsTarget.HISTORY_SYNC_MODE.name else target?.name,
+                SettingsTarget.HISTORY_SYNC_MODE.name,
+            ) { targetModifier ->
+                Box(targetModifier) {
+                    SettingsNavigationRow(
+                        icon = Icons.Outlined.Sync,
+                        title = stringResource(R.string.settings_history_sync_mode),
+                        value = stringResource(historySyncModeLabel(settings.historySyncMode)),
+                        summary = stringResource(R.string.settings_history_sync_disclosure),
+                        modifier = Modifier.testTag("settings_history_sync_mode"),
+                        onClick = { historySyncSheetOpen = true },
+                    )
+                }
+            }
+        }
         SettingsGroup(title = stringResource(R.string.settings_history_overview_section)) {
             SettingsValueRow(
                 title = stringResource(R.string.settings_history_db_size),
@@ -175,6 +207,16 @@ fun HistorySettingsContent(
                 )
             }
         }
+    }
+    if (historySyncSheetOpen) {
+        HistorySyncModeSheet(
+            selected = settings.historySyncMode,
+            global = settings.historySyncMode,
+            includeInherit = false,
+            onSelect = { mode -> mode?.let(onHistorySyncMode) },
+            onDismiss = { historySyncSheetOpen = false },
+            tag = "settings_history_sync_sheet",
+        )
     }
     if (autoCompactSheetOpen) {
         SingleChoiceSheet(
@@ -333,6 +375,7 @@ private fun HistorySettingsPreview() {
             databaseProfile = null,
             onBack = {},
             onHistoryRetention = {},
+            onHistorySyncMode = {},
             onHistoryRetentionCustomRows = {},
             onCompactDatabase = {},
         )

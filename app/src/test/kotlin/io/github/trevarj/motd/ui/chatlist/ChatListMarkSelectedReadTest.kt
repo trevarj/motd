@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
@@ -83,6 +84,11 @@ class ChatListMarkSelectedReadTest {
             id: Long,
             mode: PresenceMode?,
         ): Boolean = true
+
+        override suspend fun setHistorySyncModeOverride(
+            id: Long,
+            mode: HistorySyncMode?,
+        ): Boolean = error("Unexpected history sync mode override write")
 
         override suspend fun deleteBuffer(id: Long) = Unit
     }
@@ -163,6 +169,10 @@ class ChatListMarkSelectedReadTest {
         override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
 
         override suspend fun setHistorySyncDepth(d: io.github.trevarj.motd.data.prefs.HistorySyncDepth) = Unit
+
+        override suspend fun setHistorySyncMode(mode: HistorySyncMode) {
+            settings.value = settings.value.copy(historySyncMode = mode)
+        }
 
         override suspend fun setAutoAwayEnabled(enabled: Boolean) = Unit
 

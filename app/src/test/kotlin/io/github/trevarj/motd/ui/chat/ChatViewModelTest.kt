@@ -39,6 +39,7 @@ import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -56,8 +57,10 @@ import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.GapFillProgress
+import io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator
 import io.github.trevarj.motd.data.sync.HistoryGapFiller
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
+import io.github.trevarj.motd.data.sync.HistoryPruner
 import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
@@ -65,6 +68,9 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.dcc.DccTransferController
 import io.github.trevarj.motd.di.AppClock
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.irc.client.ChatHistoryRequest
+import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.client.IrcClient
@@ -104,6 +110,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -763,6 +770,83 @@ class ChatViewModelTest {
             assertNull(vm.state.value.conversationPresence.override)
             assertEquals(
                 ChatUiEvent.PresenceModeWriteFailed,
+                vm.uiEvents
+                    .first()
+                    .single()
+                    .value,
+            )
+        }
+
+    @Test
+    fun `history sync inherits global then persists and clears an explicit override`() =
+        runTest {
+            val settings = FakeSettingsRepository()
+            val buffers = FakeBufferRepository(channel)
+            val vm =
+                viewModel(
+                    channel,
+                    FakeConnectionManager(network.id),
+                    buffers = buffers,
+                    settings = settings,
+                )
+            vm.state.first { it.buffer != null }
+
+            settings.settings.value = Settings(historySyncMode = HistorySyncMode.AGGRESSIVE)
+            assertEquals(
+                HistorySyncMode.AGGRESSIVE,
+                vm.state
+                    .first { it.conversationHistorySync.global == HistorySyncMode.AGGRESSIVE }
+                    .conversationHistorySync.effective,
+            )
+
+            vm.setHistorySyncModeOverride(HistorySyncMode.BALANCED)
+            advanceUntilIdle()
+            assertEquals(listOf(channel.id to HistorySyncMode.BALANCED), buffers.historySyncWrites)
+            assertEquals(
+                HistorySyncMode.BALANCED,
+                vm.state
+                    .first { it.conversationHistorySync.override != null }
+                    .conversationHistorySync.effective,
+            )
+
+            settings.settings.value = Settings(historySyncMode = HistorySyncMode.LAZY)
+            assertEquals(
+                HistorySyncMode.BALANCED,
+                vm.state
+                    .first { it.conversationHistorySync.global == HistorySyncMode.LAZY }
+                    .conversationHistorySync.effective,
+            )
+
+            vm.setHistorySyncModeOverride(null)
+            advanceUntilIdle()
+            assertEquals(
+                HistorySyncMode.LAZY,
+                vm.state
+                    .first { it.conversationHistorySync.override == null }
+                    .conversationHistorySync.effective,
+            )
+        }
+
+    @Test
+    fun `history sync write failure uses canonical id without optimistic state`() =
+        runTest {
+            val buffers = FakeBufferRepository(channel, routeId = query.id).apply { historySyncWriteResult = false }
+            val vm =
+                viewModel(
+                    channel,
+                    FakeConnectionManager(network.id),
+                    routeBufferId = query.id,
+                    buffers = buffers,
+                )
+            vm.state.first { it.buffer?.id == channel.id }
+
+            vm.setHistorySyncModeOverride(HistorySyncMode.LAZY)
+            advanceUntilIdle()
+
+            assertEquals(listOf(channel.id to HistorySyncMode.LAZY), buffers.historySyncWrites)
+            assertNull(vm.state.value.conversationHistorySync.override)
+            assertEquals(
+                ChatUiEvent.HistorySyncModeWriteFailed,
                 vm.uiEvents
                     .first()
                     .single()
@@ -3497,6 +3581,7 @@ class ChatViewModelTest {
         override suspend fun fillGap(
             roomId: Long,
             gapId: Long,
+            automatic: Boolean,
         ): GapFillProgress {
             requests += roomId to gapId
             return GapFillProgress.MOVED
@@ -3644,6 +3729,119 @@ class ChatViewModelTest {
             advanceUntilIdle()
 
             assertEquals(listOf(channel.id to fixture.gapId), filler.requests)
+        }
+
+    @Test
+    fun `Lazy rejects queued viewport history at the wire but a tap still fills`() =
+        runTest {
+            val fixture = seedCatchUpSeam()
+            val window = seamWindow()
+            val settings = FakeSettingsRepository()
+            val manager = readyHistoryManager()
+            val loader = HistoryPageLoader(processor)
+            val coordinator =
+                HistoryGapFillCoordinator(
+                    manager,
+                    db.bufferDao(),
+                    db.messageDao(),
+                    db.historyCursorDao(),
+                    db.historyGapDao(),
+                    loader,
+                    DiagnosticLogger.Noop,
+                    settings,
+                    HistoryPruner.Noop,
+                )
+            val requests = mutableListOf<ChatHistoryRequest>()
+            val emptyPage =
+                ChatHistoryResponse.Messages(
+                    events = emptyList(),
+                    oldest = null,
+                    newest = null,
+                    endOfHistory = true,
+                    primaryMessageCount = 0,
+                )
+            val source =
+                object : HistoryGapFillCoordinator.HistorySource {
+                    override suspend fun availability() = HistoryAvailability.Ready(setOf(HistoryReferenceType.TIMESTAMP), 100)
+
+                    override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                        requests += req
+                        return emptyPage
+                    }
+                }
+            val filler =
+                object : HistoryGapFiller {
+                    override val fillsInFlight = coordinator.fillsInFlight
+
+                    override suspend fun fillGap(
+                        roomId: Long,
+                        gapId: Long,
+                        automatic: Boolean,
+                    ) = coordinator.fill(roomId, HistoryGapFillCoordinator.GapSelection.ById(gapId), source, automatic = automatic).progress
+                }
+            val vm =
+                viewModel(
+                    enteredAtMarker(fixture),
+                    manager,
+                    settings = settings,
+                    messages = seamRepository(),
+                    gapFiller = filler,
+                )
+            vm.state.first { it.buffer != null }
+            vm.onResume()
+            vm.onInitialPositionHandled()
+            advanceUntilIdle()
+
+            val manualRoom =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = network.id, name = "#wire-holder", displayName = "#wire-holder", type = BufferType.CHANNEL),
+                )
+            val wireEntered = CompletableDeferred<Unit>()
+            val releaseWire = CompletableDeferred<Unit>()
+            val holder =
+                launch {
+                    loader.loadPage(
+                        network.id,
+                        manualRoom,
+                        "#wire-holder",
+                        HistoryPageLoader.Direction.LATEST,
+                        object : HistoryPageLoader.HistorySource by source {
+                            override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                                wireEntered.complete(Unit)
+                                releaseWire.await()
+                                return emptyPage
+                            }
+                        },
+                    )
+                }
+            try {
+                wireEntered.await()
+                vm.setSeamPrefetch(window[39].timelineAnchor(), olderEdgeIndex = 49, gapIds = setOf(fixture.gapId))
+                runCurrent()
+                assertEquals(setOf(fixture.gapId), coordinator.fillsInFlight.value)
+
+                settings.setHistorySyncMode(HistorySyncMode.LAZY)
+                runCurrent()
+                releaseWire.complete(Unit)
+                holder.join()
+                advanceUntilIdle()
+
+                assertTrue(requests.isEmpty())
+                assertFalse(fixture.gapId in vm.timelineSeams.value.failed)
+                assertTrue(
+                    db
+                        .historyGapDao()
+                        .forRoom(channel.id)
+                        .single()
+                        .recoverable,
+                )
+                vm.fillGap(fixture.gapId)
+                advanceUntilIdle()
+                assertEquals(listOf(channel.ircTarget), requests.map { it.target })
+            } finally {
+                holder.cancelAndJoin()
+                vm.onPause()
+            }
         }
 
     @Test
@@ -3996,6 +4194,7 @@ class ChatViewModelTest {
                 db = db,
                 processor = processor,
                 scope = CoroutineScope(Dispatchers.Unconfined),
+                settingsRepository = FakeSettingsRepository(),
             ),
         messages: MessageRepository = FakeMessageRepository(),
         routeBufferId: Long = buffer.id,
@@ -4372,6 +4571,8 @@ class ChatViewModelTest {
         var layoutWriteResult = true
         val presenceWrites = mutableListOf<Pair<Long, PresenceMode?>>()
         var presenceWriteResult = true
+        val historySyncWrites = mutableListOf<Pair<Long, HistorySyncMode?>>()
+        var historySyncWriteResult = true
         val memberNicks = MutableStateFlow<List<String>>(emptyList())
         var memberObservations = 0
         var memberNickObservations = 0
@@ -4420,6 +4621,16 @@ class ChatViewModelTest {
             presenceWrites += id to mode
             if (presenceWriteResult) buffer.value = buffer.value.copy(presenceModeOverride = mode)
             return presenceWriteResult
+        }
+
+        override suspend fun setHistorySyncModeOverride(
+            id: Long,
+            mode: HistorySyncMode?,
+        ): Boolean {
+            historySyncWrites += id to mode
+            if (!historySyncWriteResult || (id != routeId && id != current.id) || buffer.value.type == BufferType.SERVER) return false
+            buffer.value = buffer.value.copy(historySyncModeOverride = mode)
+            return true
         }
 
         override suspend fun deleteBuffer(id: Long) = Unit
@@ -4605,6 +4816,10 @@ class ChatViewModelTest {
         override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
 
         override suspend fun setHistorySyncDepth(d: io.github.trevarj.motd.data.prefs.HistorySyncDepth) = Unit
+
+        override suspend fun setHistorySyncMode(mode: HistorySyncMode) {
+            settings.value = settings.value.copy(historySyncMode = mode)
+        }
 
         override suspend fun setAutoAwayEnabled(enabled: Boolean) = Unit
 

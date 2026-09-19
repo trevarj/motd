@@ -36,6 +36,7 @@ import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.AccountReminderStore
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NoopAccountReminderStore
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -150,6 +151,7 @@ data class ChatState(
     val presence: Map<PresenceKey, PresenceState> = emptyMap(),
     val conversationLayout: ConversationLayoutState = ConversationLayoutState(),
     val conversationPresence: ConversationPresenceState = ConversationPresenceState(),
+    val conversationHistorySync: ConversationHistorySyncState = ConversationHistorySyncState(),
     // True for a CHANNEL buffer we are no longer a member of (server-confirmed or reflected self-PART).
     // Drives the "You're not in #channel — Rejoin" banner and disables the composer.
     val parted: Boolean = false,
@@ -430,11 +432,13 @@ class ChatViewModel
                         historyAvailability,
                         connState,
                         entryState,
-                    ) { session, availability, connection, entry ->
+                        conversationHistorySync,
+                    ) { session, availability, connection, entry, historySync ->
                         SeamLoadingGate(
                             onScreen = session != null,
                             historyReady = availability is HistoryAvailability.Ready,
                             entrySettled = entry !is EntryPositionState.Pending,
+                            automaticAllowed = historySync.effective != HistorySyncMode.LAZY,
                             // NOT `!historyReady`: a fresh connection spends a moment negotiating, and painting
                             // "couldn't load" across every seam for that moment is an error the reader never had.
                             historyUnreachable = historyUnreachable(availability, connection),
@@ -450,7 +454,7 @@ class ChatViewModel
                     val decision = rule.next(roomId, currentGate, seams.seams, prefetch, tap)
                     // One line per DECISION, not per frame: the combine's inputs are all distinct-until-
                     // changed, so this is a handful of records per room open. It is the only place the gate's
-                    // three inputs, the seam list and the viewport's demand are all in scope at once, which
+                    // four inputs, the seam list and the viewport's demand are all in scope at once, which
                     // is what makes "demand never reported", "gate never armed" and "rule refused" separable
                     // in a journal instead of producing the identical silence.
                     journalSeamDecision(roomId, currentGate, seams, prefetch, tap, decision)
@@ -459,7 +463,7 @@ class ChatViewModel
                     // Publish before as well as after: a retry tap clears its gap's failure, and the divider
                     // must show the load it started rather than the error it is already retrying.
                     failedGapIds.value = rule.failedGapIds
-                    val progress = gapFiller.fillGap(request.roomId, request.gapId)
+                    val progress = gapFiller.fillGap(request.roomId, request.gapId, automatic = !request.fromTap)
                     rule.settle(request, progress)
                     failedGapIds.value = rule.failedGapIds
                     // Pairs with the coordinator's own gap_fill_started/gap_fill_ended: those say what the
@@ -495,6 +499,7 @@ class ChatViewModel
             mapOf(
                 "room_id" to roomId,
                 "decision" to decision.journalName,
+                "automatic_allowed" to gate.automaticAllowed,
                 "gap_id" to (decision as? SeamDecision.Start)?.request?.gapId,
                 "on_screen" to gate.onScreen,
                 "history_ready" to gate.historyReady,
@@ -802,6 +807,17 @@ class ChatViewModel
                 )
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ConversationPresenceState())
 
+        val conversationHistorySync: StateFlow<ConversationHistorySyncState> =
+            combine(
+                buffer,
+                settingsRepository.settings,
+            ) { room, settings ->
+                ConversationHistorySyncState(
+                    global = settings.historySyncMode,
+                    override = room?.historySyncModeOverride,
+                )
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ConversationHistorySyncState())
+
         /** The route id may be a durable redirect; all live screen behavior uses the winner id. */
         private val operationalBufferId: StateFlow<Long> =
             buffer
@@ -1048,6 +1064,8 @@ class ChatViewModel
                 current.copy(conversationLayout = layout)
             }.combine(conversationPresence) { current, presence ->
                 current.copy(conversationPresence = presence)
+            }.combine(conversationHistorySync) { current, historySync ->
+                current.copy(conversationHistorySync = historySync)
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatState())
 
         val accountSetupReminder: StateFlow<Boolean> =
@@ -1089,6 +1107,20 @@ class ChatViewModel
                         false
                     }
                 if (!written) uiEventQueue.enqueue(ChatUiEvent.PresenceModeWriteFailed)
+            }
+
+        fun setHistorySyncModeOverride(override: HistorySyncMode?) =
+            viewModelScope.launch {
+                val requestedId = operationalBufferId.value
+                val written =
+                    try {
+                        bufferRepository.setHistorySyncModeOverride(requestedId, override)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        false
+                    }
+                if (!written) uiEventQueue.enqueue(ChatUiEvent.HistorySyncModeWriteFailed)
             }
 
         /**

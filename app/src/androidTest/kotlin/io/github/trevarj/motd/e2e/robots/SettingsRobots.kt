@@ -20,6 +20,14 @@ internal class SettingsRobot(
         assertDisplayed("screen_notification_settings")
     }
 
+    fun selectBalancedHistorySync() {
+        scrollToAndClick("settings_category_history")
+        scrollToAndClick("settings_history_sync_mode")
+        assertDisplayed("settings_history_sync_sheet")
+        click("settings_history_sync_balanced")
+        awaitTagGone("settings_history_sync_sheet")
+    }
+
     fun appearance() = scrollToAndClick("settings_category_appearance")
 
     fun selectIrcSpritesV2() {

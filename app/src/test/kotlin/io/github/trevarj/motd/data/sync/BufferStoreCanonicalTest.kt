@@ -16,6 +16,7 @@ import io.github.trevarj.motd.data.db.ObservationOrigin
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.inMemoryDb
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
@@ -1060,5 +1061,40 @@ class BufferStoreCanonicalTest {
             val resolved = store.getOrCreate(networkId, "newnick", "NewNick", BufferType.QUERY)
             assertEquals(merged.id, resolved.id)
             assertEquals(LayoutDensity.COMPACT, resolved.layoutDensityOverride)
+        }
+
+    @Test
+    fun historySyncMergeKeepsExplicitBalancedAndTransfersOnlyIntoInheritance() =
+        runTest {
+            val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+            val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+            db.bufferDao().update(winner.copy(historySyncModeOverride = HistorySyncMode.BALANCED))
+            db.bufferDao().update(loser.copy(historySyncModeOverride = HistorySyncMode.AGGRESSIVE))
+
+            val explicitWinner = store.mergeRooms(winner.id, loser.id)
+            assertEquals(HistorySyncMode.BALANCED, explicitWinner.historySyncModeOverride)
+
+            val inheriting = store.getOrCreate(networkId, "third", "Third", BufferType.QUERY)
+            val configured = store.getOrCreate(networkId, "fourth", "Fourth", BufferType.QUERY)
+            db.bufferDao().update(configured.copy(historySyncModeOverride = HistorySyncMode.LAZY))
+            assertEquals(HistorySyncMode.LAZY, store.mergeRooms(inheriting.id, configured.id).historySyncModeOverride)
+        }
+
+    @Test
+    fun historySyncOverrideWritesThroughRedirectAndRejectsServerRooms() =
+        runTest {
+            val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+            val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+            store.mergeRooms(winner.id, loser.id)
+
+            assertEquals(1, db.bufferDao().setHistorySyncModeOverride(loser.id, HistorySyncMode.AGGRESSIVE))
+            assertEquals(HistorySyncMode.AGGRESSIVE, db.bufferDao().rawById(winner.id)?.historySyncModeOverride)
+            assertEquals(null, db.bufferDao().rawById(loser.id)?.historySyncModeOverride)
+            assertEquals(1, db.bufferDao().setHistorySyncModeOverride(loser.id, null))
+            assertEquals(null, db.bufferDao().rawById(winner.id)?.historySyncModeOverride)
+
+            val server = store.getOrCreate(networkId, "server", "server", BufferType.SERVER)
+            assertEquals(0, db.bufferDao().setHistorySyncModeOverride(server.id, HistorySyncMode.LAZY))
+            assertEquals(null, db.bufferDao().rawById(server.id)?.historySyncModeOverride)
         }
 }

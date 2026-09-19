@@ -17,6 +17,7 @@ import io.github.trevarj.motd.data.db.NotificationChannelRow
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.history.TimelineSeam
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
@@ -187,6 +188,12 @@ interface BufferRepository {
     suspend fun setPresenceModeOverride(
         id: Long,
         mode: PresenceMode?,
+    ): Boolean
+
+    /** Persists a nullable CHANNEL/QUERY override; false means the room is missing or a SERVER. */
+    suspend fun setHistorySyncModeOverride(
+        id: Long,
+        mode: HistorySyncMode?,
     ): Boolean
 
     /** Persists a validated conversation avatar model through durable room redirects. */

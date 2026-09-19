@@ -20,6 +20,7 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.FontChoice
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
@@ -388,6 +389,30 @@ class ConfigurationBackupRepositoryTest {
             } finally {
                 settings.setFolderDisplayMode(FolderDisplayMode.INLINE)
                 settings.setShowFolderChatsInAll(true)
+            }
+        }
+
+    @Test
+    fun historySyncModeRoundTripsAndOlderBackupsDefaultToBalanced() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val settings = DataStoreSettingsRepository(context)
+            val backup = repository(inMemoryDb())
+            try {
+                settings.setHistorySyncMode(HistorySyncMode.AGGRESSIVE)
+                val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+
+                settings.setHistorySyncMode(HistorySyncMode.LAZY)
+                backup.import(raw, importMode = BackupImportMode.MERGE)
+                assertEquals(HistorySyncMode.AGGRESSIVE, settings.settings.first().historySyncMode)
+
+                val oldRaw = raw.replace(Regex(""",?\s*"historySyncMode"\s*:\s*"AGGRESSIVE""""), "")
+                assertFalse(oldRaw.contains("historySyncMode"))
+                settings.setHistorySyncMode(HistorySyncMode.LAZY)
+                backup.import(oldRaw, importMode = BackupImportMode.MERGE)
+                assertEquals(HistorySyncMode.BALANCED, settings.settings.first().historySyncMode)
+            } finally {
+                settings.setHistorySyncMode(HistorySyncMode.BALANCED)
             }
         }
 

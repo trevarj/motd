@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.repo.BufferRepository
@@ -376,6 +377,11 @@ class DickordPortalViewModelTest {
             id: Long,
             mode: PresenceMode?,
         ): Boolean = true
+
+        override suspend fun setHistorySyncModeOverride(
+            id: Long,
+            mode: HistorySyncMode?,
+        ): Boolean = error("Unexpected history sync mode override write")
 
         override suspend fun deleteBuffer(id: Long) = Unit
     }

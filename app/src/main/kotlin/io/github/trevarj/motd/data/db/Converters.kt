@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.db
 
 import androidx.room.TypeConverter
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 
@@ -98,4 +99,10 @@ internal class Converters {
 
     @TypeConverter
     fun stringToPresenceMode(v: String?): PresenceMode? = v?.let { runCatching { PresenceMode.valueOf(it) }.getOrNull() }
+
+    @TypeConverter
+    fun historySyncModeToString(v: HistorySyncMode?): String? = v?.name
+
+    @TypeConverter
+    fun stringToHistorySyncMode(v: String?): HistorySyncMode? = v?.let { runCatching { HistorySyncMode.valueOf(it) }.getOrNull() }
 }

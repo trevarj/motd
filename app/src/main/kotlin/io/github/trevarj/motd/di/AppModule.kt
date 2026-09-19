@@ -325,7 +325,8 @@ internal abstract class AppModule {
                 override suspend fun fillGap(
                     roomId: Long,
                     gapId: Long,
-                ) = coordinator.fillGap(roomId, gapId).progress
+                    automatic: Boolean,
+                ) = coordinator.fillGap(roomId, gapId, automatic).progress
             }
 
         /** Provide the real crypto/health collaborators; EventProcessor owns notification policy. */

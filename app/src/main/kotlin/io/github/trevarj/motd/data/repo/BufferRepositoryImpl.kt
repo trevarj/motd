@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.db.MonitorQueryRow
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.SettingsRepository
@@ -135,6 +136,11 @@ class BufferRepositoryImpl
             id: Long,
             mode: PresenceMode?,
         ): Boolean = bufferDao.setPresenceModeOverride(id, mode) == 1
+
+        override suspend fun setHistorySyncModeOverride(
+            id: Long,
+            mode: HistorySyncMode?,
+        ): Boolean = bufferDao.setHistorySyncModeOverride(id, mode) == 1
 
         override suspend fun setAvatarOverride(
             id: Long,

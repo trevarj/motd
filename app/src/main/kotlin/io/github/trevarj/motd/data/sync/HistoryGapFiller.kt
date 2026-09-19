@@ -21,10 +21,11 @@ interface HistoryGapFiller {
     /** Gap ids with a fill in flight, for the spinner on their divider rows. */
     val fillsInFlight: StateFlow<Set<Long>>
 
-    /** Fill [gapId]. Each call grants one fresh page budget, whether a tap or the timeline asked. */
+    /** Automatic demand may stop at wire admission when saved policy becomes Lazy; taps stay explicit. */
     suspend fun fillGap(
         roomId: RoomId,
         gapId: Long,
+        automatic: Boolean,
     ): GapFillProgress
 }
 
@@ -44,9 +45,9 @@ enum class GapFillProgress {
     STALLED,
 
     /**
-     * The fill never engaged the gap at all: the room was already filling, the gap had closed, or
-     * the room cannot hold one. Like [STALLED] this is a statement about the attempt rather than
-     * about the seam.
+     * No work was admitted: the room was already filling, the gap had closed, the room cannot hold
+     * one, or saved policy declined automatic work. Like [STALLED] this describes the attempt,
+     * not a broken seam.
      */
     DROPPED,
 
@@ -61,5 +62,6 @@ object NoopHistoryGapFiller : HistoryGapFiller {
     override suspend fun fillGap(
         roomId: RoomId,
         gapId: Long,
+        automatic: Boolean,
     ) = GapFillProgress.MOVED
 }

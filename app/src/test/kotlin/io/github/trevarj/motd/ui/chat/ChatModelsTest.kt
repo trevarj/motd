@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.history.HistoryLadderStalled
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.repo.MESSAGE_PAGING_CONFIG
@@ -60,6 +61,18 @@ class ChatModelsTest {
                 override = LayoutDensity.COMFORTABLE,
             ).effective,
         )
+    }
+
+    @Test
+    fun `history sync override remains explicit when the global mode changes`() {
+        val state =
+            ConversationHistorySyncState(
+                global = HistorySyncMode.LAZY,
+                override = HistorySyncMode.BALANCED,
+            )
+
+        assertEquals(HistorySyncMode.BALANCED, state.effective)
+        assertEquals(HistorySyncMode.LAZY, state.copy(override = null).effective)
     }
 
     private fun react(
@@ -1863,6 +1876,20 @@ class ChatModelsTest {
                     GapTapRequest(2, 4),
                 ).startedRequest
                 ?.gapId,
+        )
+    }
+
+    @Test
+    fun `lazy blocks automatic seam demand but explicit taps still load`() {
+        val rule = SeamLoadingRule()
+        val seams = listOf(seam(gapId = 2, serverTime = 900))
+        val prefetch = SeamPrefetch(viewportAt(1000), setOf(2L), olderEdgeIndex = 60)
+        val lazyGate = gateOpen.copy(automaticAllowed = false)
+
+        assertEquals(SeamDecision.GateClosed, rule.next(7, lazyGate, seams, prefetch, tap = null))
+        assertEquals(
+            GapFillRequest(7, 2, fromTap = true),
+            rule.next(7, lazyGate, seams, prefetch, GapTapRequest(2, 1)).startedRequest,
         )
     }
 

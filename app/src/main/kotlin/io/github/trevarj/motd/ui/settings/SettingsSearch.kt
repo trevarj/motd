@@ -183,6 +183,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_friends, R.string.settings_people, "people nicks", SettingsSearchPage.CHAT, SettingsTarget.FRIENDS),
         spec(R.string.settings_fools, R.string.settings_people, "ignore people nicks", SettingsSearchPage.CHAT, SettingsTarget.FOOLS),
         spec(R.string.settings_fools_mode, R.string.settings_fools_hide_desc, "collapse hide", SettingsSearchPage.CHAT, SettingsTarget.FOOLS_MODE),
+        spec(R.string.settings_history_sync_mode, R.string.settings_history_sync_disclosure, "sync history balanced aggressive lazy gaps", SettingsSearchPage.HISTORY, SettingsTarget.HISTORY_SYNC_MODE),
         spec(R.string.settings_history_retention, R.string.settings_history_retention_desc, "prune storage database size old messages", SettingsSearchPage.HISTORY, SettingsTarget.HISTORY_RETENTION),
         spec(R.string.settings_auto_compact, R.string.settings_auto_compact_desc, "vacuum automatic storage database size free space", SettingsSearchPage.HISTORY, SettingsTarget.AUTO_COMPACT),
         spec(R.string.settings_compact_database, R.string.settings_compact_database_search_desc, "vacuum storage database size free space", SettingsSearchPage.HISTORY, SettingsTarget.COMPACT_DATABASE),

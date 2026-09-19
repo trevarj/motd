@@ -8,6 +8,7 @@ import io.github.trevarj.motd.avatar.AvatarController
 import io.github.trevarj.motd.avatar.NoopAvatarController
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.HistoryBackfillCursorEntity
 import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -16,7 +17,11 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.HistorySyncPrefs
+import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
@@ -49,14 +54,17 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
@@ -85,6 +93,11 @@ class HistoryResyncCoordinatorTest {
     private lateinit var coordinator: HistoryResyncCoordinator
     private var networkId = 0L
     private var bufferId = 0L
+    private val settingsState = MutableStateFlow(Settings())
+    private val settingsRepository =
+        object : SettingsRepository by DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>()) {
+            override val settings = settingsState
+        }
     private val syncPrefs =
         object : HistorySyncPrefs {
             private val values = mutableMapOf<Long, Long>()
@@ -115,6 +128,8 @@ class HistoryResyncCoordinatorTest {
                 Room
                     .inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
                     .allowMainThreadQueries()
+                    .setQueryExecutor { it.run() }
+                    .setTransactionExecutor { it.run() }
                     .build()
             processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
             coordinator =
@@ -123,6 +138,7 @@ class HistoryResyncCoordinatorTest {
                     processor,
                     syncPrefs,
                     CoroutineScope(SupervisorJob() + Dispatchers.Default),
+                    settingsRepository = settingsRepository,
                 )
             networkId =
                 db.networkDao().insert(
@@ -319,7 +335,7 @@ class HistoryResyncCoordinatorTest {
                     }
                 }
             val loader = HistoryPageLoader(processor, avatarController = avatars)
-            coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader)
+            coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader, settingsRepository = settingsRepository)
             val source =
                 FakeSource {
                     FakeResponse(events = listOf(tagged), endOfHistory = true)
@@ -412,7 +428,7 @@ class HistoryResyncCoordinatorTest {
             // serialization in the loader: an urgent pending promotion must be serviced BETWEEN two
             // pages of an in-flight network resync — never queued behind the entire pass.
             val loader = HistoryPageLoader(processor)
-            coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader)
+            coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader, settingsRepository = settingsRepository)
             val otherId =
                 db.bufferDao().insert(
                     BufferEntity(networkId = networkId, name = "#other", displayName = "#other", type = BufferType.CHANNEL),
@@ -3327,6 +3343,334 @@ class HistoryResyncCoordinatorTest {
         }
 
     @Test
+    fun lazySkipsOlderTargetsAndBalancedResumesOnTheSameSource() =
+        runTest {
+            db.historyBackfillCursorDao().seed(HistoryBackfillCursorEntity(networkId, upperBound = 1_000))
+            settingsState.value = settingsState.value.copy(historySyncMode = HistorySyncMode.LAZY)
+            val source =
+                FakeSource { request ->
+                    if (request.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
+                        FakeResponse(targets = listOf("old-friend" to 500L), endOfHistory = true)
+                    } else {
+                        FakeResponse(events = listOf(directMessage("old1", 500, peer = "old-friend")), endOfHistory = true)
+                    }
+                }
+
+            coordinator.backfillTargets(networkId, source) { true }
+            assertTrue(source.requests.isEmpty())
+            assertNull(db.bufferDao().byName(networkId, "old-friend"))
+            assertEquals(HistoryBackfillCursorEntity(networkId, 1_000), db.historyBackfillCursorDao().byNetwork(networkId))
+
+            settingsState.value = settingsState.value.copy(historySyncMode = HistorySyncMode.BALANCED)
+            coordinator.backfillTargets(networkId, source) { true }
+            assertEquals(
+                listOf(ChatHistoryRequest.Subcommand.TARGETS, ChatHistoryRequest.Subcommand.LATEST),
+                source.requests.map { it.subcommand },
+            )
+            val room = requireNotNull(db.bufferDao().byName(networkId, "old-friend"))
+            assertEquals(listOf("old1"), rows(room.id).map { it.msgid })
+            assertTrue(requireNotNull(db.historyBackfillCursorDao().byNetwork(networkId)).complete)
+        }
+
+    @Test
+    fun aLazyKnownQueryFreezesTheCursorButDoesNotBlockLaterSeedsOrResumeDuplicates() =
+        runTest {
+            db.historyBackfillCursorDao().seed(HistoryBackfillCursorEntity(networkId, upperBound = 1_000))
+            val deferred =
+                db.bufferDao().insert(
+                    BufferEntity(
+                        networkId = networkId,
+                        name = "deferred",
+                        displayName = "deferred",
+                        type = BufferType.QUERY,
+                        historySyncModeOverride = HistorySyncMode.LAZY,
+                    ),
+                )
+            val source =
+                FakeSource(pageLimit = 2) { request ->
+                    if (request.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
+                        if (requireNotNull(request.bound1).timestampBoundMillis() == 1_000L) {
+                            FakeResponse(targets = listOf("deferred" to 900L, "allowed" to 800L))
+                        } else {
+                            FakeResponse(targets = listOf("later" to 700L), endOfHistory = true)
+                        }
+                    } else {
+                        val time =
+                            when (request.target) {
+                                "deferred" -> 900L
+                                "allowed" -> 800L
+                                "later" -> 700L
+                                else -> error("unexpected target ${request.target}")
+                            }
+                        FakeResponse(
+                            events = listOf(directMessage("${request.target}-latest", time, peer = request.target)),
+                            endOfHistory = true,
+                        )
+                    }
+                }
+
+            coordinator.backfillTargets(networkId, source) { true }
+            assertEquals(
+                listOf("allowed", "later"),
+                source.requests.filter { it.subcommand != ChatHistoryRequest.Subcommand.TARGETS }.map { it.target },
+            )
+            assertEquals(0, db.messageDao().countForBuffer(deferred))
+            assertEquals(HistoryBackfillCursorEntity(networkId, 1_000), db.historyBackfillCursorDao().byNetwork(networkId))
+
+            db.bufferDao().setHistorySyncModeOverride(deferred, null)
+            coordinator.backfillTargets(networkId, source) { true }
+            assertEquals(
+                listOf("allowed", "later", "deferred"),
+                source.requests.filter { it.subcommand != ChatHistoryRequest.Subcommand.TARGETS }.map { it.target },
+            )
+            for (target in listOf("deferred", "allowed", "later")) {
+                val room = requireNotNull(db.bufferDao().byName(networkId, target))
+                assertEquals(listOf("$target-latest"), rows(room.id).map { it.msgid })
+            }
+            assertTrue(requireNotNull(db.historyBackfillCursorDao().byNetwork(networkId)).complete)
+        }
+
+    @Test
+    fun becomingLazyDuringASeedPersistsItsResponseButFreezesBeforeSkippedWork() =
+        runTest {
+            db.historyBackfillCursorDao().seed(HistoryBackfillCursorEntity(networkId, upperBound = 1_000))
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val source =
+                FakeSource { request ->
+                    if (request.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
+                        FakeResponse(targets = listOf("started" to 900L, "skipped" to 800L))
+                    } else {
+                        check(request.target == "started")
+                        entered.complete(Unit)
+                        release.await()
+                        FakeResponse(events = listOf(directMessage("started-latest", 900, peer = "started")), endOfHistory = true)
+                    }
+                }
+            val pass = async { coordinator.backfillTargets(networkId, source) { true } }
+            entered.await()
+            settingsState.value = settingsState.value.copy(historySyncMode = HistorySyncMode.LAZY)
+            release.complete(Unit)
+            pass.await()
+
+            assertEquals(listOf("*", "started"), source.requests.map { it.target })
+            val started = requireNotNull(db.bufferDao().byName(networkId, "started"))
+            assertEquals(listOf("started-latest"), rows(started.id).map { it.msgid })
+            assertNull(db.bufferDao().byName(networkId, "skipped"))
+            assertEquals(HistoryBackfillCursorEntity(networkId, 1_000), db.historyBackfillCursorDao().byNetwork(networkId))
+        }
+
+    @Test
+    fun queuedBackfillChecksTheResolvedAccountRoomRatherThanTheCollidingNickName() =
+        runTest {
+            val store = BufferStore(db)
+            val provisional = store.getOrCreate(networkId, "shared", "shared", BufferType.QUERY)
+            val oldAccount = store.bindQueryIdentity(provisional.id, networkId, "shared", "shared", "account-a")
+            val currentAccount = store.bindQueryIdentity(oldAccount.id, networkId, "shared", "shared", "account-b")
+            assertEquals(oldAccount.id, db.bufferDao().byName(networkId, "shared")?.id)
+            assertTrue(oldAccount.id != currentAccount.id)
+            db.historyBackfillCursorDao().seed(HistoryBackfillCursorEntity(networkId, upperBound = 1_000))
+            val loader = HistoryPageLoader(processor)
+            coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader, settingsRepository = settingsRepository)
+            val source =
+                FakeSource { request ->
+                    if (request.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
+                        FakeResponse(targets = listOf("shared" to 900L), endOfHistory = true)
+                    } else {
+                        FakeResponse(
+                            events =
+                                listOf(
+                                    directMessage("account-b-latest", 900, peer = "shared")
+                                        .copy(ctx = MessageContext("account-b-latest", 900, "account-b", "batch", null)),
+                                ),
+                            endOfHistory = true,
+                        )
+                    }
+                }
+            val pass = async { coordinator.backfillTargets(networkId, source) { true } }
+            runCurrent() // TARGETS has completed; the seed is in its pacing delay.
+            val wireEntered = CompletableDeferred<Unit>()
+            val releaseWire = CompletableDeferred<Unit>()
+            val holder =
+                async {
+                    loader.loadPage(
+                        networkId,
+                        bufferId,
+                        "#chan",
+                        HistoryPageLoader.Direction.LATEST,
+                        FakeSource {
+                            wireEntered.complete(Unit)
+                            releaseWire.await()
+                            FakeResponse(endOfHistory = true)
+                        },
+                    )
+                }
+            try {
+                wireEntered.await()
+                val preparingSeed = CompletableDeferred<Unit>()
+                source.onAvailability = { preparingSeed.complete(Unit) }
+                // Availability is consulted by the seed only after its canonical-room policy check.
+                preparingSeed.await()
+                runCurrent()
+                db.bufferDao().setHistorySyncModeOverride(currentAccount.id, HistorySyncMode.LAZY)
+                releaseWire.complete(Unit)
+                holder.await()
+                pass.await()
+
+                assertEquals(listOf(ChatHistoryRequest.Subcommand.TARGETS), source.requests.map { it.subcommand })
+                assertEquals(0, db.messageDao().countForBuffer(currentAccount.id))
+                assertEquals(HistoryBackfillCursorEntity(networkId, 1_000), db.historyBackfillCursorDao().byNetwork(networkId))
+
+                db.bufferDao().setHistorySyncModeOverride(currentAccount.id, null)
+                source.onAvailability = null
+                coordinator.backfillTargets(networkId, source) { true }
+                assertEquals(1, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.LATEST })
+                assertEquals(listOf("account-b-latest"), rows(currentAccount.id).map { it.msgid })
+                assertEquals(0, db.messageDao().countForBuffer(oldAccount.id))
+                assertTrue(requireNotNull(db.historyBackfillCursorDao().byNetwork(networkId)).complete)
+            } finally {
+                pass.cancelAndJoin()
+                holder.cancelAndJoin()
+            }
+        }
+
+    @Test
+    fun aReadyPolicyRoundTripWhileBackfillIsHeldResumesItsDeferredSeed() =
+        runTest {
+            val deferred =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "deferred", displayName = "deferred", type = BufferType.QUERY),
+                )
+            val held =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "held", displayName = "held", type = BufferType.QUERY),
+                )
+            db.historyBackfillCursorDao().seed(HistoryBackfillCursorEntity(networkId, upperBound = 1_000))
+            val targetsEntered = CompletableDeferred<Unit>()
+            val releaseTargets = CompletableDeferred<Unit>()
+            val secondEntered = CompletableDeferred<Unit>()
+            val releaseSecond = CompletableDeferred<Unit>()
+            val source =
+                FakeSource { request ->
+                    if (request.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
+                        targetsEntered.complete(Unit)
+                        releaseTargets.await()
+                        FakeResponse(targets = listOf("deferred" to 900L, "held" to 800L), endOfHistory = true)
+                    } else {
+                        if (request.target == "held") {
+                            secondEntered.complete(Unit)
+                            releaseSecond.await()
+                        }
+                        val time = if (request.target == "deferred") 900L else 800L
+                        FakeResponse(
+                            events = listOf(directMessage("${request.target}-latest", time, peer = request.target)),
+                            endOfHistory = true,
+                        )
+                    }
+                }
+            val session =
+                launch {
+                    runHistoryBackfillSession(
+                        globalModes = settingsState.map { it.historySyncMode },
+                        overrides = db.bufferDao().observeHistorySyncOverrides(networkId),
+                        isCurrent = { true },
+                        backfill = { coordinator.backfillTargets(networkId, source) { true } },
+                    )
+                }
+            try {
+                targetsEntered.await()
+                db.bufferDao().setHistorySyncModeOverride(deferred, HistorySyncMode.LAZY)
+                runCurrent()
+                releaseTargets.complete(Unit)
+                secondEntered.await()
+                assertEquals(listOf("held"), source.requests.filter { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }.map { it.target })
+
+                db.bufferDao().setHistorySyncModeOverride(deferred, null)
+                runCurrent() // Restore the initial policy before the first pass can return.
+                releaseSecond.complete(Unit)
+                advanceUntilIdle()
+
+                assertEquals(listOf("deferred-latest"), rows(deferred).map { it.msgid })
+                assertEquals(listOf("held-latest"), rows(held).map { it.msgid })
+                assertEquals(listOf("held", "deferred"), source.requests.filter { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }.map { it.target })
+                assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
+                assertTrue(requireNotNull(db.historyBackfillCursorDao().byNetwork(networkId)).complete)
+            } finally {
+                session.cancelAndJoin()
+            }
+        }
+
+    @Test
+    fun inheritedRoomsCreatedByBackfillDoNotQueueAnotherDiscoveryPass() =
+        runTest {
+            val deferred =
+                db.bufferDao().insert(
+                    BufferEntity(
+                        networkId = networkId,
+                        name = "deferred",
+                        displayName = "deferred",
+                        type = BufferType.QUERY,
+                        historySyncModeOverride = HistorySyncMode.LAZY,
+                    ),
+                )
+            db.historyBackfillCursorDao().seed(HistoryBackfillCursorEntity(networkId, upperBound = 1_000))
+            val source =
+                FakeSource { request ->
+                    if (request.subcommand == ChatHistoryRequest.Subcommand.TARGETS) {
+                        FakeResponse(
+                            targets = listOf("deferred" to 900L, "unknown-a" to 800L, "unknown-b" to 700L),
+                            endOfHistory = true,
+                        )
+                    } else {
+                        val time =
+                            when (request.target) {
+                                "deferred" -> 900L
+                                "unknown-a" -> 800L
+                                "unknown-b" -> 700L
+                                else -> error("unexpected target ${request.target}")
+                            }
+                        FakeResponse(
+                            events = listOf(directMessage("${request.target}-latest", time, peer = request.target)),
+                            endOfHistory = true,
+                        )
+                    }
+                }
+            val session =
+                launch {
+                    runHistoryBackfillSession(
+                        globalModes = settingsState.map { it.historySyncMode },
+                        overrides = db.bufferDao().observeHistorySyncOverrides(networkId),
+                        isCurrent = { true },
+                        backfill = { coordinator.backfillTargets(networkId, source) { true } },
+                    )
+                }
+            try {
+                advanceUntilIdle()
+                assertEquals(1, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
+                assertEquals(
+                    listOf("unknown-a", "unknown-b"),
+                    source.requests.filter { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }.map { it.target },
+                )
+                assertEquals(HistoryBackfillCursorEntity(networkId, 1_000), db.historyBackfillCursorDao().byNetwork(networkId))
+
+                db.bufferDao().setHistorySyncModeOverride(deferred, null)
+                advanceUntilIdle()
+                assertEquals(2, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.TARGETS })
+                assertEquals(
+                    listOf("unknown-a", "unknown-b", "deferred"),
+                    source.requests.filter { it.subcommand == ChatHistoryRequest.Subcommand.LATEST }.map { it.target },
+                )
+                for (target in listOf("deferred", "unknown-a", "unknown-b")) {
+                    val room = requireNotNull(db.bufferDao().byName(networkId, target))
+                    assertEquals(listOf("$target-latest"), rows(room.id).map { it.msgid })
+                }
+                assertTrue(requireNotNull(db.historyBackfillCursorDao().byNetwork(networkId)).complete)
+            } finally {
+                session.cancelAndJoin()
+            }
+        }
+
+    @Test
     fun backfillPersistsProgressAndResumesAfterTransportFailure() =
         runTest {
             db.historyBackfillCursorDao().seed(
@@ -3763,7 +4107,7 @@ class HistoryResyncCoordinatorTest {
             // reclaims one. Until it did, a request parked on the socket that just went away kept its
             // permit, and the connection replacing it queued behind a page that was never coming.
             val loader = HistoryPageLoader(processor)
-            coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader)
+            coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader, settingsRepository = settingsRepository)
             var entered = 0
             val parked = CompletableDeferred<Unit>()
             val refs = setOf(HistoryReferenceType.TIMESTAMP)
@@ -4182,6 +4526,7 @@ class HistoryResyncCoordinatorTest {
                     syncPrefs,
                     CoroutineScope(SupervisorJob() + Dispatchers.Default),
                     foregroundBuffers = FakeForegroundBuffer(foregroundId),
+                    settingsRepository = settingsRepository,
                 )
             val source =
                 FakeSource { request ->
@@ -4760,7 +5105,7 @@ class HistoryResyncCoordinatorTest {
             // want the same newest page, and the second one used to put an identical request on the
             // wire behind the first, guaranteed to insert nothing.
             val loader = HistoryPageLoader(processor)
-            coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader)
+            coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader, settingsRepository = settingsRepository)
             val fetchStarted = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
             val source =
@@ -4812,7 +5157,7 @@ class HistoryResyncCoordinatorTest {
             // leader's timeout classified as cancellation let the Paging follower read the flight as
             // abandoned and silently re-lead it onto a wire that just proved it is too slow.
             val loader = HistoryPageLoader(processor)
-            coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader)
+            coordinator = HistoryResyncCoordinator(db, processor, syncPrefs, backgroundScope, loader = loader, settingsRepository = settingsRepository)
             coordinator.requestTimeoutMs = 5_000
             val names = listOf("#slow", "#fast")
             val ids = insertChannels(names)

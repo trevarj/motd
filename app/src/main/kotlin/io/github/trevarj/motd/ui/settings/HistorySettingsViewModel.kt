@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.prefs.HistoryRetention
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.sync.DatabaseProfile
@@ -45,6 +46,8 @@ class HistorySettingsViewModel
 
         private val _databaseCompactEvents = MutableSharedFlow<DatabaseCompactEvent>()
         val databaseCompactEvents = _databaseCompactEvents.asSharedFlow()
+        private val _historySyncSaveErrors = MutableSharedFlow<Unit>()
+        val historySyncSaveErrors = _historySyncSaveErrors.asSharedFlow()
 
         /** Covers the button and automatic compaction alike, so the row can't be pressed twice. */
         val compacting: StateFlow<Boolean> = historyPruner.compacting
@@ -55,6 +58,17 @@ class HistorySettingsViewModel
         }
 
         fun setHistoryRetention(value: HistoryRetention) = launch { settingsRepository.setHistoryRetention(value) }
+
+        fun setHistorySyncMode(mode: HistorySyncMode) =
+            launch {
+                try {
+                    settingsRepository.setHistorySyncMode(mode)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    _historySyncSaveErrors.emit(Unit)
+                }
+            }
 
         fun setAutoCompactMb(mb: Int) = launch { settingsRepository.setAutoCompactMb(mb) }
 

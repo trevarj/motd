@@ -6,6 +6,7 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncDepth
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
@@ -214,6 +215,10 @@ class OnboardingViewModelTest {
         override suspend fun setHistorySyncDepth(d: HistorySyncDepth) {
             historySyncDepth = d
             log?.add("depth:${d.name}")
+        }
+
+        override suspend fun setHistorySyncMode(mode: HistorySyncMode) {
+            settings.value = settings.value.copy(historySyncMode = mode)
         }
 
         override suspend fun setAutoAwayEnabled(enabled: Boolean) = Unit

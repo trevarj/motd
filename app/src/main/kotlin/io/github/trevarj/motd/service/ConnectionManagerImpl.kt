@@ -15,6 +15,7 @@ import io.github.trevarj.motd.bouncer.isBouncerConsole
 import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.HistorySyncOverrideRow
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -29,15 +30,18 @@ import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.InviteEnrollmentStore
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.ChatSoundPlayer
 import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.OutgoingEventPlan
+import io.github.trevarj.motd.data.sync.historySource
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -78,6 +82,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -89,6 +94,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -557,6 +563,8 @@ class ConnectionManagerImpl
         @ApplicationScope private val scope: CoroutineScope,
         // Lazy to break the WebPushRegistrar <-> ConnectionManager ctor cycle.
         private val webPushRegistrar: dagger.Lazy<WebPushRegistrar>,
+        // Lazy to break the history filler <-> ConnectionManager constructor cycle.
+        private val historyGapFillCoordinator: dagger.Lazy<HistoryGapFillCoordinator>,
         private val bufferStore: BufferStore = BufferStore(db),
     ) : ConnectionManager {
         private val networkDao get() = db.networkDao()
@@ -1871,6 +1879,7 @@ class ConnectionManagerImpl
             // feature waiters alive for the exact connection rather than treating an early snapshot as
             // final. ConnectionActor cancels this scope as soon as Ready ends.
             coroutineScope {
+                val ownsConnection = { isCurrent() && clientFor(row.id) === client }
                 val initialReadMarkers =
                     async {
                         val negotiated = awaitReadMarkerCapabilityDecision(client)
@@ -1920,10 +1929,16 @@ class ConnectionManagerImpl
                         catchUp = {
                             catchUpForConnection(row.id, client, onCatchUpConverged = releaseEntryGate)
                         },
+                        proactive = {
+                            historyGapFillCoordinator.get().fillProactively(row.id, client.historySource(), ownsConnection)
+                        },
                         backfill = {
-                            historyResyncCoordinator.backfillTargets(row.id, client) {
-                                clientFor(row.id) === client
-                            }
+                            runHistoryBackfillSession(
+                                globalModes = settings.settings.map { it.historySyncMode },
+                                overrides = bufferDao.observeHistorySyncOverrides(row.id),
+                                isCurrent = ownsConnection,
+                                backfill = { historyResyncCoordinator.backfillTargets(row.id, client, ownsConnection) },
+                            )
                         },
                     )
                 }
@@ -3430,6 +3445,7 @@ internal suspend fun runHistoryCatchUpSession(
     releaseGate: suspend () -> Unit,
     catchUp: suspend () -> Unit,
     backfill: suspend () -> Unit,
+    proactive: suspend () -> Unit = {},
 ): Unit =
     coroutineScope {
         // True once this session's entry decision has claimed the catch-up; false once it is known to
@@ -3440,13 +3456,20 @@ internal suspend fun runHistoryCatchUpSession(
         // it observes.
         val claimed = CompletableDeferred<Boolean>()
         val ownsConnection = { isCurrent() && liveClient() === client }
+        var proactiveJob: Job? = null
+        val catchUpAndObserve: suspend () -> Unit = {
+            catchUp()
+            if (proactiveJob == null && ownsConnection()) {
+                proactiveJob = launch { proactive() }
+            }
+        }
         launch {
             decideHistoryCatchUp(
                 awaitHistoryReady = { awaitHistoryReady(client) },
                 stillCurrent = ownsConnection,
                 claimed = claimed,
                 releaseGate = releaseGate,
-                catchUp = catchUp,
+                catchUp = catchUpAndObserve,
                 backfill = backfill,
             )
         }
@@ -3461,7 +3484,7 @@ internal suspend fun runHistoryCatchUpSession(
                 claimed = claimed,
                 awaitCapability = { awaitCapabilityAvailable(client, ConnectionManagerImpl.CHATHISTORY_CAP) },
                 stillCurrent = ownsConnection,
-                catchUp = catchUp,
+                catchUp = catchUpAndObserve,
                 // The entry branch is the only other caller of the backfill, so without this an account
                 // that reaches history only through CAP NEW would never enumerate targets older than
                 // the initial-sync window at all — not late, never.
@@ -3469,6 +3492,24 @@ internal suspend fun runHistoryCatchUpSession(
             )
         }
     }
+
+/** Keep observing rare policy writes while a Ready-owned backfill pass is suspended. */
+internal suspend fun runHistoryBackfillSession(
+    globalModes: Flow<HistorySyncMode>,
+    overrides: Flow<List<HistorySyncOverrideRow>>,
+    isCurrent: () -> Boolean,
+    backfill: suspend () -> Unit,
+) {
+    combine(globalModes.distinctUntilChanged(), overrides) { mode, rooms ->
+        // Inherited rooms created by this pass are data changes, not saved policy changes.
+        mode to rooms.filter { it.historySyncModeOverride != null }
+    }.distinctUntilChanged()
+        // Do not conflate a Lazy -> original-policy round trip behind an in-flight pass.
+        .buffer(Channel.UNLIMITED)
+        .collect { (mode, _) ->
+            if (mode != HistorySyncMode.LAZY && isCurrent()) backfill()
+        }
+}
 
 /**
  * Trust a socket that never died: verify only when THIS connection has no converged pass of its own.

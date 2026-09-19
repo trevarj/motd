@@ -517,6 +517,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setShowComposerFormattingTools(it.showComposerFormattingTools)
                 settingsRepository.setChatSoundsEnabled(it.chatSoundsEnabled)
                 settingsRepository.setHistorySyncDepth(it.historySyncDepth)
+                settingsRepository.setHistorySyncMode(it.historySyncMode)
                 settingsRepository.setHistoryRetention(it.historyRetention)
                 settingsRepository.setHistoryRetentionCustomRows(it.historyRetentionCustomRows)
                 settingsRepository.setAutoCompactMb(it.autoCompactMb)

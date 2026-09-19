@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.settings
 
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -105,6 +106,10 @@ class ManageNicksViewModelTest {
         override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
 
         override suspend fun setHistorySyncDepth(d: io.github.trevarj.motd.data.prefs.HistorySyncDepth) = Unit
+
+        override suspend fun setHistorySyncMode(mode: HistorySyncMode) {
+            settings.value = settings.value.copy(historySyncMode = mode)
+        }
 
         override suspend fun setAutoAwayEnabled(enabled: Boolean) = Unit
 

@@ -15,10 +15,12 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.sync.ChatHistoryRemoteMediator
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
+import io.github.trevarj.motd.data.sync.HistoryPruner
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
@@ -369,6 +371,8 @@ class FillPresentationStabilityTest {
             db.historyGapDao(),
             loader,
             DiagnosticLogger.Noop,
+            settingsRepository = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>()),
+            pruner = HistoryPruner.Noop,
         ).fill(bufferId, HistoryGapFillCoordinator.GapSelection.Newest, history, pageSize = 50)
 
     // --- the modeled screen -----------------------------------------------------------------------
