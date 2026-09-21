@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -119,7 +120,7 @@ internal fun chatListRowContainer(
 
         ChatListRowVisualState.ACTIVE -> scheme.primaryContainer
 
-        ChatListRowVisualState.UNREAD -> lerp(scheme.surface, scheme.primaryContainer, 0.48f)
+        ChatListRowVisualState.UNREAD -> lerp(scheme.surface, scheme.primaryContainer, 0.20f)
 
         // Alpha-zero surface, not Color.Transparent: the row's colorFade interpolates color channels
         // independently of alpha, and Color.Transparent is transparent BLACK — fading a tint from it
@@ -188,8 +189,7 @@ internal fun chatListPreviewSender(
  * Pinned rows carry a small inline [Icons.Outlined.PushPin] beside the name (there is no separate
  * "Pinned" section; pinning gives the row global list priority).
  *
- * Round 4: a friend row gets a trailing [Icons.Filled.Star]
- * plus a quiet raised-surface background behind the display name, layered under the nick color.
+ * Friend rows keep a trailing [Icons.Filled.Star] and nick-colored titles.
  */
 @Composable
 fun ChatListRowItem(
@@ -301,17 +301,6 @@ fun ChatListRowItem(
                         modifier = Modifier.padding(end = 6.dp),
                     )
                 }
-                // Quiet raised surface behind a non-muted friend's name.
-                val nameModifier =
-                    if (isFriend && !row.muted) {
-                        Modifier
-                            .weight(1f, fill = false)
-                            .clip(MotdShapes.tag)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .padding(horizontal = 4.dp, vertical = 1.dp)
-                    } else {
-                        Modifier.weight(1f, fill = false)
-                    }
                 Text(
                     text = displayTitle ?: dickordChannelLabel(row.displayName, dickordEnabled),
                     style = MaterialTheme.typography.titleMedium,
@@ -324,7 +313,7 @@ fun ChatListRowItem(
                         },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = nameModifier,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 if (isFriend) {
                     Icon(
@@ -369,7 +358,6 @@ fun ChatListRowItem(
                     NetworkChip(
                         name = stringResource(R.string.dickord_badge),
                         dimmed = true,
-                        emphasized = isUnread,
                     )
                 }
                 if (showNetworkChip) {
@@ -377,7 +365,6 @@ fun ChatListRowItem(
                     NetworkChip(
                         name = row.networkName,
                         dimmed = true,
-                        emphasized = isUnread,
                     )
                 }
                 // The sync cue trails the network chip on the title line, well away from the
@@ -704,16 +691,11 @@ internal fun SenderLabel(
     unread: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val container =
-        if (unread) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        }
     Box(
         modifier =
             modifier
-                .background(container, MotdShapes.tag)
+                .widthIn(max = 92.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainerLow, MotdShapes.tag)
                 .padding(horizontal = 6.dp, vertical = 1.dp),
     ) {
         Text(

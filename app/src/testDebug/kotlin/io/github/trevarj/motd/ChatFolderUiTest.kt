@@ -1,10 +1,14 @@
 package io.github.trevarj.motd
 
+import android.content.Context
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -15,6 +19,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatFolderEntity
 import io.github.trevarj.motd.data.db.ChatListRow
@@ -96,7 +101,7 @@ class ChatFolderUiTest {
     }
 
     @Test
-    fun incomplete_all_summary_uses_activity_dot_instead_of_question_mark() {
+    fun incomplete_folder_summary_exposes_pending_activity() {
         val state =
             mutableStateOf(
                 ChatListState(
@@ -108,8 +113,39 @@ class ChatFolderUiTest {
             )
         setContent(state)
 
-        compose.onNodeWithTag("chatlist_folder_tab_all").assert(hasText("•")).assert(!hasText("?"))
+        val pending = ApplicationProvider.getApplicationContext<Context>().getString(R.string.badge_unread_pending)
+        compose.onNodeWithTag("chatlist_folder_tab_all").assert(hasContentDescription(pending))
+        compose.onNodeWithTag("chatlist_folder_tab_7").assert(hasContentDescription(pending))
         compose.onNodeWithTag("chatlist_row_advertised_activity_dot", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun folder_badges_preserve_mention_lower_bounds() {
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows = listOf(row(mentions = 2).copy(mentionCountIncomplete = true)),
+                    folders = listOf(folder()),
+                    folderDisplayMode = FolderDisplayMode.TABS,
+                    showFolderChatsInAll = false,
+                    loading = false,
+                ),
+            )
+        setContent(state)
+        val resources = ApplicationProvider.getApplicationContext<Context>().resources
+        val mentions = hasContentDescription(resources.getQuantityString(R.plurals.badge_mention_at_least, 2, 2))
+
+        compose.onNodeWithTag("chatlist_folder_tab_7").assert(mentions)
+        compose
+            .onNode(hasText("@2+") and hasAnyAncestor(hasTestTag("chatlist_folder_tab_7")), useUnmergedTree = true)
+            .assertIsDisplayed()
+
+        compose.runOnIdle { state.value = state.value.copy(folderDisplayMode = FolderDisplayMode.INLINE) }
+
+        compose.onNodeWithTag("chatlist_folder_7").assert(mentions)
+        compose
+            .onNode(hasText("@2+") and hasAnyAncestor(hasTestTag("chatlist_folder_7")), useUnmergedTree = true)
+            .assertIsDisplayed()
     }
 
     @Test
@@ -214,7 +250,11 @@ class ChatFolderUiTest {
         compose.onAllNodesWithTag("chatlist_folder_7").assertCountEquals(0)
         compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_row_2").assertIsDisplayed()
-        compose.onNodeWithTag("chatlist_folder_tab_7").assert(hasText("3", substring = true)).performClick()
+        val resources = ApplicationProvider.getApplicationContext<Context>().resources
+        compose
+            .onNodeWithTag("chatlist_folder_tab_7")
+            .assert(hasContentDescription(resources.getQuantityString(R.plurals.badge_mention, 3, 3)))
+            .performClick()
         compose.onNodeWithTag("chatlist_folder_tab_icon_7", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
         compose.onAllNodesWithTag("chatlist_row_2").assertCountEquals(0)

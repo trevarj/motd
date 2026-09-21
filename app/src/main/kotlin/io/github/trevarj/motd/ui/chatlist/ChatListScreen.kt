@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -168,13 +169,16 @@ import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AudioPlaybackViewModel
 import io.github.trevarj.motd.ui.components.ConnectionBanner
 import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.components.FolderIcon
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
+import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
+import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -1110,10 +1114,13 @@ private fun FolderTabStrip(
                 selected = selectedFolderId == null,
                 onClick = { onSelect(null) },
                 modifier = Modifier.testTag("chatlist_folder_tab_all"),
+                selectedContentColor = MaterialTheme.colorScheme.primary,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 text = {
                     FolderTabLabel(
                         name = stringResource(R.string.folders_all),
                         summary = allSummary,
+                        selected = selectedFolderId == null,
                         icon = { Icon(Icons.Outlined.Forum, contentDescription = null, modifier = Modifier.size(20.dp)) },
                     )
                 },
@@ -1124,10 +1131,13 @@ private fun FolderTabStrip(
                 selected = false,
                 onClick = onOpenDickord,
                 modifier = Modifier.testTag("chatlist_folder_tab_discord"),
+                selectedContentColor = MaterialTheme.colorScheme.primary,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 text = {
                     FolderTabLabel(
                         name = stringResource(R.string.dickord_badge),
                         summary = summary,
+                        selected = false,
                         icon = {
                             Icon(
                                 painter = painterResource(R.drawable.ic_discord),
@@ -1140,24 +1150,26 @@ private fun FolderTabStrip(
             )
         }
         folders.forEach { folder ->
-            val tint = remember(folder.folder.displayName) { Color.hsv((folderColorSeed(folder.folder.displayName).toUInt() % 360u).toFloat(), .55f, .72f) }
+            val selected = selectedFolderId == folder.folder.id
             Tab(
-                selected = selectedFolderId == folder.folder.id,
+                selected = selected,
                 onClick = { onSelect(folder.folder.id) },
                 modifier = Modifier.testTag("chatlist_folder_tab_${folder.folder.id}"),
+                selectedContentColor = MaterialTheme.colorScheme.primary,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 text = {
                     FolderTabLabel(
                         name = folder.folder.displayName,
                         summary = folder.summary,
+                        selected = selected,
                         icon = {
                             FolderIcon(
                                 FolderIconRef(folder.folder.iconKind, folder.folder.iconKey),
                                 contentDescription = null,
-                                tint = tint,
+                                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp).testTag("chatlist_folder_tab_icon_${folder.folder.id}"),
                             )
                         },
-                        activityColor = tint,
                     )
                 },
             )
@@ -1169,18 +1181,29 @@ private fun FolderTabStrip(
 private fun FolderTabLabel(
     name: String,
     summary: ChatFolderSummary,
+    selected: Boolean,
     icon: @Composable () -> Unit,
-    activityColor: Color = MaterialTheme.colorScheme.primary,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         icon()
-        Text(name, maxLines = 1)
-        val badge = if (summary.mentionCount > 0) summary.mentionCount else summary.unreadCount
-        when {
-            badge > 0 -> Badge { Text(if (badge > 999) "999+" else badge.toString()) }
-            summary.unreadIncomplete || summary.mentionIncomplete -> Text("•", color = activityColor)
-            summary.advertisedActivity -> Text("•", color = activityColor)
-        }
+        Text(
+            text = name,
+            modifier = Modifier.widthIn(max = 144.dp),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        FolderActivityBadge(summary)
+    }
+}
+
+@Composable
+private fun FolderActivityBadge(summary: ChatFolderSummary) {
+    when {
+        summary.mentionCount > 0 -> MentionBadge(count = summary.mentionCount, lowerBound = summary.mentionIncomplete)
+        summary.unreadCount > 0 -> UnreadBadge(count = summary.unreadCount, lowerBound = summary.unreadIncomplete)
+        summary.unreadIncomplete || summary.mentionIncomplete || summary.advertisedActivity -> AdvertisedActivityDot()
     }
 }
 
@@ -1952,12 +1975,7 @@ private fun ChatFolderHeader(
             }
         }
         if (!folder.expanded) {
-            val badge = if (folder.summary.mentionCount > 0) folder.summary.mentionCount else folder.summary.unreadCount
-            when {
-                badge > 0 -> Badge { Text(if (badge > 999) "999+" else badge.toString()) }
-                folder.summary.unreadIncomplete || folder.summary.mentionIncomplete -> Text("•", color = tint)
-                folder.summary.advertisedActivity -> Text("•", color = tint)
-            }
+            FolderActivityBadge(folder.summary)
         }
         Icon(if (folder.expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.ExpandMore, contentDescription = null)
     }

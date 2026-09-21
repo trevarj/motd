@@ -12,10 +12,13 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
@@ -76,12 +79,17 @@ class ServerDrawerUiTest {
             }
         }
 
-        val createInvite = compose.onNodeWithTag("drawer_create_contact_invite").assertIsDisplayed()
-        val scanInvite = compose.onNodeWithTag("drawer_scan_invite").assertIsDisplayed()
-        assertTrue(createInvite.fetchSemanticsNode().boundsInRoot.top < scanInvite.fetchSemanticsNode().boundsInRoot.top)
-        createInvite.performClick()
+        compose
+            .onNodeWithTag("drawer_create_contact_invite")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
         assertTrue(contactInviteNetworkId == 1L)
-        scanInvite.performClick()
+        compose
+            .onNodeWithTag("drawer_scan_invite")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
         assertTrue(scanned)
 
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -94,10 +102,59 @@ class ServerDrawerUiTest {
         for ((networkId, state) in expectedStates) {
             compose
                 .onNodeWithTag("drawer_network_icon_$networkId", useUnmergedTree = true)
+                .performScrollTo()
                 .assertIsDisplayed()
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, state))
         }
-        compose.onNodeWithTag("drawer_open_feed").assertIsDisplayed()
+        compose.onNodeWithTag("drawer_open_feed").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun long_network_list_keeps_settings_reachable_and_selection_visible() {
+        val rows = (1L..20L).map { drawerRow(it, IrcClientState.Ready("alice", emptySet(), emptyMap())) }
+        val selectedNetworkId = mutableStateOf<Long?>(1)
+        var settingsOpened = 0
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ServerDrawerContent(
+                    drawerRows = rows,
+                    selectedNetworkId = selectedNetworkId.value,
+                    allUnread = 0,
+                    allMentions = 0,
+                    scopedUnreadCount = 0,
+                    allOffline = false,
+                    onSelectNetwork = { selectedNetworkId.value = it },
+                    onConnect = {},
+                    onDisconnect = {},
+                    onServerMessages = {},
+                    onOpenNetworkSettings = {},
+                    onAddNetwork = {},
+                    onToggleOffline = {},
+                    onOpenSettings = { settingsOpened++ },
+                    onMarkAllRead = {},
+                )
+            }
+        }
+
+        compose.onNodeWithTag("drawer_network_row_1").assertIsDisplayed().assertIsSelected()
+        compose.onNodeWithTag("drawer_open_settings").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(1, settingsOpened) }
+
+        compose
+            .onNodeWithTag("drawer_network_row_20")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+            .assertIsSelected()
+        compose.runOnIdle { assertEquals(20L, selectedNetworkId.value) }
+        compose.onNodeWithTag("drawer_open_settings").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(2, settingsOpened) }
+        compose.onNodeWithTag("drawer_network_row_20").assertIsDisplayed().assertIsSelected()
+        compose
+            .onNodeWithTag("drawer_network_row_1")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertIsNotSelected()
     }
 
     /** The feed lives behind the Global Feed lab, so its row is absent until the lab is on. */

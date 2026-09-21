@@ -13,13 +13,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -71,6 +71,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -93,6 +94,7 @@ import io.github.trevarj.motd.ui.components.routedRemoteMediaData
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
 
@@ -165,189 +167,194 @@ fun ServerDrawerContent(
     DisposableEffect(Unit) { onDispose { latestDragOrder?.let(latestCommit) } }
 
     ModalDrawerSheet {
-        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-            // Compact brand header: bubble mark plus the app name in the same plain bold platform
-            // typography as the chat-list title bar, kept smaller than a navigation row so the
-            // network list, rather than the branding, owns the drawer's visual hierarchy.
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
-            ) {
-                Image(
-                    painter = painterResource(R.drawable.motd_logo_mark),
-                    contentDescription = null,
-                    colorFilter =
-                        ColorFilter.colorMatrix(
-                            ColorMatrix(ceramicLogoColorMatrix(MaterialTheme.colorScheme.onSurface.toArgb())),
-                        ),
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.size(26.dp).testTag("drawer_logo_mark"),
-                )
-                Text(
-                    text = stringResource(R.string.app_name),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-
-            // 1. The one cross-buffer destination, above the per-network rows it merges. Lab-gated:
-            // hiding the row is what keeps the feed unreachable while the lab is off.
-            if (globalFeedEnabled) {
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Outlined.DynamicFeed, contentDescription = null) },
-                    label = { Text(stringResource(R.string.drawer_feed)) },
-                    selected = false,
-                    onClick = onOpenFeed,
-                    modifier =
-                        Modifier
-                            .padding(horizontal = 12.dp)
-                            .testTag("drawer_open_feed"),
-                )
-            }
-
-            // 2. Networks section header. The unscoped ("all chats") state is simply "no network
-            // selected" — reflected by the title-bar wordmark — so there is no standalone row for
-            // it. A subtle clear-filter action appears only while scoped.
-            NetworksHeader(
-                totalUnread = allUnread,
-                totalMentions = allMentions,
-                unreadIncomplete = allUnreadIncomplete,
-                mentionsIncomplete = allMentionsIncomplete,
-                scoped = selectedNetworkId != null,
-                onClearFilter = { onSelectNetwork(null) },
-            )
-
-            // 3. One entry per network (children indented under their soju root). While a drag is
-            // live its local order overlays the published rows, so fresh unread/connection state
-            // keeps flowing into rows the drag has already moved.
-            val displayRows = dragOrderIds?.let { applyDrawerOrder(drawerRows, it) } ?: drawerRows
-            val dragUnit = draggedNetworkId?.let { drawerDragUnit(displayRows, it) }.orEmpty()
-            for (row in displayRows) {
-                // Keyed identity: when a swap reorders this list, each row's node (including the
-                // active pointer-input coroutine on its drag handle) moves with the row instead of
-                // being positionally rebound to a different network — an unkeyed reorder restarts
-                // pointerInput mid-gesture and strands the drag with no end/cancel callback.
-                key(row.networkId) {
-                    val dragging = row.networkId in dragUnit
-                    DrawerNetworkItem(
-                        row = row,
-                        selected = selectedNetworkId == row.networkId,
-                        dragging = dragging,
-                        canMoveUp = canMoveDrawerRow(displayRows, row.networkId, -1),
-                        canMoveDown = canMoveDrawerRow(displayRows, row.networkId, 1),
-                        onSelect = { onSelectNetwork(row.networkId) },
-                        onConnect = { onConnect(row.networkId) },
-                        onDisconnect = { onDisconnect(row.networkId) },
-                        onServerMessages = { onServerMessages(row.networkId) },
-                        onOpenNetworkSettings = { onOpenNetworkSettings(row.networkId) },
-                        onMove = { delta -> onMoveNetwork(row.networkId, delta) },
-                        onDragStart = {
-                            draggedNetworkId = row.networkId
-                            dragStartRows = displayRows
-                            dragOrderIds = drawerOrderIds(displayRows)
-                            dragTotal = 0f
-                            dragPassedExtent = 0
-                        },
-                        onDrag = { delta ->
-                            val start = dragStartRows
-                            if (start != null) {
-                                dragTotal += delta
-                                val placement =
-                                    drawerDragPlacement(start, rowHeights, row.networkId, dragTotal)
-                                dragPassedExtent = placement.passedExtent
-                                val ids = drawerOrderIds(placement.rows)
-                                if (ids != dragOrderIds) dragOrderIds = ids
-                            }
-                        },
-                        onDragEnd = ::endDrag,
-                        modifier =
-                            Modifier
-                                .onSizeChanged { rowHeights[row.networkId] = it.height }
-                                .then(
-                                    // The dragged entry (a soju root carries its children) follows the
-                                    // finger and draws above the rows it is passing. Translation is
-                                    // finger travel minus the extent the swaps already moved it.
-                                    if (dragging) {
-                                        Modifier.zIndex(1f).graphicsLayer {
-                                            translationY = dragTotal - dragPassedExtent
-                                        }
-                                    } else {
-                                        Modifier
-                                    },
-                                ),
+        Column(modifier = Modifier.fillMaxHeight()) {
+            Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                // Compact brand header: bubble mark plus the app name in the same plain bold platform
+                // typography as the chat-list title bar, kept smaller than a navigation row so the
+                // network list, rather than the branding, owns the drawer's visual hierarchy.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.motd_logo_mark),
+                        contentDescription = null,
+                        colorFilter =
+                            ColorFilter.colorMatrix(
+                                ColorMatrix(ceramicLogoColorMatrix(MaterialTheme.colorScheme.onSurface.toArgb())),
+                            ),
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(26.dp).testTag("drawer_logo_mark"),
+                    )
+                    Text(
+                        text = stringResource(R.string.app_name),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
                     )
                 }
-            }
 
-            // Eased in/out so the divider and footer below never jump a full row height when the
-            // scoped unread count crosses zero while the drawer is open.
-            AnimatedVisibility(
-                visible = scopedUnreadCount > 0,
-                enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
-                exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
-            ) {
+                // 1. The one cross-buffer destination, above the per-network rows it merges. Lab-gated:
+                // hiding the row is what keeps the feed unreachable while the lab is off.
+                if (globalFeedEnabled) {
+                    NavigationDrawerItem(
+                        icon = { Icon(Icons.Outlined.DynamicFeed, contentDescription = null) },
+                        label = { Text(stringResource(R.string.drawer_feed)) },
+                        selected = false,
+                        onClick = onOpenFeed,
+                        modifier =
+                            Modifier
+                                .padding(horizontal = 12.dp)
+                                .testTag("drawer_open_feed"),
+                    )
+                }
+
+                // 2. Networks section header. The unscoped ("all chats") state is simply "no network
+                // selected" — reflected by the title-bar wordmark — so there is no standalone row for
+                // it. A subtle clear-filter action appears only while scoped.
+                NetworksHeader(
+                    totalUnread = allUnread,
+                    totalMentions = allMentions,
+                    unreadIncomplete = allUnreadIncomplete,
+                    mentionsIncomplete = allMentionsIncomplete,
+                    scoped = selectedNetworkId != null,
+                    onClearFilter = { onSelectNetwork(null) },
+                )
+
+                // 3. One entry per network (children indented under their soju root). While a drag is
+                // live its local order overlays the published rows, so fresh unread/connection state
+                // keeps flowing into rows the drag has already moved.
+                val displayRows = dragOrderIds?.let { applyDrawerOrder(drawerRows, it) } ?: drawerRows
+                val dragUnit = draggedNetworkId?.let { drawerDragUnit(displayRows, it) }.orEmpty()
+                for (row in displayRows) {
+                    // Keyed identity: when a swap reorders this list, each row's node (including the
+                    // active pointer-input coroutine on its drag handle) moves with the row instead of
+                    // being positionally rebound to a different network — an unkeyed reorder restarts
+                    // pointerInput mid-gesture and strands the drag with no end/cancel callback.
+                    key(row.networkId) {
+                        val dragging = row.networkId in dragUnit
+                        DrawerNetworkItem(
+                            row = row,
+                            selected = selectedNetworkId == row.networkId,
+                            dragging = dragging,
+                            canMoveUp = canMoveDrawerRow(displayRows, row.networkId, -1),
+                            canMoveDown = canMoveDrawerRow(displayRows, row.networkId, 1),
+                            onSelect = { onSelectNetwork(row.networkId) },
+                            onConnect = { onConnect(row.networkId) },
+                            onDisconnect = { onDisconnect(row.networkId) },
+                            onServerMessages = { onServerMessages(row.networkId) },
+                            onOpenNetworkSettings = { onOpenNetworkSettings(row.networkId) },
+                            onMove = { delta -> onMoveNetwork(row.networkId, delta) },
+                            onDragStart = {
+                                draggedNetworkId = row.networkId
+                                dragStartRows = displayRows
+                                dragOrderIds = drawerOrderIds(displayRows)
+                                dragTotal = 0f
+                                dragPassedExtent = 0
+                            },
+                            onDrag = { delta ->
+                                val start = dragStartRows
+                                if (start != null) {
+                                    dragTotal += delta
+                                    val placement =
+                                        drawerDragPlacement(start, rowHeights, row.networkId, dragTotal)
+                                    dragPassedExtent = placement.passedExtent
+                                    val ids = drawerOrderIds(placement.rows)
+                                    if (ids != dragOrderIds) dragOrderIds = ids
+                                }
+                            },
+                            onDragEnd = ::endDrag,
+                            modifier =
+                                Modifier
+                                    .onSizeChanged { rowHeights[row.networkId] = it.height }
+                                    .then(
+                                        // The dragged entry (a soju root carries its children) follows the
+                                        // finger and draws above the rows it is passing. Translation is
+                                        // finger travel minus the extent the swaps already moved it.
+                                        if (dragging) {
+                                            Modifier.zIndex(1f).graphicsLayer {
+                                                translationY = dragTotal - dragPassedExtent
+                                            }
+                                        } else {
+                                            Modifier
+                                        },
+                                    ),
+                        )
+                    }
+                }
+
+                // Eased in/out so the actions below never jump a full row height when the
+                // scoped unread count crosses zero while the drawer is open.
+                AnimatedVisibility(
+                    visible = scopedUnreadCount > 0,
+                    enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                    exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+                ) {
+                    NavigationDrawerItem(
+                        icon = { Icon(Icons.Outlined.DoneAll, contentDescription = null) },
+                        label = { Text(stringResource(R.string.drawer_mark_all_read)) },
+                        selected = false,
+                        onClick = onMarkAllRead,
+                        modifier =
+                            Modifier
+                                .padding(horizontal = 12.dp)
+                                .testTag("drawer_mark_all_read"),
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                // 4. Network and invite actions.
                 NavigationDrawerItem(
-                    icon = { Icon(Icons.Outlined.DoneAll, contentDescription = null) },
-                    label = { Text(stringResource(R.string.drawer_mark_all_read)) },
+                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                    label = { Text(stringResource(R.string.drawer_add_network)) },
                     selected = false,
-                    onClick = onMarkAllRead,
-                    modifier =
-                        Modifier
-                            .padding(horizontal = 12.dp)
-                            .testTag("drawer_mark_all_read"),
+                    onClick = onAddNetwork,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
+                NavigationDrawerItem(
+                    icon = { Icon(Icons.Filled.QrCode2, contentDescription = null) },
+                    label = { Text(stringResource(R.string.contact_invite_create_title)) },
+                    selected = false,
+                    onClick = { onCreateContactInvite(selectedNetworkId) },
+                    modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_create_contact_invite"),
+                )
+                NavigationDrawerItem(
+                    icon = { Icon(Icons.Filled.QrCodeScanner, contentDescription = null) },
+                    label = { Text(stringResource(R.string.invite_scan_title)) },
+                    selected = false,
+                    onClick = onScanInvite,
+                    modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_scan_invite"),
                 )
             }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-            // 4. App-level footer actions.
-            NavigationDrawerItem(
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                label = { Text(stringResource(R.string.drawer_add_network)) },
-                selected = false,
-                onClick = onAddNetwork,
-                modifier = Modifier.padding(horizontal = 12.dp),
-            )
-            NavigationDrawerItem(
-                icon = { Icon(Icons.Filled.QrCode2, contentDescription = null) },
-                label = { Text(stringResource(R.string.contact_invite_create_title)) },
-                selected = false,
-                onClick = { onCreateContactInvite(selectedNetworkId) },
-                modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_create_contact_invite"),
-            )
-            NavigationDrawerItem(
-                icon = { Icon(Icons.Filled.QrCodeScanner, contentDescription = null) },
-                label = { Text(stringResource(R.string.invite_scan_title)) },
-                selected = false,
-                onClick = onScanInvite,
-                modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_scan_invite"),
-            )
-            NavigationDrawerItem(
-                icon = {
-                    Icon(
-                        if (allOffline) Icons.Outlined.Cloud else Icons.Outlined.CloudOff,
-                        contentDescription = null,
-                    )
-                },
-                label = {
-                    Text(
-                        stringResource(
-                            if (allOffline) R.string.drawer_go_online else R.string.drawer_go_offline,
-                        ),
-                    )
-                },
-                selected = false,
-                onClick = onToggleOffline,
-                modifier = Modifier.padding(horizontal = 12.dp),
-            )
-            NavigationDrawerItem(
-                icon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
-                label = { Text(stringResource(R.string.drawer_settings)) },
-                selected = false,
-                onClick = onOpenSettings,
-                modifier = Modifier.padding(horizontal = 12.dp),
-            )
+            HorizontalDivider()
+            Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+                NavigationDrawerItem(
+                    icon = {
+                        Icon(
+                            if (allOffline) Icons.Outlined.Cloud else Icons.Outlined.CloudOff,
+                            contentDescription = null,
+                        )
+                    },
+                    label = {
+                        Text(
+                            stringResource(
+                                if (allOffline) R.string.drawer_go_online else R.string.drawer_go_offline,
+                            ),
+                        )
+                    },
+                    selected = false,
+                    onClick = onToggleOffline,
+                    modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_toggle_offline"),
+                )
+                NavigationDrawerItem(
+                    icon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
+                    label = { Text(stringResource(R.string.drawer_settings)) },
+                    selected = false,
+                    onClick = onOpenSettings,
+                    modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_open_settings"),
+                )
+            }
         }
     }
 }
@@ -376,7 +383,7 @@ private fun NetworksHeader(
         Text(
             text = stringResource(R.string.drawer_networks).uppercase(),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
         )
@@ -457,8 +464,8 @@ private fun DrawerNetworkItem(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 2.dp)
-                    // Selected row gets the M3 pill background.
-                    .background(background, RoundedCornerShape(28.dp)),
+                    .clip(MotdShapes.composer)
+                    .background(background),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
@@ -470,7 +477,10 @@ private fun DrawerNetworkItem(
                         // The drag handle sits outside this clickable area on purpose: pressing and
                         // holding it must not race the row's own long-press menu.
                         .combinedClickable(onClick = onSelect, onLongClick = { menuOpen = true })
-                        .semantics { if (moveActions.isNotEmpty()) customActions = moveActions }
+                        .semantics {
+                            this.selected = selected
+                            if (moveActions.isNotEmpty()) customActions = moveActions
+                        }
                         // Children indent one level under their soju root.
                         .padding(start = (16 + row.depth * 16).dp, top = 8.dp, bottom = 8.dp, end = 16.dp)
                         .heightIn(min = 40.dp),
@@ -537,6 +547,7 @@ private fun DrawerNetworkItem(
                         text = row.name,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
+                        color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -553,8 +564,12 @@ private fun DrawerNetworkItem(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (row.mentions > 0) MentionBadge(row.mentions, lowerBound = row.mentionsIncomplete)
-                if (row.unread > 0) UnreadBadge(row.unread, lowerBound = row.unreadIncomplete)
+                if (row.mentions > 0 || row.unread > 0) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (row.mentions > 0) MentionBadge(row.mentions, lowerBound = row.mentionsIncomplete)
+                        if (row.unread > 0) UnreadBadge(row.unread, lowerBound = row.unreadIncomplete)
+                    }
+                }
             }
 
             // A lone network, or a lone child under its root, has nowhere to go: no dead affordance.
@@ -568,8 +583,7 @@ private fun DrawerNetworkItem(
                 Box(
                     modifier =
                         Modifier
-                            .padding(end = 8.dp)
-                            .size(40.dp)
+                            .size(48.dp)
                             .testTag("drawer_network_drag_handle_${row.networkId}")
                             .pointerInput(row.networkId) {
                                 detectDragGestures(
