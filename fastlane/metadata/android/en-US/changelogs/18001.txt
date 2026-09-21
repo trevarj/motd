@@ -1,0 +1,1 @@
+- Fixed activity dots staying visible when missing-message recovery found nothing new.
