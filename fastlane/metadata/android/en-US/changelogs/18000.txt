@@ -1,0 +1,4 @@
+- Fixed filled gaps in chat history reappearing.
+- Kept the channel message box above the keyboard.
+- Made network connection states clearer in the navigation drawer.
+- Removed a duplicate loading spinner when clearing activity dots.
