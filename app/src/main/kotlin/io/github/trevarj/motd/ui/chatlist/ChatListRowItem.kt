@@ -367,9 +367,7 @@ fun ChatListRowItem(
                         dimmed = true,
                     )
                 }
-                // Active history sync is intentionally silent here; activity recovery has its own
-                // trailing spinner.
-                if (syncIndicator != ChatListSyncIndicator.NONE && syncIndicator != ChatListSyncIndicator.SYNCING) {
+                if (syncIndicator != ChatListSyncIndicator.NONE) {
                     Spacer(Modifier.width(6.dp))
                     SyncStatusBadgeContent(syncIndicator)
                 }
@@ -483,17 +481,7 @@ fun ChatListRowItem(
                         modifier = Modifier.testTag("chatlist_row_unread_badge"),
                     )
                 }
-                if (activityRecoveryInProgress) {
-                    Box(
-                        modifier =
-                            Modifier
-                                .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
-                                .testTag("chatlist_row_activity_recovery_spinner"),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        HistorySyncSpinner(contentDescription = stringResource(R.string.chatlist_clear_activity_dot_loading))
-                    }
-                } else if (badges.advertisedActivity) {
+                if (badges.advertisedActivity && !activityRecoveryInProgress) {
                     AdvertisedActivityDot(
                         modifier = Modifier.testTag("chatlist_row_advertised_activity_dot"),
                     )
@@ -546,13 +534,19 @@ private fun PresenceAvatar(
 }
 
 /**
- * Non-spinning history-sync cues rendered inline after the network chip. Active sync is
- * intentionally silent here; activity recovery has its own trailing spinner. No live region:
+ * History-sync cues rendered inline after the network chip. No live region:
  * rows churn constantly during a resync pass, and announcing every transition would spam TalkBack.
  */
 @Composable
 private fun SyncStatusBadgeContent(indicator: ChatListSyncIndicator) {
     when (indicator) {
+        ChatListSyncIndicator.SYNCING -> {
+            HistorySyncSpinner(
+                contentDescription = stringResource(R.string.chatlist_sync_syncing),
+                modifier = Modifier.testTag("chatlist_row_sync_syncing"),
+            )
+        }
+
         ChatListSyncIndicator.QUEUED -> {
             val description = stringResource(R.string.chatlist_sync_queued)
             Box(
@@ -606,7 +600,7 @@ private fun SyncStatusBadgeContent(indicator: ChatListSyncIndicator) {
             )
         }
 
-        ChatListSyncIndicator.NONE, ChatListSyncIndicator.SYNCING -> {}
+        ChatListSyncIndicator.NONE -> {}
     }
 }
 

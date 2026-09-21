@@ -533,13 +533,13 @@ class ChatListSelectionUiTest {
         }
         assertEquals(0, compose.onAllNodesWithTag("chatlist_selection_top_app_bar").fetchSemanticsNodes().size)
         assertEquals(0, compose.onAllNodesWithTag("chatlist_selection_clear_dot").fetchSemanticsNodes().size)
-        assertEquals(2, compose.onAllNodesWithTag("chatlist_row_activity_recovery_spinner", useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_row_activity_recovery_spinner", useUnmergedTree = true).fetchSemanticsNodes().size)
         assertEquals(0, compose.onAllNodesWithTag("chatlist_row_advertised_activity_dot", useUnmergedTree = true).fetchSemanticsNodes().size)
         compose.onNodeWithTag("chatlist_row_1").performTouchInput { longClick() }
         compose.onNodeWithTag("chatlist_selection_more").performClick()
         assertEquals(0, compose.onAllNodesWithTag("chatlist_selection_clear_dot").fetchSemanticsNodes().size)
         compose.onNodeWithTag("chatlist_selection_pin").performClick()
-        // No Room update was supplied: once work ends both truthful activity cues return.
+        // No Room update was supplied: once recovery ends both advertised activity dots return.
         compose.runOnIdle { recoveringIds.value = emptySet() }
         assertEquals(0, compose.onAllNodesWithTag("chatlist_row_activity_recovery_spinner", useUnmergedTree = true).fetchSemanticsNodes().size)
         assertEquals(2, compose.onAllNodesWithTag("chatlist_row_advertised_activity_dot", useUnmergedTree = true).fetchSemanticsNodes().size)

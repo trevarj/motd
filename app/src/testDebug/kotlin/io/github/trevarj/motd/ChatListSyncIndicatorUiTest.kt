@@ -18,8 +18,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Non-spinning per-row sync cues (queued/waiting ring, error dot, unavailable glyph) render inline
- * after the network chip. SYNCING has no title-line cue, and the trailing unread count stays readable.
+ * Per-row sync cues render inline after the network chip, including the active-sync spinner,
+ * while the trailing unread count stays readable.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -32,11 +32,11 @@ class ChatListSyncIndicatorUiTest {
     val compose = createComposeRule()
 
     @Test
-    fun syncing_rendersNoSyncBadgeAndKeepsTheUnreadCount() {
+    fun syncing_rendersSpinnerAndKeepsTheUnreadCount() {
         setRow(ChatListSyncIndicator.SYNCING, unreadCount = 7)
 
+        compose.onNodeWithTag("chatlist_row_sync_syncing", useUnmergedTree = true).assertIsDisplayed()
         listOf(
-            "chatlist_row_sync_syncing",
             "chatlist_row_sync_queued",
             "chatlist_row_sync_waiting",
             "chatlist_row_sync_unavailable",
