@@ -367,9 +367,9 @@ fun ChatListRowItem(
                         dimmed = true,
                     )
                 }
-                // The sync cue trails the network chip on the title line, well away from the
-                // trailing unread badge it used to overlap.
-                if (syncIndicator != ChatListSyncIndicator.NONE) {
+                // Active history sync is intentionally silent here; activity recovery has its own
+                // trailing spinner.
+                if (syncIndicator != ChatListSyncIndicator.NONE && syncIndicator != ChatListSyncIndicator.SYNCING) {
                     Spacer(Modifier.width(6.dp))
                     SyncStatusBadgeContent(syncIndicator)
                 }
@@ -546,20 +546,13 @@ private fun PresenceAvatar(
 }
 
 /**
- * Per-row history-sync cue, rendered inline on the title line after the network chip so it never
- * collides with the trailing unread badge. No live region: rows churn constantly during a resync
- * pass, and announcing every transition would spam TalkBack.
+ * Non-spinning history-sync cues rendered inline after the network chip. Active sync is
+ * intentionally silent here; activity recovery has its own trailing spinner. No live region:
+ * rows churn constantly during a resync pass, and announcing every transition would spam TalkBack.
  */
 @Composable
 private fun SyncStatusBadgeContent(indicator: ChatListSyncIndicator) {
     when (indicator) {
-        ChatListSyncIndicator.SYNCING -> {
-            HistorySyncSpinner(
-                contentDescription = stringResource(R.string.chatlist_sync_syncing),
-                modifier = Modifier.testTag("chatlist_row_sync_syncing"),
-            )
-        }
-
         ChatListSyncIndicator.QUEUED -> {
             val description = stringResource(R.string.chatlist_sync_queued)
             Box(
@@ -613,7 +606,7 @@ private fun SyncStatusBadgeContent(indicator: ChatListSyncIndicator) {
             )
         }
 
-        ChatListSyncIndicator.NONE -> {}
+        ChatListSyncIndicator.NONE, ChatListSyncIndicator.SYNCING -> {}
     }
 }
 

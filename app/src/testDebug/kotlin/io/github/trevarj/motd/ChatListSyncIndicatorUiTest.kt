@@ -18,9 +18,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Per-row sync cues on [ChatListRowItem]: every cue (spinner, queued/waiting ring, error dot,
- * unavailable glyph) renders inline on the title line after the network chip, so the trailing
- * unread count stays readable through the whole sync lifecycle.
+ * Non-spinning per-row sync cues (queued/waiting ring, error dot, unavailable glyph) render inline
+ * after the network chip. SYNCING has no title-line cue, and the trailing unread count stays readable.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -33,17 +32,18 @@ class ChatListSyncIndicatorUiTest {
     val compose = createComposeRule()
 
     @Test
-    fun syncing_rendersSpinnerBadge() {
-        setRow(ChatListSyncIndicator.SYNCING)
-
-        compose.onNodeWithTag("chatlist_row_sync_syncing", useUnmergedTree = true).assertIsDisplayed()
-    }
-
-    @Test
-    fun syncing_spinnerCoexistsWithTheUnreadCount() {
+    fun syncing_rendersNoSyncBadgeAndKeepsTheUnreadCount() {
         setRow(ChatListSyncIndicator.SYNCING, unreadCount = 7)
 
-        compose.onNodeWithTag("chatlist_row_sync_syncing", useUnmergedTree = true).assertIsDisplayed()
+        listOf(
+            "chatlist_row_sync_syncing",
+            "chatlist_row_sync_queued",
+            "chatlist_row_sync_waiting",
+            "chatlist_row_sync_unavailable",
+            "chatlist_row_sync_error",
+        ).forEach { tag ->
+            assertEquals(0, compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().size)
+        }
         compose.onNodeWithTag("chatlist_row_unread_badge", useUnmergedTree = true).assertIsDisplayed()
     }
 
