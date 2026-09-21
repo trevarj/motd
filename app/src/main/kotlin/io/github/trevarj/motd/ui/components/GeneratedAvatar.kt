@@ -300,12 +300,11 @@ internal fun IrcSpriteV2Avatar(
     }
 }
 
-/** Deterministic network badge whose outer [status] ring remains independent of its identity. */
+/** Deterministic network badge; the drawer owns its status ring. */
 @Composable
 internal fun IrcNetworkBadge(
     name: String,
     networkId: Long,
-    status: Color,
     size: Dp,
     modifier: Modifier = Modifier,
 ) {
@@ -316,7 +315,6 @@ internal fun IrcNetworkBadge(
         avatarSize = size,
         primary = LocalNickColors.current.avatar(name),
         modifier = modifier,
-        statusRing = status,
     )
 }
 
@@ -328,7 +326,6 @@ private fun GeneratedAvatar(
     avatarSize: Dp,
     primary: Color,
     modifier: Modifier,
-    statusRing: Color? = null,
 ) {
     val traits = remember(subject, name, networkId) { generatedAvatarTraits(subject, name, networkId) }
     val scheme = MaterialTheme.colorScheme
@@ -360,19 +357,15 @@ private fun GeneratedAvatar(
                 drawProminentGlyph(prominentGlyph, palette)
             }
         }
-        val ring = statusRing ?: palette.primary.copy(alpha = 0.52f)
-        val ringWidth =
-            if (subject == GeneratedAvatarSubject.NETWORK) {
-                max(1.5.dp.toPx(), 1.75f)
-            } else {
-                max(1.dp.toPx(), 1.25f)
-            }
-        val ringInset = max(0.75.dp.toPx(), ringWidth / 2f + 0.35.dp.toPx())
-        drawCircle(
-            color = ring,
-            radius = canvasSize.minDimension / 2f - ringInset,
-            style = Stroke(width = ringWidth),
-        )
+        if (subject == GeneratedAvatarSubject.USER) {
+            val ringWidth = max(1.dp.toPx(), 1.25f)
+            val ringInset = max(0.75.dp.toPx(), ringWidth / 2f + 0.35.dp.toPx())
+            drawCircle(
+                color = palette.primary.copy(alpha = 0.52f),
+                radius = canvasSize.minDimension / 2f - ringInset,
+                style = Stroke(width = ringWidth),
+            )
+        }
     }
 }
 

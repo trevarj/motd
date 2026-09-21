@@ -522,7 +522,6 @@ private fun DrawerNetworkItem(
                             IrcNetworkBadge(
                                 name = row.name,
                                 networkId = row.networkId,
-                                status = statusColor,
                                 size = 32.dp,
                             )
                         }
