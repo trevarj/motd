@@ -45,6 +45,7 @@ import io.github.trevarj.motd.irc.client.whoxFlagsIndicateBot
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.ServerTimeSource
+import io.github.trevarj.motd.irc.event.historyEventMetadataOrNull
 import io.github.trevarj.motd.irc.event.messageContextOrNull
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.format.containsIrcFormatting
@@ -97,9 +98,9 @@ internal data class AdvertisedActivity(
     val latestMessageTime: Long,
 )
 
-/** Committed canonical order and freshly inserted row count of one playback batch. */
+/** Committed primary-event order and freshly inserted row count of one playback batch. */
 internal data class PlaybackCommit(
-    val order: List<TimelineEventId> = emptyList(),
+    val primaryOrder: List<TimelineEventId> = emptyList(),
     val inserted: Int = 0,
 )
 
@@ -1063,7 +1064,7 @@ class EventProcessor
                         room.name,
                     )
             }
-            var committedOrder = emptyList<TimelineEventId>()
+            var primaryOrder = emptyList<TimelineEventId>()
             var insertedCount = 0
             try {
                 db.withTransaction {
@@ -1114,10 +1115,20 @@ class EventProcessor
                             }
                         }
                     activeHistoryOccurrences[networkId] = mutableMapOf()
-                    activeHistoryCanonicalOrder[networkId] = mutableListOf()
+                    val committedOrder = mutableListOf<TimelineEventId>()
+                    activeHistoryCanonicalOrder[networkId] = committedOrder
                     activeHistoryInsertedIds[networkId] = mutableSetOf()
-                    for (ev in events) processEvent(networkId, ev, origin, target)
-                    committedOrder = activeHistoryCanonicalOrder[networkId].orEmpty().toList()
+                    val primaryIds = mutableListOf<TimelineEventId>()
+                    for (ev in events) {
+                        val firstIndex = committedOrder.size
+                        processEvent(networkId, ev, origin, target)
+                        if (ev.historyEventMetadataOrNull()?.isContext != true) {
+                            for (index in firstIndex until committedOrder.size) {
+                                primaryIds += committedOrder[index]
+                            }
+                        }
+                    }
+                    primaryOrder = primaryIds
                     insertedCount = activeHistoryInsertedIds[networkId].orEmpty().size
                     canonicalTimeline.reconcilePlaybackOrder(
                         orderedEventIds = committedOrder,
@@ -1143,7 +1154,7 @@ class EventProcessor
                     "source" to origin.name,
                 )
             }
-            return PlaybackCommit(committedOrder, insertedCount)
+            return PlaybackCommit(primaryOrder, insertedCount)
         }
 
         /**
@@ -1479,7 +1490,7 @@ class EventProcessor
                 previousOldest = previousOldest,
                 previousOldestAnchor = previousOldestAnchor,
                 pageRows =
-                    pageCommit.order
+                    pageCommit.primaryOrder
                         .mapNotNull { messageDao.byCanonicalId(it) }
                         .filter { it.bufferId == canonicalRoomId },
                 historyGapId = historyGapId,
@@ -1565,8 +1576,8 @@ class EventProcessor
                                             gap.newerMsgid,
                                             gapNewerAnchor,
                                         )
-                                )
-                        if (terminal && reachedNewerBoundary) {
+                                ) || response.containsPrimaryBoundary(pageRows, gap.newerMsgid, gapNewerAnchor)
+                        if (reachedNewerBoundary) {
                             db.historyGapDao().delete(gap.id)
                         } else {
                             // recoverable=false means the SERVER PROVED the remainder empty (a terminal
@@ -1594,8 +1605,8 @@ class EventProcessor
                                             gap.olderMsgid,
                                             gapOlderAnchor,
                                         )
-                                )
-                        if (terminal && reachedOlderBoundary) {
+                                ) || response.containsPrimaryBoundary(pageRows, gap.olderMsgid, gapOlderAnchor)
+                        if (reachedOlderBoundary) {
                             db.historyGapDao().delete(gap.id)
                         } else {
                             // recoverable=false means the SERVER PROVED the remainder empty (a terminal
@@ -1832,6 +1843,7 @@ class EventProcessor
                 val prior = previousNewest?.takeIf { it.serverTime != null } ?: return
                 val priorTime = checkNotNull(prior.serverTime)
                 val priorAnchor = previousNewestAnchor
+                if (response.containsPrimaryBoundary(pageRows, prior.msgid, priorAnchor)) return
                 if (
                     priorTime < pageOldestTime ||
                     (
@@ -2008,6 +2020,29 @@ class EventProcessor
             // Msgids are exact. Timestamp selectors cannot safely choose among opaque equal-time gaps.
             return if (selector?.startsWith("msgid=") == true) matches.firstOrNull() else matches.singleOrNull()
         }
+
+        private fun ChatHistoryResponse.Messages.containsPrimaryBoundary(
+            pageRows: List<MessageEntity>,
+            storedMsgid: String?,
+            storedAnchor: TimelineAnchor?,
+        ): Boolean =
+            pageRows.any { row ->
+                when {
+                    row.msgid != null && storedMsgid != null -> row.msgid == storedMsgid
+
+                    // Playback may renumber timelineOrder; the canonical event identity is stable.
+                    storedAnchor != null -> row.id == storedAnchor.eventId
+
+                    else -> false
+                }
+            } ||
+                (
+                    storedMsgid != null &&
+                        events.any { event ->
+                            val metadata = event.historyEventMetadataOrNull()
+                            metadata?.isContext == false && metadata.msgid == storedMsgid
+                        }
+                )
 
         private fun ChatHistoryReference.matchesBoundary(
             anchor: TimelineAnchor?,

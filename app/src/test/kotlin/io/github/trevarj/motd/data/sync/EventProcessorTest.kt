@@ -6492,6 +6492,233 @@ class EventProcessorTest {
         }
 
     @Test
+    fun duplicateLatestPrimaryPageCreatesNoEqualTimeGap() =
+        runTest {
+            val target = "#duplicate-latest"
+            val room = BufferStore(db).getOrCreate(networkId, target, target, BufferType.CHANNEL)
+            val request = ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = 2)
+            val response =
+                ChatHistoryResponse.Messages(
+                    events =
+                        listOf(
+                            islandRow(target, 100, prefix = "a").copy(text = "a"),
+                            islandRow(target, 100, prefix = "b").copy(text = "b"),
+                        ),
+                    oldest = ChatHistoryReference("a100", 100),
+                    newest = ChatHistoryReference("b100", 100),
+                    endOfHistory = false,
+                    primaryMessageCount = 2,
+                )
+            processor.persistHistoryPage(networkId, request, response, expectedRoomId = room.id)
+            assertTrue(db.historyGapDao().forRoom(room.id).isEmpty())
+
+            val duplicate = processor.persistHistoryPageResult(networkId, request, response, expectedRoomId = room.id)
+
+            assertEquals(0, duplicate.inserted)
+            assertTrue(db.historyGapDao().forRoom(room.id).isEmpty())
+        }
+
+    @Test
+    fun latestPrimaryPageDoesNotRecreateAClosedEqualTimeGap() =
+        runTest {
+            val target = "#closed-latest"
+            val room = BufferStore(db).getOrCreate(networkId, target, target, BufferType.CHANNEL)
+            val request = ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = 2)
+            val response =
+                ChatHistoryResponse.Messages(
+                    events =
+                        listOf(
+                            islandRow(target, 100, prefix = "a").copy(text = "a"),
+                            islandRow(target, 100, prefix = "b").copy(text = "b"),
+                        ),
+                    oldest = ChatHistoryReference("a100", 100),
+                    newest = ChatHistoryReference("b100", 100),
+                    endOfHistory = false,
+                    primaryMessageCount = 2,
+                )
+            processor.persistHistoryPage(networkId, request, response, expectedRoomId = room.id)
+            // A gap left by an earlier version is closed by the directed fill.
+            val gapId = db.historyGapDao().insert(HistoryGapEntity(0, room.id, "b100", 100, "a100", 100))
+            processor.persistHistoryPageResult(
+                networkId,
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.BEFORE, target, bound1 = "msgid=a100", limit = 2),
+                ChatHistoryResponse.Messages(
+                    events = listOf(islandRow(target, 50, prefix = "c")),
+                    oldest = ChatHistoryReference("c50", 50),
+                    newest = ChatHistoryReference("c50", 50),
+                    endOfHistory = true,
+                    primaryMessageCount = 1,
+                ),
+                expectedRoomId = room.id,
+                historyGapId = gapId,
+            )
+            assertTrue(db.historyGapDao().forRoom(room.id).isEmpty())
+
+            val duplicate = processor.persistHistoryPageResult(networkId, request, response, expectedRoomId = room.id)
+
+            assertEquals(0, duplicate.inserted)
+            assertTrue(db.historyGapDao().forRoom(room.id).isEmpty())
+        }
+
+    @Test
+    fun beforePrimaryPageClosesGapWithInteriorOppositeBoundary() =
+        runTest {
+            val target = "#before-interior"
+            val room = BufferStore(db).getOrCreate(networkId, target, target, BufferType.CHANNEL)
+            val gapId = db.historyGapDao().insert(HistoryGapEntity(0, room.id, "m100", 100, "m900", 900))
+
+            processor.persistHistoryPageResult(
+                networkId,
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.BEFORE, target, bound1 = "msgid=m900", limit = 3),
+                ChatHistoryResponse.Messages(
+                    events = listOf("a", "m", "c").map { islandRow(target, 100, prefix = it).copy(text = it) },
+                    oldest = ChatHistoryReference("a100", 100),
+                    newest = ChatHistoryReference("c100", 100),
+                    endOfHistory = false,
+                    primaryMessageCount = 3,
+                ),
+                expectedRoomId = room.id,
+                historyGapId = gapId,
+            )
+
+            assertTrue(db.historyGapDao().forRoom(room.id).isEmpty())
+        }
+
+    @Test
+    fun afterPrimaryPageClosesGapWithInteriorOppositeBoundary() =
+        runTest {
+            val target = "#after-interior"
+            val room = BufferStore(db).getOrCreate(networkId, target, target, BufferType.CHANNEL)
+            val gapId = db.historyGapDao().insert(HistoryGapEntity(0, room.id, "m100", 100, "m900", 900))
+
+            processor.persistHistoryPageResult(
+                networkId,
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.AFTER, target, bound1 = "msgid=m100", limit = 3),
+                ChatHistoryResponse.Messages(
+                    events = listOf("a", "m", "c").map { islandRow(target, 900, prefix = it).copy(text = it) },
+                    oldest = ChatHistoryReference("a900", 900),
+                    newest = ChatHistoryReference("c900", 900),
+                    endOfHistory = false,
+                    primaryMessageCount = 3,
+                ),
+                expectedRoomId = room.id,
+                historyGapId = gapId,
+            )
+
+            assertTrue(db.historyGapDao().forRoom(room.id).isEmpty())
+        }
+
+    @Test
+    fun directionalContextBoundaryDoesNotCloseEqualTimeRemainder() =
+        runTest {
+            listOf(ChatHistoryRequest.Subcommand.BEFORE, ChatHistoryRequest.Subcommand.AFTER).forEach { direction ->
+                val target = "#context-${direction.name.lowercase()}"
+                val room = BufferStore(db).getOrCreate(networkId, target, target, BufferType.CHANNEL)
+                val gapId = db.historyGapDao().insert(HistoryGapEntity(0, room.id, "m100", 100, "m900", 900))
+                val before = direction == ChatHistoryRequest.Subcommand.BEFORE
+                val oppositeTime = if (before) 100 else 900
+                val context = islandRow(target, oppositeTime)
+
+                processor.persistHistoryPageResult(
+                    networkId,
+                    ChatHistoryRequest(direction, target, bound1 = if (before) "msgid=m900" else "msgid=m100", limit = 2),
+                    ChatHistoryResponse.Messages(
+                        events =
+                            listOf(
+                                islandRow(target, oppositeTime, prefix = "a").copy(text = "a"),
+                                context.copy(ctx = context.ctx.copy(isHistoryContext = true)),
+                                islandRow(target, oppositeTime, prefix = "c").copy(text = "c"),
+                            ),
+                        oldest = ChatHistoryReference("a$oppositeTime", oppositeTime.toLong()),
+                        newest = ChatHistoryReference("c$oppositeTime", oppositeTime.toLong()),
+                        endOfHistory = false,
+                        primaryMessageCount = 2,
+                    ),
+                    expectedRoomId = room.id,
+                    historyGapId = gapId,
+                )
+
+                val remainder = db.historyGapDao().forRoom(room.id).single()
+                assertEquals(gapId, remainder.id)
+                assertEquals(if (before) "m100" else "c900", remainder.olderMsgid)
+                assertEquals(if (before) "a100" else "m900", remainder.newerMsgid)
+                assertTrue(remainder.recoverable)
+            }
+        }
+
+    @Test
+    fun latestContextBoundaryDoesNotSuppressEqualTimeGap() =
+        runTest {
+            val target = "#latest-context"
+            val context = islandRow(target, 100)
+            processor.process(networkId, context)
+            val room = checkNotNull(db.bufferDao().byName(networkId, target))
+
+            processor.persistHistoryPage(
+                networkId,
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = 2),
+                ChatHistoryResponse.Messages(
+                    events =
+                        listOf(
+                            islandRow(target, 100, prefix = "a").copy(text = "a"),
+                            context.copy(ctx = context.ctx.copy(isHistoryContext = true)),
+                            islandRow(target, 100, prefix = "c").copy(text = "c"),
+                        ),
+                    oldest = ChatHistoryReference("a100", 100),
+                    newest = ChatHistoryReference("c100", 100),
+                    endOfHistory = false,
+                    primaryMessageCount = 2,
+                ),
+                expectedRoomId = room.id,
+            )
+
+            val gap = db.historyGapDao().forRoom(room.id).single()
+            assertEquals("m100", gap.olderMsgid)
+            assertEquals("a100", gap.newerMsgid)
+            assertTrue(gap.recoverable)
+        }
+
+    @Test
+    fun msgidlessLatestBoundaryProvesCoverageOnlyWhenPrimary() =
+        runTest {
+            listOf(true, false).forEach { isContext ->
+                val target = "#msgidless-context-$isContext"
+                val boundary = islandRow(target, 100, prefix = null).copy(text = "boundary")
+                processor.process(networkId, boundary)
+                val room = checkNotNull(db.bufferDao().byName(networkId, target))
+                val boundaryId = db.messageDao().newestMessage(room.id)!!.id
+
+                processor.persistHistoryPage(
+                    networkId,
+                    ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, target, limit = 3),
+                    ChatHistoryResponse.Messages(
+                        events =
+                            listOf(
+                                islandRow(target, 100, prefix = null).copy(text = "earlier"),
+                                boundary.copy(ctx = boundary.ctx.copy(isHistoryContext = isContext)),
+                                islandRow(target, 100, prefix = null).copy(text = "later"),
+                            ),
+                        oldest = ChatHistoryReference(null, 100),
+                        newest = ChatHistoryReference(null, 100),
+                        endOfHistory = false,
+                        primaryMessageCount = if (isContext) 2 else 3,
+                    ),
+                    expectedRoomId = room.id,
+                )
+
+                val gaps = db.historyGapDao().forRoom(room.id)
+                if (isContext) {
+                    val gap = gaps.single()
+                    assertEquals(boundaryId, gap.olderEventId)
+                    assertEquals(pagingList(room.id).single { it.text == "earlier" }.id, gap.newerEventId)
+                    assertTrue(gap.recoverable)
+                } else {
+                    assertTrue(gaps.isEmpty())
+                }
+            }
+        }
+
+    @Test
     fun latestRetainsGapWhenOpaqueBoundariesShareATimestamp() =
         runTest {
             processor.process(
