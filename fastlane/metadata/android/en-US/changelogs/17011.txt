@@ -1,0 +1,5 @@
+- Added global and per-chat history sync modes: Balanced, Aggressive, and Lazy.
+- Added on-demand recovery for activity dots without marking messages read.
+- Added configurable left-swipe chat actions.
+- Improved folder activity badges, chat-list styling, and drawer accessibility; kept Settings and online/offline controls in reach.
+- Made settings choices scrollable on smaller screens.
