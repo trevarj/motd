@@ -418,6 +418,69 @@ class ChatListSelectionUiTest {
         assertEquals(0, compose.onAllNodesWithText("Chat archived").fetchSemanticsNodes().size)
     }
 
+    @Test fun clear_activity_dot_only_recovers_selected_dotted_rows_without_hiding_them() {
+        val recoveries = mutableListOf<List<Long>>()
+        val markedRead = mutableListOf<Long>()
+        val recoveringIds = mutableStateOf<Set<Long>>(emptySet())
+        val rows =
+            listOf(
+                row().copy(advertisedUnread = true),
+                row().copy(bufferId = 2, unreadCountIncomplete = true),
+                row().copy(bufferId = 3, muted = true, advertisedUnread = true, unreadCountIncomplete = true),
+                row().copy(bufferId = 4, unreadCount = 1, advertisedUnread = true, unreadCountIncomplete = true),
+                row().copy(bufferId = 5),
+            )
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListContent(
+                    state = ChatListState(rows = rows, loading = false),
+                    recoveringActivityIds = recoveringIds.value,
+                    onOpenBuffer = {},
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { _, _ -> },
+                    onSetMuted = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
+                    onMarkSelectedRead = { markedRead += it },
+                    onClearActivityDots = {
+                        recoveries += it.toList()
+                        recoveringIds.value = it.toSet()
+                    },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chatlist_row_3").performTouchInput { longClick() }
+        compose.onNodeWithTag("chatlist_row_4").performClick()
+        compose.onNodeWithTag("chatlist_row_5").performClick()
+        compose.onNodeWithTag("chatlist_selection_more").performClick()
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_selection_clear_dot").fetchSemanticsNodes().size)
+        compose.onNodeWithTag("chatlist_selection_pin").performClick()
+
+        compose.onNodeWithTag("chatlist_row_1").performTouchInput { longClick() }
+        (2..5).forEach { compose.onNodeWithTag("chatlist_row_$it").performClick() }
+        compose.onNodeWithTag("chatlist_selection_more").performClick()
+        compose.onNodeWithTag("chatlist_selection_clear_dot").assertIsDisplayed().performClick()
+
+        compose.runOnIdle {
+            assertEquals(listOf(listOf(1L, 2L)), recoveries)
+            assertEquals(emptyList<Long>(), markedRead)
+        }
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_selection_top_app_bar").fetchSemanticsNodes().size)
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_selection_clear_dot").fetchSemanticsNodes().size)
+        assertEquals(2, compose.onAllNodesWithTag("chatlist_row_activity_recovery_spinner", useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_row_advertised_activity_dot", useUnmergedTree = true).fetchSemanticsNodes().size)
+        compose.onNodeWithTag("chatlist_row_1").performTouchInput { longClick() }
+        compose.onNodeWithTag("chatlist_selection_more").performClick()
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_selection_clear_dot").fetchSemanticsNodes().size)
+        compose.onNodeWithTag("chatlist_selection_pin").performClick()
+        // No Room update was supplied: once work ends both truthful activity cues return.
+        compose.runOnIdle { recoveringIds.value = emptySet() }
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_row_activity_recovery_spinner", useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertEquals(2, compose.onAllNodesWithTag("chatlist_row_advertised_activity_dot", useUnmergedTree = true).fetchSemanticsNodes().size)
+    }
+
     @Test fun archive_announcement_uses_a_polite_live_region() {
         val announcement = mutableStateOf<String?>(null)
         compose.setContent {

@@ -1,22 +1,11 @@
 package io.github.trevarj.motd.data.sync
 
 import io.github.trevarj.motd.data.db.RoomId
+import io.github.trevarj.motd.irc.client.IrcClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/**
- * The two things the timeline needs from [HistoryGapFillCoordinator]: fill a NAMED gap, and know
- * which gaps are filling right now so their dividers can show progress.
- *
- * Every fill names its gap id, whoever asked for it. There is no "fill whichever seam is newest"
- * entry point any more: the timeline decides which seam to work on from what the reader has scrolled
- * to, so by the time it calls here the gap is already chosen. The returned [GapFillProgress] is what
- * tells the caller whether the attempt broke, which is the only outcome the divider has to report.
- *
- * Narrow on purpose, mirroring how `HistoryResyncController` fronts its own coordinator. The
- * coordinator owns a live per-network wire, a page budget, and a diagnostics journal; a ViewModel
- * depending on all of that could not be built in a unit test without standing up a transport.
- */
+/** UI history recovery: a named timeline seam or an explicit drain of a room's interior gaps. */
 interface HistoryGapFiller {
     /** Gap ids with a fill in flight, for the spinner on their divider rows. */
     val fillsInFlight: StateFlow<Set<Long>>
@@ -26,6 +15,13 @@ interface HistoryGapFiller {
         roomId: RoomId,
         gapId: Long,
         automatic: Boolean,
+    ): GapFillProgress
+
+    /** User-requested recovery, independent of saved policy and pinned to the reconciled client. */
+    suspend fun drainGaps(
+        roomId: RoomId,
+        client: IrcClient,
+        isCurrent: () -> Boolean,
     ): GapFillProgress
 }
 
@@ -64,4 +60,10 @@ object NoopHistoryGapFiller : HistoryGapFiller {
         gapId: Long,
         automatic: Boolean,
     ) = GapFillProgress.MOVED
+
+    override suspend fun drainGaps(
+        roomId: RoomId,
+        client: IrcClient,
+        isCurrent: () -> Boolean,
+    ) = GapFillProgress.FAILED
 }

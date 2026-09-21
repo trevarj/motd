@@ -203,6 +203,7 @@ fun ChatListRowItem(
     selected: Boolean = false,
     active: Boolean = false,
     syncIndicator: ChatListSyncIndicator = ChatListSyncIndicator.NONE,
+    activityRecoveryInProgress: Boolean = false,
     displayTitle: String? = null,
     showDickordBadge: Boolean = true,
     avatarName: String = row.displayName,
@@ -495,7 +496,17 @@ fun ChatListRowItem(
                         modifier = Modifier.testTag("chatlist_row_unread_badge"),
                     )
                 }
-                if (badges.advertisedActivity) {
+                if (activityRecoveryInProgress) {
+                    Box(
+                        modifier =
+                            Modifier
+                                .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                                .testTag("chatlist_row_activity_recovery_spinner"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        HistorySyncSpinner(contentDescription = stringResource(R.string.chatlist_clear_activity_dot_loading))
+                    }
+                } else if (badges.advertisedActivity) {
                     AdvertisedActivityDot(
                         modifier = Modifier.testTag("chatlist_row_advertised_activity_dot"),
                     )

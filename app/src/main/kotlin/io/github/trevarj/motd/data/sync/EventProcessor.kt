@@ -1273,6 +1273,7 @@ class EventProcessor
             response: ChatHistoryResponse.Messages,
             expectedRoomId: RoomId?,
             historyGapId: Long? = null,
+            preserveUnread: Boolean = false,
         ): PersistedHistoryPage =
             sequencer.withNetwork(networkId) {
                 val persisted =
@@ -1283,6 +1284,7 @@ class EventProcessor
                             response,
                             expectedRoomId,
                             historyGapId,
+                            preserveUnread,
                         )
                     }
                 bufferStore.drainCommittedRoomMerges()
@@ -1325,6 +1327,7 @@ class EventProcessor
             response: ChatHistoryResponse.Messages,
             expectedRoomId: RoomId?,
             historyGapId: Long?,
+            preserveUnread: Boolean = false,
         ): PersistedHistoryPage {
             require(request.subcommand != ChatHistoryRequest.Subcommand.TARGETS) {
                 "TARGETS is not a message page"
@@ -1483,9 +1486,9 @@ class EventProcessor
             )
             bufferDao.setOldestFetchedTime(canonicalRoomId, oldest?.serverTime)
             if (complete) bufferDao.markHistoryComplete(canonicalRoomId)
-            // History seeded into a room that held no durable content starts read: backlog predating
-            // the app must not badge. A marker or anchor that already exists wins inside the DAO guard.
-            if (previousNewest == null) {
+            // Automatic first imports start read; explicit activity recovery must retain unreadness.
+            // A marker or anchor that already exists still wins inside the DAO guard.
+            if (previousNewest == null && !preserveUnread) {
                 newest?.serverTime?.let { bufferDao.seedHistoryUnreadFloor(canonicalRoomId, it) }
             }
             return PersistedHistoryPage(canonicalRoomId, pageCommit.inserted)

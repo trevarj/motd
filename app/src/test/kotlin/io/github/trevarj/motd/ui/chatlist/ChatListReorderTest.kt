@@ -20,6 +20,7 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.AlwaysOnScreen
@@ -242,6 +243,7 @@ class ChatListReorderTest {
             bufferRepository = FakeBufferRepository(),
             networkRepository = repository,
             connectionManager = FakeConnectionManager(),
+            gapFiller = NoopHistoryGapFiller,
             historyResync =
                 object : HistoryResyncController {
                     override fun syncStatus(bufferId: Long) = flowOf<HistorySyncStatus>(HistorySyncStatus.Idle)
@@ -249,6 +251,7 @@ class ChatListReorderTest {
                     override suspend fun reconcileBuffer(
                         buffer: BufferEntity,
                         client: IrcClient,
+                        preserveUnread: Boolean,
                         isCurrent: () -> Boolean,
                     ) = HistoryResyncState.Idle
 

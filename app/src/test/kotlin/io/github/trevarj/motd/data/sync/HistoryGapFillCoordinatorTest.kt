@@ -43,6 +43,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -511,6 +512,185 @@ class HistoryGapFillCoordinatorTest {
                     .single()
                     .recoverable,
             )
+        }
+
+    @Test
+    fun explicitDrainIgnoresLazyAndFinishesMultipleQuantaAndGaps() =
+        runTest {
+            val fixture = newFixture()
+            fixture.setMode(HistorySyncMode.LAZY)
+            listOf(5L, 100L, 900L, 1000L).forEach { fixture.processor.process(fixture.networkId, chatMsg("row$it", it)) }
+            val dao = fixture.db.historyGapDao()
+            dao.insert(HistoryGapEntity(roomId = fixture.roomId, olderMsgid = "row5", olderServerTime = 5, newerMsgid = "row100", newerServerTime = 100))
+            dao.insert(HistoryGapEntity(roomId = fixture.roomId, olderMsgid = "row100", olderServerTime = 100, newerMsgid = "row900", newerServerTime = 900))
+            val exhausted =
+                dao.insert(
+                    HistoryGapEntity(
+                        roomId = fixture.roomId,
+                        olderMsgid = "row900",
+                        olderServerTime = 900,
+                        newerMsgid = "row1000",
+                        newerServerTime = 1000,
+                        recoverable = false,
+                    ),
+                )
+            val history =
+                FakeHistory(
+                    pageScript(
+                        ScriptedPage(listOf(chatMsg("r800", 800), chatMsg("r850", 850))),
+                        ScriptedPage(listOf(chatMsg("r700", 700), chatMsg("r750", 750))),
+                        ScriptedPage(listOf(chatMsg("r600", 600), chatMsg("r650", 650))),
+                        ScriptedPage(listOf(chatMsg("row100", 100), chatMsg("r500", 500))),
+                        ScriptedPage(listOf(chatMsg("row5", 5), chatMsg("r50", 50))),
+                    ),
+                )
+
+            val progress = fixture.coordinator().drainGaps(fixture.roomId, history, isCurrent = { true }, pageSize = 2)
+
+            assertEquals(GapFillProgress.MOVED, progress)
+            assertEquals(
+                listOf("msgid=row900", "msgid=r800", "msgid=r700", "msgid=r600", "msgid=row100"),
+                history.requests.map { it.bound1 },
+            )
+            assertEquals(listOf(exhausted), dao.forRoom(fixture.roomId).map { it.id })
+            assertFalse(dao.forRoom(fixture.roomId).single().recoverable)
+            assertEquals(12, rowCount(fixture))
+        }
+
+    @Test
+    fun explicitDrainStopsOnANonAdvancingPageAndLeavesTheGapRecoverable() =
+        runTest {
+            val fixture = newFixture()
+            val gapId = fixture.seedProactiveGap()
+            val history =
+                FakeHistory(
+                    { ScriptedPage(listOf(chatMsg("#chan:301", 301))) },
+                    setOf(HistoryReferenceType.TIMESTAMP),
+                )
+
+            val progress = fixture.coordinator().drainGaps(fixture.roomId, history, isCurrent = { true })
+
+            assertEquals(GapFillProgress.STALLED, progress)
+            assertEquals(1, history.requests.size)
+            val remaining =
+                fixture.db
+                    .historyGapDao()
+                    .forRoom(fixture.roomId)
+                    .single()
+            assertEquals(gapId, remaining.id)
+            assertTrue(remaining.recoverable)
+            assertEquals(301L, remaining.newerServerTime)
+        }
+
+    @Test
+    fun explicitDrainStopsWhenItsReconciledClientIsNoLongerCurrent() =
+        runTest {
+            val fixture = newFixture()
+            fixture.seedProactiveGap()
+            var current = true
+            val history = proactiveHistory { current = false }
+
+            val progress = fixture.coordinator().drainGaps(fixture.roomId, history, isCurrent = { current })
+
+            assertEquals(GapFillProgress.FAILED, progress)
+            assertEquals(1, history.requests.size)
+            assertTrue(
+                fixture.db
+                    .historyGapDao()
+                    .forRoom(fixture.roomId)
+                    .single()
+                    .recoverable,
+            )
+            assertEquals(52, rowCount(fixture))
+        }
+
+    @Test
+    fun explicitDrainDoesNotSeedAReadFloorWhenOnlyTheGapRemainsLocally() =
+        runTest {
+            val fixture = newFixture()
+            fixture.db.historyGapDao().insert(
+                HistoryGapEntity(roomId = fixture.roomId, olderMsgid = "marker", olderServerTime = 100, newerMsgid = "latest", newerServerTime = 900),
+            )
+            val history = FakeHistory(pageScript(ScriptedPage(listOf(chatMsg("marker", 100), chatMsg("row500", 500)))))
+
+            val progress = fixture.coordinator().drainGaps(fixture.roomId, history, isCurrent = { true }, pageSize = 2)
+
+            assertEquals(GapFillProgress.MOVED, progress)
+            assertTrue(
+                fixture.db
+                    .historyGapDao()
+                    .forRoom(fixture.roomId)
+                    .isEmpty(),
+            )
+            assertEquals(
+                2,
+                fixture.db
+                    .bufferDao()
+                    .observeChatList()
+                    .first()
+                    .single()
+                    .unreadCount,
+            )
+            val room = fixture.db.bufferDao().rawById(fixture.roomId)!!
+            assertEquals(null, room.readMarkerTime)
+            assertEquals(null, room.localReadAnchorTime)
+            assertEquals(null, room.localReadAnchorEventId)
+            assertEquals(null, room.localUnreadFloorTime)
+        }
+
+    @Test
+    fun explicitDrainFollowsQueryMergesBeforeSelectionAndBetweenQuanta() =
+        runTest {
+            for (mergeDuringPage in listOf(false, true)) {
+                val fixture = newFixture()
+                val store = BufferStore(fixture.db)
+                val winner = store.getOrCreate(fixture.networkId, "alice", "alice", BufferType.QUERY)
+                val loser = store.getOrCreate(fixture.networkId, "ally", "ally", BufferType.QUERY)
+
+                fun message(time: Long) = chatMsg("q$time", time, target = "me").copy(source = Prefix("ally"))
+                fixture.processor.process(fixture.networkId, message(100))
+                fixture.processor.process(fixture.networkId, message(900))
+                fixture.db.historyGapDao().insert(
+                    HistoryGapEntity(roomId = loser.id, olderMsgid = "q100", olderServerTime = 100, newerMsgid = "q900", newerServerTime = 900),
+                )
+                var merged = false
+                if (!mergeDuringPage) {
+                    store.mergeRooms(winner.id, loser.id)
+                    merged = true
+                }
+                val history =
+                    FakeHistory(
+                        pageScript(
+                            ScriptedPage(listOf(message(600), message(800))),
+                            ScriptedPage(listOf(message(100), message(500))),
+                        ),
+                        onRequest = {
+                            if (!merged) {
+                                store.mergeRooms(winner.id, loser.id)
+                                merged = true
+                            }
+                        },
+                    )
+
+                val progress = fixture.coordinator().drainGaps(loser.id, history, isCurrent = { true }, pageSize = 2)
+
+                assertEquals(GapFillProgress.MOVED, progress)
+                assertEquals(winner.id, fixture.db.bufferDao().canonicalId(loser.id))
+                assertEquals(listOf("msgid=q900", "msgid=q600"), history.requests.map { it.bound1 })
+                assertTrue(
+                    fixture.db
+                        .historyGapDao()
+                        .forRoom(winner.id)
+                        .isEmpty(),
+                )
+                assertTrue(
+                    fixture.db
+                        .historyGapDao()
+                        .forRoom(loser.id)
+                        .isEmpty(),
+                )
+                assertEquals(5, fixture.db.messageDao().countForBuffer(winner.id))
+            }
         }
 
     @Test

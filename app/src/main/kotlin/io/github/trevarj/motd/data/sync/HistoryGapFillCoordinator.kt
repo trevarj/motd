@@ -22,6 +22,7 @@ import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
 import io.github.trevarj.motd.irc.client.HistoryAvailability
+import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcDisconnectedException
 import io.github.trevarj.motd.service.ConnectionManager
 import kotlinx.coroutines.CancellationException
@@ -425,6 +426,57 @@ class HistoryGapFillCoordinator
             automatic: Boolean = false,
         ): GapFill = fill(roomId, GapSelection.ById(gapId), historyFor(roomId), automatic = automatic)
 
+        /** Explicit recovery keeps granting three-page quanta until no recoverable seam remains. */
+        suspend fun drainGaps(
+            roomId: RoomId,
+            client: IrcClient,
+            isCurrent: () -> Boolean,
+        ): GapFillProgress = drainGaps(roomId, client.historySource(), isCurrent)
+
+        internal suspend fun drainGaps(
+            roomId: RoomId,
+            source: HistoryPageLoader.HistorySource,
+            isCurrent: () -> Boolean,
+            pageSize: Int = PAGE_SIZE,
+        ): GapFillProgress {
+            val currentSource =
+                object : HistorySource {
+                    override suspend fun availability(): HistoryAvailability = if (isCurrent()) source.availability() else HistoryAvailability.NegotiatingOrOffline
+
+                    override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                        if (!isCurrent()) throw IrcDisconnectedException("CHATHISTORY", null)
+                        return source.chathistory(req)
+                    }
+                }
+            var progress = GapFillProgress.DROPPED
+            var canonicalRoomId = roomId
+            while (isCurrent()) {
+                currentCoroutineContext().ensureActive()
+                canonicalRoomId = bufferDao.canonicalId(canonicalRoomId) ?: return progress
+                val gaps = historyGapDao.forRoom(canonicalRoomId).filter { it.recoverable }
+                val gapId = newestPageableGap(gapAnchors.resolve(canonicalRoomId, gaps))?.gap?.id ?: return progress
+                // Share the room lock and loader, but not automatic admission or its policy stops.
+                val result =
+                    fill(
+                        canonicalRoomId,
+                        GapSelection.ById(gapId),
+                        currentSource,
+                        pageSize = pageSize,
+                        waitForRoom = true,
+                        preserveUnread = true,
+                    )
+                if (result.progress == GapFillProgress.FAILED || result.progress == GapFillProgress.STALLED) return result.progress
+                if (result.progress == GapFillProgress.MOVED) progress = GapFillProgress.MOVED
+                when (result.endReason) {
+                    "page_budget", "gap_closed", "gap_filled", "exhausted_focused_gap", "unrecoverable_focused_gap", "no_gap" -> Unit
+
+                    // Includes no-progress after earlier inserts: it must not earn another quantum.
+                    else -> return result.progress
+                }
+            }
+            return progress
+        }
+
         internal suspend fun fill(
             roomId: RoomId,
             selection: GapSelection,
@@ -433,9 +485,10 @@ class HistoryGapFillCoordinator
             pageBudget: Int = PAGE_BUDGET,
             waitForRoom: Boolean = false,
             automatic: Boolean = false,
+            preserveUnread: Boolean = false,
             onInserted: () -> Unit = {},
         ): GapFill {
-            // Manual taps drop behind an active fill; proactive work waits cancellably for its turn.
+            // Divider taps drop behind an active fill; room drains wait cancellably for their turn.
             val lock = roomLocks.computeIfAbsent(roomId) { Mutex() }
             if (waitForRoom) {
                 lock.lock()
@@ -443,8 +496,8 @@ class HistoryGapFillCoordinator
                 return ended(roomId, GapFill(null, 0, 0, "already_filling"))
             }
             try {
-                // The proactive source rechecks canonical room eligibility and saved policy here,
-                // after the mutex wait, and again inside every wire permit (including fallbacks).
+                // A waiting source rechecks admission after the mutex wait and inside every wire
+                // permit (including fallbacks); only proactive/automatic sources consult policy.
                 if (waitForRoom) source.availability()
                 val room =
                     bufferDao.observeById(roomId)
@@ -476,6 +529,7 @@ class HistoryGapFillCoordinator
                             if (automatic) automaticSource(room.id, source) else source,
                             pageSize,
                             pageBudget,
+                            preserveUnread,
                             onInserted,
                         ),
                     )
@@ -503,6 +557,7 @@ class HistoryGapFillCoordinator
             source: HistorySource,
             pageSize: Int,
             pageBudget: Int,
+            preserveUnread: Boolean,
             onInserted: () -> Unit,
         ): GapFill {
             var pages = 0
@@ -542,6 +597,7 @@ class HistoryGapFillCoordinator
                             pageSize,
                             gapId = next.focusedGapId,
                             boundary = next.boundary,
+                            preserveUnread = preserveUnread,
                         )
                     pages++
                     val page =

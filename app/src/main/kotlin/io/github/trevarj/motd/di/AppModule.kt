@@ -312,9 +312,8 @@ internal abstract class AppModule {
         fun linkPreviewFetchPolicy(): LinkPreviewFetchPolicy = LinkPreviewFetchPolicy()
 
         /**
-         * The timeline's narrow view of the gap-fill coordinator. Adapted rather than bound,
-         * because the coordinator is a concrete collaborator of the sync layer and stays that way;
-         * only the tap-a-seam action, the autopilot's arm, and the in-flight ids reach the UI.
+         * UI-facing history recovery and in-flight gap ids, without the coordinator's scheduling
+         * and diagnostics collaborators.
          */
         @Provides
         @Singleton
@@ -327,6 +326,12 @@ internal abstract class AppModule {
                     gapId: Long,
                     automatic: Boolean,
                 ) = coordinator.fillGap(roomId, gapId, automatic).progress
+
+                override suspend fun drainGaps(
+                    roomId: Long,
+                    client: io.github.trevarj.motd.irc.client.IrcClient,
+                    isCurrent: () -> Boolean,
+                ) = coordinator.drainGaps(roomId, client, isCurrent)
             }
 
         /** Provide the real crypto/health collaborators; EventProcessor owns notification policy. */

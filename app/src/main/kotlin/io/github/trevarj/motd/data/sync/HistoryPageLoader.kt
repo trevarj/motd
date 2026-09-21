@@ -172,6 +172,7 @@ class HistoryPageLoader
             response: ChatHistoryResponse.Messages,
             expectedRoomId: RoomId?,
             historyGapId: Long? = null,
+            preserveUnread: Boolean = false,
         ): PersistedHistoryPage {
             avatarController.ingestDickordAvatars(networkId, response.events)
             return processor.persistHistoryPageResult(
@@ -180,6 +181,7 @@ class HistoryPageLoader
                 response,
                 expectedRoomId,
                 historyGapId,
+                preserveUnread,
             )
         }
 
@@ -229,6 +231,8 @@ class HistoryPageLoader
             val direction: Direction,
             val gapId: Long?,
             val anchor: String? = null,
+            // Explicit recovery must never inherit automatic first-import read-floor persistence.
+            val preserveUnread: Boolean = false,
         )
 
         /**
@@ -245,6 +249,7 @@ class HistoryPageLoader
             pageSize: Int = 50,
             gapId: Long? = null,
             boundary: ChatHistoryReference? = null,
+            preserveUnread: Boolean = false,
         ): PageResult {
             val availability = source.availability()
             diagnostics.record("chat_history", "loader_page_requested") {
@@ -288,6 +293,7 @@ class HistoryPageLoader
                             referenceTypes,
                             requestTimeoutMs,
                             allowConcurrent = allowConcurrent,
+                            preserveUnread = preserveUnread,
                         ).toPageResult()
                     } catch (_: LatestFlightTimeoutException) {
                         // Paging's half of the shared flight's timeout: a retryable transport failure, never
@@ -298,7 +304,7 @@ class HistoryPageLoader
                 }
 
                 Direction.OLDER -> {
-                    coalesced(FlightKey(networkId, roomId, direction, gapId)) {
+                    coalesced(FlightKey(networkId, roomId, direction, gapId, preserveUnread = preserveUnread)) {
                         loadOlder(
                             networkId,
                             roomId,
@@ -309,12 +315,13 @@ class HistoryPageLoader
                             gapId,
                             boundary,
                             allowConcurrent,
+                            preserveUnread,
                         )
                     }
                 }
 
                 Direction.NEWER -> {
-                    coalesced(FlightKey(networkId, roomId, direction, gapId)) {
+                    coalesced(FlightKey(networkId, roomId, direction, gapId, preserveUnread = preserveUnread)) {
                         loadNewer(
                             networkId,
                             roomId,
@@ -325,6 +332,7 @@ class HistoryPageLoader
                             gapId,
                             boundary,
                             allowConcurrent,
+                            preserveUnread,
                         )
                     }
                 }
@@ -491,7 +499,7 @@ class HistoryPageLoader
 
         /**
          * Pull the most recent page for [roomId], persist it through the sole IRC→Room writer, and hand
-         * back the page itself — coalesced, so every LATEST caller for one room shares one fetch.
+         * back the page itself — coalesced among callers with the same unread-preservation policy.
          *
          * This is the shared primitive behind BOTH newest-page callers: Paging's empty-store seed and
          * the catch-up coordinator's per-target seed. They ask the same question, and before they shared
@@ -516,8 +524,9 @@ class HistoryPageLoader
             referenceTypes: Set<HistoryReferenceType>,
             timeoutMs: Long,
             allowConcurrent: Boolean = false,
+            preserveUnread: Boolean = false,
         ): LatestPage =
-            coalesced(FlightKey(networkId, roomId, Direction.LATEST, gapId = null)) {
+            coalesced(FlightKey(networkId, roomId, Direction.LATEST, gapId = null, preserveUnread = preserveUnread)) {
                 val allowMsgid = HistoryReferenceType.MSGID in referenceTypes
                 val request =
                     ChatHistoryRequest(
@@ -548,6 +557,7 @@ class HistoryPageLoader
                         request,
                         result,
                         expectedRoomId = roomId,
+                        preserveUnread = preserveUnread,
                     )
                 LatestPage(request, result, persisted.inserted, referenceTypes)
             }
@@ -586,6 +596,7 @@ class HistoryPageLoader
             gapId: Long?,
             boundary: ChatHistoryReference?,
             allowConcurrent: Boolean,
+            preserveUnread: Boolean,
         ): PageResult {
             val oldest =
                 boundary ?: return PageResult.Failed(
@@ -629,6 +640,7 @@ class HistoryPageLoader
                     result,
                     expectedRoomId = roomId,
                     historyGapId = gapId,
+                    preserveUnread = preserveUnread,
                 )
             if (result.isComplete) {
                 return PageResult.Loaded(result.primaryMessageCount, persisted.inserted, endOfDirection = true)
@@ -660,6 +672,7 @@ class HistoryPageLoader
             gapId: Long?,
             boundary: ChatHistoryReference?,
             allowConcurrent: Boolean,
+            preserveUnread: Boolean,
         ): PageResult {
             val newer =
                 boundary ?: return PageResult.Failed(
@@ -700,6 +713,7 @@ class HistoryPageLoader
                     result,
                     expectedRoomId = roomId,
                     historyGapId = gapId,
+                    preserveUnread = preserveUnread,
                 )
             return PageResult.Loaded(
                 result.primaryMessageCount,

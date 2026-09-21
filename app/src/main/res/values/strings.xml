@@ -1586,6 +1586,9 @@
         <item quantity="other">%d selected</item>
     </plurals>
     <string name="chatlist_selection_close">Close selection</string>
+    <string name="chatlist_clear_activity_dot">Clear activity dot</string>
+    <string name="chatlist_clear_activity_dot_supporting">Loads missing messages without marking them read</string>
+    <string name="chatlist_clear_activity_dot_loading">Loading missing messages</string>
     <string name="chatlist_remove">Remove</string>
     <plurals name="chatlist_remove_confirm_title">
         <item quantity="one">Remove %d chat?</item>

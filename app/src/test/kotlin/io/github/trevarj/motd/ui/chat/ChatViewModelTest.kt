@@ -3586,6 +3586,12 @@ class ChatViewModelTest {
             requests += roomId to gapId
             return GapFillProgress.MOVED
         }
+
+        override suspend fun drainGaps(
+            roomId: Long,
+            client: IrcClient,
+            isCurrent: () -> Boolean,
+        ): GapFillProgress = error("The timeline only requests named gaps")
     }
 
     /** Rows are newest-first on screen, so index 0 is the newest catch-up row. */
@@ -3778,6 +3784,12 @@ class ChatViewModelTest {
                         gapId: Long,
                         automatic: Boolean,
                     ) = coordinator.fill(roomId, HistoryGapFillCoordinator.GapSelection.ById(gapId), source, automatic = automatic).progress
+
+                    override suspend fun drainGaps(
+                        roomId: Long,
+                        client: IrcClient,
+                        isCurrent: () -> Boolean,
+                    ) = coordinator.drainGaps(roomId, source, isCurrent)
                 }
             val vm =
                 viewModel(
@@ -4541,6 +4553,7 @@ class ChatViewModelTest {
         override suspend fun reconcileBuffer(
             buffer: BufferEntity,
             client: IrcClient,
+            preserveUnread: Boolean,
             isCurrent: () -> Boolean,
         ): HistoryResyncState {
             check(isCurrent())

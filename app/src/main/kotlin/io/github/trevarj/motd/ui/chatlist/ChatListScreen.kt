@@ -57,6 +57,7 @@ import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Mail
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsOff
@@ -213,6 +214,7 @@ fun ChatListScreen(
     val syncIndicators by viewModel.syncIndicators.collectAsStateWithLifecycle()
     val syncChrome by viewModel.syncChrome.collectAsStateWithLifecycle()
     val titleConnecting by viewModel.titleConnecting.collectAsStateWithLifecycle()
+    val recoveringActivityIds by viewModel.recoveringActivityIds.collectAsStateWithLifecycle()
     val nickSuggestions by viewModel.nickSuggestions.collectAsStateWithLifecycle()
 
     // Fresh installs enter onboarding once state is loaded; a durable skip keeps the empty main UI.
@@ -236,6 +238,7 @@ fun ChatListScreen(
         state = state,
         syncIndicators = syncIndicators,
         syncChrome = syncChrome,
+        recoveringActivityIds = recoveringActivityIds,
         titleConnecting = titleConnecting,
         snackbarHostState = snackbarHostState,
         audioPlaybackState = audioPlaybackState,
@@ -278,6 +281,7 @@ fun ChatListScreen(
         onOpenChannelList = onOpenChannelList,
         onMarkAllRead = viewModel::markCurrentScopeRead,
         onMarkSelectedRead = viewModel::markSelectedRead,
+        onClearActivityDots = viewModel::clearActivityDots,
         onMoveNetwork = viewModel::moveNetwork,
         onCommitNetworkOrder = viewModel::commitNetworkOrder,
         selectedBufferId = selectedBufferId,
@@ -318,6 +322,7 @@ private fun chatListTopBarMode(
 fun ChatListContent(
     state: ChatListState,
     syncIndicators: Map<Long, ChatListSyncIndicator> = emptyMap(),
+    recoveringActivityIds: Set<Long> = emptySet(),
     syncChrome: ChatListSyncChrome = ChatListSyncChrome.Hidden,
     titleConnecting: Boolean = false,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
@@ -361,6 +366,7 @@ fun ChatListContent(
     onOpenChannelList: (Long) -> Unit = {},
     onMarkAllRead: () -> Unit = {},
     onMarkSelectedRead: (Collection<Long>) -> Unit = {},
+    onClearActivityDots: (Collection<Long>) -> Unit = {},
     // Manual drawer order (see DrawerReorder.kt); defaulted so previews and tests stay terse.
     onMoveNetwork: (Long, Int) -> Unit = { _, _ -> },
     onCommitNetworkOrder: (List<Long>) -> Unit = {},
@@ -412,6 +418,7 @@ fun ChatListContent(
     var tabChangeSignal by rememberSaveable { mutableIntStateOf(0) }
     var selectedIds by rememberSaveable(archiveMode, invitationMode, state.selectedNetworkId, effectiveFolderId) { mutableStateOf(emptyList<Long>()) }
     val selectedRows = orderedSelectedRows(displayedRows, selectedIds)
+    val dottedSelectedRows = selectedRows.filter { chatListBadgeState(it).advertisedActivity && it.bufferId !in recoveringActivityIds }
     val selectionActive = selectedRows.isNotEmpty()
     val topBarMode =
         chatListTopBarMode(
@@ -670,6 +677,27 @@ fun ChatListContent(
                                                 Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
                                             }
                                             DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                                                if (dottedSelectedRows.isNotEmpty()) {
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Column {
+                                                                Text(stringResource(R.string.chatlist_clear_activity_dot))
+                                                                Text(
+                                                                    stringResource(R.string.chatlist_clear_activity_dot_supporting),
+                                                                    style = MaterialTheme.typography.bodySmall,
+                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                )
+                                                            }
+                                                        },
+                                                        leadingIcon = { Icon(Icons.Outlined.History, contentDescription = null) },
+                                                        modifier = Modifier.testTag("chatlist_selection_clear_dot"),
+                                                        onClick = {
+                                                            onClearActivityDots(dottedSelectedRows.map(ChatListRow::bufferId))
+                                                            overflowOpen = false
+                                                            selectedIds = emptyList()
+                                                        },
+                                                    )
+                                                }
                                                 DropdownMenuItem(
                                                     text = { Text(stringResource(R.string.folders_add_to)) },
                                                     leadingIcon = { Icon(Icons.Outlined.Forum, contentDescription = null) },
@@ -870,6 +898,7 @@ fun ChatListContent(
                             onIgnoreInvitation = onIgnoreInvitation,
                             presence = state.queryPresence,
                             syncIndicators = syncIndicators,
+                            recoveringActivityIds = recoveringActivityIds,
                             friends = state.friends,
                             fools = state.fools,
                             multiNetwork = showNetworkChip,
@@ -1250,6 +1279,7 @@ private fun ChatList(
     onIgnoreInvitation: (Long) -> Unit,
     presence: Map<Long, io.github.trevarj.motd.service.PresenceState>,
     syncIndicators: Map<Long, ChatListSyncIndicator>,
+    recoveringActivityIds: Set<Long>,
     friends: Set<String>,
     fools: Set<String>,
     multiNetwork: Boolean,
@@ -1614,6 +1644,7 @@ private fun ChatList(
                         onStartSelection = onStartSelection,
                         onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
                         syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
+                        activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
                         modifier =
                             Modifier.animateItem(
                                 fadeInSpec = ChatListItemMotion.fadeInSpec,
@@ -1655,6 +1686,7 @@ private fun ChatList(
                                 onStartSelection = onStartSelection,
                                 onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
                                 syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
+                                activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
                                 modifier =
                                     Modifier.animateItem(
                                         fadeInSpec = ChatListItemMotion.fadeInSpec,
@@ -1693,6 +1725,7 @@ private fun ChatList(
                             onStartSelection = onStartSelection,
                             onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
                             syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
+                            activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
                             modifier =
                                 Modifier.animateItem(
                                     fadeInSpec = ChatListItemMotion.fadeInSpec,
@@ -1731,6 +1764,7 @@ private fun ChatList(
                         onStartSelection = onStartSelection,
                         onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
                         syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
+                        activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
                         modifier =
                             Modifier.animateItem(
                                 fadeInSpec = ChatListItemMotion.fadeInSpec,
@@ -1784,6 +1818,7 @@ private fun ChatList(
                                     onStartSelection = onStartSelection,
                                     onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
                                     syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
+                                    activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
                                 )
                             }
                         }
@@ -2291,6 +2326,7 @@ private fun SelectableChatListRow(
     onArchive: () -> Unit,
     modifier: Modifier = Modifier,
     syncIndicator: ChatListSyncIndicator = ChatListSyncIndicator.NONE,
+    activityRecoveryInProgress: Boolean = false,
 ) {
     val currentArchive by rememberUpdatedState(onArchive)
     val dismissState = rememberSwipeToDismissBoxState(positionalThreshold = ::archiveSwipePositionalThreshold)
@@ -2339,6 +2375,7 @@ private fun SelectableChatListRow(
                 selected = selected,
                 active = active,
                 syncIndicator = syncIndicator,
+                activityRecoveryInProgress = activityRecoveryInProgress,
             )
         }
     }

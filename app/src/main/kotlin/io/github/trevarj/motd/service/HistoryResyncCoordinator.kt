@@ -216,9 +216,11 @@ interface HistoryResyncController {
         work: suspend (Long) -> Unit,
     ) = bufferIds.forEach { work(it) }
 
+    /** [preserveUnread] leaves an empty room's recovered messages unread instead of seeding a backlog floor. */
     suspend fun reconcileBuffer(
         buffer: BufferEntity,
         client: IrcClient,
+        preserveUnread: Boolean = false,
         isCurrent: () -> Boolean,
     ): HistoryResyncState
 
@@ -286,6 +288,7 @@ class HistoryResyncCoordinator
         private data class RequestKey(
             val networkId: Long,
             val bufferId: Long?,
+            val preserveUnread: Boolean = false,
         )
 
         private data class RequestSpec(
@@ -943,6 +946,7 @@ class HistoryResyncCoordinator
         override suspend fun reconcileBuffer(
             buffer: BufferEntity,
             client: IrcClient,
+            preserveUnread: Boolean,
             isCurrent: () -> Boolean,
         ): HistoryResyncState =
             reconcileBuffer(
@@ -950,6 +954,7 @@ class HistoryResyncCoordinator
                 bufferId = buffer.id,
                 target = buffer.ircTarget,
                 source = ClientHistorySource(client),
+                preserveUnread = preserveUnread,
                 isCurrent = isCurrent,
             )
 
@@ -1734,6 +1739,7 @@ class HistoryResyncCoordinator
             bufferId: Long,
             target: String,
             source: HistorySource,
+            preserveUnread: Boolean = false,
             isCurrent: () -> Boolean = { true },
         ): HistoryResyncState {
             val ready =
@@ -1745,7 +1751,7 @@ class HistoryResyncCoordinator
             if (!isCurrent()) return staleConnection()
             return coalesced(
                 RequestSpec(
-                    RequestKey(networkId, bufferId),
+                    RequestKey(networkId, bufferId, preserveUnread),
                     source.flightIdentity(),
                 ),
             ) {
@@ -1765,6 +1771,7 @@ class HistoryResyncCoordinator
                                 discoveredLatestMessageTime = null,
                                 session = session,
                                 allowConcurrent = ready.supportsConcurrentRequests,
+                                preserveUnread = preserveUnread,
                             )
                         work.status.toState(work.inserted)
                     } catch (_: TimeoutCancellationException) {
@@ -2135,6 +2142,7 @@ class HistoryResyncCoordinator
             discoveredLatestMessageTime: Long?,
             session: SyncStatusSession? = null,
             allowConcurrent: Boolean = false,
+            preserveUnread: Boolean = false,
         ): WorkResult {
             val room = db.bufferDao().observeById(bufferId) ?: throw StaleConnectionException()
             val referenceTypes = source.referenceTypes()
@@ -2188,7 +2196,7 @@ class HistoryResyncCoordinator
                 request = boundedLatest.request
                 page = boundedLatest.response
                 if (!isCurrent()) throw StaleConnectionException()
-                inserted = ingest(networkId, bufferId, request, page)
+                inserted = ingest(networkId, bufferId, request, page, preserveUnread = preserveUnread)
             } else {
                 val latest =
                     loader.fetchLatest(
@@ -2200,6 +2208,7 @@ class HistoryResyncCoordinator
                         referenceTypes = referenceTypes,
                         timeoutMs = requestTimeoutMs,
                         allowConcurrent = allowConcurrent,
+                        preserveUnread = preserveUnread,
                     )
                 request = latest.request
                 page = latest.response
@@ -2405,7 +2414,8 @@ class HistoryResyncCoordinator
             request: ChatHistoryRequest,
             page: ChatHistoryResponse.Messages,
             historyGapId: Long? = null,
-        ): Int = ingestResult(networkId, expectedRoomId, request, page, historyGapId).inserted
+            preserveUnread: Boolean = false,
+        ): Int = ingestResult(networkId, expectedRoomId, request, page, historyGapId, preserveUnread).inserted
 
         private suspend fun ingestResult(
             networkId: Long,
@@ -2413,6 +2423,7 @@ class HistoryResyncCoordinator
             request: ChatHistoryRequest,
             page: ChatHistoryResponse.Messages,
             historyGapId: Long? = null,
+            preserveUnread: Boolean = false,
         ): io.github.trevarj.motd.data.sync.PersistedHistoryPage {
             if (db.bufferDao().rawById(expectedRoomId) == null) throw StaleConnectionException()
             return loader.persistHistoryPageResult(
@@ -2421,6 +2432,7 @@ class HistoryResyncCoordinator
                 page,
                 expectedRoomId = expectedRoomId,
                 historyGapId = historyGapId,
+                preserveUnread = preserveUnread,
             )
         }
 

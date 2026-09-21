@@ -5,6 +5,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatFolderEntity
 import io.github.trevarj.motd.data.db.ChatListRow
@@ -20,6 +21,7 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.data.sync.HistoryGapFiller
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.dickord.DickordLabsPrefs
 import io.github.trevarj.motd.dickord.isDickordPortalConversation
@@ -28,12 +30,18 @@ import io.github.trevarj.motd.service.AppVisibility
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.HistoryResyncController
+import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import io.github.trevarj.motd.service.markChatsRead
 import io.github.trevarj.motd.service.unreadBufferIds
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -41,6 +49,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.SharingStarted.Companion.WhileSubscribed
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -190,6 +199,7 @@ class ChatListViewModel
         private val networkRepository: NetworkRepository,
         private val connectionManager: ConnectionManager,
         private val historyResync: HistoryResyncController,
+        private val gapFiller: HistoryGapFiller,
         private val channelCloseCoordinator: ChannelCloseCoordinator,
         private val readMarkerRepository: ReadMarkerSnapshotter,
         private val settingsRepository: SettingsRepository,
@@ -208,6 +218,9 @@ class ChatListViewModel
         // One-shot: unmuting marked a muted backlog read, so the screen can report it and offer an undo.
         private val _muteBacklogSuppressions = MutableSharedFlow<List<MuteBacklogSuppression>>(extraBufferCapacity = 1)
         val muteBacklogSuppressions: SharedFlow<List<MuteBacklogSuppression>> = _muteBacklogSuppressions.asSharedFlow()
+
+        private val activityRecovery = ChatListActivityRecovery(bufferRepository)
+        val recoveringActivityIds: StateFlow<Set<Long>> = activityRecovery.activeIds
 
         // Aggregate header chrome, debounced so a fast pass never flashes. Engine-owned counts; the
         // driver's clock is elapsed real time, which keeps the windows honest across Doze.
@@ -664,6 +677,13 @@ class ChatListViewModel
             viewModelScope.launch { markChatsRead(ids, readMarkerRepository, connectionManager) }
         }
 
+        /** Load missing history; Room alone decides when its activity cue is no longer owed. */
+        fun clearActivityDots(bufferIds: Collection<Long>) {
+            activityRecovery.launch(viewModelScope, bufferIds) { ids ->
+                recoverChatListActivity(ids, bufferRepository, connectionManager, historyResync, gapFiller)
+            }
+        }
+
         private fun setSelection(networkId: Long?) {
             selection.value = networkId
             savedStateHandle[KEY_SELECTED] = networkId
@@ -673,6 +693,95 @@ class ChatListViewModel
             const val KEY_SELECTED = "selected_network"
         }
     }
+
+/** Main-thread batch ownership keeps recovery chrome attached to canonical rooms through merges. */
+internal class ChatListActivityRecovery(
+    private val buffers: BufferRepository,
+) {
+    private val _activeIds = MutableStateFlow<Set<Long>>(emptySet())
+    val activeIds: StateFlow<Set<Long>> = _activeIds.asStateFlow()
+
+    // Requested ids identify a batch for its lifetime; its value follows their current room ids.
+    private val batches = mutableMapOf<Set<Long>, Set<Long>>()
+
+    fun launch(
+        scope: CoroutineScope,
+        bufferIds: Collection<Long>,
+        work: suspend (Set<Long>) -> Unit,
+    ): Job? {
+        val ids = bufferIds.filterTo(mutableSetOf()) { id -> id !in _activeIds.value && batches.keys.none { id in it } }
+        if (ids.isEmpty()) return null
+        batches[ids] = ids
+        publish()
+        return scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                coroutineScope {
+                    val observation =
+                        launch {
+                            combine(ids.map(buffers::observeBuffer)) { rooms ->
+                                rooms.mapNotNull { it?.id }.toSet()
+                            }.collect { canonicalIds ->
+                                batches[ids] = canonicalIds
+                                publish()
+                            }
+                        }
+                    try {
+                        work(ids)
+                    } finally {
+                        observation.cancel()
+                    }
+                }
+            } finally {
+                batches.remove(ids)
+                publish()
+            }
+        }
+    }
+
+    private fun publish() {
+        _activeIds.value = buildSet { batches.values.forEach { addAll(it) } }
+    }
+}
+
+/** Exact-buffer newest reconciliation must finish on the same client before interior recovery. */
+internal suspend fun recoverChatListActivity(
+    bufferIds: Collection<Long>,
+    buffers: BufferRepository,
+    connections: ConnectionManager,
+    resync: HistoryResyncController,
+    gaps: HistoryGapFiller,
+) {
+    val rooms =
+        bufferIds
+            .mapNotNull { buffers.canonicalBufferId(it) }
+            .distinct()
+            .mapNotNull { buffers.observeBuffer(it).first() }
+            .filter { it.type != BufferType.SERVER && it.redirectToRoomId == null && it.pendingCloseAt == null && !it.dismissed }
+            .distinctBy(BufferEntity::id)
+    for ((networkId, selected) in rooms.groupBy(BufferEntity::networkId)) {
+        val client = connections.clientFor(networkId) ?: continue
+        val isCurrent = { connections.clientFor(networkId) === client }
+        for (room in selected) {
+            if (!isCurrent()) break
+            try {
+                val newest = resync.reconcileBuffer(room, client, preserveUnread = true, isCurrent = isCurrent)
+                if (!isCurrent()) break
+                val canDrain =
+                    newest is HistoryResyncState.Updated ||
+                        newest == HistoryResyncState.UpToDate ||
+                        (newest is HistoryResyncState.Incomplete && newest.inserted > 0)
+                if (canDrain) {
+                    // Reconcile owns its sync status; a wrapping manualPass would falsely settle it.
+                    gaps.drainGaps(room.id, client, isCurrent)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // A failed room keeps its cue and must not prevent recovery of the other selections.
+            }
+        }
+    }
+}
 
 internal fun toChatListInvitation(event: InvitationEventRow): ChatListInvitation? {
     val payload = InvitePayloadV1.decode(event.eventPayload) ?: return null
