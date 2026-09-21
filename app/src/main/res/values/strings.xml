@@ -992,6 +992,11 @@
     <string name="settings_composer_formatting_tools_desc">Show formatting actions in Composer Tools.</string>
     <string name="settings_chat_sounds">Chat sounds</string>
     <string name="settings_chat_sounds_desc">Play subtle sounds when sending or receiving in the open chat.</string>
+    <string name="settings_chat_list_swipe">Left swipe action</string>
+    <string name="settings_chat_list_swipe_desc">Choose what swiping a chat does. Archived chats always unarchive.</string>
+    <string name="settings_chat_list_swipe_mute">Mute/unmute</string>
+    <string name="settings_chat_list_swipe_pin">Pin/unpin</string>
+    <string name="settings_chat_list_swipe_none">Nothing</string>
     <string name="settings_reply_prefix">Visible reply prefix</string>
     <string name="settings_reply_prefix_desc">Prefix channel replies with the recipient’s nick for clients that do not render reply tags.</string>
     <string name="settings_voice_encryption">Encrypt voice messages by default</string>

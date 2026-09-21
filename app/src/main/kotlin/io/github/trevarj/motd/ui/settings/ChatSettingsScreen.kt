@@ -40,6 +40,7 @@ import io.github.trevarj.motd.audio.VoiceConfig
 import io.github.trevarj.motd.audio.VoiceRecordingQuality
 import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.data.prefs.AUTO_AWAY_MINUTE_CHOICES
+import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -88,6 +89,7 @@ fun ChatSettingsScreen(
         onOpenDirectConnections = onOpenDirectConnections,
         onPresenceMode = viewModel::setPresenceMode,
         onShowRedactedMessages = viewModel::setShowRedactedMessages,
+        onChatListSwipeAction = viewModel::setChatListSwipeAction,
         onAutoAwayEnabled = viewModel::setAutoAwayEnabled,
         onAutoAwayMinutes = viewModel::setAutoAwayMinutes,
         onAutoAwayMessage = viewModel::setAutoAwayMessage,
@@ -123,6 +125,7 @@ fun ChatSettingsContent(
     onOpenDirectConnections: () -> Unit,
     onPresenceMode: (PresenceMode) -> Unit,
     onShowRedactedMessages: (Boolean) -> Unit,
+    onChatListSwipeAction: (ChatListSwipeAction) -> Unit,
     onAutoAwayEnabled: (Boolean) -> Unit,
     onAutoAwayMinutes: (Int) -> Unit,
     onAutoAwayMessage: (String) -> Unit,
@@ -145,6 +148,7 @@ fun ChatSettingsContent(
 ) {
     var qualitySheetOpen by remember { mutableStateOf(false) }
     var presenceSheetOpen by remember { mutableStateOf(false) }
+    var swipeSheetOpen by remember { mutableStateOf(false) }
     var awayDelaySheetOpen by remember { mutableStateOf(false) }
     var foolsSheetOpen by remember { mutableStateOf(false) }
     var awayMessageDialogOpen by remember { mutableStateOf(false) }
@@ -177,6 +181,16 @@ fun ChatSettingsContent(
                 switchTag = "settings_switch_show_redacted_messages",
                 requestedTarget = target?.name,
                 targetName = SettingsTarget.DELETED_MESSAGES.name,
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsNavigationRow(
+                title = stringResource(R.string.settings_chat_list_swipe),
+                summary = stringResource(R.string.settings_chat_list_swipe_desc),
+                value = chatListSwipeActionLabel(settings.chatListSwipeAction),
+                modifier = Modifier.testTag("settings_chat_list_swipe_picker"),
+                requestedTarget = target?.name,
+                targetName = SettingsTarget.CHAT_LIST_SWIPE.name,
+                onClick = { swipeSheetOpen = true },
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_media_previews_section)) {
@@ -422,6 +436,23 @@ fun ChatSettingsContent(
             tag = "settings_presence_sheet",
         )
     }
+    if (swipeSheetOpen) {
+        SingleChoiceSheet(
+            title = stringResource(R.string.settings_chat_list_swipe),
+            selected = settings.chatListSwipeAction,
+            options =
+                ChatListSwipeAction.entries.map { action ->
+                    ChoiceOption(
+                        action,
+                        chatListSwipeActionLabel(action),
+                        tag = "settings_chat_list_swipe_${action.name.lowercase()}",
+                    )
+                },
+            onSelect = onChatListSwipeAction,
+            onDismiss = { swipeSheetOpen = false },
+            tag = "settings_chat_list_swipe_sheet",
+        )
+    }
     if (awayDelaySheetOpen) {
         SingleChoiceSheet(
             title = stringResource(R.string.settings_auto_away_delay),
@@ -464,6 +495,19 @@ fun ChatSettingsContent(
         )
     }
 }
+
+@Composable
+private fun chatListSwipeActionLabel(action: ChatListSwipeAction): String =
+    stringResource(
+        when (action) {
+            ChatListSwipeAction.ARCHIVE -> R.string.chatlist_archive
+            ChatListSwipeAction.MARK_READ -> R.string.chatlist_mark_read
+            ChatListSwipeAction.MUTE -> R.string.settings_chat_list_swipe_mute
+            ChatListSwipeAction.PIN -> R.string.settings_chat_list_swipe_pin
+            ChatListSwipeAction.DELETE -> R.string.action_delete
+            ChatListSwipeAction.NONE -> R.string.settings_chat_list_swipe_none
+        },
+    )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -564,6 +608,7 @@ private fun ChatSettingsPreview() {
             onOpenDirectConnections = {},
             onPresenceMode = {},
             onShowRedactedMessages = {},
+            onChatListSwipeAction = {},
             onAutoAwayEnabled = {},
             onAutoAwayMinutes = {},
             onAutoAwayMessage = {},

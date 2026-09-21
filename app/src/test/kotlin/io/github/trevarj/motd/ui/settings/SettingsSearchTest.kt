@@ -39,6 +39,7 @@ class SettingsSearchTest {
             "unassigned" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.SHOW_FOLDER_CHATS_IN_ALL),
             "dickord" to SettingsSearchDestination.Page(SettingsSearchPage.LABS, SettingsTarget.DICKORD),
             "aggressive lazy" to SettingsSearchDestination.Page(SettingsSearchPage.HISTORY, SettingsTarget.HISTORY_SYNC_MODE),
+            "swipe" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.CHAT_LIST_SWIPE),
         ).forEach { (query, destination) ->
             assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
         }

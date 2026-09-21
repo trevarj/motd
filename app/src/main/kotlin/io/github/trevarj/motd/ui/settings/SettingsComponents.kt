@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
@@ -354,9 +356,9 @@ internal fun <T> SingleChoiceSheet(
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag(tag)) {
         SheetSystemBars()
-        Column(Modifier.fillMaxWidth().selectableGroup()) {
-            SectionHeader(title)
-            options.forEach { option ->
+        LazyColumn(Modifier.fillMaxWidth().selectableGroup().testTag("${tag}_options")) {
+            item { SectionHeader(title) }
+            items(options) { option ->
                 RadioRow(
                     label = option.label,
                     subtitle = option.summary,
@@ -369,8 +371,8 @@ internal fun <T> SingleChoiceSheet(
                     modifier = option.tag?.let(Modifier::testTag) ?: Modifier,
                 )
             }
-            footer()
-            Spacer(Modifier.height(20.dp))
+            item { footer() }
+            item { Spacer(Modifier.height(20.dp)) }
         }
     }
 }

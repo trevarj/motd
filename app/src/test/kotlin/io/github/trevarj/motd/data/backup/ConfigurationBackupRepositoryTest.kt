@@ -15,6 +15,7 @@ import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefsImpl
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
+import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
@@ -361,7 +362,7 @@ class ConfigurationBackupRepositoryTest {
         }
 
     @Test
-    fun folderTabSettingsRoundTripThroughSettingsBackup() =
+    fun chatListSettingsRoundTripThroughSettingsBackup() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()
             val settings = DataStoreSettingsRepository(context)
@@ -369,26 +370,32 @@ class ConfigurationBackupRepositoryTest {
             try {
                 settings.setFolderDisplayMode(FolderDisplayMode.TABS)
                 settings.setShowFolderChatsInAll(false)
+                settings.setChatListSwipeAction(ChatListSwipeAction.MARK_READ)
                 val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
 
                 settings.setFolderDisplayMode(FolderDisplayMode.INLINE)
                 settings.setShowFolderChatsInAll(true)
+                settings.setChatListSwipeAction(ChatListSwipeAction.ARCHIVE)
                 backup.import(raw, importMode = BackupImportMode.MERGE)
                 assertEquals(FolderDisplayMode.TABS, settings.settings.first().folderDisplayMode)
                 assertFalse(settings.settings.first().showFolderChatsInAll)
+                assertEquals(ChatListSwipeAction.MARK_READ, settings.settings.first().chatListSwipeAction)
 
                 val oldRaw =
                     raw
                         .replace(Regex(",\\s*\"folderDisplayMode\"\\s*:\\s*\"TABS\""), "")
                         .replace(Regex(",\\s*\"showFolderChatsInAll\"\\s*:\\s*false"), "")
+                        .replace(Regex(",\\s*\"chatListSwipeAction\"\\s*:\\s*\"MARK_READ\""), "")
                 assertFalse(oldRaw.contains("folderDisplayMode"))
                 assertFalse(oldRaw.contains("showFolderChatsInAll"))
                 backup.import(oldRaw, importMode = BackupImportMode.MERGE)
                 assertEquals(FolderDisplayMode.INLINE, settings.settings.first().folderDisplayMode)
                 assertTrue(settings.settings.first().showFolderChatsInAll)
+                assertEquals(ChatListSwipeAction.ARCHIVE, settings.settings.first().chatListSwipeAction)
             } finally {
                 settings.setFolderDisplayMode(FolderDisplayMode.INLINE)
                 settings.setShowFolderChatsInAll(true)
+                settings.setChatListSwipeAction(ChatListSwipeAction.ARCHIVE)
             }
         }
 

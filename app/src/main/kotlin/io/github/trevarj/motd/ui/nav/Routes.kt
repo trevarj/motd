@@ -82,6 +82,7 @@ enum class SettingsTarget {
     LAUNCHER_ICON,
     PRESENCE,
     DELETED_MESSAGES,
+    CHAT_LIST_SWIPE,
     IMAGES,
     LINK_PREVIEWS,
     MEDIA_UNMETERED,

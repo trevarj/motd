@@ -164,6 +164,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_app_icon_section, R.string.settings_appearance_summary, "launcher", SettingsSearchPage.APPEARANCE, SettingsTarget.LAUNCHER_ICON),
         spec(R.string.settings_presence_title, R.string.settings_presence_smart_desc, "join part quit away", SettingsSearchPage.CHAT, SettingsTarget.PRESENCE),
         spec(R.string.settings_show_redacted_messages, R.string.settings_show_redacted_messages_desc, "deleted accountability", SettingsSearchPage.CHAT, SettingsTarget.DELETED_MESSAGES),
+        spec(R.string.settings_chat_list_swipe, R.string.settings_chat_list_swipe_desc, "left swipe gesture archive read mute unmute pin unpin delete nothing chat list", SettingsSearchPage.CHAT, SettingsTarget.CHAT_LIST_SWIPE),
         spec(R.string.settings_show_images, R.string.settings_show_images_desc, "media photos", SettingsSearchPage.CHAT, SettingsTarget.IMAGES),
         spec(R.string.settings_show_link_previews, R.string.settings_show_link_previews_desc, "url metadata", SettingsSearchPage.CHAT, SettingsTarget.LINK_PREVIEWS),
         spec(R.string.settings_auto_media_unmetered, R.string.settings_auto_media_unmetered_desc, "wifi download", SettingsSearchPage.CHAT, SettingsTarget.MEDIA_UNMETERED),

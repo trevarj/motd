@@ -10,6 +10,7 @@ import io.github.trevarj.motd.audio.VoiceRecordingQuality
 import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.avatar.AvatarController
 import io.github.trevarj.motd.avatar.AvatarPrefs
+import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.FoolsMode
@@ -73,6 +74,8 @@ class ChatSettingsViewModel
             ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatSettingsUiState())
 
         fun setPresenceMode(value: PresenceMode) = launch { settingsRepository.setPresenceMode(value) }
+
+        fun setChatListSwipeAction(value: ChatListSwipeAction) = launch { settingsRepository.setChatListSwipeAction(value) }
 
         fun setShowRedactedMessages(value: Boolean) = launch { settingsRepository.setShowRedactedMessages(value) }
 

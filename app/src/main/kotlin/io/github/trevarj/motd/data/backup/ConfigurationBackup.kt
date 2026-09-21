@@ -494,6 +494,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setLayoutDensity(it.layoutDensity)
                 settingsRepository.setFolderDisplayMode(it.folderDisplayMode)
                 settingsRepository.setShowFolderChatsInAll(it.showFolderChatsInAll)
+                settingsRepository.setChatListSwipeAction(it.chatListSwipeAction)
                 settingsRepository.setNickColorsEnabled(it.nickColorsEnabled)
                 settingsRepository.setNickColorPalette(it.nickColorPalette)
                 current.nickColorOverrides.keys

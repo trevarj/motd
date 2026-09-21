@@ -35,6 +35,10 @@ enum class FolderDisplayMode { INLINE, TABS }
 /** Decode folder presentation without letting unknown future values break startup. */
 internal fun folderDisplayModeFromPreference(saved: String?): FolderDisplayMode = saved?.let { runCatching { FolderDisplayMode.valueOf(it) }.getOrNull() } ?: FolderDisplayMode.INLINE
 
+enum class ChatListSwipeAction { ARCHIVE, MARK_READ, MUTE, PIN, DELETE, NONE }
+
+internal fun chatListSwipeActionFromPreference(saved: String?): ChatListSwipeAction = saved?.let { runCatching { ChatListSwipeAction.valueOf(it) }.getOrNull() } ?: ChatListSwipeAction.ARCHIVE
+
 /**
  * How presence events (join/part/quit and nick changes) are presented in a conversation.
  *
@@ -236,6 +240,8 @@ data class Settings(
     val folderDisplayMode: FolderDisplayMode = FolderDisplayMode.INLINE,
     /** Include chats assigned to folders in the All tab. */
     val showFolderChatsInAll: Boolean = true,
+    /** End-to-start action on active chat-list rows; archived rows always unarchive. */
+    val chatListSwipeAction: ChatListSwipeAction = ChatListSwipeAction.ARCHIVE,
 )
 
 /** Canonical key for friends/fools/override lookups: trimmed + lowercased.
@@ -267,6 +273,8 @@ interface SettingsRepository {
     suspend fun setFolderDisplayMode(mode: FolderDisplayMode) {}
 
     suspend fun setShowFolderChatsInAll(enabled: Boolean) {}
+
+    suspend fun setChatListSwipeAction(action: ChatListSwipeAction) {}
 
     suspend fun setNickColorsEnabled(enabled: Boolean)
 

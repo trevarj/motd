@@ -25,6 +25,7 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.ui.chatlist.ArchiveAccessibilityAnnouncement
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
 import io.github.trevarj.motd.ui.chatlist.ChatListDefaultTitle
@@ -241,6 +242,69 @@ class ChatListSelectionUiTest {
         }
     }
 
+    @Test fun configured_mark_read_swipe_invokes_only_read() {
+        val calls = mutableListOf<Pair<String, List<Long>>>()
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListContent(
+                    state = ChatListState(rows = listOf(row().copy(unreadCount = 3)), chatListSwipeAction = ChatListSwipeAction.MARK_READ, loading = false),
+                    onOpenBuffer = { calls += "open" to listOf(it) },
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { ids, _ -> calls += "pin" to ids.toList() },
+                    onSetMuted = { ids, _ -> calls += "mute" to ids.toList() },
+                    onSetArchived = { ids, _ -> calls += "archive" to ids.toList() },
+                    onMarkSelectedRead = { ids -> calls += "read" to ids.toList() },
+                    onDeleteBuffers = { rows -> calls += "delete" to rows.map(ChatListRow::bufferId) },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeLeft() }
+
+        compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_delete_dialog").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(listOf("read" to listOf(1L)), calls) }
+    }
+
+    @Test fun configured_delete_swipe_cancels_unchanged_then_confirms_once() {
+        val calls = mutableListOf<Pair<String, List<Long>>>()
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListContent(
+                    state = ChatListState(rows = listOf(row()), chatListSwipeAction = ChatListSwipeAction.DELETE, loading = false),
+                    onOpenBuffer = {},
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { ids, _ -> calls += "pin" to ids.toList() },
+                    onSetMuted = { ids, _ -> calls += "mute" to ids.toList() },
+                    onSetArchived = { ids, _ -> calls += "archive" to ids.toList() },
+                    onMarkSelectedRead = { ids -> calls += "read" to ids.toList() },
+                    onDeleteBuffers = { rows -> calls += "delete" to rows.map(ChatListRow::bufferId) },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("chatlist_delete_dialog").assertIsDisplayed()
+        compose.runOnIdle { assertTrue(calls.isEmpty()) }
+        compose.onNodeWithTag("chatlist_delete_cancel").performClick()
+        compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
+        compose.runOnIdle { assertTrue(calls.isEmpty()) }
+
+        compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("chatlist_delete_dialog").assertIsDisplayed()
+        compose.runOnIdle { assertTrue(calls.isEmpty()) }
+        compose.onNodeWithTag("chatlist_delete_confirm").performClick()
+
+        compose.onNodeWithTag("chatlist_delete_dialog").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(listOf("delete" to listOf(1L)), calls) }
+    }
+
     @Test fun dismissing_swipe_undo_leaves_archive_unchanged() {
         val archiveCalls = mutableListOf<Pair<List<Long>, Boolean>>()
         val snackbarHostState = SnackbarHostState()
@@ -314,11 +378,11 @@ class ChatListSelectionUiTest {
         compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
     }
 
-    @Test fun unarchiving_query_stays_in_archive_until_back_then_shows_restored_row() {
+    @Test fun unarchiving_query_ignores_disabled_swipe_preference_and_stays_in_archive_until_back() {
         val active = row().copy(bufferId = 2, displayName = "bob")
         val archived = row().copy(archived = true)
         val restored = archived.copy(archived = false)
-        val state = mutableStateOf(ChatListState(rows = listOf(active), archivedRows = listOf(archived), networks = listOf(network()), loading = false))
+        val state = mutableStateOf(ChatListState(rows = listOf(active), archivedRows = listOf(archived), networks = listOf(network()), chatListSwipeAction = ChatListSwipeAction.NONE, loading = false))
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 ChatListContent(

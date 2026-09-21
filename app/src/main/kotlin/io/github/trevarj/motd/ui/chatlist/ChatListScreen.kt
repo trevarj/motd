@@ -164,6 +164,7 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -375,6 +376,7 @@ fun ChatListContent(
     onNickSuggestionQuery: (Long?, String) -> Unit = { _, _ -> },
 ) {
     var archiveMode by rememberSaveable { mutableStateOf(false) }
+    val swipeAction = if (archiveMode) ChatListSwipeAction.ARCHIVE else state.chatListSwipeAction
     var invitationMode by rememberSaveable { mutableStateOf(false) }
     var showSheet by remember { mutableStateOf(false) }
     var showMarkAllReadDialog by remember { mutableStateOf(false) }
@@ -434,6 +436,7 @@ fun ChatListContent(
     var lastScopeName by remember { mutableStateOf("") }
     state.selectedNetworkName?.let { lastScopeName = it }
     var confirmRemoval by remember { mutableStateOf(false) }
+    var swipeRemoval by remember { mutableStateOf<ChatListRow?>(null) }
     var archiveRevealSignal by rememberSaveable(state.selectedNetworkId) { mutableStateOf(0) }
     var archiveSwipeUndoJob by remember { mutableStateOf<Job?>(null) }
     val archivedSnackbarMessage = stringResource(R.string.chatlist_archived_snackbar)
@@ -890,6 +893,7 @@ fun ChatListContent(
                             folders = if (state.folderDisplayMode == FolderDisplayMode.INLINE) state.folders else emptyList(),
                             invitations = if (effectiveFolderId == null || archiveMode || invitationMode) state.invitations else emptyList(),
                             archiveMode = archiveMode,
+                            swipeAction = swipeAction,
                             invitationMode = invitationMode,
                             archiveRevealSignal = archiveRevealSignal,
                             onOpenArchive = { archiveMode = true },
@@ -903,10 +907,17 @@ fun ChatListContent(
                             fools = state.fools,
                             multiNetwork = showNetworkChip,
                             onOpenBuffer = onOpenBuffer,
-                            onSetPinned = onSetPinned,
-                            onSetMuted = onSetMuted,
-                            onSetArchived = ::setArchivedFromSwipe,
-                            onDeleteBuffers = onDeleteBuffers,
+                            onSwipe = { row ->
+                                val ids = listOf(row.bufferId)
+                                when (swipeAction) {
+                                    ChatListSwipeAction.ARCHIVE -> setArchivedFromSwipe(ids, !archiveMode)
+                                    ChatListSwipeAction.MARK_READ -> onMarkSelectedRead(ids)
+                                    ChatListSwipeAction.MUTE -> onSetMuted(ids, !row.muted)
+                                    ChatListSwipeAction.PIN -> onSetPinned(ids, !row.pinned)
+                                    ChatListSwipeAction.DELETE -> swipeRemoval = row
+                                    ChatListSwipeAction.NONE -> Unit
+                                }
+                            },
                             onSetFolderExpanded = onSetFolderExpanded,
                             onOpenFolderEditor = onOpenFolderEditor,
                             activeBufferId = selectedBufferId,
@@ -1036,6 +1047,18 @@ fun ChatListContent(
         } else {
             MultiDeleteConfirmDialog(selectedRows, onConfirmRemoval) { confirmRemoval = false }
         }
+    }
+    swipeRemoval?.let { row ->
+        DeleteConfirmDialog(
+            row = row,
+            onConfirm = {
+                swipeRemoval?.let {
+                    swipeRemoval = null
+                    onDeleteBuffers(listOf(it))
+                }
+            },
+            onDismiss = { swipeRemoval = null },
+        )
     }
 }
 
@@ -1271,6 +1294,7 @@ private fun ChatList(
     folders: List<io.github.trevarj.motd.data.db.ChatFolderEntity>,
     invitations: List<ChatListInvitation>,
     archiveMode: Boolean,
+    swipeAction: ChatListSwipeAction,
     invitationMode: Boolean,
     archiveRevealSignal: Int,
     onOpenArchive: () -> Unit,
@@ -1284,10 +1308,7 @@ private fun ChatList(
     fools: Set<String>,
     multiNetwork: Boolean,
     onOpenBuffer: (Long) -> Unit,
-    onSetPinned: (Collection<Long>, Boolean) -> Unit,
-    onSetMuted: (Collection<Long>, Boolean) -> Unit,
-    onSetArchived: (Collection<Long>, Boolean) -> Unit,
-    onDeleteBuffers: (Collection<ChatListRow>) -> Unit,
+    onSwipe: (ChatListRow) -> Unit,
     onSetFolderExpanded: (Long, Boolean) -> Unit,
     onOpenFolderEditor: (Long) -> Unit,
     activeBufferId: Long?,
@@ -1369,7 +1390,7 @@ private fun ChatList(
         archivePullState = result.state
         result.effects.forEach { effect ->
             when (effect) {
-                ArchiveFolderPullEffect.HapticThresholdActivated -> view.performArchiveThresholdHaptic()
+                ArchiveFolderPullEffect.HapticThresholdActivated -> view.performThresholdHaptic()
                 ArchiveFolderPullEffect.AnnounceShown -> archiveAnnouncement = archivedRevealedAnnouncement
                 ArchiveFolderPullEffect.AnnounceHidden -> archiveAnnouncement = archivedHiddenAnnouncement
             }
@@ -1637,12 +1658,13 @@ private fun ChatList(
                         multiNetwork,
                         onOpenBuffer,
                         archiveMode,
+                        swipeAction = swipeAction,
                         selected = row.bufferId in selectedIds,
                         active = row.bufferId == activeBufferId,
                         selectionActive = selectionActive,
                         onToggleSelection = onToggleSelection,
                         onStartSelection = onStartSelection,
-                        onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
+                        onSwipe = { onSwipe(row) },
                         syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
                         activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
                         modifier =
@@ -1679,12 +1701,13 @@ private fun ChatList(
                                 multiNetwork,
                                 onOpenBuffer,
                                 archiveMode,
+                                swipeAction = swipeAction,
                                 selected = row.bufferId in selectedIds,
                                 active = row.bufferId == activeBufferId,
                                 selectionActive = selectionActive,
                                 onToggleSelection = onToggleSelection,
                                 onStartSelection = onStartSelection,
-                                onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
+                                onSwipe = { onSwipe(row) },
                                 syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
                                 activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
                                 modifier =
@@ -1718,12 +1741,13 @@ private fun ChatList(
                             multiNetwork,
                             onOpenBuffer,
                             archiveMode,
+                            swipeAction = swipeAction,
                             selected = row.bufferId in selectedIds,
                             active = row.bufferId == activeBufferId,
                             selectionActive = selectionActive,
                             onToggleSelection = onToggleSelection,
                             onStartSelection = onStartSelection,
-                            onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
+                            onSwipe = { onSwipe(row) },
                             syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
                             activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
                             modifier =
@@ -1757,12 +1781,13 @@ private fun ChatList(
                         multiNetwork,
                         onOpenBuffer,
                         archiveMode,
+                        swipeAction = swipeAction,
                         selected = row.bufferId in selectedIds,
                         active = row.bufferId == activeBufferId,
                         selectionActive = selectionActive,
                         onToggleSelection = onToggleSelection,
                         onStartSelection = onStartSelection,
-                        onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
+                        onSwipe = { onSwipe(row) },
                         syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
                         activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
                         modifier =
@@ -1811,12 +1836,13 @@ private fun ChatList(
                                     multiNetwork = multiNetwork,
                                     onOpenBuffer = onOpenBuffer,
                                     archiveMode = archiveMode,
+                                    swipeAction = swipeAction,
                                     selected = row.bufferId in selectedIds,
                                     active = row.bufferId == activeBufferId,
                                     selectionActive = selectionActive,
                                     onToggleSelection = onToggleSelection,
                                     onStartSelection = onStartSelection,
-                                    onArchive = { onSetArchived(listOf(row.bufferId), !archiveMode) },
+                                    onSwipe = { onSwipe(row) },
                                     syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
                                     activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
                                 )
@@ -2171,18 +2197,18 @@ private fun ArchiveFolderPullOverlay(
     }
 }
 
-internal const val CHAT_LIST_ARCHIVE_SWIPE_THRESHOLD_FRACTION = 0.65f
+internal const val CHAT_LIST_SWIPE_THRESHOLD_FRACTION = 0.65f
 
-internal fun archiveSwipePositionalThreshold(totalDistance: Float): Float = totalDistance * CHAT_LIST_ARCHIVE_SWIPE_THRESHOLD_FRACTION
+internal fun chatListSwipePositionalThreshold(totalDistance: Float): Float = totalDistance * CHAT_LIST_SWIPE_THRESHOLD_FRACTION
 
-internal fun shouldPerformArchiveSwipeHaptic(
+internal fun shouldPerformChatListSwipeHaptic(
     previous: SwipeToDismissBoxValue,
     current: SwipeToDismissBoxValue,
     enabled: Boolean,
 ): Boolean = enabled && previous != SwipeToDismissBoxValue.EndToStart && current == SwipeToDismissBoxValue.EndToStart
 
-/** Use the action-specific compat effect while honoring the user's touch-feedback preference. */
-private fun View.performArchiveThresholdHaptic() {
+/** Use the compat threshold effect while honoring the user's touch-feedback preference. */
+private fun View.performThresholdHaptic() {
     ViewCompat.performHapticFeedback(
         this,
         HapticFeedbackConstantsCompat.GESTURE_THRESHOLD_ACTIVATE,
@@ -2318,25 +2344,27 @@ private fun SelectableChatListRow(
     multiNetwork: Boolean,
     onOpenBuffer: (Long) -> Unit,
     archiveMode: Boolean,
+    swipeAction: ChatListSwipeAction,
     selected: Boolean,
     active: Boolean,
     selectionActive: Boolean,
     onToggleSelection: (Long) -> Unit,
     onStartSelection: (Long) -> Unit,
-    onArchive: () -> Unit,
+    onSwipe: () -> Unit,
     modifier: Modifier = Modifier,
     syncIndicator: ChatListSyncIndicator = ChatListSyncIndicator.NONE,
     activityRecoveryInProgress: Boolean = false,
 ) {
-    val currentArchive by rememberUpdatedState(onArchive)
-    val dismissState = rememberSwipeToDismissBoxState(positionalThreshold = ::archiveSwipePositionalThreshold)
+    val currentSwipe by rememberUpdatedState(onSwipe)
+    val swipeEnabled = !selectionActive && swipeAction != ChatListSwipeAction.NONE
+    val dismissState = rememberSwipeToDismissBoxState(positionalThreshold = ::chatListSwipePositionalThreshold)
     val scope = rememberCoroutineScope()
     val view = LocalView.current
-    LaunchedEffect(dismissState, selectionActive) {
+    LaunchedEffect(dismissState, swipeEnabled) {
         var previous = dismissState.targetValue
         snapshotFlow { dismissState.targetValue }.collect { current ->
-            if (shouldPerformArchiveSwipeHaptic(previous, current, enabled = !selectionActive)) {
-                view.performArchiveThresholdHaptic()
+            if (shouldPerformChatListSwipeHaptic(previous, current, enabled = swipeEnabled)) {
+                view.performThresholdHaptic()
             }
             previous = current
         }
@@ -2344,21 +2372,21 @@ private fun SelectableChatListRow(
     SwipeToDismissBox(
         state = dismissState,
         enableDismissFromStartToEnd = false,
-        enableDismissFromEndToStart = !selectionActive,
+        enableDismissFromEndToStart = swipeEnabled,
         onDismiss = { direction ->
-            if (direction == SwipeToDismissBoxValue.EndToStart) {
+            if (direction == SwipeToDismissBoxValue.EndToStart && swipeEnabled) {
                 scope.launch {
                     // Lazy items may retain composition after moving between active/archive lists.
                     // Settle before moving the row so a reused state cannot fire the inverse action.
                     dismissState.snapTo(SwipeToDismissBoxValue.Settled)
-                    currentArchive()
+                    currentSwipe()
                 }
             }
         },
-        backgroundContent = { ArchiveSwipeBackground(archiveMode) },
-        modifier = modifier,
+        backgroundContent = { ChatListSwipeBackground(row, swipeAction, archiveMode) },
+        modifier = modifier.testTag("chatlist_swipe_${row.bufferId}"),
     ) {
-        // Keep the normal foreground opaque so the archive affordance appears only during drag.
+        // Keep the normal foreground opaque so the action affordance appears only during drag.
         Box(
             modifier =
                 Modifier
@@ -2449,22 +2477,49 @@ private fun ChatListTopBar(
     )
 }
 
-/** End-to-start archive action uses a neutral archive container, never destructive styling. */
 @Composable
-private fun ArchiveSwipeBackground(archiveMode: Boolean) {
+private fun ChatListSwipeBackground(
+    row: ChatListRow,
+    action: ChatListSwipeAction,
+    archiveMode: Boolean,
+) {
+    if (action == ChatListSwipeAction.NONE) return
+    val icon =
+        when (action) {
+            ChatListSwipeAction.ARCHIVE -> archiveActionIcon(archiveMode)
+            ChatListSwipeAction.MARK_READ -> Icons.Outlined.DoneAll
+            ChatListSwipeAction.MUTE -> if (row.muted) Icons.Outlined.Notifications else Icons.Outlined.NotificationsOff
+            ChatListSwipeAction.PIN -> if (row.pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin
+            ChatListSwipeAction.DELETE -> Icons.Outlined.Delete
+            ChatListSwipeAction.NONE -> return
+        }
+    val label =
+        stringResource(
+            when (action) {
+                ChatListSwipeAction.ARCHIVE -> if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive
+                ChatListSwipeAction.MARK_READ -> R.string.chatlist_mark_read
+                ChatListSwipeAction.MUTE -> if (row.muted) R.string.chatlist_unmute else R.string.chatlist_mute
+                ChatListSwipeAction.PIN -> if (row.pinned) R.string.chatlist_unpin else R.string.chatlist_pin
+                ChatListSwipeAction.DELETE -> chatRemovalCopy(row.type).actionLabel
+                ChatListSwipeAction.NONE -> return
+            },
+        )
+    val destructive = action == ChatListSwipeAction.DELETE
+    val foreground = if (destructive) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
     Row(
         modifier =
             Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.secondaryContainer)
-                .padding(horizontal = 24.dp),
+                .background(if (destructive) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer)
+                .padding(horizontal = 24.dp)
+                .testTag("chatlist_swipe_action_${row.bufferId}"),
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = archiveActionIcon(archiveMode),
-            contentDescription = stringResource(if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive),
-            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            imageVector = icon,
+            contentDescription = label,
+            tint = foreground,
         )
     }
 }
@@ -2488,10 +2543,11 @@ private fun DeleteConfirmDialog(
         }
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.testTag("chatlist_delete_dialog"),
         title = { Text(stringResource(copy.confirmTitle)) },
         text = { Text(message) },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
+            TextButton(onClick = onConfirm, modifier = Modifier.testTag("chatlist_delete_confirm")) {
                 Text(
                     stringResource(copy.confirmAction),
                     color = MaterialTheme.colorScheme.error,
@@ -2499,7 +2555,7 @@ private fun DeleteConfirmDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onDismiss, modifier = Modifier.testTag("chatlist_delete_cancel")) {
                 Text(stringResource(R.string.action_cancel))
             }
         },

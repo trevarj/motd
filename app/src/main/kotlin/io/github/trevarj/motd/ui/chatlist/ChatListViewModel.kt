@@ -13,6 +13,7 @@ import io.github.trevarj.motd.data.db.InvitationEventRow
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
@@ -133,6 +134,7 @@ data class ChatListState(
     val folders: List<ChatFolderEntity> = emptyList(),
     val folderDisplayMode: FolderDisplayMode = FolderDisplayMode.INLINE,
     val showFolderChatsInAll: Boolean = true,
+    val chatListSwipeAction: ChatListSwipeAction = ChatListSwipeAction.ARCHIVE,
     val connection: Map<Long, IrcClientState> = emptyMap(),
     val queryPresence: Map<Long, PresenceState> = emptyMap(),
     val networks: List<NetworkEntity> = emptyList(),
@@ -347,6 +349,7 @@ class ChatListViewModel
                     folders = folders,
                     folderDisplayMode = settings.folderDisplayMode,
                     showFolderChatsInAll = settings.showFolderChatsInAll,
+                    chatListSwipeAction = settings.chatListSwipeAction,
                     connection = connection,
                     queryPresence =
                         scopedRows
