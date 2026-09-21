@@ -955,6 +955,7 @@ class HistoryResyncCoordinator
                 target = buffer.ircTarget,
                 source = ClientHistorySource(client),
                 preserveUnread = preserveUnread,
+                advertisedLatestTime = buffer.advertisedLatestTime,
                 isCurrent = isCurrent,
             )
 
@@ -1740,6 +1741,7 @@ class HistoryResyncCoordinator
             target: String,
             source: HistorySource,
             preserveUnread: Boolean = false,
+            advertisedLatestTime: Long? = null,
             isCurrent: () -> Boolean = { true },
         ): HistoryResyncState {
             val ready =
@@ -1773,6 +1775,22 @@ class HistoryResyncCoordinator
                                 allowConcurrent = ready.supportsConcurrentRequests,
                                 preserveUnread = preserveUnread,
                             )
+                        if (advertisedLatestTime != null) {
+                            val newestStoredTime =
+                                maxHighWater(
+                                    db.messageDao().latestBoundary(bufferId)?.serverTime,
+                                    db.historyCursorDao().byRoom(bufferId)?.newestServerTime,
+                                    work.highWater,
+                                )
+                            if (
+                                reachedAdvertised(newestStoredTime, advertisedLatestTime) ||
+                                (work.status == WorkStatus.Complete && work.inserted == 0)
+                            ) {
+                                // A duplicate-only LATEST disproves an unreachable advertisement too.
+                                // The pre-request bound preserves any newer discovery during the fetch.
+                                processor.clampAdvertisedActivity(networkId, bufferId, advertisedLatestTime)
+                            }
+                        }
                         work.status.toState(work.inserted)
                     } catch (_: TimeoutCancellationException) {
                         HistoryResyncState.Failed("History refresh timed out")

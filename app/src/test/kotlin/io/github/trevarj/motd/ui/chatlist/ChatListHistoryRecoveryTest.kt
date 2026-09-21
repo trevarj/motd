@@ -121,6 +121,42 @@ class ChatListHistoryRecoveryTest {
         }
 
     @Test
+    fun duplicateOnlyNewestRecoveryClearsUnreachableActivityWithoutMarkingRead() =
+        runTest {
+            val fixture = fixture(backgroundScope)
+            val room = fixture.rooms[0]
+            fixture.recover(listOf(room.id))
+            val newest = requireNotNull(fixture.db.messageDao().byMsgid(room.id, "${room.ircTarget}:900000"))
+            fixture.db.bufferDao().advanceLocalReadAnchor(room.id, newest.serverTime, newest.id)
+            val baseline = fixture.db.bufferDao().rawById(room.id)!!
+            val recoveredRow = fixture.rows().single { it.bufferId == room.id }
+            assertEquals(0, recoveredRow.unreadCount)
+            assertFalse(chatListBadgeState(recoveredRow).advertisedActivity)
+            assertFalse(recoveredRow.unreadCountIncomplete)
+            val newestTime = newest.serverTime
+            fixture.db.bufferDao().advanceAdvertisedLatest(room.id, newestTime + 5_000)
+            assertTrue(chatListBadgeState(fixture.rows().single { it.bufferId == room.id }).advertisedActivity)
+            fixture.requests.clear()
+
+            fixture.recover(listOf(room.id))
+
+            assertEquals(listOf(ChatHistoryRequest.Subcommand.LATEST), fixture.requests.map { it.subcommand })
+            assertEquals(HistoryResyncState.UpToDate, fixture.newestResult)
+            assertEquals(10, fixture.db.messageDao().countForBuffer(room.id))
+            val row = fixture.rows().single { it.bufferId == room.id }
+            assertFalse(chatListBadgeState(row).advertisedActivity)
+            assertFalse(row.unreadCountIncomplete)
+            assertEquals(recoveredRow.unreadCount, row.unreadCount)
+            val stored = fixture.db.bufferDao().rawById(room.id)!!
+            assertEquals(newestTime, stored.advertisedLatestTime)
+            assertEquals(baseline.readMarkerTime, stored.readMarkerTime)
+            assertEquals(baseline.localReadAnchorTime, stored.localReadAnchorTime)
+            assertEquals(baseline.localReadAnchorEventId, stored.localReadAnchorEventId)
+            assertEquals(baseline.localUnreadFloorTime, stored.localUnreadFloorTime)
+            assertEquals(emptyList<Long>(), fixture.markedRead)
+        }
+
+    @Test
     fun activeRecoveryFollowsRoomRedirectUntilItsOwnBatchCompletes() =
         runTest {
             val fixture = fixture(backgroundScope)
@@ -451,6 +487,7 @@ class ChatListHistoryRecoveryTest {
                             buffer.ircTarget,
                             source,
                             preserveUnread = preserveUnread,
+                            advertisedLatestTime = buffer.advertisedLatestTime,
                             isCurrent = isCurrent,
                         )
                     newestResult = result
