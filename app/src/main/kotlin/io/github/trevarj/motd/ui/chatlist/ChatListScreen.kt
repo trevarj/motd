@@ -385,7 +385,7 @@ fun ChatListContent(
     var showSheet by remember { mutableStateOf(false) }
     var showMarkAllReadDialog by remember { mutableStateOf(false) }
     var showFolderAssignment by remember { mutableStateOf(false) }
-    val sheetState = rememberModalBottomSheetState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     // The per-row network tag is redundant once the list is scoped to one network.

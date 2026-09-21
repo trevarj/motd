@@ -192,8 +192,8 @@ internal fun NewConversationSheetContent(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
                 .imePadding()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 32.dp)
                 .testTag("new_conversation_content"),
