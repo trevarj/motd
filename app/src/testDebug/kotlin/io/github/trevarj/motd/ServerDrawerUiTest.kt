@@ -13,14 +13,17 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
@@ -49,18 +52,22 @@ class ServerDrawerUiTest {
     val compose = createComposeRule()
 
     @Test
-    fun ircNetworkIcons_remainVisibleAcrossConnectionStates() {
+    fun ircNetworkIcons_showIdenticalNeutralCirclesWithOnlineAndOfflineDotsAcrossThemes() {
         var scanned = false
         var contactInviteNetworkId: Long? = null
         lateinit var selectTheme: (ColorThemePreset) -> Unit
         var connectedColor = 0
         var disconnectedColor = 0
+        var badgeBackgroundColor = 0
+        var iconSurfaceColor = 0
         compose.setContent {
             var theme by remember { mutableStateOf(ColorThemePreset.LIGHT) }
             selectTheme = { theme = it }
             MotdTheme(themePreset = theme, dynamicColor = false) {
                 connectedColor = LocalMotdSemanticColors.current.success.toArgb()
-                disconnectedColor = MaterialTheme.colorScheme.outline.toArgb()
+                disconnectedColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
+                badgeBackgroundColor = MaterialTheme.colorScheme.background.toArgb()
+                iconSurfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.toArgb()
                 ServerDrawerContent(
                     drawerRows =
                         listOf(
@@ -111,17 +118,53 @@ class ServerDrawerUiTest {
             )
         for (theme in listOf(ColorThemePreset.LIGHT, ColorThemePreset.DARK)) {
             compose.runOnUiThread { selectTheme(theme) }
+            var offlineIcon: Bitmap? = null
             for ((networkId, state) in expectedStates) {
                 val icon =
                     compose
                         .onNodeWithTag("drawer_network_icon_$networkId", useUnmergedTree = true)
                         .performScrollTo()
                         .assertIsDisplayed()
+                        .assertWidthIsEqualTo(40.dp)
+                        .assertHeightIsEqualTo(40.dp)
                         .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, state))
-                val pixels = icon.captureToImage().asAndroidBitmap()
+                val iconPixels = icon.captureToImage().asAndroidBitmap()
+                assertEquals(iconSurfaceColor, sample(iconPixels, 0.5f, 0.075f))
+                assertEquals(iconSurfaceColor, sample(iconPixels, 0.075f, 0.5f))
+                assertEquals(iconSurfaceColor, sample(iconPixels, 0.5f, 0.9f))
+                assertTrue(
+                    "The network glyph must use the theme's neutral foreground",
+                    (0 until iconPixels.width).any { x ->
+                        (0 until iconPixels.height / 2).any { y -> iconPixels.getPixel(x, y) == disconnectedColor }
+                    },
+                )
+                if (networkId != 1L) {
+                    offlineIcon?.let {
+                        assertTrue("Different network names and IDs must show the same default icon", it.sameAs(iconPixels))
+                    }
+                    offlineIcon = iconPixels
+                }
+                val badge =
+                    compose
+                        .onNodeWithTag("drawer_network_status_$networkId", useUnmergedTree = true)
+                        .assertIsDisplayed()
+                        .assertWidthIsEqualTo(14.dp)
+                        .assertHeightIsEqualTo(14.dp)
+                val iconBounds = icon.fetchSemanticsNode().boundsInRoot
+                val badgeBounds = badge.fetchSemanticsNode().boundsInRoot
+                assertEquals(iconBounds.right, badgeBounds.right, 0.5f)
+                assertEquals(iconBounds.bottom, badgeBounds.bottom, 0.5f)
+                val pixels = badge.captureToImage().asAndroidBitmap()
                 val expectedColor = if (networkId == 1L) connectedColor else disconnectedColor
-                assertEquals(expectedColor, sample(pixels, 0.5f, 0.04f))
-                assertEquals(expectedColor, sample(pixels, 0.5f, 0.96f))
+                assertEquals(expectedColor, sample(pixels, 0.5f, 0.25f))
+                assertEquals(expectedColor, sample(pixels, 0.5f, 0.75f))
+                assertEquals(expectedColor, sample(pixels, 0.25f, 0.5f))
+                assertEquals(expectedColor, sample(pixels, 0.75f, 0.5f))
+                assertEquals(
+                    if (networkId == 1L) connectedColor else badgeBackgroundColor,
+                    sample(pixels, 0.5f, 0.5f),
+                )
+                assertEquals(badgeBackgroundColor, sample(pixels, 0.5f, 0.1f))
             }
         }
         compose.onNodeWithTag("drawer_open_feed").performScrollTo().assertIsDisplayed()

@@ -6,7 +6,6 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.avatarStyleFromPreference
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,23 +13,12 @@ import org.junit.Test
 class GeneratedAvatarTraitsTest {
     @Test fun casemapped_nicks_keep_the_same_operator_sprite() {
         assertEquals(
-            generatedAvatarTraits(GeneratedAvatarSubject.USER, "Alice"),
-            generatedAvatarTraits(GeneratedAvatarSubject.USER, "alice"),
+            generatedAvatarTraits("Alice"),
+            generatedAvatarTraits("alice"),
         )
         assertEquals(
-            generatedAvatarTraits(GeneratedAvatarSubject.USER, "foo{bar"),
-            generatedAvatarTraits(GeneratedAvatarSubject.USER, "foo[bar"),
-        )
-    }
-
-    @Test fun network_target_and_network_id_are_part_of_the_seed() {
-        assertNotEquals(
-            generatedAvatarTraits(GeneratedAvatarSubject.USER, "linux"),
-            generatedAvatarTraits(GeneratedAvatarSubject.NETWORK, "linux", networkId = 7),
-        )
-        assertNotEquals(
-            generatedAvatarTraits(GeneratedAvatarSubject.NETWORK, "Libera", networkId = 1),
-            generatedAvatarTraits(GeneratedAvatarSubject.NETWORK, "Libera", networkId = 2),
+            generatedAvatarTraits("foo{bar"),
+            generatedAvatarTraits("foo[bar"),
         )
     }
 
@@ -83,10 +71,5 @@ class GeneratedAvatarTraitsTest {
         assertEquals((0 until 7).toSet(), traits.map { it.face }.toSet())
         assertEquals((0 until 10).toSet(), traits.map { it.accessory }.toSet())
         assertTrue(traits.zipWithNext().any { (first, second) -> first.body == second.body && first.head != second.head })
-    }
-
-    @Test fun network_badges_use_a_prominent_network_symbol() {
-        assertNull(prominentAvatarGlyph(GeneratedAvatarSubject.USER))
-        assertEquals(FontAwesomeGlyph.NETWORK, prominentAvatarGlyph(GeneratedAvatarSubject.NETWORK))
     }
 }

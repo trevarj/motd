@@ -34,12 +34,6 @@ import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.identityRamp
 import kotlin.math.max
 
-/** A person and a network have distinct deterministic sprite seeds. */
-internal enum class GeneratedAvatarSubject { USER, NETWORK }
-
-/** Network rows use an unmistakable topology mark instead of another person-shaped sprite. */
-internal fun prominentAvatarGlyph(subject: GeneratedAvatarSubject): FontAwesomeGlyph? = if (subject == GeneratedAvatarSubject.NETWORK) FontAwesomeGlyph.NETWORK else null
-
 internal enum class AvatarDetail {
     MINI,
     STANDARD,
@@ -110,13 +104,9 @@ internal data class GeneratedAvatarTraits(
 private val TOP_FEATURE_HEADS = setOf(3, 5, 6)
 
 /** Deterministic traits with no Android, network, persistence, or current-theme dependency. */
-internal fun generatedAvatarTraits(
-    subject: GeneratedAvatarSubject,
-    name: String,
-    networkId: Long? = null,
-): GeneratedAvatarTraits {
-    val seed = avatarSeed(subject, name, networkId)
-    val project = if (subject == GeneratedAvatarSubject.USER) matchedProjectMark(name) else null
+internal fun generatedAvatarTraits(name: String): GeneratedAvatarTraits {
+    val seed = fnv1a64("user:${canonicalAvatarNick(name)}")
+    val project = matchedProjectMark(name)
     val head = seededIndex(seed, 1, 8)
     // The cap collides with heads that already own a top feature; those pulls take the antenna.
     val accessory =
@@ -135,19 +125,6 @@ internal fun generatedAvatarTraits(
         genericBadge = project?.fallback ?: GenericBadge.entries[seededIndex(seed, 5, GenericBadge.entries.size)],
         projectMark = project,
     )
-}
-
-private fun avatarSeed(
-    subject: GeneratedAvatarSubject,
-    name: String,
-    networkId: Long?,
-): Long {
-    val scope =
-        when (subject) {
-            GeneratedAvatarSubject.USER -> "user"
-            GeneratedAvatarSubject.NETWORK -> "network:${networkId ?: 0L}"
-        }
-    return fnv1a64("$scope:${canonicalAvatarNick(name)}")
 }
 
 private fun fnv1a64(value: String): Long {
@@ -251,9 +228,7 @@ internal fun IrcSpriteAvatar(
     modifier: Modifier = Modifier,
 ) {
     GeneratedAvatar(
-        subject = GeneratedAvatarSubject.USER,
         name = name,
-        networkId = null,
         avatarSize = size,
         primary = LocalNickColors.current.avatar(name),
         modifier = modifier,
@@ -300,34 +275,42 @@ internal fun IrcSpriteV2Avatar(
     }
 }
 
-/** Deterministic network badge; the drawer owns its status ring. */
+/** One neutral topology mark for every network; the drawer owns its connection-status dot. */
 @Composable
 internal fun IrcNetworkBadge(
-    name: String,
-    networkId: Long,
     size: Dp,
     modifier: Modifier = Modifier,
 ) {
-    GeneratedAvatar(
-        subject = GeneratedAvatarSubject.NETWORK,
-        name = name,
-        networkId = networkId,
-        avatarSize = size,
-        primary = LocalNickColors.current.avatar(name),
-        modifier = modifier,
-    )
+    val surface = MaterialTheme.colorScheme.surfaceContainerHighest
+    val foreground = MaterialTheme.colorScheme.onSurfaceVariant
+    Canvas(modifier = modifier.size(size)) {
+        val side = this.size.minDimension
+        val top = Offset(side * 0.5f, side * 0.35f)
+        val left = Offset(side * 0.3f, side * 0.65f)
+        val right = Offset(side * 0.7f, side * 0.65f)
+        val stroke = Stroke(width = side * 0.05f, cap = StrokeCap.Round)
+        val radius = side * 0.07f
+        drawCircle(surface)
+        drawLine(foreground, top, left, stroke.width, StrokeCap.Round)
+        drawLine(foreground, top, right, stroke.width, StrokeCap.Round)
+        drawLine(foreground, left, right, stroke.width, StrokeCap.Round)
+        drawCircle(surface, radius, top)
+        drawCircle(surface, radius, left)
+        drawCircle(surface, radius, right)
+        drawCircle(foreground, radius, top, style = stroke)
+        drawCircle(foreground, radius, left, style = stroke)
+        drawCircle(foreground, radius, right, style = stroke)
+    }
 }
 
 @Composable
 private fun GeneratedAvatar(
-    subject: GeneratedAvatarSubject,
     name: String,
-    networkId: Long?,
     avatarSize: Dp,
     primary: Color,
     modifier: Modifier,
 ) {
-    val traits = remember(subject, name, networkId) { generatedAvatarTraits(subject, name, networkId) }
+    val traits = remember(name) { generatedAvatarTraits(name) }
     val scheme = MaterialTheme.colorScheme
     val dark = isAppliedThemeDark()
     val detail = remember(avatarSize) { AvatarDetail.forSize(avatarSize) }
@@ -350,22 +333,15 @@ private fun GeneratedAvatar(
         drawRect(palette.base)
         val sceneScale = canvasSize.minDimension / GRID
         withTransform({ scale(sceneScale, sceneScale, pivot = Offset.Zero) }) {
-            val prominentGlyph = prominentAvatarGlyph(subject)
-            if (prominentGlyph == null) {
-                drawUserSprite(traits, detail, palette)
-            } else {
-                drawProminentGlyph(prominentGlyph, palette)
-            }
+            drawUserSprite(traits, detail, palette)
         }
-        if (subject == GeneratedAvatarSubject.USER) {
-            val ringWidth = max(1.dp.toPx(), 1.25f)
-            val ringInset = max(0.75.dp.toPx(), ringWidth / 2f + 0.35.dp.toPx())
-            drawCircle(
-                color = palette.primary.copy(alpha = 0.52f),
-                radius = canvasSize.minDimension / 2f - ringInset,
-                style = Stroke(width = ringWidth),
-            )
-        }
+        val ringWidth = max(1.dp.toPx(), 1.25f)
+        val ringInset = max(0.75.dp.toPx(), ringWidth / 2f + 0.35.dp.toPx())
+        drawCircle(
+            color = palette.primary.copy(alpha = 0.52f),
+            radius = canvasSize.minDimension / 2f - ringInset,
+            style = Stroke(width = ringWidth),
+        )
     }
 }
 
@@ -421,26 +397,6 @@ private fun DrawScope.drawUserSprite(
     if (detail != AvatarDetail.MINI) {
         drawAccessory(traits.accessory, colors)
         drawExpression(traits.expression, colors)
-    }
-}
-
-/** Fill the badge with a large topology glyph that remains legible at the drawer's 32dp size. */
-private fun DrawScope.drawProminentGlyph(
-    glyph: FontAwesomeGlyph,
-    colors: SpritePalette,
-) {
-    drawCircle(colors.shade, radius = 8.5f, center = p(12f, 12f))
-    val maxSize = 12f
-    val scale = maxSize / max(glyph.viewBoxWidth, glyph.viewBoxHeight)
-    val width = glyph.viewBoxWidth * scale
-    val height = glyph.viewBoxHeight * scale
-    withTransform({
-        translate(12f - width / 2f, 12f - height / 2f)
-        // Glyph coordinates start at the SVG view-box origin. Compose otherwise scales around
-        // the canvas centre, which shifts this already-translated path outside the badge.
-        scale(scale, scale, pivot = Offset.Zero)
-    }) {
-        drawPath(glyph.path, colors.ink.copy(alpha = 0.92f))
     }
 }
 

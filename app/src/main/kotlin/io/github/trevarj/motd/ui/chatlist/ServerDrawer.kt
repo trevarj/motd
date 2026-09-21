@@ -71,6 +71,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -490,12 +491,6 @@ private fun DrawerNetworkItem(
             ) {
                 if (LocalAvatarStyle.current in setOf(AvatarStyle.IRC_SPRITE, AvatarStyle.IRC_SPRITE_V2)) {
                     val connected = row.state is IrcClientState.Ready
-                    val statusColor =
-                        if (connected) {
-                            LocalMotdSemanticColors.current.success
-                        } else {
-                            MaterialTheme.colorScheme.outline
-                        }
                     val statusDescription =
                         stringResource(
                             if (connected) {
@@ -513,16 +508,12 @@ private fun DrawerNetworkItem(
                             Modifier
                                 .size(40.dp)
                                 .testTag("drawer_network_icon_${row.networkId}")
-                                .semantics { stateDescription = statusDescription }
-                                .border(3.dp, statusColor, CircleShape)
-                                .padding(4.dp),
+                                .semantics { stateDescription = statusDescription },
                         contentAlignment = Alignment.Center,
                     ) {
                         if (!iconLoaded) {
                             IrcNetworkBadge(
-                                name = row.name,
-                                networkId = row.networkId,
-                                size = 32.dp,
+                                size = 40.dp,
                             )
                         }
                         iconUrl?.let { url ->
@@ -540,7 +531,29 @@ private fun DrawerNetworkItem(
                                 onLoading = { iconLoaded = false },
                                 onSuccess = { iconLoaded = true },
                                 onError = { iconLoaded = false },
-                                modifier = Modifier.size(32.dp).clip(CircleShape),
+                                modifier = Modifier.size(40.dp).clip(CircleShape),
+                            )
+                        }
+                        Box(
+                            modifier =
+                                Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(14.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.background)
+                                    .testTag("drawer_network_status_${row.networkId}"),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(10.dp)
+                                    .then(
+                                        if (connected) {
+                                            Modifier.clip(CircleShape).background(LocalMotdSemanticColors.current.success)
+                                        } else {
+                                            Modifier.border(2.dp, MaterialTheme.colorScheme.onSurfaceVariant, CircleShape)
+                                        },
+                                    ).clearAndSetSemantics {},
                             )
                         }
                     }

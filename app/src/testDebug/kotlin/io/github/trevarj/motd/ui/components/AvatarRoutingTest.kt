@@ -6,6 +6,8 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -19,6 +21,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import coil.Coil
 import coil.EventListener
@@ -54,6 +57,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -80,6 +84,37 @@ class AvatarRoutingTest {
 
     @get:Rule
     val temporaryFolder = TemporaryFolder()
+
+    @Test
+    fun defaultNetworkGlyphIsCenteredWithinItsCircularBackground() {
+        compose.setContent {
+            MaterialTheme(
+                colorScheme = lightColorScheme(surfaceContainerHighest = Color.White, onSurfaceVariant = Color.Black),
+            ) {
+                Box(Modifier.background(Color.White)) {
+                    IrcNetworkBadge(size = 100.dp, modifier = Modifier.testTag("network_badge"))
+                }
+            }
+        }
+        val pixels = compose.onNodeWithTag("network_badge").captureToImage().toPixelMap()
+        var minX = pixels.width
+        var minY = pixels.height
+        var maxX = -1
+        var maxY = -1
+        for (y in 0 until pixels.height) {
+            for (x in 0 until pixels.width) {
+                if (pixels[x, y].red < 0.5f) {
+                    minX = minOf(minX, x)
+                    minY = minOf(minY, y)
+                    maxX = maxOf(maxX, x)
+                    maxY = maxOf(maxY, y)
+                }
+            }
+        }
+        assertTrue("The rendered topology glyph must be visible", maxX >= minX && maxY >= minY)
+        assertEquals("Horizontal glyph center", pixels.width / 2f, (minX + maxX + 1) / 2f, 1f)
+        assertEquals("Vertical glyph center", pixels.height / 2f, (minY + maxY + 1) / 2f, 1f)
+    }
 
     @Test
     fun automaticLoadingUsesSourceAvatarAndDrawerIconOwnersThroughRealSocksTls() {
