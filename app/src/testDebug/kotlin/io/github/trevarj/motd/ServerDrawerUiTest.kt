@@ -3,11 +3,13 @@ package io.github.trevarj.motd
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -25,6 +27,7 @@ import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.chatlist.DrawerRow
 import io.github.trevarj.motd.ui.chatlist.ServerDrawerContent
+import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -49,8 +52,15 @@ class ServerDrawerUiTest {
     fun ircNetworkIcons_remainVisibleAcrossConnectionStates() {
         var scanned = false
         var contactInviteNetworkId: Long? = null
+        lateinit var selectTheme: (ColorThemePreset) -> Unit
+        var connectedColor = 0
+        var disconnectedColor = 0
         compose.setContent {
-            MotdTheme(dynamicColor = false) {
+            var theme by remember { mutableStateOf(ColorThemePreset.LIGHT) }
+            selectTheme = { theme = it }
+            MotdTheme(themePreset = theme, dynamicColor = false) {
+                connectedColor = LocalMotdSemanticColors.current.success.toArgb()
+                disconnectedColor = MaterialTheme.colorScheme.outline.toArgb()
                 ServerDrawerContent(
                     drawerRows =
                         listOf(
@@ -99,12 +109,20 @@ class ServerDrawerUiTest {
                 2L to context.getString(R.string.drawer_state_disconnected),
                 3L to context.getString(R.string.drawer_state_disconnected),
             )
-        for ((networkId, state) in expectedStates) {
-            compose
-                .onNodeWithTag("drawer_network_icon_$networkId", useUnmergedTree = true)
-                .performScrollTo()
-                .assertIsDisplayed()
-                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, state))
+        for (theme in listOf(ColorThemePreset.LIGHT, ColorThemePreset.DARK)) {
+            compose.runOnUiThread { selectTheme(theme) }
+            for ((networkId, state) in expectedStates) {
+                val icon =
+                    compose
+                        .onNodeWithTag("drawer_network_icon_$networkId", useUnmergedTree = true)
+                        .performScrollTo()
+                        .assertIsDisplayed()
+                        .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, state))
+                val pixels = icon.captureToImage().asAndroidBitmap()
+                val expectedColor = if (networkId == 1L) connectedColor else disconnectedColor
+                assertEquals(expectedColor, sample(pixels, 0.5f, 0.04f))
+                assertEquals(expectedColor, sample(pixels, 0.5f, 0.96f))
+            }
         }
         compose.onNodeWithTag("drawer_open_feed").performScrollTo().assertIsDisplayed()
     }

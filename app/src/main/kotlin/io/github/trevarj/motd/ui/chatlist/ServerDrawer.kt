@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -489,6 +490,12 @@ private fun DrawerNetworkItem(
             ) {
                 if (LocalAvatarStyle.current in setOf(AvatarStyle.IRC_SPRITE, AvatarStyle.IRC_SPRITE_V2)) {
                     val connected = row.state is IrcClientState.Ready
+                    val statusColor =
+                        if (connected) {
+                            LocalMotdSemanticColors.current.success
+                        } else {
+                            MaterialTheme.colorScheme.outline
+                        }
                     val statusDescription =
                         stringResource(
                             if (connected) {
@@ -504,21 +511,18 @@ private fun DrawerNetworkItem(
                     Box(
                         modifier =
                             Modifier
-                                .size(32.dp)
+                                .size(40.dp)
                                 .testTag("drawer_network_icon_${row.networkId}")
-                                .semantics { stateDescription = statusDescription },
+                                .semantics { stateDescription = statusDescription }
+                                .border(3.dp, statusColor, CircleShape)
+                                .padding(4.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         if (!iconLoaded) {
                             IrcNetworkBadge(
                                 name = row.name,
                                 networkId = row.networkId,
-                                status =
-                                    if (connected) {
-                                        LocalMotdSemanticColors.current.success
-                                    } else {
-                                        MaterialTheme.colorScheme.outlineVariant
-                                    },
+                                status = statusColor,
                                 size = 32.dp,
                             )
                         }
