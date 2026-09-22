@@ -1,0 +1,4 @@
+- Refreshed IRC sprite avatars.
+- Redesigned chat wallpapers as seamless, denser patterns, including MOTD as the default.
+- Added configurable in-chat sounds: choose from four voices, five receive melodies, and independent send and receive settings.
+- Added a Security menu with separate controls for sending and showing typing indicators, plus media, avatar, voice, direct connection, and upload privacy settings.
