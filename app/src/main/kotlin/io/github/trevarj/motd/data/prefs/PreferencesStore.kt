@@ -53,6 +53,8 @@ internal object PrefKeys {
     val SHOW_JOIN_PART_QUIT = stringPreferencesKey("show_join_part_quit")
     val PRESENCE_MODE = stringPreferencesKey("presence_mode")
     val SHOW_REDACTED_MESSAGES = stringPreferencesKey("show_redacted_messages")
+    val SEND_TYPING_INDICATORS = stringPreferencesKey("send_typing_indicators")
+    val SHOW_TYPING_INDICATORS = stringPreferencesKey("show_typing_indicators")
     val AVATAR_STYLE = stringPreferencesKey("avatar_style")
     val CHAT_WALLPAPER = stringPreferencesKey("chat_wallpaper")
     val SHOW_COMPOSER_EMOJI = stringPreferencesKey("show_composer_emoji")
@@ -140,6 +142,8 @@ class DataStoreSettingsRepository
                             prefs[PrefKeys.SHOW_JOIN_PART_QUIT],
                         ),
                     showRedactedMessages = prefs[PrefKeys.SHOW_REDACTED_MESSAGES]?.toBooleanStrictOrNull() ?: true,
+                    sendTypingIndicators = prefs[PrefKeys.SEND_TYPING_INDICATORS]?.toBooleanStrictOrNull() ?: true,
+                    showTypingIndicators = prefs[PrefKeys.SHOW_TYPING_INDICATORS]?.toBooleanStrictOrNull() ?: true,
                     avatarStyle = avatarStyleFromPreference(prefs[PrefKeys.AVATAR_STYLE]),
                     chatWallpaper =
                         prefs[PrefKeys.CHAT_WALLPAPER]?.let { runCatching { ChatWallpaper.valueOf(it) }.getOrNull() }
@@ -314,6 +318,14 @@ class DataStoreSettingsRepository
 
         override suspend fun setShowRedactedMessages(show: Boolean) {
             store.edit { it[PrefKeys.SHOW_REDACTED_MESSAGES] = show.toString() }
+        }
+
+        override suspend fun setSendTypingIndicators(enabled: Boolean) {
+            store.edit { it[PrefKeys.SEND_TYPING_INDICATORS] = enabled.toString() }
+        }
+
+        override suspend fun setShowTypingIndicators(enabled: Boolean) {
+            store.edit { it[PrefKeys.SHOW_TYPING_INDICATORS] = enabled.toString() }
         }
 
         override suspend fun setAvatarStyle(style: AvatarStyle) {

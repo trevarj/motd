@@ -68,6 +68,7 @@ import io.github.trevarj.motd.ui.settings.NetworkToolsScreen
 import io.github.trevarj.motd.ui.settings.NetworksSettingsScreen
 import io.github.trevarj.motd.ui.settings.NickListKind
 import io.github.trevarj.motd.ui.settings.NotificationSettingsScreen
+import io.github.trevarj.motd.ui.settings.SecuritySettingsScreen
 import io.github.trevarj.motd.ui.settings.SettingsScreen
 import io.github.trevarj.motd.ui.settings.SettingsSearchDestination
 import io.github.trevarj.motd.ui.settings.SettingsSearchPage
@@ -379,6 +380,7 @@ fun MotdNavGraph(
                 onBack = { navController.popBackStack() },
                 onOpenAppearance = { navController.navigate(AppearanceSettingsRoute()) },
                 onOpenChat = { navController.navigate(ChatSettingsRoute()) },
+                onOpenSecurity = { navController.navigate(SecuritySettingsRoute()) },
                 onOpenDelivery = { navController.navigate(DeliverySettingsRoute()) },
                 onOpenNotifications = { navController.navigate(NotificationSettingsRoute()) },
                 onOpenHistory = { navController.navigate(HistorySettingsRoute()) },
@@ -407,6 +409,14 @@ fun MotdNavGraph(
                 onOpenFools = { navController.navigate(FoolsRoute) },
                 onOpenDirectConnections = { navController.navigate(DirectConnectionsRoute) },
                 onOpenChatSounds = { navController.navigate(ChatSoundSettingsRoute) },
+            )
+        }
+        composable<SecuritySettingsRoute> { entry ->
+            SecuritySettingsScreen(
+                target = entry.toRoute<SecuritySettingsRoute>().target,
+                onBack = { navController.popBackStack() },
+                onOpenDirectConnections = { navController.navigate(DirectConnectionsRoute) },
+                onOpenUploads = { navController.navigate(UploadsSettingsRoute()) },
             )
         }
         composable<ChatSoundSettingsRoute> {
@@ -795,6 +805,7 @@ private fun NavHostController.openSettingsResult(destination: SettingsSearchDest
                 SettingsSearchPage.ROOT -> navigate(SettingsRoute(target))
                 SettingsSearchPage.APPEARANCE -> navigate(AppearanceSettingsRoute(target))
                 SettingsSearchPage.CHAT -> navigate(ChatSettingsRoute(target))
+                SettingsSearchPage.SECURITY -> navigate(SecuritySettingsRoute(target))
                 SettingsSearchPage.CHAT_SOUNDS -> navigate(ChatSoundSettingsRoute)
                 SettingsSearchPage.DELIVERY -> navigate(DeliverySettingsRoute(target))
                 SettingsSearchPage.NOTIFICATIONS -> navigate(NotificationSettingsRoute(target))

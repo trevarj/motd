@@ -40,6 +40,7 @@ class SettingsSearchTest {
             "dickord" to SettingsSearchDestination.Page(SettingsSearchPage.LABS, SettingsTarget.DICKORD),
             "aggressive lazy" to SettingsSearchDestination.Page(SettingsSearchPage.HISTORY, SettingsTarget.HISTORY_SYNC_MODE),
             "swipe" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.CHAT_LIST_SWIPE),
+            "ircv3 typing" to SettingsSearchDestination.Page(SettingsSearchPage.SECURITY, SettingsTarget.SEND_TYPING),
         ).forEach { (query, destination) ->
             assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
         }
@@ -52,6 +53,27 @@ class SettingsSearchTest {
 
         listOf("melody", "pitch", "tone", "volume", "soft glass", "terminal tick", "arcade pluck", "16-bit synth").forEach { query ->
             assertTrue("sound controls must be searchable by $query", searchSettings(query, entries).any { it.destination == destination })
+        }
+    }
+
+    @Test
+    fun `moved privacy controls open Security`() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        listOf(
+            SettingsTarget.IMAGES,
+            SettingsTarget.LINK_PREVIEWS,
+            SettingsTarget.MEDIA_UNMETERED,
+            SettingsTarget.MEDIA_METERED,
+            SettingsTarget.SHARED_AVATARS,
+            SettingsTarget.VOICE_ENCRYPTION,
+            SettingsTarget.DIRECT_CONNECTIONS,
+            SettingsTarget.SEND_TYPING,
+            SettingsTarget.SHOW_TYPING,
+        ).forEach { target ->
+            assertEquals(
+                SettingsSearchDestination.Page(SettingsSearchPage.SECURITY, target),
+                entries.single { (it.destination as? SettingsSearchDestination.Page)?.target == target }.destination,
+            )
         }
     }
 
@@ -151,6 +173,12 @@ class SettingsSearchTest {
         assertFalse(SettingsTarget.AUDIO_CACHE in crafterBin)
         assertFalse(SettingsTarget.UPLOAD_CONNECTION in crafterBin)
         assertTrue(SettingsTarget.UPLOAD_PRIVACY in crafterBin)
+        assertEquals(
+            SettingsSearchDestination.Page(SettingsSearchPage.SECURITY, SettingsTarget.UPLOAD_PRIVACY),
+            buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle, PasteBackendConfig().copy(backend = AttachmentBackend.CRAFTERBIN))
+                .single { (it.destination as? SettingsSearchDestination.Page)?.target == SettingsTarget.UPLOAD_PRIVACY }
+                .destination,
+        )
         assertTrue(SettingsTarget.UPLOAD_CONNECTION in custom)
         assertTrue(SettingsTarget.UPLOAD_PRIVACY in custom)
         assertFalse(SettingsTarget.UPLOAD_CONNECTION in catbox)

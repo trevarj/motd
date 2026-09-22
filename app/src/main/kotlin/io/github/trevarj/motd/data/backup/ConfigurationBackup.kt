@@ -516,6 +516,8 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setFoolsMode(it.foolsMode)
                 settingsRepository.setPresenceMode(it.restoredPresenceMode())
                 settingsRepository.setShowRedactedMessages(it.showRedactedMessages)
+                settingsRepository.setSendTypingIndicators(it.sendTypingIndicators)
+                settingsRepository.setShowTypingIndicators(it.showTypingIndicators)
                 settingsRepository.setAvatarStyle(it.avatarStyle)
                 settingsRepository.setChatWallpaper(it.chatWallpaper)
                 settingsRepository.setShowComposerEmoji(it.showComposerEmoji)

@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material3.AlertDialog
@@ -196,71 +195,6 @@ fun ChatSettingsContent(
                 onClick = { swipeSheetOpen = true },
             )
         }
-        SettingsGroup(title = stringResource(R.string.settings_media_previews_section)) {
-            SwitchRow(
-                title = stringResource(R.string.settings_show_images),
-                subtitle = stringResource(R.string.settings_show_images_desc),
-                checked = contentPreviews.showImages,
-                onCheckedChange = onShowImages,
-                switchTag = "settings_switch_show_images",
-                requestedTarget = target?.name,
-                targetName = SettingsTarget.IMAGES.name,
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            SwitchRow(
-                title = stringResource(R.string.settings_auto_media_unmetered),
-                subtitle = stringResource(R.string.settings_auto_media_unmetered_desc),
-                checked = contentPreviews.autoLoadOnUnmetered,
-                onCheckedChange = onAutoLoadOnUnmetered,
-                switchTag = "settings_switch_auto_media_unmetered",
-                enabled = contentPreviews.showImages,
-                disabledExplanation = stringResource(R.string.settings_media_disabled_explanation),
-                requestedTarget = target?.name,
-                targetName = SettingsTarget.MEDIA_UNMETERED.name,
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            SwitchRow(
-                title = stringResource(R.string.settings_auto_media_metered),
-                subtitle = stringResource(R.string.settings_auto_media_metered_desc),
-                checked = contentPreviews.autoLoadOnMetered,
-                onCheckedChange = onAutoLoadOnMetered,
-                switchTag = "settings_switch_auto_media_metered",
-                enabled = contentPreviews.showImages,
-                disabledExplanation = stringResource(R.string.settings_media_disabled_explanation),
-                requestedTarget = target?.name,
-                targetName = SettingsTarget.MEDIA_METERED.name,
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            SwitchRow(
-                title = stringResource(R.string.settings_show_link_previews),
-                subtitle = stringResource(R.string.settings_show_link_previews_desc),
-                checked = contentPreviews.showLinkPreviews,
-                onCheckedChange = onShowLinkPreviews,
-                switchTag = "settings_switch_show_link_previews",
-                requestedTarget = target?.name,
-                targetName = SettingsTarget.LINK_PREVIEWS.name,
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            SwitchRow(
-                title = stringResource(R.string.settings_show_shared_avatars),
-                subtitle = stringResource(R.string.settings_show_shared_avatars_desc),
-                checked = avatars.showSharedAvatars,
-                onCheckedChange = onShowSharedAvatars,
-                switchTag = "settings_switch_show_shared_avatars",
-                requestedTarget = target?.name,
-                targetName = SettingsTarget.SHARED_AVATARS.name,
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            SettingsNavigationRow(
-                icon = Icons.Outlined.AttachFile,
-                title = stringResource(R.string.settings_direct_connections),
-                summary = stringResource(R.string.settings_direct_connections_summary),
-                modifier = Modifier.testTag("settings_direct_connections"),
-                requestedTarget = target?.name,
-                targetName = SettingsTarget.DIRECT_CONNECTIONS.name,
-                onClick = onOpenDirectConnections,
-            )
-        }
         SettingsGroup(title = stringResource(R.string.settings_auto_away_section)) {
             SwitchRow(
                 title = stringResource(R.string.settings_auto_away),
@@ -366,16 +300,6 @@ fun ChatSettingsContent(
                 switchTag = "settings_switch_voice_noise_reduction",
                 requestedTarget = target?.name,
                 targetName = SettingsTarget.VOICE_NOISE_REDUCTION.name,
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            SwitchRow(
-                title = stringResource(R.string.settings_voice_encryption),
-                subtitle = stringResource(R.string.settings_voice_encryption_desc),
-                checked = voice.encryptionDefault,
-                onCheckedChange = onVoiceEncryptionDefault,
-                switchTag = "settings_switch_voice_encryption",
-                requestedTarget = target?.name,
-                targetName = SettingsTarget.VOICE_ENCRYPTION.name,
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsTarget(target?.name, SettingsTarget.AUDIO_CACHE.name) { targetModifier ->

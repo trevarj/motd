@@ -14,6 +14,7 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +44,7 @@ fun SettingsScreen(
     onBack: () -> Unit = {},
     onOpenAppearance: () -> Unit = {},
     onOpenChat: () -> Unit = {},
+    onOpenSecurity: () -> Unit = {},
     onOpenDelivery: () -> Unit = {},
     onOpenNotifications: () -> Unit = {},
     onOpenHistory: () -> Unit = {},
@@ -61,6 +63,7 @@ fun SettingsScreen(
         onBack = onBack,
         onOpenAppearance = onOpenAppearance,
         onOpenChat = onOpenChat,
+        onOpenSecurity = onOpenSecurity,
         onOpenDelivery = onOpenDelivery,
         onOpenNotifications = onOpenNotifications,
         onOpenHistory = onOpenHistory,
@@ -80,6 +83,7 @@ fun SettingsContent(
     onBack: () -> Unit,
     onOpenAppearance: () -> Unit,
     onOpenChat: () -> Unit,
+    onOpenSecurity: () -> Unit = {},
     onOpenDelivery: () -> Unit,
     onOpenNotifications: () -> Unit,
     onOpenNetworks: () -> Unit,
@@ -165,6 +169,7 @@ fun SettingsContent(
                 state = state,
                 onOpenAppearance = onOpenAppearance,
                 onOpenChat = onOpenChat,
+                onOpenSecurity = onOpenSecurity,
                 onOpenDelivery = onOpenDelivery,
                 onOpenNotifications = onOpenNotifications,
                 onOpenHistory = onOpenHistory,
@@ -183,6 +188,7 @@ private fun SettingsRoot(
     state: SettingsHomeUiState,
     onOpenAppearance: () -> Unit,
     onOpenChat: () -> Unit,
+    onOpenSecurity: () -> Unit = {},
     onOpenDelivery: () -> Unit,
     onOpenNotifications: () -> Unit,
     onOpenNetworks: () -> Unit,
@@ -219,6 +225,14 @@ private fun SettingsRoot(
             summary = stringResource(R.string.settings_chat_summary),
             modifier = Modifier.testTag("settings_category_chat"),
             onClick = onOpenChat,
+        )
+        SettingsDivider()
+        SettingsNavigationRow(
+            title = stringResource(R.string.settings_security),
+            icon = Icons.Outlined.Security,
+            summary = stringResource(R.string.settings_security_summary),
+            modifier = Modifier.testTag("settings_category_security"),
+            onClick = onOpenSecurity,
         )
     }
     SettingsGroup(title = stringResource(R.string.settings_group_services)) {

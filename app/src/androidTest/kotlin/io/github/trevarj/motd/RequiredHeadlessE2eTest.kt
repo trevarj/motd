@@ -582,6 +582,9 @@ class RequiredHeadlessE2eTest {
             returnToRoot()
             selectBalancedHistorySync()
             returnToRoot()
+            security()
+            toggleTypingPrivacy()
+            returnToRoot()
             appearance()
         }
         ThemeSheetRobot(compose).selectAyuDarkAndTrueBlack()

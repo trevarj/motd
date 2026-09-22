@@ -50,6 +50,7 @@ enum class SettingsTarget {
     NETWORKS,
     APPEARANCE,
     CHAT,
+    SECURITY,
     DELIVERY,
     NOTIFICATIONS,
     HISTORY,
@@ -82,6 +83,8 @@ enum class SettingsTarget {
     LAUNCHER_ICON,
     PRESENCE,
     DELETED_MESSAGES,
+    SEND_TYPING,
+    SHOW_TYPING,
     CHAT_LIST_SWIPE,
     IMAGES,
     LINK_PREVIEWS,
@@ -136,6 +139,10 @@ enum class NetworkSettingsTarget { CONNECTION, AUTHENTICATION, OBFUSCATION, AVAT
 )
 
 @Serializable data class ChatSettingsRoute(
+    val target: SettingsTarget? = null,
+)
+
+@Serializable data class SecuritySettingsRoute(
     val target: SettingsTarget? = null,
 )
 

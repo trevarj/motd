@@ -300,6 +300,25 @@ class ConfigurationBackupRepositoryTest {
         }
 
     @Test
+    fun typingIndicatorPreferencesRestoreExplicitly() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val settings = DataStoreSettingsRepository(context)
+            val backup = repository(inMemoryDb())
+
+            settings.setSendTypingIndicators(false)
+            settings.setShowTypingIndicators(false)
+            val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+
+            settings.setSendTypingIndicators(true)
+            settings.setShowTypingIndicators(true)
+            backup.import(raw, importMode = BackupImportMode.MERGE)
+
+            assertFalse(settings.settings.first().sendTypingIndicators)
+            assertFalse(settings.settings.first().showTypingIndicators)
+        }
+
+    @Test
     fun contentPreviewAutomaticLoadingRoundTripsAndOldBackupsDefaultOn() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

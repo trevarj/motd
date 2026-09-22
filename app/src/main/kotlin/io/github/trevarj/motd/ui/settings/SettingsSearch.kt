@@ -9,7 +9,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 
-enum class SettingsSearchPage { ROOT, APPEARANCE, CHAT, CHAT_SOUNDS, DELIVERY, NOTIFICATIONS, HISTORY, UPLOADS, NETWORKS, BACKUP, LABS, AI_LABS, ABOUT }
+enum class SettingsSearchPage { ROOT, APPEARANCE, CHAT, SECURITY, CHAT_SOUNDS, DELIVERY, NOTIFICATIONS, HISTORY, UPLOADS, NETWORKS, BACKUP, LABS, AI_LABS, ABOUT }
 
 sealed interface SettingsSearchDestination {
     data class Page(
@@ -114,7 +114,7 @@ private fun uploadSearchSpecs(backend: AttachmentBackend): List<SettingsSearchSp
                     R.string.settings_upload_privacy,
                     R.string.settings_upload_secret_desc,
                     "secret expiry retention",
-                    SettingsSearchPage.UPLOADS,
+                    SettingsSearchPage.SECURITY,
                     SettingsTarget.UPLOAD_PRIVACY,
                 ),
             )
@@ -134,6 +134,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_networks, R.string.settings_networks_summary, "connections servers bouncers", SettingsSearchPage.NETWORKS, SettingsTarget.NETWORKS),
         spec(R.string.settings_appearance, R.string.settings_appearance_summary, "experience display", SettingsSearchPage.APPEARANCE, SettingsTarget.APPEARANCE),
         spec(R.string.settings_chat, R.string.settings_chat_summary, "conversation messages", SettingsSearchPage.CHAT, SettingsTarget.CHAT),
+        spec(R.string.settings_security, R.string.settings_security_summary, "privacy remote content transfers typing media avatars encryption", SettingsSearchPage.SECURITY, SettingsTarget.SECURITY),
         spec(R.string.settings_delivery, R.string.settings_delivery_summary, "notifications push background", SettingsSearchPage.DELIVERY, SettingsTarget.DELIVERY),
         spec(R.string.settings_notifications, R.string.settings_notifications_summary, "notifications alerts mentions mute watch all messages", SettingsSearchPage.NOTIFICATIONS, SettingsTarget.NOTIFICATIONS),
         spec(R.string.settings_history, R.string.settings_history_summary, "messages storage database prune size", SettingsSearchPage.HISTORY, SettingsTarget.HISTORY),
@@ -165,11 +166,11 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_presence_title, R.string.settings_presence_smart_desc, "join part quit away", SettingsSearchPage.CHAT, SettingsTarget.PRESENCE),
         spec(R.string.settings_show_redacted_messages, R.string.settings_show_redacted_messages_desc, "deleted accountability", SettingsSearchPage.CHAT, SettingsTarget.DELETED_MESSAGES),
         spec(R.string.settings_chat_list_swipe, R.string.settings_chat_list_swipe_desc, "left swipe gesture archive read mute unmute pin unpin delete nothing chat list", SettingsSearchPage.CHAT, SettingsTarget.CHAT_LIST_SWIPE),
-        spec(R.string.settings_show_images, R.string.settings_show_images_desc, "media photos", SettingsSearchPage.CHAT, SettingsTarget.IMAGES),
-        spec(R.string.settings_show_link_previews, R.string.settings_show_link_previews_desc, "url metadata", SettingsSearchPage.CHAT, SettingsTarget.LINK_PREVIEWS),
-        spec(R.string.settings_auto_media_unmetered, R.string.settings_auto_media_unmetered_desc, "wifi download", SettingsSearchPage.CHAT, SettingsTarget.MEDIA_UNMETERED),
-        spec(R.string.settings_auto_media_metered, R.string.settings_auto_media_metered_desc, "mobile data download", SettingsSearchPage.CHAT, SettingsTarget.MEDIA_METERED),
-        spec(R.string.settings_show_shared_avatars, R.string.settings_show_shared_avatars_desc, "profile images", SettingsSearchPage.CHAT, SettingsTarget.SHARED_AVATARS),
+        spec(R.string.settings_show_images, R.string.settings_show_images_desc, "media photos", SettingsSearchPage.SECURITY, SettingsTarget.IMAGES),
+        spec(R.string.settings_show_link_previews, R.string.settings_show_link_previews_desc, "url metadata", SettingsSearchPage.SECURITY, SettingsTarget.LINK_PREVIEWS),
+        spec(R.string.settings_auto_media_unmetered, R.string.settings_auto_media_unmetered_desc, "wifi download", SettingsSearchPage.SECURITY, SettingsTarget.MEDIA_UNMETERED),
+        spec(R.string.settings_auto_media_metered, R.string.settings_auto_media_metered_desc, "mobile data download", SettingsSearchPage.SECURITY, SettingsTarget.MEDIA_METERED),
+        spec(R.string.settings_show_shared_avatars, R.string.settings_show_shared_avatars_desc, "profile images", SettingsSearchPage.SECURITY, SettingsTarget.SHARED_AVATARS),
         spec(R.string.settings_auto_away, R.string.settings_auto_away_desc, "background idle", SettingsSearchPage.CHAT, SettingsTarget.AUTO_AWAY),
         spec(R.string.settings_auto_away_delay, R.string.settings_auto_away_desc, "minutes idle", SettingsSearchPage.CHAT, SettingsTarget.AUTO_AWAY_DELAY),
         spec(R.string.settings_auto_away_message_title, R.string.settings_auto_away_message_hint, "status", SettingsSearchPage.CHAT, SettingsTarget.AWAY_MESSAGE),
@@ -177,10 +178,12 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_composer_emoji, R.string.settings_composer_emoji_desc, "input", SettingsSearchPage.CHAT, SettingsTarget.COMPOSER_EMOJI),
         spec(R.string.settings_composer_formatting_tools, R.string.settings_composer_formatting_tools_desc, "bold italic input", SettingsSearchPage.CHAT, SettingsTarget.COMPOSER_FORMATTING),
         spec(R.string.settings_reply_prefix, R.string.settings_reply_prefix_desc, "channel", SettingsSearchPage.CHAT, SettingsTarget.REPLY_PREFIX),
-        spec(R.string.settings_direct_connections, R.string.settings_direct_connections_summary, "dcc files peer", SettingsSearchPage.CHAT, SettingsTarget.DIRECT_CONNECTIONS),
+        spec(R.string.settings_direct_connections, R.string.settings_direct_connections_summary, "dcc files peer", SettingsSearchPage.SECURITY, SettingsTarget.DIRECT_CONNECTIONS),
         spec(R.string.settings_voice_quality, R.string.settings_voice_section, "opus aac bitrate", SettingsSearchPage.CHAT, SettingsTarget.VOICE_QUALITY),
         spec(R.string.settings_voice_noise_reduction, R.string.settings_voice_noise_reduction_desc, "audio", SettingsSearchPage.CHAT, SettingsTarget.VOICE_NOISE_REDUCTION),
-        spec(R.string.settings_voice_encryption, R.string.settings_voice_encryption_desc, "password secure", SettingsSearchPage.CHAT, SettingsTarget.VOICE_ENCRYPTION),
+        spec(R.string.settings_voice_encryption, R.string.settings_voice_encryption_desc, "password secure", SettingsSearchPage.SECURITY, SettingsTarget.VOICE_ENCRYPTION),
+        spec(R.string.settings_send_typing_indicators, R.string.settings_send_typing_indicators_desc, "ircv3 typing privacy", SettingsSearchPage.SECURITY, SettingsTarget.SEND_TYPING),
+        spec(R.string.settings_show_typing_indicators, R.string.settings_show_typing_indicators_desc, "ircv3 typing privacy", SettingsSearchPage.SECURITY, SettingsTarget.SHOW_TYPING),
         spec(R.string.settings_friends, R.string.settings_people, "people nicks", SettingsSearchPage.CHAT, SettingsTarget.FRIENDS),
         spec(R.string.settings_fools, R.string.settings_people, "ignore people nicks", SettingsSearchPage.CHAT, SettingsTarget.FOOLS),
         spec(R.string.settings_fools_mode, R.string.settings_fools_hide_desc, "collapse hide", SettingsSearchPage.CHAT, SettingsTarget.FOOLS_MODE),

@@ -218,6 +218,20 @@ private sealed interface DraftSubmissionOutcome {
 
 internal fun MessageEntity.toReplyPreviewData(): ReplyPreviewData = ReplyPreviewData(sender, text, ircFormattedText)
 
+/** Immediately removes already-tracked peer activity when the privacy preference changes. */
+internal fun visibleTypingNicks(
+    nicks: List<String>,
+    showTypingIndicators: Boolean,
+): List<String> = if (showTypingIndicators) nicks else emptyList()
+
+internal fun visibleTypingNicks(
+    typing: Flow<List<String>>,
+    settings: Flow<Settings>,
+): Flow<List<String>> =
+    typing.combine(settings.map { it.showTypingIndicators }) { nicks, show ->
+        visibleTypingNicks(nicks, show)
+    }
+
 /**
  * Wire text for resending a failed row. An ACTION is stored with its `/me ` prefix stripped, so
  * re-prefix it; the manager rewrites `/me ` back into a CTCP ACTION. Non-ACTION kinds resend
@@ -1039,6 +1053,7 @@ class ChatViewModel
         private val typingNicks =
             operationalBufferId
                 .flatMapLatest(typingTracker::typingNicks)
+                .let { typing -> visibleTypingNicks(typing, settingsRepository.settings) }
 
         val state: StateFlow<ChatState> =
             combine(

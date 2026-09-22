@@ -230,6 +230,10 @@ data class Settings(
     val presenceMode: PresenceMode = PresenceMode.SMART,
     /** Keep visible accountability tombstones for messages deleted through IRCv3 redaction. */
     val showRedactedMessages: Boolean = true,
+    /** Send IRCv3 +typing state to peers while composing. */
+    val sendTypingIndicators: Boolean = true,
+    /** Show IRCv3 +typing state received from peers. */
+    val showTypingIndicators: Boolean = true,
     /**
      * Backup compatibility only, never populated at runtime. Archives written before presence modes
      * existed carry the former boolean here; restore maps it onto [presenceMode] (see
@@ -345,6 +349,10 @@ interface SettingsRepository {
     suspend fun setPresenceMode(m: PresenceMode)
 
     suspend fun setShowRedactedMessages(show: Boolean) {}
+
+    suspend fun setSendTypingIndicators(enabled: Boolean) {}
+
+    suspend fun setShowTypingIndicators(enabled: Boolean) {}
 
     suspend fun setAvatarStyle(style: AvatarStyle)
 

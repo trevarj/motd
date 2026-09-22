@@ -34,6 +34,7 @@ import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.InviteEnrollmentStore
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
+import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.ChatSoundPlayer
 import io.github.trevarj.motd.data.sync.EventProcessor
@@ -130,6 +131,15 @@ internal fun outgoingClientTags(
     } else {
         emptyMap()
     }
+
+/** Keep the privacy check at the connection send boundary for every +typing state. */
+internal suspend fun sendTypingWhenAllowed(
+    settings: Settings,
+    state: String,
+    send: suspend (String) -> Unit,
+) {
+    if (settings.sendTypingIndicators) send(state)
+}
 
 /**
  * Convert composer text into safe, independently sendable IRC payloads.
@@ -2595,8 +2605,10 @@ class ConnectionManagerImpl
             bufferId: Long,
             state: String,
         ) {
-            val buffer = bufferDao.observeById(bufferId) ?: return
-            clientFor(buffer.networkId)?.sendTyping(buffer.ircTarget, state)
+            sendTypingWhenAllowed(settings.settings.first(), state) { allowedState ->
+                val buffer = bufferDao.observeById(bufferId) ?: return@sendTypingWhenAllowed
+                clientFor(buffer.networkId)?.sendTyping(buffer.ircTarget, allowedState)
+            }
         }
 
         override suspend fun sendReact(

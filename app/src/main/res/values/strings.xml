@@ -265,6 +265,15 @@
     <!-- Settings category submenu summaries (top-level Settings list). -->
     <string name="settings_appearance_summary">Personalize themes, text size, chat layout, avatars, and wallpaper.</string>
     <string name="settings_chat_summary">Control message previews, composer options, sounds, friends, and fools.</string>
+    <string name="settings_security">Security</string>
+    <string name="settings_security_summary">Control typing, remote content, transfers, and encryption.</string>
+    <string name="settings_typing_section">Typing</string>
+    <string name="settings_send_typing_indicators">Send typing indicators</string>
+    <string name="settings_send_typing_indicators_desc">Share when you are composing through IRCv3 typing</string>
+    <string name="settings_show_typing_indicators">Show typing indicators</string>
+    <string name="settings_show_typing_indicators_desc">Show when other people are composing through IRCv3 typing</string>
+    <string name="settings_remote_content_section">Remote content</string>
+    <string name="settings_transfers_section">Transfers</string>
     <string name="settings_direct_connections">Direct connections</string>
     <string name="settings_direct_connections_summary">DCC file transfers and safety policy.</string>
     <string name="settings_direct_connections_disclosure">DCC file transfers connect directly to peers.</string>
@@ -490,6 +499,7 @@
     <string name="settings_upload_custom_username">Username</string>
     <string name="settings_upload_custom_password">Password</string>
     <string name="settings_upload_privacy">Privacy and retention</string>
+    <string name="settings_upload_privacy_unavailable">This provider has no privacy or expiry controls. Choose another provider in Uploads.</string>
     <string name="settings_upload_secret">Secret URL</string>
     <string name="settings_upload_secret_desc">Ask the service not to list the upload publicly.</string>
     <string name="settings_upload_expiry">Default expiry</string>

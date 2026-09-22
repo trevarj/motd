@@ -87,10 +87,8 @@ fun UploadsSettingsContent(
 
     val connectionFallsBackToProvider =
         target == SettingsTarget.UPLOAD_CONNECTION && config.backend != AttachmentBackend.CUSTOM_0X0
-    val privacyFallsBackToProvider =
-        target == SettingsTarget.UPLOAD_PRIVACY && !backendHasPrivacyControls(config.backend)
     val providerTarget =
-        if (target == SettingsTarget.UPLOADS || connectionFallsBackToProvider || privacyFallsBackToProvider) {
+        if (target == SettingsTarget.UPLOADS || connectionFallsBackToProvider) {
             SettingsTarget.UPLOAD_PROVIDER.name
         } else {
             target?.name
@@ -221,54 +219,12 @@ fun UploadsSettingsContent(
             }
 
             when (backend) {
-                AttachmentBackend.CRAFTERBIN, AttachmentBackend.ZERO_X_ZERO, AttachmentBackend.CUSTOM_0X0 -> {
-                    SettingsTarget(target?.name, SettingsTarget.UPLOAD_PRIVACY.name) { targetModifier ->
-                        SettingsGroup(
-                            title = stringResource(R.string.settings_upload_privacy),
-                            modifier = targetModifier,
-                        ) {
-                            SwitchRow(
-                                title = stringResource(io.github.trevarj.motd.R.string.settings_upload_secret),
-                                subtitle = stringResource(io.github.trevarj.motd.R.string.settings_upload_secret_desc),
-                                checked = config.secretUrl,
-                                onCheckedChange = { value -> viewModel.update { it.copy(secretUrl = value) } },
-                                switchTag = "settings_upload_secret",
-                            )
-                            val expiryDays = uploadExpiryWholeDays(config.expiry)
-                            OutlinedTextField(
-                                value =
-                                    expiryDays?.let {
-                                        pluralStringResource(io.github.trevarj.motd.R.plurals.settings_upload_expiry_days, it, it)
-                                    } ?: config.expiry.orEmpty(),
-                                onValueChange = { value -> viewModel.update { it.copy(expiry = uploadExpiryHours(value)) } },
-                                label = { Text(stringResource(io.github.trevarj.motd.R.string.settings_upload_expiry)) },
-                                supportingText = { Text(stringResource(io.github.trevarj.motd.R.string.settings_upload_expiry_desc)) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                            )
-                        }
-                    }
-                }
-
-                AttachmentBackend.LITTERBOX -> {
-                    SettingsTarget(target?.name, SettingsTarget.UPLOAD_PRIVACY.name) { targetModifier ->
-                        SettingsGroup(
-                            title = stringResource(R.string.settings_upload_privacy),
-                            modifier = targetModifier,
-                        ) {
-                            Column(Modifier.selectableGroup()) {
-                                LITTERBOX_EXPIRIES.forEach { expiry ->
-                                    RadioRow(
-                                        label = litterboxExpiryLabel(expiry),
-                                        subtitle = stringResource(io.github.trevarj.motd.R.string.settings_upload_litterbox_expiry_desc),
-                                        selected = config.litterboxExpiry == expiry,
-                                        enabled = true,
-                                        onClick = { viewModel.update { it.copy(litterboxExpiry = expiry) } },
-                                    )
-                                }
-                            }
-                        }
-                    }
+                AttachmentBackend.CRAFTERBIN,
+                AttachmentBackend.ZERO_X_ZERO,
+                AttachmentBackend.CUSTOM_0X0,
+                AttachmentBackend.LITTERBOX,
+                -> {
+                    // Privacy and expiry controls are shown on Security.
                 }
 
                 AttachmentBackend.UGUU -> {
@@ -402,7 +358,7 @@ internal fun uploadExpiryHours(value: String): String? {
 
 internal fun uploadLimitMaximumMiB(backend: AttachmentBackend): Long = backendMaxBytes(backend) / MIB
 
-private fun backendHasPrivacyControls(backend: AttachmentBackend): Boolean =
+internal fun backendHasPrivacyControls(backend: AttachmentBackend): Boolean =
     backend in
         setOf(
             AttachmentBackend.CRAFTERBIN,

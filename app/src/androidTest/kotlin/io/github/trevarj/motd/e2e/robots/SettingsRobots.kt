@@ -48,6 +48,16 @@ internal class SettingsRobot(
         click("settings_category_chat")
     }
 
+    fun security() {
+        scrollToAndClick("settings_category_security")
+        assertDisplayed("screen_security_settings")
+    }
+
+    fun toggleTypingPrivacy() {
+        scrollToAndClick("settings_switch_send_typing_indicators_row")
+        scrollToAndClick("settings_switch_show_typing_indicators_row")
+    }
+
     fun searchPresence() {
         click("settings_search_action")
         replace("settings_search_field", "join part")
