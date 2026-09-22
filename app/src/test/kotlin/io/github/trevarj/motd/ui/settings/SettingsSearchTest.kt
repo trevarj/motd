@@ -46,6 +46,16 @@ class SettingsSearchTest {
     }
 
     @Test
+    fun `sound controls search opens the dedicated sound page`() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        val destination = SettingsSearchDestination.Page(SettingsSearchPage.CHAT_SOUNDS, SettingsTarget.CHAT_SOUNDS)
+
+        listOf("melody", "pitch", "tone", "volume", "soft glass", "terminal tick", "arcade pluck", "16-bit synth").forEach { query ->
+            assertTrue("sound controls must be searchable by $query", searchSettings(query, entries).any { it.destination == destination })
+        }
+    }
+
+    @Test
     fun `notification policy searches open the notifications page rather than delivery`() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
         val destination = SettingsSearchDestination.Page(SettingsSearchPage.NOTIFICATIONS, SettingsTarget.NOTIFICATIONS)

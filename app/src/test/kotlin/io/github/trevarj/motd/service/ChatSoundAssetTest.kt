@@ -2,9 +2,15 @@ package io.github.trevarj.motd.service
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.prefs.ChatSoundMelody
+import io.github.trevarj.motd.data.prefs.ChatSoundTone
+import io.github.trevarj.motd.data.prefs.ChatSoundVoice
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -12,56 +18,93 @@ import org.robolectric.RobolectricTestRunner
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
-import kotlin.math.pow
 
 @RunWith(RobolectricTestRunner::class)
 class ChatSoundAssetTest {
-    private val resources = ApplicationProvider.getApplicationContext<Context>().resources
+    private val context = ApplicationProvider.getApplicationContext<Context>()
 
     @Test
-    fun `chat cues are deterministic short mono PCM with click-free boundaries`() {
-        val send = readWav(R.raw.chat_send)
-        val receive = readWav(R.raw.chat_receive)
-
-        listOf(send, receive).forEach { sound ->
+    fun `configured sound catalog contains every voice cue tone and take`() {
+        val files =
+            context.assets
+                .list("chat-sounds")
+                ?.filter { it.endsWith(".wav") }
+                .orEmpty()
+        assertEquals(120, files.size)
+        ChatSoundVoice.entries.forEach { voice ->
+            ChatSoundCue.entries.forEach { cue ->
+                ChatSoundTone.entries.forEach { tone ->
+                    (0..4).forEach { take ->
+                        assertTrue(ChatSoundAssetKey(voice, cue, tone, take).path.substringAfterLast('/') in files)
+                    }
+                }
+            }
+        }
+        assertTrue(context.assets.list("chat-sounds")?.contains("catalog.json") == true)
+        files.map { readWav("chat-sounds/$it") }.forEach { sound ->
             assertEquals(1, sound.channels)
             assertEquals(48_000, sound.sampleRate)
             assertEquals(16, sound.bitsPerSample)
             assertEquals(0, sound.samples.first().toInt())
             assertEquals(0, sound.samples.last().toInt())
+            assertTrue(sound.durationMillis in 70.0..140.0)
+            assertTrue(sound.peak <= 0.16)
         }
-        assertTrue(send.durationMillis in 55.0..65.0)
-        assertTrue(receive.durationMillis in 55.0..65.0)
-        assertEquals(send.durationMillis, receive.durationMillis, 0.01)
-        assertTrue(send.peak in 0.35..0.36)
-        assertTrue(receive.peak in 0.50..0.51)
-        assertTrue(send.peak < receive.peak)
-        assertTrue(send.magnitudeAt(SEND_PITCH) > receive.magnitudeAt(SEND_PITCH))
-        assertTrue(receive.magnitudeAt(RECEIVE_PITCH) > send.magnitudeAt(RECEIVE_PITCH))
-        assertTrue(send.magnitudeAt(SEND_PITCH) > send.magnitudeAt(800.0) * 2)
-        assertTrue(receive.magnitudeAt(RECEIVE_PITCH) > receive.magnitudeAt(800.0) * 2)
-        assertFalse(send.samples.contentEquals(receive.samples))
     }
 
-    private fun readWav(resourceId: Int): WavInfo {
-        val bytes = resources.openRawResource(resourceId).use { it.readBytes() }
+    @Test
+    fun `kotlin melody phrases match every catalog voice and melody`() {
+        val catalog =
+            context.assets
+                .open("chat-sounds/catalog.json")
+                .use { Json.parseToJsonElement(it.readBytes().decodeToString()) }
+                .jsonObject
+        val candidates = catalog.getValue("candidates").jsonArray
+        ChatSoundVoice.entries.forEach { voice ->
+            val candidate =
+                candidates
+                    .single {
+                        it.jsonObject
+                            .getValue("id")
+                            .jsonPrimitive.content == voice.assetId
+                    }.jsonObject
+            val catalogMelodies = candidate.getValue("melodies").jsonArray
+            ChatSoundMelody.entries.forEach { melody ->
+                val catalogMotif =
+                    catalogMelodies
+                        .single {
+                            it.jsonObject
+                                .getValue("id")
+                                .jsonPrimitive.content == melody.name.lowercase()
+                        }.jsonObject
+                        .getValue("motif")
+                        .jsonArray
+                        .map { it.jsonPrimitive.int }
+                assertEquals(ChatSoundSequence.motifs.getValue(voice to melody).toList(), catalogMotif)
+            }
+        }
+    }
+
+    private fun readWav(path: String): WavInfo {
+        val bytes = context.assets.open(path).use { it.readBytes() }
         assertEquals("RIFF", bytes.decodeToString(0, 4))
         assertEquals("WAVE", bytes.decodeToString(8, 12))
         assertEquals("fmt ", bytes.decodeToString(12, 16))
         assertEquals("data", bytes.decodeToString(36, 40))
-
         val data = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-        val channels = data.getShort(22).toInt()
-        val sampleRate = data.getInt(24)
-        val bitsPerSample = data.getShort(34).toInt()
         val dataSize = data.getInt(40)
         assertEquals(bytes.size - WAV_HEADER_BYTES, dataSize)
         val samples = ShortArray(dataSize / Short.SIZE_BYTES)
         data.position(WAV_HEADER_BYTES)
         data.asShortBuffer().get(samples)
-        val peak = samples.maxOf { abs(it.toInt()) } / Short.MAX_VALUE.toDouble()
-        val durationMillis = samples.size * 1_000.0 / sampleRate
-        return WavInfo(channels, sampleRate, bitsPerSample, samples, peak, durationMillis)
+        return WavInfo(
+            channels = data.getShort(22).toInt(),
+            sampleRate = data.getInt(24),
+            bitsPerSample = data.getShort(34).toInt(),
+            samples = samples,
+            peak = samples.maxOf { abs(it.toInt()) } / Short.MAX_VALUE.toDouble(),
+            durationMillis = samples.size * 1_000.0 / data.getInt(24),
+        )
     }
 
     private data class WavInfo(
@@ -71,35 +114,9 @@ class ChatSoundAssetTest {
         val samples: ShortArray,
         val peak: Double,
         val durationMillis: Double,
-    ) {
-        val zeroCrossingRate: Double
-            get() {
-                var crossings = 0
-                for (index in 1 until samples.size) {
-                    val left = samples[index - 1]
-                    val right = samples[index]
-                    if ((left < 0 && right >= 0) || (left >= 0 && right < 0)) {
-                        crossings += 1
-                    }
-                }
-                return crossings.toDouble() / (samples.size - 1).coerceAtLeast(1)
-            }
-
-        fun magnitudeAt(frequency: Double): Double {
-            var real = 0.0
-            var imaginary = 0.0
-            samples.forEachIndexed { index, sample ->
-                val angle = 2.0 * Math.PI * frequency * index / sampleRate
-                real += sample * kotlin.math.cos(angle)
-                imaginary -= sample * kotlin.math.sin(angle)
-            }
-            return kotlin.math.hypot(real, imaginary)
-        }
-    }
+    )
 
     private companion object {
         const val WAV_HEADER_BYTES = 44
-        const val SEND_PITCH = 1_108.73
-        val RECEIVE_PITCH = SEND_PITCH * 2.0.pow(5.0 / 12.0)
     }
 }

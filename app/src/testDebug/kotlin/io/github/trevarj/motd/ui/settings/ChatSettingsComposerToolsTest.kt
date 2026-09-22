@@ -21,6 +21,7 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -112,6 +113,49 @@ class ChatSettingsComposerToolsTest {
             assertEquals(true, unmetered)
             assertEquals(false, metered)
         }
+    }
+
+    @Test
+    fun chatSoundSettingsNavigationIsAvailableWithMasterOff() {
+        var opened = false
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatSettingsContent(
+                    settings = Settings(chatSoundsEnabled = false),
+                    reply = ReplyConfig(),
+                    contentPreviews = ContentPreviewConfig(),
+                    voice = VoiceConfig(),
+                    avatars = AvatarConfig(),
+                    onBack = {},
+                    onOpenFriends = {},
+                    onOpenFools = {},
+                    onOpenDirectConnections = {},
+                    onOpenChatSounds = { opened = true },
+                    onPresenceMode = {},
+                    onShowRedactedMessages = {},
+                    onChatListSwipeAction = {},
+                    onAutoAwayEnabled = {},
+                    onAutoAwayMinutes = {},
+                    onAutoAwayMessage = {},
+                    onFoolsMode = {},
+                    onShowComposerEmoji = {},
+                    onShowComposerFormattingTools = {},
+                    onChatSoundsEnabled = {},
+                    onVisibleReplyPrefix = {},
+                    onShowImages = {},
+                    onShowLinkPreviews = {},
+                    onAutoLoadOnUnmetered = {},
+                    onAutoLoadOnMetered = {},
+                    onShowSharedAvatars = {},
+                    onVoiceEncryptionDefault = {},
+                    onVoiceQuality = {},
+                    onVoiceNoiseReduction = {},
+                    onClearAudioCache = {},
+                )
+            }
+        }
+        compose.onNodeWithTag("settings_chat_sounds_configure").performScrollTo().performClick()
+        compose.runOnIdle { assertTrue(opened) }
     }
 
     @Test

@@ -17,6 +17,11 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefsImpl
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
+import io.github.trevarj.motd.data.prefs.ChatSoundConfig
+import io.github.trevarj.motd.data.prefs.ChatSoundMelody
+import io.github.trevarj.motd.data.prefs.ChatSoundPrefs
+import io.github.trevarj.motd.data.prefs.ChatSoundTone
+import io.github.trevarj.motd.data.prefs.ChatSoundVoice
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
@@ -49,6 +54,33 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ConfigurationBackupRepositoryTest {
+    @Test
+    fun chatSoundConfigRoundTripsAndLegacyBackupLeavesExistingConfigUntouched() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs = ChatSoundPrefs(context)
+            val selected =
+                ChatSoundConfig(
+                    masterVolume = 42,
+                    receiveMelody = ChatSoundMelody.VICTORY,
+                    send = ChatSoundConfig().send.copy(voice = ChatSoundVoice.TERMINAL_TICK, tone = ChatSoundTone.WARM, pitch = -2),
+                )
+            prefs.replace(selected)
+            val db = inMemoryDb()
+            val source = repository(db)
+            val raw = source.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+            prefs.replace(ChatSoundConfig(masterVolume = 99))
+            source.import(raw, importMode = BackupImportMode.MERGE)
+            assertEquals(selected, prefs.config.first())
+
+            val legacy = raw.replace(Regex(",?\\s*\"chatSounds\"\\s*:\\s*\\{.*?\\}(?=,\\s*\"replies\")", RegexOption.DOT_MATCHES_ALL), "")
+            prefs.replace(ChatSoundConfig(masterVolume = 23, receiveMelody = ChatSoundMelody.BEACON))
+            source.import(legacy, importMode = BackupImportMode.MERGE)
+            assertEquals(23, prefs.config.first().masterVolume)
+            assertEquals(ChatSoundMelody.BEACON, prefs.config.first().receiveMelody)
+            db.close()
+        }
+
     @Test
     fun credentialsExcludedExportOmitsSecretsAndImportsAsPendingCredentials() =
         runTest {
@@ -563,6 +595,7 @@ class ConfigurationBackupRepositoryTest {
             settingsRepository = settings,
             appearancePrefs = AppearancePrefsImpl(context),
             contentPreviewPrefs = ContentPreviewPrefsImpl(context),
+            chatSoundPrefs = ChatSoundPrefs(context),
             replyPrefs = ReplyPrefsImpl(context),
             attachmentPrefs = AttachmentPrefsImpl(context),
             voicePrefs = VoicePrefs(context),

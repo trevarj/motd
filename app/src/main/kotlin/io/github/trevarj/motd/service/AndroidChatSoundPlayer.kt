@@ -3,16 +3,21 @@ package io.github.trevarj.motd.service
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.SoundPool
-import android.util.Log
+import android.os.Handler
+import android.os.Looper
 import dagger.hilt.android.qualifiers.ApplicationContext
-import io.github.trevarj.motd.BuildConfig
-import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.AudioActivityTracker
 import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.data.prefs.ChatSoundConfig
+import io.github.trevarj.motd.data.prefs.ChatSoundMelody
+import io.github.trevarj.motd.data.prefs.ChatSoundPrefs
+import io.github.trevarj.motd.data.prefs.ChatSoundTone
+import io.github.trevarj.motd.data.prefs.ChatSoundVariation
+import io.github.trevarj.motd.data.prefs.ChatSoundVoice
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.sync.ChatSoundPlayer
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
@@ -20,17 +25,14 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
-import java.util.EnumMap
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.pow
 
-internal enum class ChatSoundCue {
-    SEND,
-    RECEIVE,
-}
+internal enum class ChatSoundCue { SEND, RECEIVE }
 
 internal fun shouldPlayIncomingChatSound(
     enabled: Boolean,
@@ -39,12 +41,7 @@ internal fun shouldPlayIncomingChatSound(
     type: BufferType,
     muted: Boolean,
     senderIsFool: Boolean,
-): Boolean =
-    enabled &&
-        foregroundBufferId == bufferId &&
-        type != BufferType.SERVER &&
-        !muted &&
-        !senderIsFool
+): Boolean = enabled && foregroundBufferId == bufferId && type != BufferType.SERVER && !muted && !senderIsFool
 
 internal fun shouldPlayOutgoingChatSound(
     enabled: Boolean,
@@ -58,11 +55,7 @@ internal fun isFoolForChatSound(
     identityRules: IrcIdentityRules,
     senderAccount: String?,
     normalizedActor: String,
-): Boolean =
-    MessageVisibilityPolicy(
-        MessageVisibilitySpec(fools = fools),
-        identityRules,
-    ).matchesFoolIdentity(senderAccount, normalizedActor)
+): Boolean = MessageVisibilityPolicy(MessageVisibilitySpec(fools = fools), identityRules).matchesFoolIdentity(senderAccount, normalizedActor)
 
 internal fun incomingChatSoundCue(
     enabled: Boolean,
@@ -71,126 +64,197 @@ internal fun incomingChatSoundCue(
     type: BufferType,
     muted: Boolean,
     senderIsFool: Boolean,
-): ChatSoundCue? =
-    ChatSoundCue.RECEIVE.takeIf {
-        shouldPlayIncomingChatSound(
-            enabled = enabled,
-            foregroundBufferId = foregroundBufferId,
-            bufferId = bufferId,
-            type = type,
-            muted = muted,
-            senderIsFool = senderIsFool,
-        )
-    }
+): ChatSoundCue? = ChatSoundCue.RECEIVE.takeIf { shouldPlayIncomingChatSound(enabled, foregroundBufferId, bufferId, type, muted, senderIsFool) }
 
 internal fun outgoingChatSoundCue(
     enabled: Boolean,
     foregroundBufferId: Long?,
     bufferId: Long,
     muted: Boolean,
-): ChatSoundCue? =
-    ChatSoundCue.SEND.takeIf {
-        shouldPlayOutgoingChatSound(
-            enabled = enabled,
-            foregroundBufferId = foregroundBufferId,
-            bufferId = bufferId,
-            muted = muted,
-        )
+): ChatSoundCue? = ChatSoundCue.SEND.takeIf { shouldPlayOutgoingChatSound(enabled, foregroundBufferId, bufferId, muted) }
+
+/** A quiet gap, buffer change, or configuration change starts a fresh receive phrase. */
+internal class ChatReceiveBurstGate {
+    private var lastBufferId: Long? = null
+    private var lastAtNanos = Long.MIN_VALUE
+    private var accepted = 0
+
+    fun accept(
+        bufferId: Long,
+        nowNanos: Long,
+    ): Result =
+        synchronized(this) {
+            val reset = lastBufferId != bufferId || nowNanos - lastAtNanos >= RESET_AFTER_SILENCE_NANOS
+            if (reset) accepted = 0
+            lastBufferId = bufferId
+            lastAtNanos = nowNanos
+            val allowed = accepted < MAX_PER_BURST
+            if (allowed) accepted++
+            Result(allowed, reset)
+        }
+
+    fun reset() =
+        synchronized(this) {
+            lastBufferId = null
+            lastAtNanos = Long.MIN_VALUE
+            accepted = 0
+        }
+
+    data class Result(
+        val accepted: Boolean,
+        val reset: Boolean,
+    )
+
+    private companion object {
+        const val MAX_PER_BURST = 5
+        const val RESET_AFTER_SILENCE_NANOS = 2_000_000_000L
     }
+}
 
-/**
- * Process-lifetime receive melody. Only eligible RECEIVE cues advance it; SEND is deliberately
- * inert so outgoing activity cannot alter an incoming conversation's cadence.
- */
-internal class ChatReceiveMelody {
-    private var lastEligibleBufferId: Long? = null
-    private var lastEligibleAtNanos: Long = Long.MIN_VALUE
-    private var nextIndex: Int = 0
+internal data class ChatSoundSelection(
+    val take: Int,
+    val semitones: Int,
+)
 
-    fun playbackRate(
+/** Natural picks are independent by direction; sends never affect an incoming phrase. */
+internal class ChatSoundSequence(
+    private val random: () -> Double = Math::random,
+) {
+    private val bags = mutableMapOf(ChatSoundCue.SEND to mutableListOf<Int>(), ChatSoundCue.RECEIVE to mutableListOf())
+    private val last = mutableMapOf<ChatSoundCue, Int?>()
+    private val melodyIndex = mutableMapOf<Pair<ChatSoundVoice, ChatSoundMelody>, Int>()
+
+    fun next(
+        cue: ChatSoundCue,
+        config: ChatSoundConfig,
+    ): ChatSoundSelection =
+        synchronized(this) {
+            when (config.variation) {
+                ChatSoundVariation.FIXED -> {
+                    ChatSoundSelection(2, 0)
+                }
+
+                ChatSoundVariation.MUSICAL -> {
+                    if (cue == ChatSoundCue.SEND) {
+                        ChatSoundSelection(2, 0)
+                    } else {
+                        val key = config.receive.voice to config.receiveMelody
+                        val notes = motifs.getValue(key)
+                        val index = melodyIndex.getOrDefault(key, 0) % notes.size
+                        melodyIndex[key] = index + 1
+                        ChatSoundSelection(2, notes[index])
+                    }
+                }
+
+                ChatSoundVariation.NATURAL -> {
+                    val bag = bags.getValue(cue)
+                    if (bag.isEmpty()) {
+                        bag += (0..4).shuffled(java.util.Random((random() * Long.MAX_VALUE).toLong()))
+                        if (bag.firstOrNull() == last[cue]) java.util.Collections.swap(bag, 0, 1)
+                    }
+                    ChatSoundSelection(bag.removeAt(0).also { last[cue] = it }, 0)
+                }
+            }
+        }
+
+    fun reset() =
+        synchronized(this) {
+            bags.values.forEach { it.clear() }
+            last.clear()
+            melodyIndex.clear()
+        }
+
+    fun resetReceive() =
+        synchronized(this) {
+            // Silence restarts the melody, while natural takes retain their no-repeat history.
+            melodyIndex.clear()
+        }
+
+    companion object {
+        private val templates =
+            mapOf(
+                ChatSoundMelody.CLIMB to intArrayOf(0, 2, 4, 5, 0),
+                ChatSoundMelody.RELAY to intArrayOf(0, 4, 2, 5, 0),
+                ChatSoundMelody.BEACON to intArrayOf(0, 2, 7, 4, 0),
+                ChatSoundMelody.VICTORY to intArrayOf(0, 4, 5, 7, 0),
+            )
+        private val homecoming =
+            mapOf(
+                ChatSoundVoice.SOFT_GLASS to intArrayOf(0, 4, 7, 2, 0),
+                ChatSoundVoice.TERMINAL_TICK to intArrayOf(0, 7, 4, 2, 0),
+                ChatSoundVoice.ARCADE_PLUCK to intArrayOf(0, 4, 2, 7, 0),
+                ChatSoundVoice.SYNTH_16_BIT to intArrayOf(0, 4, 7, 4, 0),
+            )
+        internal val motifs: Map<Pair<ChatSoundVoice, ChatSoundMelody>, IntArray> =
+            ChatSoundVoice.entries
+                .flatMap { voice ->
+                    ChatSoundMelody.entries.map { melody ->
+                        (voice to melody) to (if (melody == ChatSoundMelody.HOMECOMING) homecoming.getValue(voice) else templates.getValue(melody))
+                    }
+                }.toMap()
+    }
+}
+
+internal data class ChatSoundAssetKey(
+    val voice: ChatSoundVoice,
+    val cue: ChatSoundCue,
+    val tone: ChatSoundTone,
+    val take: Int,
+) {
+    val path: String get() = "chat-sounds/${voice.assetId}-${cue.name.lowercase()}-${tone.name.lowercase()}-$take.wav"
+}
+
+/** One atomic decision owns the receive limit and phrase; send activity is independent. */
+internal class ChatSoundConversation {
+    private val gate = ChatReceiveBurstGate()
+    private val sequence = ChatSoundSequence()
+    private var lastConfig: ChatSoundConfig? = null
+
+    fun next(
         cue: ChatSoundCue,
         bufferId: Long,
         nowNanos: Long,
-    ): Float =
+        config: ChatSoundConfig,
+    ): ChatSoundSelection? =
         synchronized(this) {
-            if (cue == ChatSoundCue.SEND) return@synchronized NORMAL_RATE
-
-            if (
-                lastEligibleBufferId != bufferId ||
-                nowNanos - lastEligibleAtNanos >= RESET_AFTER_SILENCE_NANOS
-            ) {
-                nextIndex = 0
+            if (lastConfig != config) {
+                gate.reset()
+                sequence.reset()
+                lastConfig = config
             }
-            val rate = RECEIVE_RATES[nextIndex]
-            nextIndex = (nextIndex + 1) % RECEIVE_RATES.size
-            lastEligibleBufferId = bufferId
-            lastEligibleAtNanos = nowNanos
-            rate
-        }
-
-    private companion object {
-        const val NORMAL_RATE = 1f
-        const val RESET_AFTER_SILENCE_NANOS = 2_000_000_000L
-        val RECEIVE_RATES =
-            floatArrayOf(
-                NORMAL_RATE,
-                2.0.pow(2.0 / 12.0).toFloat(),
-                2.0.pow(4.0 / 12.0).toFloat(),
-                2.0.pow(7.0 / 12.0).toFloat(),
-            )
-    }
-}
-
-internal data class PendingChatSoundPlayback(
-    val cue: ChatSoundCue,
-    val playbackRate: Float,
-)
-
-internal class ChatSoundReadinessQueue {
-    private val pending = EnumMap<ChatSoundCue, PendingChatSoundPlayback>(ChatSoundCue::class.java)
-
-    fun request(
-        cue: ChatSoundCue,
-        playbackRate: Float,
-        ready: Boolean,
-    ): PendingChatSoundPlayback? =
-        synchronized(this) {
-            val playback = PendingChatSoundPlayback(cue, playbackRate)
-            if (ready) {
-                playback
-            } else {
-                pending[cue] = playback
-                null
+            val choice = if (cue == ChatSoundCue.SEND) config.send else config.receive
+            if (!choice.enabled || choice.volume == 0 || config.masterVolume == 0) return@synchronized null
+            if (cue == ChatSoundCue.RECEIVE) {
+                val result = gate.accept(bufferId, nowNanos)
+                if (result.reset) sequence.resetReceive()
+                if (!result.accepted) return@synchronized null
             }
-        }
-
-    fun markLoaded(cue: ChatSoundCue): PendingChatSoundPlayback? =
-        synchronized(this) {
-            pending.remove(cue)
-        }
-
-    fun markLoadFailed(cue: ChatSoundCue) =
-        synchronized(this) {
-            pending.remove(cue)
+            sequence.next(cue, config)
         }
 }
 
-/**
- * Process-lifetime sonification using two small, original PCM samples. Sonification attributes
- * keep the cues subordinate to Android's ringer/silent policy without requesting audio focus.
- */
+/** Preferences can suspend; eligibility must be checked after they arrive. */
+internal suspend fun dispatchConfiguredChatSound(
+    config: Flow<ChatSoundConfig>,
+    stillEligible: () -> Boolean,
+    play: (ChatSoundConfig) -> Unit,
+) {
+    val selected = config.first()
+    if (stillEligible()) play(selected)
+}
+
 @Singleton
 internal class SoundPoolChatSoundBackend
     @Inject
     constructor(
-        @ApplicationContext context: Context,
+        @ApplicationContext private val context: Context,
         private val diagnostics: DiagnosticLogger,
     ) {
-        private val soundPool =
-            try {
+        private val pool =
+            runCatching {
                 SoundPool
                     .Builder()
-                    .setMaxStreams(MAX_STREAMS)
+                    .setMaxStreams(5)
                     .setAudioAttributes(
                         AudioAttributes
                             .Builder()
@@ -198,133 +262,94 @@ internal class SoundPoolChatSoundBackend
                             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                             .build(),
                     ).build()
-            } catch (error: Exception) {
-                trace("create_failed", null, "error" to error::class.simpleName)
-                null
-            }
-        private val sampleIds = EnumMap<ChatSoundCue, Int>(ChatSoundCue::class.java)
-        private val cuesBySampleId = ConcurrentHashMap<Int, ChatSoundCue>()
-        private val readySampleIds = ConcurrentHashMap.newKeySet<Int>()
-        private val readinessQueue = ChatSoundReadinessQueue()
+            }.onFailure { trace("create_failed", it) }.getOrNull()
+        private val samples = ConcurrentHashMap<ChatSoundAssetKey, Int>()
+        private val ready = ConcurrentHashMap<Int, Boolean>()
+        private val recentStreams = ArrayDeque<Int>()
+        private val mainHandler = Handler(Looper.getMainLooper())
+        private val preview =
+            ChatSoundPreview(
+                nowMs = android.os.SystemClock::uptimeMillis,
+                post = { task, delay -> mainHandler.postDelayed(task, delay) },
+                remove = { mainHandler.removeCallbacks(it) },
+                stopPlaying = ::stopStreams,
+            )
 
         init {
-            soundPool?.setOnLoadCompleteListener { _, sampleId, status ->
-                val cue = cuesBySampleId[sampleId]
-                if (status == LOAD_SUCCESS) {
-                    readySampleIds += sampleId
-                    trace("loaded", cue, "status" to status)
-                    cue?.let { loadedCue ->
-                        readinessQueue.markLoaded(loadedCue)?.let(::playReady)
-                    }
-                } else {
-                    cue?.let(readinessQueue::markLoadFailed)
-                    trace("load_failed", cue, "status" to status)
+            pool?.setOnLoadCompleteListener { _, id, status -> if (status == 0) ready[id] = true }
+            ChatSoundVoice.entries.forEach { voice ->
+                ChatSoundCue.entries.forEach { cue ->
+                    ChatSoundTone.entries.forEach { tone -> (0..4).forEach { preload(ChatSoundAssetKey(voice, cue, tone, it)) } }
                 }
             }
-            register(context, ChatSoundCue.SEND, R.raw.chat_send)
-            register(context, ChatSoundCue.RECEIVE, R.raw.chat_receive)
-        }
-
-        private fun register(
-            context: Context,
-            cue: ChatSoundCue,
-            resourceId: Int,
-        ) {
-            val pool = soundPool ?: return
-            val sampleId =
-                try {
-                    pool.load(context, resourceId, LOAD_PRIORITY)
-                } catch (error: Exception) {
-                    trace("load_failed", cue, "error" to error::class.simpleName)
-                    return
-                }
-            if (sampleId == LOAD_FAILED) {
-                trace("load_rejected", cue)
-                return
-            }
-            sampleIds[cue] = sampleId
-            cuesBySampleId[sampleId] = cue
         }
 
         fun play(
+            config: ChatSoundConfig,
             cue: ChatSoundCue,
-            playbackRate: Float = NORMAL_RATE,
+            selection: ChatSoundSelection,
         ) {
-            val sampleId = sampleIds[cue]
-            if (sampleId == null) {
-                trace("not_ready", cue)
-                return
+            val cueConfig = if (cue == ChatSoundCue.SEND) config.send else config.receive
+            if (!cueConfig.enabled || config.masterVolume == 0 || cueConfig.volume == 0) return
+            val key = ChatSoundAssetKey(cueConfig.voice, cue, cueConfig.tone, selection.take)
+            val id = samples[key] ?: load(key) ?: return
+            if (ready[id] != true) return // Drop loading-time events rather than playing stale feedback later.
+            val volume = config.masterVolume / 100f * cueConfig.volume / 100f
+            val rate = 2.0.pow((selection.semitones + cueConfig.pitch) / 12.0).toFloat()
+            synchronized(recentStreams) {
+                runCatching { pool?.play(id, volume, volume, 1, 0, rate) ?: 0 }.onFailure { trace("play_failed", it) }.getOrDefault(0).takeIf { it != 0 }?.let { stream ->
+                    recentStreams += stream
+                    while (recentStreams.size > 5) runCatching { pool?.stop(recentStreams.removeFirst()) }
+                }
             }
-            val playback = readinessQueue.request(cue, playbackRate, sampleId in readySampleIds)
-            if (playback == null) {
-                trace("queued_not_ready", cue)
-                return
-            }
-            playReady(playback)
         }
 
-        private fun playReady(playback: PendingChatSoundPlayback) {
-            val pool = soundPool ?: return
-            val sampleId = sampleIds[playback.cue]
-            if (sampleId == null || sampleId !in readySampleIds) {
-                trace("not_ready", playback.cue)
-                return
-            }
-            val streamId =
-                try {
-                    pool.play(
-                        sampleId,
-                        PLAYBACK_VOLUME,
-                        PLAYBACK_VOLUME,
-                        PLAYBACK_PRIORITY,
-                        NO_LOOP,
-                        playback.playbackRate,
-                    )
-                } catch (error: Exception) {
-                    trace("play_failed", playback.cue, "error" to error::class.simpleName)
-                    return
+        fun preview(
+            config: ChatSoundConfig,
+            cue: ChatSoundCue,
+        ) {
+            val notes = if (cue == ChatSoundCue.RECEIVE) ChatSoundSequence.motifs.getValue(config.receive.voice to config.receiveMelody) else intArrayOf(0)
+            val previewSequence = ChatSoundSequence()
+            val selections =
+                notes.map { note ->
+                    if (config.variation == ChatSoundVariation.MUSICAL && cue == ChatSoundCue.RECEIVE) {
+                        ChatSoundSelection(2, note)
+                    } else {
+                        previewSequence.next(cue, config)
+                    }
                 }
-            if (streamId == PLAY_FAILED) {
-                trace("play_failed", playback.cue)
-            } else {
-                trace("played", playback.cue)
+            val cueConfig = if (cue == ChatSoundCue.SEND) config.send else config.receive
+            val keys = selections.map { ChatSoundAssetKey(cueConfig.voice, cue, cueConfig.tone, it.take) }
+            preview.start(
+                noteCount = selections.size,
+                ready = { keys.all { samples[it]?.let { id -> ready[id] == true } == true } },
+                playNote = { play(config, cue, selections[it]) },
+            )
+        }
+
+        fun stop() = preview.stop()
+
+        private fun stopStreams() {
+            synchronized(recentStreams) {
+                recentStreams.forEach { runCatching { pool?.stop(it) } }
+                recentStreams.clear()
             }
         }
+
+        private fun preload(key: ChatSoundAssetKey) {
+            if (!samples.containsKey(key)) load(key)
+        }
+
+        private fun load(key: ChatSoundAssetKey): Int? =
+            runCatching {
+                context.assets.openFd(key.path).use { pool?.load(it, 1) ?: 0 }
+            }.onFailure { trace("load_failed", it) }.getOrNull()?.takeIf { it != 0 }?.also { samples[key] = it }
 
         private fun trace(
             event: String,
-            cue: ChatSoundCue?,
-            vararg fields: Pair<String, Any?>,
+            error: Throwable,
         ) {
-            diagnostics.record("chat_sound", event) {
-                buildMap {
-                    cue?.let { put("cue", it.name.lowercase()) }
-                    fields.forEach { (key, value) -> put(key, value) }
-                }
-            }
-            if (BuildConfig.DEBUG && Log.isLoggable(LOG_TAG, Log.DEBUG)) {
-                Log.d(
-                    LOG_TAG,
-                    buildString {
-                        append(event)
-                        cue?.let { append(" cue=").append(it.name.lowercase()) }
-                        fields.forEach { (key, value) -> append(' ').append(key).append('=').append(value) }
-                    },
-                )
-            }
-        }
-
-        private companion object {
-            const val LOG_TAG = "MotdChatSound"
-            const val MAX_STREAMS = 2
-            const val LOAD_PRIORITY = 1
-            const val LOAD_SUCCESS = 0
-            const val LOAD_FAILED = 0
-            const val PLAYBACK_VOLUME = 1f
-            const val PLAYBACK_PRIORITY = 1
-            const val NO_LOOP = 0
-            const val NORMAL_RATE = 1f
-            const val PLAY_FAILED = 0
+            diagnostics.record("chat_sound", event) { mapOf("error" to error::class.simpleName) }
         }
     }
 
@@ -335,36 +360,25 @@ class AndroidChatSoundPlayer
         private val db: MotdDatabase,
         private val foregroundBufferTracker: ForegroundBufferTracker,
         private val settingsRepository: SettingsRepository,
+        private val chatSoundPrefs: ChatSoundPrefs,
         private val backend: SoundPoolChatSoundBackend,
         private val audioPlaybackController: AudioPlaybackController,
         private val audioActivityTracker: AudioActivityTracker,
     ) : ChatSoundPlayer {
-        private val receiveMelody = ChatReceiveMelody()
+        private val conversation = ChatSoundConversation()
 
         override suspend fun onIncoming(
             bufferId: Long,
             type: BufferType,
             message: IrcEvent.ChatMessage,
-        ) = playIncoming(
-            bufferId = bufferId,
-            type = type,
-            senderAccount = message.ctx.account,
-            senderNick = message.source.nick,
-            normalizedActor = null,
-        )
+        ) = playIncoming(bufferId, type, message.ctx.account, message.source.nick, null)
 
         override suspend fun onCanonicalIncoming(
             bufferId: Long,
             type: BufferType,
             message: IrcEvent.ChatMessage,
             canonical: MessageEntity,
-        ) = playIncoming(
-            bufferId = bufferId,
-            type = type,
-            senderAccount = canonical.senderAccount,
-            senderNick = null,
-            normalizedActor = canonical.normalizedActor,
-        )
+        ) = playIncoming(bufferId, type, canonical.senderAccount, null, canonical.normalizedActor)
 
         private suspend fun playIncoming(
             bufferId: Long,
@@ -376,44 +390,40 @@ class AndroidChatSoundPlayer
             val buffer = db.bufferDao().observeById(bufferId) ?: return
             if (audioActivityTracker.recording.value || audioPlaybackController.state.value.playing) return
             val settings = settingsRepository.settings.first()
-            val identityRules =
-                db.networkIdentityDao().byNetwork(buffer.networkId)?.identityRules
-                    ?: IrcIdentityRules()
-            val cue =
-                incomingChatSoundCue(
-                    enabled = settings.chatSoundsEnabled,
-                    foregroundBufferId = foregroundBufferTracker.foregroundBufferId.value,
-                    bufferId = bufferId,
-                    type = type,
-                    muted = buffer.muted,
-                    senderIsFool =
-                        isFoolForChatSound(
-                            settings.fools,
-                            identityRules,
-                            senderAccount,
-                            normalizedActor ?: identityRules.normalize(senderNick.orEmpty()),
-                        ),
-                ) ?: return
-            backend.play(
-                cue,
-                receiveMelody.playbackRate(cue, bufferId, android.os.SystemClock.elapsedRealtimeNanos()),
-            )
+            val rules = db.networkIdentityDao().byNetwork(buffer.networkId)?.identityRules ?: IrcIdentityRules()
+            val eligible = incomingChatSoundCue(settings.chatSoundsEnabled, foregroundBufferTracker.foregroundBufferId.value, bufferId, type, buffer.muted, isFoolForChatSound(settings.fools, rules, senderAccount, normalizedActor ?: rules.normalize(senderNick.orEmpty())))
+            if (eligible == null) return
+            playConfigured(ChatSoundCue.RECEIVE, bufferId)
         }
 
         override suspend fun onOutgoingAccepted(bufferId: Long) {
             val buffer = db.bufferDao().observeById(bufferId) ?: return
             if (audioActivityTracker.recording.value || audioPlaybackController.state.value.playing) return
             val settings = settingsRepository.settings.first()
-            val cue =
-                outgoingChatSoundCue(
-                    enabled = settings.chatSoundsEnabled,
-                    foregroundBufferId = foregroundBufferTracker.foregroundBufferId.value,
-                    bufferId = bufferId,
-                    muted = buffer.muted,
-                ) ?: return
-            backend.play(
-                cue,
-                receiveMelody.playbackRate(cue, bufferId, android.os.SystemClock.elapsedRealtimeNanos()),
-            )
+            if (outgoingChatSoundCue(settings.chatSoundsEnabled, foregroundBufferTracker.foregroundBufferId.value, bufferId, buffer.muted) == null) return
+            playConfigured(ChatSoundCue.SEND, bufferId)
         }
+
+        private suspend fun playConfigured(
+            cue: ChatSoundCue,
+            bufferId: Long,
+        ) = dispatchConfiguredChatSound(
+            config = chatSoundPrefs.config,
+            stillEligible = {
+                foregroundBufferTracker.foregroundBufferId.value == bufferId &&
+                    !audioActivityTracker.recording.value && !audioPlaybackController.state.value.playing
+            },
+        ) { config ->
+            synchronized(this) {
+                conversation.next(cue, bufferId, android.os.SystemClock.elapsedRealtimeNanos(), config)?.let {
+                    backend.play(config, cue, it)
+                }
+            }
+        }
+
+        fun previewSend(config: ChatSoundConfig) = backend.preview(config, ChatSoundCue.SEND)
+
+        fun previewReceiveMelody(config: ChatSoundConfig) = backend.preview(config, ChatSoundCue.RECEIVE)
+
+        fun stopPreview() = backend.stop()
     }

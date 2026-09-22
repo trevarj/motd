@@ -97,6 +97,9 @@ assert.deepEqual(picker.next("receive", "musical"), {take: 2, semitones: 0, melo
 
 execFileSync("node", ["tools/chat-sounds/generate-studies.mjs"], {cwd: root, stdio: "inherit"});
 const manifest = JSON.parse(fs.readFileSync(path.join(output, "manifest.json"), "utf8"));
+const androidOutput = path.join(root, "app/src/main/assets/chat-sounds");
+const androidCatalog = JSON.parse(fs.readFileSync(path.join(androidOutput, "catalog.json"), "utf8"));
+assert.deepEqual(androidCatalog, manifest, "Android must ship the same voice and melody catalog as the gallery");
 assert.equal(manifest.assets.length, 120);
 for (const asset of manifest.assets) {
   const sample = fs.readFileSync(path.join(output, asset.file));
@@ -106,6 +109,7 @@ for (const asset of manifest.assets) {
   assert.equal(sample.readInt16LE(44), 0);
   assert.equal(sample.readInt16LE(sample.length - 2), 0);
   assert.ok(asset.peak <= 0.16);
+  assert.deepEqual(fs.readFileSync(path.join(androidOutput, asset.file)), sample, `${asset.id}: Android and gallery PCM must match`);
 }
 execFileSync("node", ["tools/chat-sounds/generate-studies.mjs", "--check"], {cwd: root, stdio: "inherit"});
 console.log("sound study tests passed");

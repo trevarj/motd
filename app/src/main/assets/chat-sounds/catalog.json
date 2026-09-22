@@ -1,0 +1,2003 @@
+{
+  "version": 1,
+  "candidates": [
+    {
+      "id": "soft-glass",
+      "pack": "Soft Pop",
+      "label": "Soft glass",
+      "description": "A gentle glassy pluck with a soft edge.",
+      "rootNote": "D6",
+      "motif": [
+        0,
+        4,
+        7,
+        2,
+        0
+      ],
+      "degrees": [
+        1,
+        3,
+        5,
+        2,
+        1
+      ],
+      "scale": [
+        "D6",
+        "E6",
+        "F#6",
+        "G6",
+        "A6",
+        "B6",
+        "C#7"
+      ],
+      "notes": [
+        "D6",
+        "F#6",
+        "A6",
+        "E6",
+        "D6"
+      ],
+      "melodies": [
+        {
+          "id": "homecoming",
+          "label": "Homecoming",
+          "description": "The original reply phrase.",
+          "motif": [
+            0,
+            4,
+            7,
+            2,
+            0
+          ],
+          "degrees": [
+            1,
+            3,
+            5,
+            2,
+            1
+          ],
+          "notes": [
+            "D6",
+            "F#6",
+            "A6",
+            "E6",
+            "D6"
+          ]
+        },
+        {
+          "id": "climb",
+          "label": "Climb",
+          "description": "A small rising answer.",
+          "motif": [
+            0,
+            2,
+            4,
+            5,
+            0
+          ],
+          "degrees": [
+            1,
+            2,
+            3,
+            4,
+            1
+          ],
+          "notes": [
+            "D6",
+            "E6",
+            "F#6",
+            "G6",
+            "D6"
+          ]
+        },
+        {
+          "id": "relay",
+          "label": "Relay",
+          "description": "A playful up-and-back signal.",
+          "motif": [
+            0,
+            4,
+            2,
+            5,
+            0
+          ],
+          "degrees": [
+            1,
+            3,
+            2,
+            4,
+            1
+          ],
+          "notes": [
+            "D6",
+            "F#6",
+            "E6",
+            "G6",
+            "D6"
+          ]
+        },
+        {
+          "id": "beacon",
+          "label": "Beacon",
+          "description": "A pentatonic call from the high point.",
+          "motif": [
+            0,
+            2,
+            7,
+            4,
+            0
+          ],
+          "degrees": [
+            1,
+            2,
+            5,
+            3,
+            1
+          ],
+          "notes": [
+            "D6",
+            "E6",
+            "A6",
+            "F#6",
+            "D6"
+          ]
+        },
+        {
+          "id": "victory",
+          "label": "Victory",
+          "description": "A bright platformer-style finish.",
+          "motif": [
+            0,
+            4,
+            5,
+            7,
+            0
+          ],
+          "degrees": [
+            1,
+            3,
+            4,
+            5,
+            1
+          ],
+          "notes": [
+            "D6",
+            "F#6",
+            "G6",
+            "A6",
+            "D6"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "terminal-tick",
+      "pack": "Terminal",
+      "label": "Terminal tick",
+      "description": "A restrained console confirmation tick.",
+      "rootNote": "B5",
+      "motif": [
+        0,
+        7,
+        4,
+        2,
+        0
+      ],
+      "degrees": [
+        1,
+        5,
+        3,
+        2,
+        1
+      ],
+      "scale": [
+        "B5",
+        "C#6",
+        "D#6",
+        "E6",
+        "F#6",
+        "G#6",
+        "A#6"
+      ],
+      "notes": [
+        "B5",
+        "F#6",
+        "D#6",
+        "C#6",
+        "B5"
+      ],
+      "melodies": [
+        {
+          "id": "homecoming",
+          "label": "Homecoming",
+          "description": "The original reply phrase.",
+          "motif": [
+            0,
+            7,
+            4,
+            2,
+            0
+          ],
+          "degrees": [
+            1,
+            5,
+            3,
+            2,
+            1
+          ],
+          "notes": [
+            "B5",
+            "F#6",
+            "D#6",
+            "C#6",
+            "B5"
+          ]
+        },
+        {
+          "id": "climb",
+          "label": "Climb",
+          "description": "A small rising answer.",
+          "motif": [
+            0,
+            2,
+            4,
+            5,
+            0
+          ],
+          "degrees": [
+            1,
+            2,
+            3,
+            4,
+            1
+          ],
+          "notes": [
+            "B5",
+            "C#6",
+            "D#6",
+            "E6",
+            "B5"
+          ]
+        },
+        {
+          "id": "relay",
+          "label": "Relay",
+          "description": "A playful up-and-back signal.",
+          "motif": [
+            0,
+            4,
+            2,
+            5,
+            0
+          ],
+          "degrees": [
+            1,
+            3,
+            2,
+            4,
+            1
+          ],
+          "notes": [
+            "B5",
+            "D#6",
+            "C#6",
+            "E6",
+            "B5"
+          ]
+        },
+        {
+          "id": "beacon",
+          "label": "Beacon",
+          "description": "A pentatonic call from the high point.",
+          "motif": [
+            0,
+            2,
+            7,
+            4,
+            0
+          ],
+          "degrees": [
+            1,
+            2,
+            5,
+            3,
+            1
+          ],
+          "notes": [
+            "B5",
+            "C#6",
+            "F#6",
+            "D#6",
+            "B5"
+          ]
+        },
+        {
+          "id": "victory",
+          "label": "Victory",
+          "description": "A bright platformer-style finish.",
+          "motif": [
+            0,
+            4,
+            5,
+            7,
+            0
+          ],
+          "degrees": [
+            1,
+            3,
+            4,
+            5,
+            1
+          ],
+          "notes": [
+            "B5",
+            "D#6",
+            "E6",
+            "F#6",
+            "B5"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "arcade-pluck",
+      "pack": "Bubble / Arcade",
+      "label": "Arcade pluck",
+      "description": "A compact arcade-like pluck.",
+      "rootNote": "Ab5",
+      "motif": [
+        0,
+        4,
+        2,
+        7,
+        0
+      ],
+      "degrees": [
+        1,
+        3,
+        2,
+        5,
+        1
+      ],
+      "scale": [
+        "Ab5",
+        "Bb5",
+        "C6",
+        "Db6",
+        "Eb6",
+        "F6",
+        "G6"
+      ],
+      "notes": [
+        "Ab5",
+        "C6",
+        "Bb5",
+        "Eb6",
+        "Ab5"
+      ],
+      "melodies": [
+        {
+          "id": "homecoming",
+          "label": "Homecoming",
+          "description": "The original reply phrase.",
+          "motif": [
+            0,
+            4,
+            2,
+            7,
+            0
+          ],
+          "degrees": [
+            1,
+            3,
+            2,
+            5,
+            1
+          ],
+          "notes": [
+            "Ab5",
+            "C6",
+            "Bb5",
+            "Eb6",
+            "Ab5"
+          ]
+        },
+        {
+          "id": "climb",
+          "label": "Climb",
+          "description": "A small rising answer.",
+          "motif": [
+            0,
+            2,
+            4,
+            5,
+            0
+          ],
+          "degrees": [
+            1,
+            2,
+            3,
+            4,
+            1
+          ],
+          "notes": [
+            "Ab5",
+            "Bb5",
+            "C6",
+            "Db6",
+            "Ab5"
+          ]
+        },
+        {
+          "id": "relay",
+          "label": "Relay",
+          "description": "A playful up-and-back signal.",
+          "motif": [
+            0,
+            4,
+            2,
+            5,
+            0
+          ],
+          "degrees": [
+            1,
+            3,
+            2,
+            4,
+            1
+          ],
+          "notes": [
+            "Ab5",
+            "C6",
+            "Bb5",
+            "Db6",
+            "Ab5"
+          ]
+        },
+        {
+          "id": "beacon",
+          "label": "Beacon",
+          "description": "A pentatonic call from the high point.",
+          "motif": [
+            0,
+            2,
+            7,
+            4,
+            0
+          ],
+          "degrees": [
+            1,
+            2,
+            5,
+            3,
+            1
+          ],
+          "notes": [
+            "Ab5",
+            "Bb5",
+            "Eb6",
+            "C6",
+            "Ab5"
+          ]
+        },
+        {
+          "id": "victory",
+          "label": "Victory",
+          "description": "A bright platformer-style finish.",
+          "motif": [
+            0,
+            4,
+            5,
+            7,
+            0
+          ],
+          "degrees": [
+            1,
+            3,
+            4,
+            5,
+            1
+          ],
+          "notes": [
+            "Ab5",
+            "C6",
+            "Db6",
+            "Eb6",
+            "Ab5"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "16bit-synth",
+      "pack": "16-bit Synth",
+      "label": "16-bit synth",
+      "description": "A warm layered console synth with a platformer-like reply phrase.",
+      "rootNote": "C5",
+      "motif": [
+        0,
+        4,
+        7,
+        4,
+        0
+      ],
+      "degrees": [
+        1,
+        3,
+        5,
+        3,
+        1
+      ],
+      "scale": [
+        "C5",
+        "D5",
+        "E5",
+        "F5",
+        "G5",
+        "A5",
+        "B5"
+      ],
+      "notes": [
+        "C5",
+        "E5",
+        "G5",
+        "E5",
+        "C5"
+      ],
+      "melodies": [
+        {
+          "id": "homecoming",
+          "label": "Homecoming",
+          "description": "The original reply phrase.",
+          "motif": [
+            0,
+            4,
+            7,
+            4,
+            0
+          ],
+          "degrees": [
+            1,
+            3,
+            5,
+            3,
+            1
+          ],
+          "notes": [
+            "C5",
+            "E5",
+            "G5",
+            "E5",
+            "C5"
+          ]
+        },
+        {
+          "id": "climb",
+          "label": "Climb",
+          "description": "A small rising answer.",
+          "motif": [
+            0,
+            2,
+            4,
+            5,
+            0
+          ],
+          "degrees": [
+            1,
+            2,
+            3,
+            4,
+            1
+          ],
+          "notes": [
+            "C5",
+            "D5",
+            "E5",
+            "F5",
+            "C5"
+          ]
+        },
+        {
+          "id": "relay",
+          "label": "Relay",
+          "description": "A playful up-and-back signal.",
+          "motif": [
+            0,
+            4,
+            2,
+            5,
+            0
+          ],
+          "degrees": [
+            1,
+            3,
+            2,
+            4,
+            1
+          ],
+          "notes": [
+            "C5",
+            "E5",
+            "D5",
+            "F5",
+            "C5"
+          ]
+        },
+        {
+          "id": "beacon",
+          "label": "Beacon",
+          "description": "A pentatonic call from the high point.",
+          "motif": [
+            0,
+            2,
+            7,
+            4,
+            0
+          ],
+          "degrees": [
+            1,
+            2,
+            5,
+            3,
+            1
+          ],
+          "notes": [
+            "C5",
+            "D5",
+            "G5",
+            "E5",
+            "C5"
+          ]
+        },
+        {
+          "id": "victory",
+          "label": "Victory",
+          "description": "A bright platformer-style finish.",
+          "motif": [
+            0,
+            4,
+            5,
+            7,
+            0
+          ],
+          "degrees": [
+            1,
+            3,
+            4,
+            5,
+            1
+          ],
+          "notes": [
+            "C5",
+            "E5",
+            "F5",
+            "G5",
+            "C5"
+          ]
+        }
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "id": "soft-glass-send-warm-0",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 0,
+      "tone": "warm",
+      "file": "soft-glass-send-warm-0.wav",
+      "durationMs": 109,
+      "peak": 0.068853,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-warm-1",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 1,
+      "tone": "warm",
+      "file": "soft-glass-send-warm-1.wav",
+      "durationMs": 111,
+      "peak": 0.068299,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-warm-2",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 2,
+      "tone": "warm",
+      "file": "soft-glass-send-warm-2.wav",
+      "durationMs": 112,
+      "peak": 0.069264,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-warm-3",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 3,
+      "tone": "warm",
+      "file": "soft-glass-send-warm-3.wav",
+      "durationMs": 114,
+      "peak": 0.071986,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-warm-4",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 4,
+      "tone": "warm",
+      "file": "soft-glass-send-warm-4.wav",
+      "durationMs": 115,
+      "peak": 0.070265,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-balanced-0",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 0,
+      "tone": "balanced",
+      "file": "soft-glass-send-balanced-0.wav",
+      "durationMs": 109,
+      "peak": 0.076734,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-balanced-1",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 1,
+      "tone": "balanced",
+      "file": "soft-glass-send-balanced-1.wav",
+      "durationMs": 111,
+      "peak": 0.07751,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-balanced-2",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 2,
+      "tone": "balanced",
+      "file": "soft-glass-send-balanced-2.wav",
+      "durationMs": 112,
+      "peak": 0.078262,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-balanced-3",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 3,
+      "tone": "balanced",
+      "file": "soft-glass-send-balanced-3.wav",
+      "durationMs": 114,
+      "peak": 0.076536,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-balanced-4",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 4,
+      "tone": "balanced",
+      "file": "soft-glass-send-balanced-4.wav",
+      "durationMs": 115,
+      "peak": 0.081994,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-bright-0",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 0,
+      "tone": "bright",
+      "file": "soft-glass-send-bright-0.wav",
+      "durationMs": 109,
+      "peak": 0.081826,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-bright-1",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 1,
+      "tone": "bright",
+      "file": "soft-glass-send-bright-1.wav",
+      "durationMs": 111,
+      "peak": 0.083921,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-bright-2",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 2,
+      "tone": "bright",
+      "file": "soft-glass-send-bright-2.wav",
+      "durationMs": 112,
+      "peak": 0.078957,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-bright-3",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 3,
+      "tone": "bright",
+      "file": "soft-glass-send-bright-3.wav",
+      "durationMs": 114,
+      "peak": 0.086837,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-send-bright-4",
+      "candidate": "soft-glass",
+      "cue": "send",
+      "take": 4,
+      "tone": "bright",
+      "file": "soft-glass-send-bright-4.wav",
+      "durationMs": 115,
+      "peak": 0.08282,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-warm-0",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 0,
+      "tone": "warm",
+      "file": "soft-glass-receive-warm-0.wav",
+      "durationMs": 121,
+      "peak": 0.070398,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-warm-1",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 1,
+      "tone": "warm",
+      "file": "soft-glass-receive-warm-1.wav",
+      "durationMs": 123,
+      "peak": 0.070319,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-warm-2",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 2,
+      "tone": "warm",
+      "file": "soft-glass-receive-warm-2.wav",
+      "durationMs": 124,
+      "peak": 0.071013,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-warm-3",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 3,
+      "tone": "warm",
+      "file": "soft-glass-receive-warm-3.wav",
+      "durationMs": 126,
+      "peak": 0.069511,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-warm-4",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 4,
+      "tone": "warm",
+      "file": "soft-glass-receive-warm-4.wav",
+      "durationMs": 127,
+      "peak": 0.070177,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-balanced-0",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 0,
+      "tone": "balanced",
+      "file": "soft-glass-receive-balanced-0.wav",
+      "durationMs": 121,
+      "peak": 0.077765,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-balanced-1",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 1,
+      "tone": "balanced",
+      "file": "soft-glass-receive-balanced-1.wav",
+      "durationMs": 123,
+      "peak": 0.07974,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-balanced-2",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 2,
+      "tone": "balanced",
+      "file": "soft-glass-receive-balanced-2.wav",
+      "durationMs": 124,
+      "peak": 0.079792,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-balanced-3",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 3,
+      "tone": "balanced",
+      "file": "soft-glass-receive-balanced-3.wav",
+      "durationMs": 126,
+      "peak": 0.079669,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-balanced-4",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 4,
+      "tone": "balanced",
+      "file": "soft-glass-receive-balanced-4.wav",
+      "durationMs": 127,
+      "peak": 0.078483,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-bright-0",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 0,
+      "tone": "bright",
+      "file": "soft-glass-receive-bright-0.wav",
+      "durationMs": 121,
+      "peak": 0.084506,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-bright-1",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 1,
+      "tone": "bright",
+      "file": "soft-glass-receive-bright-1.wav",
+      "durationMs": 123,
+      "peak": 0.083383,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-bright-2",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 2,
+      "tone": "bright",
+      "file": "soft-glass-receive-bright-2.wav",
+      "durationMs": 124,
+      "peak": 0.086971,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-bright-3",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 3,
+      "tone": "bright",
+      "file": "soft-glass-receive-bright-3.wav",
+      "durationMs": 126,
+      "peak": 0.083904,
+      "rms": 0.0195
+    },
+    {
+      "id": "soft-glass-receive-bright-4",
+      "candidate": "soft-glass",
+      "cue": "receive",
+      "take": 4,
+      "tone": "bright",
+      "file": "soft-glass-receive-bright-4.wav",
+      "durationMs": 127,
+      "peak": 0.087506,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-warm-0",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 0,
+      "tone": "warm",
+      "file": "terminal-tick-send-warm-0.wav",
+      "durationMs": 72,
+      "peak": 0.100771,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-warm-1",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 1,
+      "tone": "warm",
+      "file": "terminal-tick-send-warm-1.wav",
+      "durationMs": 74,
+      "peak": 0.108069,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-warm-2",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 2,
+      "tone": "warm",
+      "file": "terminal-tick-send-warm-2.wav",
+      "durationMs": 75,
+      "peak": 0.108207,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-warm-3",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 3,
+      "tone": "warm",
+      "file": "terminal-tick-send-warm-3.wav",
+      "durationMs": 77,
+      "peak": 0.098626,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-warm-4",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 4,
+      "tone": "warm",
+      "file": "terminal-tick-send-warm-4.wav",
+      "durationMs": 78,
+      "peak": 0.108848,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-balanced-0",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 0,
+      "tone": "balanced",
+      "file": "terminal-tick-send-balanced-0.wav",
+      "durationMs": 72,
+      "peak": 0.115787,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-balanced-1",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 1,
+      "tone": "balanced",
+      "file": "terminal-tick-send-balanced-1.wav",
+      "durationMs": 74,
+      "peak": 0.11307,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-balanced-2",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 2,
+      "tone": "balanced",
+      "file": "terminal-tick-send-balanced-2.wav",
+      "durationMs": 75,
+      "peak": 0.12595,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-balanced-3",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 3,
+      "tone": "balanced",
+      "file": "terminal-tick-send-balanced-3.wav",
+      "durationMs": 77,
+      "peak": 0.121686,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-balanced-4",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 4,
+      "tone": "balanced",
+      "file": "terminal-tick-send-balanced-4.wav",
+      "durationMs": 78,
+      "peak": 0.122053,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-bright-0",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 0,
+      "tone": "bright",
+      "file": "terminal-tick-send-bright-0.wav",
+      "durationMs": 72,
+      "peak": 0.109671,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-bright-1",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 1,
+      "tone": "bright",
+      "file": "terminal-tick-send-bright-1.wav",
+      "durationMs": 74,
+      "peak": 0.128961,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-bright-2",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 2,
+      "tone": "bright",
+      "file": "terminal-tick-send-bright-2.wav",
+      "durationMs": 75,
+      "peak": 0.127198,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-bright-3",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 3,
+      "tone": "bright",
+      "file": "terminal-tick-send-bright-3.wav",
+      "durationMs": 77,
+      "peak": 0.125523,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-send-bright-4",
+      "candidate": "terminal-tick",
+      "cue": "send",
+      "take": 4,
+      "tone": "bright",
+      "file": "terminal-tick-send-bright-4.wav",
+      "durationMs": 78,
+      "peak": 0.124023,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-warm-0",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 0,
+      "tone": "warm",
+      "file": "terminal-tick-receive-warm-0.wav",
+      "durationMs": 84,
+      "peak": 0.118142,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-warm-1",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 1,
+      "tone": "warm",
+      "file": "terminal-tick-receive-warm-1.wav",
+      "durationMs": 86,
+      "peak": 0.115294,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-warm-2",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 2,
+      "tone": "warm",
+      "file": "terminal-tick-receive-warm-2.wav",
+      "durationMs": 87,
+      "peak": 0.109936,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-warm-3",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 3,
+      "tone": "warm",
+      "file": "terminal-tick-receive-warm-3.wav",
+      "durationMs": 89,
+      "peak": 0.129425,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-warm-4",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 4,
+      "tone": "warm",
+      "file": "terminal-tick-receive-warm-4.wav",
+      "durationMs": 90,
+      "peak": 0.105796,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-balanced-0",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 0,
+      "tone": "balanced",
+      "file": "terminal-tick-receive-balanced-0.wav",
+      "durationMs": 84,
+      "peak": 0.12343,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-balanced-1",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 1,
+      "tone": "balanced",
+      "file": "terminal-tick-receive-balanced-1.wav",
+      "durationMs": 86,
+      "peak": 0.146392,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-balanced-2",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 2,
+      "tone": "balanced",
+      "file": "terminal-tick-receive-balanced-2.wav",
+      "durationMs": 87,
+      "peak": 0.131116,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-balanced-3",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 3,
+      "tone": "balanced",
+      "file": "terminal-tick-receive-balanced-3.wav",
+      "durationMs": 89,
+      "peak": 0.12354,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-balanced-4",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 4,
+      "tone": "balanced",
+      "file": "terminal-tick-receive-balanced-4.wav",
+      "durationMs": 90,
+      "peak": 0.120896,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-bright-0",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 0,
+      "tone": "bright",
+      "file": "terminal-tick-receive-bright-0.wav",
+      "durationMs": 84,
+      "peak": 0.143256,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-bright-1",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 1,
+      "tone": "bright",
+      "file": "terminal-tick-receive-bright-1.wav",
+      "durationMs": 86,
+      "peak": 0.141183,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-bright-2",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 2,
+      "tone": "bright",
+      "file": "terminal-tick-receive-bright-2.wav",
+      "durationMs": 87,
+      "peak": 0.12527,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-bright-3",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 3,
+      "tone": "bright",
+      "file": "terminal-tick-receive-bright-3.wav",
+      "durationMs": 89,
+      "peak": 0.122909,
+      "rms": 0.0195
+    },
+    {
+      "id": "terminal-tick-receive-bright-4",
+      "candidate": "terminal-tick",
+      "cue": "receive",
+      "take": 4,
+      "tone": "bright",
+      "file": "terminal-tick-receive-bright-4.wav",
+      "durationMs": 90,
+      "peak": 0.139974,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-warm-0",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 0,
+      "tone": "warm",
+      "file": "arcade-pluck-send-warm-0.wav",
+      "durationMs": 112,
+      "peak": 0.07288,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-warm-1",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 1,
+      "tone": "warm",
+      "file": "arcade-pluck-send-warm-1.wav",
+      "durationMs": 114,
+      "peak": 0.073284,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-warm-2",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 2,
+      "tone": "warm",
+      "file": "arcade-pluck-send-warm-2.wav",
+      "durationMs": 115,
+      "peak": 0.073696,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-warm-3",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 3,
+      "tone": "warm",
+      "file": "arcade-pluck-send-warm-3.wav",
+      "durationMs": 117,
+      "peak": 0.074106,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-warm-4",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 4,
+      "tone": "warm",
+      "file": "arcade-pluck-send-warm-4.wav",
+      "durationMs": 118,
+      "peak": 0.074482,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-balanced-0",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 0,
+      "tone": "balanced",
+      "file": "arcade-pluck-send-balanced-0.wav",
+      "durationMs": 112,
+      "peak": 0.073645,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-balanced-1",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 1,
+      "tone": "balanced",
+      "file": "arcade-pluck-send-balanced-1.wav",
+      "durationMs": 114,
+      "peak": 0.073843,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-balanced-2",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 2,
+      "tone": "balanced",
+      "file": "arcade-pluck-send-balanced-2.wav",
+      "durationMs": 115,
+      "peak": 0.07396,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-balanced-3",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 3,
+      "tone": "balanced",
+      "file": "arcade-pluck-send-balanced-3.wav",
+      "durationMs": 117,
+      "peak": 0.074061,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-balanced-4",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 4,
+      "tone": "balanced",
+      "file": "arcade-pluck-send-balanced-4.wav",
+      "durationMs": 118,
+      "peak": 0.07439,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-bright-0",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 0,
+      "tone": "bright",
+      "file": "arcade-pluck-send-bright-0.wav",
+      "durationMs": 112,
+      "peak": 0.075195,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-bright-1",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 1,
+      "tone": "bright",
+      "file": "arcade-pluck-send-bright-1.wav",
+      "durationMs": 114,
+      "peak": 0.075057,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-bright-2",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 2,
+      "tone": "bright",
+      "file": "arcade-pluck-send-bright-2.wav",
+      "durationMs": 115,
+      "peak": 0.074992,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-bright-3",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 3,
+      "tone": "bright",
+      "file": "arcade-pluck-send-bright-3.wav",
+      "durationMs": 117,
+      "peak": 0.074956,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-send-bright-4",
+      "candidate": "arcade-pluck",
+      "cue": "send",
+      "take": 4,
+      "tone": "bright",
+      "file": "arcade-pluck-send-bright-4.wav",
+      "durationMs": 118,
+      "peak": 0.076051,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-warm-0",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 0,
+      "tone": "warm",
+      "file": "arcade-pluck-receive-warm-0.wav",
+      "durationMs": 124,
+      "peak": 0.076338,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-warm-1",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 1,
+      "tone": "warm",
+      "file": "arcade-pluck-receive-warm-1.wav",
+      "durationMs": 126,
+      "peak": 0.076969,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-warm-2",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 2,
+      "tone": "warm",
+      "file": "arcade-pluck-receive-warm-2.wav",
+      "durationMs": 127,
+      "peak": 0.077508,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-warm-3",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 3,
+      "tone": "warm",
+      "file": "arcade-pluck-receive-warm-3.wav",
+      "durationMs": 129,
+      "peak": 0.078062,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-warm-4",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 4,
+      "tone": "warm",
+      "file": "arcade-pluck-receive-warm-4.wav",
+      "durationMs": 130,
+      "peak": 0.078632,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-balanced-0",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 0,
+      "tone": "balanced",
+      "file": "arcade-pluck-receive-balanced-0.wav",
+      "durationMs": 124,
+      "peak": 0.075926,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-balanced-1",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 1,
+      "tone": "balanced",
+      "file": "arcade-pluck-receive-balanced-1.wav",
+      "durationMs": 126,
+      "peak": 0.076958,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-balanced-2",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 2,
+      "tone": "balanced",
+      "file": "arcade-pluck-receive-balanced-2.wav",
+      "durationMs": 127,
+      "peak": 0.077841,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-balanced-3",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 3,
+      "tone": "balanced",
+      "file": "arcade-pluck-receive-balanced-3.wav",
+      "durationMs": 129,
+      "peak": 0.078804,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-balanced-4",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 4,
+      "tone": "balanced",
+      "file": "arcade-pluck-receive-balanced-4.wav",
+      "durationMs": 130,
+      "peak": 0.079725,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-bright-0",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 0,
+      "tone": "bright",
+      "file": "arcade-pluck-receive-bright-0.wav",
+      "durationMs": 124,
+      "peak": 0.076804,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-bright-1",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 1,
+      "tone": "bright",
+      "file": "arcade-pluck-receive-bright-1.wav",
+      "durationMs": 126,
+      "peak": 0.077757,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-bright-2",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 2,
+      "tone": "bright",
+      "file": "arcade-pluck-receive-bright-2.wav",
+      "durationMs": 127,
+      "peak": 0.078969,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-bright-3",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 3,
+      "tone": "bright",
+      "file": "arcade-pluck-receive-bright-3.wav",
+      "durationMs": 129,
+      "peak": 0.080271,
+      "rms": 0.0195
+    },
+    {
+      "id": "arcade-pluck-receive-bright-4",
+      "candidate": "arcade-pluck",
+      "cue": "receive",
+      "take": 4,
+      "tone": "bright",
+      "file": "arcade-pluck-receive-bright-4.wav",
+      "durationMs": 130,
+      "peak": 0.081527,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-warm-0",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 0,
+      "tone": "warm",
+      "file": "16bit-synth-send-warm-0.wav",
+      "durationMs": 129,
+      "peak": 0.062603,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-warm-1",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 1,
+      "tone": "warm",
+      "file": "16bit-synth-send-warm-1.wav",
+      "durationMs": 131,
+      "peak": 0.061233,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-warm-2",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 2,
+      "tone": "warm",
+      "file": "16bit-synth-send-warm-2.wav",
+      "durationMs": 132,
+      "peak": 0.061219,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-warm-3",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 3,
+      "tone": "warm",
+      "file": "16bit-synth-send-warm-3.wav",
+      "durationMs": 134,
+      "peak": 0.061568,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-warm-4",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 4,
+      "tone": "warm",
+      "file": "16bit-synth-send-warm-4.wav",
+      "durationMs": 135,
+      "peak": 0.0621,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-balanced-0",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 0,
+      "tone": "balanced",
+      "file": "16bit-synth-send-balanced-0.wav",
+      "durationMs": 129,
+      "peak": 0.061702,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-balanced-1",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 1,
+      "tone": "balanced",
+      "file": "16bit-synth-send-balanced-1.wav",
+      "durationMs": 131,
+      "peak": 0.061553,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-balanced-2",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 2,
+      "tone": "balanced",
+      "file": "16bit-synth-send-balanced-2.wav",
+      "durationMs": 132,
+      "peak": 0.061499,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-balanced-3",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 3,
+      "tone": "balanced",
+      "file": "16bit-synth-send-balanced-3.wav",
+      "durationMs": 134,
+      "peak": 0.061701,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-balanced-4",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 4,
+      "tone": "balanced",
+      "file": "16bit-synth-send-balanced-4.wav",
+      "durationMs": 135,
+      "peak": 0.062276,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-bright-0",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 0,
+      "tone": "bright",
+      "file": "16bit-synth-send-bright-0.wav",
+      "durationMs": 129,
+      "peak": 0.062588,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-bright-1",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 1,
+      "tone": "bright",
+      "file": "16bit-synth-send-bright-1.wav",
+      "durationMs": 131,
+      "peak": 0.062088,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-bright-2",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 2,
+      "tone": "bright",
+      "file": "16bit-synth-send-bright-2.wav",
+      "durationMs": 132,
+      "peak": 0.061751,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-bright-3",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 3,
+      "tone": "bright",
+      "file": "16bit-synth-send-bright-3.wav",
+      "durationMs": 134,
+      "peak": 0.061808,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-send-bright-4",
+      "candidate": "16bit-synth",
+      "cue": "send",
+      "take": 4,
+      "tone": "bright",
+      "file": "16bit-synth-send-bright-4.wav",
+      "durationMs": 135,
+      "peak": 0.062422,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-warm-0",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 0,
+      "tone": "warm",
+      "file": "16bit-synth-receive-warm-0.wav",
+      "durationMs": 140,
+      "peak": 0.067334,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-warm-1",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 1,
+      "tone": "warm",
+      "file": "16bit-synth-receive-warm-1.wav",
+      "durationMs": 140,
+      "peak": 0.065737,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-warm-2",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 2,
+      "tone": "warm",
+      "file": "16bit-synth-receive-warm-2.wav",
+      "durationMs": 140,
+      "peak": 0.065437,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-warm-3",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 3,
+      "tone": "warm",
+      "file": "16bit-synth-receive-warm-3.wav",
+      "durationMs": 140,
+      "peak": 0.065281,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-warm-4",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 4,
+      "tone": "warm",
+      "file": "16bit-synth-receive-warm-4.wav",
+      "durationMs": 140,
+      "peak": 0.065465,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-balanced-0",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 0,
+      "tone": "balanced",
+      "file": "16bit-synth-receive-balanced-0.wav",
+      "durationMs": 140,
+      "peak": 0.067277,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-balanced-1",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 1,
+      "tone": "balanced",
+      "file": "16bit-synth-receive-balanced-1.wav",
+      "durationMs": 140,
+      "peak": 0.066592,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-balanced-2",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 2,
+      "tone": "balanced",
+      "file": "16bit-synth-receive-balanced-2.wav",
+      "durationMs": 140,
+      "peak": 0.065817,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-balanced-3",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 3,
+      "tone": "balanced",
+      "file": "16bit-synth-receive-balanced-3.wav",
+      "durationMs": 140,
+      "peak": 0.06537,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-balanced-4",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 4,
+      "tone": "balanced",
+      "file": "16bit-synth-receive-balanced-4.wav",
+      "durationMs": 140,
+      "peak": 0.065627,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-bright-0",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 0,
+      "tone": "bright",
+      "file": "16bit-synth-receive-bright-0.wav",
+      "durationMs": 140,
+      "peak": 0.068592,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-bright-1",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 1,
+      "tone": "bright",
+      "file": "16bit-synth-receive-bright-1.wav",
+      "durationMs": 140,
+      "peak": 0.067446,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-bright-2",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 2,
+      "tone": "bright",
+      "file": "16bit-synth-receive-bright-2.wav",
+      "durationMs": 140,
+      "peak": 0.066208,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-bright-3",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 3,
+      "tone": "bright",
+      "file": "16bit-synth-receive-bright-3.wav",
+      "durationMs": 140,
+      "peak": 0.065481,
+      "rms": 0.0195
+    },
+    {
+      "id": "16bit-synth-receive-bright-4",
+      "candidate": "16bit-synth",
+      "cue": "receive",
+      "take": 4,
+      "tone": "bright",
+      "file": "16bit-synth-receive-bright-4.wav",
+      "durationMs": 140,
+      "peak": 0.065775,
+      "rms": 0.0195
+    }
+  ]
+}

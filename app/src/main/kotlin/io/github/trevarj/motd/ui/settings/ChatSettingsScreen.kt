@@ -60,6 +60,7 @@ fun ChatSettingsScreen(
     onOpenFriends: () -> Unit = {},
     onOpenFools: () -> Unit = {},
     onOpenDirectConnections: () -> Unit = {},
+    onOpenChatSounds: () -> Unit = {},
     target: SettingsTarget? = null,
     viewModel: ChatSettingsViewModel = hiltViewModel(),
 ) {
@@ -87,6 +88,7 @@ fun ChatSettingsScreen(
         onOpenFriends = onOpenFriends,
         onOpenFools = onOpenFools,
         onOpenDirectConnections = onOpenDirectConnections,
+        onOpenChatSounds = onOpenChatSounds,
         onPresenceMode = viewModel::setPresenceMode,
         onShowRedactedMessages = viewModel::setShowRedactedMessages,
         onChatListSwipeAction = viewModel::setChatListSwipeAction,
@@ -123,6 +125,7 @@ fun ChatSettingsContent(
     onOpenFriends: () -> Unit,
     onOpenFools: () -> Unit,
     onOpenDirectConnections: () -> Unit,
+    onOpenChatSounds: () -> Unit = {},
     onPresenceMode: (PresenceMode) -> Unit,
     onShowRedactedMessages: (Boolean) -> Unit,
     onChatListSwipeAction: (ChatListSwipeAction) -> Unit,
@@ -305,6 +308,13 @@ fun ChatSettingsContent(
                 switchTag = "settings_switch_chat_sounds",
                 requestedTarget = target?.name,
                 targetName = SettingsTarget.CHAT_SOUNDS.name,
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsNavigationRow(
+                title = stringResource(R.string.settings_chat_sounds_configure),
+                summary = stringResource(R.string.settings_chat_sounds_configure_desc),
+                modifier = Modifier.testTag("settings_chat_sounds_configure"),
+                onClick = onOpenChatSounds,
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(

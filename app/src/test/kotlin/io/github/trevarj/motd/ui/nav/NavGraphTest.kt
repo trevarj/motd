@@ -58,6 +58,29 @@ class NavGraphTest {
     }
 
     @Test
+    fun `chat sound overview and cue editor preserve typed back navigation`() {
+        val controller =
+            NavHostController(ApplicationProvider.getApplicationContext<Context>()).apply {
+                setLifecycleOwner(ResumedOwner())
+                setViewModelStore(ViewModelStore())
+                navigatorProvider.addNavigator(ComposeNavigator())
+                graph =
+                    createGraph(startDestination = ChatSettingsRoute()) {
+                        composable<ChatSettingsRoute> {}
+                        composable<ChatSoundSettingsRoute> {}
+                        composable<ChatSoundCueEditorRoute> {}
+                    }
+            }
+
+        controller.navigate(ChatSoundSettingsRoute)
+        assertEquals(ChatSoundSettingsRoute, controller.currentBackStackEntry!!.toRoute<ChatSoundSettingsRoute>())
+        controller.navigate(ChatSoundCueEditorRoute(ChatSoundCue.RECEIVE))
+        assertEquals(ChatSoundCue.RECEIVE, controller.currentBackStackEntry!!.toRoute<ChatSoundCueEditorRoute>().cue)
+        assertTrue(controller.popBackStack())
+        assertEquals(ChatSoundSettingsRoute, controller.currentBackStackEntry!!.toRoute<ChatSoundSettingsRoute>())
+    }
+
+    @Test
     fun `restored image viewer keeps the selected network and exact URL`() {
         fun controller() =
             NavHostController(ApplicationProvider.getApplicationContext<Context>()).apply {

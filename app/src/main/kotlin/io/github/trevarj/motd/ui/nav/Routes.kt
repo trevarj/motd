@@ -139,6 +139,16 @@ enum class NetworkSettingsTarget { CONNECTION, AUTHENTICATION, OBFUSCATION, AVAT
     val target: SettingsTarget? = null,
 )
 
+@Serializable data object ChatSoundSettingsRoute
+
+@Keep
+@Serializable
+enum class ChatSoundCue { SEND, RECEIVE }
+
+@Serializable data class ChatSoundCueEditorRoute(
+    val cue: ChatSoundCue,
+)
+
 @Serializable data object DirectConnectionsRoute
 
 @Serializable data class DeliverySettingsRoute(

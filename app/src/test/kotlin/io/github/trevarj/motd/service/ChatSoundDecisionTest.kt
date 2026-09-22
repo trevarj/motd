@@ -1,108 +1,103 @@
 package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.prefs.ChatSoundConfig
+import io.github.trevarj.motd.data.prefs.ChatSoundMelody
+import io.github.trevarj.motd.data.prefs.ChatSoundVariation
+import io.github.trevarj.motd.data.prefs.ChatSoundVoice
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.pow
 
 class ChatSoundDecisionTest {
     @Test
-    fun `receive melody follows the configured interval sequence and wraps`() {
-        val melody = ChatReceiveMelody()
-        val rates =
-            listOf(
-                1f,
-                2.0.pow(2.0 / 12.0).toFloat(),
-                2.0.pow(4.0 / 12.0).toFloat(),
-                2.0.pow(7.0 / 12.0).toFloat(),
-                1f,
-            )
+    fun `navigation or recording during preference loading suppresses playback`() =
+        runTest {
+            for (changeForeground in listOf(true, false)) {
+                val readStarted = CompletableDeferred<Unit>()
+                val loaded = CompletableDeferred<ChatSoundConfig>()
+                var foreground: Long? = 7
+                var audioActive = false
+                var played = false
+                val job =
+                    launch {
+                        dispatchConfiguredChatSound(
+                            config =
+                                flow {
+                                    readStarted.complete(Unit)
+                                    emit(loaded.await())
+                                },
+                            stillEligible = { foreground == 7L && !audioActive },
+                            play = { played = true },
+                        )
+                    }
+                readStarted.await()
+                if (changeForeground) foreground = null else audioActive = true
+                loaded.complete(ChatSoundConfig())
+                job.join()
+                assertFalse(played)
+            }
+        }
 
-        rates.forEachIndexed { index, expected ->
-            assertEquals(
-                expected,
-                melody.playbackRate(ChatSoundCue.RECEIVE, bufferId = 7, nowNanos = index.toLong()),
-                0f,
-            )
+    @Test
+    fun `conversation resets partial phrases and preserves receive burst across sends`() {
+        val conversation = ChatSoundConversation()
+        val config = ChatSoundConfig()
+
+        fun receive(
+            at: Long,
+            buffer: Long = 7,
+        ) = conversation.next(ChatSoundCue.RECEIVE, buffer, at, config)?.semitones
+        assertEquals(0, receive(0))
+        assertEquals(4, receive(100))
+        assertEquals(0, conversation.next(ChatSoundCue.SEND, 8, 200, config)?.semitones)
+        assertEquals(7, receive(300))
+        assertEquals(0, receive(2_000_000_300))
+        assertEquals(4, receive(2_000_000_400))
+        assertEquals(0, receive(2_000_000_500, buffer = 8))
+        listOf(4, 7, 2, 0).forEachIndexed { index, note -> assertEquals(note, receive(2_000_000_600L + index, buffer = 8)) }
+        assertNull(receive(2_000_000_700, buffer = 8))
+        assertNull(receive(4_000_000_699, buffer = 8))
+        assertEquals(0, receive(6_000_000_699, buffer = 8))
+        assertEquals(0, conversation.next(ChatSoundCue.RECEIVE, 8, 6_000_000_700, config.copy(receiveMelody = ChatSoundMelody.VICTORY))?.semitones)
+    }
+
+    @Test
+    fun `five approved melodies preserve their configured phrases`() {
+        val sequence = ChatSoundSequence()
+        ChatSoundMelody.entries.forEach { melody ->
+            val config = ChatSoundConfig(receive = ChatSoundConfig().receive.copy(voice = ChatSoundVoice.SYNTH_16_BIT), receiveMelody = melody)
+            val actual = (0 until 5).map { sequence.next(ChatSoundCue.RECEIVE, config).semitones }
+            assertEquals(ChatSoundSequence.motifs.getValue(ChatSoundVoice.SYNTH_16_BIT to melody).toList(), actual)
+            sequence.reset()
         }
     }
 
     @Test
-    fun `receive melody resets after silence or an eligible buffer change`() {
-        val melody = ChatReceiveMelody()
-        assertEquals(1f, melody.playbackRate(ChatSoundCue.RECEIVE, 7, nowNanos = 0), 0f)
-        assertEquals(
-            2.0.pow(2.0 / 12.0).toFloat(),
-            melody.playbackRate(ChatSoundCue.RECEIVE, 7, nowNanos = 1),
-            0f,
-        )
-        assertEquals(1f, melody.playbackRate(ChatSoundCue.RECEIVE, 7, nowNanos = 2_000_000_001L), 0f)
-        assertEquals(1f, melody.playbackRate(ChatSoundCue.RECEIVE, 8, nowNanos = 2_000_000_002L), 0f)
+    fun `natural variants use all takes without adjacent repeats`() {
+        val sequence = ChatSoundSequence { 0.37 }
+        val config = ChatSoundConfig(variation = ChatSoundVariation.NATURAL)
+        val takes = (0 until 10).map { sequence.next(ChatSoundCue.RECEIVE, config).take }
+        assertEquals((0..4).toSet(), takes.take(5).toSet())
+        assertTrue(takes.zipWithNext().none { (left, right) -> left == right })
     }
 
     @Test
-    fun `send cue neither advances nor resets the receive melody`() {
-        val melody = ChatReceiveMelody()
-        assertEquals(1f, melody.playbackRate(ChatSoundCue.RECEIVE, 7, nowNanos = 0), 0f)
-        assertEquals(1f, melody.playbackRate(ChatSoundCue.SEND, 8, nowNanos = 1_000_000_000L), 0f)
-        assertEquals(
-            2.0.pow(2.0 / 12.0).toFloat(),
-            melody.playbackRate(ChatSoundCue.RECEIVE, 7, nowNanos = 1_500_000_000L),
-            0f,
-        )
-    }
-
-    @Test
-    fun `sound readiness queues a cue until its sample loads`() {
-        val queue = ChatSoundReadinessQueue()
-
-        assertNull(queue.request(ChatSoundCue.RECEIVE, playbackRate = 1.25f, ready = false))
-
-        assertEquals(
-            PendingChatSoundPlayback(ChatSoundCue.RECEIVE, playbackRate = 1.25f),
-            queue.markLoaded(ChatSoundCue.RECEIVE),
-        )
-        assertNull(queue.markLoaded(ChatSoundCue.RECEIVE))
-    }
-
-    @Test
-    fun `sound readiness keeps the latest queued playback rate`() {
-        val queue = ChatSoundReadinessQueue()
-
-        assertNull(queue.request(ChatSoundCue.RECEIVE, playbackRate = 1f, ready = false))
-        assertNull(queue.request(ChatSoundCue.RECEIVE, playbackRate = 1.5f, ready = false))
-
-        assertEquals(
-            PendingChatSoundPlayback(ChatSoundCue.RECEIVE, playbackRate = 1.5f),
-            queue.markLoaded(ChatSoundCue.RECEIVE),
-        )
-    }
-
-    @Test
-    fun `sound readiness plays ready samples immediately`() {
-        val queue = ChatSoundReadinessQueue()
-
-        assertEquals(
-            PendingChatSoundPlayback(ChatSoundCue.SEND, playbackRate = 1f),
-            queue.request(ChatSoundCue.SEND, playbackRate = 1f, ready = true),
-        )
-        assertNull(queue.markLoaded(ChatSoundCue.SEND))
-    }
-
-    @Test
-    fun `sound readiness drops queued playback after load failure`() {
-        val queue = ChatSoundReadinessQueue()
-
-        assertNull(queue.request(ChatSoundCue.SEND, playbackRate = 1f, ready = false))
-        queue.markLoadFailed(ChatSoundCue.SEND)
-
-        assertNull(queue.markLoaded(ChatSoundCue.SEND))
+    fun `receive gate caps a burst while suppressed arrivals extend its reset window`() {
+        val gate = ChatReceiveBurstGate()
+        assertTrue((0 until 5).all { gate.accept(7, it.toLong()).accepted })
+        assertFalse(gate.accept(7, 6).accepted)
+        assertFalse(gate.accept(7, 1_999_999_999).accepted)
+        assertTrue(gate.accept(7, 4_000_000_000).accepted)
     }
 
     @Test

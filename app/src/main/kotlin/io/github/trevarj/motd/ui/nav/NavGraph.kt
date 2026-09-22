@@ -57,6 +57,8 @@ import io.github.trevarj.motd.ui.search.SearchScreen
 import io.github.trevarj.motd.ui.settings.AppearanceSettingsScreen
 import io.github.trevarj.motd.ui.settings.BackupRestoreScreen
 import io.github.trevarj.motd.ui.settings.ChatSettingsScreen
+import io.github.trevarj.motd.ui.settings.ChatSoundCueEditorScreen
+import io.github.trevarj.motd.ui.settings.ChatSoundSettingsScreen
 import io.github.trevarj.motd.ui.settings.DeliverySettingsScreen
 import io.github.trevarj.motd.ui.settings.DirectConnectionsScreen
 import io.github.trevarj.motd.ui.settings.HistorySettingsScreen
@@ -404,6 +406,19 @@ fun MotdNavGraph(
                 onOpenFriends = { navController.navigate(FriendsRoute) },
                 onOpenFools = { navController.navigate(FoolsRoute) },
                 onOpenDirectConnections = { navController.navigate(DirectConnectionsRoute) },
+                onOpenChatSounds = { navController.navigate(ChatSoundSettingsRoute) },
+            )
+        }
+        composable<ChatSoundSettingsRoute> {
+            ChatSoundSettingsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenCue = { cue -> navController.navigate(ChatSoundCueEditorRoute(cue)) },
+            )
+        }
+        composable<ChatSoundCueEditorRoute> { entry ->
+            ChatSoundCueEditorScreen(
+                cue = entry.toRoute<ChatSoundCueEditorRoute>().cue,
+                onBack = { navController.popBackStack() },
             )
         }
         composable<DirectConnectionsRoute> {
@@ -780,6 +795,7 @@ private fun NavHostController.openSettingsResult(destination: SettingsSearchDest
                 SettingsSearchPage.ROOT -> navigate(SettingsRoute(target))
                 SettingsSearchPage.APPEARANCE -> navigate(AppearanceSettingsRoute(target))
                 SettingsSearchPage.CHAT -> navigate(ChatSettingsRoute(target))
+                SettingsSearchPage.CHAT_SOUNDS -> navigate(ChatSoundSettingsRoute)
                 SettingsSearchPage.DELIVERY -> navigate(DeliverySettingsRoute(target))
                 SettingsSearchPage.NOTIFICATIONS -> navigate(NotificationSettingsRoute(target))
                 SettingsSearchPage.HISTORY -> navigate(HistorySettingsRoute(target))

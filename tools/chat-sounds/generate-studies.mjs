@@ -5,8 +5,15 @@ import process from "node:process";
 import {CANDIDATES, SAMPLE_RATE, TONES, synthesize} from "./studies.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
-const outputDirectory = path.join(root, "build/sound-previews");
-const check = process.argv.includes("--check");
+const flags = new Set(process.argv.slice(2));
+if ([...flags].some(flag => !["--check", "--android"].includes(flag))) {
+  throw new Error("Usage: generate-studies.mjs [--android] [--check]");
+}
+// Both destinations use identical synthesis and PCM encoding so auditions match the app.
+const android = flags.has("--android");
+const outputDirectory = path.join(root, android ? "app/src/main/assets/chat-sounds" : "build/sound-previews");
+const manifestName = android ? "catalog.json" : "manifest.json";
+const check = flags.has("--check");
 
 function wav(samples) {
   const pcm = Buffer.alloc(samples.length * 2);
@@ -57,11 +64,11 @@ for (const candidate of CANDIDATES) {
   }
 }
 const manifest = Buffer.from(`${JSON.stringify({version: 1, candidates: CANDIDATES, assets}, null, 2)}\n`);
-files.set("manifest.json", manifest);
+files.set(manifestName, manifest);
 
 let stale = false;
 if (!check) {
-  const previousManifestPath = path.join(outputDirectory, "manifest.json");
+  const previousManifestPath = path.join(outputDirectory, manifestName);
   try {
     const previous = JSON.parse(fs.readFileSync(previousManifestPath, "utf8"));
     const activeCandidates = new Set(CANDIDATES.map(({id}) => id));

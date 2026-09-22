@@ -9,7 +9,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 
-enum class SettingsSearchPage { ROOT, APPEARANCE, CHAT, DELIVERY, NOTIFICATIONS, HISTORY, UPLOADS, NETWORKS, BACKUP, LABS, AI_LABS, ABOUT }
+enum class SettingsSearchPage { ROOT, APPEARANCE, CHAT, CHAT_SOUNDS, DELIVERY, NOTIFICATIONS, HISTORY, UPLOADS, NETWORKS, BACKUP, LABS, AI_LABS, ABOUT }
 
 sealed interface SettingsSearchDestination {
     data class Page(
@@ -173,7 +173,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_auto_away, R.string.settings_auto_away_desc, "background idle", SettingsSearchPage.CHAT, SettingsTarget.AUTO_AWAY),
         spec(R.string.settings_auto_away_delay, R.string.settings_auto_away_desc, "minutes idle", SettingsSearchPage.CHAT, SettingsTarget.AUTO_AWAY_DELAY),
         spec(R.string.settings_auto_away_message_title, R.string.settings_auto_away_message_hint, "status", SettingsSearchPage.CHAT, SettingsTarget.AWAY_MESSAGE),
-        spec(R.string.settings_chat_sounds, R.string.settings_chat_sounds_desc, "audio", SettingsSearchPage.CHAT, SettingsTarget.CHAT_SOUNDS),
+        spec(R.string.settings_chat_sounds, R.string.settings_chat_sounds_configure_desc, "audio send receive melody volume pitch tone variation soft glass terminal tick arcade pluck 16-bit synth", SettingsSearchPage.CHAT_SOUNDS, SettingsTarget.CHAT_SOUNDS),
         spec(R.string.settings_composer_emoji, R.string.settings_composer_emoji_desc, "input", SettingsSearchPage.CHAT, SettingsTarget.COMPOSER_EMOJI),
         spec(R.string.settings_composer_formatting_tools, R.string.settings_composer_formatting_tools_desc, "bold italic input", SettingsSearchPage.CHAT, SettingsTarget.COMPOSER_FORMATTING),
         spec(R.string.settings_reply_prefix, R.string.settings_reply_prefix_desc, "channel", SettingsSearchPage.CHAT, SettingsTarget.REPLY_PREFIX),

@@ -367,6 +367,10 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testInstrumentationRunnerArguments["clearPackageData"] = "true"
     }
+    androidResources {
+        // SoundPool opens configured cues through AssetManager.openFd, which requires stored WAVs.
+        noCompress += "wav"
+    }
 
     // Signing only when CI secrets are present; local/debug builds never fail on this.
     val keystorePath = System.getenv("MOTD_KEYSTORE_PATH")

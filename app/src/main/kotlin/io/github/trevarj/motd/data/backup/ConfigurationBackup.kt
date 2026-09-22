@@ -19,6 +19,8 @@ import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
+import io.github.trevarj.motd.data.prefs.ChatSoundConfig
+import io.github.trevarj.motd.data.prefs.ChatSoundPrefs
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -122,6 +124,7 @@ class ConfigurationBackupRepositoryImpl
         private val settingsRepository: SettingsRepository,
         private val appearancePrefs: AppearancePrefs,
         private val contentPreviewPrefs: ContentPreviewPrefs,
+        private val chatSoundPrefs: ChatSoundPrefs,
         private val replyPrefs: ReplyPrefs,
         private val attachmentPrefs: AttachmentPrefs,
         private val voicePrefs: VoicePrefs,
@@ -322,6 +325,7 @@ class ConfigurationBackupRepositoryImpl
                         general = settingsRepository.settings.first(),
                         appearance = appearancePrefs.config.first(),
                         contentPreviews = contentPreviewPrefs.config.first(),
+                        chatSounds = chatSoundPrefs.config.first(),
                         replies = replyPrefs.config.first(),
                         attachments =
                             attachmentPrefs.config.first().let { config ->
@@ -550,6 +554,7 @@ class ConfigurationBackupRepositoryImpl
                 contentPreviewPrefs.setAutoLoadOnUnmetered(it.autoLoadOnUnmetered)
                 contentPreviewPrefs.setAutoLoadOnMetered(it.autoLoadOnMetered)
             }
+            settings.chatSounds?.let { chatSoundPrefs.replace(it) }
             settings.replies?.let { replyPrefs.setVisibleChannelPrefix(it.visibleChannelPrefix) }
             settings.attachments?.let { imported ->
                 val resolved =
@@ -729,6 +734,7 @@ private data class PortableSettings(
     val general: Settings? = null,
     val appearance: AppearanceConfig? = null,
     val contentPreviews: ContentPreviewConfig? = null,
+    val chatSounds: ChatSoundConfig? = null,
     val replies: ReplyConfig? = null,
     val attachments: PasteBackendConfig? = null,
     val voice: VoiceConfig? = null,
@@ -741,6 +747,7 @@ private data class PortableSettings(
             if (general != null) add("general")
             if (appearance != null) add("appearance")
             if (contentPreviews != null) add("content previews")
+            if (chatSounds != null) add("chat sounds")
             if (replies != null) add("replies")
             if (attachments != null) add("uploads")
             if (voice != null) add("voice")
