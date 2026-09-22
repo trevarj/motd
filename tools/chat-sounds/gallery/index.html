@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MOTD · Sound studies</title>
+  <link rel="stylesheet" href="/sounds/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div><p class="eyebrow">MOTD / Sound studies <span>02</span></p><h1>A little more character.</h1><p class="lede">Three favorites. One new console voice. A melody in every conversation.</p></div>
+      <a class="nav-link" href="/">Wallpaper gallery ↗</a>
+    </header>
+    <div id="notice" role="status" hidden></div>
+    <section aria-labelledby="collection-title" class="collection">
+      <div class="section-heading"><h2 id="collection-title">The collection</h2><span>Original sounds · complementary send + receive</span></div>
+      <div id="candidates" class="candidate-grid" aria-busy="true"></div>
+    </section>
+    <section class="reference" aria-labelledby="reference-title">
+      <div><h2 id="reference-title">The current sound</h2><p>Your comparison point, at a matching preview level.</p></div>
+      <div class="button-row"><button type="button" data-reference="send" disabled>Send</button><button type="button" data-reference="receive" disabled>Receive</button><button type="button" data-reference="conversation" disabled>Conversation</button><button type="button" id="use-reference" disabled>Use this pair</button></div>
+    </section>
+    <section class="workbench" aria-label="Sound workbench">
+      <div class="controls panel">
+        <div class="section-heading"><h2>Your mix</h2><button class="text-button" type="button" id="reset">Reset</button></div>
+        <p class="helper">Choose a pair above, or mix sounds from different families.</p>
+        <div class="cue-controls" id="cue-controls"></div>
+        <label class="slider-label" for="master">Master volume <output id="master-output">70%</output></label>
+        <input type="range" id="master" min="0" max="100" step="1" value="70">
+        <label for="variation">Variation</label>
+        <select id="variation"><option value="musical">Musical · five-note receive phrases</option><option value="natural">Natural · five subtle takes</option><option value="fixed">Fixed · the same cue every time</option></select>
+        <p class="helper" id="variation-description">Five-note major-key phrases start and resolve on the home note.</p>
+        <button type="button" id="copy-settings">Copy settings</button>
+        <textarea id="settings-copy" aria-label="Settings to copy" readonly hidden></textarea>
+      </div>
+      <div class="listening panel">
+        <div class="section-heading"><h2>Listen in context</h2><span class="live-state" id="playback-state" role="status">Ready</span></div>
+        <p class="helper">Hear your mix in a conversation, then put the five-cue limit to the test.</p>
+        <div class="button-row transport"><button type="button" data-play="send" disabled>Send</button><button type="button" data-play="receive" disabled>Receive</button><button type="button" data-play="melody" disabled>Melody</button><button type="button" data-play="conversation" disabled>Conversation</button><button type="button" data-play="burst" disabled>Rapid burst</button><button type="button" id="stop" class="stop">Stop</button></div>
+        <p class="cap-note">First five incoming messages sound. Two seconds without an incoming message resets the limit. Sends always keep their feedback.</p>
+        <div class="chat-log" id="chat-log" aria-label="Simulated conversation" role="log" aria-live="polite"><p class="empty">Press a preview button to listen.<br>Nothing plays automatically.</p></div>
+        <div class="stats"><span id="played-count">0 sounded</span><span id="suppressed-count">0 capped</span></div>
+      </div>
+    </section>
+    <footer>Listening studies · Android sound choices will follow this review. Pitch also changes cue length.</footer>
+  </main>
+  <script type="module" src="/sounds/app.mjs"></script>
+</body>
+</html>

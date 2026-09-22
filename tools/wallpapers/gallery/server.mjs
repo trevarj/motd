@@ -8,6 +8,7 @@ import http from "node:http";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { handleSoundRoute } from "../../chat-sounds/gallery/server-routes.mjs";
 
 const galleryDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRoot = path.resolve(galleryDir, "../../..");
@@ -194,6 +195,7 @@ export function createServer(root = defaultRoot) {
       send(response, 400, { "Content-Type": "text/plain; charset=utf-8" }, "Invalid request URL\n", headOnly);
       return;
     }
+    if (handleSoundRoute(root, url.pathname, response, headOnly)) return;
     if (url.pathname === "/api/gallery") {
       send(response, 200, { "Content-Type": "application/json; charset=utf-8" }, `${JSON.stringify(buildGallery(root))}\n`, headOnly);
       return;
@@ -231,6 +233,6 @@ function portFromArgs(args) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = portFromArgs(process.argv.slice(2));
   createServer().listen(port, "127.0.0.1", () => {
-    console.log(`Wallpaper gallery: http://127.0.0.1:${port}`);
+    console.log(`Wallpaper gallery: http://127.0.0.1:${port} · Sound studies: http://127.0.0.1:${port}/sounds`);
   });
 }
