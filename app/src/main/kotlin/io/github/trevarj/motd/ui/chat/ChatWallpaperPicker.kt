@@ -184,7 +184,11 @@ private fun WallpaperCard(
                 .background(MaterialTheme.colorScheme.background)
                 .border(if (selected) 3.dp else 1.dp, border, shape),
         ) {
-            ChatWallpaperBackground(WallpaperSelection(preset, intensity), Modifier.matchParentSize())
+            ChatWallpaperBackground(
+                wallpaper = WallpaperSelection(preset, intensity),
+                modifier = Modifier.matchParentSize(),
+                tilePeriodDp = WALLPAPER_THUMBNAIL_TILE_PERIOD_DP,
+            )
             if (selected) {
                 Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(bottomStart = 10.dp), modifier = Modifier.align(Alignment.TopEnd)) {
                     Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp).padding(2.dp))
@@ -203,12 +207,13 @@ private fun wallpaperLabel(preset: ChatWallpaperPreset): String =
     stringResource(
         when (preset) {
             ChatWallpaperPreset.NONE -> R.string.settings_wallpaper_none
-            ChatWallpaperPreset.CHATTER -> R.string.settings_wallpaper_chatter
-            ChatWallpaperPreset.CHANNELS -> R.string.settings_wallpaper_channels
-            ChatWallpaperPreset.TERMINAL -> R.string.settings_wallpaper_terminal
-            ChatWallpaperPreset.RELAY -> R.string.settings_wallpaper_relay
-            ChatWallpaperPreset.SIGNALS -> R.string.settings_wallpaper_signals
-            ChatWallpaperPreset.PIXELS -> R.string.settings_wallpaper_pixels
+            ChatWallpaperPreset.MOTD -> R.string.settings_wallpaper_motd
+            ChatWallpaperPreset.DEEP_SPACE -> R.string.settings_wallpaper_deep_space
+            ChatWallpaperPreset.RETRO_GAMING -> R.string.settings_wallpaper_retro_gaming
+            ChatWallpaperPreset.RADIO_CLUB -> R.string.settings_wallpaper_radio_club
+            ChatWallpaperPreset.INTERNET_ODDITIES -> R.string.settings_wallpaper_internet_oddities
+            ChatWallpaperPreset.RETRO_CHAT -> R.string.settings_wallpaper_retro_chat
+            ChatWallpaperPreset.MEMES -> R.string.settings_wallpaper_memes
         },
     )
 
@@ -216,10 +221,11 @@ private fun wallpaperLabel(preset: ChatWallpaperPreset): String =
 private fun wallpaperDescription(preset: ChatWallpaperPreset): String? =
     when (preset) {
         ChatWallpaperPreset.NONE -> null
-        ChatWallpaperPreset.CHATTER -> stringResource(R.string.settings_wallpaper_chatter_desc)
-        ChatWallpaperPreset.CHANNELS -> stringResource(R.string.settings_wallpaper_channels_desc)
-        ChatWallpaperPreset.TERMINAL -> stringResource(R.string.settings_wallpaper_terminal_desc)
-        ChatWallpaperPreset.RELAY -> stringResource(R.string.settings_wallpaper_relay_desc)
-        ChatWallpaperPreset.SIGNALS -> stringResource(R.string.settings_wallpaper_signals_desc)
-        ChatWallpaperPreset.PIXELS -> stringResource(R.string.settings_wallpaper_pixels_desc)
+        ChatWallpaperPreset.MOTD -> stringResource(R.string.settings_wallpaper_motd_desc)
+        ChatWallpaperPreset.DEEP_SPACE -> stringResource(R.string.settings_wallpaper_deep_space_desc)
+        ChatWallpaperPreset.RETRO_GAMING -> stringResource(R.string.settings_wallpaper_retro_gaming_desc)
+        ChatWallpaperPreset.RADIO_CLUB -> stringResource(R.string.settings_wallpaper_radio_club_desc)
+        ChatWallpaperPreset.INTERNET_ODDITIES -> stringResource(R.string.settings_wallpaper_internet_oddities_desc)
+        ChatWallpaperPreset.RETRO_CHAT -> stringResource(R.string.settings_wallpaper_retro_chat_desc)
+        ChatWallpaperPreset.MEMES -> stringResource(R.string.settings_wallpaper_memes_desc)
     }

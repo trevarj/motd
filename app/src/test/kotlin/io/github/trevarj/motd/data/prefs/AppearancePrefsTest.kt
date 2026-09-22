@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -14,12 +16,13 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class AppearancePrefsTest {
     private val prefs: AppearancePrefs = AppearancePrefsImpl(ApplicationProvider.getApplicationContext<Context>())
+    private val jsonWithDefaults = Json { encodeDefaults = true }
 
-    @Test fun defaults_areSystemAndChatterAtEighty() {
+    @Test fun defaults_areSystemAndMotdAtEighty() {
         assertEquals(
             AppearanceConfig(
                 ColorThemePreset.SYSTEM,
-                WallpaperSelection(ChatWallpaperPreset.CHATTER, 80),
+                WallpaperSelection(ChatWallpaperPreset.MOTD, 80),
                 100,
                 100,
             ),
@@ -92,11 +95,11 @@ class AppearancePrefsTest {
             prefs.setTheme(ColorThemePreset.KANAGAWA_WAVE)
             prefs.setTrueBlack(true)
             prefs.setFollowSystem(true)
-            prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RELAY, 73))
+            prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.INTERNET_ODDITIES, 73))
             assertEquals(ColorThemePreset.KANAGAWA_WAVE, prefs.config.first().theme)
             assertEquals(true, prefs.config.first().trueBlack)
             assertEquals(true, prefs.config.first().followSystem)
-            assertEquals(WallpaperSelection(ChatWallpaperPreset.RELAY, 73), prefs.config.first().wallpaper)
+            assertEquals(WallpaperSelection(ChatWallpaperPreset.INTERNET_ODDITIES, 73), prefs.config.first().wallpaper)
         }
 
     @Test fun followSystem_defaultsFalseAndRoundTrips() =
@@ -135,11 +138,41 @@ class AppearancePrefsTest {
 
     @Test fun wallpaperIntensity_isClampedAtomically() =
         runTest {
-            prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.SIGNALS, 500))
-            assertEquals(WallpaperSelection(ChatWallpaperPreset.SIGNALS, 100), prefs.config.first().wallpaper)
-            prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.PIXELS, -9))
-            assertEquals(WallpaperSelection(ChatWallpaperPreset.PIXELS, 0), prefs.config.first().wallpaper)
+            prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RADIO_CLUB, 500))
+            assertEquals(WallpaperSelection(ChatWallpaperPreset.RADIO_CLUB, 100), prefs.config.first().wallpaper)
+            prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_GAMING, -9))
+            assertEquals(WallpaperSelection(ChatWallpaperPreset.RETRO_GAMING, 0), prefs.config.first().wallpaper)
         }
+
+    @Test fun storedWallpaperAliasesAndUnknownsResolveToTheNewCollection() {
+        val expected =
+            mapOf(
+                "MOTD" to ChatWallpaperPreset.MOTD,
+                "CHATTER" to ChatWallpaperPreset.RETRO_CHAT,
+                "CHANNELS" to ChatWallpaperPreset.RETRO_CHAT,
+                "TERMINAL" to ChatWallpaperPreset.MOTD,
+                "NIGHT_SHIFT" to ChatWallpaperPreset.MOTD,
+                "RELAY" to ChatWallpaperPreset.INTERNET_ODDITIES,
+                "SIGNALS" to ChatWallpaperPreset.RADIO_CLUB,
+                "PIXELS" to ChatWallpaperPreset.RETRO_GAMING,
+                "NONE" to ChatWallpaperPreset.NONE,
+                "MEMES" to ChatWallpaperPreset.MEMES,
+            )
+        expected.forEach { (stored, preset) -> assertEquals(stored, preset, chatWallpaperPresetFromStored(stored)) }
+        assertEquals(ChatWallpaperPreset.MOTD, chatWallpaperPresetFromStored(null))
+        assertEquals(ChatWallpaperPreset.MOTD, chatWallpaperPresetFromStored("future-wallpaper"))
+    }
+
+    @Test fun wallpaperJsonDecodesLegacyNamesAndWritesCurrentNames() {
+        assertEquals(
+            WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73),
+            Json.decodeFromString<WallpaperSelection>("""{"preset":"CHATTER","intensity":73}"""),
+        )
+        assertEquals(
+            """{"preset":"RETRO_CHAT","intensity":73}""",
+            jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73)),
+        )
+    }
 
     @Test fun fontScales_areIndependentRoundedAndClamped() =
         runTest {

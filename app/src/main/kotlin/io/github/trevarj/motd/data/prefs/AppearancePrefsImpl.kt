@@ -64,8 +64,7 @@ class AppearancePrefsImpl
                     wallpaper =
                         WallpaperSelection(
                             preset =
-                                prefs[WALLPAPER]?.let { runCatching { ChatWallpaperPreset.valueOf(it) }.getOrNull() }
-                                    ?: ChatWallpaperPreset.CHATTER,
+                                chatWallpaperPresetFromStored(prefs[WALLPAPER]),
                             intensity = (prefs[WALLPAPER_INTENSITY] ?: DEFAULT_WALLPAPER_INTENSITY).coerceIn(0, 100),
                         ),
                     uiFontScalePercent =

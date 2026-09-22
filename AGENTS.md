@@ -17,6 +17,10 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
 
 ## Architecture and implementation rules
 
+- Chat wallpaper artwork must tile seamlessly across both axes and corners.
+  Wrap complete motifs and verify repeated proofs; transparent border padding
+  or cropping alone does not satisfy this requirement. Preserve the approved
+  dense mix of medium doodles, small motifs, and tiny accents when repairing seams.
 - `:irc` is pure JVM: no Android imports. Keep parsing, protocol state, and
   transport behavior testable with fake transports.
 - `EventProcessor` is the sole writer of IRC-derived state to Room. UI reads

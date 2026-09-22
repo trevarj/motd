@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Wallpaper studies</title>
+    <link rel="stylesheet" href="/gallery.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">MOTD / Visual studies</p>
+          <h1>Chat wallpapers</h1>
+          <p class="lede">Review dense raster patterns at their actual chat scale.</p>
+        </div>
+        <button class="button refresh" type="button" id="refresh">Refresh artwork</button>
+      </header>
+
+      <div class="notice" id="notice" hidden role="status"></div>
+      <section class="themes" aria-labelledby="themes-heading">
+        <div class="section-heading"><h2 id="themes-heading">Collection</h2><p>Seven directions, one shared visual language.</p></div>
+        <div class="theme-grid" id="theme-grid" aria-live="polite"></div>
+      </section>
+
+      <section class="inspector" aria-labelledby="inspector-heading">
+        <div class="inspector-title">
+          <div class="inspector-copy">
+            <p class="eyebrow">Inspector</p>
+            <h2 id="inspector-heading">Select a study</h2>
+            <p id="selection-detail">Choose a theme card to inspect its artwork.</p>
+            <p class="image-metadata" id="image-metadata" hidden></p>
+          </div>
+          <label class="variant-control" for="variant">Variant<select id="variant" disabled><option>No artwork available</option></select></label>
+        </div>
+        <div class="tabs" role="tablist" aria-label="Wallpaper preview mode">
+          <button type="button" role="tab" aria-selected="true" aria-controls="panel-original" id="tab-original" data-tab="original" tabindex="0">Original</button>
+          <button type="button" role="tab" aria-selected="false" aria-controls="panel-repeat" id="tab-repeat" data-tab="repeat" tabindex="-1">Repeat</button>
+          <button type="button" role="tab" aria-selected="false" aria-controls="panel-chat" id="tab-chat" data-tab="chat" tabindex="-1">Chat</button>
+        </div>
+
+        <div class="panel" id="panel-original" role="tabpanel" aria-labelledby="tab-original">
+          <div class="panel-tools" aria-label="Original artwork zoom">
+            <span class="tool-label">Zoom</span>
+            <button type="button" class="zoom active" data-zoom="fit">Fit</button>
+            <button type="button" class="zoom" data-zoom="1">100%</button>
+            <button type="button" class="zoom" data-zoom="2">200%</button>
+          </div>
+          <div class="original-stage checkerboard" id="original-stage"><img class="original-art" id="original-art" alt="" hidden><p class="empty-state" id="original-empty">Artwork is awaiting its first study.</p></div>
+        </div>
+
+        <div class="panel" id="panel-repeat" role="tabpanel" aria-labelledby="tab-repeat" hidden>
+          <label class="check-control"><input type="checkbox" id="seam-guides"> Show tile boundaries</label>
+          <div class="repeat-stage checkerboard" id="repeat-stage"><div class="repeat-art mask-art" id="repeat-art"></div><div class="seam-guides" aria-hidden="true"></div><p class="empty-state" id="repeat-empty">Artwork is awaiting its first study.</p></div>
+          <p class="caption">Two by two repeat preview. Artwork uses high-contrast ink for seam review.</p>
+        </div>
+
+        <div class="panel" id="panel-chat" role="tabpanel" aria-labelledby="tab-chat" hidden>
+          <div class="chat-controls">
+            <fieldset><legend>Appearance</legend><div class="segmented" id="appearance-controls">
+              <button type="button" data-appearance="light" aria-pressed="true">Light</button>
+              <button type="button" data-appearance="dark" aria-pressed="false">Dark</button>
+              <button type="button" data-appearance="amoled" aria-pressed="false">AMOLED</button>
+            </div></fieldset>
+            <label class="range-control" for="intensity">Pattern intensity <output id="intensity-value" for="intensity">80%</output><input id="intensity" type="range" min="0" max="100" value="80"></label>
+          </div>
+          <div class="phone-frame" id="phone-frame" data-appearance="light">
+            <div class="chat-wallpaper mask-art" id="chat-wallpaper"></div>
+            <div class="chat-content">
+              <header class="chat-header"><span class="presence"></span><div><strong>#general</strong><small>42 people here</small></div></header>
+              <div class="message incoming"><strong>lena</strong><p>Did you see the new wallpaper studies?</p><time>14:07</time></div>
+              <p class="irc-line">*** sam has joined #general</p>
+              <div class="message outgoing"><strong>you</strong><p>Yep. Trying the new wallpaper collection.</p><time>14:08</time></div>
+              <div class="message incoming"><strong>lena</strong><p>I can compare the different themes here.</p><time>14:08</time></div>
+              <div class="composer">Message #general</div>
+            </div>
+          </div>
+          <p class="caption">Mockup: colors approximate the Android theme. Intensity is actual pattern opacity.</p>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/gallery.js"></script>
+  </body>
+</html>

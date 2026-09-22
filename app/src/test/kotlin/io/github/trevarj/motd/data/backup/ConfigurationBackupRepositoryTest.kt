@@ -17,6 +17,7 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefsImpl
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
+import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
@@ -27,6 +28,7 @@ import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.gesture.GestureMenuConfig
@@ -210,10 +212,14 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setMessageSpacing(MessageSpacing.RELAXED)
             appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.SQUARE)
             appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
+            appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73))
             // Only the display name travels; the font binary itself is not part of the backup payload.
             appearancePrefs.setCustomFontName("Iosevka Term.ttf")
 
-            val raw = source.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+            val raw =
+                source
+                    .exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    .replace("\"RETRO_CHAT\"", "\"CHATTER\"")
 
             appearancePrefs.setFontChoice(FontChoice.SYSTEM)
             appearancePrefs.setShowTimestamps(true)
@@ -222,6 +228,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setMessageSpacing(MessageSpacing.DEFAULT)
             appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.ROUNDED)
             appearancePrefs.setLauncherIcon(LauncherIcon.DEFAULT)
+            appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.MEMES, 20))
             appearancePrefs.setCustomFontName("")
 
             source.import(raw, importMode = BackupImportMode.MERGE)
@@ -235,6 +242,12 @@ class ConfigurationBackupRepositoryTest {
             assertEquals(BubbleCornerStyle.SQUARE, config.bubbleCornerStyle)
             assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
             assertEquals("Iosevka Term.ttf", config.customFontName)
+            assertEquals(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73), config.wallpaper)
+            assertTrue(
+                source
+                    .exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 2_000L)
+                    .contains("\"RETRO_CHAT\""),
+            )
         }
 
     @Test

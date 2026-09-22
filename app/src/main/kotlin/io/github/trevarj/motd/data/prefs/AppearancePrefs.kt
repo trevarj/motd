@@ -1,7 +1,13 @@
 package io.github.trevarj.motd.data.prefs
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
 /** App-owned color presets kept separate from the frozen settings contract. */
 enum class ColorThemePreset {
@@ -124,7 +130,44 @@ fun resolveAutoPalette(
     return listOf(themePreset, partner).first { it.isDark == systemDark }
 }
 
-enum class ChatWallpaperPreset { NONE, CHATTER, CHANNELS, TERMINAL, RELAY, SIGNALS, PIXELS }
+@Serializable(with = ChatWallpaperPresetSerializer::class)
+enum class ChatWallpaperPreset {
+    NONE,
+    MOTD,
+    DEEP_SPACE,
+    RETRO_GAMING,
+    RADIO_CLUB,
+    INTERNET_ODDITIES,
+    RETRO_CHAT,
+    MEMES,
+}
+
+/** Decode current wallpaper names plus the seven retired SVG selections from preferences and backups. */
+internal fun chatWallpaperPresetFromStored(saved: String?): ChatWallpaperPreset =
+    when (saved) {
+        "NONE" -> ChatWallpaperPreset.NONE
+        "MOTD", "NIGHT_SHIFT", "TERMINAL" -> ChatWallpaperPreset.MOTD
+        "DEEP_SPACE" -> ChatWallpaperPreset.DEEP_SPACE
+        "RETRO_GAMING", "PIXELS" -> ChatWallpaperPreset.RETRO_GAMING
+        "RADIO_CLUB", "SIGNALS" -> ChatWallpaperPreset.RADIO_CLUB
+        "INTERNET_ODDITIES", "RELAY" -> ChatWallpaperPreset.INTERNET_ODDITIES
+        "RETRO_CHAT", "CHATTER", "CHANNELS" -> ChatWallpaperPreset.RETRO_CHAT
+        "MEMES" -> ChatWallpaperPreset.MEMES
+        null -> ChatWallpaperPreset.MOTD
+        else -> ChatWallpaperPreset.MOTD
+    }
+
+internal object ChatWallpaperPresetSerializer : KSerializer<ChatWallpaperPreset> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("io.github.trevarj.motd.data.prefs.ChatWallpaperPreset", PrimitiveKind.STRING)
+
+    override fun serialize(
+        encoder: Encoder,
+        value: ChatWallpaperPreset,
+    ) = encoder.encodeString(value.name)
+
+    override fun deserialize(decoder: Decoder): ChatWallpaperPreset = chatWallpaperPresetFromStored(decoder.decodeString())
+}
 
 enum class FontChoice { SYSTEM, SANS, SERIF, MONOSPACE, JETBRAINS_MONO, CUSTOM }
 
@@ -141,7 +184,7 @@ enum class LauncherIcon { DEFAULT, MONO, TERMINAL, GRUVBOX, CATPPUCCIN, NORD, LI
 
 @Serializable
 data class WallpaperSelection(
-    val preset: ChatWallpaperPreset = ChatWallpaperPreset.CHATTER,
+    val preset: ChatWallpaperPreset = ChatWallpaperPreset.MOTD,
     val intensity: Int = DEFAULT_WALLPAPER_INTENSITY,
 ) {
     fun normalized() = copy(intensity = intensity.coerceIn(0, 100))
