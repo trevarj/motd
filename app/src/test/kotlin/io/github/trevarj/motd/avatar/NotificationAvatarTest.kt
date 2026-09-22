@@ -26,12 +26,10 @@ class NotificationAvatarTest {
         val monogram = notificationAvatarBitmap(context, "alice", AvatarStyle.MONOGRAM)
         val initials = notificationAvatarBitmap(context, "alice", AvatarStyle.INITIALS)
         val sprite = notificationAvatarBitmap(context, "alice", AvatarStyle.IRC_SPRITE)
-        val spriteV2 = notificationAvatarBitmap(context, "alice", AvatarStyle.IRC_SPRITE_V2)
 
         assertEquals(64, monogram.width)
         assertEquals(64, initials.width)
         assertEquals(64, sprite.width)
-        assertEquals(64, spriteV2.width)
     }
 
     /** Hiding avatars is an in-app choice; system UI still needs a person icon to post. */
@@ -43,7 +41,7 @@ class NotificationAvatarTest {
         assertTrue(hidden.sameAs(initials))
     }
 
-    @Test fun notificationV2_usesTheSharedRasterTraitMapping() {
+    @Test fun notificationSprite_usesTheSharedRasterTraitMapping() {
         val name = "alice"
         val dark =
             context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
@@ -61,10 +59,10 @@ class NotificationAvatarTest {
             )
 
         assertTrue(expected != null)
-        assertTrue(notificationAvatarBitmap(context, name, AvatarStyle.IRC_SPRITE_V2).sameAs(expected))
+        assertTrue(notificationAvatarBitmap(context, name, AvatarStyle.IRC_SPRITE).sameAs(expected))
     }
 
-    @Test fun notificationV2_followsTheSystemLightDarkPalette() {
+    @Test fun notificationSprite_followsTheSystemLightDarkPalette() {
         fun themedContext(night: Boolean): Context {
             val configuration = Configuration(context.resources.configuration)
             configuration.uiMode =
@@ -93,8 +91,8 @@ class NotificationAvatarTest {
 
         val darkContext = themedContext(night = true)
         val lightContext = themedContext(night = false)
-        val dark = notificationAvatarBitmap(darkContext, "alice", AvatarStyle.IRC_SPRITE_V2)
-        val light = notificationAvatarBitmap(lightContext, "alice", AvatarStyle.IRC_SPRITE_V2)
+        val dark = notificationAvatarBitmap(darkContext, "alice", AvatarStyle.IRC_SPRITE)
+        val light = notificationAvatarBitmap(lightContext, "alice", AvatarStyle.IRC_SPRITE)
 
         assertFalse(dark.sameAs(light))
         assertTrue(dark.sameAs(expected(darkContext, dark = true)))

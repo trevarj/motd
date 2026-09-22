@@ -211,8 +211,7 @@ internal fun channelDeviconMatchCacheSize(): Int = synchronized(channelMarkMatch
 
 /**
  * Channel names retain compact technical identifiers such as `k8s` in addition to the ordinary
- * nick-token split (which still makes `doomEmacs` match Emacs). This is deliberately local to
- * channel matching so established person-hint behavior remains unchanged.
+ * nick-token split (which still makes `doomEmacs` match Emacs).
  */
 private fun channelTokens(channelName: String): List<String> {
     val compactTokens =
@@ -247,8 +246,7 @@ internal fun IrcChannelBadge(
 ) {
     val glyph = remember(name) { matchedChannelDevicon(name) }
     val background = LocalNickColors.current.avatar(name)
-    // Same ramp as SpritePalette.from, so a channel tile and a nick sprite of the same identity
-    // agree: the fill itself is the tile, its highlight step is the border, and the mark takes
+    // The identity fill is the tile, its highlight step is the border, and the mark takes
     // whichever of black/white reads on the tile.
     val border = remember(background) { identityRamp(background).highlight }
     val mark = onColorFor(background)

@@ -158,14 +158,6 @@ fun Avatar(
                     if (isChannel) {
                         IrcChannelBadge(name, size, Modifier)
                     } else {
-                        IrcSpriteAvatar(name, size, Modifier)
-                    }
-                }
-
-                AvatarStyle.IRC_SPRITE_V2 -> {
-                    if (isChannel) {
-                        IrcChannelBadge(name, size, Modifier)
-                    } else {
                         IrcSpriteV2Avatar(name, size, Modifier)
                     }
                 }
@@ -251,7 +243,7 @@ private fun MonogramAvatar(
 
 /** The bolder alternate: two initials over the solid, saturated nick color (the original style). */
 @Composable
-private fun InitialsAvatar(
+internal fun InitialsAvatar(
     name: String,
     bg: Color,
     size: Dp,

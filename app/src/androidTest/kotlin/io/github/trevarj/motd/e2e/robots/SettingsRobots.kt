@@ -30,10 +30,10 @@ internal class SettingsRobot(
 
     fun appearance() = scrollToAndClick("settings_category_appearance")
 
-    fun selectIrcSpritesV2() {
+    fun selectIrcSprites() {
         scrollToAndClick("settings_avatar_style_picker")
         assertDisplayed("settings_avatar_style_sheet")
-        click("settings_avatar_style_irc_sprite_v2")
+        click("settings_avatar_style_irc_sprite")
         awaitTagGone("settings_avatar_style_sheet")
     }
 

@@ -62,14 +62,14 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
-    fun avatarStylePickerSelectsIrcSpritesV2() {
+    fun avatarStylePickerSelectsIrcSprites() {
         var selected: AvatarStyle? = null
         setContent(onAvatarStyle = { selected = it })
 
         compose.onNodeWithTag("settings_avatar_style_picker").performScrollTo().performClick()
-        compose.onNodeWithTag("settings_avatar_style_irc_sprite_v2").performClick()
+        compose.onNodeWithTag("settings_avatar_style_irc_sprite").performClick()
 
-        assertEquals(AvatarStyle.IRC_SPRITE_V2, selected)
+        assertEquals(AvatarStyle.IRC_SPRITE, selected)
     }
 
     @Test

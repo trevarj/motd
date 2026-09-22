@@ -1,25 +1,14 @@
-# Generated-avatar chest emblems
+# IRC Sprites and channel marks
 
-The opt-in IRC sprite renderer is Kotlin Canvas code and makes no network
-requests. People and private messages use compact robot variations; network
-rows use a robot plus a thicker outer status ring. Project-named channels use
-a matched, background-free Devicons mark, while ordinary channels use a quiet
-`#` fallback. All badges are tinted with the deterministic channel/nick color,
-so the marks feel native to motd rather than like imported app icons.
-
-## Font Awesome Free source
-
-The renderer embeds a small subset of [Font Awesome Free 6.7.2](https://github.com/FortAwesome/Font-Awesome/tree/6.7.2)
-SVG path data, copied from the upstream `svgs/` tree. It does not bundle or
-render a Font Awesome font. Font Awesome Free's SVG icons are licensed under
-[CC BY 4.0](https://fontawesome.com/license/free); the attribution here and in
-the top-level [third-party notice](../../../THIRD_PARTY_NOTICES.md) travels
-with a distributed build containing these paths.
-
-| Renderer use | Font Awesome Free SVG source |
-| --- | --- |
-| Generic technical fallback | `solid/terminal.svg`, `solid/code.svg`, `solid/microchip.svg`, `solid/network-wired.svg`, `solid/database.svg`, `solid/shield-halved.svg`, `solid/robot.svg`, `solid/box-open.svg` |
-| Contextual language/tool chest marks | `brands/rust.svg`, `brands/python.svg`, `brands/golang.svg`, `brands/git-alt.svg`, `brands/github.svg`, `brands/linux.svg`, `brands/docker.svg`, `brands/android.svg` |
+IRC Sprites is the default avatar style. People and private messages use
+deterministic pixel robots assembled from the bundled
+[`irc-sprites-v2/`](../../../app/src/main/assets/irc-sprites-v2/) raster layers
+with nickname-tinted components. Rendering makes no network requests and
+falls back to initials if the raster catalog is unavailable. Remote-avatar
+overrides still take precedence. Network rows retain their neutral topology
+badge, network-provided icons, and connection-status dot. Project-named
+channels use a matched, background-free Devicons mark; other channels use a
+quiet `#` fallback. Channel marks keep their deterministic identity color.
 
 ## Devicon channel marks
 
@@ -38,20 +27,13 @@ Hand-kept overrides in `ChannelDeviconBadge.kt`: Arch Linux and Clojure retain
 Felipe López Acevedo (`guix-artwork.git`,
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)).
 
-## Contextual hint policy
+## Channel matching policy
 
-Nick hints such as `rustacean`, `python`, `golang`, `git`, `github`, `linux`,
-`docker`, and `android` select the corresponding Font Awesome brand glyph.
-Hints without a suitable small Font Awesome mark—such as Emacs, Vim, Neovim,
-NixOS, Guix, Tor, and Kubernetes—select a neutral terminal, code, package,
-network, or security glyph instead. A non-matching nick deterministically
-selects one of the same technical glyphs.
-
-Channel matching is intentionally separate: `#debian`, `#guix`, `#emacs`,
+Channel names such as `#debian`, `#guix`, `#emacs`,
 `#rust-lang`, `#k8s`, and similarly tokenized project names select only their
 known channel mark. A channel that does not match a curated alias remains the
 neutral `#` badge; a short alias such as `go` must be an exact token.
 
 These marks are descriptive only and do not imply affiliation, endorsement, or
-ownership. The feature may be disabled by selecting either existing avatar
-style in Appearance settings.
+ownership. Choose Monogram, Initials, or None in Appearance settings to use
+another avatar treatment.

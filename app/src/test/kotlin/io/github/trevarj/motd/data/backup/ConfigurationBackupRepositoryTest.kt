@@ -13,6 +13,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
+import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefsImpl
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
@@ -359,6 +360,30 @@ class ConfigurationBackupRepositoryTest {
             backup.import(encrypted, password = "backup-password", importMode = BackupImportMode.MERGE)
             assertEquals("camera-user", prefs.config.first().username)
             assertEquals("camera-secret", prefs.config.first().password)
+        }
+
+    @Test
+    fun retiredSpriteStyleRestoresAndExportsWithCanonicalName() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val settings = DataStoreSettingsRepository(context)
+            val backup = repository(inMemoryDb())
+            try {
+                settings.setAvatarStyle(AvatarStyle.IRC_SPRITE)
+                val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                val legacyRaw = raw.replace("\"avatarStyle\": \"IRC_SPRITE\"", "\"avatarStyle\": \"IRC_SPRITE_V2\"")
+                assertTrue(legacyRaw.contains("\"avatarStyle\": \"IRC_SPRITE_V2\""))
+
+                settings.setAvatarStyle(AvatarStyle.INITIALS)
+                backup.import(legacyRaw, importMode = BackupImportMode.MERGE)
+                assertEquals(AvatarStyle.IRC_SPRITE, settings.settings.first().avatarStyle)
+
+                val reexported = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 2_000L)
+                assertTrue(reexported.contains("\"avatarStyle\": \"IRC_SPRITE\""))
+                assertFalse(reexported.contains("IRC_SPRITE_V2"))
+            } finally {
+                settings.setAvatarStyle(AvatarStyle.IRC_SPRITE)
+            }
         }
 
     @Test

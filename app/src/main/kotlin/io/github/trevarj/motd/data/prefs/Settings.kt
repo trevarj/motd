@@ -3,7 +3,13 @@ package io.github.trevarj.motd.data.prefs
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.DeliveryMode
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
 enum class ThemeMode {
     SYSTEM,
@@ -168,10 +174,30 @@ internal fun autoAwayMinutesFromPreference(saved: Int?): Int = saved?.takeIf { i
  * hides avatars in the UI entirely (notifications still need an icon, so they fall back to
  * initials).
  */
-enum class AvatarStyle { MONOGRAM, INITIALS, IRC_SPRITE, NONE, IRC_SPRITE_V2 }
+@Serializable(with = AvatarStyleSerializer::class)
+enum class AvatarStyle { MONOGRAM, INITIALS, IRC_SPRITE, NONE }
 
-/** Decode a saved choice while defaulting installations without one to IRC sprites. */
-internal fun avatarStyleFromPreference(saved: String?): AvatarStyle = saved?.let { runCatching { AvatarStyle.valueOf(it) }.getOrNull() } ?: AvatarStyle.IRC_SPRITE
+/** Decode preferences and backups, including the retired raster-style name. */
+internal fun avatarStyleFromPreference(saved: String?): AvatarStyle =
+    when (saved) {
+        "MONOGRAM" -> AvatarStyle.MONOGRAM
+        "INITIALS" -> AvatarStyle.INITIALS
+        "NONE" -> AvatarStyle.NONE
+        "IRC_SPRITE", "IRC_SPRITE_V2", null -> AvatarStyle.IRC_SPRITE
+        else -> AvatarStyle.IRC_SPRITE
+    }
+
+internal object AvatarStyleSerializer : KSerializer<AvatarStyle> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("io.github.trevarj.motd.data.prefs.AvatarStyle", PrimitiveKind.STRING)
+
+    override fun serialize(
+        encoder: Encoder,
+        value: AvatarStyle,
+    ) = encoder.encodeString(value.name)
+
+    override fun deserialize(decoder: Decoder): AvatarStyle = avatarStyleFromPreference(decoder.decodeString())
+}
 
 /** Subtle IRC-themed chat background rendered behind the message list. NONE keeps the plain
  *  theme background (opt-in; default for existing users). */

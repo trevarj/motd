@@ -586,7 +586,7 @@ class RequiredHeadlessE2eTest {
         }
         ThemeSheetRobot(compose).selectAyuDarkAndTrueBlack()
         ThemeSheetRobot(compose).dismiss()
-        SettingsRobot(compose).selectIrcSpritesV2()
+        SettingsRobot(compose).selectIrcSprites()
         // Return from Appearance to Settings, then exercise the category and bouncer routes.
         SettingsRobot(compose).apply {
             returnToRoot()

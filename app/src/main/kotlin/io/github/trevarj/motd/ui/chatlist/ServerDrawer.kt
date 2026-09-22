@@ -489,7 +489,7 @@ private fun DrawerNetworkItem(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                if (LocalAvatarStyle.current in setOf(AvatarStyle.IRC_SPRITE, AvatarStyle.IRC_SPRITE_V2)) {
+                if (LocalAvatarStyle.current == AvatarStyle.IRC_SPRITE) {
                     val connected = row.state is IrcClientState.Ready
                     val statusDescription =
                         stringResource(
