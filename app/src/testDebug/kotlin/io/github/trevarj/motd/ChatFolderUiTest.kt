@@ -2,10 +2,12 @@ package io.github.trevarj.motd
 
 import android.content.Context
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -33,6 +35,7 @@ import io.github.trevarj.motd.ui.chatlist.partitionArchivedRows
 import io.github.trevarj.motd.ui.chatlist.summarizeFolder
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -258,6 +261,42 @@ class ChatFolderUiTest {
         compose.onNodeWithTag("chatlist_folder_tab_icon_7", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
         compose.onAllNodesWithTag("chatlist_row_2").assertCountEquals(0)
+    }
+
+    @Test
+    fun folder_tabs_show_only_selected_pill_without_underline_or_separator() {
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows = listOf(row(1, "#dev", folderId = 7), row(2, "#other", folderId = null)),
+                    folders = listOf(folder()),
+                    folderDisplayMode = FolderDisplayMode.TABS,
+                    loading = false,
+                ),
+            )
+        setContent(state)
+
+        fun pillPixel(tag: String): Int {
+            val strip = compose.onNodeWithTag("chatlist_folder_tabs")
+            val stripBounds = strip.fetchSemanticsNode().boundsInRoot
+            val pillBounds = compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val pixels = strip.captureToImage().asAndroidBitmap()
+            val x = ((pillBounds.left + pillBounds.right) / 2 - stripBounds.left).toInt()
+            val y = (pillBounds.top - stripBounds.top + 2).toInt()
+            // This point is inside the pill fill but above the icon, label, and badge.
+            assertEquals(pixels.getPixel(x, 0), pixels.getPixel(x, pixels.height - 1))
+            return pixels.getPixel(x, y)
+        }
+
+        val allTag = "chatlist_folder_tab_pill_all"
+        val folderTag = "chatlist_folder_tab_pill_7"
+        val selectedFill = pillPixel(allTag)
+        val plainFill = pillPixel(folderTag)
+        assertNotEquals(plainFill, selectedFill)
+
+        compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
+        assertEquals(plainFill, pillPixel(allTag))
+        assertNotEquals(plainFill, pillPixel(folderTag))
     }
 
     @Test

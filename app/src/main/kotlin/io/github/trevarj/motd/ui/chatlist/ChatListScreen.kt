@@ -1108,19 +1108,22 @@ private fun FolderTabStrip(
         selectedTabIndex = selectedIndex,
         edgePadding = 0.dp,
         modifier = Modifier.fillMaxWidth().testTag("chatlist_folder_tabs"),
+        indicator = {},
+        divider = {},
     ) {
         if (showAllTab) {
             Tab(
                 selected = selectedFolderId == null,
                 onClick = { onSelect(null) },
                 modifier = Modifier.testTag("chatlist_folder_tab_all"),
-                selectedContentColor = MaterialTheme.colorScheme.primary,
+                selectedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 text = {
                     FolderTabLabel(
                         name = stringResource(R.string.folders_all),
                         summary = allSummary,
                         selected = selectedFolderId == null,
+                        pillTag = "chatlist_folder_tab_pill_all",
                         icon = { Icon(Icons.Outlined.Forum, contentDescription = null, modifier = Modifier.size(20.dp)) },
                     )
                 },
@@ -1131,13 +1134,14 @@ private fun FolderTabStrip(
                 selected = false,
                 onClick = onOpenDickord,
                 modifier = Modifier.testTag("chatlist_folder_tab_discord"),
-                selectedContentColor = MaterialTheme.colorScheme.primary,
+                selectedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 text = {
                     FolderTabLabel(
                         name = stringResource(R.string.dickord_badge),
                         summary = summary,
                         selected = false,
+                        pillTag = "chatlist_folder_tab_pill_discord",
                         icon = {
                             Icon(
                                 painter = painterResource(R.drawable.ic_discord),
@@ -1155,18 +1159,19 @@ private fun FolderTabStrip(
                 selected = selected,
                 onClick = { onSelect(folder.folder.id) },
                 modifier = Modifier.testTag("chatlist_folder_tab_${folder.folder.id}"),
-                selectedContentColor = MaterialTheme.colorScheme.primary,
+                selectedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 text = {
                     FolderTabLabel(
                         name = folder.folder.displayName,
                         summary = folder.summary,
                         selected = selected,
+                        pillTag = "chatlist_folder_tab_pill_${folder.folder.id}",
                         icon = {
                             FolderIcon(
                                 FolderIconRef(folder.folder.iconKind, folder.folder.iconKey),
                                 contentDescription = null,
-                                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp).testTag("chatlist_folder_tab_icon_${folder.folder.id}"),
                             )
                         },
@@ -1182,9 +1187,18 @@ private fun FolderTabLabel(
     name: String,
     summary: ChatFolderSummary,
     selected: Boolean,
+    pillTag: String,
     icon: @Composable () -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier =
+            Modifier
+                .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, CircleShape)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .testTag(pillTag),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         icon()
         Text(
             text = name,
