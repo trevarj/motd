@@ -1755,8 +1755,7 @@
     <string name="settings_wallpaper_intensity">Pattern intensity</string>
     <string name="settings_wallpaper_preview_incoming">The background stays quiet.</string>
     <string name="settings_wallpaper_preview_outgoing">And still feels like IRC.</string>
-    <string name="settings_wallpaper_apply">Apply wallpaper</string>
-    <string name="settings_wallpaper_cancel">Cancel</string>
+    <string name="settings_wallpaper_done">Done</string>
 
     <string name="settings_app_icon_section">App icon</string>
     <string name="settings_app_icon_default">Default</string>

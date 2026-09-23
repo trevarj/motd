@@ -431,7 +431,7 @@ fun AppearanceSettingsContent(
         }
         SettingsTarget(target?.name, SettingsTarget.WALLPAPER.name) { targetModifier ->
             SettingsGroup(title = stringResource(R.string.settings_wallpaper), modifier = targetModifier) {
-                ChatWallpaperPicker(current = appearance.wallpaper, onApply = onWallpaper)
+                ChatWallpaperPicker(current = appearance.wallpaper, onChange = onWallpaper)
             }
         }
         SettingsTarget(target?.name, SettingsTarget.LAUNCHER_ICON.name) { targetModifier ->

@@ -29,7 +29,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,7 +52,7 @@ import kotlin.math.roundToInt
 @Composable
 fun ChatWallpaperPicker(
     current: WallpaperSelection,
-    onApply: (WallpaperSelection) -> Unit,
+    onChange: (WallpaperSelection) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showEditor by remember { mutableStateOf(false) }
@@ -76,10 +75,7 @@ fun ChatWallpaperPicker(
         WallpaperEditorSheet(
             current = current,
             onDismiss = { showEditor = false },
-            onApply = {
-                onApply(it)
-                showEditor = false
-            },
+            onChange = onChange,
         )
     }
 }
@@ -89,14 +85,21 @@ fun ChatWallpaperPicker(
 private fun WallpaperEditorSheet(
     current: WallpaperSelection,
     onDismiss: () -> Unit,
-    onApply: (WallpaperSelection) -> Unit,
+    onChange: (WallpaperSelection) -> Unit,
 ) {
-    var staged by remember(current) { mutableStateOf(current.normalized()) }
+    // Keep the active edit local so delayed preference emissions cannot rewind a slider drag.
+    var selection by remember { mutableStateOf(current.normalized()) }
+
+    fun updateSelection(next: WallpaperSelection) {
+        selection = next.normalized()
+        onChange(selection)
+    }
+
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_wallpaper_sheet")) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Text(stringResource(R.string.settings_wallpaper), style = MaterialTheme.typography.titleLarge)
-            WallpaperPreview(staged, Modifier.fillMaxWidth().height(190.dp).padding(top = 14.dp))
+            WallpaperPreview(selection, Modifier.fillMaxWidth().height(190.dp).padding(top = 14.dp))
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -106,31 +109,30 @@ private fun WallpaperEditorSheet(
                 items(ChatWallpaperPreset.entries) { preset ->
                     WallpaperCard(
                         preset = preset,
-                        intensity = staged.intensity,
-                        selected = staged.preset == preset,
-                        onClick = { staged = staged.copy(preset = preset) },
+                        intensity = selection.intensity,
+                        selected = selection.preset == preset,
+                        onClick = { updateSelection(selection.copy(preset = preset)) },
                     )
                 }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.settings_wallpaper_intensity), modifier = Modifier.weight(1f))
-                Text("${staged.intensity}%", fontWeight = FontWeight.SemiBold)
+                Text("${selection.intensity}%", fontWeight = FontWeight.SemiBold)
             }
             Slider(
-                value = staged.intensity.toFloat(),
-                onValueChange = { staged = staged.copy(intensity = it.roundToInt()) },
+                value = selection.intensity.toFloat(),
+                onValueChange = { updateSelection(selection.copy(intensity = it.roundToInt())) },
                 valueRange = 0f..100f,
                 steps = 19,
-                enabled = staged.preset != ChatWallpaperPreset.NONE,
+                enabled = selection.preset != ChatWallpaperPreset.NONE,
                 modifier = Modifier.testTag("settings_wallpaper_intensity"),
             )
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
             ) {
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.settings_wallpaper_cancel)) }
-                Button(onClick = { onApply(staged.normalized()) }, modifier = Modifier.testTag("settings_wallpaper_apply")) {
-                    Text(stringResource(R.string.settings_wallpaper_apply))
+                Button(onClick = onDismiss, modifier = Modifier.testTag("settings_wallpaper_done")) {
+                    Text(stringResource(R.string.settings_wallpaper_done))
                 }
             }
         }
@@ -173,7 +175,7 @@ private fun WallpaperCard(
     val shape = RoundedCornerShape(16.dp)
     val border = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
     Column(
-        Modifier.selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
+        Modifier.selectable(selected = selected, role = Role.RadioButton, onClick = onClick).testTag("settings_wallpaper_preset_${preset.name.lowercase()}"),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
