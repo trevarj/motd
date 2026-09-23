@@ -28,6 +28,7 @@ import kotlin.math.roundToInt
 
 private const val ASSET_ROOT = "irc-sprites-v2/"
 private const val CATALOG_FILE = "${ASSET_ROOT}catalog.json"
+private const val SCREEN_PANEL_MAX_LUMINANCE = 60
 
 /** A deterministic selection from the V2 raster catalog, independent of Android or a theme. */
 internal data class IrcSpriteV2Traits(
@@ -284,10 +285,7 @@ internal object IrcSpriteV2Renderer {
         return output
     }
 
-    /**
-     * Finds the dark connected face panel inside a head's catalog-defined face rect. This mirrors
-     * the preview's flood fill and is cached by source file, never recomputed while drawing.
-     */
+    /** Finds the dark screen from a seed inside the face rect, then fills its full connected area. */
     internal fun headPanelMask(
         head: IrcSpriteV2Component,
         pixels: IntArray,
@@ -324,7 +322,7 @@ internal object IrcSpriteV2Renderer {
                 val index = y * width + x
                 val pixel = pixels[index]
                 val distance = (x - centerX) * (x - centerX) + (y - centerY) * (y - centerY)
-                if (Color.alpha(pixel) >= 192 && ircSpriteV2Luminance(pixel) <= 100 && distance < bestDistance) {
+                if (Color.alpha(pixel) >= 192 && ircSpriteV2Luminance(pixel) <= SCREEN_PANEL_MAX_LUMINANCE && distance < bestDistance) {
                     seed = index
                     bestDistance = distance
                 }
@@ -340,10 +338,11 @@ internal object IrcSpriteV2Renderer {
                 val x = point % width
                 val y = point / width
                 for ((nextX, nextY) in arrayOf(x - 1 to y, x + 1 to y, x to y - 1, x to y + 1)) {
-                    if (nextX !in left..right || nextY !in top..bottom) continue
+                    if (nextX !in 0 until width || nextY !in 0 until height) continue
                     val next = nextY * width + nextX
                     val pixel = pixels[next]
-                    if (mask[next] || Color.alpha(pixel) < 192 || ircSpriteV2Luminance(pixel) > 100) continue
+                    // The brighter bezel joins the panel only above this source luminance.
+                    if (mask[next] || Color.alpha(pixel) < 192 || ircSpriteV2Luminance(pixel) > SCREEN_PANEL_MAX_LUMINANCE) continue
                     mask[next] = true
                     queue.addLast(next)
                 }

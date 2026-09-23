@@ -129,6 +129,59 @@ class IrcSpriteV2Test {
         }
     }
 
+    @Test fun light_theme_tints_the_entire_screen_for_every_head_and_face() {
+        val catalog = IrcSpriteV2Renderer.catalogForTest(context)!!
+        val names = mutableMapOf<Pair<Int, Int>, String>()
+        for (index in 0 until 2_000) {
+            val name = "screen-$index"
+            val traits = ircSpriteV2Traits(name, catalog.bodies.size, catalog.heads.size, catalog.faces.size, catalog.accessories.size)
+            names.putIfAbsent(traits.head to traits.face, name)
+            if (names.size == catalog.heads.size * catalog.faces.size) break
+        }
+        assertEquals(catalog.heads.size * catalog.faces.size, names.size)
+
+        catalog.heads.forEachIndexed { headIndex, head ->
+            val bitmap = context.assets.open("irc-sprites-v2/${head.file}").use(BitmapFactory::decodeStream)!!
+            val faceRect = requireNotNull(head.faceRect)
+            val centerY = ((faceRect.y + faceRect.height / 2f - head.rect.y) / head.rect.height * bitmap.height).toInt()
+            val faceLeft = ((faceRect.x - head.rect.x) / head.rect.width * bitmap.width).toInt()
+            // Sample the screen outside the face image, where the old rectangular mask stopped.
+            val screenX = faceLeft - 8
+            val sourcePixel = bitmap.getPixel(screenX, centerY)
+            assertTrue("${head.id} screen sample is opaque", Color.alpha(sourcePixel) >= 192)
+            assertTrue("${head.id} screen sample is dark in source", ircSpriteV2Luminance(sourcePixel) <= 60)
+            val point =
+                IrcSpriteV2LayerTransform
+                    .forHead(head.rect, requireNotNull(catalog.framing).zoom)
+                    .rect(
+                        IrcSpriteV2Rect(
+                            head.rect.x + (screenX + 0.5f) / bitmap.width * head.rect.width,
+                            head.rect.y + (centerY + 0.5f) / bitmap.height * head.rect.height,
+                            0f,
+                            0f,
+                        ),
+                    )
+
+            catalog.faces.indices.forEach { faceIndex ->
+                val rendered =
+                    IrcSpriteV2Renderer.render(
+                        context,
+                        names.getValue(headIndex to faceIndex),
+                        Color.BLUE,
+                        512,
+                        Color.TRANSPARENT,
+                        Color.TRANSPARENT,
+                        includeAccessory = false,
+                        theme = IrcSpriteV2Theme.LIGHT,
+                    )!!
+                val screen = rendered.getPixel((point.x * 512).toInt(), (point.y * 512).toInt())
+                assertTrue("${head.id}/${catalog.faces[faceIndex].id} screen is not ivory: $screen", Color.red(screen) >= 220)
+                assertTrue("${head.id}/${catalog.faces[faceIndex].id} screen is not ivory: $screen", Color.green(screen) >= 215)
+                assertTrue("${head.id}/${catalog.faces[faceIndex].id} screen is not ivory: $screen", Color.blue(screen) >= 200)
+            }
+        }
+    }
+
     @Test fun packaged_catalog_loads_every_layer_and_renders_a_circular_tinted_scene() {
         val catalog = IrcSpriteV2Renderer.catalogForTest(context)!!
         assertEquals(3, catalog.bodies.size)
