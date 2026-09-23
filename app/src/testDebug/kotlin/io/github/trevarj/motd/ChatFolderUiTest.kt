@@ -1,13 +1,17 @@
 package io.github.trevarj.motd
 
 import android.content.Context
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
@@ -327,6 +331,30 @@ class ChatFolderUiTest {
         touchBounds.forEach { bounds ->
             assertTrue("Each tab should retain a 48dp touch target", bounds.height >= minTouchHeight)
         }
+    }
+
+    @Test
+    fun folder_tab_edge_tap_preserves_full_touch_target() {
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows = listOf(row(1, "#dev", folderId = 7)),
+                    folders = listOf(folder()),
+                    folderDisplayMode = FolderDisplayMode.TABS,
+                    loading = false,
+                ),
+            )
+        setContent(state)
+
+        val tab = compose.onNodeWithTag("chatlist_folder_tab_7")
+        val bounds = tab.fetchSemanticsNode().boundsInRoot
+        val minTouchHeight = with(compose.density) { 48.dp.toPx() }
+        assertTrue(bounds.height >= minTouchHeight)
+        assertEquals(CircleShape, tab.fetchSemanticsNode().config[SemanticsProperties.Shape])
+
+        // The top edge stays tappable even though the visible pill is shorter than the target.
+        tab.performTouchInput { click(Offset(center.x, 2f)) }
+        tab.assertIsSelected()
     }
 
     @Test
