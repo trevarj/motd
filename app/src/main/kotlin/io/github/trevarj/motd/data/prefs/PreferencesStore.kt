@@ -42,6 +42,8 @@ internal object PrefKeys {
     val FOLDER_DISPLAY_MODE = stringPreferencesKey("folder_display_mode")
     val SHOW_FOLDER_CHATS_IN_ALL = stringPreferencesKey("show_folder_chats_in_all")
     val CHAT_LIST_SWIPE_ACTION = stringPreferencesKey("chat_list_swipe_action")
+    val MENTIONS_ENABLED = stringPreferencesKey("mentions_enabled")
+    val MENTIONS_PLACEMENT = stringPreferencesKey("mentions_placement")
     val NICK_COLORS_ENABLED = stringPreferencesKey("nick_colors_enabled")
     val NICK_COLOR_PALETTE = stringPreferencesKey("nick_color_palette")
     val NICK_COLOR_OVERRIDES = stringPreferencesKey("nick_color_overrides")
@@ -173,6 +175,8 @@ class DataStoreSettingsRepository
                     folderDisplayMode = folderDisplayModeFromPreference(prefs[PrefKeys.FOLDER_DISPLAY_MODE]),
                     showFolderChatsInAll = prefs[PrefKeys.SHOW_FOLDER_CHATS_IN_ALL]?.toBooleanStrictOrNull() ?: true,
                     chatListSwipeAction = chatListSwipeActionFromPreference(prefs[PrefKeys.CHAT_LIST_SWIPE_ACTION]),
+                    mentionsEnabled = mentionsEnabledFromPreference(prefs[PrefKeys.MENTIONS_ENABLED]),
+                    mentionsPlacement = mentionsPlacementFromPreference(prefs[PrefKeys.MENTIONS_PLACEMENT]),
                 )
             }
 
@@ -204,6 +208,14 @@ class DataStoreSettingsRepository
 
         override suspend fun setChatListSwipeAction(action: ChatListSwipeAction) {
             store.edit { it[PrefKeys.CHAT_LIST_SWIPE_ACTION] = action.name }
+        }
+
+        override suspend fun setMentionsEnabled(enabled: Boolean) {
+            store.edit { it[PrefKeys.MENTIONS_ENABLED] = enabled.toString() }
+        }
+
+        override suspend fun setMentionsPlacement(placement: MentionsPlacement) {
+            store.edit { it[PrefKeys.MENTIONS_PLACEMENT] = placement.name }
         }
 
         override suspend fun setNickColorsEnabled(enabled: Boolean) {

@@ -5,6 +5,7 @@ import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.data.visibility.GlobalFeedMode
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -18,7 +19,13 @@ class GlobalFeedRepositoryImpl
         override fun globalFeed(spec: MessageVisibilitySpec): Flow<PagingData<SearchHit>> =
             Pager(
                 config = GLOBAL_FEED_PAGING_CONFIG,
-                pagingSourceFactory = { GlobalFeedPagingSource(db, spec) },
+                pagingSourceFactory = { GlobalFeedPagingSource(db, spec, GlobalFeedMode.ALL) },
+            ).flow
+
+        override fun mentionsFeed(spec: MessageVisibilitySpec): Flow<PagingData<SearchHit>> =
+            Pager(
+                config = GLOBAL_FEED_PAGING_CONFIG,
+                pagingSourceFactory = { GlobalFeedPagingSource(db, spec, GlobalFeedMode.MENTIONS) },
             ).flow
     }
 

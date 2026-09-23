@@ -16,6 +16,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
+import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.BufferRepository
@@ -150,6 +151,8 @@ data class ChatListState(
     val allMentions: Int = 0, // "All chats" mention rollup
     /** Global Feed lab flag; off hides both entry points into the feed. */
     val globalFeedEnabled: Boolean = false,
+    val mentionsEnabled: Boolean = true,
+    val mentionsPlacement: MentionsPlacement = MentionsPlacement.DRAWER,
     /** Lab-gated portal navigation state emitted atomically with the ordinary row partition. */
     val dickordEnabled: Boolean = false,
     val dickordUnreadSummary: ChatFolderSummary? = null,
@@ -371,6 +374,8 @@ class ChatListViewModel
                     allUnread = rows.filterNot { it.muted || it.archived }.sumOf { it.unreadCount },
                     allMentions = rows.filterNot { it.muted || it.archived }.sumOf { it.mentionCount },
                     globalFeedEnabled = globalFeedEnabled,
+                    mentionsEnabled = settings.mentionsEnabled,
+                    mentionsPlacement = settings.mentionsPlacement,
                     dickordEnabled = dickordEnabled,
                     dickordUnreadSummary =
                         if (dickordEnabled) {

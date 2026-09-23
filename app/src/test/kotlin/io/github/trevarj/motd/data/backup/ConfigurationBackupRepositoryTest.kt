@@ -30,6 +30,7 @@ import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LauncherIcon
+import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
 import io.github.trevarj.motd.data.prefs.TimeFormat
@@ -540,6 +541,31 @@ class ConfigurationBackupRepositoryTest {
             settings.setShowComposerEmoji(true)
             settings.setShowComposerFormattingTools(true)
             settings.setShowRedactedMessages(true)
+        }
+
+    @Test
+    fun mentionsSettingsRoundTripThroughSettingsBackup() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val settings = DataStoreSettingsRepository(context)
+            val backup = repository(inMemoryDb())
+
+            try {
+                settings.setMentionsEnabled(true)
+                settings.setMentionsPlacement(MentionsPlacement.FOLDER_TAB)
+                val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+
+                settings.setMentionsEnabled(false)
+                settings.setMentionsPlacement(MentionsPlacement.CHAT_LIST)
+                backup.import(raw, importMode = BackupImportMode.MERGE)
+
+                val restored = settings.settings.first()
+                assertTrue(restored.mentionsEnabled)
+                assertEquals(MentionsPlacement.FOLDER_TAB, restored.mentionsPlacement)
+            } finally {
+                settings.setMentionsEnabled(false)
+                settings.setMentionsPlacement(MentionsPlacement.DRAWER)
+            }
         }
 
     @Test

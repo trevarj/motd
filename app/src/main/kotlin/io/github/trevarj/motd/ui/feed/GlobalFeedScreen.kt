@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -78,12 +79,45 @@ fun GlobalFeedScreen(
     }
 }
 
+/** Read-only stream of stored mentions, with the same exact-message jump as Global Feed. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MentionsScreen(
+    onBack: () -> Unit = {},
+    onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit = { _, _, _ -> },
+    viewModel: MentionsViewModel = hiltViewModel(),
+) {
+    val rows = viewModel.items.collectAsLazyPagingItems()
+    val showNetwork by viewModel.showNetwork.collectAsStateWithLifecycle()
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                    }
+                },
+                title = { Text(stringResource(R.string.mentions_title)) },
+            )
+        },
+    ) { padding ->
+        GlobalFeedContent(
+            rows = rows,
+            showNetwork = showNetwork,
+            onOpenMessage = onOpenMessage,
+            modifier = Modifier.padding(padding),
+            mentions = true,
+        )
+    }
+}
+
 @Composable
 internal fun GlobalFeedContent(
     rows: LazyPagingItems<SearchHit>,
     showNetwork: Boolean,
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit,
     modifier: Modifier = Modifier,
+    mentions: Boolean = false,
 ) {
     val refresh = rows.loadState.refresh
     when {
@@ -102,9 +136,9 @@ internal fun GlobalFeedContent(
         // NotLoading, so the empty state never flashes over an arriving first page.
         rows.itemCount == 0 && refresh is LoadState.NotLoading -> {
             EmptyState(
-                icon = Icons.Outlined.DynamicFeed,
-                title = stringResource(R.string.feed_empty_title),
-                message = stringResource(R.string.feed_empty_message),
+                icon = if (mentions) Icons.Outlined.AlternateEmail else Icons.Outlined.DynamicFeed,
+                title = stringResource(if (mentions) R.string.mentions_empty_title else R.string.feed_empty_title),
+                message = stringResource(if (mentions) R.string.mentions_empty_message else R.string.feed_empty_message),
                 modifier = modifier,
                 ghostRows = true,
             )
@@ -116,6 +150,7 @@ internal fun GlobalFeedContent(
                 showNetwork = showNetwork,
                 onOpenMessage = onOpenMessage,
                 modifier = modifier,
+                mentions = mentions,
             )
         }
     }
@@ -127,11 +162,12 @@ private fun GlobalFeedList(
     showNetwork: Boolean,
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit,
     modifier: Modifier = Modifier,
+    mentions: Boolean = false,
 ) {
     // One list-scoped formatter: MessageBubble's per-row fallback ignores the app's timestamp
     // preference.
     val formatTime = rememberMessageTimeFormatter()
-    LazyColumn(modifier = modifier.fillMaxSize().testTag("feed_list")) {
+    LazyColumn(modifier = modifier.fillMaxSize().testTag(if (mentions) "mentions_list" else "feed_list")) {
         items(
             count = rows.itemCount,
             // The canonical row id: stable across invalidation, unlike a merged-stream position.
@@ -147,6 +183,7 @@ private fun GlobalFeedList(
                     showNetwork = showNetwork,
                     formatTime = formatTime,
                     onOpenMessage = onOpenMessage,
+                    mentions = mentions,
                 )
             }
         }
@@ -160,6 +197,7 @@ private fun GlobalFeedLineRow(
     showNetwork: Boolean,
     formatTime: (Long) -> String,
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit,
+    mentions: Boolean,
 ) {
     val message = row.message
     val dickordEnabled = LocalDickordLabsEnabled.current
@@ -171,11 +209,12 @@ private fun GlobalFeedLineRow(
             IrcIdentityRules.from(row.caseMapping, row.chanTypes)
         }
     val newerMessage = newer?.message
-    val sameBuffer = newerMessage?.bufferId == message.bufferId
+    // Mention rows skip intervening chat lines, so each one needs its own conversation label.
+    val sameBuffer = !mentions && newerMessage?.bufferId == message.bufferId
     // Headers are drawn above the bubble, so both are decided against the newer row above.
     // showsSender takes the older of the pair — true means this row opens the group.
     val showSender = newerMessage == null || !sameBuffer || showsSender(newerMessage, message)
-    Column(modifier = Modifier.fillMaxWidth().testTag("feed_row_${message.id}")) {
+    Column(modifier = Modifier.fillMaxWidth().testTag("${if (mentions) "mentions" else "feed"}_row_${message.id}")) {
         if (!sameBuffer) {
             Text(
                 text =
@@ -210,7 +249,7 @@ private fun GlobalFeedLineRow(
             identityRules = identityRules,
             formattedTime = remember(message.serverTime, formatTime) { formatTime(message.serverTime) },
             onClick = { onOpenMessage(message.bufferId, message.id, message.serverTime) },
-            onClickLabel = stringResource(R.string.feed_open_message),
+            onClickLabel = stringResource(if (mentions) R.string.mentions_open_message else R.string.feed_open_message),
         )
     }
 }

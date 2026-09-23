@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
@@ -16,6 +17,7 @@ import io.github.trevarj.motd.audio.VoiceConfig
 import io.github.trevarj.motd.avatar.AvatarConfig
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
+import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.ui.nav.SettingsTarget
@@ -194,5 +196,67 @@ class ChatSettingsComposerToolsTest {
             selected = action
         }
         compose.runOnIdle { assertEquals(ChatListSwipeAction.entries.toList(), selections) }
+    }
+
+    @Test
+    fun mentionsStartsOffAndPlacementIsChosenOnlyWhenEnabled() {
+        val settings = mutableStateOf(Settings())
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatSettingsContent(
+                    settings = settings.value,
+                    reply = ReplyConfig(),
+                    contentPreviews = ContentPreviewConfig(),
+                    voice = VoiceConfig(),
+                    avatars = AvatarConfig(),
+                    onBack = {},
+                    onOpenFriends = {},
+                    onOpenFools = {},
+                    onOpenDirectConnections = {},
+                    onPresenceMode = {},
+                    onShowRedactedMessages = {},
+                    onChatListSwipeAction = {},
+                    onMentionsEnabled = { settings.value = settings.value.copy(mentionsEnabled = it) },
+                    onMentionsPlacement = { settings.value = settings.value.copy(mentionsPlacement = it) },
+                    onAutoAwayEnabled = {},
+                    onAutoAwayMinutes = {},
+                    onAutoAwayMessage = {},
+                    onFoolsMode = {},
+                    onShowComposerEmoji = {},
+                    onShowComposerFormattingTools = {},
+                    onChatSoundsEnabled = {},
+                    onVisibleReplyPrefix = {},
+                    onShowImages = {},
+                    onShowLinkPreviews = {},
+                    onAutoLoadOnUnmetered = {},
+                    onAutoLoadOnMetered = {},
+                    onShowSharedAvatars = {},
+                    onVoiceEncryptionDefault = {},
+                    onVoiceQuality = {},
+                    onVoiceNoiseReduction = {},
+                    onClearAudioCache = {},
+                )
+            }
+        }
+
+        compose
+            .onNodeWithTag("settings_mentions_switch_row")
+            .performScrollTo()
+            .assertIsOff()
+            .performClick()
+        compose.onNodeWithTag("settings_mentions_location_picker").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_mentions_location_folder_tab").performClick()
+        compose.runOnIdle {
+            assertEquals(true, settings.value.mentionsEnabled)
+            assertEquals(MentionsPlacement.FOLDER_TAB, settings.value.mentionsPlacement)
+        }
+
+        compose
+            .onNodeWithTag("settings_mentions_switch_row")
+            .performScrollTo()
+            .assertIsOn()
+            .performClick()
+        compose.onNodeWithTag("settings_mentions_location_picker").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(MentionsPlacement.FOLDER_TAB, settings.value.mentionsPlacement) }
     }
 }

@@ -1134,7 +1134,7 @@ class ChatModelsTest {
     }
 
     @Test
-    fun `materialized target follows its stable key when an insertion shifts the index`() {
+    fun `exact jump waits for its shifted target to be visibly positioned before acknowledgement`() {
         val row =
             MessageEntity(
                 id = 7,
@@ -1145,16 +1145,63 @@ class ChatModelsTest {
                 text = "row",
                 dedupKey = "row",
             )
-        val materialized = MaterializedChatTarget(row, index = 4)
-        val shiftedVisibleItems =
+        // The feed click resolves this message at index 4. Before the placeholder's load settles,
+        // one newer row arrives; the target must be re-scrolled to index 5, not left focused on
+        // the row that replaced index 4.
+        val shiftedSnapshotItems =
             listOf(
-                99L to 4,
-                row.id to 5,
+                message(id = 99, serverTime = 101),
+                row,
             )
 
-        assertEquals(4, materialized.index)
-        assertEquals(7L, materialized.row.id)
-        assertEquals(5, materializedTargetVisibleIndex(shiftedVisibleItems, row.id))
+        assertEquals(
+            ExactTargetPlacement.NeedsScroll(index = 5),
+            exactTargetPlacement(
+                loadedStart = 4,
+                loadedItems = shiftedSnapshotItems,
+                visibleItems = listOf(99L to 4, row.id to 5),
+                firstVisibleIndex = 4,
+                firstVisibleOffset = 0,
+                targetOffset = 0,
+                eventId = row.id,
+            ),
+        )
+        assertEquals(
+            ExactTargetPlacement.Positioned(index = 5),
+            exactTargetPlacement(
+                loadedStart = 4,
+                loadedItems = shiftedSnapshotItems,
+                visibleItems = listOf(99L to 4, row.id to 5),
+                firstVisibleIndex = 5,
+                firstVisibleOffset = 0,
+                targetOffset = 0,
+                eventId = row.id,
+            ),
+        )
+        assertEquals(
+            ExactTargetPlacement.NeedsScroll(index = 5),
+            exactTargetPlacement(
+                loadedStart = 4,
+                loadedItems = shiftedSnapshotItems,
+                visibleItems = listOf(99L to 4, row.id to 5),
+                firstVisibleIndex = 5,
+                firstVisibleOffset = 1,
+                targetOffset = 0,
+                eventId = row.id,
+            ),
+        )
+        assertEquals(
+            ExactTargetPlacement.Missing,
+            exactTargetPlacement(
+                loadedStart = 4,
+                loadedItems = listOf(message(id = 99, serverTime = 101)),
+                visibleItems = listOf(99L to 4),
+                firstVisibleIndex = 4,
+                firstVisibleOffset = 0,
+                targetOffset = 0,
+                eventId = row.id,
+            ),
+        )
     }
 
     @Test

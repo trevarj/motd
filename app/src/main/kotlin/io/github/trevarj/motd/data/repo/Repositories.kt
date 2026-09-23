@@ -335,6 +335,9 @@ interface SearchRepository {
 /** Read-only cross-buffer conversation stream over the shared messages table, newest first. */
 interface GlobalFeedRepository {
     fun globalFeed(spec: MessageVisibilitySpec): Flow<PagingData<SearchHit>>
+
+    /** Stored messages from other people that mention or reply to the user, newest first. */
+    fun mentionsFeed(spec: MessageVisibilitySpec): Flow<PagingData<SearchHit>>
 }
 
 /**

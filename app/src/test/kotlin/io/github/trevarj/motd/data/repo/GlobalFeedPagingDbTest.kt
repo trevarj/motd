@@ -16,6 +16,7 @@ import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.visibility.GlobalFeedKey
+import io.github.trevarj.motd.data.visibility.GlobalFeedMode
 import io.github.trevarj.motd.data.visibility.GlobalFeedSeek
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.globalFeedPagingQuery
@@ -358,6 +359,79 @@ class GlobalFeedPagingDbTest {
             assertNull(rows.first().caseMapping)
             assertNull(rows.first().chanTypes)
         }
+
+    @Test
+    fun mentionsFeedIncludesMutedAndArchivedMentionsButExcludesNonCanonicalOrIneligibleRows() =
+        runTest {
+            val muted = db.bufferDao().insert(buffer(networkA, "#muted").copy(muted = true))
+            val archived = db.bufferDao().insert(buffer(networkA, "#archived").copy(archived = true))
+            val dismissed = db.bufferDao().insert(buffer(networkA, "#dismissed").copy(dismissed = true))
+            val closing = db.bufferDao().insert(buffer(networkA, "#closing").copy(pendingCloseAt = 1_000L))
+            val redirected = db.bufferDao().insert(buffer(networkA, "#redirected").copy(redirectToRoomId = bufferA))
+            val ids =
+                db.messageDao().insertAll(
+                    listOf(
+                        message(muted, "muted", sender = "alice", serverTime = 100, dedupKey = "m1", hasMention = true),
+                        message(archived, "archived", sender = "alice", serverTime = 200, dedupKey = "m2", hasMention = true),
+                        message(bufferA, "self", sender = "me", serverTime = 300, dedupKey = "m3", hasMention = true, isSelf = true),
+                        message(bufferA, "ordinary", sender = "alice", serverTime = 400, dedupKey = "m4"),
+                        message(dismissed, "dismissed", sender = "alice", serverTime = 500, dedupKey = "m5", hasMention = true),
+                        message(closing, "closing", sender = "alice", serverTime = 600, dedupKey = "m6", hasMention = true),
+                        message(redirected, "redirected", sender = "alice", serverTime = 700, dedupKey = "m7", hasMention = true),
+                        message(bufferB, "fool", sender = "fool", serverTime = 800, dedupKey = "m8", hasMention = true),
+                        message(bufferA, "canonical", sender = "alice", serverTime = 900, dedupKey = "m9", hasMention = true),
+                        message(bufferA, "redirect-loser", sender = "alice", serverTime = 1_000, dedupKey = "m10", hasMention = true),
+                    ),
+                )
+            db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(losingEventId = ids.last(), canonicalEventId = ids[8]))
+
+            val rows =
+                db.messageDao().globalFeedRows(
+                    globalFeedPagingQuery(
+                        spec = MessageVisibilitySpec(fools = setOf("fool")),
+                        mode = GlobalFeedMode.MENTIONS,
+                    ),
+                )
+
+            assertEquals(listOf("canonical", "archived", "muted"), rows.map { it.message.text })
+        }
+
+    @Test
+    fun mentionsPagingUsesTheCrossBufferMentionIndex() =
+        runTest {
+            val plan =
+                db.explainQueryPlan(
+                    globalFeedPagingQuery(
+                        spec = MessageVisibilitySpec(),
+                        key = GlobalFeedKey(serverTime = 400, id = 9),
+                        seek = GlobalFeedSeek.OLDER,
+                        limit = 50,
+                        mode = GlobalFeedMode.MENTIONS,
+                    ).sql,
+                )
+
+            assertFalse(plan.toString(), plan.any { "USE TEMP B-TREE FOR ORDER BY" in it })
+            assertTrue(plan.toString(), plan.any { "index_messages_hasMention_serverTime_id" in it })
+        }
+
+    @Test
+    fun bothFeedModesKeepTheSharedLifecycleFoolAndOrderingClauses() {
+        GlobalFeedMode.entries.forEach { mode ->
+            val sql =
+                globalFeedPagingQuery(
+                    spec = MessageVisibilitySpec(fools = setOf("fool")),
+                    mode = mode,
+                ).sql
+
+            assertTrue(sql, "b.dismissed = 0" in sql)
+            assertTrue(sql, "b.pendingCloseAt IS NULL" in sql)
+            assertTrue(sql, "b.redirectToRoomId IS NULL" in sql)
+            assertTrue(sql, "redirect.losingEventId IS NULL" in sql)
+            assertTrue(sql, "m.kind IN" in sql)
+            assertTrue(sql, "normalizedActor" in sql)
+            assertTrue(sql, "ORDER BY m.serverTime DESC, m.id DESC" in sql)
+        }
+    }
 }
 
 private fun MotdDatabase.explainQueryPlan(sql: String): List<String> =

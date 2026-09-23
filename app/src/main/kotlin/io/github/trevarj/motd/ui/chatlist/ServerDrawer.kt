@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.DoneAll
@@ -124,6 +125,8 @@ fun ServerDrawerContent(
     onToggleOffline: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenFeed: () -> Unit = {},
+    onOpenMentions: () -> Unit = {},
+    mentionsEnabled: Boolean = true,
     /** Global Feed lab flag; the feed row exists only while the lab is on. */
     globalFeedEnabled: Boolean = false,
     onMarkAllRead: () -> Unit,
@@ -196,7 +199,27 @@ fun ServerDrawerContent(
                     )
                 }
 
-                // 1. The one cross-buffer destination, above the per-network rows it merges. Lab-gated:
+                // The mention shortcut stays above the networks it merges.
+                if (mentionsEnabled) {
+                    NavigationDrawerItem(
+                        icon = { Icon(Icons.Outlined.AlternateEmail, contentDescription = null) },
+                        label = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(stringResource(R.string.mentions_title))
+                                if (allMentions > 0) MentionBadge(allMentions, lowerBound = allMentionsIncomplete)
+                            }
+                        },
+                        selected = false,
+                        onClick = onOpenMentions,
+                        modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_open_mentions"),
+                    )
+                }
+
+                // Global Feed stays above the per-network rows it merges. Lab-gated:
                 // hiding the row is what keeps the feed unreachable while the lab is off.
                 if (globalFeedEnabled) {
                     NavigationDrawerItem(

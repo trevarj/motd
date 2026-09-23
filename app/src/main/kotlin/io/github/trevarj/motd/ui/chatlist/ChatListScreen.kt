@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DoneAll
@@ -176,6 +177,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
+import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
@@ -206,6 +208,7 @@ fun ChatListScreen(
     onOpenSettings: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onOpenFeed: () -> Unit = {},
+    onOpenMentions: () -> Unit = {},
     onOpenDickord: () -> Unit = {},
     onOpenManageFolders: (Long?) -> Unit = {},
     onOpenFolderEditor: (Long) -> Unit = {},
@@ -268,6 +271,7 @@ fun ChatListScreen(
         onOpenSettings = onOpenSettings,
         onOpenSearch = onOpenSearch,
         onOpenFeed = onOpenFeed,
+        onOpenMentions = onOpenMentions,
         onOpenDickord = onOpenDickord,
         onOpenManageFolders = onOpenManageFolders,
         onOpenFolderEditor = onOpenFolderEditor,
@@ -353,6 +357,7 @@ fun ChatListContent(
     onOpenSettings: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenFeed: () -> Unit = {},
+    onOpenMentions: () -> Unit = {},
     onOpenDickord: () -> Unit = {},
     onOpenManageFolders: (Long?) -> Unit = {},
     onOpenFolderEditor: (Long) -> Unit = {},
@@ -402,9 +407,11 @@ fun ChatListContent(
     val showNetworkChip = state.networks.size > 1 && state.selectedNetworkId == null
     val visibleRows = if (archiveMode) state.archivedRows else state.rows
     val folderTabs = if (state.folderDisplayMode == FolderDisplayMode.TABS) presentFolderTabs(state.rows, state.folders) else emptyList()
+    val mentionsAsTab = state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.FOLDER_TAB
     val allTabRows = state.rows.filter { state.showFolderChatsInAll || it.folderId == null }
     val showAllTab =
         state.dickordEnabled ||
+            mentionsAsTab ||
             allTabRows.isNotEmpty() ||
             state.archivedRows.isNotEmpty() ||
             state.invitations.any(ChatListInvitation::actionable) ||
@@ -547,6 +554,11 @@ fun ChatListContent(
                     scope.launch { drawerState.close() }
                     onOpenFeed()
                 },
+                onOpenMentions = {
+                    scope.launch { drawerState.close() }
+                    onOpenMentions()
+                },
+                mentionsEnabled = state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.DRAWER,
                 globalFeedEnabled = state.globalFeedEnabled,
                 onMarkAllRead = {
                     scope.launch { drawerState.close() }
@@ -848,12 +860,15 @@ fun ChatListContent(
                         )
                     }
 
-                    if (!archiveMode && !invitationMode && (folderTabs.isNotEmpty() || state.dickordEnabled)) {
+                    if (!archiveMode && !invitationMode && (folderTabs.isNotEmpty() || state.dickordEnabled || mentionsAsTab)) {
                         FolderTabStrip(
                             folders = folderTabs,
                             allSummary = summarizeFolder(allTabRows),
                             showAllTab = showAllTab,
                             dickordSummary = state.dickordUnreadSummary,
+                            mentionsEnabled = mentionsAsTab,
+                            mentionsCount = state.allMentions,
+                            mentionsIncomplete = state.allMentionsIncomplete,
                             selectedFolderId = effectiveFolderId,
                             onSelect = { folderId ->
                                 if (folderId != effectiveFolderId) {
@@ -866,7 +881,15 @@ fun ChatListContent(
                                 selectedIds = emptyList()
                                 onOpenDickord()
                             },
+                            onOpenMentions = {
+                                selectedIds = emptyList()
+                                onOpenMentions()
+                            },
                         )
+                    }
+
+                    if (!archiveMode && !invitationMode && state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.CHAT_LIST) {
+                        MentionsPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenMentions)
                     }
 
                     val hasInvitationRoute = state.invitations.any(ChatListInvitation::actionable)
@@ -1107,9 +1130,13 @@ private fun FolderTabStrip(
     allSummary: ChatFolderSummary,
     showAllTab: Boolean,
     dickordSummary: ChatFolderSummary?,
+    mentionsEnabled: Boolean,
+    mentionsCount: Int,
+    mentionsIncomplete: Boolean,
     selectedFolderId: Long?,
     onSelect: (Long?) -> Unit,
     onOpenDickord: () -> Unit,
+    onOpenMentions: () -> Unit,
 ) {
     Row(
         modifier =
@@ -1133,6 +1160,23 @@ private fun FolderTabStrip(
                     pillTag = "chatlist_folder_tab_pill_all",
                     icon = { Icon(Icons.Outlined.Forum, contentDescription = null, modifier = Modifier.size(20.dp)) },
                 )
+            }
+        }
+        if (mentionsEnabled) {
+            FolderPillTab(
+                selected = false,
+                onClick = onOpenMentions,
+                tag = "chatlist_folder_tab_mentions",
+            ) {
+                Row(
+                    modifier = Modifier.testTag("chatlist_folder_tab_pill_mentions").padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.AlternateEmail, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Text(stringResource(R.string.mentions_title), style = MaterialTheme.typography.labelLarge)
+                    if (mentionsCount > 0) MentionBadge(mentionsCount, lowerBound = mentionsIncomplete)
+                }
             }
         }
         dickordSummary?.let { summary ->
@@ -1178,6 +1222,29 @@ private fun FolderTabStrip(
                     },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun MentionsPinnedRow(
+    count: Int,
+    incomplete: Boolean,
+    onClick: () -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).testTag("chatlist_pinned_mentions"),
+        shape = MotdShapes.channelAvatar,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.AlternateEmail, contentDescription = null, modifier = Modifier.size(24.dp))
+            Text(stringResource(R.string.mentions_title), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            if (count > 0) MentionBadge(count, lowerBound = incomplete)
         }
     }
 }

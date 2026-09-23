@@ -46,6 +46,7 @@ import io.github.trevarj.motd.ui.chatlist.ChatListViewModel
 import io.github.trevarj.motd.ui.chatlist.FolderEditorScreen
 import io.github.trevarj.motd.ui.chatlist.ManageFoldersScreen
 import io.github.trevarj.motd.ui.feed.GlobalFeedScreen
+import io.github.trevarj.motd.ui.feed.MentionsScreen
 import io.github.trevarj.motd.ui.imageviewer.ImageViewerScreen
 import io.github.trevarj.motd.ui.invite.AccountSetupScreen
 import io.github.trevarj.motd.ui.invite.CreateContactInviteScreen
@@ -565,6 +566,14 @@ fun MotdNavGraph(
                 },
             )
         }
+        composable<MentionsRoute> {
+            MentionsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenMessage = { bufferId, eventId, time ->
+                    navController.navigate(ChatRoute(bufferId, jumpToTime = time, jumpToEventId = eventId))
+                },
+            )
+        }
         composable<ChannelInfoRoute> { entry ->
             val route = entry.toRoute<ChannelInfoRoute>()
             ChannelInfoScreen(
@@ -726,6 +735,7 @@ private fun ChatListPane(
         onOpenSettings = { navController.navigate(SettingsRoute()) },
         onOpenSearch = { navController.navigate(SearchRoute()) },
         onOpenFeed = { navController.navigate(GlobalFeedRoute) },
+        onOpenMentions = { navController.navigate(MentionsRoute) },
         onOpenDickord = {
             navController.navigate(DickordPortalRoute) { launchSingleTop = true }
         },

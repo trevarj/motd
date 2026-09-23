@@ -415,6 +415,9 @@ data class GlobalFeedKey(
 /** Which side of a [GlobalFeedKey] a page reads, and whether the key row itself is included. */
 internal enum class GlobalFeedSeek { OLDER, OLDER_OR_AT, NEWER }
 
+/** The shared cross-buffer pager supports the ordinary stream and its mention-only view. */
+internal enum class GlobalFeedMode { ALL, MENTIONS }
+
 /**
  * Cross-buffer reverse-chronological conversation stream, newest first.
  *
@@ -433,6 +436,7 @@ internal fun globalFeedPagingQuery(
     key: GlobalFeedKey? = null,
     seek: GlobalFeedSeek = GlobalFeedSeek.OLDER,
     limit: Int? = null,
+    mode: GlobalFeedMode = GlobalFeedMode.ALL,
 ): SimpleSQLiteQuery {
     val direction = if (key != null && seek == GlobalFeedSeek.NEWER) "ASC" else "DESC"
     val keyset = if (key == null) "" else "${keysetPredicate(seek)} "
@@ -449,10 +453,12 @@ internal fun globalFeedPagingQuery(
             "JOIN networks n ON n.id = b.networkId " +
             "LEFT JOIN network_identity ni ON ni.networkId = b.networkId " +
             "LEFT JOIN event_redirects redirect ON redirect.losingEventId = m.id " +
-            "WHERE b.type IN ('CHANNEL','QUERY') AND b.dismissed = 0 AND b.archived = 0 " +
+            "WHERE b.type IN ('CHANNEL','QUERY') AND b.dismissed = 0 " +
+            (if (mode == GlobalFeedMode.ALL) "AND b.archived = 0 " else "") +
             "AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL " +
             "AND redirect.losingEventId IS NULL " +
             "AND m.kind IN ($CONVERSATION_KIND_SQL) " +
+            (if (mode == GlobalFeedMode.MENTIONS) "AND m.hasMention = 1 AND m.isSelf = 0 " else "") +
             "AND ${MessageVisibilitySql.notFoolAnyCasemap(spec, "ni.caseMapping")} " +
             keyset +
             "ORDER BY m.serverTime $direction, m.id $direction" +

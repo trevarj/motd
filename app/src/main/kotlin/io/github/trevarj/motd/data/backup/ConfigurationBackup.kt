@@ -499,6 +499,8 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setFolderDisplayMode(it.folderDisplayMode)
                 settingsRepository.setShowFolderChatsInAll(it.showFolderChatsInAll)
                 settingsRepository.setChatListSwipeAction(it.chatListSwipeAction)
+                settingsRepository.setMentionsEnabled(it.mentionsEnabled)
+                settingsRepository.setMentionsPlacement(it.mentionsPlacement)
                 settingsRepository.setNickColorsEnabled(it.nickColorsEnabled)
                 settingsRepository.setNickColorPalette(it.nickColorPalette)
                 current.nickColorOverrides.keys

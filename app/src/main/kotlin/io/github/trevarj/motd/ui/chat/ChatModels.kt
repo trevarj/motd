@@ -1243,6 +1243,53 @@ internal fun materializedTargetVisibleIndex(
     eventId: Long,
 ): Int? = visibleItems.firstOrNull { (key, _) -> key == eventId }?.second
 
+/** Find an exact target in Paging's current loaded window after a presentation shift. */
+internal fun materializedTargetSnapshotIndex(
+    loadedStart: Int,
+    loadedItems: List<MessageEntity>,
+    eventId: Long,
+): Int? =
+    loadedItems
+        .indexOfFirst { it.id == eventId }
+        .takeIf { it >= 0 }
+        ?.plus(loadedStart)
+
+/** Whether an exact deep-jump target is still loaded and has reached the current viewport. */
+internal sealed interface ExactTargetPlacement {
+    data object Missing : ExactTargetPlacement
+
+    data class NeedsScroll(
+        val index: Int,
+    ) : ExactTargetPlacement
+
+    data class Positioned(
+        val index: Int,
+    ) : ExactTargetPlacement
+}
+
+internal fun exactTargetPlacement(
+    loadedStart: Int,
+    loadedItems: List<MessageEntity>,
+    visibleItems: List<Pair<Any, Int>>,
+    firstVisibleIndex: Int,
+    firstVisibleOffset: Int,
+    targetOffset: Int,
+    eventId: Long,
+): ExactTargetPlacement {
+    val snapshotIndex =
+        materializedTargetSnapshotIndex(loadedStart, loadedItems, eventId)
+            ?: return ExactTargetPlacement.Missing
+    return if (
+        materializedTargetVisibleIndex(visibleItems, eventId) == snapshotIndex &&
+        firstVisibleIndex == snapshotIndex &&
+        firstVisibleOffset == targetOffset
+    ) {
+        ExactTargetPlacement.Positioned(snapshotIndex)
+    } else {
+        ExactTargetPlacement.NeedsScroll(snapshotIndex)
+    }
+}
+
 internal fun shouldShowNewestFab(
     atBottom: Boolean,
     autoScrolling: Boolean,

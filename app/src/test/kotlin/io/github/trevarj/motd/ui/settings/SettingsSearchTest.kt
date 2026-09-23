@@ -40,6 +40,8 @@ class SettingsSearchTest {
             "dickord" to SettingsSearchDestination.Page(SettingsSearchPage.LABS, SettingsTarget.DICKORD),
             "aggressive lazy" to SettingsSearchDestination.Page(SettingsSearchPage.HISTORY, SettingsTarget.HISTORY_SYNC_MODE),
             "swipe" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.CHAT_LIST_SWIPE),
+            "replies feed" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.MENTIONS),
+            "mentions drawer" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.MENTIONS_LOCATION),
             "ircv3 typing" to SettingsSearchDestination.Page(SettingsSearchPage.SECURITY, SettingsTarget.SEND_TYPING),
         ).forEach { (query, destination) ->
             assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)

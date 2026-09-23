@@ -101,6 +101,7 @@ class GlobalFeedScreenTest {
         stream: Flow<PagingData<SearchHit>>,
         showNetwork: () -> Boolean = { false },
         dickordEnabled: Boolean = false,
+        mentions: Boolean = false,
     ) {
         compose.setContent {
             // Motion off: the caption waits on a Lottie clock a stub composition never advances.
@@ -115,6 +116,7 @@ class GlobalFeedScreenTest {
                         onOpenMessage = { bufferId, eventId, serverTime ->
                             opened = Triple(bufferId, eventId, serverTime)
                         },
+                        mentions = mentions,
                     )
                 }
             }
@@ -152,6 +154,28 @@ class GlobalFeedScreenTest {
             // Canonical row id for identity, serverTime only as the scroll anchor.
             assertEquals(Triple(7L, 11L, 1_700_000_000_000L), opened)
         }
+    }
+
+    @Test
+    fun mentionsModeOpensTheExactStoredMessage() {
+        setContent(flowOf(PagingData.from(listOf(row(id = 21L, text = "hey nick")))), mentions = true)
+
+        awaitTag("mentions_row_21")
+        compose.onNodeWithTag("mentions_list").assertIsDisplayed()
+        compose.onNodeWithText("hey nick").performClick()
+
+        compose.runOnIdle { assertEquals(Triple(7L, 21L, 1_700_000_000_000L), opened) }
+    }
+
+    @Test
+    fun mentionsModeLabelsEveryRowEvenWhenTwoMentionsShareAChat() {
+        setContent(
+            flowOf(PagingData.from(listOf(row(id = 22L, text = "later"), row(id = 21L, text = "earlier")))),
+            mentions = true,
+        )
+
+        awaitTag("mentions_row_21")
+        assertEquals(2, compose.onAllNodesWithText("#kotlin").fetchSemanticsNodes().size)
     }
 
     @Test

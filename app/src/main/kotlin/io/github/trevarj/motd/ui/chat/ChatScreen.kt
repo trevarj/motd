@@ -1536,7 +1536,53 @@ fun ChatContent(
                     "loaded_count=${items.itemSnapshotList.items.size}"
             }
         }
-        return row?.let { MaterializedChatTarget(it, materializedIndex) }
+        return row?.let { targetRow ->
+            if (!scroll || target.expectedEventId != targetRow.id) {
+                return@let MaterializedChatTarget(targetRow, materializedIndex)
+            }
+            // `scrollToItem` ran before Paging loaded this placeholder. An arriving message can
+            // shift the exact row in a replacement snapshot while entry positioning is unsettled,
+            // before the normal viewport pin is allowed to run. Keep correcting that exact event
+            // across presentation changes, and settle only after LazyColumn has laid out its key.
+
+            fun exactPlacement(): ExactTargetPlacement {
+                val snapshot = items.itemSnapshotList
+                return exactTargetPlacement(
+                    loadedStart = snapshot.placeholdersBefore,
+                    loadedItems = snapshot.items,
+                    visibleItems = listState.layoutInfo.visibleItemsInfo.map { it.key to it.index },
+                    firstVisibleIndex = listState.firstVisibleItemIndex,
+                    firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                    targetOffset = target.offset,
+                    eventId = targetRow.id,
+                )
+            }
+            withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+                var placement = exactPlacement()
+                while (true) {
+                    when (placement) {
+                        ExactTargetPlacement.Missing -> {
+                            return@withTimeoutOrNull null
+                        }
+
+                        is ExactTargetPlacement.Positioned -> {
+                            return@withTimeoutOrNull MaterializedChatTarget(targetRow, placement.index)
+                        }
+
+                        is ExactTargetPlacement.NeedsScroll -> {
+                            val requestedIndex = placement.index
+                            listState.scrollToItem(requestedIndex, target.offset)
+                            placement =
+                                snapshotFlow { exactPlacement() }.first { next ->
+                                    next !is ExactTargetPlacement.NeedsScroll || next.index != requestedIndex
+                                }
+                        }
+                    }
+                }
+                @Suppress("UNREACHABLE_CODE")
+                null
+            }
+        }
     }
 
     // Deep jumps request one resolved placeholder, then validate both of its exact identities.

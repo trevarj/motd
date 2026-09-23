@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
@@ -76,6 +77,10 @@ class ChatSettingsViewModel
         fun setPresenceMode(value: PresenceMode) = launch { settingsRepository.setPresenceMode(value) }
 
         fun setChatListSwipeAction(value: ChatListSwipeAction) = launch { settingsRepository.setChatListSwipeAction(value) }
+
+        fun setMentionsEnabled(enabled: Boolean) = launch { settingsRepository.setMentionsEnabled(enabled) }
+
+        fun setMentionsPlacement(placement: MentionsPlacement) = launch { settingsRepository.setMentionsPlacement(placement) }
 
         fun setShowRedactedMessages(value: Boolean) = launch { settingsRepository.setShowRedactedMessages(value) }
 

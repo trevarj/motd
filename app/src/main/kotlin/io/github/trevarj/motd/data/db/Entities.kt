@@ -426,6 +426,9 @@ data class RoomAliasEntity(
         // bufferId-prefixed and cannot serve that scan, leaving it a full sort of the table.
         // (serverTime, id) only: timelineOrder is per-buffer and not comparable across buffers.
         Index(value = ["serverTime", "id"]),
+        // Mentions scan every conversation together, newest first; no buffer-leading index can
+        // serve this cross-buffer keyset walk.
+        Index(value = ["hasMention", "serverTime", "id"]),
     ],
     foreignKeys = [
         ForeignKey(

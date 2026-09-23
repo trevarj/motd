@@ -41,6 +41,15 @@ enum class FolderDisplayMode { INLINE, TABS }
 /** Decode folder presentation without letting unknown future values break startup. */
 internal fun folderDisplayModeFromPreference(saved: String?): FolderDisplayMode = saved?.let { runCatching { FolderDisplayMode.valueOf(it) }.getOrNull() } ?: FolderDisplayMode.INLINE
 
+/** Where the optional cross-network Mentions feed is presented. */
+enum class MentionsPlacement { DRAWER, CHAT_LIST, FOLDER_TAB }
+
+/** Decode a saved location without letting a newer value block startup. */
+internal fun mentionsPlacementFromPreference(saved: String?): MentionsPlacement = saved?.let { runCatching { MentionsPlacement.valueOf(it) }.getOrNull() } ?: MentionsPlacement.DRAWER
+
+/** Decode the stored state, making Mentions visible for new installations. */
+internal fun mentionsEnabledFromPreference(saved: String?): Boolean = saved?.toBooleanStrictOrNull() ?: true
+
 enum class ChatListSwipeAction { ARCHIVE, MARK_READ, MUTE, PIN, DELETE, NONE }
 
 internal fun chatListSwipeActionFromPreference(saved: String?): ChatListSwipeAction = saved?.let { runCatching { ChatListSwipeAction.valueOf(it) }.getOrNull() } ?: ChatListSwipeAction.ARCHIVE
@@ -272,6 +281,10 @@ data class Settings(
     val showFolderChatsInAll: Boolean = true,
     /** End-to-start action on active chat-list rows; archived rows always unarchive. */
     val chatListSwipeAction: ChatListSwipeAction = ChatListSwipeAction.ARCHIVE,
+    /** Show the cross-network feed of stored messages that mention or reply to you. */
+    val mentionsEnabled: Boolean = true,
+    /** Presentation location retained while [mentionsEnabled] is off. */
+    val mentionsPlacement: MentionsPlacement = MentionsPlacement.DRAWER,
 )
 
 /** Canonical key for friends/fools/override lookups: trimmed + lowercased.
@@ -305,6 +318,10 @@ interface SettingsRepository {
     suspend fun setShowFolderChatsInAll(enabled: Boolean) {}
 
     suspend fun setChatListSwipeAction(action: ChatListSwipeAction) {}
+
+    suspend fun setMentionsEnabled(enabled: Boolean) {}
+
+    suspend fun setMentionsPlacement(placement: MentionsPlacement) {}
 
     suspend fun setNickColorsEnabled(enabled: Boolean)
 

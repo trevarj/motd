@@ -7,6 +7,7 @@ import androidx.room.InvalidationTracker
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.visibility.GlobalFeedKey
+import io.github.trevarj.motd.data.visibility.GlobalFeedMode
 import io.github.trevarj.motd.data.visibility.GlobalFeedSeek
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.globalFeedPagingQuery
@@ -32,6 +33,7 @@ internal val GLOBAL_FEED_TABLES =
 internal class GlobalFeedPagingSource(
     private val db: MotdDatabase,
     private val spec: MessageVisibilitySpec,
+    private val mode: GlobalFeedMode = GlobalFeedMode.ALL,
 ) : PagingSource<GlobalFeedKey, SearchHit>() {
     private val observer =
         object : InvalidationTracker.Observer(GLOBAL_FEED_TABLES) {
@@ -94,7 +96,7 @@ internal class GlobalFeedPagingSource(
         key: GlobalFeedKey?,
         seek: GlobalFeedSeek,
         limit: Int,
-    ): List<SearchHit> = db.messageDao().globalFeedPage(globalFeedPagingQuery(spec, key, seek, limit))
+    ): List<SearchHit> = db.messageDao().globalFeedPage(globalFeedPagingQuery(spec, key, seek, limit, mode))
 
     /** First load arms the observer; the source is discarded on the first invalidation after that. */
     private fun observe() {

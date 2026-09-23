@@ -606,6 +606,10 @@
 
     <!-- Global feed: unified cross-buffer conversation stream -->
     <string name="feed_title">Global Feed</string>
+    <string name="mentions_title">Mentions</string>
+    <string name="mentions_empty_title">No mentions yet</string>
+    <string name="mentions_empty_message">Messages that mention your nick or reply to you will appear here.</string>
+    <string name="mentions_open_message">Open mention in chat</string>
     <string name="feed_empty_title">Nothing here yet</string>
     <string name="feed_empty_message">Conversation lines from every channel and DM appear here as they arrive.</string>
     <string name="feed_error_title">Couldn\'t load the global feed</string>
@@ -1058,6 +1062,11 @@
     <string name="settings_chat_list_swipe_mute">Mute/unmute</string>
     <string name="settings_chat_list_swipe_pin">Pin/unpin</string>
     <string name="settings_chat_list_swipe_none">Nothing</string>
+    <string name="settings_mentions_desc">Show mentions from all chats in one feed, including replies to your messages.</string>
+    <string name="settings_mentions_location">Mentions location</string>
+    <string name="settings_mentions_drawer">Popout drawer</string>
+    <string name="settings_mentions_chat_list">Top of chat list</string>
+    <string name="settings_mentions_folder_tab">Folder tab</string>
     <string name="settings_reply_prefix">Visible reply prefix</string>
     <string name="settings_reply_prefix_desc">Prefix channel replies with the recipient’s nick for clients that do not render reply tags.</string>
     <string name="settings_voice_encryption">Encrypt voice messages by default</string>

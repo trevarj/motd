@@ -62,3 +62,23 @@ class GlobalFeedViewModel
             showsNetworkName(networkRepository.observeNetworks())
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     }
+
+/** The same live cross-buffer paging path, restricted to stored mentions. */
+@HiltViewModel
+class MentionsViewModel
+    @Inject
+    constructor(
+        settingsRepository: SettingsRepository,
+        networkRepository: NetworkRepository,
+        globalFeedRepository: GlobalFeedRepository,
+    ) : ViewModel() {
+        val items: Flow<PagingData<SearchHit>> =
+            globalFeedPages(
+                source = globalFeedRepository::mentionsFeed,
+                specs = settingsRepository.settings.map(MessageVisibilitySpec::from),
+            ).cachedIn(viewModelScope)
+
+        val showNetwork: StateFlow<Boolean> =
+            showsNetworkName(networkRepository.observeNetworks())
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    }
