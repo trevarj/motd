@@ -306,7 +306,7 @@ internal class SoundPoolChatSoundBackend
                 post = { task, delay -> mainHandler.postDelayed(task, delay) },
                 remove = { mainHandler.removeCallbacks(it) },
                 stopPlaying = ::stopStreams,
-        )
+            )
 
         init {
             pool?.setOnLoadCompleteListener { _, id, status -> if (status == 0) ready[id] = true }
@@ -348,7 +348,7 @@ internal class SoundPoolChatSoundBackend
                     } else {
                         previewSequence.next(cue, config)
                     }
-            }
+                }
             val keys = previewChatSoundAssetKeys(config, cue, selections)
             keys.forEach(::preload)
             preview.start(
@@ -373,8 +373,7 @@ internal class SoundPoolChatSoundBackend
             warmChatSoundAssetKeys(config).forEach(::preload)
         }
 
-        private fun loadIfNeeded(key: ChatSoundAssetKey): Int? =
-            samples[key] ?: synchronized(samples) { samples[key] ?: load(key) }
+        private fun loadIfNeeded(key: ChatSoundAssetKey): Int? = samples[key] ?: synchronized(samples) { samples[key] ?: load(key) }
 
         private fun load(key: ChatSoundAssetKey): Int? =
             runCatching {

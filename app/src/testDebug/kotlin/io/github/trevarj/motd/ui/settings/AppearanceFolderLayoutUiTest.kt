@@ -16,10 +16,14 @@ import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
+import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
+import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -27,6 +31,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.GraphicsMode
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -140,6 +147,47 @@ class AppearanceFolderLayoutUiTest {
         assertEquals(BubbleCornerStyle.SQUARE, selectedCorners)
     }
 
+    @Test
+    fun chatPreviewAppliesMessageAppearanceConfiguration() {
+        val expectedTime = previewTimeText()
+        setContent(
+            settings = Settings(avatarStyle = AvatarStyle.NONE, nickColorsEnabled = false),
+            appearance =
+                AppearanceConfig(
+                    conversationFontScalePercent = 140,
+                    fontChoice = FontChoice.MONOSPACE,
+                    showTimestamps = false,
+                    timeFormat = TimeFormat.H24,
+                    messageSpacing = MessageSpacing.RELAXED,
+                    bubbleCornerStyle = BubbleCornerStyle.SQUARE,
+                    chatShadowsEnabled = false,
+                    wallpaper = WallpaperSelection(ChatWallpaperPreset.NONE),
+                ),
+        )
+
+        compose.onNodeWithTag("settings_chat_preview_inline_comfortable_relaxed_square").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings_chat_preview_inline_wallpaper_none_50").assertExists()
+        compose.onNodeWithTag("settings_chat_preview_inline_timestamps_false_h24").assertExists()
+        compose.onNodeWithTag("settings_chat_preview_inline_shadows_false").assertExists()
+        compose.onNodeWithTag("chat_sender_avatar", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText(expectedTime, useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun avatarAndTimeSelectionsUpdateInlinePreviewBeforeSettingsEmit() {
+        val expectedTime = previewTimeText()
+        setContent()
+
+        compose.onNodeWithTag("settings_avatar_style_picker").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_avatar_style_none").performClick()
+        compose.onNodeWithTag("chat_sender_avatar", useUnmergedTree = true).assertDoesNotExist()
+
+        compose.onNodeWithTag("settings_time_format_picker").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_time_format_h24").performClick()
+        compose.onNodeWithTag("settings_chat_preview_inline_timestamps_true_h24").performScrollTo().assertExists()
+        compose.onNodeWithText(expectedTime, useUnmergedTree = true).assertIsDisplayed()
+    }
+
     private fun dismissSheet(tag: String) {
         val sheet = hasTestTag(tag)
         val dismissAction = SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet))
@@ -147,8 +195,11 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag(tag, useUnmergedTree = true).assertDoesNotExist()
     }
 
+    private fun previewTimeText(): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(PREVIEW_MESSAGE_TIME_MILLIS))
+
     private fun setContent(
         settings: Settings = Settings(),
+        appearance: AppearanceConfig = AppearanceConfig(),
         onFolderDisplayMode: (FolderDisplayMode) -> Unit = {},
         onShowFolderChatsInAll: (Boolean) -> Unit = {},
         onAvatarStyle: (AvatarStyle) -> Unit = {},
@@ -161,7 +212,7 @@ class AppearanceFolderLayoutUiTest {
             MotdTheme(dynamicColor = false) {
                 AppearanceSettingsContent(
                     settings = settings,
-                    appearance = AppearanceConfig(),
+                    appearance = appearance,
                     onBack = {},
                     onOpenNickColors = {},
                     onThemePreset = {},
@@ -190,3 +241,5 @@ class AppearanceFolderLayoutUiTest {
         }
     }
 }
+
+private const val PREVIEW_MESSAGE_TIME_MILLIS = 1_704_110_040_000L

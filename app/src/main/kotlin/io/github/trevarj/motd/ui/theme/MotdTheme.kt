@@ -194,6 +194,8 @@ fun MotdTheme(
     messageSpacing: MessageSpacing = MessageSpacing.DEFAULT,
     bubbleCornerStyle: BubbleCornerStyle = BubbleCornerStyle.ROUNDED,
     chatShadowsEnabled: Boolean = true,
+    // Nested previews can render a different palette from the app shell without restyling its bars.
+    syncSystemBars: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     // Read composable environment values unconditionally. Changing between dynamic/system and a
@@ -230,7 +232,7 @@ fun MotdTheme(
     // Re-applying here also keeps the bars in sync when the theme changes at runtime.
     // Only hosts that opted in via [SystemBarThemeHost] get their window restyled: test hosts must
     // never see the enableEdgeToEdge relayout race mid-gesture.
-    val activity = remember(context) { context.findComponentActivity()?.takeIf { it is SystemBarThemeHost } }
+    val activity = remember(context, syncSystemBars) { context.findComponentActivity()?.takeIf { it is SystemBarThemeHost && syncSystemBars } }
     LaunchedEffect(activity, dark) {
         if (activity == null) return@LaunchedEffect
         val barStyle =
