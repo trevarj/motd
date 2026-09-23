@@ -1,7 +1,6 @@
 package io.github.trevarj.motd
 
 import android.content.Context
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -38,6 +37,7 @@ import io.github.trevarj.motd.ui.chatlist.ChatListState
 import io.github.trevarj.motd.ui.chatlist.ordinaryChatListRows
 import io.github.trevarj.motd.ui.chatlist.partitionArchivedRows
 import io.github.trevarj.motd.ui.chatlist.summarizeFolder
+import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -290,7 +290,6 @@ class ChatFolderUiTest {
             val x = ((pillBounds.left + pillBounds.right) / 2 - stripBounds.left).toInt()
             val y = (pillBounds.top - stripBounds.top + 2).toInt()
             // This point is inside the pill fill but above the icon, label, and badge.
-            assertEquals(pixels.getPixel(x, 0), pixels.getPixel(x, pixels.height - 1))
             return pixels.getPixel(x, y)
         }
 
@@ -299,6 +298,20 @@ class ChatFolderUiTest {
         val selectedFill = pillPixel(allTag)
         val plainFill = pillPixel(folderTag)
         assertNotEquals(plainFill, selectedFill)
+
+        val strip = compose.onNodeWithTag("chatlist_folder_tabs")
+        val stripBounds = strip.fetchSemanticsNode().boundsInRoot
+        val pillBounds = compose.onNodeWithTag(allTag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val pixels = strip.captureToImage().asAndroidBitmap()
+        val left = (pillBounds.left - stripBounds.left).toInt()
+        val top = (pillBounds.top - stripBounds.top).toInt()
+        val center = ((pillBounds.left + pillBounds.right) / 2 - stripBounds.left).toInt()
+        assertEquals(pixels.getPixel(center, 0), pixels.getPixel(center, pixels.height - 1))
+        val cornerInset = with(compose.density) { 2.dp.toPx().toInt() }
+        val shoulderInset = with(compose.density) { 7.dp.toPx().toInt() }
+        // The avatar-like corner reaches the top edge sooner than a fully round capsule.
+        assertEquals(plainFill, pixels.getPixel(left + cornerInset, top + cornerInset))
+        assertEquals(selectedFill, pixels.getPixel(left + shoulderInset, top + cornerInset))
 
         compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
         assertEquals(plainFill, pillPixel(allTag))
@@ -350,7 +363,7 @@ class ChatFolderUiTest {
         val bounds = tab.fetchSemanticsNode().boundsInRoot
         val minTouchHeight = with(compose.density) { 48.dp.toPx() }
         assertTrue(bounds.height >= minTouchHeight)
-        assertEquals(CircleShape, tab.fetchSemanticsNode().config[SemanticsProperties.Shape])
+        assertEquals(MotdShapes.channelAvatar, tab.fetchSemanticsNode().config[SemanticsProperties.Shape])
 
         // The top edge stays tappable even though the visible pill is shorter than the target.
         tab.performTouchInput { click(Offset(center.x, 2f)) }

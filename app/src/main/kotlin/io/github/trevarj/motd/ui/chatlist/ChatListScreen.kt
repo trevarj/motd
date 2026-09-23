@@ -190,6 +190,7 @@ import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -1197,7 +1198,7 @@ private fun FolderPillTab(
         modifier =
             Modifier
                 .bringIntoViewRequester(bringIntoViewRequester)
-                .clip(CircleShape)
+                .clip(MotdShapes.channelAvatar)
                 .selectable(selected = selected, onClick = onClick, role = Role.Tab)
                 .heightIn(min = 48.dp)
                 .padding(horizontal = 2.dp)
@@ -1221,7 +1222,7 @@ private fun FolderTabLabel(
     Row(
         modifier =
             Modifier
-                .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, CircleShape)
+                .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, MotdShapes.channelAvatar)
                 .testTag(pillTag)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
