@@ -10,8 +10,10 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -443,6 +445,7 @@ private fun TlsRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(stringResource(R.string.onboarding_field_tls), modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(16.dp))
         // withTls re-defaults the port (6697<->6667) unless the user typed a custom one.
         Switch(checked = server.tls, onCheckedChange = { onServerChange(server.withTls(it)) })
     }
@@ -656,6 +659,7 @@ private fun AuthSection(
                                     stringResource(R.string.onboarding_auth_nickserv_recovery),
                                     modifier = Modifier.weight(1f),
                                 )
+                                Spacer(Modifier.width(16.dp))
                                 Switch(
                                     checked = auth.nickServRecoveryEnabled,
                                     onCheckedChange = {

@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -21,6 +23,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -202,6 +205,23 @@ class SettingsHomeAndPrimitivesUiTest {
         compose.onNodeWithText("Conversation").assert(isHeading())
         compose.onNodeWithTag("images_switch_row").assertIsOn().assert(hasClickAction())
         compose.onNodeWithTag("settings_target_highlight_PRESENCE").assertIsDisplayed()
+    }
+
+    @Test
+    fun narrow_switch_row_wraps_label_with_space_before_toggle() {
+        val title = "Automatically download images sent to this conversation"
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                Box(Modifier.width(220.dp)) {
+                    SwitchRow(title, "Show images", checked = true, onCheckedChange = {}, switchTag = "narrow_switch")
+                }
+            }
+        }
+
+        val label = compose.onNodeWithText(title, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val toggle = compose.onNodeWithTag("narrow_switch", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("Label should wrap at a narrow width", label.height > toggle.height)
+        assertTrue("Label should have a 16 dp gap before the switch", toggle.left - label.right >= with(compose.density) { 16.dp.toPx() } - 1f)
     }
 
     private fun network(
