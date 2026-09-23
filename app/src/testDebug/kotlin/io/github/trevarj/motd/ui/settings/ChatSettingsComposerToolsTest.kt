@@ -200,7 +200,7 @@ class ChatSettingsComposerToolsTest {
 
     @Test
     fun mentionsStartsOffAndPlacementIsChosenOnlyWhenEnabled() {
-        val settings = mutableStateOf(Settings())
+        val settings = mutableStateOf(Settings(mentionsEnabled = false))
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 ChatSettingsContent(
