@@ -16,6 +16,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Dp
@@ -161,6 +162,20 @@ class MessageBubbleFooterUiTest {
         compose.onNodeWithTag("self_sender_label", useUnmergedTree = true).assertDoesNotExist()
     }
 
+    @Test
+    fun comfortableAvatarKeepsSenderActionForOrdinaryAndActionMessages() {
+        val kind = mutableStateOf(MessageKind.PRIVMSG)
+        var senderOpens = 0
+        compose.setContent { Sample(isSelf = false, kind = kind.value, onSenderClick = { senderOpens++ }) }
+
+        compose.onNodeWithTag("chat_sender_avatar", useUnmergedTree = true).assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(1, senderOpens) }
+
+        compose.runOnIdle { kind.value = MessageKind.ACTION }
+        compose.onNodeWithTag("chat_sender_avatar", useUnmergedTree = true).assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(2, senderOpens) }
+    }
+
     @Composable
     private fun Sample(
         sender: String = NICK,
@@ -170,6 +185,7 @@ class MessageBubbleFooterUiTest {
         width: Dp = 380.dp,
         density: LayoutDensity = LayoutDensity.COMFORTABLE,
         kind: MessageKind = MessageKind.PRIVMSG,
+        onSenderClick: (() -> Unit)? = null,
     ) {
         MotdTheme(
             dynamicColor = false,
@@ -186,6 +202,7 @@ class MessageBubbleFooterUiTest {
                     isSelf = isSelf,
                     kind = kind,
                     showSender = showSender,
+                    onSenderClick = onSenderClick,
                 )
             }
         }

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -42,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -70,6 +72,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
@@ -106,6 +109,8 @@ import java.text.DateFormat as JavaDateFormat
 private const val TWO_LINE_ROW_TINT_ALPHA = 0.10f
 internal const val MENTION_ROW_TINT_ALPHA = 0.55f
 private const val ACTION_ROW_TINT_ALPHA = 0.22f
+private val COMFORTABLE_BUBBLE_ELEVATION = 2.dp
+private val COMFORTABLE_CONTENT_ELEVATION = 1.dp
 
 internal fun actionAccessibilityLabel(
     sender: String,
@@ -514,6 +519,8 @@ fun MessageBubble(
                 val avatarMod =
                     Modifier
                         .padding(end = 8.dp, top = 2.dp)
+                        .shadow(COMFORTABLE_BUBBLE_ELEVATION, CircleShape)
+                        .testTag("chat_sender_avatar")
                         .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
                 Avatar(
                     name = sender,
@@ -531,6 +538,8 @@ fun MessageBubble(
             modifier =
                 Modifier
                     .chatBubbleWidth()
+                    // Lift only the comfortable bubble, using its grouped corner shape.
+                    .shadow(COMFORTABLE_BUBBLE_ELEVATION, shape)
                     .clip(shape)
                     .background(bubbleColor)
                     .messageRowClicks(
@@ -577,7 +586,7 @@ fun MessageBubble(
                 )
             }
 
-            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, elevation = COMFORTABLE_CONTENT_ELEVATION) }
 
             if (text.isNotBlank()) {
                 // Linkify http(s) URLs so the body is tappable even when the preview fails
@@ -632,6 +641,7 @@ fun MessageBubble(
                             .padding(vertical = 2.dp)
                             .heightIn(max = 280.dp)
                             .aspectRatio(4f / 3f)
+                            .shadow(COMFORTABLE_CONTENT_ELEVATION, RoundedCornerShape(12.dp))
                             .clip(RoundedCornerShape(12.dp)),
                 )
                 MediaOriginCaption(
@@ -647,6 +657,7 @@ fun MessageBubble(
                         networkId = networkId,
                         loading = linkPreviewLoading,
                         onClick = onLinkPreviewClick,
+                        modifier = Modifier.shadow(COMFORTABLE_CONTENT_ELEVATION, RoundedCornerShape(12.dp)),
                     )
                 }
             }
@@ -686,7 +697,7 @@ fun MessageBubble(
                 }
             }
 
-            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf)
+            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf, chipElevation = COMFORTABLE_CONTENT_ELEVATION)
         }
     }
 }
@@ -831,6 +842,7 @@ private fun ComfortableActionBubble(
             modifier =
                 Modifier
                     .chatBubbleWidth()
+                    .shadow(COMFORTABLE_BUBBLE_ELEVATION, shape)
                     .clip(shape)
                     .background(rowColor)
                     .testTag("chat_action_row")
@@ -844,7 +856,7 @@ private fun ComfortableActionBubble(
                         onLongPressLabel = actionsLabel,
                     ).padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
         ) {
-            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, elevation = COMFORTABLE_CONTENT_ELEVATION) }
 
             Row(verticalAlignment = Alignment.Top) {
                 if (!hideAvatar) {
@@ -852,6 +864,8 @@ private fun ComfortableActionBubble(
                         Modifier
                             .padding(end = 6.dp, top = 2.dp)
                             .size(20.dp)
+                            .shadow(COMFORTABLE_CONTENT_ELEVATION, CircleShape)
+                            .testTag("chat_sender_avatar")
                             .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
                     Avatar(
                         name = sender,
@@ -909,6 +923,7 @@ private fun ComfortableActionBubble(
                             .widthIn(max = 280.dp)
                             .heightIn(max = 240.dp)
                             .aspectRatio(4f / 3f)
+                            .shadow(COMFORTABLE_CONTENT_ELEVATION, RoundedCornerShape(10.dp))
                             .clip(RoundedCornerShape(10.dp)),
                 )
                 MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
@@ -921,11 +936,12 @@ private fun ComfortableActionBubble(
                         networkId = networkId,
                         loading = linkPreviewLoading,
                         onClick = onLinkPreviewClick,
+                        modifier = Modifier.shadow(COMFORTABLE_CONTENT_ELEVATION, RoundedCornerShape(12.dp)),
                     )
                 }
             }
 
-            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf)
+            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf, chipElevation = COMFORTABLE_CONTENT_ELEVATION)
         }
     }
 }
@@ -1965,6 +1981,7 @@ internal fun ReplyMiniBubble(
     reply: ReplyPreviewData,
     nickColors: NickColorScheme,
     onClick: (() -> Unit)? = null,
+    elevation: Dp = 0.dp,
 ) {
     val accent = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val openLabel = stringResource(R.string.chat_reply_open)
@@ -1976,6 +1993,7 @@ internal fun ReplyMiniBubble(
                     animationSpec = MotdMotion.contentSize,
                     alignment = Alignment.TopStart,
                 ).padding(vertical = 2.dp)
+                .then(if (elevation > 0.dp) Modifier.shadow(elevation, RoundedCornerShape(6.dp)) else Modifier)
                 .clip(RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
                 .let { modifier ->
