@@ -2,8 +2,10 @@ package io.github.trevarj.motd.service
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.data.prefs.ChatSoundConfig
 import io.github.trevarj.motd.data.prefs.ChatSoundMelody
 import io.github.trevarj.motd.data.prefs.ChatSoundTone
+import io.github.trevarj.motd.data.prefs.ChatSoundVariation
 import io.github.trevarj.motd.data.prefs.ChatSoundVoice
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
@@ -83,6 +85,37 @@ class ChatSoundAssetTest {
                 assertEquals(ChatSoundSequence.motifs.getValue(voice to melody).toList(), catalogMotif)
             }
         }
+    }
+
+    @Test
+    fun `preview requests only its selected assets`() {
+        val config = ChatSoundConfig()
+        val selections = listOf(ChatSoundSelection(2, 0), ChatSoundSelection(2, 4), ChatSoundSelection(2, 7))
+
+        assertEquals(
+            listOf(ChatSoundAssetKey(ChatSoundVoice.SOFT_GLASS, ChatSoundCue.RECEIVE, ChatSoundTone.BALANCED, 2)),
+            previewChatSoundAssetKeys(config, ChatSoundCue.RECEIVE, selections),
+        )
+    }
+
+    @Test
+    fun `warming only loads the current enabled sound choices`() {
+        val defaults = warmChatSoundAssetKeys(ChatSoundConfig())
+        assertEquals(
+            listOf(
+                ChatSoundAssetKey(ChatSoundVoice.SOFT_GLASS, ChatSoundCue.SEND, ChatSoundTone.BALANCED, 2),
+                ChatSoundAssetKey(ChatSoundVoice.SOFT_GLASS, ChatSoundCue.RECEIVE, ChatSoundTone.BALANCED, 2),
+            ),
+            defaults,
+        )
+
+        val natural = warmChatSoundAssetKeys(ChatSoundConfig(variation = ChatSoundVariation.NATURAL))
+        assertEquals(10, natural.size)
+        assertEquals((0..4).toSet(), natural.filter { it.cue == ChatSoundCue.SEND }.map { it.take }.toSet())
+        assertEquals((0..4).toSet(), natural.filter { it.cue == ChatSoundCue.RECEIVE }.map { it.take }.toSet())
+
+        val disabled = ChatSoundConfig(send = ChatSoundConfig().send.copy(enabled = false), receive = ChatSoundConfig().receive.copy(volume = 0))
+        assertTrue(warmChatSoundAssetKeys(disabled).isEmpty())
     }
 
     private fun readWav(path: String): WavInfo {

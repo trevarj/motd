@@ -22,11 +22,17 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.sync.ChatSoundPlayer
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.di.ApplicationScope
+import io.github.trevarj.motd.di.IoDispatcher
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -204,6 +210,30 @@ internal data class ChatSoundAssetKey(
     val path: String get() = "chat-sounds/${voice.assetId}-${cue.name.lowercase()}-${tone.name.lowercase()}-$take.wav"
 }
 
+internal fun previewChatSoundAssetKeys(
+    config: ChatSoundConfig,
+    cue: ChatSoundCue,
+    selections: List<ChatSoundSelection>,
+): List<ChatSoundAssetKey> {
+    val cueConfig = if (cue == ChatSoundCue.SEND) config.send else config.receive
+    return selections
+        .map { ChatSoundAssetKey(cueConfig.voice, cue, cueConfig.tone, it.take) }
+        .distinct()
+}
+
+internal fun warmChatSoundAssetKeys(config: ChatSoundConfig): List<ChatSoundAssetKey> {
+    if (config.masterVolume == 0) return emptyList()
+    val takes = if (config.variation == ChatSoundVariation.NATURAL) 0..4 else 2..2
+    return ChatSoundCue.entries.flatMap { cue ->
+        val cueConfig = if (cue == ChatSoundCue.SEND) config.send else config.receive
+        if (!cueConfig.enabled || cueConfig.volume == 0) {
+            emptyList()
+        } else {
+            takes.map { take -> ChatSoundAssetKey(cueConfig.voice, cue, cueConfig.tone, take) }
+        }
+    }
+}
+
 /** One atomic decision owns the receive limit and phrase; send activity is independent. */
 internal class ChatSoundConversation {
     private val gate = ChatReceiveBurstGate()
@@ -249,6 +279,9 @@ internal class SoundPoolChatSoundBackend
     constructor(
         @ApplicationContext private val context: Context,
         private val diagnostics: DiagnosticLogger,
+        private val chatSoundPrefs: ChatSoundPrefs,
+        @ApplicationScope private val applicationScope: CoroutineScope,
+        @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     ) {
         private val pool =
             runCatching {
@@ -273,14 +306,12 @@ internal class SoundPoolChatSoundBackend
                 post = { task, delay -> mainHandler.postDelayed(task, delay) },
                 remove = { mainHandler.removeCallbacks(it) },
                 stopPlaying = ::stopStreams,
-            )
+        )
 
         init {
             pool?.setOnLoadCompleteListener { _, id, status -> if (status == 0) ready[id] = true }
-            ChatSoundVoice.entries.forEach { voice ->
-                ChatSoundCue.entries.forEach { cue ->
-                    ChatSoundTone.entries.forEach { tone -> (0..4).forEach { preload(ChatSoundAssetKey(voice, cue, tone, it)) } }
-                }
+            applicationScope.launch(ioDispatcher) {
+                chatSoundPrefs.config.collect { config -> warmChatSoundAssets(config) }
             }
         }
 
@@ -292,7 +323,7 @@ internal class SoundPoolChatSoundBackend
             val cueConfig = if (cue == ChatSoundCue.SEND) config.send else config.receive
             if (!cueConfig.enabled || config.masterVolume == 0 || cueConfig.volume == 0) return
             val key = ChatSoundAssetKey(cueConfig.voice, cue, cueConfig.tone, selection.take)
-            val id = samples[key] ?: load(key) ?: return
+            val id = loadIfNeeded(key) ?: return
             if (ready[id] != true) return // Drop loading-time events rather than playing stale feedback later.
             val volume = config.masterVolume / 100f * cueConfig.volume / 100f
             val rate = 2.0.pow((selection.semitones + cueConfig.pitch) / 12.0).toFloat()
@@ -317,9 +348,9 @@ internal class SoundPoolChatSoundBackend
                     } else {
                         previewSequence.next(cue, config)
                     }
-                }
-            val cueConfig = if (cue == ChatSoundCue.SEND) config.send else config.receive
-            val keys = selections.map { ChatSoundAssetKey(cueConfig.voice, cue, cueConfig.tone, it.take) }
+            }
+            val keys = previewChatSoundAssetKeys(config, cue, selections)
+            keys.forEach(::preload)
             preview.start(
                 noteCount = selections.size,
                 ready = { keys.all { samples[it]?.let { id -> ready[id] == true } == true } },
@@ -336,9 +367,14 @@ internal class SoundPoolChatSoundBackend
             }
         }
 
-        private fun preload(key: ChatSoundAssetKey) {
-            if (!samples.containsKey(key)) load(key)
+        private fun preload(key: ChatSoundAssetKey) = loadIfNeeded(key)
+
+        private fun warmChatSoundAssets(config: ChatSoundConfig) {
+            warmChatSoundAssetKeys(config).forEach(::preload)
         }
+
+        private fun loadIfNeeded(key: ChatSoundAssetKey): Int? =
+            samples[key] ?: synchronized(samples) { samples[key] ?: load(key) }
 
         private fun load(key: ChatSoundAssetKey): Int? =
             runCatching {
