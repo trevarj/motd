@@ -101,19 +101,28 @@ class AvatarRoutingTest {
         var minY = pixels.height
         var maxX = -1
         var maxY = -1
+        var inkX = 0.0
+        var inkY = 0.0
+        var inkWeight = 0.0
         for (y in 0 until pixels.height) {
             for (x in 0 until pixels.width) {
-                if (pixels[x, y].red < 0.5f) {
+                val weight = (1f - pixels[x, y].red).toDouble()
+                if (weight > 0.5) {
                     minX = minOf(minX, x)
                     minY = minOf(minY, y)
                     maxX = maxOf(maxX, x)
                     maxY = maxOf(maxY, y)
                 }
+                inkX += x * weight
+                inkY += y * weight
+                inkWeight += weight
             }
         }
         assertTrue("The rendered topology glyph must be visible", maxX >= minX && maxY >= minY)
         assertEquals("Horizontal glyph center", pixels.width / 2f, (minX + maxX + 1) / 2f, 1f)
-        assertEquals("Vertical glyph center", pixels.height / 2f, (minY + maxY + 1) / 2f, 1f)
+        assertTrue("Glyph must fit inside the circular background", minY > pixels.height * 0.15 && maxY < pixels.height * 0.85)
+        assertEquals("Horizontal ink center", pixels.width / 2.0, inkX / inkWeight + 0.5, pixels.width * 0.01)
+        assertEquals("Vertical ink center", pixels.height / 2.0, inkY / inkWeight + 0.5, pixels.height * 0.01)
     }
 
     @Test

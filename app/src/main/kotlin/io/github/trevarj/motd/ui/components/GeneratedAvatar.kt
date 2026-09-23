@@ -112,9 +112,10 @@ internal fun IrcNetworkBadge(
     val foreground = MaterialTheme.colorScheme.onSurfaceVariant
     Canvas(modifier = modifier.size(size)) {
         val side = this.size.minDimension
-        val top = Offset(side * 0.5f, side * 0.35f)
-        val left = Offset(side * 0.3f, side * 0.65f)
-        val right = Offset(side * 0.7f, side * 0.65f)
+        // Raise the topology slightly to balance the two lower nodes and bottom edge.
+        val top = Offset(side * 0.5f, side * 0.30f)
+        val left = Offset(side * 0.3f, side * 0.60f)
+        val right = Offset(side * 0.7f, side * 0.60f)
         val stroke = Stroke(width = side * 0.05f, cap = StrokeCap.Round)
         val radius = side * 0.07f
         drawCircle(surface)
