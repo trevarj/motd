@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatFolderEntity
@@ -36,6 +37,7 @@ import io.github.trevarj.motd.ui.chatlist.summarizeFolder
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -297,6 +299,34 @@ class ChatFolderUiTest {
         compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
         assertEquals(plainFill, pillPixel(allTag))
         assertNotEquals(plainFill, pillPixel(folderTag))
+    }
+
+    @Test
+    fun folder_tabs_keep_pills_close_with_full_touch_targets() {
+        val folders = listOf(folder(7, "First"), folder(8, "Second"))
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows = folders.map { row(it.id, "#room${it.id}", folderId = it.id) },
+                    folders = folders,
+                    folderDisplayMode = FolderDisplayMode.TABS,
+                    loading = false,
+                ),
+            )
+        setContent(state)
+
+        val pillTags = listOf("chatlist_folder_tab_pill_all", "chatlist_folder_tab_pill_7", "chatlist_folder_tab_pill_8")
+        val tabTags = listOf("chatlist_folder_tab_all", "chatlist_folder_tab_7", "chatlist_folder_tab_8")
+        val pillBounds = pillTags.map { compose.onNodeWithTag(it, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot }
+        val touchBounds = tabTags.map { compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot }
+        val maxPillGap = with(compose.density) { 12.dp.toPx() }
+        val minTouchHeight = with(compose.density) { 48.dp.toPx() }
+        pillBounds.zipWithNext().forEach { (left, right) ->
+            assertTrue("Adjacent pills should have less than 12dp between them", right.left - left.right < maxPillGap)
+        }
+        touchBounds.forEach { bounds ->
+            assertTrue("Each tab should retain a 48dp touch target", bounds.height >= minTouchHeight)
+        }
     }
 
     @Test

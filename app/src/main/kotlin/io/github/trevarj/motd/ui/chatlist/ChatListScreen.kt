@@ -24,6 +24,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,6 +43,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
@@ -80,10 +87,10 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -91,7 +98,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -100,6 +106,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -138,6 +145,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
@@ -1101,83 +1109,101 @@ private fun FolderTabStrip(
     onSelect: (Long?) -> Unit,
     onOpenDickord: () -> Unit,
 ) {
-    val selectedFolderIndex = folders.indexOfFirst { it.folder.id == selectedFolderId }
-    val leadingTabCount = (if (showAllTab) 1 else 0) + (if (dickordSummary != null) 1 else 0)
-    val selectedIndex = if (selectedFolderIndex < 0) 0 else selectedFolderIndex + leadingTabCount
-    PrimaryScrollableTabRow(
-        selectedTabIndex = selectedIndex,
-        edgePadding = 0.dp,
-        modifier = Modifier.fillMaxWidth().testTag("chatlist_folder_tabs"),
-        indicator = {},
-        divider = {},
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .selectableGroup()
+                .testTag("chatlist_folder_tabs"),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         if (showAllTab) {
-            Tab(
+            FolderPillTab(
                 selected = selectedFolderId == null,
                 onClick = { onSelect(null) },
-                modifier = Modifier.testTag("chatlist_folder_tab_all"),
-                selectedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                text = {
-                    FolderTabLabel(
-                        name = stringResource(R.string.folders_all),
-                        summary = allSummary,
-                        selected = selectedFolderId == null,
-                        pillTag = "chatlist_folder_tab_pill_all",
-                        icon = { Icon(Icons.Outlined.Forum, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                    )
-                },
-            )
+                tag = "chatlist_folder_tab_all",
+            ) {
+                FolderTabLabel(
+                    name = stringResource(R.string.folders_all),
+                    summary = allSummary,
+                    selected = selectedFolderId == null,
+                    pillTag = "chatlist_folder_tab_pill_all",
+                    icon = { Icon(Icons.Outlined.Forum, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                )
+            }
         }
         dickordSummary?.let { summary ->
-            Tab(
+            FolderPillTab(
                 selected = false,
                 onClick = onOpenDickord,
-                modifier = Modifier.testTag("chatlist_folder_tab_discord"),
-                selectedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                text = {
-                    FolderTabLabel(
-                        name = stringResource(R.string.dickord_badge),
-                        summary = summary,
-                        selected = false,
-                        pillTag = "chatlist_folder_tab_pill_discord",
-                        icon = {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_discord),
-                                contentDescription = null,
-                                modifier = Modifier.width(24.dp).height(18.dp),
-                            )
-                        },
-                    )
-                },
-            )
+                tag = "chatlist_folder_tab_discord",
+            ) {
+                FolderTabLabel(
+                    name = stringResource(R.string.dickord_badge),
+                    summary = summary,
+                    selected = false,
+                    pillTag = "chatlist_folder_tab_pill_discord",
+                    icon = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_discord),
+                            contentDescription = null,
+                            modifier = Modifier.width(24.dp).height(18.dp),
+                        )
+                    },
+                )
+            }
         }
         folders.forEach { folder ->
             val selected = selectedFolderId == folder.folder.id
-            Tab(
+            FolderPillTab(
                 selected = selected,
                 onClick = { onSelect(folder.folder.id) },
-                modifier = Modifier.testTag("chatlist_folder_tab_${folder.folder.id}"),
-                selectedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                text = {
-                    FolderTabLabel(
-                        name = folder.folder.displayName,
-                        summary = folder.summary,
-                        selected = selected,
-                        pillTag = "chatlist_folder_tab_pill_${folder.folder.id}",
-                        icon = {
-                            FolderIcon(
-                                FolderIconRef(folder.folder.iconKind, folder.folder.iconKey),
-                                contentDescription = null,
-                                tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp).testTag("chatlist_folder_tab_icon_${folder.folder.id}"),
-                            )
-                        },
-                    )
-                },
-            )
+                tag = "chatlist_folder_tab_${folder.folder.id}",
+            ) {
+                FolderTabLabel(
+                    name = folder.folder.displayName,
+                    summary = folder.summary,
+                    selected = selected,
+                    pillTag = "chatlist_folder_tab_pill_${folder.folder.id}",
+                    icon = {
+                        FolderIcon(
+                            FolderIconRef(folder.folder.iconKind, folder.folder.iconKey),
+                            contentDescription = null,
+                            tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp).testTag("chatlist_folder_tab_icon_${folder.folder.id}"),
+                        )
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderPillTab(
+    selected: Boolean,
+    onClick: () -> Unit,
+    tag: String,
+    content: @Composable () -> Unit,
+) {
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+    LaunchedEffect(selected) {
+        if (selected) bringIntoViewRequester.bringIntoView()
+    }
+    Box(
+        modifier =
+            Modifier
+                .bringIntoViewRequester(bringIntoViewRequester)
+                .selectable(selected = selected, onClick = onClick, role = Role.Tab)
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 2.dp)
+                .testTag(tag),
+        contentAlignment = Alignment.Center,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides contentColor) {
+            content()
         }
     }
 }
@@ -1194,8 +1220,8 @@ private fun FolderTabLabel(
         modifier =
             Modifier
                 .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, CircleShape)
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                .testTag(pillTag),
+                .testTag(pillTag)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
