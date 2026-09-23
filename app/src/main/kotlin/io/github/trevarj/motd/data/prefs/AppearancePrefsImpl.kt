@@ -26,6 +26,7 @@ private val TIME_FORMAT = stringPreferencesKey("time_format_v1")
 private val CUSTOM_TIME_FORMAT_PATTERN = stringPreferencesKey("custom_time_format_pattern_v1")
 private val MESSAGE_SPACING = stringPreferencesKey("message_spacing_v1")
 private val BUBBLE_CORNER_STYLE = stringPreferencesKey("bubble_corner_style_v1")
+private val CHAT_SHADOWS_ENABLED = booleanPreferencesKey("chat_shadows_enabled_v1")
 private val LAUNCHER_ICON = stringPreferencesKey("launcher_icon_v1")
 private val CUSTOM_FONT_NAME = stringPreferencesKey("custom_font_name_v1")
 
@@ -94,6 +95,7 @@ class AppearancePrefsImpl
                         prefs[BUBBLE_CORNER_STYLE]
                             ?.let { runCatching { BubbleCornerStyle.valueOf(it) }.getOrNull() }
                             ?: BubbleCornerStyle.ROUNDED,
+                    chatShadowsEnabled = prefs[CHAT_SHADOWS_ENABLED] ?: true,
                     launcherIcon =
                         prefs[LAUNCHER_ICON]?.let { runCatching { LauncherIcon.valueOf(it) }.getOrNull() }
                             ?: LauncherIcon.DEFAULT,
@@ -158,6 +160,10 @@ class AppearancePrefsImpl
 
         override suspend fun setBubbleCornerStyle(style: BubbleCornerStyle) {
             store.edit { it[BUBBLE_CORNER_STYLE] = style.name }
+        }
+
+        override suspend fun setChatShadowsEnabled(enabled: Boolean) {
+            store.edit { it[CHAT_SHADOWS_ENABLED] = enabled }
         }
 
         override suspend fun setLauncherIcon(icon: LauncherIcon) {

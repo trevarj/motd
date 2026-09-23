@@ -89,6 +89,7 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.chat.parseInlineCode
+import io.github.trevarj.motd.ui.theme.LocalChatShadowsEnabled
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
@@ -111,6 +112,10 @@ internal const val MENTION_ROW_TINT_ALPHA = 0.55f
 private const val ACTION_ROW_TINT_ALPHA = 0.22f
 private val COMFORTABLE_BUBBLE_ELEVATION = 2.dp
 private val COMFORTABLE_CONTENT_ELEVATION = 1.dp
+
+/** All Comfortable message depth is controlled at the render boundary. */
+@Composable
+private fun comfortableElevation(elevation: Dp): Dp = if (LocalChatShadowsEnabled.current) elevation else 0.dp
 
 internal fun actionAccessibilityLabel(
     sender: String,
@@ -519,7 +524,7 @@ fun MessageBubble(
                 val avatarMod =
                     Modifier
                         .padding(end = 8.dp, top = 2.dp)
-                        .shadow(COMFORTABLE_BUBBLE_ELEVATION, CircleShape)
+                        .shadow(comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION), CircleShape)
                         .testTag("chat_sender_avatar")
                         .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
                 Avatar(
@@ -539,7 +544,7 @@ fun MessageBubble(
                 Modifier
                     .chatBubbleWidth()
                     // Lift only the comfortable bubble, using its grouped corner shape.
-                    .shadow(COMFORTABLE_BUBBLE_ELEVATION, shape)
+                    .shadow(comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION), shape)
                     .clip(shape)
                     .background(bubbleColor)
                     .messageRowClicks(
@@ -586,7 +591,7 @@ fun MessageBubble(
                 )
             }
 
-            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, elevation = COMFORTABLE_CONTENT_ELEVATION) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, elevation = comfortableElevation(COMFORTABLE_CONTENT_ELEVATION)) }
 
             if (text.isNotBlank()) {
                 // Linkify http(s) URLs so the body is tappable even when the preview fails
@@ -641,7 +646,7 @@ fun MessageBubble(
                             .padding(vertical = 2.dp)
                             .heightIn(max = 280.dp)
                             .aspectRatio(4f / 3f)
-                            .shadow(COMFORTABLE_CONTENT_ELEVATION, RoundedCornerShape(12.dp))
+                            .shadow(comfortableElevation(COMFORTABLE_CONTENT_ELEVATION), RoundedCornerShape(12.dp))
                             .clip(RoundedCornerShape(12.dp)),
                 )
                 MediaOriginCaption(
@@ -657,7 +662,7 @@ fun MessageBubble(
                         networkId = networkId,
                         loading = linkPreviewLoading,
                         onClick = onLinkPreviewClick,
-                        modifier = Modifier.shadow(COMFORTABLE_CONTENT_ELEVATION, RoundedCornerShape(12.dp)),
+                        modifier = Modifier.shadow(comfortableElevation(COMFORTABLE_CONTENT_ELEVATION), RoundedCornerShape(12.dp)),
                     )
                 }
             }
@@ -697,7 +702,7 @@ fun MessageBubble(
                 }
             }
 
-            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf, chipElevation = COMFORTABLE_CONTENT_ELEVATION)
+            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf, chipElevation = comfortableElevation(COMFORTABLE_CONTENT_ELEVATION))
         }
     }
 }
@@ -842,7 +847,7 @@ private fun ComfortableActionBubble(
             modifier =
                 Modifier
                     .chatBubbleWidth()
-                    .shadow(COMFORTABLE_BUBBLE_ELEVATION, shape)
+                    .shadow(comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION), shape)
                     .clip(shape)
                     .background(rowColor)
                     .testTag("chat_action_row")
@@ -856,7 +861,7 @@ private fun ComfortableActionBubble(
                         onLongPressLabel = actionsLabel,
                     ).padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
         ) {
-            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, elevation = COMFORTABLE_CONTENT_ELEVATION) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, elevation = comfortableElevation(COMFORTABLE_CONTENT_ELEVATION)) }
 
             Row(verticalAlignment = Alignment.Top) {
                 if (!hideAvatar) {
@@ -864,7 +869,7 @@ private fun ComfortableActionBubble(
                         Modifier
                             .padding(end = 6.dp, top = 2.dp)
                             .size(20.dp)
-                            .shadow(COMFORTABLE_CONTENT_ELEVATION, CircleShape)
+                            .shadow(comfortableElevation(COMFORTABLE_CONTENT_ELEVATION), CircleShape)
                             .testTag("chat_sender_avatar")
                             .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
                     Avatar(
@@ -923,7 +928,7 @@ private fun ComfortableActionBubble(
                             .widthIn(max = 280.dp)
                             .heightIn(max = 240.dp)
                             .aspectRatio(4f / 3f)
-                            .shadow(COMFORTABLE_CONTENT_ELEVATION, RoundedCornerShape(10.dp))
+                            .shadow(comfortableElevation(COMFORTABLE_CONTENT_ELEVATION), RoundedCornerShape(10.dp))
                             .clip(RoundedCornerShape(10.dp)),
                 )
                 MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
@@ -936,12 +941,12 @@ private fun ComfortableActionBubble(
                         networkId = networkId,
                         loading = linkPreviewLoading,
                         onClick = onLinkPreviewClick,
-                        modifier = Modifier.shadow(COMFORTABLE_CONTENT_ELEVATION, RoundedCornerShape(12.dp)),
+                        modifier = Modifier.shadow(comfortableElevation(COMFORTABLE_CONTENT_ELEVATION), RoundedCornerShape(12.dp)),
                     )
                 }
             }
 
-            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf, chipElevation = COMFORTABLE_CONTENT_ELEVATION)
+            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf, chipElevation = comfortableElevation(COMFORTABLE_CONTENT_ELEVATION))
         }
     }
 }

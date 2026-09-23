@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.prefs
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
@@ -36,6 +37,7 @@ class AppearancePrefsTest {
         assertEquals(TimeFormat.AUTO, AppearanceConfig().timeFormat)
         assertEquals(MessageSpacing.DEFAULT, AppearanceConfig().messageSpacing)
         assertEquals(BubbleCornerStyle.ROUNDED, AppearanceConfig().bubbleCornerStyle)
+        assertEquals(true, AppearanceConfig().chatShadowsEnabled)
         assertEquals(LauncherIcon.DEFAULT, AppearanceConfig().launcherIcon)
         assertEquals("", AppearanceConfig().customFontName)
     }
@@ -69,6 +71,19 @@ class AppearancePrefsTest {
             assertEquals(FontChoice.CUSTOM, prefs.config.first().fontChoice)
             prefs.setCustomFontName("")
             assertEquals("", prefs.config.first().customFontName)
+        }
+
+    @Test fun chatShadowsEnabled_roundTripsAndDefaultsWhenMissing() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            context.appearanceDataStore.edit {
+                it.remove(booleanPreferencesKey("chat_shadows_enabled_v1"))
+            }
+            assertEquals(true, prefs.config.first().chatShadowsEnabled)
+            prefs.setChatShadowsEnabled(false)
+            assertEquals(false, prefs.config.first().chatShadowsEnabled)
+            prefs.setChatShadowsEnabled(true)
+            assertEquals(true, prefs.config.first().chatShadowsEnabled)
         }
 
     @Test fun garbageStoredEnumStrings_decodeToDefaults() =

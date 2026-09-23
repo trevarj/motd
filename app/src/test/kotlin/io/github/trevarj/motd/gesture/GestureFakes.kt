@@ -258,6 +258,10 @@ internal class FakeAppearance(
 
     override suspend fun setMessageSpacing(spacing: MessageSpacing) = Unit
 
+    override suspend fun setChatShadowsEnabled(enabled: Boolean) {
+        state.value = state.value.copy(chatShadowsEnabled = enabled)
+    }
+
     override suspend fun setBubbleCornerStyle(style: BubbleCornerStyle) = Unit
 
     override suspend fun setLauncherIcon(icon: LauncherIcon) = Unit

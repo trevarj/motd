@@ -5,12 +5,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -176,6 +178,29 @@ class MessageBubbleFooterUiTest {
         compose.runOnIdle { assertEquals(2, senderOpens) }
     }
 
+    @Test
+    fun comfortableShadowsCanBeDisabledForOrdinaryAndActionMessages() {
+        val shadows = mutableStateOf(true)
+        val kind = mutableStateOf(MessageKind.PRIVMSG)
+        compose.setContent { Sample(isSelf = false, kind = kind.value, shadows = shadows.value) }
+
+        for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION)) {
+            compose.runOnIdle {
+                kind.value = messageKind
+                shadows.value = true
+            }
+            val withShadows = compose.onNodeWithTag("sample").captureToImage().toPixelMap()
+            compose.runOnIdle { shadows.value = false }
+            val withoutShadows = compose.onNodeWithTag("sample").captureToImage().toPixelMap()
+            assertTrue(
+                "$messageKind should render different pixels when chat shadows change",
+                (0 until withShadows.width).any { x ->
+                    (0 until withShadows.height).any { y -> withShadows[x, y] != withoutShadows[x, y] }
+                },
+            )
+        }
+    }
+
     @Composable
     private fun Sample(
         sender: String = NICK,
@@ -185,12 +210,14 @@ class MessageBubbleFooterUiTest {
         width: Dp = 380.dp,
         density: LayoutDensity = LayoutDensity.COMFORTABLE,
         kind: MessageKind = MessageKind.PRIVMSG,
+        shadows: Boolean = true,
         onSenderClick: (() -> Unit)? = null,
     ) {
         MotdTheme(
             dynamicColor = false,
             themePreset = ColorThemePreset.LIGHT,
             layoutDensity = density,
+            chatShadowsEnabled = shadows,
             timestampConfig = TimestampConfig(show = showTime),
         ) {
             Surface(Modifier.width(width).testTag("sample")) {

@@ -545,6 +545,7 @@ class ConfigurationBackupRepositoryImpl
                 appearancePrefs.setCustomTimeFormatPattern(it.customTimeFormatPattern)
                 appearancePrefs.setMessageSpacing(it.messageSpacing)
                 appearancePrefs.setBubbleCornerStyle(it.bubbleCornerStyle)
+                appearancePrefs.setChatShadowsEnabled(it.chatShadowsEnabled)
                 appearancePrefs.setLauncherIcon(it.launcherIcon)
                 // The font binary itself is not backed up; only the display name travels. A restored
                 // CUSTOM choice falls back to system until the user re-imports the file (see AppFonts).

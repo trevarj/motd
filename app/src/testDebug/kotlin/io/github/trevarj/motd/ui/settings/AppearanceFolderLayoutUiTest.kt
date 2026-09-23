@@ -77,6 +77,18 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
+    fun chatShadowSwitchUpdatesPreviewAndInvokesCallback() {
+        var enabled: Boolean? = null
+        setContent(onChatShadowsEnabled = { enabled = it })
+
+        compose.onNodeWithTag("settings_chat_preview_inline_shadows_true").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings_switch_chat_shadows", useUnmergedTree = true).performScrollTo().performClick()
+
+        assertEquals(false, enabled)
+        compose.onNodeWithTag("settings_chat_preview_inline_shadows_false").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
     fun dismissingThemeSheetKeepsAppearanceControlsAvailable() {
         setContent()
 
@@ -143,6 +155,7 @@ class AppearanceFolderLayoutUiTest {
         onLayoutDensity: (LayoutDensity) -> Unit = {},
         onMessageSpacing: (MessageSpacing) -> Unit = {},
         onBubbleCornerStyle: (BubbleCornerStyle) -> Unit = {},
+        onChatShadowsEnabled: (Boolean) -> Unit = {},
     ) {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
@@ -170,6 +183,7 @@ class AppearanceFolderLayoutUiTest {
                     onCustomTimeFormatPattern = {},
                     onMessageSpacing = onMessageSpacing,
                     onBubbleCornerStyle = onBubbleCornerStyle,
+                    onChatShadowsEnabled = onChatShadowsEnabled,
                     onLauncherIcon = {},
                 )
             }

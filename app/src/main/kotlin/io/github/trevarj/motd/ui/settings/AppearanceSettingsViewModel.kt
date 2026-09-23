@@ -92,6 +92,8 @@ class AppearanceSettingsViewModel
 
         fun setBubbleCornerStyle(value: BubbleCornerStyle) = launch { appearancePrefs.setBubbleCornerStyle(value) }
 
+        fun setChatShadowsEnabled(value: Boolean) = launch { appearancePrefs.setChatShadowsEnabled(value) }
+
         fun setLauncherIcon(value: LauncherIcon) = launch { appearancePrefs.setLauncherIcon(value) }
 
         fun importCustomFont(uri: Uri) =

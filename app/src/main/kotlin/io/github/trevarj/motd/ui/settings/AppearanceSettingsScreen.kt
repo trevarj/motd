@@ -90,6 +90,7 @@ import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
+import io.github.trevarj.motd.ui.theme.LocalChatShadowsEnabled
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
@@ -152,6 +153,7 @@ fun AppearanceSettingsScreen(
         onCustomTimeFormatPattern = viewModel::setCustomTimeFormatPattern,
         onMessageSpacing = viewModel::setMessageSpacing,
         onBubbleCornerStyle = viewModel::setBubbleCornerStyle,
+        onChatShadowsEnabled = viewModel::setChatShadowsEnabled,
         onLauncherIcon = viewModel::setLauncherIcon,
         target = target,
         snackbarHostState = snackbarHostState,
@@ -183,6 +185,7 @@ fun AppearanceSettingsContent(
     onCustomTimeFormatPattern: (String) -> Unit,
     onMessageSpacing: (io.github.trevarj.motd.data.prefs.MessageSpacing) -> Unit,
     onBubbleCornerStyle: (io.github.trevarj.motd.data.prefs.BubbleCornerStyle) -> Unit,
+    onChatShadowsEnabled: (Boolean) -> Unit = {},
     onLauncherIcon: (LauncherIcon) -> Unit,
     customFontFile: File? = null,
     onImportCustomFont: (Uri) -> Unit = {},
@@ -196,9 +199,11 @@ fun AppearanceSettingsContent(
     var previewDensity by rememberSaveable { mutableStateOf(settings.layoutDensity) }
     var previewSpacing by rememberSaveable { mutableStateOf(appearance.messageSpacing) }
     var previewCorners by rememberSaveable { mutableStateOf(appearance.bubbleCornerStyle) }
+    var previewShadows by rememberSaveable { mutableStateOf(appearance.chatShadowsEnabled) }
     LaunchedEffect(settings.layoutDensity) { previewDensity = settings.layoutDensity }
     LaunchedEffect(appearance.messageSpacing) { previewSpacing = appearance.messageSpacing }
     LaunchedEffect(appearance.bubbleCornerStyle) { previewCorners = appearance.bubbleCornerStyle }
+    LaunchedEffect(appearance.chatShadowsEnabled) { previewShadows = appearance.chatShadowsEnabled }
     val followSystemAvailable = appearance.theme.systemPartner != null
     val trueBlackAvailable =
         appearance.theme == ColorThemePreset.SYSTEM ||
@@ -389,6 +394,7 @@ fun AppearanceSettingsContent(
                 density = previewDensity,
                 messageSpacing = previewSpacing,
                 bubbleCorners = previewCorners,
+                chatShadowsEnabled = previewShadows,
                 avatarStyle = settings.avatarStyle,
                 tagPrefix = "settings_chat_preview_inline",
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -453,6 +459,17 @@ fun AppearanceSettingsContent(
                     onClick = { choiceSheet = AppearanceChoice.BUBBLES },
                 )
             }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_chat_shadows),
+                subtitle = stringResource(R.string.settings_chat_shadows_desc),
+                checked = previewShadows,
+                onCheckedChange = {
+                    previewShadows = it
+                    onChatShadowsEnabled(it)
+                },
+                switchTag = "settings_switch_chat_shadows",
+            )
         }
         SettingsTarget(target?.name, SettingsTarget.WALLPAPER.name) { targetModifier ->
             SettingsGroup(title = stringResource(R.string.settings_wallpaper), modifier = targetModifier) {
@@ -487,6 +504,7 @@ fun AppearanceSettingsContent(
             previewDensity = previewDensity,
             previewSpacing = previewSpacing,
             previewCorners = previewCorners,
+            previewShadows = previewShadows,
             onPalette = onNickColorPalette,
             onDensity = {
                 previewDensity = it
@@ -526,12 +544,17 @@ private fun ChatLayoutPreview(
     density: LayoutDensity,
     messageSpacing: MessageSpacing,
     bubbleCorners: BubbleCornerStyle,
+    chatShadowsEnabled: Boolean,
     avatarStyle: AvatarStyle,
     tagPrefix: String,
     modifier: Modifier = Modifier,
 ) {
     val spacing = remember(density, messageSpacing, bubbleCorners) { spacingFor(density, messageSpacing, bubbleCorners) }
-    CompositionLocalProvider(LocalSpacing provides spacing, LocalAvatarStyle provides avatarStyle) {
+    CompositionLocalProvider(
+        LocalSpacing provides spacing,
+        LocalAvatarStyle provides avatarStyle,
+        LocalChatShadowsEnabled provides chatShadowsEnabled,
+    ) {
         Column(modifier) {
             Text(
                 stringResource(R.string.settings_chat_preview, densityLabel(density)),
@@ -544,7 +567,7 @@ private fun ChatLayoutPreview(
                 shape = MotdShapes.card,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
-                Column(Modifier.padding(vertical = 8.dp)) {
+                Column(Modifier.padding(vertical = 8.dp).testTag("${tagPrefix}_shadows_$chatShadowsEnabled")) {
                     MessageBubble(
                         sender = stringResource(R.string.settings_chat_preview_sender),
                         text = stringResource(R.string.settings_chat_preview_message),
@@ -588,6 +611,7 @@ private fun AppearanceChoiceSheet(
     previewDensity: LayoutDensity,
     previewSpacing: MessageSpacing,
     previewCorners: BubbleCornerStyle,
+    previewShadows: Boolean,
     onPalette: (NickColorPalette) -> Unit,
     onDensity: (LayoutDensity) -> Unit,
     onFolderDisplayMode: (FolderDisplayMode) -> Unit,
@@ -633,7 +657,7 @@ private fun AppearanceChoiceSheet(
                 onDismiss = onDismiss,
                 tag = "settings_density_sheet",
                 dismissOnSelect = false,
-                footer = { ChatLayoutPreview(previewDensity, previewSpacing, previewCorners, settings.avatarStyle, "settings_chat_preview_sheet") },
+                footer = { ChatLayoutPreview(previewDensity, previewSpacing, previewCorners, previewShadows, settings.avatarStyle, "settings_chat_preview_sheet") },
             )
         }
 
@@ -673,7 +697,7 @@ private fun AppearanceChoiceSheet(
                 onDismiss = onDismiss,
                 tag = "settings_message_spacing_sheet",
                 dismissOnSelect = false,
-                footer = { ChatLayoutPreview(previewDensity, previewSpacing, previewCorners, settings.avatarStyle, "settings_chat_preview_sheet") },
+                footer = { ChatLayoutPreview(previewDensity, previewSpacing, previewCorners, previewShadows, settings.avatarStyle, "settings_chat_preview_sheet") },
             )
         }
 
@@ -689,7 +713,7 @@ private fun AppearanceChoiceSheet(
                 tag = "settings_bubble_corner_sheet",
                 dismissOnSelect = false,
                 // Corners only affect Comfortable bubbles, even if another density is selected.
-                footer = { ChatLayoutPreview(LayoutDensity.COMFORTABLE, previewSpacing, previewCorners, settings.avatarStyle, "settings_chat_preview_sheet") },
+                footer = { ChatLayoutPreview(LayoutDensity.COMFORTABLE, previewSpacing, previewCorners, previewShadows, settings.avatarStyle, "settings_chat_preview_sheet") },
             )
         }
 

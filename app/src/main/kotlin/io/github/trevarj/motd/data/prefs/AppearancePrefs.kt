@@ -205,6 +205,7 @@ data class AppearanceConfig(
     val customTimeFormatPattern: String = DEFAULT_CUSTOM_TIME_FORMAT,
     val messageSpacing: MessageSpacing = MessageSpacing.DEFAULT,
     val bubbleCornerStyle: BubbleCornerStyle = BubbleCornerStyle.ROUNDED,
+    val chatShadowsEnabled: Boolean = true,
     val launcherIcon: LauncherIcon = LauncherIcon.DEFAULT,
     // Display name of a user-imported custom font file; empty means nothing imported. The font
     // binary itself lives in CustomFontStore, not DataStore or backups.
@@ -237,6 +238,8 @@ interface AppearancePrefs {
     suspend fun setMessageSpacing(spacing: MessageSpacing)
 
     suspend fun setBubbleCornerStyle(style: BubbleCornerStyle)
+
+    suspend fun setChatShadowsEnabled(enabled: Boolean)
 
     suspend fun setLauncherIcon(icon: LauncherIcon)
 

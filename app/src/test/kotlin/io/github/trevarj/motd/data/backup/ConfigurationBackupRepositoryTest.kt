@@ -243,6 +243,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setCustomTimeFormatPattern("yyyy-MM-dd HH:mm:ss")
             appearancePrefs.setMessageSpacing(MessageSpacing.RELAXED)
             appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.SQUARE)
+            appearancePrefs.setChatShadowsEnabled(false)
             appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
             appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73))
             // Only the display name travels; the font binary itself is not part of the backup payload.
@@ -259,6 +260,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setCustomTimeFormatPattern("HH:mm")
             appearancePrefs.setMessageSpacing(MessageSpacing.DEFAULT)
             appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.ROUNDED)
+            appearancePrefs.setChatShadowsEnabled(true)
             appearancePrefs.setLauncherIcon(LauncherIcon.DEFAULT)
             appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.MEMES, 20))
             appearancePrefs.setCustomFontName("")
@@ -272,6 +274,7 @@ class ConfigurationBackupRepositoryTest {
             assertEquals("yyyy-MM-dd HH:mm:ss", config.customTimeFormatPattern)
             assertEquals(MessageSpacing.RELAXED, config.messageSpacing)
             assertEquals(BubbleCornerStyle.SQUARE, config.bubbleCornerStyle)
+            assertEquals(false, config.chatShadowsEnabled)
             assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
             assertEquals("Iosevka Term.ttf", config.customFontName)
             assertEquals(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73), config.wallpaper)
