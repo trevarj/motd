@@ -1143,6 +1143,12 @@
     <string name="settings_database_compacted">Freed %1$s</string>
     <string name="settings_database_compact_failed">Couldn\'t compact the database</string>
     <string name="settings_appearance_messages_section">Messages</string>
+    <string name="settings_chat_preview">%1$s chat preview</string>
+    <string name="settings_chat_preview_sender">Alex</string>
+    <string name="settings_chat_preview_self">You</string>
+    <string name="settings_chat_preview_message">See you in the channel!</string>
+    <string name="settings_chat_preview_followup">I found the answer.</string>
+    <string name="settings_chat_preview_reply">Thanks, Alex!</string>
     <string name="settings_show_timestamps">Show timestamps</string>
     <string name="settings_show_timestamps_desc">Show the time next to each message</string>
     <string name="settings_time_format">Time format</string>

@@ -10,11 +10,15 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
+import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
@@ -89,11 +93,56 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag("settings_avatar_style_picker").performScrollTo().assertIsDisplayed()
     }
 
+    @Test
+    fun chatLayoutPreviewUpdatesWhileEachChoiceSheetRemainsOpen() {
+        var selectedDensity: LayoutDensity? = null
+        var selectedSpacing: MessageSpacing? = null
+        var selectedCorners: BubbleCornerStyle? = null
+        setContent(
+            onLayoutDensity = { selectedDensity = it },
+            onMessageSpacing = { selectedSpacing = it },
+            onBubbleCornerStyle = { selectedCorners = it },
+        )
+
+        compose.onNodeWithTag("settings_density_picker").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_density_compact").performClick()
+        compose.onNodeWithTag("settings_density_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("settings_density_sheet_options").performScrollToIndex(4)
+        compose.onNodeWithTag("settings_chat_preview_sheet_compact_default_rounded").assertExists()
+        assertEquals(LayoutDensity.COMPACT, selectedDensity)
+        dismissSheet("settings_density_sheet")
+
+        compose.onNodeWithTag("settings_message_spacing_picker").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_message_spacing_relaxed").performClick()
+        compose.onNodeWithTag("settings_message_spacing_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("settings_message_spacing_sheet_options").performScrollToIndex(4)
+        compose.onNodeWithTag("settings_chat_preview_sheet_compact_relaxed_rounded").assertExists()
+        assertEquals(MessageSpacing.RELAXED, selectedSpacing)
+        dismissSheet("settings_message_spacing_sheet")
+
+        compose.onNodeWithTag("settings_bubble_corner_picker").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_bubble_corner_square").performClick()
+        compose.onNodeWithTag("settings_bubble_corner_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("settings_bubble_corner_sheet_options").performScrollToIndex(4)
+        compose.onNodeWithTag("settings_chat_preview_sheet_comfortable_relaxed_square").assertExists()
+        assertEquals(BubbleCornerStyle.SQUARE, selectedCorners)
+    }
+
+    private fun dismissSheet(tag: String) {
+        val sheet = hasTestTag(tag)
+        val dismissAction = SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet))
+        compose.onAllNodes(dismissAction, useUnmergedTree = true)[0].performSemanticsAction(SemanticsActions.Dismiss)
+        compose.onNodeWithTag(tag, useUnmergedTree = true).assertDoesNotExist()
+    }
+
     private fun setContent(
         settings: Settings = Settings(),
         onFolderDisplayMode: (FolderDisplayMode) -> Unit = {},
         onShowFolderChatsInAll: (Boolean) -> Unit = {},
         onAvatarStyle: (AvatarStyle) -> Unit = {},
+        onLayoutDensity: (LayoutDensity) -> Unit = {},
+        onMessageSpacing: (MessageSpacing) -> Unit = {},
+        onBubbleCornerStyle: (BubbleCornerStyle) -> Unit = {},
     ) {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
@@ -106,7 +155,7 @@ class AppearanceFolderLayoutUiTest {
                     onTrueBlack = {},
                     onFollowSystem = {},
                     onDynamicColor = {},
-                    onLayoutDensity = {},
+                    onLayoutDensity = onLayoutDensity,
                     onFolderDisplayMode = onFolderDisplayMode,
                     onShowFolderChatsInAll = onShowFolderChatsInAll,
                     onAvatarStyle = onAvatarStyle,
@@ -119,8 +168,8 @@ class AppearanceFolderLayoutUiTest {
                     onShowTimestamps = {},
                     onTimeFormat = {},
                     onCustomTimeFormatPattern = {},
-                    onMessageSpacing = {},
-                    onBubbleCornerStyle = {},
+                    onMessageSpacing = onMessageSpacing,
+                    onBubbleCornerStyle = onBubbleCornerStyle,
                     onLauncherIcon = {},
                 )
             }

@@ -44,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -67,7 +68,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.FONT_SCALE_STEP_PERCENT
@@ -77,19 +80,24 @@ import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MAX_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.MIN_FONT_SCALE_PERCENT
+import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.systemPartner
 import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
+import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.nav.SettingsTarget
+import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
+import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.fontFamily
 import io.github.trevarj.motd.ui.theme.rememberAppFontFamily
+import io.github.trevarj.motd.ui.theme.spacingFor
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -184,6 +192,13 @@ fun AppearanceSettingsContent(
     var showThemeSheet by rememberSaveable { mutableStateOf(false) }
     var showFontSheet by rememberSaveable { mutableStateOf(false) }
     var choiceSheet by rememberSaveable { mutableStateOf<AppearanceChoice?>(null) }
+    // Update the sample on tap, before the persisted settings flow emits its new value.
+    var previewDensity by rememberSaveable { mutableStateOf(settings.layoutDensity) }
+    var previewSpacing by rememberSaveable { mutableStateOf(appearance.messageSpacing) }
+    var previewCorners by rememberSaveable { mutableStateOf(appearance.bubbleCornerStyle) }
+    LaunchedEffect(settings.layoutDensity) { previewDensity = settings.layoutDensity }
+    LaunchedEffect(appearance.messageSpacing) { previewSpacing = appearance.messageSpacing }
+    LaunchedEffect(appearance.bubbleCornerStyle) { previewCorners = appearance.bubbleCornerStyle }
     val followSystemAvailable = appearance.theme.systemPartner != null
     val trueBlackAvailable =
         appearance.theme == ColorThemePreset.SYSTEM ||
@@ -364,11 +379,20 @@ fun AppearanceSettingsContent(
             SettingsTarget(target?.name, SettingsTarget.MESSAGE_STYLE.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_density),
-                    value = densityLabel(settings.layoutDensity),
+                    value = densityLabel(previewDensity),
                     modifier = targetModifier.testTag("settings_density_picker"),
                     onClick = { choiceSheet = AppearanceChoice.DENSITY },
                 )
             }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            ChatLayoutPreview(
+                density = previewDensity,
+                messageSpacing = previewSpacing,
+                bubbleCorners = previewCorners,
+                avatarStyle = settings.avatarStyle,
+                tagPrefix = "settings_chat_preview_inline",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsTarget(target?.name, SettingsTarget.AVATAR_STYLE.name) { targetModifier ->
                 SettingsNavigationRow(
@@ -414,7 +438,7 @@ fun AppearanceSettingsContent(
             SettingsTarget(target?.name, SettingsTarget.MESSAGE_SPACING.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_message_spacing),
-                    value = messageSpacingLabel(appearance.messageSpacing),
+                    value = messageSpacingLabel(previewSpacing),
                     modifier = targetModifier.testTag("settings_message_spacing_picker"),
                     onClick = { choiceSheet = AppearanceChoice.SPACING },
                 )
@@ -423,7 +447,8 @@ fun AppearanceSettingsContent(
             SettingsTarget(target?.name, SettingsTarget.BUBBLE_CORNERS.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_bubble_corners),
-                    value = bubbleCornerLabel(appearance.bubbleCornerStyle),
+                    value = bubbleCornerLabel(previewCorners),
+                    summary = stringResource(R.string.settings_bubble_corners_desc),
                     modifier = targetModifier.testTag("settings_bubble_corner_picker"),
                     onClick = { choiceSheet = AppearanceChoice.BUBBLES },
                 )
@@ -459,13 +484,25 @@ fun AppearanceSettingsContent(
             choice = choice,
             settings = settings,
             appearance = appearance,
+            previewDensity = previewDensity,
+            previewSpacing = previewSpacing,
+            previewCorners = previewCorners,
             onPalette = onNickColorPalette,
-            onDensity = onLayoutDensity,
+            onDensity = {
+                previewDensity = it
+                onLayoutDensity(it)
+            },
             onFolderDisplayMode = onFolderDisplayMode,
             onAvatar = onAvatarStyle,
             onTime = onTimeFormat,
-            onSpacing = onMessageSpacing,
-            onBubbles = onBubbleCornerStyle,
+            onSpacing = {
+                previewSpacing = it
+                onMessageSpacing(it)
+            },
+            onBubbles = {
+                previewCorners = it
+                onBubbleCornerStyle(it)
+            },
             onLauncher = onLauncherIcon,
             onDismiss = { choiceSheet = null },
         )
@@ -485,17 +522,79 @@ fun AppearanceSettingsContent(
 private enum class AppearanceChoice { PALETTE, FOLDER_LAYOUT, DENSITY, AVATAR, TIME, SPACING, BUBBLES, LAUNCHER }
 
 @Composable
+private fun ChatLayoutPreview(
+    density: LayoutDensity,
+    messageSpacing: MessageSpacing,
+    bubbleCorners: BubbleCornerStyle,
+    avatarStyle: AvatarStyle,
+    tagPrefix: String,
+    modifier: Modifier = Modifier,
+) {
+    val spacing = remember(density, messageSpacing, bubbleCorners) { spacingFor(density, messageSpacing, bubbleCorners) }
+    CompositionLocalProvider(LocalSpacing provides spacing, LocalAvatarStyle provides avatarStyle) {
+        Column(modifier) {
+            Text(
+                stringResource(R.string.settings_chat_preview, densityLabel(density)),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            Surface(
+                modifier = Modifier.fillMaxWidth().testTag("${tagPrefix}_${density.name.lowercase()}_${messageSpacing.name.lowercase()}_${bubbleCorners.name.lowercase()}"),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                shape = MotdShapes.card,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+                Column(Modifier.padding(vertical = 8.dp)) {
+                    MessageBubble(
+                        sender = stringResource(R.string.settings_chat_preview_sender),
+                        text = stringResource(R.string.settings_chat_preview_message),
+                        timeMs = 0L,
+                        formattedTime = "12:34",
+                        isSelf = false,
+                        kind = MessageKind.PRIVMSG,
+                        showSender = true,
+                    )
+                    Spacer(Modifier.height(spacing.bubbleBurstGap))
+                    MessageBubble(
+                        sender = stringResource(R.string.settings_chat_preview_sender),
+                        text = stringResource(R.string.settings_chat_preview_followup),
+                        timeMs = 0L,
+                        formattedTime = "12:35",
+                        isSelf = false,
+                        kind = MessageKind.PRIVMSG,
+                        showSender = false,
+                    )
+                    Spacer(Modifier.height(spacing.bubbleBreakGap))
+                    MessageBubble(
+                        sender = stringResource(R.string.settings_chat_preview_self),
+                        text = stringResource(R.string.settings_chat_preview_reply),
+                        timeMs = 0L,
+                        formattedTime = "12:36",
+                        isSelf = true,
+                        kind = MessageKind.PRIVMSG,
+                        showSender = true,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun AppearanceChoiceSheet(
     choice: AppearanceChoice,
     settings: Settings,
     appearance: io.github.trevarj.motd.data.prefs.AppearanceConfig,
+    previewDensity: LayoutDensity,
+    previewSpacing: MessageSpacing,
+    previewCorners: BubbleCornerStyle,
     onPalette: (NickColorPalette) -> Unit,
     onDensity: (LayoutDensity) -> Unit,
     onFolderDisplayMode: (FolderDisplayMode) -> Unit,
     onAvatar: (AvatarStyle) -> Unit,
     onTime: (TimeFormat) -> Unit,
-    onSpacing: (io.github.trevarj.motd.data.prefs.MessageSpacing) -> Unit,
-    onBubbles: (io.github.trevarj.motd.data.prefs.BubbleCornerStyle) -> Unit,
+    onSpacing: (MessageSpacing) -> Unit,
+    onBubbles: (BubbleCornerStyle) -> Unit,
     onLauncher: (LauncherIcon) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -528,11 +627,13 @@ private fun AppearanceChoiceSheet(
         AppearanceChoice.DENSITY -> {
             SingleChoiceSheet(
                 title = stringResource(R.string.settings_density),
-                selected = settings.layoutDensity,
+                selected = previewDensity,
                 options = LayoutDensity.entries.map { ChoiceOption(it, densityLabel(it), densityDescription(it), "settings_density_${it.name.lowercase()}") },
                 onSelect = onDensity,
                 onDismiss = onDismiss,
                 tag = "settings_density_sheet",
+                dismissOnSelect = false,
+                footer = { ChatLayoutPreview(previewDensity, previewSpacing, previewCorners, settings.avatarStyle, "settings_chat_preview_sheet") },
             )
         }
 
@@ -564,26 +665,31 @@ private fun AppearanceChoiceSheet(
         AppearanceChoice.SPACING -> {
             SingleChoiceSheet(
                 title = stringResource(R.string.settings_message_spacing),
-                selected = appearance.messageSpacing,
+                selected = previewSpacing,
                 options =
                     io.github.trevarj.motd.data.prefs.MessageSpacing.entries
                         .map { ChoiceOption(it, messageSpacingLabel(it), tag = "settings_message_spacing_${it.name.lowercase()}") },
                 onSelect = onSpacing,
                 onDismiss = onDismiss,
                 tag = "settings_message_spacing_sheet",
+                dismissOnSelect = false,
+                footer = { ChatLayoutPreview(previewDensity, previewSpacing, previewCorners, settings.avatarStyle, "settings_chat_preview_sheet") },
             )
         }
 
         AppearanceChoice.BUBBLES -> {
             SingleChoiceSheet(
                 title = stringResource(R.string.settings_bubble_corners),
-                selected = appearance.bubbleCornerStyle,
+                selected = previewCorners,
                 options =
                     io.github.trevarj.motd.data.prefs.BubbleCornerStyle.entries
                         .map { ChoiceOption(it, bubbleCornerLabel(it), tag = "settings_bubble_corner_${it.name.lowercase()}") },
                 onSelect = onBubbles,
                 onDismiss = onDismiss,
                 tag = "settings_bubble_corner_sheet",
+                dismissOnSelect = false,
+                // Corners only affect Comfortable bubbles, even if another density is selected.
+                footer = { ChatLayoutPreview(LayoutDensity.COMFORTABLE, previewSpacing, previewCorners, settings.avatarStyle, "settings_chat_preview_sheet") },
             )
         }
 

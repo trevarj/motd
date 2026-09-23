@@ -352,6 +352,7 @@ internal fun <T> SingleChoiceSheet(
     onSelect: (T) -> Unit,
     onDismiss: () -> Unit,
     tag: String,
+    dismissOnSelect: Boolean = true,
     footer: @Composable () -> Unit = {},
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag(tag)) {
@@ -366,7 +367,7 @@ internal fun <T> SingleChoiceSheet(
                     enabled = true,
                     onClick = {
                         onSelect(option.value)
-                        onDismiss()
+                        if (dismissOnSelect) onDismiss()
                     },
                     modifier = option.tag?.let(Modifier::testTag) ?: Modifier,
                 )
