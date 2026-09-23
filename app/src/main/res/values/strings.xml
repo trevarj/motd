@@ -1015,7 +1015,10 @@
     <string name="settings_chat_sounds_preview">Preview</string>
     <string name="settings_chat_sounds_reset_desc">Restore the default playback and sound choices.</string>
     <string name="settings_chat_sounds_volume_value">%1$d%%</string>
-    <string name="settings_chat_sounds_pitch_value">%1$+d semitones</string>
+    <plurals name="settings_chat_sounds_pitch_value">
+        <item quantity="one">%1$+d semitone</item>
+        <item quantity="other">%1$+d semitones</item>
+    </plurals>
     <string name="settings_chat_sounds_cue_summary">%1$s · %2$s · %3$s · %4$s</string>
     <string name="settings_chat_sounds_disabled">Off</string>
     <string name="settings_chat_sounds_master_volume">Master volume</string>
@@ -2065,7 +2068,6 @@
     <string name="dcc_state_expired">Expired</string>
     <string name="dcc_state_removed">Removed</string>
     <string name="settings_conversation_section">Conversation</string>
-    <string name="settings_media_previews_section">Media and previews</string>
     <string name="settings_voice_audio_section">Voice and audio</string>
     <string name="settings_media_disabled_explanation">Turn on Show images to configure automatic media loading.</string>
     <string name="settings_auto_away_disabled_explanation">Turn on Away when backgrounded to configure this.</string>

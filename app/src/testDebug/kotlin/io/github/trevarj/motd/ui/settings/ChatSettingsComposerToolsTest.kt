@@ -39,14 +39,12 @@ class ChatSettingsComposerToolsTest {
     fun composerToolSwitchesRenderAndDispatchIndependently() {
         var emoji: Boolean? = null
         var formatting: Boolean? = null
-        var unmetered: Boolean? = null
-        var metered: Boolean? = null
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 ChatSettingsContent(
                     settings = Settings(showComposerEmoji = false, showComposerFormattingTools = true),
                     reply = ReplyConfig(),
-                    contentPreviews = ContentPreviewConfig(autoLoadOnUnmetered = false, autoLoadOnMetered = true),
+                    contentPreviews = ContentPreviewConfig(),
                     voice = VoiceConfig(),
                     avatars = AvatarConfig(),
                     onBack = {},
@@ -66,8 +64,8 @@ class ChatSettingsComposerToolsTest {
                     onVisibleReplyPrefix = {},
                     onShowImages = {},
                     onShowLinkPreviews = {},
-                    onAutoLoadOnUnmetered = { unmetered = it },
-                    onAutoLoadOnMetered = { metered = it },
+                    onAutoLoadOnUnmetered = {},
+                    onAutoLoadOnMetered = {},
                     onShowSharedAvatars = {},
                     onVoiceEncryptionDefault = {},
                     onVoiceQuality = {},
@@ -81,21 +79,6 @@ class ChatSettingsComposerToolsTest {
         compose.onNodeWithTag("settings_target_highlight_PRESENCE", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("settings_presence_picker", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("settings_switch_direct_media_proxied", useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithTag("settings_switch_show_images", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
-        compose
-            .onNodeWithText("Automatically load remote media on unmetered networks")
-            .performScrollTo()
-            .assertIsOff()
-            .performClick()
-        compose.onNodeWithTag("settings_switch_auto_media_unmetered", useUnmergedTree = true).assertIsDisplayed()
-        compose
-            .onNodeWithText("Automatically load remote media on metered networks")
-            .performScrollTo()
-            .assertIsOn()
-            .performClick()
-        compose.onNodeWithTag("settings_switch_auto_media_metered", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithTag("settings_switch_show_link_previews", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("settings_switch_show_shared_avatars", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
         compose
             .onNodeWithText("Emoji tool")
             .performScrollTo()
@@ -110,8 +93,6 @@ class ChatSettingsComposerToolsTest {
         compose.runOnIdle {
             assertEquals(true, emoji)
             assertEquals(false, formatting)
-            assertEquals(true, unmetered)
-            assertEquals(false, metered)
         }
     }
 

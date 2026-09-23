@@ -17,6 +17,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -45,6 +46,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlin.math.absoluteValue
 
 data class ChatSoundSettingsUiState(
     val enabled: Boolean = false,
@@ -276,7 +278,13 @@ fun ChatSoundCueEditorContent(
                 value = cue.pitch,
                 range = -4..4,
                 tag = "chat_sound_${cueKind.name.lowercase()}_pitch",
-                valueLabel = { value -> stringResource(R.string.settings_chat_sounds_pitch_value, value) },
+                valueLabel = { value ->
+                    pluralStringResource(
+                        R.plurals.settings_chat_sounds_pitch_value,
+                        value.absoluteValue,
+                        value,
+                    )
+                },
             ) { value -> updateCue { it.copy(pitch = value) } }
         }
         if (cueKind == ChatSoundCue.RECEIVE) {
@@ -372,7 +380,11 @@ private fun chatSoundCueSummary(cue: ChatSoundCueConfig): String =
             chatSoundVoiceLabel(cue.voice),
             chatSoundToneLabel(cue.tone),
             stringResource(R.string.settings_chat_sounds_volume_value, cue.volume),
-            stringResource(R.string.settings_chat_sounds_pitch_value, cue.pitch),
+            pluralStringResource(
+                R.plurals.settings_chat_sounds_pitch_value,
+                cue.pitch.absoluteValue,
+                cue.pitch,
+            ),
         )
     }
 

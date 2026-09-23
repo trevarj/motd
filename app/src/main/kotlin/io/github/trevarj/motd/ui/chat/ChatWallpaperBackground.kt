@@ -31,6 +31,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
+import androidx.core.graphics.scale
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.theme.contrastSafeOverlay
@@ -228,7 +229,7 @@ internal fun renderWallpaperTile(
     return if (alphaMask.width == key.tileSizePx && alphaMask.height == key.tileSizePx) {
         alphaMask
     } else {
-        Bitmap.createScaledBitmap(alphaMask, key.tileSizePx, key.tileSizePx, true).also {
+        alphaMask.scale(key.tileSizePx, key.tileSizePx, true).also {
             if (it !== alphaMask) alphaMask.recycle()
         }
     }

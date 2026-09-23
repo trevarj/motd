@@ -4,12 +4,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.PasteBackendConfig
+import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertTrue
@@ -81,5 +84,43 @@ class SecuritySettingsScreenTest {
 
         compose.onNodeWithTag("settings_upload_secret", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("settings_upload_expiry").assertIsDisplayed()
+    }
+
+    @Test
+    fun remoteContentSwitchesRenderWithTheirConfiguredStates() {
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                SecuritySettingsContent(
+                    state =
+                        SecuritySettingsUiState(
+                            contentPreviews =
+                                ContentPreviewConfig(
+                                    showImages = true,
+                                    autoLoadOnUnmetered = false,
+                                    autoLoadOnMetered = true,
+                                    showLinkPreviews = true,
+                                ),
+                        ),
+                    onOpenDirectConnections = {},
+                    onOpenUploads = {},
+                    onSendTypingIndicators = {},
+                    onShowTypingIndicators = {},
+                    onShowImages = {},
+                    onShowLinkPreviews = {},
+                    onAutoLoadOnUnmetered = {},
+                    onAutoLoadOnMetered = {},
+                    onShowSharedAvatars = {},
+                    onVoiceEncryptionDefault = {},
+                    onUpdateUploads = {},
+                )
+            }
+        }
+
+        compose.onNodeWithTag("settings_switch_show_images_row").assertIsOn()
+        compose.onNodeWithTag("settings_switch_auto_media_unmetered_row").assertIsOff()
+        compose.onNodeWithTag("settings_switch_auto_media_metered_row").assertIsOn()
+        compose.onNodeWithTag("settings_switch_show_link_previews_row").assertIsOn()
+        compose.onNodeWithTag("settings_switch_show_shared_avatars_row").assertIsOn()
+        compose.onNodeWithTag("settings_switch_voice_encryption_row").assertIsOff()
     }
 }
