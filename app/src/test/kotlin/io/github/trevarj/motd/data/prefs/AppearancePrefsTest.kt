@@ -18,11 +18,11 @@ class AppearancePrefsTest {
     private val prefs: AppearancePrefs = AppearancePrefsImpl(ApplicationProvider.getApplicationContext<Context>())
     private val jsonWithDefaults = Json { encodeDefaults = true }
 
-    @Test fun defaults_areSystemAndMotdAtEighty() {
+    @Test fun defaults_areSystemAndMotdAtFifty() {
         assertEquals(
             AppearanceConfig(
                 ColorThemePreset.SYSTEM,
-                WallpaperSelection(ChatWallpaperPreset.MOTD, 80),
+                WallpaperSelection(ChatWallpaperPreset.MOTD, 50),
                 100,
                 100,
             ),
@@ -60,7 +60,7 @@ class AppearancePrefsTest {
 
     @Test fun customFontName_roundTrips() =
         runTest {
-            // The data-class default (empty) is covered by defaults_areSystemAndChatterAtEighty; this
+            // The data-class default (empty) is covered by defaults_areSystemAndMotdAtFifty; this
             // DataStore instance is shared across every test method in this class (see that test's
             // comment), so a leading "reads empty" assertion here would be order-dependent.
             prefs.setCustomFontName("Iosevka Term.ttf")

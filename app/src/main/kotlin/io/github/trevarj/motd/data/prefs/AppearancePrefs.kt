@@ -243,7 +243,7 @@ interface AppearancePrefs {
     suspend fun setCustomFontName(name: String)
 }
 
-const val DEFAULT_WALLPAPER_INTENSITY = 80
+const val DEFAULT_WALLPAPER_INTENSITY = 50
 const val MIN_FONT_SCALE_PERCENT = 80
 const val MAX_FONT_SCALE_PERCENT = 140
 const val FONT_SCALE_STEP_PERCENT = 5
