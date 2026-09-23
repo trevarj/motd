@@ -1,0 +1,4 @@
+- Added Mentions with configurable placement, message jumps, Up/Down navigation, and faster live updates.
+- Made Appearance changes preview and apply immediately, including chat layout, wallpaper, shadows, and avatars.
+- Refined chat folder tabs and light IRC avatars.
+- Improved chat-sound startup performance.
