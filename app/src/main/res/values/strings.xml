@@ -610,6 +610,9 @@
     <string name="mentions_empty_title">No mentions yet</string>
     <string name="mentions_empty_message">Messages that mention your nick or reply to you will appear here.</string>
     <string name="mentions_open_message">Open mention in chat</string>
+    <string name="mentions_scroll_up">Scroll up</string>
+    <string name="mentions_scroll_down">Scroll down</string>
+    <string name="mentions_jump_to_top">Jump to newest mention</string>
     <string name="feed_empty_title">Nothing here yet</string>
     <string name="feed_empty_message">Conversation lines from every channel and DM appear here as they arrive.</string>
     <string name="feed_error_title">Couldn\'t load the global feed</string>

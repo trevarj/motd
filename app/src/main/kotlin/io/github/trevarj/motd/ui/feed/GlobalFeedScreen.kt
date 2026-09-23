@@ -1,16 +1,29 @@
 package io.github.trevarj.motd.ui.feed
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -18,11 +31,23 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -44,6 +69,11 @@ import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.conversationTag
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+
+private const val MENTIONS_NAVIGATION_FAB_HOLD_MS = 450
+private const val MENTIONS_NAVIGATION_FAB_SETTLE_MS = 160
 
 /** Read-only merged stream of conversation lines from every channel and DM, newest first. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,6 +119,7 @@ fun MentionsScreen(
 ) {
     val rows = viewModel.items.collectAsLazyPagingItems()
     val showNetwork by viewModel.showNetwork.collectAsStateWithLifecycle()
+    val listState = rememberLazyListState()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -100,6 +131,12 @@ fun MentionsScreen(
                 title = { Text(stringResource(R.string.mentions_title)) },
             )
         },
+        floatingActionButton = {
+            MentionsNavigationFab(
+                listState = listState,
+                itemCount = rows.itemCount,
+            )
+        },
     ) { padding ->
         GlobalFeedContent(
             rows = rows,
@@ -107,6 +144,7 @@ fun MentionsScreen(
             onOpenMessage = onOpenMessage,
             modifier = Modifier.padding(padding),
             mentions = true,
+            listState = listState,
         )
     }
 }
@@ -118,6 +156,7 @@ internal fun GlobalFeedContent(
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit,
     modifier: Modifier = Modifier,
     mentions: Boolean = false,
+    listState: LazyListState = rememberLazyListState(),
 ) {
     val refresh = rows.loadState.refresh
     when {
@@ -151,6 +190,7 @@ internal fun GlobalFeedContent(
                 onOpenMessage = onOpenMessage,
                 modifier = modifier,
                 mentions = mentions,
+                listState = listState,
             )
         }
     }
@@ -163,11 +203,15 @@ private fun GlobalFeedList(
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit,
     modifier: Modifier = Modifier,
     mentions: Boolean = false,
+    listState: LazyListState,
 ) {
     // One list-scoped formatter: MessageBubble's per-row fallback ignores the app's timestamp
     // preference.
     val formatTime = rememberMessageTimeFormatter()
-    LazyColumn(modifier = modifier.fillMaxSize().testTag(if (mentions) "mentions_list" else "feed_list")) {
+    LazyColumn(
+        state = listState,
+        modifier = modifier.fillMaxSize().testTag(if (mentions) "mentions_list" else "feed_list"),
+    ) {
         items(
             count = rows.itemCount,
             // The canonical row id: stable across invalidation, unlike a merged-stream position.
@@ -187,6 +231,178 @@ private fun GlobalFeedList(
                 )
             }
         }
+    }
+}
+
+/** Adjacent-mention navigation. Holding Up returns to the newest mention. */
+@Composable
+internal fun MentionsNavigationFab(
+    listState: LazyListState,
+    itemCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val canScrollUp by remember(listState) { derivedStateOf { listState.canScrollBackward } }
+    val canScrollDown by remember(listState) { derivedStateOf { listState.canScrollForward } }
+    if (itemCount == 0 || (!canScrollUp && !canScrollDown)) return
+
+    Column(
+        modifier = modifier.testTag("mentions_navigation_fab"),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (canScrollUp) {
+            MentionsNavigationFabButton(
+                icon = {
+                    Icon(
+                        Icons.Filled.KeyboardArrowUp,
+                        contentDescription = stringResource(R.string.mentions_scroll_up),
+                    )
+                },
+                onClick = {
+                    scope.launch {
+                        listState.animateScrollToItem(listState.navigationTarget(MentionsNavigationDirection.UP, itemCount))
+                    }
+                },
+                onLongClick = { scope.launch { listState.scrollToItem(0) } },
+                modifier = Modifier.testTag("mentions_navigation_up"),
+            )
+        }
+        if (canScrollDown) {
+            FloatingActionButton(
+                onClick = {
+                    scope.launch {
+                        listState.animateScrollToItem(listState.navigationTarget(MentionsNavigationDirection.DOWN, itemCount))
+                    }
+                },
+                modifier = Modifier.testTag("mentions_navigation_down"),
+            ) {
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.mentions_scroll_down))
+            }
+        }
+    }
+}
+
+private enum class MentionsNavigationDirection { UP, DOWN }
+
+private fun LazyListState.navigationTarget(
+    direction: MentionsNavigationDirection,
+    itemCount: Int,
+): Int =
+    when (direction) {
+        MentionsNavigationDirection.UP -> {
+            (firstVisibleItemIndex - 1).coerceAtLeast(0)
+        }
+
+        MentionsNavigationDirection.DOWN -> {
+            (firstVisibleItemIndex + 1).coerceAtMost(itemCount - 1)
+        }
+    }
+
+@Composable
+private fun MentionsNavigationFabButton(
+    icon: @Composable () -> Unit,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val latestOnClick by rememberUpdatedState(onClick)
+    val latestOnLongClick by rememberUpdatedState(onLongClick)
+    val jumpToTopLabel = stringResource(R.string.mentions_jump_to_top)
+    val holdProgress = remember { Animatable(0f) }
+    val ringColor = MaterialTheme.colorScheme.onPrimaryContainer
+
+    fun settle() {
+        scope.launch {
+            holdProgress.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = MENTIONS_NAVIGATION_FAB_SETTLE_MS, easing = FastOutSlowInEasing),
+            )
+        }
+    }
+
+    FloatingActionButton(
+        onClick = latestOnClick,
+        modifier =
+            modifier
+                .semantics {
+                    onLongClick(label = jumpToTopLabel) {
+                        latestOnLongClick()
+                        true
+                    }
+                }.pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        val holdJob =
+                            scope.launch {
+                                holdProgress.snapTo(0f)
+                                holdProgress.animateTo(
+                                    1f,
+                                    tween(durationMillis = MENTIONS_NAVIGATION_FAB_HOLD_MS, easing = LinearEasing),
+                                )
+                            }
+                        val releaseResult =
+                            withTimeoutOrNull(MENTIONS_NAVIGATION_FAB_HOLD_MS.toLong()) {
+                                Result.success(waitForUpOrCancellation(PointerEventPass.Initial))
+                            }
+                        holdJob.cancel()
+                        when {
+                            releaseResult == null -> {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                settle()
+                                latestOnLongClick()
+                                waitForUpOrCancellation(PointerEventPass.Initial)?.consume()
+                            }
+
+                            releaseResult.getOrNull() != null -> {
+                                releaseResult.getOrNull()?.consume()
+                                settle()
+                                latestOnClick()
+                            }
+
+                            else -> {
+                                settle()
+                            }
+                        }
+                    }
+                }.drawWithContent {
+                    drawContent()
+                    val progress = holdProgress.value
+                    if (progress > 0f) {
+                        val stroke = 3.dp.toPx()
+                        val inset = stroke / 2 + 2.dp.toPx()
+                        val diameter = minOf(size.width, size.height) - inset * 2
+                        if (diameter > 0f) {
+                            drawArc(
+                                color = ringColor.copy(alpha = 0.22f * (progress * 4f).coerceAtMost(1f)),
+                                startAngle = -90f,
+                                sweepAngle = 360f,
+                                useCenter = false,
+                                topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f),
+                                size = Size(diameter, diameter),
+                                style =
+                                    androidx.compose.ui.graphics.drawscope
+                                        .Stroke(width = stroke),
+                            )
+                            drawArc(
+                                color = ringColor,
+                                startAngle = -90f,
+                                sweepAngle = 360f * progress,
+                                useCenter = false,
+                                topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f),
+                                size = Size(diameter, diameter),
+                                style =
+                                    androidx.compose.ui.graphics.drawscope
+                                        .Stroke(width = stroke),
+                            )
+                        }
+                    }
+                },
+        containerColor = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        icon()
     }
 }
 

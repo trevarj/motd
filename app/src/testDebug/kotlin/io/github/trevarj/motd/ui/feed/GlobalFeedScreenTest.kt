@@ -1,18 +1,26 @@
 package io.github.trevarj.motd.ui.feed
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.paging.LoadState
 import androidx.paging.LoadStates
 import androidx.paging.Pager
@@ -55,6 +63,7 @@ class GlobalFeedScreenTest {
     val compose = createComposeRule()
 
     private var opened: Triple<Long, Long, Long>? = null
+    private var navigationListState: LazyListState? = null
 
     private fun row(
         id: Long,
@@ -102,6 +111,7 @@ class GlobalFeedScreenTest {
         showNetwork: () -> Boolean = { false },
         dickordEnabled: Boolean = false,
         mentions: Boolean = false,
+        showMentionsNavigation: Boolean = false,
     ) {
         compose.setContent {
             // Motion off: the caption waits on a Lottie clock a stub composition never advances.
@@ -110,14 +120,27 @@ class GlobalFeedScreenTest {
                 LocalDickordLabsEnabled provides dickordEnabled,
             ) {
                 MotdTheme(dynamicColor = false) {
-                    GlobalFeedContent(
-                        rows = stream.collectAsLazyPagingItems(context = Dispatchers.Unconfined),
-                        showNetwork = showNetwork(),
-                        onOpenMessage = { bufferId, eventId, serverTime ->
-                            opened = Triple(bufferId, eventId, serverTime)
-                        },
-                        mentions = mentions,
-                    )
+                    val listState = rememberLazyListState()
+                    navigationListState = listState
+                    Box(Modifier.fillMaxSize()) {
+                        val rows = stream.collectAsLazyPagingItems(context = Dispatchers.Unconfined)
+                        GlobalFeedContent(
+                            rows = rows,
+                            showNetwork = showNetwork(),
+                            onOpenMessage = { bufferId, eventId, serverTime ->
+                                opened = Triple(bufferId, eventId, serverTime)
+                            },
+                            mentions = mentions,
+                            listState = listState,
+                        )
+                        if (showMentionsNavigation) {
+                            MentionsNavigationFab(
+                                listState = listState,
+                                itemCount = rows.itemCount,
+                                modifier = Modifier.align(Alignment.BottomEnd),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -176,6 +199,30 @@ class GlobalFeedScreenTest {
 
         awaitTag("mentions_row_21")
         assertEquals(2, compose.onAllNodesWithText("#kotlin").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun mentionsNavigationMovesToAdjacentRowsAndHoldingUpReturnsToTheNewestMention() {
+        setContent(
+            flowOf(PagingData.from((1L..80L).map { row(id = it, text = "mention $it") })),
+            mentions = true,
+            showMentionsNavigation = true,
+        )
+
+        awaitTag("mentions_navigation_down")
+        compose.onNodeWithTag("mentions_navigation_down").assertIsDisplayed().performClick()
+        compose.waitUntil(timeoutMillis = 10_000) { (navigationListState?.firstVisibleItemIndex ?: 0) > 0 }
+        val afterDown = checkNotNull(navigationListState).firstVisibleItemIndex
+
+        compose.onNodeWithTag("mentions_navigation_up").assertIsDisplayed().performClick()
+        compose.waitUntil(timeoutMillis = 10_000) {
+            navigationListState?.firstVisibleItemIndex == afterDown - 1
+        }
+
+        compose.onNodeWithTag("mentions_navigation_down").performClick()
+        compose.waitUntil(timeoutMillis = 10_000) { (navigationListState?.firstVisibleItemIndex ?: 0) > 0 }
+        compose.onNodeWithTag("mentions_navigation_up").performTouchInput { longClick() }
+        compose.waitUntil(timeoutMillis = 10_000) { navigationListState?.firstVisibleItemIndex == 0 }
     }
 
     @Test
