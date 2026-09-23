@@ -34,6 +34,7 @@ internal class GlobalFeedPagingSource(
     private val db: MotdDatabase,
     private val spec: MessageVisibilitySpec,
     private val mode: GlobalFeedMode = GlobalFeedMode.ALL,
+    private val isAtNewest: () -> Boolean = { false },
 ) : PagingSource<GlobalFeedKey, SearchHit>() {
     private val observer =
         object : InvalidationTracker.Observer(GLOBAL_FEED_TABLES) {
@@ -51,10 +52,14 @@ internal class GlobalFeedPagingSource(
      * The viewport survives a refresh: re-seek from the closest loaded row's own key rather than
      * from a position, which a merged stream does not have.
      */
-    override fun getRefreshKey(state: PagingState<GlobalFeedKey, SearchHit>): GlobalFeedKey? =
-        state.anchorPosition
+    override fun getRefreshKey(state: PagingState<GlobalFeedKey, SearchHit>): GlobalFeedKey? {
+        // A mention inserted while the reader is at its newest edge must be in the next refresh's
+        // first page. Elsewhere, retain the anchor so an invalidation does not move the viewport.
+        if (mode == GlobalFeedMode.MENTIONS && isAtNewest()) return null
+        return state.anchorPosition
             ?.let(state::closestItemToPosition)
             ?.let { GlobalFeedKey(it.message.serverTime, it.message.id) }
+    }
 
     override suspend fun load(params: LoadParams<GlobalFeedKey>): LoadResult<GlobalFeedKey, SearchHit> =
         // Off the collector's thread: registering the tracker observer and reading a page are both

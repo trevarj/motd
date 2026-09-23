@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 /**
@@ -72,13 +73,22 @@ class MentionsViewModel
         networkRepository: NetworkRepository,
         globalFeedRepository: GlobalFeedRepository,
     ) : ViewModel() {
+        // Paging reads this from Room's invalidation thread, while Compose reports it on main.
+        // Start at newest so the initial page and an initially empty feed pick up new mentions.
+        private val atNewest = AtomicBoolean(true)
+
         val items: Flow<PagingData<SearchHit>> =
             globalFeedPages(
-                source = globalFeedRepository::mentionsFeed,
+                source = { spec -> globalFeedRepository.mentionsFeed(spec, atNewest::get) },
                 specs = settingsRepository.settings.map(MessageVisibilitySpec::from),
             ).cachedIn(viewModelScope)
 
         val showNetwork: StateFlow<Boolean> =
             showsNetworkName(networkRepository.observeNetworks())
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+        /** Called only after a non-empty mentions list has a real viewport. */
+        fun reportViewportAtNewest(value: Boolean) {
+            atNewest.set(value)
+        }
     }

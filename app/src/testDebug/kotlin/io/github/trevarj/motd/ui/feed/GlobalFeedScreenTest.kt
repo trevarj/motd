@@ -112,6 +112,7 @@ class GlobalFeedScreenTest {
         dickordEnabled: Boolean = false,
         mentions: Boolean = false,
         showMentionsNavigation: Boolean = false,
+        onMentionsViewportAtNewest: ((Boolean) -> Unit)? = null,
     ) {
         compose.setContent {
             // Motion off: the caption waits on a Lottie clock a stub composition never advances.
@@ -133,6 +134,12 @@ class GlobalFeedScreenTest {
                             mentions = mentions,
                             listState = listState,
                         )
+                        onMentionsViewportAtNewest?.let { callback ->
+                            ReportMentionsViewportAtNewest(
+                                listState = listState,
+                                onAtNewestChanged = callback,
+                            )
+                        }
                         if (showMentionsNavigation) {
                             MentionsNavigationFab(
                                 listState = listState,
@@ -223,6 +230,22 @@ class GlobalFeedScreenTest {
         compose.waitUntil(timeoutMillis = 10_000) { (navigationListState?.firstVisibleItemIndex ?: 0) > 0 }
         compose.onNodeWithTag("mentions_navigation_up").performTouchInput { longClick() }
         compose.waitUntil(timeoutMillis = 10_000) { navigationListState?.firstVisibleItemIndex == 0 }
+    }
+
+    @Test
+    fun mentionsViewportReportsNewestOnlyAfterRowsArePresentedAndClearsOnScroll() {
+        val viewportStates = mutableListOf<Boolean>()
+        setContent(
+            flowOf(PagingData.from((1L..80L).map { row(id = it, text = "mention $it") })),
+            mentions = true,
+            showMentionsNavigation = true,
+            onMentionsViewportAtNewest = viewportStates::add,
+        )
+
+        awaitTag("mentions_row_1")
+        compose.waitUntil(timeoutMillis = 10_000) { viewportStates.lastOrNull() == true }
+        compose.onNodeWithTag("mentions_navigation_down").performClick()
+        compose.waitUntil(timeoutMillis = 10_000) { viewportStates.lastOrNull() == false }
     }
 
     @Test

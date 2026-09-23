@@ -31,6 +31,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** The global feed against a real database: ordering, fool scoping, keyset paging, and the plan. */
 @RunWith(RobolectricTestRunner::class)
@@ -280,6 +281,91 @@ class GlobalFeedPagingDbTest {
             assertEquals(listOf("line-3", "line-2"), refreshed.data.map { it.message.text })
             // And the rows above it stay reachable through prepend.
             assertEquals(GlobalFeedKey(300, loaded.data[3].message.id), refreshed.prevKey)
+        }
+
+    @Test
+    fun mentionsRefreshStartsAtNewestOnlyWhileTheMentionsViewportIsAtNewest() =
+        runTest {
+            val ids =
+                db.messageDao().insertAll(
+                    (1..8).map {
+                        message(
+                            bufferA,
+                            "mention-$it",
+                            serverTime = it * 100L,
+                            dedupKey = "mention-$it",
+                            hasMention = true,
+                        )
+                    },
+                )
+            val atNewest = AtomicBoolean(false)
+            val source =
+                GlobalFeedPagingSource(
+                    db = db,
+                    spec = MessageVisibilitySpec(),
+                    mode = GlobalFeedMode.MENTIONS,
+                    isAtNewest = atNewest::get,
+                )
+            val loaded = source.refresh(key = null, loadSize = 8)
+            val anchoredState =
+                PagingState(
+                    pages = listOf(loaded),
+                    anchorPosition = 6,
+                    config = GLOBAL_FEED_PAGING_CONFIG,
+                    leadingPlaceholderCount = 0,
+                )
+
+            val anchoredKey = GlobalFeedKey(200, ids[1])
+            assertEquals(anchoredKey, source.getRefreshKey(anchoredState))
+
+            db.messageDao().insertAll(
+                listOf(
+                    message(
+                        bufferA,
+                        "new mention",
+                        serverTime = 900,
+                        dedupKey = "mention-new",
+                        hasMention = true,
+                    ),
+                ),
+            )
+            val anchoredSource =
+                GlobalFeedPagingSource(
+                    db = db,
+                    spec = MessageVisibilitySpec(),
+                    mode = GlobalFeedMode.MENTIONS,
+                    isAtNewest = atNewest::get,
+                )
+            val anchoredRefresh = anchoredSource.refresh(key = anchoredKey, loadSize = 2)
+            assertEquals(listOf("mention-2", "mention-1"), anchoredRefresh.data.map { it.message.text })
+
+            atNewest.set(true)
+
+            assertNull(source.getRefreshKey(anchoredState))
+            val newestSource =
+                GlobalFeedPagingSource(
+                    db = db,
+                    spec = MessageVisibilitySpec(),
+                    mode = GlobalFeedMode.MENTIONS,
+                    isAtNewest = atNewest::get,
+                )
+            val newestRefresh = newestSource.refresh(key = null, loadSize = 2)
+            assertEquals(
+                "new mention",
+                newestRefresh.data
+                    .first()
+                    .message
+                    .text,
+            )
+
+            val allSource =
+                GlobalFeedPagingSource(
+                    db = db,
+                    spec = MessageVisibilitySpec(),
+                    mode = GlobalFeedMode.ALL,
+                    isAtNewest = atNewest::get,
+                )
+            assertEquals(anchoredKey, allSource.getRefreshKey(anchoredState))
         }
 
     /** The plan must stay an ordered index walk with a real seek, not a per-page sort. */

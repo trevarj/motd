@@ -337,7 +337,10 @@ interface GlobalFeedRepository {
     fun globalFeed(spec: MessageVisibilitySpec): Flow<PagingData<SearchHit>>
 
     /** Stored messages from other people that mention or reply to the user, newest first. */
-    fun mentionsFeed(spec: MessageVisibilitySpec): Flow<PagingData<SearchHit>>
+    fun mentionsFeed(
+        spec: MessageVisibilitySpec,
+        isAtNewest: () -> Boolean,
+    ): Flow<PagingData<SearchHit>>
 }
 
 /**

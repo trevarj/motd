@@ -22,10 +22,20 @@ class GlobalFeedRepositoryImpl
                 pagingSourceFactory = { GlobalFeedPagingSource(db, spec, GlobalFeedMode.ALL) },
             ).flow
 
-        override fun mentionsFeed(spec: MessageVisibilitySpec): Flow<PagingData<SearchHit>> =
+        override fun mentionsFeed(
+            spec: MessageVisibilitySpec,
+            isAtNewest: () -> Boolean,
+        ): Flow<PagingData<SearchHit>> =
             Pager(
                 config = GLOBAL_FEED_PAGING_CONFIG,
-                pagingSourceFactory = { GlobalFeedPagingSource(db, spec, GlobalFeedMode.MENTIONS) },
+                pagingSourceFactory = {
+                    GlobalFeedPagingSource(
+                        db = db,
+                        spec = spec,
+                        mode = GlobalFeedMode.MENTIONS,
+                        isAtNewest = isAtNewest,
+                    )
+                },
             ).flow
     }
 

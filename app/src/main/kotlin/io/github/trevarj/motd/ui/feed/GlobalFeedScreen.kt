@@ -36,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -69,6 +70,8 @@ import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.conversationTag
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -120,6 +123,10 @@ fun MentionsScreen(
     val rows = viewModel.items.collectAsLazyPagingItems()
     val showNetwork by viewModel.showNetwork.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    ReportMentionsViewportAtNewest(
+        listState = listState,
+        onAtNewestChanged = viewModel::reportViewportAtNewest,
+    )
     Scaffold(
         topBar = {
             TopAppBar(
@@ -146,6 +153,29 @@ fun MentionsScreen(
             mentions = true,
             listState = listState,
         )
+    }
+}
+
+/**
+ * A refresh can temporarily clear a LazyColumn's layout. Ignore that empty layout so the last
+ * real viewport remains authoritative until Paging presents rows again.
+ */
+@Composable
+internal fun ReportMentionsViewportAtNewest(
+    listState: LazyListState,
+    onAtNewestChanged: (Boolean) -> Unit,
+) {
+    val latestCallback by rememberUpdatedState(onAtNewestChanged)
+    androidx.compose.runtime.LaunchedEffect(listState) {
+        snapshotFlow {
+            if (listState.layoutInfo.totalItemsCount == 0) {
+                null
+            } else {
+                !listState.canScrollBackward
+            }
+        }.filterNotNull()
+            .distinctUntilChanged()
+            .collect(latestCallback)
     }
 }
 
