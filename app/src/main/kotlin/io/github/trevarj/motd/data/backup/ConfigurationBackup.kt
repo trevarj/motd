@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import io.github.trevarj.motd.BuildConfig
 import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.PasteBackendConfig
+import io.github.trevarj.motd.attachment.normalizeTrustedFileHost
 import io.github.trevarj.motd.audio.VoiceConfig
 import io.github.trevarj.motd.audio.VoicePrefs
 import io.github.trevarj.motd.avatar.AvatarPrefs
@@ -400,6 +401,9 @@ class ConfigurationBackupRepositoryImpl
                 }
                 network.wsUrl?.let { require(it.startsWith("wss://")) { "Backup contains an invalid WebSocket URL." } }
                 network.proxyPort?.let { require(it in 1..65535) { "Backup contains an invalid proxy port." } }
+                network.trustedFileHost?.let {
+                    require(normalizeTrustedFileHost(it) == it) { "Backup contains an invalid trusted file host." }
+                }
             }
             require(payload.folders.size <= MAX_FOLDERS) { "Too many folders in backup." }
             require(payload.folderAssignments.size <= MAX_FOLDER_ASSIGNMENTS) { "Too many folder assignments in backup." }
@@ -810,6 +814,7 @@ private data class PortableNetwork(
     val proxyPort: Int? = null,
     val obfsLink: String? = null,
     val hadObfsLink: Boolean = false,
+    val trustedFileHost: String? = null,
     val znc: Boolean = false,
 ) {
     override fun toString(): String = "PortableNetwork(exportId=$exportId, name=$name, role=$role, host=$host:$port)"
@@ -875,6 +880,9 @@ private fun NetworkEntity.toPortable(
         proxyPort = proxyPort,
         obfsLink = obfsLink.takeIf { includeSecrets },
         hadObfsLink = !obfsLink.isNullOrBlank(),
+        // FILEHOST is a credential authority. Plaintext backups must never be able to redirect a
+        // locally retained SASL credential to a host supplied by an untrusted document.
+        trustedFileHost = trustedFileHost.takeIf { includeSecrets },
         znc = id in zncIds,
     )
 
@@ -924,6 +932,9 @@ private fun PortableNetwork.toEntity(
         proxyHost = proxyHost,
         proxyPort = proxyPort,
         obfsLink = retainedObfsLink,
+        // A credentials-excluded merge preserves the local authority alongside its retained
+        // credential. Encrypted backups authenticate this field and may explicitly clear it.
+        trustedFileHost = if (includeSecrets) trustedFileHost else local?.trustedFileHost,
         pendingCredentialRequirements = requirements.takeIf { it.isNotEmpty() }?.joinToString(","),
         restoreAutoConnect = autoConnect,
     )

@@ -37,7 +37,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 43,
+    version = 44,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1077,6 +1077,14 @@ val MIGRATION_42_43 =
         }
     }
 
+/** v43 -> v44 adds an optional exact authority for authenticated Soju FILEHOST uploads. */
+val MIGRATION_43_44 =
+    object : Migration(43, 44) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE networks ADD COLUMN trustedFileHost TEXT")
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1132,6 +1140,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_40_41,
         MIGRATION_41_42,
         MIGRATION_42_43,
+        MIGRATION_43_44,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"

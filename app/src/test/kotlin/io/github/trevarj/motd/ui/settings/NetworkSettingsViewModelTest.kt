@@ -462,6 +462,24 @@ class NetworkSettingsViewModelTest {
         }
 
     @Test
+    fun trustedFileHostIsNormalizedAndDoesNotTriggerBouncerChildWarning() =
+        runTest {
+            val repo = FakeNetworkRepository(listOf(root(), child(2)))
+            val vm = loadedVm(repo)
+
+            vm.editTrustedFileHost(" Files.Example. ")
+            runCurrent()
+            assertTrue(vm.state.value.canSave)
+
+            vm.save {}
+            runCurrent()
+
+            assertEquals("files.example", repo.networks.getValue(1).trustedFileHost)
+            assertNull(vm.state.value.pendingBouncerIdentityChange)
+            assertEquals(listOf("update:1"), repo.operations)
+        }
+
+    @Test
     fun unavailableAvatarPublishing_isNotAttempted_andShowsFailure() =
         runTest {
             val repo = FakeNetworkRepository(listOf(root()))

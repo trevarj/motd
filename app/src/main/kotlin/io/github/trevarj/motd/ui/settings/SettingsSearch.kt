@@ -71,7 +71,7 @@ fun buildSettingsSearchEntries(
     } +
         networks.flatMap { network ->
             buildList {
-                add(networkEntry(network, NetworkSettingsTarget.CONNECTION, R.string.network_settings_connection_section, "server host port tls websocket", resolve, networkTitle))
+                add(networkEntry(network, NetworkSettingsTarget.CONNECTION, R.string.network_settings_connection_section, "server host port tls websocket filehost trusted upload credentials", resolve, networkTitle))
                 if (network.role != NetworkRole.BOUNCER_CHILD) {
                     add(networkEntry(network, NetworkSettingsTarget.AUTHENTICATION, R.string.network_settings_identity_section, "nick username sasl password certificate", resolve, networkTitle))
                     add(networkEntry(network, NetworkSettingsTarget.OBFUSCATION, R.string.network_settings_routing, "proxy socks tor vless reality transport", resolve, networkTitle))

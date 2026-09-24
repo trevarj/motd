@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.attachment.normalizeTrustedFileHost
 import io.github.trevarj.motd.avatar.AvatarController
 import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.avatar.SelfAvatarSetting
@@ -54,6 +55,8 @@ data class NetworkSettingsUiState(
     val displayName: String = "",
     // Opt-in IRC-over-WebSocket URL; blank = default TCP/TLS transport.
     val wsUrl: String = "",
+    /** Exact file-host authority that may receive this selected network's HTTP credentials. */
+    val trustedFileHost: String = "",
     // Opt-in obfuscation/proxy. NONE = direct; SOCKS5/REALITY reveal host/port;
     // TOR pins Orbot's 127.0.0.1:9050. Port kept as a string for text-field editing.
     val obfsMode: ObfsMode = ObfsMode.NONE,
@@ -82,6 +85,7 @@ data class NetworkSettingsUiState(
         val current = entity ?: return false
         return displayName.trim().ifBlank { current.name } != current.name ||
             wsUrl.trim().ifBlank { null } != current.wsUrl?.trim()?.ifBlank { null } ||
+            normalizeTrustedFileHost(trustedFileHost) != current.trustedFileHost ||
             obfsMode != (current.obfsMode ?: ObfsMode.NONE) ||
             (
                 obfsMode == ObfsMode.SOCKS5 && (
@@ -104,9 +108,11 @@ data class NetworkSettingsUiState(
             ) || autoConnect != current.autoConnect
     }
     val initialAwayValid: Boolean get() = initialAwayValidationError(initialAwayMessage) == null
+    val trustedFileHostError: String?
+        get() = if (trustedFileHost.isBlank() || normalizeTrustedFileHost(trustedFileHost) != null) null else "invalid"
     val isValid: Boolean get() =
         server.isValid && (if (isZnc) zncLogin.isValid else auth.isValid) &&
-            vlessLinkError == null && initialAwayValid
+            vlessLinkError == null && initialAwayValid && trustedFileHostError == null
     val canSave: Boolean get() = isValid && hasUnsavedChanges
 }
 
@@ -217,6 +223,7 @@ class NetworkSettingsViewModel
                         entity = n,
                         displayName = n?.name.orEmpty(),
                         wsUrl = n?.wsUrl.orEmpty(),
+                        trustedFileHost = n?.trustedFileHost.orEmpty(),
                         obfsMode = n?.obfsMode ?: ObfsMode.NONE,
                         proxyHost = n?.proxyHost.orEmpty(),
                         proxyPort = n?.proxyPort?.toString().orEmpty(),
@@ -273,6 +280,10 @@ class NetworkSettingsViewModel
 
         fun editWsUrl(url: String) {
             _state.value = _state.value.copy(wsUrl = url)
+        }
+
+        fun editTrustedFileHost(host: String) {
+            _state.value = _state.value.copy(trustedFileHost = host)
         }
 
         fun editInitialAwayMessage(message: String) {
@@ -447,6 +458,7 @@ class NetworkSettingsViewModel
                 // Persist the current autoConnect value alongside the form fields.
             ).copy(
                 autoConnect = _state.value.autoConnect,
+                trustedFileHost = normalizeTrustedFileHost(_state.value.trustedFileHost),
                 initialAwayMessage =
                     _state.value.initialAwayMessage
                         .trim()

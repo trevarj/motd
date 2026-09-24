@@ -84,19 +84,42 @@ class SojuFileHostBindingTest {
         assertTrue("the upload never reached the configured VLESS host", probe.connections() > 0)
     }
 
-    @Test fun embeddedDirectNetworkMayUseItsAdvertisedFileHost() {
+    @Test fun explicitTrustedFileHostMayServeTheFileHostButAdjacentHostIsRefused() {
         assertThrows(IOException::class.java) {
+            uploadText(
+                advertised = "https://localhost:${probe.port}/uploads",
+                networkHost = "soju",
+                trustedFileHost = "localhost",
+            )
+        }
+        // localhost resolves to the probe. Its TLS failure proves both authenticated upload paths
+        // reached the configured exact DNS authority.
+        val trustedConnections = probe.connections()
+        assertTrue("the upload never reached the configured trusted host", trustedConnections > 0)
+
+        assertThrows(UploadException::class.java) {
+            uploadText(
+                advertised = "https://adjacent.localhost:${probe.port}/uploads",
+                networkHost = "soju",
+                trustedFileHost = "localhost",
+            )
+        }
+        assertEquals(trustedConnections, probe.connections())
+    }
+
+    @Test fun embeddedDirectNetworkRejectsUnboundAdvertisedFileHost() {
+        assertThrows(UploadException::class.java) {
             uploadText(
                 advertised = "https://127.0.0.1:${probe.port}/uploads",
                 networkHost = "soju",
                 vlessHost = "192.0.2.1",
             )
         }
-        assertTrue("the upload never reached the embedded peer's advertised file host", probe.connections() > 0)
+        assertEquals(0, probe.connections())
     }
 
-    @Test fun embeddedBouncerMayUseItsExternalFileHost() {
-        assertThrows(IOException::class.java) {
+    @Test fun embeddedBouncerRejectsUnboundAdvertisedFileHost() {
+        assertThrows(UploadException::class.java) {
             uploadText(
                 advertised = "https://127.0.0.1:${probe.port}/uploads",
                 networkHost = "soju",
@@ -104,7 +127,7 @@ class SojuFileHostBindingTest {
                 role = NetworkRole.BOUNCER_ROOT,
             )
         }
-        assertTrue("the upload never reached the bouncer's advertised file host", probe.connections() > 0)
+        assertEquals(0, probe.connections())
     }
 
     @Test fun networkWithoutAFileHostIsRefusedWithoutNamingAHost() {
@@ -120,6 +143,7 @@ class SojuFileHostBindingTest {
         advertised: String?,
         networkHost: String,
         vlessHost: String? = null,
+        trustedFileHost: String? = null,
         role: NetworkRole = NetworkRole.DIRECT,
     ) = runBlocking {
         val isupport = advertised?.let { mapOf(SOJU_FILEHOST_TOKEN to it) }.orEmpty()
@@ -127,7 +151,7 @@ class SojuFileHostBindingTest {
             AttachmentUploaderImpl(
                 ApplicationProvider.getApplicationContext<Context>(),
                 FakeConnectionManager(IrcClientState.Ready("me", emptySet(), isupport)),
-                MediaRouteResolver { id -> route(id, networkHost, vlessHost, role) },
+                MediaRouteResolver { id -> route(id, networkHost, vlessHost, trustedFileHost, role) },
             )
         uploader
             .upload(
@@ -141,6 +165,7 @@ class SojuFileHostBindingTest {
         networkId: Long,
         host: String,
         vlessHost: String?,
+        trustedFileHost: String?,
         role: NetworkRole,
     ) = NetworkMediaRoute(
         networkId = networkId,
@@ -167,6 +192,8 @@ class SojuFileHostBindingTest {
         proxy = null,
         proxyError = null,
         authorizationHeader = "Basic bWU6aHVudGVyMg==",
+        trustedFileHost = trustedFileHost,
+        vlessIngressHost = vlessHost,
         release = { released = true },
     )
 

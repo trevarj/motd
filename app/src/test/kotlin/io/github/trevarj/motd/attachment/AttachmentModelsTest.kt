@@ -98,6 +98,22 @@ class AttachmentModelsTest {
         )
     }
 
+    @Test fun trustedFileHostIsExactAndNormalized() {
+        assertEquals("files.example", normalizeTrustedFileHost(" Files.Example. "))
+        assertNull(normalizeTrustedFileHost("files.example.."))
+        assertNull(normalizeTrustedFileHost("https://files.example"))
+        assertNull(normalizeTrustedFileHost("files.example:443"))
+        assertNull(normalizeTrustedFileHost("127.0.0.1"))
+        assertEquals(
+            SojuFileHostEndpoint.Usable("https://FILES.example/uploads"),
+            validateSojuFileHostEndpoint("https://FILES.example/uploads", "irc.example", trustedFileHost = "files.example"),
+        )
+        assertEquals(
+            SojuFileHostEndpoint.OffHost("cdn.files.example", "irc.example"),
+            validateSojuFileHostEndpoint("https://cdn.files.example/uploads", "irc.example", trustedFileHost = "files.example"),
+        )
+    }
+
     @Test fun sojuFileHostAdvertisementDrivesTheOfferOnly() {
         assertTrue(sojuFileHostAdvertised(mapOf(SOJU_FILEHOST_TOKEN to "https://evil.example/uploads")))
         assertFalse(sojuFileHostAdvertised(emptyMap()))

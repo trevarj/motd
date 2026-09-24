@@ -3,7 +3,9 @@ package io.github.trevarj.motd.audio
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.prefs.CertTrustStore
+import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.service.LocalSocksProvider
 import io.github.trevarj.motd.service.PinningTrustManager
 import io.github.trevarj.motd.service.resolveTransportProxy
@@ -26,6 +28,10 @@ data class NetworkMediaRoute(
     val proxyError: String?,
     val authorizationHeader: String?,
     val endpointPinnedSha256: String? = null,
+    /** Per-selected-network authority; bouncer children never inherit it from their parent. */
+    val trustedFileHost: String? = null,
+    /** Parsed from the physical endpoint's embedded VLESS transport, when active. */
+    val vlessIngressHost: String? = null,
     private val release: () -> Unit = {},
 ) : AutoCloseable {
     fun open(
@@ -51,6 +57,8 @@ data class NetworkMediaRoute(
             connection.hostnameVerifier = HostnameVerifier { _, _ -> true }
         }
         if (authenticated) {
+            // FILEHOST OPTIONS/POST carry Basic auth. Never forward it through an HTTP redirect.
+            connection.instanceFollowRedirects = false
             authorizationHeader?.let { connection.setRequestProperty("Authorization", it) }
         }
         return connection
@@ -101,6 +109,11 @@ class NetworkMediaRouteProvider
                 proxyError = resolved.error,
                 authorizationHeader = authorizationHeader,
                 endpointPinnedSha256 = endpointPinnedSha256,
+                trustedFileHost = row.trustedFileHost,
+                vlessIngressHost =
+                    endpoint.obfsLink
+                        ?.takeIf { endpoint.obfsMode == ObfsMode.EMBEDDED_REALITY }
+                        ?.let { VlessLink.parse(it).getOrNull()?.host },
                 release = resolved.release,
             )
         }

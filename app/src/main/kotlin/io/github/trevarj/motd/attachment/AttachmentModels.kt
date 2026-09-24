@@ -4,6 +4,7 @@ import android.net.Uri
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
 import java.io.File
+import java.util.Locale
 
 enum class PasteProtocol { TERMBIN, MULTIPART_0X0, RAW_CNET, MULTIPART_UGUU, MULTIPART_CATBOX, SOJU_FILEHOST }
 
@@ -213,39 +214,65 @@ fun sojuFileHostAdvertised(isupport: Map<String, String>): Boolean = httpsUpload
 fun sojuFileHostEndpoint(
     isupport: Map<String, String>,
     networkHost: String,
-    trustedTunnelHost: String? = null,
-): SojuFileHostEndpoint = validateSojuFileHostEndpoint(isupport[SOJU_FILEHOST_TOKEN], networkHost, trustedTunnelHost)
+    vlessIngressHost: String? = null,
+    trustedFileHost: String? = null,
+): SojuFileHostEndpoint = validateSojuFileHostEndpoint(isupport[SOJU_FILEHOST_TOKEN], networkHost, vlessIngressHost, trustedFileHost)
 
 /**
  * Resolve an advertised file-host endpoint against [networkHost], the host of the IRC endpoint the
- * upload's credential belongs to, or [trustedTunnelHost], its user-configured VLESS ingress.
+ * upload's credential belongs to, [vlessIngressHost], its user-configured VLESS ingress, or the
+ * selected network's [trustedFileHost].
  *
- * The host must match or be a subdomain of [networkHost], or exactly match [trustedTunnelHost],
+ * The host must match or be a subdomain of [networkHost], or exactly match [vlessIngressHost],
  * case-insensitively. This permits a network owner to isolate uploads at e.g.
  * `files.irc.example` without treating every host below a third-party VLESS provider as trusted.
+ * [trustedFileHost] is also exact: it never grants its subdomains authority.
  * **Ports must not** match: soju commonly serves IRC and uploads on separate ports.
  */
 fun validateSojuFileHostEndpoint(
     value: String?,
     networkHost: String,
-    trustedTunnelHost: String? = null,
+    vlessIngressHost: String? = null,
+    trustedFileHost: String? = null,
 ): SojuFileHostEndpoint {
     val uri = httpsUploadUri(value) ?: return SojuFileHostEndpoint.Unavailable
     val advertised = uri.host.trimEnd('.')
     val expected = networkHost.trim().trimEnd('.')
-    val tunnel = trustedTunnelHost?.trim()?.trimEnd('.').orEmpty()
+    val tunnel = vlessIngressHost?.trim()?.trimEnd('.').orEmpty()
+    val trusted = normalizeTrustedFileHost(trustedFileHost).orEmpty()
     // Fails closed when no configured authority owns the advertised DNS namespace.
     return if (
         (
             expected.isNotEmpty() &&
                 (advertised.equals(expected, ignoreCase = true) || advertised.endsWith(".$expected", ignoreCase = true))
         ) ||
-        (tunnel.isNotEmpty() && advertised.equals(tunnel, ignoreCase = true))
+        (tunnel.isNotEmpty() && advertised.equals(tunnel, ignoreCase = true)) ||
+        (trusted.isNotEmpty() && advertised.equals(trusted, ignoreCase = true))
     ) {
         SojuFileHostEndpoint.Usable(uri.toString())
     } else {
         SojuFileHostEndpoint.OffHost(advertisedHost = uri.host, networkHost = expected)
     }
+}
+
+/** Normalize a user-entered FILEHOST authority, accepting only a bare ASCII DNS hostname. */
+fun normalizeTrustedFileHost(value: String?): String? {
+    val entered = value?.trim().orEmpty()
+    if (entered.endsWith("..")) return null
+    val host = entered.removeSuffix(".").lowercase(Locale.ROOT)
+    if (host.isEmpty() || host.length > 253 || host.any { it.code !in 0x21..0x7e }) return null
+    val labels = host.split('.')
+    if (labels.any { label ->
+            label.isEmpty() || label.length > 63 ||
+                !label.first().isLetterOrDigit() || !label.last().isLetterOrDigit() ||
+                label.any { !it.isLetterOrDigit() && it != '-' }
+        }
+    ) {
+        return null
+    }
+    // Numeric dotted quads are IP addresses, not DNS hostnames, and cannot be trusted here.
+    if (labels.size == 4 && labels.all { it.all(Char::isDigit) }) return null
+    return host
 }
 
 fun normalizedConfig(config: PasteBackendConfig): PasteBackendConfig {

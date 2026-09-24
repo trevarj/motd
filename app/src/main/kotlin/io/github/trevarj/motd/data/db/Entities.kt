@@ -150,6 +150,8 @@ data class NetworkEntity(
     val restoreAutoConnect: Boolean = false,
     /** Validated HTTPS icon advertised through IRCv3 draft/ICON; refreshed on registration. */
     val serverIconUrl: String? = null,
+    /** Exact HTTPS file-host authority explicitly allowed to receive this network's upload credential. */
+    val trustedFileHost: String? = null,
 ) {
     // Redact secrets (saslPassword, serverPassword, nickServPassword, obfsLink) from logs; proxyHost/port are
     // non-sensitive so keep them out

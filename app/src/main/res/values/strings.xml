@@ -542,6 +542,9 @@
     <string name="network_settings_save">Save</string>
     <string name="network_settings_general_section">General</string>
     <string name="network_settings_connection_section">Connection</string>
+    <string name="network_settings_trusted_filehost">Trusted file host</string>
+    <string name="network_settings_trusted_filehost_desc">Optional exact hostname for a Soju file host. Uploads to this additional host send your network credentials; HTTPS certificate and hostname checks still apply.</string>
+    <string name="network_settings_trusted_filehost_error">Enter a hostname only, without a scheme, path, port, or IP address.</string>
     <string name="network_settings_identity_section">Identity and authentication</string>
     <string name="network_settings_presence_section">Presence</string>
     <string name="network_settings_initial_away">Initial away message</string>

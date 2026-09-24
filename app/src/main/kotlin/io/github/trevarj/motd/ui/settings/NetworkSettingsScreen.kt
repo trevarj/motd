@@ -121,6 +121,7 @@ fun NetworkSettingsScreen(
         onCancelResyncHistory = viewModel::cancelResyncHistory,
         onDisplayNameChange = viewModel::editDisplayName,
         onWsUrlChange = viewModel::editWsUrl,
+        onTrustedFileHostChange = viewModel::editTrustedFileHost,
         onInitialAwayMessageChange = viewModel::editInitialAwayMessage,
         onObfsModeChange = viewModel::editObfsMode,
         onProxyHostChange = viewModel::editProxyHost,
@@ -156,6 +157,7 @@ fun NetworkSettingsContent(
     onBack: () -> Unit,
     onDisplayNameChange: (String) -> Unit = {},
     onWsUrlChange: (String) -> Unit = {},
+    onTrustedFileHostChange: (String) -> Unit = {},
     onInitialAwayMessageChange: (String) -> Unit = {},
     onObfsModeChange: (ObfsMode) -> Unit = {},
     onProxyHostChange: (String) -> Unit = {},
@@ -235,6 +237,7 @@ fun NetworkSettingsContent(
                             androidx.compose.material3.ListItemDefaults
                                 .colors(containerColor = Color.Transparent),
                     )
+                    TrustedFileHostField(state, onTrustedFileHostChange)
                     InitialAwayField(state, onInitialAwayMessageChange)
                 }
             }
@@ -249,6 +252,8 @@ fun NetworkSettingsContent(
                     }
                     androidx.compose.material3.HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     TransportSection(wsUrl = state.wsUrl, onWsUrlChange = onWsUrlChange)
+                    androidx.compose.material3.HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    TrustedFileHostField(state, onTrustedFileHostChange)
                     androidx.compose.material3.HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     ObfuscationSection(
                         target = target,
@@ -653,6 +658,33 @@ private fun InitialAwayField(
                 imeAction = ImeAction.Done,
             ),
         modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("network_initial_away"),
+    )
+}
+
+@Composable
+private fun TrustedFileHostField(
+    state: NetworkSettingsUiState,
+    onValueChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = state.trustedFileHost,
+        onValueChange = onValueChange,
+        label = { Text(stringResource(R.string.network_settings_trusted_filehost)) },
+        supportingText = {
+            Text(
+                stringResource(
+                    if (state.trustedFileHostError == null) {
+                        R.string.network_settings_trusted_filehost_desc
+                    } else {
+                        R.string.network_settings_trusted_filehost_error
+                    },
+                ),
+            )
+        },
+        isError = state.trustedFileHostError != null,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("network_trusted_filehost"),
     )
 }
 

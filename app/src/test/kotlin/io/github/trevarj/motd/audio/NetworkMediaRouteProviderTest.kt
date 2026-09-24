@@ -14,6 +14,7 @@ import io.github.trevarj.motd.service.LocalSocksProvider
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -98,6 +99,27 @@ class NetworkMediaRouteProviderTest {
     }
 
     @Test
+    fun `bouncer child keeps its own trusted file host while using parent transport and auth`() =
+        runTest {
+            val parent = db.networkDao().insert(network().copy(trustedFileHost = "parent-files.example"))
+            val child =
+                db.networkDao().insert(
+                    network().copy(
+                        role = NetworkRole.BOUNCER_CHILD,
+                        parentId = parent,
+                        bouncerNetId = "libera",
+                        trustedFileHost = "child-files.example",
+                    ),
+                )
+
+            requireNotNull(provider.routeForNetwork(child)).use { route ->
+                assertEquals(parent, route.endpoint.id)
+                assertEquals("child-files.example", route.trustedFileHost)
+                assertEquals("trev/libera:password", decodeBasic(route.authorizationHeader))
+            }
+        }
+
+    @Test
     fun `non plain SASL does not synthesize HTTP basic credentials`() {
         assertNull(network().copy(saslMechanism = "EXTERNAL").basicAuthorizationHeader("libera"))
     }
@@ -126,7 +148,12 @@ class NetworkMediaRouteProviderTest {
         try {
             val url = "http://127.0.0.1:${server.address.port}/"
             route.open(url).apply { responseCode }.disconnect()
-            route.open(url, authenticated = true).apply { responseCode }.disconnect()
+            route
+                .open(url, authenticated = true)
+                .apply {
+                    assertFalse(instanceFollowRedirects)
+                    responseCode
+                }.disconnect()
 
             assertEquals(listOf(null, "Basic private"), received)
         } finally {

@@ -56,6 +56,52 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class ConfigurationBackupRepositoryTest {
     @Test
+    fun plaintextBackupCannotReplaceTrustedFileHostAndMalformedImportFailsClosed() =
+        runTest {
+            val sourceDb = inMemoryDb()
+            val source = repository(sourceDb)
+            sourceDb.networkDao().insert(secretNetwork(clientCertAlias = null).copy(trustedFileHost = "files.example"))
+            val raw = source.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+            assertFalse(raw.contains("files.example"))
+            assertTrue(raw.contains("\"trustedFileHost\": null"))
+
+            val targetDb = inMemoryDb()
+            val target = repository(targetDb)
+            targetDb.networkDao().insert(secretNetwork(clientCertAlias = null).copy(saslPassword = "retained-secret", trustedFileHost = "local.example"))
+            val malicious = raw.replace("\"trustedFileHost\": null", "\"trustedFileHost\": \"attacker.example\"")
+            target.import(malicious, importMode = BackupImportMode.MERGE)
+            assertEquals(
+                "local.example",
+                targetDb
+                    .networkDao()
+                    .allNow()
+                    .single()
+                    .trustedFileHost,
+            )
+            assertEquals(
+                "retained-secret",
+                targetDb
+                    .networkDao()
+                    .allNow()
+                    .single()
+                    .saslPassword,
+            )
+
+            try {
+                target.preview(
+                    raw.replace("\"trustedFileHost\": null", "\"trustedFileHost\": \"https://evil.example\""),
+                    importMode = BackupImportMode.MERGE,
+                )
+                fail("malformed trusted host was accepted")
+            } catch (_: BackupFormatException) {
+                // Expected: imports never turn a URL into a credential authority.
+            } finally {
+                sourceDb.close()
+                targetDb.close()
+            }
+        }
+
+    @Test
     fun chatSoundConfigRoundTripsAndLegacyBackupLeavesExistingConfigUntouched() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()
@@ -129,7 +175,7 @@ class ConfigurationBackupRepositoryTest {
         runTest {
             val sourceDb = inMemoryDb()
             val source = repository(sourceDb)
-            sourceDb.networkDao().insert(secretNetwork(clientCertAlias = null))
+            sourceDb.networkDao().insert(secretNetwork(clientCertAlias = null).copy(trustedFileHost = "files.example"))
 
             val raw =
                 source.exportToString(
@@ -164,6 +210,7 @@ class ConfigurationBackupRepositoryTest {
             assertTrue(imported.nickServRecoveryEnabled)
             assertEquals("GHOST,REGAIN", imported.nickServRecoverySequence)
             assertEquals("vless://secret", imported.obfsLink)
+            assertEquals("files.example", imported.trustedFileHost)
             assertNull(imported.pendingCredentialRequirements)
             assertEquals(true, imported.autoConnect)
         }
