@@ -1,0 +1,3 @@
+- Refined media, link, reply, and reaction styling for cleaner chats.
+- Turned chat shadows off by default while keeping your existing setting.
+- Prevented Smart join/part bursts from looking like unread messages, with a separate indicator when history needs recovery.
