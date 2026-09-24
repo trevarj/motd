@@ -591,7 +591,7 @@ fun MessageBubble(
                 )
             }
 
-            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, elevation = comfortableElevation(COMFORTABLE_CONTENT_ELEVATION)) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
             if (text.isNotBlank()) {
                 // Linkify http(s) URLs so the body is tappable even when the preview fails
@@ -646,7 +646,6 @@ fun MessageBubble(
                             .padding(vertical = 2.dp)
                             .heightIn(max = 280.dp)
                             .aspectRatio(4f / 3f)
-                            .shadow(comfortableElevation(COMFORTABLE_CONTENT_ELEVATION), RoundedCornerShape(12.dp))
                             .clip(RoundedCornerShape(12.dp)),
                 )
                 MediaOriginCaption(
@@ -662,7 +661,6 @@ fun MessageBubble(
                         networkId = networkId,
                         loading = linkPreviewLoading,
                         onClick = onLinkPreviewClick,
-                        modifier = Modifier.shadow(comfortableElevation(COMFORTABLE_CONTENT_ELEVATION), RoundedCornerShape(12.dp)),
                     )
                 }
             }
@@ -861,7 +859,7 @@ private fun ComfortableActionBubble(
                         onLongPressLabel = actionsLabel,
                     ).padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
         ) {
-            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, elevation = comfortableElevation(COMFORTABLE_CONTENT_ELEVATION)) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
 
             Row(verticalAlignment = Alignment.Top) {
                 if (!hideAvatar) {
@@ -928,7 +926,6 @@ private fun ComfortableActionBubble(
                             .widthIn(max = 280.dp)
                             .heightIn(max = 240.dp)
                             .aspectRatio(4f / 3f)
-                            .shadow(comfortableElevation(COMFORTABLE_CONTENT_ELEVATION), RoundedCornerShape(10.dp))
                             .clip(RoundedCornerShape(10.dp)),
                 )
                 MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
@@ -941,7 +938,6 @@ private fun ComfortableActionBubble(
                         networkId = networkId,
                         loading = linkPreviewLoading,
                         onClick = onLinkPreviewClick,
-                        modifier = Modifier.shadow(comfortableElevation(COMFORTABLE_CONTENT_ELEVATION), RoundedCornerShape(12.dp)),
                     )
                 }
             }
@@ -1986,7 +1982,6 @@ internal fun ReplyMiniBubble(
     reply: ReplyPreviewData,
     nickColors: NickColorScheme,
     onClick: (() -> Unit)? = null,
-    elevation: Dp = 0.dp,
 ) {
     val accent = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val openLabel = stringResource(R.string.chat_reply_open)
@@ -1998,7 +1993,6 @@ internal fun ReplyMiniBubble(
                     animationSpec = MotdMotion.contentSize,
                     alignment = Alignment.TopStart,
                 ).padding(vertical = 2.dp)
-                .then(if (elevation > 0.dp) Modifier.shadow(elevation, RoundedCornerShape(6.dp)) else Modifier)
                 .clip(RoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
                 .let { modifier ->

@@ -1180,7 +1180,7 @@
     <string name="settings_bubble_corner_square">Square</string>
     <string name="settings_bubble_corners_desc">Applies to the Comfortable layout</string>
     <string name="settings_chat_shadows">Chat shadows</string>
-    <string name="settings_chat_shadows_desc">Add depth to bubbles, avatars, and attachments in Comfortable layout</string>
+    <string name="settings_chat_shadows_desc">Add depth to bubbles, avatars, and reactions in Comfortable layout</string>
     <string name="settings_wallpaper">Chat wallpaper</string>
     <string name="settings_wallpaper_none">None</string>
     <string name="settings_people">People</string>

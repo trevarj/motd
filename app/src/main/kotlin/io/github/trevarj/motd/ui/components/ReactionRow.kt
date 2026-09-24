@@ -130,13 +130,21 @@ fun ReactionRow(
     chipElevation: Dp = 0.dp,
 ) {
     if (reactions.isEmpty()) return
+    // animateContentSize clips to its measured bounds, so keep the chip shadow inside them.
+    val shadowPadding = chipElevation * 3
     FlowRow(
         // Ease chip add/remove and wrap-line growth; rows scrolled in render at final size (no
         // first-layout animation). Tight top gap so chips sit snugly under the message body.
         modifier =
             modifier
                 .animateContentSize(animationSpec = MotdMotion.contentSize)
-                .padding(top = 2.dp),
+                .testTag("chat_reaction_row")
+                .padding(
+                    start = shadowPadding,
+                    top = 2.dp + shadowPadding,
+                    end = shadowPadding,
+                    bottom = shadowPadding,
+                ),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {

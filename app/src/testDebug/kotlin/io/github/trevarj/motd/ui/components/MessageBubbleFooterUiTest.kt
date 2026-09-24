@@ -201,6 +201,17 @@ class MessageBubbleFooterUiTest {
         }
     }
 
+    @Test
+    fun elevatedReactionChipHasRoomForItsShadowInsideAnimatedRow() {
+        compose.setContent { Sample(reactions = listOf(ReactionChip("♥", 1, mine = false))) }
+
+        val row = compose.onNodeWithTag("chat_reaction_row", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val chip = compose.onNodeWithTag("chat_reaction_chip_♥", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("reaction shadow needs room at the bottom of its animated row", chip.bottom < row.bottom)
+        assertTrue("reaction shadow needs room at the left edge of its animated row", row.left < chip.left)
+        assertTrue("reaction shadow needs room at the right edge of its animated row", chip.right < row.right)
+    }
+
     @Composable
     private fun Sample(
         sender: String = NICK,
@@ -211,6 +222,7 @@ class MessageBubbleFooterUiTest {
         density: LayoutDensity = LayoutDensity.COMFORTABLE,
         kind: MessageKind = MessageKind.PRIVMSG,
         shadows: Boolean = true,
+        reactions: List<ReactionChip> = emptyList(),
         onSenderClick: (() -> Unit)? = null,
     ) {
         MotdTheme(
@@ -229,6 +241,7 @@ class MessageBubbleFooterUiTest {
                     isSelf = isSelf,
                     kind = kind,
                     showSender = showSender,
+                    reactions = reactions,
                     onSenderClick = onSenderClick,
                 )
             }
