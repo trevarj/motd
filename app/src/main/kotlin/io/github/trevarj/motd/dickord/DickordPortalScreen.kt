@@ -88,6 +88,7 @@ import io.github.trevarj.motd.ui.chatlist.chatListBadgeState
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.EmptyState
+import io.github.trevarj.motd.ui.components.HistoryIncompleteBadge
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MutedActivityBadge
@@ -352,8 +353,12 @@ private fun PortalRailAction(
                     lowerBound = unreadIncomplete,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 4.dp),
                 )
-            } else if (unreadIncomplete || advertisedUnread) {
+            } else if (advertisedUnread) {
                 AdvertisedActivityDot(
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 4.dp),
+                )
+            } else if (unreadIncomplete) {
+                HistoryIncompleteBadge(
                     modifier = Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 4.dp),
                 )
             }
@@ -720,6 +725,7 @@ private fun DickordChannelRow(
             badges.mentions?.let { MentionBadge(it, lowerBound = badges.mentionsIncomplete) }
             badges.unread?.let { UnreadBadge(it, lowerBound = badges.unreadIncomplete) }
             if (badges.advertisedActivity) AdvertisedActivityDot()
+            if (badges.historyIncomplete) HistoryIncompleteBadge()
         }
     }
 }

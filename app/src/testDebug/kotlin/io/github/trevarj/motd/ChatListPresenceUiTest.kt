@@ -109,6 +109,27 @@ class ChatListPresenceUiTest {
     }
 
     @Test
+    fun incompleteHistory_usesItsOwnAccessibleCueInsteadOfAnUnreadDot() {
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListRowItem(
+                    row = queryRow().copy(type = BufferType.CHANNEL, unreadCountIncomplete = true),
+                    showNetworkChip = false,
+                    onClick = {},
+                    onLongClick = {},
+                )
+            }
+        }
+
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        compose
+            .onNodeWithTag("chatlist_row_history_incomplete", useUnmergedTree = true)
+            .assertIsDisplayed()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf(context.getString(R.string.chat_history_partial_chip))))
+        compose.onAllNodesWithTag("chatlist_row_advertised_activity_dot", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    @Test
     fun dickordRow_defaultsKeepCleanLabelAndBadge() {
         setDickordRow(enabled = true)
 

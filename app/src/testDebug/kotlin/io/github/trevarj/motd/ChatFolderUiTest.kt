@@ -110,7 +110,7 @@ class ChatFolderUiTest {
     }
 
     @Test
-    fun incomplete_folder_summary_exposes_pending_activity() {
+    fun incomplete_folder_summary_exposes_history_coverage_without_claiming_activity() {
         val state =
             mutableStateOf(
                 ChatListState(
@@ -122,10 +122,10 @@ class ChatFolderUiTest {
             )
         setContent(state)
 
-        val pending = ApplicationProvider.getApplicationContext<Context>().getString(R.string.badge_unread_pending)
-        compose.onNodeWithTag("chatlist_folder_tab_all").assert(hasContentDescription(pending))
-        compose.onNodeWithTag("chatlist_folder_tab_7").assert(hasContentDescription(pending))
-        compose.onNodeWithTag("chatlist_row_advertised_activity_dot", useUnmergedTree = true).assertIsDisplayed()
+        val incomplete = ApplicationProvider.getApplicationContext<Context>().getString(R.string.chat_history_partial_chip)
+        compose.onNodeWithTag("chatlist_folder_tab_all").assert(hasContentDescription(incomplete))
+        compose.onNodeWithTag("chatlist_folder_tab_7").assert(hasContentDescription(incomplete))
+        compose.onNodeWithTag("chatlist_row_history_incomplete", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test

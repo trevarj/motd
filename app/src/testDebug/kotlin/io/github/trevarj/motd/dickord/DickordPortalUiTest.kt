@@ -138,8 +138,9 @@ class DickordPortalUiTest {
                         },
                 )
         }
+        val incompleteMatcher = serverMatcher and hasContentDescription(resources.getString(R.string.chat_history_partial_chip))
         val pendingMatcher = serverMatcher and hasContentDescription(resources.getString(R.string.badge_unread_pending))
-        compose.onNode(pendingMatcher, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNode(incompleteMatcher, useUnmergedTree = true).assertIsDisplayed()
         compose.runOnIdle {
             state.value =
                 state.value.copy(
@@ -168,6 +169,7 @@ class DickordPortalUiTest {
         }
         compose.onNode(serverMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_unread_at_least, 2, 2)), useUnmergedTree = true).assertDoesNotExist()
         compose.onNode(serverMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_unread, 0, 0)), useUnmergedTree = true).assertDoesNotExist()
+        compose.onNode(incompleteMatcher, useUnmergedTree = true).assertDoesNotExist()
         compose.onNode(pendingMatcher, useUnmergedTree = true).assertDoesNotExist()
     }
 
@@ -198,6 +200,7 @@ class DickordPortalUiTest {
         val dmMatcher = hasAnyAncestor(hasTestTag("dickord_group_dms"))
         val countMatcher = dmMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_unread, 4, 4))
         val lowerBoundMatcher = dmMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_unread_at_least, 4, 4))
+        val incompleteMatcher = dmMatcher and hasContentDescription(resources.getString(R.string.chat_history_partial_chip))
         val pendingMatcher = dmMatcher and hasContentDescription(resources.getString(R.string.badge_unread_pending))
         compose.onNode(countMatcher, useUnmergedTree = true).assertIsDisplayed()
 
@@ -207,7 +210,7 @@ class DickordPortalUiTest {
         val readAlice = alice.copy(row = alice.row.copy(unreadCount = 0))
         val readBob = bob.copy(row = bob.row.copy(unreadCount = 0))
         updateDms(readAlice, readBob.copy(row = readBob.row.copy(unreadCountIncomplete = true)))
-        compose.onNode(pendingMatcher, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNode(incompleteMatcher, useUnmergedTree = true).assertIsDisplayed()
 
         updateDms(readAlice, readBob.copy(row = readBob.row.copy(advertisedUnread = true)))
         compose.onNode(pendingMatcher, useUnmergedTree = true).assertIsDisplayed()
@@ -215,6 +218,7 @@ class DickordPortalUiTest {
         updateDms(readAlice, readBob)
         compose.onNode(countMatcher, useUnmergedTree = true).assertDoesNotExist()
         compose.onNode(lowerBoundMatcher, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNode(incompleteMatcher, useUnmergedTree = true).assertDoesNotExist()
         compose.onNode(pendingMatcher, useUnmergedTree = true).assertDoesNotExist()
         compose
             .onNode(dmMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_unread_at_least, 2, 2)), useUnmergedTree = true)

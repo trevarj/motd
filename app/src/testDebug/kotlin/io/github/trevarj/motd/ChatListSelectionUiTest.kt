@@ -539,10 +539,11 @@ class ChatListSelectionUiTest {
         compose.onNodeWithTag("chatlist_selection_more").performClick()
         assertEquals(0, compose.onAllNodesWithTag("chatlist_selection_clear_dot").fetchSemanticsNodes().size)
         compose.onNodeWithTag("chatlist_selection_pin").performClick()
-        // No Room update was supplied: once recovery ends both advertised activity dots return.
+        // No Room update was supplied: once recovery ends each row's original cue returns.
         compose.runOnIdle { recoveringIds.value = emptySet() }
         assertEquals(0, compose.onAllNodesWithTag("chatlist_row_activity_recovery_spinner", useUnmergedTree = true).fetchSemanticsNodes().size)
-        assertEquals(2, compose.onAllNodesWithTag("chatlist_row_advertised_activity_dot", useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertEquals(1, compose.onAllNodesWithTag("chatlist_row_advertised_activity_dot", useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertEquals(1, compose.onAllNodesWithTag("chatlist_row_history_incomplete", useUnmergedTree = true).fetchSemanticsNodes().size)
     }
 
     @Test fun archive_announcement_uses_a_polite_live_region() {

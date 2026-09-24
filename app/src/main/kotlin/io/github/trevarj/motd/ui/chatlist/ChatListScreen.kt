@@ -186,6 +186,7 @@ import io.github.trevarj.motd.ui.components.AudioPlaybackViewModel
 import io.github.trevarj.motd.ui.components.ConnectionBanner
 import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.components.FolderIcon
+import io.github.trevarj.motd.ui.components.HistoryIncompleteBadge
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
@@ -441,7 +442,7 @@ fun ChatListContent(
     var tabChangeSignal by rememberSaveable { mutableIntStateOf(0) }
     var selectedIds by rememberSaveable(archiveMode, invitationMode, state.selectedNetworkId, effectiveFolderId) { mutableStateOf(emptyList<Long>()) }
     val selectedRows = orderedSelectedRows(displayedRows, selectedIds)
-    val dottedSelectedRows = selectedRows.filter { chatListBadgeState(it).advertisedActivity && it.bufferId !in recoveringActivityIds }
+    val dottedSelectedRows = selectedRows.filter { chatListBadgeState(it).recoveryNeeded && it.bufferId !in recoveringActivityIds }
     val selectionActive = selectedRows.isNotEmpty()
     val topBarMode =
         chatListTopBarMode(
@@ -1313,7 +1314,8 @@ private fun FolderActivityBadge(summary: ChatFolderSummary) {
     when {
         summary.mentionCount > 0 -> MentionBadge(count = summary.mentionCount, lowerBound = summary.mentionIncomplete)
         summary.unreadCount > 0 -> UnreadBadge(count = summary.unreadCount, lowerBound = summary.unreadIncomplete)
-        summary.unreadIncomplete || summary.mentionIncomplete || summary.advertisedActivity -> AdvertisedActivityDot()
+        summary.advertisedActivity -> AdvertisedActivityDot()
+        summary.unreadIncomplete || summary.mentionIncomplete -> HistoryIncompleteBadge()
     }
 }
 

@@ -196,6 +196,29 @@ class HistoryResyncCoordinatorTest {
         replyToMsgid = null,
     )
 
+    private fun presence(
+        msgid: String,
+        time: Long,
+    ): IrcEvent =
+        if (time / 1_000L % 2L == 0L) {
+            IrcEvent.Joined(
+                ctx = MessageContext(msgid, time, null, "batch", null),
+                nick = "alice",
+                channel = "#chan",
+                account = null,
+                realname = null,
+                isSelf = false,
+            )
+        } else {
+            IrcEvent.Parted(
+                ctx = MessageContext(msgid, time, null, "batch", null),
+                nick = "alice",
+                channel = "#chan",
+                reason = null,
+                isSelf = false,
+            )
+        }
+
     private suspend fun rows(
         id: Long = bufferId,
         loadSize: Int = 500,
@@ -636,6 +659,48 @@ class HistoryResyncCoordinatorTest {
             assertEquals(0, source.requests.count { it.subcommand == ChatHistoryRequest.Subcommand.BEFORE })
             assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(bufferId).first())
             assertEquals(1_214L, syncPrefs.lastSuccessfulSync(networkId))
+        }
+
+    @Test
+    fun presenceOnlyBurstClearsAdvertisedActivityButLeavesTheOlderWindowIncomplete() =
+        runTest {
+            // Model the reported threshold: TARGETS observes 100 JOIN/PART events while the recent
+            // synchronization page retains the newest 50 and leaves the earlier half for recovery.
+            processor.process(networkId, message("seed", 75_000L))
+            val seed = requireNotNull(db.messageDao().byMsgid(bufferId, "seed"))
+            db.bufferDao().advanceLocalReadAnchor(bufferId, seed.serverTime, seed.id)
+            val burst = (101L..200L).map { presence("presence-$it", it * 1_000L) }
+            val source =
+                FakeSource(pageLimit = 100) { request ->
+                    when (request.subcommand) {
+                        ChatHistoryRequest.Subcommand.TARGETS -> {
+                            FakeResponse(targets = listOf("#chan" to 200_000L), endOfHistory = true)
+                        }
+
+                        ChatHistoryRequest.Subcommand.LATEST -> {
+                            assertEquals(50, request.limit)
+                            FakeResponse(events = burst.takeLast(request.limit))
+                        }
+
+                        else -> {
+                            error("unexpected ${request.subcommand}")
+                        }
+                    }
+                }
+
+            assertEquals(
+                HistoryResyncState.Updated(50),
+                coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), source),
+            )
+
+            val chatList = db.bufferDao().observeChatList()
+            val row = chatList.first().single()
+            assertFalse(row.advertisedUnread)
+            assertEquals(0, row.unreadCount)
+            assertTrue(row.unreadCountIncomplete)
+            assertEquals(51, rows().size)
+            val buffer = requireNotNull(db.bufferDao().rawById(bufferId))
+            assertEquals(75_000L, buffer.advertisedLatestTime)
         }
 
     @Test

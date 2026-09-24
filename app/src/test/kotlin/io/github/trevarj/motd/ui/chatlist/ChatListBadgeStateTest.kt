@@ -42,7 +42,7 @@ class ChatListBadgeStateTest {
     }
 
     @Test
-    fun incomplete_zero_counts_use_a_countless_unread_cue() {
+    fun incomplete_zero_counts_use_a_history_cue_without_claiming_unread_activity() {
         val state =
             chatListBadgeState(
                 row(muted = false, unread = 0, mentions = 0).copy(
@@ -55,7 +55,7 @@ class ChatListBadgeStateTest {
             ChatListBadgeState(
                 mentionsIncomplete = true,
                 unreadIncomplete = true,
-                advertisedActivity = true,
+                historyIncomplete = true,
             ),
             state,
         )

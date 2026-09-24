@@ -67,6 +67,7 @@ import io.github.trevarj.motd.dickord.isDickordChannel
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.HistoryIncompleteBadge
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MutedActivityBadge
@@ -95,7 +96,14 @@ internal data class ChatListBadgeState(
      * a count. Shown as a dot rather than a number: a count would be invented.
      */
     val advertisedActivity: Boolean = false,
-)
+    /**
+     * Fetched history stops above the read anchor. This leaves coverage unresolved without claiming
+     * that the missing interval contains chat activity.
+     */
+    val historyIncomplete: Boolean = false,
+) {
+    val recoveryNeeded: Boolean get() = advertisedActivity || historyIncomplete
+}
 
 internal enum class ChatListRowVisualState { DEFAULT, UNREAD, ACTIVE, SELECTED }
 
@@ -133,8 +141,8 @@ internal fun chatListRowContainer(
 /**
  * The advertised cue only ever stands IN for a count, never beside one: once a real unread count
  * exists the dot would be redundant noise, and by then the fetched rows have usually caught the
- * room up anyway. A muted row keeps its subdued treatment and shows no advertised cue at all — the
- * whole point of muting is not to be told about activity ahead of time.
+ * room up anyway. A fetched interval that remains incomplete gets its own history cue instead of
+ * impersonating unread activity. A muted row keeps its subdued treatment and shows neither cue.
  */
 internal fun chatListBadgeState(row: ChatListRow): ChatListBadgeState =
     if (row.muted) {
@@ -148,7 +156,8 @@ internal fun chatListBadgeState(row: ChatListRow): ChatListBadgeState =
             unread = row.unreadCount.takeIf { it > 0 },
             mentionsIncomplete = row.mentionCountIncomplete,
             unreadIncomplete = row.unreadCountIncomplete,
-            advertisedActivity = (row.advertisedUnread || row.unreadCountIncomplete) && row.unreadCount == 0,
+            advertisedActivity = row.advertisedUnread && row.unreadCount == 0,
+            historyIncomplete = row.unreadCountIncomplete && row.unreadCount == 0 && !row.advertisedUnread,
         )
     }
 
@@ -484,6 +493,11 @@ fun ChatListRowItem(
                 if (badges.advertisedActivity && !activityRecoveryInProgress) {
                     AdvertisedActivityDot(
                         modifier = Modifier.testTag("chatlist_row_advertised_activity_dot"),
+                    )
+                }
+                if (badges.historyIncomplete && !activityRecoveryInProgress) {
+                    HistoryIncompleteBadge(
+                        modifier = Modifier.testTag("chatlist_row_history_incomplete"),
                     )
                 }
             }

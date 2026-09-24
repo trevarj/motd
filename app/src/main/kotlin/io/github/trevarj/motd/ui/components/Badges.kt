@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -82,6 +85,25 @@ fun AdvertisedActivityDot(modifier: Modifier = Modifier) {
                     .background(MaterialTheme.colorScheme.primary, CircleShape),
         )
     }
+}
+
+/**
+ * The fetched window has not reached the reader's anchor yet. This deliberately differs from
+ * [AdvertisedActivityDot]: an incomplete window may contain only presence events, so it cannot
+ * claim that a chat message is waiting.
+ */
+@Composable
+fun HistoryIncompleteBadge(modifier: Modifier = Modifier) {
+    val cd = stringResource(R.string.chat_history_partial_chip)
+    Icon(
+        imageVector = Icons.Outlined.History,
+        contentDescription = cd,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier =
+            modifier
+                .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                .padding(2.dp),
+    )
 }
 
 /** Mention badge (secondary, "@" glyph). */
