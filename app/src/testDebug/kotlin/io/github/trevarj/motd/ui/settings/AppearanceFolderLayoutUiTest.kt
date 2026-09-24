@@ -88,11 +88,11 @@ class AppearanceFolderLayoutUiTest {
         var enabled: Boolean? = null
         setContent(onChatShadowsEnabled = { enabled = it })
 
-        compose.onNodeWithTag("settings_chat_preview_inline_shadows_true").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings_chat_preview_inline_shadows_false").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("settings_switch_chat_shadows", useUnmergedTree = true).performScrollTo().performClick()
 
-        assertEquals(false, enabled)
-        compose.onNodeWithTag("settings_chat_preview_inline_shadows_false").performScrollTo().assertIsDisplayed()
+        assertEquals(true, enabled)
+        compose.onNodeWithTag("settings_chat_preview_inline_shadows_true").performScrollTo().assertIsDisplayed()
     }
 
     @Test

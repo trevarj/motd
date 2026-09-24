@@ -95,7 +95,7 @@ class AppearancePrefsImpl
                         prefs[BUBBLE_CORNER_STYLE]
                             ?.let { runCatching { BubbleCornerStyle.valueOf(it) }.getOrNull() }
                             ?: BubbleCornerStyle.ROUNDED,
-                    chatShadowsEnabled = prefs[CHAT_SHADOWS_ENABLED] ?: true,
+                    chatShadowsEnabled = prefs[CHAT_SHADOWS_ENABLED] ?: false,
                     launcherIcon =
                         prefs[LAUNCHER_ICON]?.let { runCatching { LauncherIcon.valueOf(it) }.getOrNull() }
                             ?: LauncherIcon.DEFAULT,

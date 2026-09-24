@@ -130,7 +130,7 @@ val LocalTimestampConfig: ProvidableCompositionLocal<TimestampConfig> =
     staticCompositionLocalOf { TimestampConfig() }
 
 /** The Comfortable message renderer reads this without changing unrelated surfaces. */
-val LocalChatShadowsEnabled: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { true }
+val LocalChatShadowsEnabled: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { false }
 
 /**
  * Opt-in marker for activities whose system bars [MotdTheme] may restyle.
@@ -193,7 +193,7 @@ fun MotdTheme(
     timestampConfig: TimestampConfig = TimestampConfig(),
     messageSpacing: MessageSpacing = MessageSpacing.DEFAULT,
     bubbleCornerStyle: BubbleCornerStyle = BubbleCornerStyle.ROUNDED,
-    chatShadowsEnabled: Boolean = true,
+    chatShadowsEnabled: Boolean = false,
     // Nested previews can render a different palette from the app shell without restyling its bars.
     syncSystemBars: Boolean = true,
     content: @Composable () -> Unit,

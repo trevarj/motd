@@ -37,7 +37,7 @@ class AppearancePrefsTest {
         assertEquals(TimeFormat.AUTO, AppearanceConfig().timeFormat)
         assertEquals(MessageSpacing.DEFAULT, AppearanceConfig().messageSpacing)
         assertEquals(BubbleCornerStyle.ROUNDED, AppearanceConfig().bubbleCornerStyle)
-        assertEquals(true, AppearanceConfig().chatShadowsEnabled)
+        assertEquals(false, AppearanceConfig().chatShadowsEnabled)
         assertEquals(LauncherIcon.DEFAULT, AppearanceConfig().launcherIcon)
         assertEquals("", AppearanceConfig().customFontName)
     }
@@ -79,12 +79,17 @@ class AppearancePrefsTest {
             context.appearanceDataStore.edit {
                 it.remove(booleanPreferencesKey("chat_shadows_enabled_v1"))
             }
-            assertEquals(true, prefs.config.first().chatShadowsEnabled)
-            prefs.setChatShadowsEnabled(false)
             assertEquals(false, prefs.config.first().chatShadowsEnabled)
             prefs.setChatShadowsEnabled(true)
             assertEquals(true, prefs.config.first().chatShadowsEnabled)
+            prefs.setChatShadowsEnabled(false)
+            assertEquals(false, prefs.config.first().chatShadowsEnabled)
         }
+
+    @Test fun appearanceJsonPreservesExplicitShadowPreference() {
+        assertEquals(false, Json.decodeFromString<AppearanceConfig>("""{}""").chatShadowsEnabled)
+        assertEquals(true, Json.decodeFromString<AppearanceConfig>("""{"chatShadowsEnabled":true}""").chatShadowsEnabled)
+    }
 
     @Test fun garbageStoredEnumStrings_decodeToDefaults() =
         runTest {
