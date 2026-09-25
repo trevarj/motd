@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -44,7 +45,7 @@ class NetworkTrustedFileHostUiTest {
     @Test
     fun trustedFileHostField_reportsInvalidEntryThroughItsCallback() {
         compose.setContent {
-            var trustedHost by mutableStateOf("")
+            var trustedHost by remember { mutableStateOf("") }
             MotdTheme(dynamicColor = false) {
                 NetworkSettingsContent(
                     state = stateFor(NetworkRole.DIRECT).copy(trustedFileHost = trustedHost),
