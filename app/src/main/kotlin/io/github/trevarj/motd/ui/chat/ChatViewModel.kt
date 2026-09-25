@@ -50,6 +50,7 @@ import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
 import io.github.trevarj.motd.data.repo.NoopNetworkIgnoreRepository
+import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.data.repo.entryAnchorPagingKey
 import io.github.trevarj.motd.data.sync.HistoryGapFiller
 import io.github.trevarj.motd.data.sync.HistoryPageLoader
@@ -108,6 +109,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
@@ -531,33 +533,39 @@ class ChatViewModel
             )
         }
 
+        private val viewportRefreshAnchor = MutableStateFlow<ViewportRefreshAnchor?>(null)
+
+        fun reportViewportRefreshAnchor(anchor: ViewportRefreshAnchor?) {
+            viewportRefreshAnchor.value = anchor
+        }
+
         /** Every visibility change cancels the old generation and creates a positionally exact Pager. */
         val messages: Flow<PagingData<MessageEntity>> =
             filterSpecs
                 .flatMapLatest { spec ->
                     flow {
+                        viewportRefreshAnchor.value = null
                         // Resolve the open-at-first-unread anchor BEFORE creating the Pager so a deep
                         // entry collects ONE generation keyed from birth. Keying the already-collected
                         // stream by swapping in a second Pager mid-presentation parks the new
                         // generation's first page behind the cachedIn handoff, which left the reopened
                         // timeline stuck on the stale generation with refresh loading (blank reopen).
-                        emitAll(messageRepository.messages(bufferId, spec, entryPagingKey(spec)))
+                        emitAll(messageRepository.messages(bufferId, spec, entryPagingKey(spec), viewportRefreshAnchor))
                     }
                 }.cachedIn(viewModelScope)
 
         /**
          * Pager initial key for the one-shot normal entry, taken from the SAME at-rest resolution the
-         * entry decision publishes ([entryAnchors]). Null unless a pending entry sits beyond the default
-         * newest load, so first-open backfill, escapes and mentions keep their unkeyed newest-first load.
+         * entry decision publishes ([entryAnchors]). Null unless a pending entry sits beyond the
+         * selected visibility's newest load, so first-open backfill and mentions stay newest-first.
          * A deep jump is excluded outright: its destination is the jump target, not the entry anchor, and
          * it reaches that row by requesting the placeholder inside this SAME generation rather than by
          * rebuilding the Pager around it.
          *
          * BOTH entry anchors are considered, and the key names the one [preferredEntryTarget] will
          * actually land on — resolved through [preferredEntryIndex], the same rule, on the same inputs
-         * — because a saved viewport parked 400 rows into history is exactly as far outside the newest
-         * load as a deep unread anchor, and reaching it by scrolling to an unloaded placeholder is the
-         * churn this key exists to avoid.
+         * — because a saved viewport parked beyond the selected newest load needs the same initial
+         * materialization as a deep unread anchor, rather than scrolling to an unloaded placeholder.
          *
          * The entry pipeline still positions precisely; state that converges after this snapshot at
          * worst yields an unkeyed-style placeholder scroll, never a wrong position.
@@ -566,7 +574,10 @@ class ChatViewModel
             if (routeHasDeepJump) return null
             if (_entryState.value !is EntryPositionState.Pending) return null
             return try {
-                entryAnchors(spec).pagingKey
+                val anchors = entryAnchors(spec)
+                // ponytail: pin the already-selected row until the first viewport can report its own anchor.
+                viewportRefreshAnchor.value = anchors.target.expectedEventId?.let(ViewportRefreshAnchor::Parked)
+                anchors.pagingKey
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: RuntimeException) {
@@ -698,7 +709,7 @@ class ChatViewModel
                         savedIndex = saved?.index,
                         firstUnreadIndex = unreadTarget?.index,
                         furthestDisplayedIndex = furthestDisplayedIndex,
-                    )?.let(::entryAnchorPagingKey),
+                    )?.let { entryAnchorPagingKey(it) },
                 // Ordered cheapest-first: the extra row lookup only runs for a room with no stored
                 // anchor and no saved viewport at all.
                 hasDurableContent =
@@ -838,6 +849,12 @@ class ChatViewModel
                 .map { it?.id ?: bufferId }
                 .distinctUntilChanged()
                 .stateIn(viewModelScope, SharingStarted.Eagerly, bufferId)
+
+        init {
+            viewModelScope.launch {
+                operationalBufferId.drop(1).collect { viewportRefreshAnchor.value = null }
+            }
+        }
 
         val channelNotifications: StateFlow<ChannelNotificationPresentation> =
             combine(buffer, notificationSettings.state) { room, settings -> room to settings }

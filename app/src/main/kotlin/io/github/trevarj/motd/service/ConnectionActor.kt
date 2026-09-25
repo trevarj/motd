@@ -5,6 +5,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.selects.select
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
@@ -126,7 +128,7 @@ class ConnectionActor(
     private val scope: CoroutineScope,
     private val connectionFactory: suspend () -> ManagedConnection,
     private val onState: suspend (Long, IrcClientState) -> Unit,
-    private val onEvent: suspend (Long, IrcEvent) -> Unit,
+    private val onEvents: suspend (Long, List<IrcEvent>) -> Unit,
     private val onReady: suspend (ManagedConnection) -> Unit,
     private val onConnectionChanged: (Long, ManagedConnection?) -> Unit = { _, _ -> },
     private val onLag: (Long, Long?) -> Unit = { _, _ -> },
@@ -246,9 +248,7 @@ class ConnectionActor(
 
             val attemptScope = CoroutineScope(currentCoroutineContext())
             val collector =
-                attemptScope.launch {
-                    for (event in conn.criticalEvents) onEvent(networkId, event)
-                }
+                attemptScope.launch { collectCriticalEvents(conn.criticalEvents) }
             // Forward latency readings for this connection's lifetime; cancelled with the attempt
             // scope so a replaced/destroyed actor never reports a stale measurement.
             val lagCollector =
@@ -327,6 +327,47 @@ class ConnectionActor(
             }
         }
     }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private suspend fun collectCriticalEvents(events: ReceiveChannel<IrcEvent>) {
+        for (event in events) {
+            if (!event.isPeerPresence()) {
+                onEvents(networkId, listOf(event))
+                continue
+            }
+            val batch = ArrayList<IrcEvent>(64)
+            batch.add(event)
+            // ponytail: one deadline per batch; a busy socket must not postpone a commit forever.
+            // Quiet peers wait up to 250ms; any other event flushes them in wire order immediately.
+            val deadline = CoroutineScope(currentCoroutineContext()).launch { delay(5_000) }
+            try {
+                while (batch.size < 64) {
+                    val (received, next) =
+                        select<Pair<Boolean, IrcEvent?>> {
+                            deadline.onJoin { false to null }
+                            events.onReceiveCatching { true to it.getOrNull() }
+                            onTimeout(250) { false to null }
+                        }
+                    if (next == null) {
+                        onEvents(networkId, batch)
+                        if (received) return // Closed: drain the final batch before reconnecting.
+                        break
+                    }
+                    if (!next.isPeerPresence()) {
+                        onEvents(networkId, batch)
+                        onEvents(networkId, listOf(next))
+                        break
+                    }
+                    batch.add(next)
+                }
+                if (batch.size == 64) onEvents(networkId, batch)
+            } finally {
+                deadline.cancel()
+            }
+        }
+    }
+
+    private fun IrcEvent.isPeerPresence(): Boolean = (this is IrcEvent.Joined && !isSelf) || (this is IrcEvent.Parted && !isSelf)
 
     private enum class Outcome { Fatal, Retry, RetryImmediately }
 

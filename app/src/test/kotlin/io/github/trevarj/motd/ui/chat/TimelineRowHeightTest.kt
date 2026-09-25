@@ -21,29 +21,17 @@ class TimelineRowHeightTest {
     @Test
     fun onlyRealMessageRowsAreSampled() {
         // Row keys are entity ids (Long). Paging's placeholder key and the append footer are not.
-        val samples =
-            timelineRowHeightSamplesPx(
-                listOf(
-                    11L to 120,
-                    "append-state" to 90,
-                    PlaceholderKeyStandIn(3) to 48,
-                    12L to 140,
-                ),
-            )
-
-        assertEquals(listOf(120, 140), samples)
+        assertTrue(isTimelineRowHeightSample(11L, 120, bounds.minPx))
+        assertFalse(isTimelineRowHeightSample("append-state", 90, bounds.minPx))
+        assertFalse(isTimelineRowHeightSample(PlaceholderKeyStandIn(3), 90, bounds.minPx))
     }
 
     @Test
-    fun suppressedZeroHeightRowsDoNotDragTheEstimateDown() {
-        // A suppressed member of a collapsed system run is a real row with a real key that composes
-        // nothing. Counting it would push every skeleton below every row that is actually drawn.
-        val samples =
-            timelineRowHeightSamplesPx(
-                listOf(1L to 0, 2L to 0, 3L to 0, 4L to 132, 5L to 140),
-            )
-
-        assertEquals(listOf(132, 140), samples)
+    fun suppressedRunMembersDoNotDragTheEstimateDown() {
+        // Suppressed rows measure 1dp instead of zero so LazyColumn cannot measure hundreds of
+        // them in a frame. They must not shrink skeletons for the real rows they surround.
+        assertFalse(isTimelineRowHeightSample(1L, 3, bounds.minPx))
+        assertTrue(isTimelineRowHeightSample(4L, 132, bounds.minPx))
     }
 
     @Test
@@ -127,13 +115,18 @@ class TimelineRowHeightTest {
         // The sampler re-runs on every resting measure pass. A value that keeps moving would repaint
         // the timeline indefinitely, so a stable viewport must reach a fixed point.
         var current = UNSAMPLED_ROW_HEIGHT_PX
-        val viewport = listOf(1L to 130, 2L to 0, 3L to 138, 4L to 700, 5L to 126)
+        val viewport = listOf(1L to 130, 2L to 3, 3L to 138, 4L to 700, 5L to 126)
         val settled =
             (0 until 8).map {
                 current =
                     nextTimelineRowHeightPx(
                         currentPx = current,
-                        sampledPx = medianTimelineRowHeightPx(timelineRowHeightSamplesPx(viewport)),
+                        sampledPx =
+                            medianTimelineRowHeightPx(
+                                viewport
+                                    .filter { (key, size) -> isTimelineRowHeightSample(key, size, bounds.minPx) }
+                                    .map { it.second },
+                            ),
                         bounds = bounds,
                     )
                 current

@@ -34,8 +34,8 @@ import kotlin.math.abs
  * - Only real message rows count. A row's LazyColumn key is its `MessageEntity.id`, a Long; Paging's
  *   placeholder key and the footer's "append-state" are not, so `isTimelineRowKey` is an exact
  *   discriminator that does not depend on Paging internals.
- * - Zero-height rows are dropped. A suppressed member of a collapsed system run composes nothing and
- *   occupies no space; counting those would drag the estimate below every row that *is* drawn.
+ * - Suppressed run members measure 1dp to bound LazyColumn's subcomposition, but are not message
+ *   rows. Ignore samples below the minimum real-row height when estimating skeletons.
  * - The statistic is the MEDIAN, not the mean. One image or link-preview row is worth ten ordinary
  *   lines, and a mean would let a single tall row inflate every skeleton on screen.
  *
@@ -126,8 +126,12 @@ internal fun nextTimelineRowHeightPx(
     return (((clamped + step / 2) / step) * step).coerceIn(bounds.minPx, bounds.maxPx)
 }
 
-/** Heights worth sampling out of one measure pass: real rows that actually occupy space. */
-internal fun timelineRowHeightSamplesPx(keysAndSizes: List<Pair<Any?, Int>>): List<Int> = keysAndSizes.mapNotNull { (key, size) -> size.takeIf { isTimelineRowKey(key) && it > 0 } }
+/** Suppressed 1dp run members have real keys but cannot represent skeleton height. */
+internal fun isTimelineRowHeightSample(
+    key: Any?,
+    sizePx: Int,
+    minHeightPx: Int,
+): Boolean = isTimelineRowKey(key) && sizePx >= minHeightPx
 
 /**
  * A deferred read of the current row-height estimate for [listState].
@@ -160,7 +164,7 @@ internal fun rememberTimelineRowHeight(
             val visible = listState.layoutInfo.visibleItemsInfo
             val heights = ArrayList<Int>(visible.size)
             for (info in visible) {
-                if (isTimelineRowKey(info.key) && info.size > 0) heights.add(info.size)
+                if (isTimelineRowHeightSample(info.key, info.size, bounds.minPx)) heights.add(info.size)
             }
             nextTimelineRowHeightPx(
                 currentPx = estimatePx.intValue,

@@ -4,6 +4,9 @@ import androidx.paging.ExperimentalPagingApi
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
+import androidx.paging.PagingSource
+import androidx.paging.PagingState
+import androidx.sqlite.db.SimpleSQLiteQuery
 import io.github.trevarj.motd.data.db.BufferDao
 import io.github.trevarj.motd.data.db.HistoryGapDao
 import io.github.trevarj.motd.data.db.MessageDao
@@ -17,11 +20,14 @@ import io.github.trevarj.motd.data.history.GapAnchorResolver
 import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.history.timelineSeams
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySql
 import io.github.trevarj.motd.data.visibility.countTimelineNewerQuery
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.data.visibility.newestPresentedMessageQuery
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
@@ -57,29 +63,48 @@ class MessageRepositoryImpl
             bufferId: Long,
             visibility: MessageVisibilitySpec,
             initialKey: Int?,
+        ): Flow<PagingData<MessageEntity>> = messages(bufferId, visibility, initialKey, MutableStateFlow(null))
+
+        @OptIn(ExperimentalPagingApi::class)
+        override fun messages(
+            bufferId: Long,
+            visibility: MessageVisibilitySpec,
+            initialKey: Int?,
+            viewport: StateFlow<ViewportRefreshAnchor?>,
         ): Flow<PagingData<MessageEntity>> =
             pagingContextFlow(bufferId).flatMapLatest { context ->
                 Pager(
                     config = MESSAGE_PAGING_CONFIG,
-                    // Seed the first source load from the caller-computed key so a deep
-                    // open-at-first-unread entry materializes together with the viewport below it in
-                    // the initial refresh (see entryAnchorPagingKey — callers gate depth and shift
-                    // the key; Room clamps a key at or past the window end to the trailing load, so
-                    // a transiently smaller window cannot key past its own bounds).
+                    // Initial entry retains its own computed key until the screen has a laid-out
+                    // viewport. Later invalidations use that viewport instead of collapsed-row hints.
                     initialKey = initialKey?.coerceAtLeast(0),
-                    // Scroll-driven paging: the mediator is always attached so Paging3 APPEND drives
-                    // older history at the bottom of the timeline; interior seams belong to the gap
-                    // fill coordinator. The canonical id comes from pagingContextFlow, so a durable
-                    // redirect still paints and pages the winner room.
                     remoteMediator = mediatorFactory.create(context.roomId, visibility, context.identityRules),
                     pagingSourceFactory = {
-                        messageDao.pagingSource(
-                            messagePagingQuery(
-                                context.roomId,
-                                visibility,
-                                context.identityRules,
+                        ViewportPagingSource(
+                            messageDao.pagingSource(
+                                messagePagingQuery(context.roomId, visibility, context.identityRules),
                             ),
-                        )
+                            viewport,
+                        ) { id ->
+                            val row =
+                                messageDao.rawMessage(
+                                    SimpleSQLiteQuery(
+                                        "SELECT m.* FROM messages m WHERE m.id = ? AND m.bufferId = ? " +
+                                            "AND ${MessageVisibilitySql(visibility, context.identityRules).timeline()}",
+                                        arrayOf(id, context.roomId),
+                                    ),
+                                ) ?: return@ViewportPagingSource null
+                            messageDao.rawCount(
+                                countTimelineNewerQuery(
+                                    context.roomId,
+                                    row.serverTime,
+                                    row.id,
+                                    row.timelineOrder,
+                                    visibility,
+                                    context.identityRules,
+                                ),
+                            )
+                        }
                     },
                 ).flow
             }
@@ -221,12 +246,65 @@ class MessageRepositoryImpl
         )
     }
 
+// ponytail: Room still owns pages/counts; only the refresh key follows the visual viewport.
+@OptIn(ExperimentalPagingApi::class)
+internal class ViewportPagingSource(
+    private val room: PagingSource<Int, MessageEntity>,
+    private val viewport: StateFlow<ViewportRefreshAnchor?>,
+    private val resolveParkedIndex: suspend (Long) -> Int?,
+) : PagingSource<Int, MessageEntity>() {
+    // ponytail: remember loaded offsets for this generation; Room owns the actual rows and counts.
+    private val loadedOffsets = HashMap<Long, Int>()
+
+    init {
+        room.registerInvalidatedCallback { invalidate() }
+        registerInvalidatedCallback { room.invalidate() }
+    }
+
+    override val jumpingSupported: Boolean get() = room.jumpingSupported
+
+    // Parked refresh resolves its current Room position in load, after intervening inserts.
+    override fun getRefreshKey(state: PagingState<Int, MessageEntity>): Int? = if (viewport.value != null) 0 else room.getRefreshKey(state)
+
+    override suspend fun load(params: LoadParams<Int>): LoadResult<Int, MessageEntity> {
+        val result =
+            if (params !is LoadParams.Refresh || (params.key != null && params.key != 0)) {
+                room.load(params)
+            } else {
+                // ponytail: viewport invalidations use key zero; preserve explicit nonzero jumps/entries.
+                val key =
+                    when (val anchor = viewport.value) {
+                        ViewportRefreshAnchor.Newest -> 0
+                        is ViewportRefreshAnchor.Parked -> resolveParkedIndex(anchor.id)?.let { entryAnchorPagingKey(it) ?: 0 }
+                        null -> null
+                    } ?: params.key
+                room.load(LoadParams.Refresh(key, params.loadSize, params.placeholdersEnabled))
+            }
+        synchronized(loadedOffsets) {
+            if (invalid) return LoadResult.Invalid()
+            // Unknown counts have no absolute offsets; the production Pager always enables placeholders.
+            if (result is LoadResult.Page && result.itemsBefore != LoadResult.Page.COUNT_UNDEFINED) {
+                result.data.forEachIndexed { offset, message ->
+                    val position = result.itemsBefore + offset
+                    val previous = loadedOffsets.put(message.id, position)
+                    if (previous != null && previous != position) {
+                        invalidate()
+                        return LoadResult.Invalid()
+                    }
+                }
+            }
+        }
+        return result
+    }
+}
+
 internal val MESSAGE_PAGING_CONFIG =
     PagingConfig(
         pageSize = 50,
         prefetchDistance = 25,
         enablePlaceholders = true,
-        maxSize = 500,
+        initialLoadSize = 600,
+        maxSize = 1_500,
         jumpThreshold = 250,
     )
 
@@ -239,11 +317,10 @@ internal val MESSAGE_PAGING_CONFIG =
  * reversed viewport would stay a placeholder until later prepend hints, which a regenerating
  * bounded window can starve. Shift the key back by `initialLoadSize - pageSize` so the first load
  * covers the anchor, a full viewport of newer rows below it, and one page of older rows above.
- * Anchors inside the default newest load return null: the plain newest-first refresh already
+ * Anchors inside the selected newest load return null: the plain newest-first refresh already
  * materializes them, keeping first-open backfill behavior untouched.
  */
 internal fun entryAnchorPagingKey(index: Int): Int? {
-    val config = MESSAGE_PAGING_CONFIG
-    if (index < config.initialLoadSize) return null
-    return (index - (config.initialLoadSize - config.pageSize)).coerceAtLeast(0)
+    if (index < MESSAGE_PAGING_CONFIG.initialLoadSize) return null
+    return (index - (MESSAGE_PAGING_CONFIG.initialLoadSize - MESSAGE_PAGING_CONFIG.pageSize)).coerceAtLeast(0)
 }

@@ -181,6 +181,7 @@ The native stack provides deterministic inputs for the baseline matrix:
 ```sh
 ./test/e2e/local-stack.sh burst       # 12 numbered PRIVMSGs, then QUIT
 ./test/e2e/local-stack.sh jpq         # JOIN/PART/JOIN/QUIT, no chat text
+./test/e2e/local-stack.sh jpq-storm 200 # paced peer PART/JOIN cycles for live chat viewport checks
 ./test/e2e/local-stack.sh push TOKEN  # tagged highlight + DM for UnifiedPush checks
 ./test/e2e/local-stack.sh canonical TOKEN # repeated text + account-backed PM nick rewrite
 ./test/e2e/local-stack.sh reconnect-gap TOKEN # retained TOKEN g01 through g40

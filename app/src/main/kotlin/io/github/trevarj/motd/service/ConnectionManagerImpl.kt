@@ -1226,8 +1226,14 @@ class ConnectionManagerImpl
                         }
                     }
                 },
-                onEvent = { id, event ->
-                    registry.runIfCurrent(id, generation) { handleConnectionEvent(id, event) }
+                onEvents = { id, events ->
+                    registry.runIfCurrent(id, generation) {
+                        if (events.size == 1) {
+                            handleConnectionEvent(id, events.single())
+                        } else {
+                            eventProcessor.processPeerPresenceBatch(id, events)
+                        }
+                    }
                 },
                 onConnectionChanged = { id, connection ->
                     registry.actorConnection(id, generation, connection)

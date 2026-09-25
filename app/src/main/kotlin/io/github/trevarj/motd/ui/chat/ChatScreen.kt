@@ -46,6 +46,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -189,6 +190,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
+import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
@@ -237,6 +239,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
@@ -505,6 +508,7 @@ fun ChatScreen(
         friends = settings.friends,
         fools = settings.fools,
         foolsMode = settings.foolsMode,
+        showRedactedMessages = settings.showRedactedMessages,
         hiddenFoolsRevealed = hiddenFoolsRevealed,
         onHiddenFoolsRevealedChange = viewModel::setHiddenFoolsRevealed,
         chatWallpaper = appearance.wallpaper,
@@ -632,6 +636,7 @@ fun ChatScreen(
         initialTarget = initialTarget,
         entryState = entryState,
         timelineSeams = timelineSeams,
+        onViewportRefreshAnchor = viewModel::reportViewportRefreshAnchor,
         onLoadGap = viewModel::fillGap,
         onSeamPrefetchChanged = viewModel::setSeamPrefetch,
         onJumpHandled = viewModel::onJumpHandled,
@@ -923,6 +928,7 @@ fun ChatContent(
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
     foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    showRedactedMessages: Boolean = true,
     hiddenFoolsRevealed: Boolean = false,
     onHiddenFoolsRevealedChange: (Boolean) -> Unit = {},
     chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection =
@@ -980,6 +986,7 @@ fun ChatContent(
     // The reader started a scroll themselves. Retires the ViewModel's one post-catch-up entry
     // correction: a viewport its reader is driving is no longer entry's to move.
     onTimelineInteraction: () -> Unit = {},
+    onViewportRefreshAnchor: (ViewportRefreshAnchor?) -> Unit = {},
     onClearScrollPosition: () -> Unit = {},
     // Indeterminate snapshot at save time: drop the saved viewport WITHOUT asserting a bottom park.
     onForgetScrollPosition: () -> Unit = {},
@@ -1068,11 +1075,13 @@ fun ChatContent(
             fools,
             foolsMode,
             hiddenFoolsRevealed,
+            showRedactedMessages,
             identityRules,
         ) {
             MessageVisibilityPolicy(
                 MessageVisibilitySpec(
                     presenceMode = presenceMode,
+                    showRedactedMessages = showRedactedMessages,
                     fools = fools,
                     foolsMode = foolsMode,
                     revealHiddenFools = hiddenFoolsRevealed,
@@ -1491,12 +1500,22 @@ fun ChatContent(
             }
             return null
         }
-        val materializedIndex =
-            materializableTargetIndex(
-                requestedIndex = target.index,
+
+        // JOIN/PART commits can change the raw rank after the entry snapshot was resolved.
+        // A loaded exact row is authoritative; the old index is only a load hint while absent.
+        fun currentIndex(): Int? {
+            val snapshot = items.itemSnapshotList
+            val loaded =
+                target.expectedEventId?.let {
+                    materializedTargetSnapshotIndex(snapshot.placeholdersBefore, snapshot.items, it)
+                }
+            return materializableTargetIndex(
+                requestedIndex = loaded ?: target.index,
                 itemCount = items.itemCount,
                 hasExactIdentity = target.expectedEventId != null || target.expectedMsgid != null,
             )
+        }
+        val materializedIndex = currentIndex()
         if (materializedIndex == null) {
             AutoFollowTrace.record("materialize_index_unaddressable", traceBufferId, traceSessionId) {
                 "target_index=${target.index} item_count=${items.itemCount}"
@@ -1506,13 +1525,13 @@ fun ChatContent(
         val row =
             requestAndAwaitTarget(
                 index = materializedIndex,
-                request = { index ->
-                    val count = items.itemCount
-                    if (index !in 0 until count) {
+                request = { _ ->
+                    val index = currentIndex()
+                    if (index == null) {
                         false
                     } else {
                         try {
-                            if (scroll) listState.scrollToItem(index, target.offset)
+                            if (scroll) listState.requestScrollToItem(index, target.offset)
                             // This is the only item access: it sends Paging a load hint for the exact target.
                             items[index]
                             true
@@ -1524,7 +1543,14 @@ fun ChatContent(
                 },
                 snapshots =
                     snapshotFlow {
-                        targetMaterialization(items, materializedIndex)
+                        val index = currentIndex() ?: materializedIndex
+                        targetMaterialization(items, index).let { snapshot ->
+                            if (target.expectedEventId != null && snapshot.item?.id != target.expectedEventId) {
+                                snapshot.copy(item = null)
+                            } else {
+                                snapshot
+                            }
+                        }
                     },
             )
         if (row == null) {
@@ -1538,7 +1564,7 @@ fun ChatContent(
         }
         return row?.let { targetRow ->
             if (!scroll || target.expectedEventId != targetRow.id) {
-                return@let MaterializedChatTarget(targetRow, materializedIndex)
+                return@let MaterializedChatTarget(targetRow, currentIndex() ?: materializedIndex)
             }
             // `scrollToItem` ran before Paging loaded this placeholder. An arriving message can
             // shift the exact row in a replacement snapshot while entry positioning is unsettled,
@@ -1562,7 +1588,9 @@ fun ChatContent(
                 while (true) {
                     when (placement) {
                         ExactTargetPlacement.Missing -> {
-                            return@withTimeoutOrNull null
+                            // A replacement may temporarily drop the old loaded window. Wait for its
+                            // Parked(id) refresh instead of settling on whichever row took the old slot.
+                            placement = snapshotFlow { exactPlacement() }.first { it !is ExactTargetPlacement.Missing }
                         }
 
                         is ExactTargetPlacement.Positioned -> {
@@ -1571,7 +1599,7 @@ fun ChatContent(
 
                         is ExactTargetPlacement.NeedsScroll -> {
                             val requestedIndex = placement.index
-                            listState.scrollToItem(requestedIndex, target.offset)
+                            listState.requestScrollToItem(requestedIndex, target.offset)
                             placement =
                                 snapshotFlow { exactPlacement() }.first { next ->
                                     next !is ExactTargetPlacement.NeedsScroll || next.index != requestedIndex
@@ -1588,6 +1616,7 @@ fun ChatContent(
     // Deep jumps request one resolved placeholder, then validate both of its exact identities.
     LaunchedEffect(jumpTarget) {
         val j = jumpTarget ?: return@LaunchedEffect
+        onViewportRefreshAnchor(null)
         AutoFollowTrace.record("deep_jump_start", traceBufferId, traceSessionId) {
             "target_index=${j.index} item_count=${items.itemCount}"
         }
@@ -2029,6 +2058,15 @@ fun ChatContent(
             )
         }
     }
+    ReportMessageViewport(
+        items = items,
+        listState = listState,
+        policy = visibilityPolicy,
+        enabled = initialPositionSettled,
+        scopeId = state.buffer?.id,
+        followingAtBottom = autoFollow.following && atBottom,
+        onAnchor = onViewportRefreshAnchor,
+    )
 
     // Newest row the timeline has actually placed on screen. Neither rawNewestAnchor (the room's
     // newest stored row) nor the Paging snapshot proves display — both keep advancing while the
@@ -2067,6 +2105,7 @@ fun ChatContent(
             "reason=$reason animate=$animate index=${listState.firstVisibleItemIndex} " +
                 "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
         }
+        onViewportRefreshAnchor(null)
         autoFollow.requestFollow()
         programmaticScrolls++
         try {
@@ -2091,6 +2130,7 @@ fun ChatContent(
             "reason=$reason animate=$animate target=$index index=${listState.firstVisibleItemIndex} " +
                 "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
         }
+        onViewportRefreshAnchor(null)
         programmaticScrolls++
         try {
             if (animate) listState.animateScrollToItem(index) else listState.scrollToItem(index)
@@ -2114,7 +2154,10 @@ fun ChatContent(
                 // ViewModel so its one post-catch-up entry correction stands down. Programmatic
                 // scrolls (entry placement, the newest FAB, a send) are excluded here; the actions
                 // that issue them retire the correction themselves.
-                if (scrolling && !programmatic) onTimelineInteraction()
+                if (scrolling && !programmatic) {
+                    onTimelineInteraction()
+                    onViewportRefreshAnchor(null)
+                }
                 val before = autoFollow.following
                 autoFollow.onScrollStateChanged(scrolling, programmatic, atBottom)
                 AutoFollowTrace.record("scroll_intent", traceBufferId, traceSessionId) {
@@ -2815,6 +2858,7 @@ fun ChatContent(
                                         MessageList(
                                             items = items,
                                             listState = listState,
+                                            pagingHintsEnabled = initialPositionSettled,
                                             liveEntryIds = liveEntryIds,
                                             onLiveEntryConsumed = onLiveEntryConsumed,
                                             outgoingFlight = outgoingFlight,
@@ -3395,6 +3439,62 @@ fun ChatContent(
             onDismiss = { notificationSheetOpen = false },
             tagPrefix = "chat",
         )
+    }
+}
+
+/** Only a measured, loaded, non-suppressed row can park a refresh in history. */
+@Composable
+internal fun ReportMessageViewport(
+    items: LazyPagingItems<MessageEntity>,
+    listState: LazyListState,
+    policy: MessageVisibilityPolicy,
+    enabled: Boolean,
+    scopeId: Long?,
+    followingAtBottom: Boolean,
+    onAnchor: (ViewportRefreshAnchor?) -> Unit,
+) {
+    val latestOnAnchor by rememberUpdatedState(onAnchor)
+    var lastVisibleIndex by remember(items, listState, scopeId) { mutableStateOf<Int?>(null) }
+    var lastItemCount by remember(items, listState, scopeId) { mutableIntStateOf(-1) }
+    LaunchedEffect(items, listState, policy, followingAtBottom, enabled, scopeId) {
+        if (!enabled) return@LaunchedEffect
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            val snapshot = items.itemSnapshotList
+            var newestVisible = false
+            var row: MessageEntity? = null
+            for (visible in layout.visibleItemsInfo) {
+                if (
+                    visible.size <= 0 ||
+                    visible.offset >= layout.viewportEndOffset ||
+                    visible.offset + visible.size <= layout.viewportStartOffset
+                ) {
+                    continue
+                }
+                if (visible.index == 0) newestVisible = true
+                val message = snapshot.getOrNull(visible.index)
+                if (message != null && visible.key == message.id && policy.anchor(message)) {
+                    row = message
+                    break
+                }
+            }
+            // A replacement can briefly have no loaded visible row. Keep its parked identity
+            // while the viewport stays put; a jump to another placeholder must retire it.
+            // An arriving row can shift the index without the reader scrolling.
+            val anchor =
+                when {
+                    followingAtBottom && (newestVisible || row != null) -> ViewportRefreshAnchor.Newest
+                    row != null -> ViewportRefreshAnchor.Parked(row.id)
+                    else -> null
+                }
+            Triple(layout.visibleItemsInfo.firstOrNull()?.index, anchor, items.itemCount)
+        }.distinctUntilChanged().collect { (index, anchor, count) ->
+            if (anchor != null || (index != null && lastVisibleIndex != null && index != lastVisibleIndex && count == lastItemCount)) {
+                latestOnAnchor(anchor)
+            }
+            if (index != null) lastVisibleIndex = index
+            lastItemCount = count
+        }
     }
 }
 

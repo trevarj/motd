@@ -74,9 +74,9 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.paging.ItemSnapshotList
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
-import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.AudioAttachment
@@ -385,6 +385,8 @@ fun MessageList(
     timelineSeams: TimelineSeamState = TimelineSeamState(),
     onLoadGap: (Long) -> Unit = {},
     highlightEventId: Long? = null,
+    // Entry's exact target owns paging demand until it is positioned.
+    pagingHintsEnabled: Boolean = true,
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
@@ -399,6 +401,45 @@ fun MessageList(
     // regenerates the PagingSource and turns loaded rows back into placeholders) does not reflow
     // everything below each swap. Deferred read: only the composed skeletons see the change.
     val placeholderHeight = rememberTimelineRowHeight(listState, bufferId)
+    // One presentation supplies the provider's count, keys, types and row content. Paging may
+    // publish a different generation before LazyColumn finishes measuring this one.
+    val snapshot = items.itemSnapshotList
+    val placeholderKey = items.itemKey()
+    // Hint only after layout: reading Paging in a lazy item subcomposition can replace the
+    // presentation while Compose still measures its old keyed provider.
+    LaunchedEffect(items, listState, pagingHintsEnabled) {
+        if (!pagingHintsEnabled) return@LaunchedEffect
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            val window = items.itemSnapshotList
+            var olderEdge: Int? = null
+            for (visible in layout.visibleItemsInfo) {
+                if (
+                    visible.index < window.size &&
+                    visible.offset < layout.viewportEndOffset &&
+                    visible.offset + visible.size > layout.viewportStartOffset &&
+                    (olderEdge == null || visible.index > olderEdge)
+                ) {
+                    olderEdge = visible.index
+                }
+            }
+            // A sparse run can put the visible skeleton edge farther than prefetchDistance
+            // from any loaded page. Hint the nearest page boundary so Paging actually advances.
+            val loadedStart = window.placeholdersBefore
+            val loadedEnd = window.size - window.placeholdersAfter
+            val hint =
+                olderEdge?.let { index ->
+                    when {
+                        index >= loadedEnd && loadedEnd < window.size -> loadedEnd
+                        index < loadedStart -> loadedStart - 1
+                        else -> index
+                    }
+                }
+            window to hint
+        }.collect { (_, index) ->
+            if (index != null && index < items.itemCount) items[index]
+        }
+    }
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -415,29 +456,20 @@ fun MessageList(
                 .testTag("chat_timeline"),
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
-        // Stable keys stop paging invalidations (new message / echo confirm / page load) from
-        // re-anchoring the viewport by index and reusing per-row state across messages.
-        // Placeholder rows fall back to the position key.
-        //
-        // A seam is drawn INSIDE the newer row's composition, never as its own item(). An extra item
-        // would change items.itemCount and shift itemKey, which would in turn break the
-        // "countNewerThan == list index" contract ChatJumpResolver documents, the placeholder math,
-        // auto-follow, every jump index, and entryAnchorPagingKey — all at once.
+        // The seam stays inside its newer row, so the reverse index continues to name exactly
+        // one Paging slot. Paging owns the namespace for placeholders; loaded IDs stay Long keys.
         items(
-            count = items.itemCount,
-            key = items.itemKey { it.id },
-            // Own bubbles, other bubbles, ACTION rows, and retry rows have different composition
-            // shapes. Keeping separate pools avoids structural churn at exactly the boundaries that
-            // previously produced hitches when a fling crossed own messages.
-            contentType = items.itemContentType { messageContentType(it, collapseSystemEvents) },
+            count = snapshot.size,
+            key = { index -> snapshot[index]?.id ?: placeholderKey(index) },
+            contentType = { index -> snapshot[index]?.let { messageContentType(it, collapseSystemEvents) } },
         ) { index ->
-            val msg = items[index]
+            val msg = snapshot[index]
             if (msg == null) {
                 MessagePlaceholderRow(placeholderHeight)
                 return@items
             }
-            val older = if (index + 1 < items.itemCount) items.peek(index + 1) else null
-            val newer = if (index - 1 >= 0) items.peek(index - 1) else null
+            val older = if (index + 1 < snapshot.size) snapshot[index + 1] else null
+            val newer = if (index > 0) snapshot[index - 1] else null
 
             // The self-contained card/pill kinds below draw no dividers of their own, so they get
             // the seam through a wrapper rather than as a parameter. Skipping them would hide the
@@ -509,7 +541,12 @@ fun MessageList(
             // skip the rest. In a reversed list the newest of a contiguous system run is the item
             // whose just-newer neighbor is not a system event.
             if (collapseSystemEvents && isSystemKind(msg.kind)) {
-                if (!isSystemRunChunkHead(msg.id, newer?.let { sameSystemRun(msg, it) } == true)) return@items
+                if (!isSystemRunChunkHead(msg.id, newer?.let { sameSystemRun(msg, it) } == true)) {
+                    // A measured slot must have height: zero-height runs make LazyColumn
+                    // subcompose hundreds of rows in one frame while Paging replaces them.
+                    Spacer(Modifier.height(1.dp))
+                    return@items
+                }
                 LiveTimelineEntry(
                     liveEntryIds,
                     msg,
@@ -520,7 +557,7 @@ fun MessageList(
                     onFlightRowPositioned,
                 ) {
                     SystemEventRun(
-                        items = items,
+                        snapshot = snapshot,
                         index = index,
                         newest = msg,
                         readMarkerTime = readMarkerTime,
@@ -663,7 +700,7 @@ fun MessageList(
         // The empty-state item must not become a scroll anchor for the populated footer:
         // keeping its key would move index 0 to the oldest end when the first page arrives.
         item(
-            key = if (items.itemCount == 0) "empty-append-state" else "append-state",
+            key = if (snapshot.size == 0) "empty-append-state" else "append-state",
             contentType = "loadstate",
         ) {
             // Paging 3.5.1 can lose a replacement source's boundary request during APPEND.
@@ -1236,7 +1273,7 @@ private fun InvitationCard(
  */
 @Composable
 private fun SystemEventRun(
-    items: LazyPagingItems<MessageEntity>,
+    snapshot: ItemSnapshotList<MessageEntity>,
     index: Int,
     newest: MessageEntity,
     readMarkerTime: TimelineAnchor?,
@@ -1253,15 +1290,15 @@ private fun SystemEventRun(
     val run = ArrayList<MessageEntity>()
     run.add(newest)
     var i = index + 1
-    while (i < items.itemCount) {
-        val m = items.peek(i) ?: break
+    while (i < snapshot.size) {
+        val m = snapshot[i] ?: break
         if (!sameSystemRun(newest, m) || isSystemRunChunkBoundary(m.id)) break
         run.add(m)
         i++
     }
     val oldest = run.last()
     val runIds = run.map { it.id }
-    val olderThanRun = if (index + run.size < items.itemCount) items.peek(index + run.size) else null
+    val olderThanRun = if (index + run.size < snapshot.size) snapshot[index + run.size] else null
 
     val commandResponse = commandResponseGroup(newest) != null
     val summary =

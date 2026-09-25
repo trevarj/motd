@@ -174,15 +174,6 @@ class MessageRepositoryPagingTest {
             assertEquals(winnerId, repository.observeReplyTarget(bufferId, ids[0], null).first()?.id)
         }
 
-    @Test
-    fun pagingConfigIsPlaceholderAwareAndBounded() {
-        assertEquals(50, MESSAGE_PAGING_CONFIG.pageSize)
-        assertEquals(25, MESSAGE_PAGING_CONFIG.prefetchDistance)
-        assertTrue(MESSAGE_PAGING_CONFIG.enablePlaceholders)
-        assertEquals(500, MESSAGE_PAGING_CONFIG.maxSize)
-        assertEquals(250, MESSAGE_PAGING_CONFIG.jumpThreshold)
-    }
-
     @OptIn(ExperimentalPagingApi::class)
     @Test
     fun pagingAttachesMediatorWithCanonicalRoomAndVisibilityContext() =
@@ -663,6 +654,69 @@ class MessageRepositoryPagingTest {
                     .toList()
             assertEquals(listOf("system", "own", "ordinary"), expected)
             assertEquals(expected, page.data.map { it.text })
+        }
+
+    @Test
+    fun staleOffsetOverlapInvalidatesSourceBeforeTheDuplicatePageIsPresented() =
+        runTest {
+            val rows =
+                (4L downTo 1L)
+                    .map { id ->
+                        message(bufferId, "row-$id", serverTime = id, dedupKey = "row-$id").copy(id = id)
+                    }.toMutableList()
+
+            fun roomSource() =
+                object : PagingSource<Int, MessageEntity>() {
+                    override fun getRefreshKey(state: PagingState<Int, MessageEntity>): Int? = null
+
+                    override suspend fun load(params: LoadParams<Int>): LoadResult<Int, MessageEntity> {
+                        val start = (params.key ?: 0).coerceIn(0, rows.size)
+                        val end = (start + params.loadSize).coerceAtMost(rows.size)
+                        return LoadResult.Page(
+                            data = rows.subList(start, end).toList(),
+                            prevKey = if (start == 0) null else 0,
+                            nextKey = end.takeIf { it < rows.size },
+                            itemsBefore = start,
+                            itemsAfter = rows.size - end,
+                        )
+                    }
+                }
+            val room = roomSource()
+            val source = ViewportPagingSource(room, kotlinx.coroutines.flow.MutableStateFlow(null)) { null }
+            val first = source.load(PagingSource.LoadParams.Refresh(0, 3, true)).requirePage()
+            assertEquals(listOf(4L, 3L, 2L), first.data.map { it.id })
+            val initialAppend = source.load(PagingSource.LoadParams.Append(3, 1, true)).requirePage()
+            assertEquals(listOf(4L, 3L, 2L, 1L), (first.data + initialAppend.data).map { it.id })
+            assertEquals(4, initialAppend.itemsBefore + initialAppend.data.size + initialAppend.itemsAfter)
+
+            // A dropped page can load again at the original offset without invalidating this source.
+            assertEquals(
+                first.data.map { it.id },
+                source
+                    .load(PagingSource.LoadParams.Refresh(0, 3, true))
+                    .requirePage()
+                    .data
+                    .map { it.id },
+            )
+            assertFalse(source.invalid)
+
+            // The same id now arrives in an append at another absolute offset after a newer insert.
+            rows.add(0, message(bufferId, "row-5", serverTime = 5, dedupKey = "row-5").copy(id = 5))
+            val overlapping = source.load(PagingSource.LoadParams.Append(3, 2, true))
+            assertTrue(overlapping is PagingSource.LoadResult.Invalid)
+            assertTrue(source.invalid)
+            assertTrue(room.invalid)
+
+            val freshSource = ViewportPagingSource(roomSource(), kotlinx.coroutines.flow.MutableStateFlow(null)) { null }
+            val canonical = freshSource.load(PagingSource.LoadParams.Refresh(0, 5, true)).requirePage()
+            val visibleIds = canonical.data.map { it.id }
+            assertEquals(listOf(5L, 4L, 3L, 2L, 1L), visibleIds)
+            assertEquals(visibleIds.size, visibleIds.toSet().size)
+            assertEquals(5, canonical.itemsBefore + canonical.data.size + canonical.itemsAfter)
+            val jumped = freshSource.load(PagingSource.LoadParams.Refresh(2, 2, true)).requirePage()
+            assertEquals(listOf(3L, 2L), jumped.data.map { it.id })
+            assertEquals(2, jumped.itemsBefore)
+            assertFalse(freshSource.invalid)
         }
 
     private fun PagingSource.LoadResult<Int, MessageEntity>.requirePage() =

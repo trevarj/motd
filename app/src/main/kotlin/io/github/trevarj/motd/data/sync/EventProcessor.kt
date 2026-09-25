@@ -111,9 +111,9 @@ internal data class HistoryPageWrite(
 )
 
 /**
- * The sole IRC→Room writer. Implements [IrcEventSink]: every per-network
- * collector, the catch-up path, the RemoteMediator, the pending-send insert, and the push path
- * funnel through [process] or [persistHistoryPage]. Never writes state from anywhere else.
+ * The sole IRC→Room writer. Implements [IrcEventSink]: per-network collectors, catch-up,
+ * RemoteMediator, pending sends and push delivery funnel through [process],
+ * [processPeerPresenceBatch] or [persistHistoryPage]. Never writes state from anywhere else.
  *
  * Per-network mutable helpers (self nick and immutable ISUPPORT identity rules) are kept in a small
  * [NetworkState] cache keyed by network id and rebuilt on Registered / NickChanged.
@@ -391,6 +391,26 @@ class EventProcessor
                 processEvent(networkId, event, EventOrigin.LIVE)
                 completeCommandFromState(networkId, event)
                 if (event is IrcEvent.Disconnected) clearCommandResponses(networkId)
+                bufferStore.drainCommittedRoomMerges()
+            }
+        }
+
+        /** Consecutive live peer membership changes share a commit, not a canonical event identity. */
+        suspend fun processPeerPresenceBatch(
+            networkId: Long,
+            events: List<IrcEvent>,
+        ) {
+            require(
+                events.isNotEmpty() &&
+                    events.all {
+                        (it is IrcEvent.Joined && !it.isSelf) || (it is IrcEvent.Parted && !it.isSelf)
+                    },
+            )
+            sequencer.withNetwork(networkId) {
+                db.withTransaction {
+                    events.forEach { processEvent(networkId, it, EventOrigin.LIVE) }
+                }
+                events.forEach { completeCommandFromState(networkId, it) }
                 bufferStore.drainCommittedRoomMerges()
             }
         }
@@ -2797,12 +2817,9 @@ class EventProcessor
 
         // -- membership ----------------------------------------------------------
 
-        // One arrival, one commit. The roster upsert, the user record, the invite resolution and the
-        // JOIN row are a single logical event, and a Room commit is what releases a PagingSource
-        // invalidation — so committing them separately regenerated the open timeline two or three times
-        // per JOIN line. A reconnect join storm turns that into visible redraw churn, worst under
-        // presence mode ALL where every one of those rows is also a presented row. Live-only: the
-        // historical path already runs inside [onPlaybackEvents]' batch transaction.
+        // One logical JOIN, one transaction. For a run of live peer JOIN/PART events,
+        // [processPeerPresenceBatch] wraps these nested transactions in one outer commit so Room
+        // invalidates the timeline only once; historical playback already batches separately.
         private suspend fun onJoined(
             networkId: Long,
             e: IrcEvent.Joined,

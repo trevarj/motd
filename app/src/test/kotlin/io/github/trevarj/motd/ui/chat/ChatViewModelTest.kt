@@ -55,6 +55,7 @@ import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
+import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.GapFillProgress
 import io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator
@@ -3474,10 +3475,10 @@ class ChatViewModelTest {
             // The key and the target must name the same row. A forward reader's target is the park, so
             // keying the deeper unread anchor instead would rebuild the generation around a row entry
             // never scrolls to and push the park back out into the placeholder scroll the key exists to
-            // avoid. 200 rows, so both candidates sit beyond the default newest load.
+            // avoid. 700 rows, so both candidates sit beyond the newest 600-row load.
             val ids =
                 db.messageDao().insertAll(
-                    (1..200).map { ordinal ->
+                    (1..700).map { ordinal ->
                         message(channel.id, "row$ordinal", "m$ordinal", "alice").copy(
                             serverTime = ordinal.toLong(),
                             dedupKey = "row$ordinal",
@@ -3495,22 +3496,23 @@ class ChatViewModelTest {
                             ids[20],
                             "m21",
                             serverTime = 21,
-                            // Entered at the first unread row (index 198) and read forward to the park (179).
+                            // Entered at the first unread row (index 698) and read forward to the park (679).
                             displayed = ids[1] to 2L,
                         ),
                 )
             backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messages.collect { } }
 
-            // entryAnchorPagingKey(179) for the park, NOT entryAnchorPagingKey(198) for the divider.
-            assertEquals(79, messages.firstInitialKey.await())
-            assertEquals(179, vm.initialTarget.first { it != null }?.index)
+            // entryAnchorPagingKey(679) for the park, NOT entryAnchorPagingKey(698) for the divider.
+            assertEquals(129, messages.firstInitialKey.await())
+            assertEquals(ViewportRefreshAnchor.Parked(ids[20]), messages.firstViewportAnchor.await())
+            assertEquals(679, vm.initialTarget.first { it != null }?.index)
         }
 
     @Test
     fun `a saved viewport beyond the newest load keys the Pager at itself`() =
         runTest {
             // Publishing the right target is only half of a restore. A viewport parked deeper than the
-            // default newest load (initialLoadSize = 150) opens as an unloaded placeholder unless the
+            // newest load (initialLoadSize = 600) opens as an unloaded placeholder unless the
             // Pager is keyed there, and reaching it by scrolling to that placeholder drives a boundary
             // APPEND that churns the generation before the row can compose. The key used to be computed
             // for the unread anchor ONLY, so a deep restore had to be probed for rather than loaded.
@@ -3519,7 +3521,7 @@ class ChatViewModelTest {
             // this pins that the ViewModel asks for it at all, for a saved viewport.
             val ids =
                 db.messageDao().insertAll(
-                    (1..200).map { ordinal ->
+                    (1..700).map { ordinal ->
                         message(channel.id, "row$ordinal", "m$ordinal", "alice").copy(
                             serverTime = ordinal.toLong(),
                             dedupKey = "row$ordinal",
@@ -3529,16 +3531,16 @@ class ChatViewModelTest {
             val messages = FakeMessageRepository()
             val vm =
                 viewModel(
-                    channel.copy(localReadAnchorTime = 200, localReadAnchorEventId = ids.last()),
+                    channel.copy(localReadAnchorTime = 700, localReadAnchorEventId = ids.last()),
                     FakeConnectionManager(network.id),
                     messages = messages,
-                    // The oldest row: 199 newer rows sit below it.
+                    // The oldest row: 699 newer rows sit below it.
                     scrollPositions = savedAt(ids.first(), "m1", serverTime = 1),
                 )
             backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messages.collect { } }
 
-            // entryAnchorPagingKey(199): the anchor shifted back by initialLoadSize - pageSize.
-            assertEquals(99, messages.firstInitialKey.await())
+            // entryAnchorPagingKey(699): the anchor shifted back by initialLoadSize - pageSize.
+            assertEquals(149, messages.firstInitialKey.await())
         }
 
     @Test
@@ -4673,6 +4675,7 @@ class ChatViewModelTest {
 
         /** The Pager initial key of the first generation the ViewModel created. */
         val firstInitialKey = CompletableDeferred<Int?>()
+        val firstViewportAnchor = CompletableDeferred<ViewportRefreshAnchor?>()
 
         override fun messages(
             bufferId: Long,
@@ -4686,6 +4689,16 @@ class ChatViewModelTest {
         ): Flow<PagingData<MessageEntity>> {
             firstInitialKey.complete(initialKey)
             return flowOf(PagingData.empty())
+        }
+
+        override fun messages(
+            bufferId: Long,
+            visibility: MessageVisibilitySpec,
+            initialKey: Int?,
+            viewport: StateFlow<ViewportRefreshAnchor?>,
+        ): Flow<PagingData<MessageEntity>> {
+            firstViewportAnchor.complete(viewport.value)
+            return messages(bufferId, visibility, initialKey)
         }
 
         override fun reactions(

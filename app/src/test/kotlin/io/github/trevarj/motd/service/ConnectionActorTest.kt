@@ -2,6 +2,8 @@ package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.proto.Prefix
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
@@ -63,6 +65,11 @@ class ConnectionActorTest {
         }
     }
 
+    private fun eventContext(
+        id: String,
+        time: Long = 1_000,
+    ) = MessageContext(id, time, null, null, null)
+
     @Test
     fun backoffSequence_exponentialWithCap_and_jitterBounds() {
         val actor =
@@ -71,7 +78,7 @@ class ConnectionActorTest {
                 scope = TestScope(),
                 connectionFactory = { FakeConnection() },
                 onState = { _, _ -> },
-                onEvent = { _, _ -> },
+                onEvents = { _, _ -> },
                 onReady = {},
                 random = { 0.0 }, // jitter = 0.7
             )
@@ -109,7 +116,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                     random = { 0.5 },
                 )
@@ -135,7 +142,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                     random = { 0.5 }, // jitter 1.0
                 )
@@ -172,8 +179,8 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also(conns::addLast) },
                     onState = { _, _ -> },
-                    onEvent = { _, event ->
-                        val code = (event as IrcEvent.ServerError).code
+                    onEvents = { _, events ->
+                        val code = (events.single() as IrcEvent.ServerError).code
                         if (code == "first") {
                             firstEventStarted.complete(Unit)
                             releaseFirstEvent.await()
@@ -216,7 +223,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, state -> states += state },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                     random = { 0.5 },
                 )
@@ -248,7 +255,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, state -> states += state },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                     random = { 0.5 },
                 )
@@ -275,7 +282,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                     random = { 1.0 }, // jitter 1.3, longer wait
                 )
@@ -312,7 +319,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                     random = { 0.5 },
                 )
@@ -341,7 +348,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection() },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                     random = { draw },
                 )
@@ -362,7 +369,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                     random = { 0.5 }, // jitter 1.0
                 )
@@ -420,7 +427,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                     random = { 0.5 }, // jitter 1.0
                 )
@@ -468,7 +475,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                     random = { 0.5 }, // jitter 1.0
                 )
@@ -540,7 +547,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                     random = { 0.5 }, // jitter 1.0, so the delay is exactly the nominal schedule
                 )
@@ -585,7 +592,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {
                         setupStarted = true
                         try {
@@ -622,7 +629,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, state -> states += state },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {
                         setupCount++
                         awaitCancellation()
@@ -663,7 +670,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                 )
             actor.start()
@@ -699,7 +706,7 @@ class ConnectionActorTest {
                         }
                     },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                     random = { 0.5 },
                 )
@@ -733,7 +740,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, state -> states += state },
-                    onEvent = { _, _ -> },
+                    onEvents = { _, _ -> },
                     onReady = {},
                 )
             actor.start()
@@ -764,7 +771,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, _ -> },
-                    onEvent = { _, _ -> awaitCancellation() },
+                    onEvents = { _, _ -> awaitCancellation() },
                     onReady = {
                         try {
                             awaitCancellation()
@@ -783,6 +790,111 @@ class ConnectionActorTest {
             assertTrue(setupCancelled)
             assertTrue(conn.stopped)
             assertTrue(!actor.isAlive)
+        }
+
+    @Test
+    fun peerPresenceCapsAt64AndFlushesBeforeOrdinarySelfAndEofWithoutLosingOrder() =
+        runTest {
+            val scope = TestScope(StandardTestDispatcher(testScheduler))
+            val conn = FakeConnection()
+            val batches = mutableListOf<List<IrcEvent>>()
+            val actor =
+                ConnectionActor(
+                    networkId = 1,
+                    scope = scope,
+                    connectionFactory = { conn },
+                    onState = { _, _ -> },
+                    onEvents = { _, events -> batches += events },
+                    onReady = {},
+                )
+            val peers =
+                (0 until 70).map { index ->
+                    val context = eventContext("peer-$index", index.toLong())
+                    if (index % 2 == 0) {
+                        IrcEvent.Joined(context, "peer$index", "#room", null, null, false)
+                    } else {
+                        IrcEvent.Parted(context, "peer${index - 1}", "#room", null, false)
+                    }
+                }
+            val chat =
+                IrcEvent.ChatMessage(
+                    eventContext("chat"),
+                    IrcEvent.ChatKind.PRIVMSG,
+                    Prefix("someone"),
+                    "#room",
+                    "hello",
+                    false,
+                    null,
+                )
+            val self = IrcEvent.Joined(eventContext("self"), "me", "#room", null, null, true)
+            val quit = IrcEvent.Quit(eventContext("quit"), "someone", null)
+            val afterSelf =
+                (70 until 73).map {
+                    IrcEvent.Joined(eventContext("$it"), "peer$it", "#room", null, null, false)
+                }
+            actor.start()
+            scope.testScheduler.runCurrent()
+            (peers + chat + self + afterSelf + quit).forEach { conn.emit(it) }
+            scope.testScheduler.runCurrent()
+            assertEquals(listOf(64, 6, 1, 1, 3, 1), batches.map { it.size })
+            assertEquals(peers + chat + self + afterSelf + quit, batches.flatten())
+            val eofPeer = IrcEvent.Parted(eventContext("eof"), "last", "#room", null, false)
+            conn.emit(eofPeer)
+            conn.transition(IrcClientState.Disconnected)
+            scope.testScheduler.runCurrent()
+            assertEquals(listOf(eofPeer), batches.last())
+            assertEquals(peers + chat + self + afterSelf + quit + eofPeer, batches.flatten())
+            actor.stop()
+        }
+
+    @Test
+    fun peerPresenceFlushesAfter250msQuietOrFiveSecondsOfContinuousEvents() =
+        runTest {
+            val scope = TestScope(StandardTestDispatcher(testScheduler))
+            val conn = FakeConnection()
+            val batches = mutableListOf<List<IrcEvent>>()
+            val actor =
+                ConnectionActor(
+                    networkId = 1,
+                    scope = scope,
+                    connectionFactory = { conn },
+                    onState = { _, _ -> },
+                    onEvents = { _, events -> batches += events },
+                    onReady = {},
+                )
+            actor.start()
+            scope.testScheduler.runCurrent()
+            val isolated = IrcEvent.Joined(eventContext("isolated"), "one", "#room", null, null, false)
+            conn.emit(isolated)
+            scope.testScheduler.runCurrent()
+            scope.testScheduler.advanceTimeBy(249)
+            scope.testScheduler.runCurrent()
+            assertTrue(batches.isEmpty())
+            scope.testScheduler.advanceTimeBy(1)
+            scope.testScheduler.runCurrent()
+            assertEquals(listOf(listOf(isolated)), batches)
+
+            val storm =
+                (0 until 50).map {
+                    IrcEvent.Joined(eventContext("storm-$it"), "peer$it", "#room", null, null, false)
+                }
+            storm.forEachIndexed { index, event ->
+                if (index > 0) scope.testScheduler.advanceTimeBy(100)
+                conn.emit(event)
+                scope.testScheduler.runCurrent()
+            }
+            scope.testScheduler.advanceTimeBy(99)
+            scope.testScheduler.runCurrent()
+            assertEquals(listOf(listOf(isolated)), batches)
+            scope.testScheduler.advanceTimeBy(1)
+            scope.testScheduler.runCurrent()
+            assertEquals(listOf(listOf(isolated), storm), batches)
+            val afterDeadline = IrcEvent.Parted(eventContext("after-deadline"), "one", "#room", null, false)
+            conn.emit(afterDeadline)
+            conn.transition(IrcClientState.Disconnected)
+            scope.testScheduler.runCurrent()
+            assertEquals(listOf(listOf(isolated), storm, listOf(afterDeadline)), batches)
+            actor.stop()
         }
 
     @Test

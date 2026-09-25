@@ -23,6 +23,7 @@ import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
@@ -209,6 +210,15 @@ interface BufferRepository {
     // exact local tuple and selects an authoritative timestamp for wire MARKREAD when supported.
 }
 
+/** A laid-out viewport identity; null in the owning flow means a jump has no loaded row yet. */
+sealed interface ViewportRefreshAnchor {
+    data object Newest : ViewportRefreshAnchor
+
+    data class Parked(
+        val id: Long,
+    ) : ViewportRefreshAnchor
+}
+
 interface MessageRepository {
     /** Each visibility spec creates a distinct, positionally correct Pager generation. */
     fun messages(
@@ -229,6 +239,14 @@ interface MessageRepository {
         visibility: MessageVisibilitySpec,
         initialKey: Int?,
     ): Flow<PagingData<MessageEntity>> = messages(bufferId, visibility)
+
+    /** Read at source refresh time; viewport updates never rebuild the Pager. */
+    fun messages(
+        bufferId: Long,
+        visibility: MessageVisibilitySpec,
+        initialKey: Int?,
+        viewport: StateFlow<ViewportRefreshAnchor?>,
+    ): Flow<PagingData<MessageEntity>> = messages(bufferId, visibility, initialKey)
 
     fun reactions(
         bufferId: Long,

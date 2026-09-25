@@ -599,18 +599,16 @@ class RecentPagingAppendReproTest {
         runTest {
             Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
             try {
-                // Reopen state: an earlier visit already filled the gap down to row62, so rows 62..260
-                // plus the marker are retained and the seam has receded. The oldest unread entry (row62)
-                // sits at index 198 — beyond the default newest 150-row load. Materializing it by
-                // scrolling there would drive a boundary APPEND and churn the generation before the row
-                // can compose (the blank-timeline reopen bug). Seeding the Recent Pager with
-                // entryAnchorPagingKey (the anchor shifted back by initialLoadSize - pageSize, matching
-                // what ChatViewModel passes) must materialize the entry row AND the newer rows below it
-                // in the FIRST refresh, with no boundary scroll: Room treats a refresh key as the load's
-                // start offset, so an unshifted anchor key would load the anchor plus older rows only
-                // and leave the reversed viewport below it as placeholders.
+                // Reopen state: an earlier visit filled the gap down to row62, and later live
+                // traffic added rows through 700. The oldest unread entry (row62) sits at index
+                // 638 — beyond the newest 600-row load. Scrolling into an unloaded placeholder
+                // would drive a boundary APPEND and churn the generation before the row can compose.
+                // entryAnchorPagingKey shifts back by initialLoadSize - pageSize, materializing the
+                // entry AND newer rows below it in the FIRST refresh: Room treats a refresh key as
+                // the load's start offset, so an unshifted anchor leaves the reversed viewport
+                // below it as placeholders.
                 processor.process(networkId, chatMsg("marker", 10))
-                (62..260).forEach { processor.process(networkId, chatMsg("row$it", it.toLong())) }
+                (62..700).forEach { processor.process(networkId, chatMsg("row$it", it.toLong())) }
                 db.historyGapDao().insert(
                     HistoryGapEntity(
                         roomId = bufferId,
@@ -626,9 +624,9 @@ class RecentPagingAppendReproTest {
                 // backfill page does to the ladder is the cascade tests' business, not this one's.
                 val history = BoundaryScriptedHistory(timestampOnlyWire = false)
                 val repository = repository(history)
-                val entryIndex = 198
+                val entryIndex = 638
                 val anchorKey = entryAnchorPagingKey(entryIndex)
-                assertEquals("anchor key shifts back by initialLoadSize - pageSize", 98, anchorKey)
+                assertEquals("anchor key shifts back by initialLoadSize - pageSize", 88, anchorKey)
 
                 val keyed = openAndPeekIndex(repository, initialKey = anchorKey, index = entryIndex)
                 val unkeyed = openAndPeekIndex(repository, initialKey = null, index = entryIndex)
@@ -659,7 +657,7 @@ class RecentPagingAppendReproTest {
                 // PRESENT (refresh completes and the entry row materializes); a swap that leaves the
                 // differ's refresh stuck loading is the blank-reopen wedge.
                 processor.process(networkId, chatMsg("marker", 10))
-                (62..260).forEach { processor.process(networkId, chatMsg("row$it", it.toLong())) }
+                (62..700).forEach { processor.process(networkId, chatMsg("row$it", it.toLong())) }
                 db.historyGapDao().insert(
                     HistoryGapEntity(
                         roomId = bufferId,
@@ -694,10 +692,10 @@ class RecentPagingAppendReproTest {
                 if (differ.itemCount > 0) differ.getItem(0)
                 advanceUntilIdle()
                 val presentedBeforeSwap = differ.itemCount
-                keyFlow.value = entryAnchorPagingKey(198)
+                keyFlow.value = entryAnchorPagingKey(638)
                 advanceUntilIdle()
-                val target = (198).takeIf { it < differ.itemCount }?.let { differ.peek(it) }
-                val sibling = (197).takeIf { it < differ.itemCount }?.let { differ.peek(it) }
+                val target = (638).takeIf { it < differ.itemCount }?.let { differ.peek(it) }
+                val sibling = (637).takeIf { it < differ.itemCount }?.let { differ.peek(it) }
                 println(
                     "KEYSWAP before=$presentedBeforeSwap after=${differ.itemCount} " +
                         "target=${target?.msgid} sibling=${sibling?.msgid}",

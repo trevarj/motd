@@ -20,6 +20,7 @@
 #   burst     Post a numbered live burst for auto-follow diagnostics.
 #
 #   jpq       Emit JOIN/PART/QUIT activity without chat messages.
+#   jpq-storm [cycles]  Emit 200 paced PART/JOIN cycles by default.
 #
 #   push      Send one uniquely-tagged channel highlight and one direct message.
 #
@@ -284,6 +285,28 @@ do_jpq() {
   } | feed_irc
 }
 
+do_jpq_storm() {
+  cycles="$1"
+  log "posting $cycles PART/JOIN cycles into $TEST_CHANNEL as $SEED_NICK"
+  {
+    printf 'NICK %s\r\n' "$SEED_NICK"
+    printf 'USER %s 0 * :motd auto-follow fixture\r\n' "$SEED_NICK"
+    printf 'NICKSERV IDENTIFY %s %s\r\n' "$SEED_NICK" "$SEED_PASS"
+    sleep 2
+    printf 'JOIN %s\r\n' "$TEST_CHANNEL"
+    sleep 1
+    i=0
+    while [ "$i" -lt "$cycles" ]; do
+      printf 'PART %s :auto-follow part\r\n' "$TEST_CHANNEL"
+      sleep 0.1
+      printf 'JOIN %s\r\n' "$TEST_CHANNEL"
+      sleep 0.1
+      i=$((i + 1))
+    done
+    printf 'QUIT :auto-follow storm complete\r\n'
+  } | feed_irc
+}
+
 do_push() {
   case "$PUSH_TOKEN" in
     *[!A-Za-z0-9._-]*) log "FATAL: PUSH_TOKEN contains unsafe IRC characters"; exit 2 ;;
@@ -374,6 +397,14 @@ do_reconnect_current() {
   } | feed_irc
 }
 
+if [ "$MODE" = jpq-storm ]; then
+  cycles="${2-200}"
+  case "$cycles" in
+    *[!0-9]*|'') log "FATAL: cycles must be a positive integer"; exit 2 ;;
+  esac
+  [ "$cycles" -ge 1 ] 2>/dev/null || { log "FATAL: cycles must be a positive integer"; exit 2; }
+fi
+
 wait_for_ergo
 case "$MODE" in
   register) do_register ;;
@@ -382,6 +413,7 @@ case "$MODE" in
   showcase-hold) do_showcase_hold ;;
   burst)    do_burst ;;
   jpq)      do_jpq ;;
+  jpq-storm) do_jpq_storm "$cycles" ;;
   push)     do_push ;;
   canonical) do_canonical ;;
   reconnect-gap) do_reconnect_gap "${2:-}" ;;
@@ -390,6 +422,6 @@ case "$MODE" in
     do_register
     if [ "$STACK_PROFILE" = showcase ]; then do_showcase_seed; else do_seed; fi
     ;;
-  *) log "FATAL: unknown mode '$MODE' (want register|seed|showcase|showcase-hold|burst|jpq|push|canonical|reconnect-gap|reconnect-current|all)"; exit 2 ;;
+  *) log "FATAL: unknown mode '$MODE' (want register|seed|showcase|showcase-hold|burst|jpq|jpq-storm|push|canonical|reconnect-gap|reconnect-current|all)"; exit 2 ;;
 esac
 log "done"

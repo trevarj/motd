@@ -22,6 +22,9 @@ import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.TimelineEventEntity
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.dickord.DICKORD_CHANNEL_TAG
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
@@ -2173,13 +2176,9 @@ class EventProcessorTest {
         }
 
     /**
-     * A Room commit is what releases a `PagingSource` invalidation, and every invalidation
-     * regenerates the open timeline. These two pin the per-line commit count for the presence
-     * events a reconnect storm delivers by the hundred: one wire event must cost one regeneration,
-     * not one per member table plus one per shared channel.
-     *
-     * The DB is rebuilt with a direct query executor so `InvalidationTracker` refreshes inline at
-     * each commit; the shared one leaves them on a background pool, where the count would race.
+     * Room releases PagingSource invalidations per commit. A single JOIN still commits once;
+     * consecutive live peer JOIN/PART rows now share one outer commit. The DB is rebuilt with
+     * a direct executor so InvalidationTracker refreshes inline rather than racing this assertion.
      */
     @Test
     fun `a quit fanning across channels commits one timeline invalidation`() =
@@ -2264,6 +2263,118 @@ class EventProcessorTest {
                             .first()
                             .any { it.nick == "alice2" },
                     )
+                }
+            } finally {
+                direct.db.close()
+            }
+        }
+
+    @Test
+    fun `peer join part batch persists ordered distinct rows with one invalidation and unchanged visibility`() =
+        runTest {
+            val direct = directCommitDatabase()
+            try {
+                val individual = "#individual"
+                val batched = "#batched"
+                listOf(individual, batched).forEach { channel ->
+                    direct.processor.process(
+                        direct.networkId,
+                        IrcEvent.Joined(ctx(msgid = "self-$channel"), "me", channel, null, null, true),
+                    )
+                }
+
+                fun events(channel: String): List<IrcEvent> =
+                    (0 until 4).flatMap { cycle ->
+                        listOf(
+                            IrcEvent.Joined(
+                                ctx(msgid = "join-$channel-$cycle", time = 2_000L + cycle * 2),
+                                "alice",
+                                channel,
+                                null,
+                                null,
+                                false,
+                            ),
+                            IrcEvent.Parted(
+                                ctx(msgid = "part-$channel-$cycle", time = 2_001L + cycle * 2),
+                                "alice",
+                                channel,
+                                null,
+                                false,
+                            ),
+                        )
+                    } +
+                        IrcEvent.Joined(
+                            ctx(msgid = "join-$channel-bob", time = 2_008),
+                            "bob",
+                            channel,
+                            null,
+                            null,
+                            false,
+                        )
+                val individualEvents = events(individual)
+                val batchEvents = events(batched)
+                val individualCommits =
+                    direct.countInvalidations("messages", "members", "users") {
+                        individualEvents.forEach { direct.processor.process(direct.networkId, it) }
+                    }
+                val batchCommits =
+                    direct.countInvalidations("messages", "members", "users") {
+                        direct.processor.processPeerPresenceBatch(direct.networkId, batchEvents)
+                    }
+                assertEquals(individualEvents.size, individualCommits)
+                assertEquals(1, batchCommits)
+                for (channel in listOf(individual, batched)) {
+                    val roomId =
+                        direct.db
+                            .bufferDao()
+                            .byName(direct.networkId, channel)!!
+                            .id
+                    val rows =
+                        direct.db
+                            .messageDao()
+                            .pagingSource(roomId)
+                            .load(
+                                androidx.paging.PagingSource.LoadParams
+                                    .Refresh(null, 100, false),
+                            ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data }
+                            .filterNot { it.isSelf }
+                            .asReversed()
+                    assertEquals((2_000L..2_008L).toList(), rows.map { it.serverTime })
+                    assertEquals(
+                        (0 until 9).map { if (it % 2 == 0) MessageKind.JOIN else MessageKind.PART },
+                        rows.map { it.kind },
+                    )
+                    assertEquals((0 until 8).map { "alice" } + "bob", rows.map { it.sender })
+                    assertEquals(9, rows.map { it.id }.toSet().size)
+                    assertEquals(
+                        setOf("me", "bob"),
+                        direct.db
+                            .memberDao()
+                            .observe(roomId)
+                            .first()
+                            .map { it.nick }
+                            .toSet(),
+                    )
+                    val allRows =
+                        direct.db
+                            .messageDao()
+                            .pagingSource(messagePagingQuery(roomId, MessageVisibilitySpec(presenceMode = PresenceMode.ALL)))
+                            .load(
+                                androidx.paging.PagingSource.LoadParams
+                                    .Refresh(null, 100, false),
+                            ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data }
+                            .filterNot { it.isSelf }
+                    val smartRows =
+                        direct.db
+                            .messageDao()
+                            .pagingSource(messagePagingQuery(roomId, MessageVisibilitySpec(presenceMode = PresenceMode.SMART)))
+                            .load(
+                                androidx.paging.PagingSource.LoadParams
+                                    .Refresh(null, 100, false),
+                            ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data }
+                            .filterNot { it.isSelf }
+                    assertEquals(rows.map { it.id }.toSet(), allRows.map { it.id }.toSet())
+                    assertTrue(smartRows.isEmpty())
                 }
             } finally {
                 direct.db.close()

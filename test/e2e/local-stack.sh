@@ -17,6 +17,7 @@
 #                                      # multi-channel screenshot fixture
 #   ./test/e2e/local-stack.sh burst     # post a numbered 12-message live burst
 #   ./test/e2e/local-stack.sh jpq       # emit JOIN/PART/QUIT-only activity
+#   ./test/e2e/local-stack.sh jpq-storm [cycles] # 200 JOIN/PART cycles by default
 #   ./test/e2e/local-stack.sh push TOKEN # emit one tagged highlight and direct message
 #   ./test/e2e/local-stack.sh canonical TOKEN # repeated text + account-backed PM nick rewrite
 #   ./test/e2e/local-stack.sh reconnect-gap TOKEN # persist forty older TOKEN gNN rows
@@ -130,7 +131,7 @@ esac
 if [ "$need_reexec" = true ]; then
   [ "${MOTD_E2E_STACK_SHELL:-}" != 1 ] || die "required command is missing from the e2e-stack shell"
   log "entering the lockfile-backed e2e-stack shell…"
-  exec nix develop "$REPO#e2e-stack" -c "$0" "$@"
+  exec nix develop "$REPO#e2e-stack" -c bash "$0" "$@"
 fi
 
 CONF_ERGO="$RUN/ircd.yaml"
@@ -952,6 +953,7 @@ case "$CMD" in
   showcase-hold) showcase_hold ;;
   burst) sh "$PROVISION" burst ;;
   jpq) sh "$PROVISION" jpq ;;
+  jpq-storm) sh "$PROVISION" jpq-storm "${2-200}" ;;
   push) sh "$PROVISION" push ;;
   canonical) sh "$PROVISION" canonical ;;
   reconnect-gap) sh "$PROVISION" reconnect-gap "${2:-}" ;;
@@ -979,5 +981,5 @@ case "$CMD" in
   obfs-xray-validate) xray_obfs_validate ;;
   obfs-xray-history-check) xray_obfs_history_check ;;
   obfs-xray-negative) xray_obfs_negative ;;
-  *) die "unknown command '$CMD' (want up|down|seed|showcase|showcase-hold|burst|jpq|push|canonical|reconnect-gap|reconnect-current|pause-soju|resume-soju|stop-soju|start-soju|status|history-check|filehost-check|tls-fingerprint|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-history-check|obfs-xray-negative)" ;;
+  *) die "unknown command '$CMD' (want up|down|seed|showcase|showcase-hold|burst|jpq|jpq-storm|push|canonical|reconnect-gap|reconnect-current|pause-soju|resume-soju|stop-soju|start-soju|status|history-check|filehost-check|tls-fingerprint|control-check|read-marker-check|invite-check|ready-up|ready-check|ready-down|obfs-up|obfs-down|obfs-validate|obfs-xray-up|obfs-xray-down|obfs-xray-validate|obfs-xray-history-check|obfs-xray-negative)" ;;
 esac
