@@ -1075,6 +1075,8 @@
     <string name="settings_mentions_folder_tab">Folder tab</string>
     <string name="settings_reply_prefix">Visible reply prefix</string>
     <string name="settings_reply_prefix_desc">Prefix channel replies with the recipient’s nick for clients that do not render reply tags.</string>
+    <string name="settings_swipe_to_reply">Swipe to reply</string>
+    <string name="settings_swipe_to_reply_desc">Swipe a message to reply to it. Long-press Reply stays available.</string>
     <string name="settings_voice_encryption">Encrypt voice messages by default</string>
     <string name="settings_voice_encryption_desc">Uploads use host-blind AES-GCM. IRC servers and bouncers still see the key in the link.</string>
     <string name="settings_voice_section">Voice messages</string>

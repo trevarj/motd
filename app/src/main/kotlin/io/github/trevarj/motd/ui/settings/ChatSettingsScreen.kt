@@ -102,6 +102,7 @@ fun ChatSettingsScreen(
         onShowComposerFormattingTools = viewModel::setShowComposerFormattingTools,
         onChatSoundsEnabled = viewModel::setChatSoundsEnabled,
         onVisibleReplyPrefix = viewModel::setVisibleReplyPrefix,
+        onSwipeToReplyEnabled = viewModel::setSwipeToReplyEnabled,
         onShowImages = viewModel::setShowImages,
         onShowLinkPreviews = viewModel::setShowLinkPreviews,
         onAutoLoadOnUnmetered = viewModel::setAutoLoadOnUnmetered,
@@ -141,6 +142,7 @@ fun ChatSettingsContent(
     onShowComposerFormattingTools: (Boolean) -> Unit,
     onChatSoundsEnabled: (Boolean) -> Unit,
     onVisibleReplyPrefix: (Boolean) -> Unit,
+    onSwipeToReplyEnabled: (Boolean) -> Unit,
     onShowImages: (Boolean) -> Unit,
     onShowLinkPreviews: (Boolean) -> Unit,
     onAutoLoadOnUnmetered: (Boolean) -> Unit,
@@ -305,6 +307,16 @@ fun ChatSettingsContent(
                 switchTag = "settings_switch_reply_prefix",
                 requestedTarget = target?.name,
                 targetName = SettingsTarget.REPLY_PREFIX.name,
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_swipe_to_reply),
+                subtitle = stringResource(R.string.settings_swipe_to_reply_desc),
+                checked = reply.swipeToReplyEnabled,
+                onCheckedChange = onSwipeToReplyEnabled,
+                switchTag = "settings_switch_swipe_to_reply",
+                requestedTarget = target?.name,
+                targetName = SettingsTarget.SWIPE_TO_REPLY.name,
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_voice_audio_section)) {
@@ -604,6 +616,7 @@ private fun ChatSettingsPreview() {
             onShowComposerFormattingTools = {},
             onChatSoundsEnabled = {},
             onVisibleReplyPrefix = {},
+            onSwipeToReplyEnabled = {},
             onShowImages = {},
             onShowLinkPreviews = {},
             onAutoLoadOnUnmetered = {},

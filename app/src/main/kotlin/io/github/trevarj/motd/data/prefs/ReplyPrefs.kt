@@ -11,20 +11,24 @@ import kotlinx.serialization.Serializable
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** App-owned reply delivery preference kept outside the frozen settings contract. */
+/** App-owned reply preferences kept outside the frozen settings contract. */
 @Serializable
 data class ReplyConfig(
     val visibleChannelPrefix: Boolean = false,
+    val swipeToReplyEnabled: Boolean = true,
 )
 
 interface ReplyPrefs {
     val config: Flow<ReplyConfig>
 
     suspend fun setVisibleChannelPrefix(enabled: Boolean)
+
+    suspend fun setSwipeToReplyEnabled(enabled: Boolean)
 }
 
 private val Context.replyDataStore by preferencesDataStore("replies")
 private val VISIBLE_CHANNEL_PREFIX = booleanPreferencesKey("visible_channel_prefix_v1")
+private val SWIPE_TO_REPLY_ENABLED = booleanPreferencesKey("swipe_to_reply_enabled_v1")
 
 @Singleton
 class ReplyPrefsImpl
@@ -36,10 +40,17 @@ class ReplyPrefsImpl
 
         override val config: Flow<ReplyConfig> =
             store.data.map { prefs ->
-                ReplyConfig(visibleChannelPrefix = prefs[VISIBLE_CHANNEL_PREFIX] ?: false)
+                ReplyConfig(
+                    visibleChannelPrefix = prefs[VISIBLE_CHANNEL_PREFIX] ?: false,
+                    swipeToReplyEnabled = prefs[SWIPE_TO_REPLY_ENABLED] ?: true,
+                )
             }
 
         override suspend fun setVisibleChannelPrefix(enabled: Boolean) {
             store.edit { it[VISIBLE_CHANNEL_PREFIX] = enabled }
+        }
+
+        override suspend fun setSwipeToReplyEnabled(enabled: Boolean) {
+            store.edit { it[SWIPE_TO_REPLY_ENABLED] = enabled }
         }
     }

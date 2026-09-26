@@ -564,7 +564,10 @@ class ConfigurationBackupRepositoryImpl
                 contentPreviewPrefs.setAutoLoadOnMetered(it.autoLoadOnMetered)
             }
             settings.chatSounds?.let { chatSoundPrefs.replace(it) }
-            settings.replies?.let { replyPrefs.setVisibleChannelPrefix(it.visibleChannelPrefix) }
+            settings.replies?.let {
+                replyPrefs.setVisibleChannelPrefix(it.visibleChannelPrefix)
+                replyPrefs.setSwipeToReplyEnabled(it.swipeToReplyEnabled)
+            }
             settings.attachments?.let { imported ->
                 val resolved =
                     if (includeSecrets) {

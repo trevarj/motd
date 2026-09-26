@@ -178,6 +178,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_composer_emoji, R.string.settings_composer_emoji_desc, "input", SettingsSearchPage.CHAT, SettingsTarget.COMPOSER_EMOJI),
         spec(R.string.settings_composer_formatting_tools, R.string.settings_composer_formatting_tools_desc, "bold italic input", SettingsSearchPage.CHAT, SettingsTarget.COMPOSER_FORMATTING),
         spec(R.string.settings_reply_prefix, R.string.settings_reply_prefix_desc, "channel", SettingsSearchPage.CHAT, SettingsTarget.REPLY_PREFIX),
+        spec(R.string.settings_swipe_to_reply, R.string.settings_swipe_to_reply_desc, "message gesture reply swipe", SettingsSearchPage.CHAT, SettingsTarget.SWIPE_TO_REPLY),
         spec(R.string.settings_direct_connections, R.string.settings_direct_connections_summary, "dcc files peer", SettingsSearchPage.SECURITY, SettingsTarget.DIRECT_CONNECTIONS),
         spec(R.string.settings_voice_quality, R.string.settings_voice_section, "opus aac bitrate", SettingsSearchPage.CHAT, SettingsTarget.VOICE_QUALITY),
         spec(R.string.settings_voice_noise_reduction, R.string.settings_voice_noise_reduction_desc, "audio", SettingsSearchPage.CHAT, SettingsTarget.VOICE_NOISE_REDUCTION),

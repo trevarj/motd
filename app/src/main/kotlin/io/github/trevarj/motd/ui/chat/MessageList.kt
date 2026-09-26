@@ -308,6 +308,7 @@ fun MessageList(
     readMarkerLabel: String? = null,
     onLongPress: (MessageEntity) -> Unit,
     onReply: (MessageEntity) -> Unit,
+    swipeToReplyEnabled: Boolean = true,
     // React to a message; the whole entity is passed so a still-pending own row (msgid == null) is
     // queued by the VM instead of silently dropped (bug: react on a just-sent message did nothing).
     onReact: (MessageEntity, String) -> Unit,
@@ -653,6 +654,7 @@ fun MessageList(
                         identityRules = identityRules,
                         onLongPress = onLongPress,
                         onReply = onReply,
+                        swipeToReplyEnabled = swipeToReplyEnabled,
                         onReact = onReact,
                         onImageClick = onImageClick,
                         onRetry = onRetry,
@@ -1446,6 +1448,7 @@ private fun MessageRow(
     identityRules: IrcIdentityRules,
     onLongPress: (MessageEntity) -> Unit,
     onReply: (MessageEntity) -> Unit,
+    swipeToReplyEnabled: Boolean,
     onReact: (MessageEntity, String) -> Unit,
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
@@ -1713,6 +1716,7 @@ private fun MessageRow(
                 mentionDescription?.let { stateDescription = it }
             },
         onReply = { onReply(msg) },
+        enabled = swipeToReplyEnabled,
     ) { rowModifier ->
         Column(modifier = rowModifier.fillMaxWidth()) {
             val messageBubble: @Composable () -> Unit = {

@@ -100,6 +100,8 @@ class ChatSettingsViewModel
 
         fun setVisibleReplyPrefix(value: Boolean) = launch { replyPrefs.setVisibleChannelPrefix(value) }
 
+        fun setSwipeToReplyEnabled(value: Boolean) = launch { replyPrefs.setSwipeToReplyEnabled(value) }
+
         fun setShowImages(value: Boolean) = launch { contentPreviewPrefs.setShowImages(value) }
 
         fun setShowLinkPreviews(value: Boolean) = launch { contentPreviewPrefs.setShowLinkPreviews(value) }

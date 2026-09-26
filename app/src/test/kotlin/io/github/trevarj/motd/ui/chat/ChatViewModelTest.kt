@@ -4882,6 +4882,10 @@ class ChatViewModelTest {
         override val config = MutableStateFlow(initial)
 
         override suspend fun setVisibleChannelPrefix(enabled: Boolean) = Unit
+
+        override suspend fun setSwipeToReplyEnabled(enabled: Boolean) {
+            config.value = config.value.copy(swipeToReplyEnabled = enabled)
+        }
     }
 
     private class FakeContentPreviewPrefs : ContentPreviewPrefs {

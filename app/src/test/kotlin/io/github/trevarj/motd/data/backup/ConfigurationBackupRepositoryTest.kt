@@ -32,6 +32,7 @@ import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
@@ -126,6 +127,33 @@ class ConfigurationBackupRepositoryTest {
             assertEquals(23, prefs.config.first().masterVolume)
             assertEquals(ChatSoundMelody.BEACON, prefs.config.first().receiveMelody)
             db.close()
+        }
+
+    @Test
+    fun swipeReplyPreferenceRoundTripsAndOldReplyConfigDefaultsToEnabled() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs = ReplyPrefsImpl(context)
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                prefs.setVisibleChannelPrefix(true)
+                prefs.setSwipeToReplyEnabled(false)
+                val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                prefs.setVisibleChannelPrefix(false)
+                prefs.setSwipeToReplyEnabled(true)
+                backup.import(raw, importMode = BackupImportMode.MERGE)
+                assertEquals(ReplyConfig(visibleChannelPrefix = true, swipeToReplyEnabled = false), prefs.config.first())
+
+                val legacy = raw.replace(Regex(""",\s*"swipeToReplyEnabled"\s*:\s*false"""), "")
+                assertFalse(legacy.contains("swipeToReplyEnabled"))
+                backup.import(legacy, importMode = BackupImportMode.MERGE)
+                assertEquals(ReplyConfig(visibleChannelPrefix = true, swipeToReplyEnabled = true), prefs.config.first())
+            } finally {
+                prefs.setVisibleChannelPrefix(false)
+                prefs.setSwipeToReplyEnabled(true)
+                db.close()
+            }
         }
 
     @Test

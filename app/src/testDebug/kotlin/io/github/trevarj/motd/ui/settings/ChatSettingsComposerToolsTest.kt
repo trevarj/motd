@@ -38,14 +38,15 @@ class ChatSettingsComposerToolsTest {
     val compose = createComposeRule()
 
     @Test
-    fun composerToolSwitchesRenderAndDispatchIndependently() {
+    fun composerAndReplySwitchesRenderAndDispatchIndependently() {
         var emoji: Boolean? = null
         var formatting: Boolean? = null
+        val reply = mutableStateOf(ReplyConfig())
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 ChatSettingsContent(
                     settings = Settings(showComposerEmoji = false, showComposerFormattingTools = true),
-                    reply = ReplyConfig(),
+                    reply = reply.value,
                     contentPreviews = ContentPreviewConfig(),
                     voice = VoiceConfig(),
                     avatars = AvatarConfig(),
@@ -63,7 +64,8 @@ class ChatSettingsComposerToolsTest {
                     onShowComposerEmoji = { emoji = it },
                     onShowComposerFormattingTools = { formatting = it },
                     onChatSoundsEnabled = {},
-                    onVisibleReplyPrefix = {},
+                    onVisibleReplyPrefix = { reply.value = reply.value.copy(visibleChannelPrefix = it) },
+                    onSwipeToReplyEnabled = { reply.value = reply.value.copy(swipeToReplyEnabled = it) },
                     onShowImages = {},
                     onShowLinkPreviews = {},
                     onAutoLoadOnUnmetered = {},
@@ -91,6 +93,19 @@ class ChatSettingsComposerToolsTest {
             .performScrollTo()
             .assertIsOn()
             .performClick()
+        compose
+            .onNodeWithText("Visible reply prefix")
+            .performScrollTo()
+            .assertIsOff()
+            .performClick()
+        compose
+            .onNodeWithText("Swipe to reply")
+            .performScrollTo()
+            .assertIsOn()
+            .performClick()
+
+        compose.onNodeWithText("Visible reply prefix").assertIsOn()
+        compose.onNodeWithText("Swipe to reply").assertIsOff()
 
         compose.runOnIdle {
             assertEquals(true, emoji)
@@ -125,6 +140,7 @@ class ChatSettingsComposerToolsTest {
                     onShowComposerFormattingTools = {},
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = {},
+                    onSwipeToReplyEnabled = {},
                     onShowImages = {},
                     onShowLinkPreviews = {},
                     onAutoLoadOnUnmetered = {},
@@ -171,6 +187,7 @@ class ChatSettingsComposerToolsTest {
                     onShowComposerFormattingTools = {},
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = {},
+                    onSwipeToReplyEnabled = {},
                     onShowImages = {},
                     onShowLinkPreviews = {},
                     onAutoLoadOnUnmetered = {},
@@ -226,6 +243,7 @@ class ChatSettingsComposerToolsTest {
                     onShowComposerFormattingTools = {},
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = {},
+                    onSwipeToReplyEnabled = {},
                     onShowImages = {},
                     onShowLinkPreviews = {},
                     onAutoLoadOnUnmetered = {},
