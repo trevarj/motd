@@ -24,7 +24,7 @@ data class DatabaseProfile(
         fixedRows +
             rooms.sumOf { room ->
                 val cap = if (room.type == BufferType.QUERY) channelRows.toLong() * QUERY_RETENTION_MULTIPLIER else channelRows.toLong()
-                minOf(room.rowCount.toLong(), cap)
+                minOf((room.rowCount - room.presenceRowCount).toLong(), cap) + minOf(room.presenceRowCount.toLong(), cap)
             }
 
     /** Estimated database size after pruning at [channelRows]. */
@@ -32,11 +32,11 @@ data class DatabaseProfile(
 
     /**
      * Largest channel cap whose projection fits in [targetBytes]; 0 when even the fixed rows do not.
-     * Projection is monotonic in the cap, so this is a binary search over the largest room's size.
+     * Projection is monotonic in the cap, so search up to the largest per-room category.
      */
     fun channelRowsFor(targetBytes: Long): Int {
         var low = 0
-        var high = rooms.maxOfOrNull { it.rowCount } ?: 0
+        var high = rooms.maxOfOrNull { maxOf(it.rowCount - it.presenceRowCount, it.presenceRowCount) } ?: 0
         if (projectedBytes(high) <= targetBytes) return high
         while (low < high) {
             val mid = (low + high + 1) / 2

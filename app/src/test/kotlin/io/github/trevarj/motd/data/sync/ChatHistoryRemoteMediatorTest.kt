@@ -235,6 +235,31 @@ class ChatHistoryRemoteMediatorTest {
             ).let { (it as androidx.paging.PagingSource.LoadResult.Page).data }
 
     @Test
+    fun presenceOnlyLatestAdvancesCursorSoAppendFetchesOlderChat() =
+        runTest {
+            val joins = listOf(joined("oldest-join", 100), joined("newest-join", 200))
+            processor.persistHistoryPage(
+                networkId,
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#chan", limit = 50),
+                messages(joins),
+            )
+            val cursor = db.historyCursorDao().byRoom(bufferId)!!
+            assertEquals("oldest-join", cursor.oldestMsgid)
+            assertEquals(100L, cursor.oldestServerTime)
+            assertEquals(0, rowCount())
+
+            val history = FakeHistory(before = ArrayDeque(listOf(listOf(chatMsg("older-chat", 50)))))
+            val result = load(mediator(history), LoadType.APPEND)
+
+            assertTrue(result is RemoteMediator.MediatorResult.Success)
+            assertFalse((result as RemoteMediator.MediatorResult.Success).endOfPaginationReached)
+            assertEquals(listOf(ChatHistoryRequest.Subcommand.BEFORE), history.calls)
+            assertEquals("msgid=oldest-join", history.requests.single().bound1)
+            assertEquals(listOf("older-chat"), presentedRows().map { it.msgid })
+            assertEquals("older-chat", db.historyCursorDao().byRoom(bufferId)!!.oldestMsgid)
+        }
+
+    @Test
     fun hiddenPresenceBudgetOffersRetryAndResumesFromTheAdvancedBoundary() =
         runTest {
             processor.process(networkId, joined("self-join", 10_000, nick = "me", isSelf = true))

@@ -2592,6 +2592,7 @@ data class PruneTarget(
 data class PrunableRoom(
     val type: BufferType,
     val rowCount: Int,
+    val presenceRowCount: Int,
 )
 
 /** One room's locally held history: how many rows and the span they cover. */
@@ -2603,9 +2604,9 @@ data class RoomSpan(
 )
 
 /**
- * Local history retention. Pruned rows are recoverable: the mediator pages `CHATHISTORY BEFORE`
- * the oldest retained row, so trimming a room only needs the completion flags reopened and the
- * protocol cursor forgotten; it never touches the dismiss floor (`historyDiscardedThrough*`).
+ * Local history retention. Reopen paging for chat rows while the server still retains them;
+ * older locally stored presence is not restored. Forgetting the old protocol cursor lets
+ * `CHATHISTORY BEFORE` page below the oldest retained row without touching the dismiss floor.
  */
 @Dao
 interface HistoryPruneDao {
@@ -2620,7 +2621,9 @@ interface HistoryPruneDao {
 
     /** Same eligibility as [targets], with each room's row count. */
     @Query(
-        """SELECT b.type AS type, (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id) AS rowCount
+        """SELECT b.type AS type, (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id) AS rowCount,
+                  (SELECT COUNT(*) FROM messages m WHERE m.bufferId = b.id
+                   AND m.kind IN ('JOIN', 'PART', 'QUIT', 'NICK', 'AWAY', 'BACK', 'NETSPLIT', 'NETJOIN')) AS presenceRowCount
            FROM buffers b
            JOIN network_history_cursors c ON c.networkId = b.networkId AND c.serverDerived = 1
            WHERE b.type IN ('CHANNEL', 'QUERY') AND b.dismissed = 0 AND b.redirectToRoomId IS NULL
@@ -2645,16 +2648,18 @@ interface HistoryPruneDao {
     suspend fun roomSpans(networkId: Long): List<RoomSpan>
 
     /**
-     * Rows strictly older than this are past the room's retention: the serverTime of the row
-     * [keepOffset] places from the newest. Null when the room holds no more than that many rows.
+     * Rows strictly older than this are past their presence or non-presence budget: the
+     * serverTime of the row [keepOffset] places from that group's newest. Equal-time rows stay.
      */
     @Query(
         """SELECT serverTime FROM messages WHERE bufferId = :roomId
+             AND (kind IN ('JOIN', 'PART', 'QUIT', 'NICK', 'AWAY', 'BACK', 'NETSPLIT', 'NETJOIN')) = :presence
            ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT 1 OFFSET :keepOffset""",
     )
     suspend fun pruneFloor(
         roomId: RoomId,
         keepOffset: Int,
+        presence: Boolean,
     ): Long?
 
     /**
@@ -2665,6 +2670,7 @@ interface HistoryPruneDao {
         """DELETE FROM messages WHERE id IN (
                SELECT m.id FROM messages m
                WHERE m.bufferId = :roomId AND m.serverTime < :floor
+                 AND (m.kind IN ('JOIN', 'PART', 'QUIT', 'NICK', 'AWAY', 'BACK', 'NETSPLIT', 'NETJOIN')) = :presence
                  AND m.pendingLabel IS NULL AND m.failed = 0 AND m.notificationClaimed = 0
                  AND (m.kind != 'INVITE' OR m.inviteState IS NULL OR m.inviteState NOT IN ('PENDING', 'JOINING'))
                  AND NOT EXISTS (
@@ -2677,6 +2683,7 @@ interface HistoryPruneDao {
     suspend fun deleteOldest(
         roomId: RoomId,
         floor: Long,
+        presence: Boolean,
         chunk: Int,
     ): Int
 
@@ -2695,7 +2702,7 @@ interface HistoryPruneDao {
     )
     suspend fun forgetOldestCursor(roomId: RoomId)
 
-    /** Gaps starting below the floor are now plain "older than what we hold", owned by the ladder. */
+    /** Gaps below the oldest remaining boundary belong to the history ladder again. */
     @Query("DELETE FROM history_gaps WHERE roomId = :roomId AND olderServerTime < :floor")
     suspend fun dropGapsBelow(
         roomId: RoomId,

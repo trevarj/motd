@@ -478,31 +478,19 @@ class EventProcessor
                 }
 
                 is IrcEvent.NetworkBatch -> {
-                    onNetworkBatch(networkId, event, origin, historyTarget)
+                    onNetworkBatch(networkId, event, origin)
                 }
 
                 is IrcEvent.Joined -> {
-                    if (origin.mutatesSessionState) {
-                        onJoined(networkId, event)
-                    } else if (origin.isHistorical) {
-                        onHistoricalJoined(networkId, event)
-                    }
+                    if (origin.mutatesSessionState) onJoined(networkId, event)
                 }
 
                 is IrcEvent.Parted -> {
-                    if (origin.mutatesSessionState) {
-                        onParted(networkId, event)
-                    } else if (origin.isHistorical) {
-                        onHistoricalParted(networkId, event)
-                    }
+                    if (origin.mutatesSessionState) onParted(networkId, event)
                 }
 
                 is IrcEvent.Quit -> {
-                    if (origin.mutatesSessionState) {
-                        onQuit(networkId, event)
-                    } else if (origin.isHistorical) {
-                        onHistoricalQuit(networkId, event, historyTarget)
-                    }
+                    if (origin.mutatesSessionState) onQuit(networkId, event)
                 }
 
                 is IrcEvent.Kicked -> {
@@ -514,11 +502,7 @@ class EventProcessor
                 }
 
                 is IrcEvent.NickChanged -> {
-                    if (origin.mutatesSessionState) {
-                        onNickChanged(networkId, event)
-                    } else if (origin.isHistorical) {
-                        onHistoricalNickChanged(networkId, event, historyTarget)
-                    }
+                    if (origin.mutatesSessionState) onNickChanged(networkId, event)
                 }
 
                 is IrcEvent.NamesStarted -> {
@@ -1056,9 +1040,9 @@ class EventProcessor
             expectedRoomId: RoomId? = null,
             placement: IrcEvent.PlaybackPlacement,
         ): PlaybackCommit {
-            // All events for one target are applied in a single Room transaction (idempotent by
-            // dedupKey). They are historical replay, never live arrivals: persist them without posting
-            // notifications even when a previously-missing row is a DM or mention.
+            // Eligible events for one target are applied in a single Room transaction (idempotent by
+            // dedupKey). Historical presence is ignored, but substantive replay stays silent even for
+            // a previously-missing DM or mention.
             diagnostics.record("history", "batch_started") {
                 mapOf(
                     "network_id" to networkId,
@@ -2184,36 +2168,8 @@ class EventProcessor
                     )
                 }
 
-                is IrcEvent.Joined -> {
-                    key(
-                        channelRoom(event.channel),
-                        MessageKind.JOIN,
-                        event.nick,
-                        "${event.nick} joined",
-                        event.ctx.serverTime,
-                    )
-                }
-
-                is IrcEvent.Parted -> {
-                    key(
-                        channelRoom(event.channel),
-                        MessageKind.PART,
-                        event.nick,
-                        "${event.nick} left" + (event.reason?.let { " ($it)" } ?: ""),
-                        event.ctx.serverTime,
-                    )
-                }
-
-                is IrcEvent.Quit -> {
-                    historicalTargetBuffer(networkId, target)?.let {
-                        key(
-                            it,
-                            MessageKind.QUIT,
-                            event.nick,
-                            "${event.nick} quit" + (event.reason?.let { reason -> " ($reason)" } ?: ""),
-                            event.ctx.serverTime,
-                        )
-                    }
+                is IrcEvent.Joined, is IrcEvent.Parted, is IrcEvent.Quit -> {
+                    null
                 }
 
                 is IrcEvent.Kicked -> {
@@ -2228,15 +2184,7 @@ class EventProcessor
                 }
 
                 is IrcEvent.NickChanged -> {
-                    historicalTargetBuffer(networkId, target)?.let {
-                        key(
-                            it,
-                            MessageKind.NICK,
-                            event.from,
-                            "${event.from} is now known as ${event.to}",
-                            event.ctx.serverTime,
-                        )
-                    }
+                    null
                 }
 
                 is IrcEvent.TopicChanged -> {
@@ -2309,26 +2257,11 @@ class EventProcessor
             networkId: Long,
             batch: IrcEvent.NetworkBatch,
             origin: EventOrigin,
-            historyTarget: String?,
         ) {
             if (batch.events.isEmpty()) return
             if (batch.kind == IrcEvent.NetworkBatchKind.NETSPLIT && batch.events.any { it !is IrcEvent.Quit }) return
             if (batch.kind == IrcEvent.NetworkBatchKind.NETJOIN && batch.events.any { it !is IrcEvent.Joined }) return
-            if (origin.isHistorical) {
-                val target = batch.target ?: historyTarget ?: return
-                val st = stateFor(networkId)
-                val bufferId = ensureBuffer(networkId, target, BufferType.CHANNEL, st)
-                val children =
-                    batch.events.map { child ->
-                        when (child) {
-                            is IrcEvent.Quit -> child.nick to child.ctx
-                            is IrcEvent.Joined -> child.nick to child.ctx
-                            else -> error("validated network batch child")
-                        }
-                    }
-                insertNetworkBatch(bufferId, batch, children, st)
-                return
-            }
+            if (origin.isHistorical) return
             if (!origin.mutatesSessionState) return
             val st = stateFor(networkId)
             val affected = LinkedHashMap<Long, MutableList<Pair<String, MessageContext>>>()
@@ -2856,17 +2789,6 @@ class EventProcessor
             resolvedInviteIds.forEach { notifier.onInvitationResolved(it) }
         }
 
-        private suspend fun onHistoricalJoined(
-            networkId: Long,
-            e: IrcEvent.Joined,
-        ) {
-            val st = stateFor(networkId)
-            val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
-            // History uses msgid/exact identity. Attaching the current live membership-cycle alias to
-            // an old replay could otherwise coalesce two genuine JOIN cycles.
-            insertSystem(bufferId, e.ctx, MessageKind.JOIN, e.nick, "${e.nick} joined", isSelf = e.isSelf)
-        }
-
         private suspend fun onParted(
             networkId: Long,
             e: IrcEvent.Parted,
@@ -2894,15 +2816,6 @@ class EventProcessor
             }
         }
 
-        private suspend fun onHistoricalParted(
-            networkId: Long,
-            e: IrcEvent.Parted,
-        ) {
-            val st = stateFor(networkId)
-            val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
-            insertSystem(bufferId, e.ctx, MessageKind.PART, e.nick, "${e.nick} left" + (e.reason?.let { " ($it)" } ?: ""), isSelf = e.isSelf)
-        }
-
         private suspend fun onQuit(
             networkId: Long,
             e: IrcEvent.Quit,
@@ -2923,15 +2836,6 @@ class EventProcessor
             if (e.ctx.batchId == null) {
                 journalAcrossActiveSnapshots(networkId, buffers.toSet(), RosterDelta.DeferredQuit(e))
             }
-        }
-
-        private suspend fun onHistoricalQuit(
-            networkId: Long,
-            e: IrcEvent.Quit,
-            target: String?,
-        ) {
-            val bufferId = historicalTargetBuffer(networkId, target) ?: return
-            insertSystem(bufferId, e.ctx, MessageKind.QUIT, e.nick, "${e.nick} quit" + (e.reason?.let { " ($it)" } ?: ""))
         }
 
         /** AWAY has no channel target, so fan it out to channels where the nick is present. */
@@ -3045,15 +2949,6 @@ class EventProcessor
                     account = account,
                 )
             }
-        }
-
-        private suspend fun onHistoricalNickChanged(
-            networkId: Long,
-            e: IrcEvent.NickChanged,
-            target: String?,
-        ) {
-            val bufferId = historicalTargetBuffer(networkId, target) ?: return
-            insertSystem(bufferId, e.ctx, MessageKind.NICK, e.from, "${e.from} is now known as ${e.to}")
         }
 
         private suspend fun onNamesStarted(

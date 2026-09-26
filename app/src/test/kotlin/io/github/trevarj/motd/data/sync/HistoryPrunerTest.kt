@@ -3,6 +3,7 @@ package io.github.trevarj.motd.data.sync
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.HistoryGapEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
@@ -39,10 +40,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/**
- * Retention keeps a room at its newest N rows and leaves it fetchable: the completion flags reopen,
- * the protocol cursor is forgotten, and gaps below the floor go with the rows.
- */
+/** Per-room retention independently caps presence and non-presence without losing paging boundaries. */
 @RunWith(RobolectricTestRunner::class)
 class HistoryPrunerTest {
     private lateinit var db: MotdDatabase
@@ -94,6 +92,121 @@ class HistoryPrunerTest {
             assertFalse(cursor.historyComplete)
             assertNull(cursor.oldestServerTime)
             assertEquals(listOf(gapAbove), db.historyGapDao().forRoom(id).map { it.id })
+        }
+
+    @Test
+    fun presenceAndConversationHaveIndependentPerRoomCaps() =
+        runTest {
+            val presenceHeavy = room("#presence", rows = 2)
+            db.messageDao().insertAll(
+                (3..7).map {
+                    message(presenceHeavy, "join-$it", serverTime = it * 1_000L, dedupKey = "join-$it", kind = MessageKind.JOIN)
+                },
+            )
+            val chatHeavy = room("#chat", rows = 5)
+            val presenceKinds =
+                listOf(
+                    MessageKind.JOIN,
+                    MessageKind.PART,
+                    MessageKind.QUIT,
+                    MessageKind.NICK,
+                    MessageKind.AWAY,
+                    MessageKind.BACK,
+                    MessageKind.NETSPLIT,
+                    MessageKind.NETJOIN,
+                )
+            db.messageDao().insertAll(
+                presenceKinds.mapIndexed { index, kind ->
+                    message(chatHeavy, "presence-$index", serverTime = (index + 6) * 1_000L, dedupKey = "chat-presence-$index", kind = kind)
+                },
+            )
+            db.bufferDao().markHistoryComplete(presenceHeavy)
+            db.historyCursorDao().upsert(
+                HistoryCursorEntity(roomId = presenceHeavy, oldestMsgid = "old", oldestServerTime = 1, historyComplete = true),
+            )
+            db.historyGapDao().insert(
+                HistoryGapEntity(roomId = presenceHeavy, olderMsgid = null, olderServerTime = 500, newerMsgid = null, newerServerTime = 900),
+            )
+            val gapAfterChat =
+                db.historyGapDao().insert(
+                    HistoryGapEntity(roomId = presenceHeavy, olderMsgid = null, olderServerTime = 2_000, newerMsgid = null, newerServerTime = 3_000),
+                )
+
+            assertEquals(12, pruner.prune(null, channelRows = 2, queryRows = null))
+
+            assertEquals(listOf("#presence-1", "#presence-2", "join-6", "join-7"), texts(presenceHeavy))
+            assertEquals(listOf("#chat-4", "#chat-5", "presence-6", "presence-7"), texts(chatHeavy))
+            assertFalse(db.bufferDao().rawById(presenceHeavy)!!.historyComplete)
+            assertEquals(1_000L, db.bufferDao().rawById(presenceHeavy)!!.oldestFetchedTime)
+            assertEquals(1_000L, db.messageDao().oldestBoundary(presenceHeavy)?.serverTime)
+            assertNull(db.historyCursorDao().byRoom(presenceHeavy)!!.oldestServerTime)
+            assertEquals(listOf(gapAfterChat), db.historyGapDao().forRoom(presenceHeavy).map { it.id })
+        }
+
+    @Test
+    fun presenceOnlyRoomReopensAtOldestSurvivingPresence() =
+        runTest {
+            val id = room("#only-presence", rows = 0)
+            db.messageDao().insertAll(
+                (1..5).map {
+                    message(id, "join-$it", serverTime = it * 1_000L, dedupKey = "join-$it", kind = MessageKind.JOIN)
+                },
+            )
+            db.bufferDao().markHistoryComplete(id)
+            db.historyCursorDao().upsert(HistoryCursorEntity(roomId = id, oldestMsgid = "old", oldestServerTime = 1, historyComplete = true))
+            db.historyGapDao().insert(
+                HistoryGapEntity(roomId = id, olderMsgid = null, olderServerTime = 2_000, newerMsgid = null, newerServerTime = 3_000),
+            )
+            val retainedGap =
+                db.historyGapDao().insert(
+                    HistoryGapEntity(roomId = id, olderMsgid = null, olderServerTime = 4_000, newerMsgid = null, newerServerTime = 5_000),
+                )
+
+            assertEquals(3, pruner.prune(null, channelRows = 2, queryRows = null))
+
+            assertEquals(listOf("join-4", "join-5"), texts(id))
+            assertEquals(4_000L, db.bufferDao().rawById(id)!!.oldestFetchedTime)
+            assertEquals(4_000L, db.messageDao().oldestBoundary(id)?.serverTime)
+            assertFalse(db.bufferDao().rawById(id)!!.historyComplete)
+            assertNull(db.historyCursorDao().byRoom(id)!!.oldestServerTime)
+            assertFalse(db.historyCursorDao().byRoom(id)!!.historyComplete)
+            assertEquals(listOf(retainedGap), db.historyGapDao().forRoom(id).map { it.id })
+        }
+
+    @Test
+    fun protectedOldRowsAndMixedTimestampFloorsPreserveActualOldest() =
+        runTest {
+            val id = room("#mixed", rows = 0)
+            db.messageDao().insertAll(
+                listOf(
+                    message(id, "old-chat", serverTime = 1_000, dedupKey = "old-chat", pendingLabel = "sending"),
+                    message(id, "old-join", serverTime = 2_000, dedupKey = "old-join", kind = MessageKind.JOIN, pendingLabel = "sending-join"),
+                    message(id, "drop-join-1", serverTime = 3_000, dedupKey = "drop-join-1", kind = MessageKind.JOIN),
+                    message(id, "drop-chat", serverTime = 3_500, dedupKey = "drop-chat"),
+                    message(id, "drop-join-2", serverTime = 4_000, dedupKey = "drop-join-2", kind = MessageKind.JOIN),
+                    message(id, "chat-1", serverTime = 8_500, dedupKey = "chat-1"),
+                    message(id, "join-1", serverTime = 9_000, dedupKey = "join-1", kind = MessageKind.JOIN),
+                    message(id, "join-2", serverTime = 9_000, dedupKey = "join-2", kind = MessageKind.JOIN),
+                    message(id, "chat-2", serverTime = 10_000, dedupKey = "chat-2"),
+                ),
+            )
+            db.bufferDao().markHistoryComplete(id)
+            db.historyCursorDao().upsert(HistoryCursorEntity(roomId = id, oldestMsgid = "old", oldestServerTime = 1, historyComplete = true))
+            db.historyGapDao().insert(
+                HistoryGapEntity(roomId = id, olderMsgid = null, olderServerTime = 500, newerMsgid = null, newerServerTime = 900),
+            )
+            val retainedGap =
+                db.historyGapDao().insert(
+                    HistoryGapEntity(roomId = id, olderMsgid = null, olderServerTime = 3_000, newerMsgid = null, newerServerTime = 4_000),
+                )
+
+            assertEquals(3, pruner.prune(null, channelRows = 2, queryRows = null))
+
+            assertEquals(listOf("old-chat", "old-join", "chat-1", "join-1", "join-2", "chat-2"), texts(id))
+            assertEquals(1_000L, db.bufferDao().rawById(id)!!.oldestFetchedTime)
+            assertEquals(1_000L, db.messageDao().oldestBoundary(id)?.serverTime)
+            assertNull(db.historyCursorDao().byRoom(id)!!.oldestServerTime)
+            assertEquals(listOf(retainedGap), db.historyGapDao().forRoom(id).map { it.id })
         }
 
     @Test

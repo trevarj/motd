@@ -4313,15 +4313,15 @@ class EventProcessorTest {
             assertEquals(2, pagingList(bufferId).count { it.text == "same" })
         }
 
-    // --- self-join idempotency across replays (bug 8) ---
+    // --- live self-join idempotency ---
 
     @Test
-    fun selfJoin_idempotent_acrossReplaysAndReconnects() =
+    fun selfJoin_idempotent_acrossRepeatedLiveJoins() =
         runTest {
             // Live self-join (no msgid).
             processor.process(networkId, IrcEvent.Joined(ctx(msgid = null, time = 1000), "me", "#chan", null, null, isSelf = true))
             val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
-            // Buffer reopen → CHATHISTORY event-playback replays the self-join with a msgid + new time.
+            // A repeated live self-join with a msgid still belongs to the same membership cycle.
             processor.process(networkId, IrcEvent.Joined(ctx(msgid = "j-play", time = 1000), "me", "#chan", null, null, isSelf = true))
             // Reconnect → another live self-join, no msgid, different time.
             processor.process(networkId, IrcEvent.Joined(ctx(msgid = null, time = 9999), "me", "#chan", null, null, isSelf = true))
@@ -4371,7 +4371,7 @@ class EventProcessorTest {
         }
 
     @Test
-    fun selfJoinAfterKickStartsNewCycleWithoutHistoryReplayCoalescingIt() =
+    fun selfJoinAfterKickStartsNewCycleWithoutImportingHistoricalJoin() =
         runTest {
             val firstJoin =
                 IrcEvent.Joined(
@@ -4396,30 +4396,6 @@ class EventProcessorTest {
             val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
             assertEquals(2, pagingList(bufferId).count { it.kind == MessageKind.JOIN })
             assertEquals(1, pagingList(bufferId).count { it.kind == MessageKind.KICK })
-        }
-
-    @Test
-    fun historyFirstSelfJoinConvergesWithLaterLiveReconnectJoin() =
-        runTest {
-            val historyJoin =
-                IrcEvent.Joined(
-                    ctx(msgid = "history-join", time = 1_000).copy(batchId = "history"),
-                    "me",
-                    "#chan",
-                    null,
-                    null,
-                    true,
-                )
-            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(historyJoin)))
-            processor.process(
-                networkId,
-                IrcEvent.Joined(ctx(msgid = null, time = 9_999), "me", "#chan", null, null, true),
-            )
-
-            val bufferId = db.bufferDao().byName(networkId, "#chan")!!.id
-            val joins = pagingList(bufferId).filter { it.kind == MessageKind.JOIN }
-            assertEquals(1, joins.size)
-            assertEquals("history-join", joins.single().msgid)
         }
 
     @Test
@@ -4777,6 +4753,14 @@ class EventProcessorTest {
             )
             assertEquals(1, pagingList(one.id).count { it.kind == MessageKind.NETJOIN })
             assertEquals(0, pagingList(one.id).count { it.kind == MessageKind.JOIN })
+            processor.process(networkId, IrcEvent.Joined(ctx("live-join", 21_000), "Carol", "#one", null, null, false))
+            processor.process(networkId, IrcEvent.NickChanged(ctx("live-nick", 22_000), "Carol", "Caroline", false))
+            processor.process(networkId, IrcEvent.Parted(ctx("live-part", 23_000), "Bob", "#one", null, false))
+            processor.process(networkId, IrcEvent.Quit(ctx("live-quit", 24_000), "Caroline", "bye"))
+            assertEquals(
+                setOf(MessageKind.JOIN, MessageKind.NICK, MessageKind.PART, MessageKind.QUIT),
+                pagingList(one.id).filter { it.msgid?.startsWith("live-") == true }.map { it.kind }.toSet(),
+            )
         }
 
     @Test
@@ -5368,7 +5352,7 @@ class EventProcessorTest {
         }
 
     @Test
-    fun nativePlaybackPersistsHistoricalStateWithoutOverwritingCurrentSessionState() =
+    fun nativePlaybackKeepsSubstantiveEventsAndOmitsHistoricalPresenceWithoutChangingSession() =
         runTest {
             processor.process(networkId, IrcEvent.Joined(ctx("self-join"), "me", "#chan", null, null, true))
             processor.process(networkId, IrcEvent.TopicChanged(ctx("current-topic", 2_000), "#chan", "current", "alice"))
@@ -5381,34 +5365,54 @@ class EventProcessorTest {
                     target = "#chan",
                     items =
                         listOf(
-                            IrcEvent.PlaybackItem(
-                                IrcEvent.TopicChanged(
-                                    ctx("old-topic", 1_000).copy(batchId = "znc"),
-                                    "#chan",
-                                    "old",
-                                    "bob",
-                                ),
-                                ordinal = 0,
+                            IrcEvent.TopicChanged(ctx("old-topic", 1_000).copy(batchId = "znc"), "#chan", "old", "bob"),
+                            IrcEvent.Joined(ctx("old-join", 1_100).copy(batchId = "znc"), "historical-user", "#chan", null, null, false),
+                            IrcEvent.Parted(ctx("old-part", 1_101), "historical-user", "#chan", null, false),
+                            IrcEvent.Quit(ctx("old-quit", 1_102), "historical-user", null),
+                            IrcEvent.NickChanged(ctx("old-nick", 1_103), "historical-user", "old-user", false),
+                            IrcEvent.ChatMessage(ctx("old-action", 1_104), IrcEvent.ChatKind.ACTION, Prefix("bob"), "#chan", "waves", false, null),
+                            IrcEvent.Kicked(ctx("old-kick", 1_105), "bob", "#chan", "op", null, false),
+                            IrcEvent.NetworkBatch(
+                                IrcEvent.NetworkBatchKind.NETJOIN,
+                                "a.example",
+                                "b.example",
+                                listOf(IrcEvent.Joined(ctx("old-netjoin", 1_106), "historical-user", "#chan", null, null, false)),
+                                target = "#chan",
                             ),
-                            IrcEvent.PlaybackItem(
-                                IrcEvent.Joined(
-                                    ctx("old-join", 1_100).copy(batchId = "znc"),
-                                    "historical-user",
-                                    "#chan",
-                                    null,
-                                    null,
-                                    false,
-                                ),
-                                ordinal = 1,
-                            ),
+                        ).mapIndexed { ordinal, event -> IrcEvent.PlaybackItem(event, ordinal) },
+                ),
+            )
+            processor.process(
+                networkId,
+                IrcEvent.ReplayBatch(
+                    "#chan",
+                    listOf(
+                        IrcEvent.Quit(ctx("replay-quit", 1_107), "alice", null),
+                        IrcEvent.NetworkBatch(
+                            IrcEvent.NetworkBatchKind.NETSPLIT,
+                            "a.example",
+                            "b.example",
+                            listOf(IrcEvent.Quit(ctx("replay-split", 1_108), "alice", "split")),
+                            target = "#chan",
                         ),
+                        IrcEvent.ChatMessage(ctx("replay-chat", 1_109), IrcEvent.ChatKind.PRIVMSG, Prefix("bob"), "#chan", "still here", false, null),
+                    ),
                 ),
             )
 
             assertEquals("current", db.bufferDao().observeById(room.id)!!.topic)
             assertTrue(db.memberDao().allNow(room.id).none { it.nick == "historical-user" })
-            assertEquals(1, pagingList(room.id).count { it.kind == MessageKind.TOPIC && it.text == "topic: old" })
-            assertEquals(1, pagingList(room.id).count { it.kind == MessageKind.JOIN && it.sender == "historical-user" })
+            val rows = pagingList(room.id)
+            assertEquals(1, rows.count { it.kind == MessageKind.TOPIC && it.text == "topic: old" })
+            assertEquals(1, rows.count { it.msgid == "old-action" && it.kind == MessageKind.ACTION })
+            assertEquals(1, rows.count { it.msgid == "old-kick" && it.kind == MessageKind.KICK })
+            assertEquals(1, rows.count { it.msgid == "replay-chat" && it.kind == MessageKind.PRIVMSG })
+            assertTrue(
+                rows.none {
+                    it.msgid in setOf("old-join", "old-part", "old-quit", "old-nick", "replay-quit") ||
+                        it.kind == MessageKind.NETJOIN || it.kind == MessageKind.NETSPLIT
+                },
+            )
         }
 
     @Test
@@ -5677,7 +5681,9 @@ class EventProcessorTest {
                     "#room",
                     listOf(
                         IrcEvent.ChatMessage(ctx("history-chat", 1_000), IrcEvent.ChatKind.PRIVMSG, Prefix("Alice"), "#room", "old me mention", false, null),
+                        IrcEvent.ChatMessage(ctx("history-action", 1_000), IrcEvent.ChatKind.ACTION, Prefix("Alice"), "#room", "waves", false, null),
                         IrcEvent.Joined(ctx("history-join", 1_001), "Eve", "#room", "old-account", "Old Eve", false),
+                        IrcEvent.Joined(ctx("history-other-join", 1_001), "Eve", "#ghost", null, null, false),
                         IrcEvent.Parted(ctx("history-part", 1_002), "Alice", "#room", "old part", false),
                         IrcEvent.Kicked(ctx("history-kick", 1_003), "Bob", "#room", "old-op", "old kick", false),
                         IrcEvent.Quit(ctx("history-quit", 1_004), "Alice", "old quit"),
@@ -5706,6 +5712,13 @@ class EventProcessorTest {
                             listOf(IrcEvent.Quit(ctx("history-split", 1_010), "Bob", "split")),
                             target = "#room",
                         ),
+                        IrcEvent.NetworkBatch(
+                            IrcEvent.NetworkBatchKind.NETJOIN,
+                            "old-a.example",
+                            "old-b.example",
+                            listOf(IrcEvent.Joined(ctx("history-netjoin", 1_011), "Eve", "#room", null, null, false)),
+                            target = "#room",
+                        ),
                     ),
                 )
             recording.process(networkId, history)
@@ -5716,6 +5729,7 @@ class EventProcessorTest {
             assertEquals(aliceBefore, db.userDao().byNick(networkId, "alice"))
             assertNull(db.userDao().byNick(networkId, "eve"))
             assertNull(db.userDao().byNick(networkId, "mallory"))
+            assertNull(db.bufferDao().byName(networkId, "#ghost"))
             assertEquals(networksBefore, db.networkDao().allNow())
             assertEquals(InviteState.JOINING, db.messageDao().byId(inviteBefore.id)?.inviteState)
             assertTrue(notifications.isEmpty())
@@ -5735,18 +5749,21 @@ class EventProcessorTest {
             val rows = pagingList(bufferBefore.id)
             listOf(
                 MessageKind.PRIVMSG,
-                MessageKind.JOIN,
-                MessageKind.PART,
+                MessageKind.ACTION,
                 MessageKind.KICK,
-                MessageKind.QUIT,
-                MessageKind.NICK,
                 MessageKind.MODE,
                 MessageKind.TOPIC,
                 MessageKind.INVITE,
-                MessageKind.NETSPLIT,
             ).forEach { kind -> assertTrue("missing historical $kind row", rows.any { it.kind == kind }) }
+            assertTrue(
+                rows.none {
+                    it.serverTime < 10_000L &&
+                        it.kind in setOf(MessageKind.JOIN, MessageKind.PART, MessageKind.QUIT, MessageKind.NICK, MessageKind.NETSPLIT, MessageKind.NETJOIN)
+                },
+            )
             assertEquals(1, rows.count { it.msgid == "history-chat" })
-            assertEquals(1, rows.count { it.msgid == "history-join" })
+            assertEquals(1, rows.count { it.msgid == "history-action" })
+            assertEquals(1, rows.count { it.msgid == "history-kick" })
             assertEquals(InviteState.HISTORICAL, rows.single { it.msgid == "history-invite" }.inviteState)
 
             recording.process(
@@ -7099,8 +7116,8 @@ class EventProcessorTest {
             assertEquals(100L, cursor?.oldestServerTime)
             assertEquals("winner-newest", cursor?.newestMsgid)
             assertEquals(1_000L, cursor?.newestServerTime)
-            assertEquals(winner.id, db.messageDao().byMsgid(winner.id, "page-context")?.bufferId)
-            assertEquals(null, db.messageDao().byMsgid(loser.id, "page-context"))
+            assertNull(db.messageDao().byMsgid(winner.id, "page-context"))
+            assertNull(db.messageDao().byMsgid(loser.id, "page-context"))
             assertNull(db.historyCursorDao().byRoom(loser.id))
         }
 

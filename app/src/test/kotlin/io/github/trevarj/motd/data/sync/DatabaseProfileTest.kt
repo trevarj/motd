@@ -15,9 +15,9 @@ class DatabaseProfileTest {
             totalRows = 10_200,
             rooms =
                 listOf(
-                    PrunableRoom(BufferType.CHANNEL, 8_000),
-                    PrunableRoom(BufferType.CHANNEL, 100),
-                    PrunableRoom(BufferType.QUERY, 1_900),
+                    PrunableRoom(BufferType.CHANNEL, 8_000, 0),
+                    PrunableRoom(BufferType.CHANNEL, 100, 0),
+                    PrunableRoom(BufferType.QUERY, 1_900, 0),
                 ),
         )
 
@@ -26,6 +26,22 @@ class DatabaseProfileTest {
         // 200 fixed + min(8000,500) + min(100,500) + min(1900, 500*5)
         assertEquals(1_000L * (200 + 500 + 100 + 1_900), profile.projectedBytes(500))
         assertEquals(1_000L * 10_200, profile.projectedBytes(100_000))
+    }
+
+    @Test
+    fun skewedPresenceCapsIndependentlyAndInvertsProjection() {
+        val skewed =
+            DatabaseProfile(
+                liveBytes = 1_000L * 10_200,
+                totalRows = 10_200,
+                rooms = listOf(PrunableRoom(BufferType.CHANNEL, 10_000, 9_000)),
+            )
+        assertEquals(1_000L * (200 + 500 + 500), skewed.projectedBytes(500))
+        val target = 1_000L * (200 + 1_000 + 1_200)
+        assertEquals(1_200, skewed.channelRowsFor(target))
+        assertTrue(skewed.projectedBytes(1_200) <= target)
+        assertTrue(skewed.projectedBytes(1_201) > target)
+        assertEquals(9_000, skewed.channelRowsFor(Long.MAX_VALUE))
     }
 
     @Test

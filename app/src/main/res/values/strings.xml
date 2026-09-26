@@ -1101,7 +1101,7 @@
     <string name="settings_history_sync_write_failed">Could not save history sync setting.</string>
     <string name="settings_history_overview_section">Overview</string>
     <string name="settings_history_db_size">Database</string>
-    <string name="settings_history_messages">Messages</string>
+    <string name="settings_history_messages">Stored rows</string>
     <string name="settings_history_projected">After pruning</string>
     <string name="settings_history_projected_off">Never pruned</string>
     <string name="settings_history_apply">Apply</string>
@@ -1130,7 +1130,7 @@
     <string name="network_settings_resync_unsupported">This network doesn\'t provide history</string>
     <string name="network_settings_resync_failed">Couldn\'t sync history</string>
     <string name="settings_history_retention">Keep on this device</string>
-    <string name="settings_history_retention_desc">Messages beyond this many per chat are removed from the phone and fetched from the bouncer again when you scroll back. Only networks with server-side history are trimmed.</string>
+    <string name="settings_history_retention_desc">Keep up to this many chat and other non-presence rows per chat, plus the same number of live presence rows. Older chat can be fetched again only while the server retains it; old presence is not restored. Only networks with server-side history are pruned.</string>
     <string name="settings_history_retention_off">Everything</string>
     <string name="settings_history_retention_off_desc">Never prune local history</string>
     <string name="settings_history_retention_compact">Compact</string>
@@ -1143,8 +1143,8 @@
     <string name="settings_history_retention_custom_desc">Your own number, set with the fields below</string>
     <string name="settings_history_retention_custom_value">Custom · %1$s per channel</string>
     <string name="settings_retention_planner_analyzing">Measuring the database…</string>
-    <string name="settings_retention_planner_note">Direct messages keep %1$d× as many as channels. Sizes are estimates.</string>
-    <string name="settings_retention_rows_label">Messages kept per channel</string>
+    <string name="settings_retention_planner_note">Direct messages keep %1$d× as many rows per category as channels. Sizes are estimates.</string>
+    <string name="settings_retention_rows_label">Non-presence rows kept per channel</string>
     <string name="settings_retention_size_label">Database size target (MB)</string>
     <string name="settings_auto_compact">Compact automatically</string>
     <string name="settings_auto_compact_desc">After pruning, rewrite the database file once at least this much space can be freed. The rewrite briefly locks the database.</string>
