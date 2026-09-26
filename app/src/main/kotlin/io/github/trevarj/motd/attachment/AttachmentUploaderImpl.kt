@@ -289,7 +289,7 @@ class AttachmentUploaderImpl
                             )
                     ) {
                         is SojuFileHostEndpoint.Usable -> advertised.url
-                        is SojuFileHostEndpoint.OffHost -> throw UploadException(sojuOffHostMessage(advertised))
+                        is SojuFileHostEndpoint.OffHost -> throw OffHostUploadException(sojuOffHostMessage(advertised), networkId)
                         SojuFileHostEndpoint.Unavailable -> throw UploadException("This IRC network is not advertising a Soju file host.")
                     }
                 val acceptPost = probeAcceptPost(route, endpoint)
@@ -715,9 +715,14 @@ private fun AttachmentSource.sizeOrNull() =
         is AttachmentSource.LocalFile -> size
     }
 
-class UploadException(
+open class UploadException(
     message: String,
 ) : IOException(message)
+
+class OffHostUploadException(
+    message: String,
+    val networkId: Long,
+) : UploadException(message)
 
 internal class UploadProgressThrottle(
     startedAtNanos: Long,

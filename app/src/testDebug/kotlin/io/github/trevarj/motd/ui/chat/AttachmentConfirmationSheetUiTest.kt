@@ -43,6 +43,7 @@ import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.AttachmentUploader
+import io.github.trevarj.motd.attachment.OffHostUploadException
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.SOJU_FILEHOST_TOKEN
 import io.github.trevarj.motd.attachment.UploadProgress
@@ -53,6 +54,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -63,6 +65,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
+import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -203,6 +206,37 @@ class AttachmentConfirmationSheetUiTest {
     }
 
     @Test
+    fun offHostUploadOffersNetworkSettingsButOrdinaryFailureDoesNot() {
+        val networkId = 42L
+        var failure: Throwable = IOException("Server rejected upload")
+        var openedNetwork: Long? = null
+        showConditionalAttachments(
+            currentDraft = "A text attachment",
+            networkId = networkId,
+            startWithCurrentDraft = true,
+            sojuFileHostAvailable = { true },
+            uploadFailure = { failure },
+            onOpenNetworkSettings = { openedNetwork = it },
+        )
+        compose.onNodeWithText(context.getString(R.string.upload_destination_change)).performClick()
+        compose.onNodeWithText(AttachmentBackend.SOJU_FILEHOST.label).performScrollTo().performClick()
+
+        compose.onNodeWithTag("attachment_upload").performClick()
+        compose.onNodeWithText("Server rejected upload").assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.upload_soju_open_network_settings)).assertDoesNotExist()
+
+        compose.runOnIdle {
+            failure = OffHostUploadException("File host differs from network host", networkId)
+        }
+        compose.onNodeWithText(context.getString(R.string.upload_retry)).performClick()
+        compose.onNodeWithText("File host differs from network host").assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.upload_soju_off_host_override)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.upload_soju_open_network_settings)).performClick()
+        compose.runOnIdle { assertEquals(networkId, openedNetwork) }
+        compose.onNodeWithTag("attachment_owner").assertDoesNotExist()
+    }
+
+    @Test
     fun voiceDestinationsOfferEveryBinaryBackendOnceAndSelectDefaultSoju() {
         val config = PasteBackendConfig()
         var selected: PasteBackendConfig? = config
@@ -279,6 +313,10 @@ class AttachmentConfirmationSheetUiTest {
         directFileTransferAvailable: Boolean = false,
         sojuFileHostAvailable: () -> Boolean = { false },
         preferSojuFileHost: Boolean = false,
+        networkId: Long? = null,
+        startWithCurrentDraft: Boolean = false,
+        uploadFailure: (() -> Throwable)? = null,
+        onOpenNetworkSettings: (Long) -> Unit = {},
     ) {
         val viewModel =
             AttachmentViewModel(
@@ -301,7 +339,16 @@ class AttachmentConfirmationSheetUiTest {
                             source: AttachmentSource,
                             config: PasteBackendConfig,
                             context: AttachmentUploadContext,
-                        ): Flow<UploadProgress> = error("Source selection must not upload")
+                        ): Flow<UploadProgress> =
+                            if (uploadFailure == null) {
+                                error("Source selection must not upload")
+                            } else {
+                                flow {
+                                    assertEquals(networkId, context.networkId)
+                                    assertEquals(AttachmentBackend.SOJU_FILEHOST, config.backend)
+                                    throw uploadFailure()
+                                }
+                            }
 
                         override suspend fun delete(record: UploadRecord): Unit = error("Source selection must not delete uploads")
                     },
@@ -323,13 +370,15 @@ class AttachmentConfirmationSheetUiTest {
                             AttachmentSheets(
                                 open = open,
                                 currentDraft = currentDraft,
-                                networkId = null,
+                                networkId = networkId,
                                 sojuFileHostAvailable = sojuFileHostAvailable(),
+                                startWithCurrentDraft = startWithCurrentDraft,
                                 preferSojuFileHost = preferSojuFileHost,
                                 directFileTransferAvailable = directFileTransferAvailable,
                                 onDismiss = { open = false },
                                 onInsertUrl = {},
                                 onReplaceDraft = {},
+                                onOpenNetworkSettings = onOpenNetworkSettings,
                                 onDirectFile = { directFile = it },
                                 viewModel = viewModel,
                             )

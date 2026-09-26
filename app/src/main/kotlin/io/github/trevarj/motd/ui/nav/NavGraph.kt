@@ -315,6 +315,9 @@ fun MotdNavGraph(
                                 },
                                 onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
                                 onOpenAccountSetup = { navController.navigate(AccountSetupRoute(it)) },
+                                onOpenNetworkSettings = {
+                                    navController.navigate(NetworkSettingsRoute(it, NetworkSettingsTarget.CONNECTION))
+                                },
                             )
                         }
                     },
@@ -582,6 +585,9 @@ fun MotdNavGraph(
                 // Member "Message" action opens the DM's QUERY buffer.
                 onOpenBuffer = { navController.navigate(ChatRoute(it)) },
                 onCreateInvite = { navController.navigate(CreateInviteRoute(it)) },
+                onOpenNetworkSettings = {
+                    navController.navigate(NetworkSettingsRoute(it, NetworkSettingsTarget.CONNECTION))
+                },
             )
         }
         composable<CreateInviteRoute> { entry ->

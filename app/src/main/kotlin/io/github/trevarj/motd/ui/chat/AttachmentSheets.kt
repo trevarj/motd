@@ -198,6 +198,7 @@ fun AttachmentSheets(
     onDismiss: () -> Unit,
     onInsertUrl: (String) -> Unit,
     onReplaceDraft: (String) -> Unit,
+    onOpenNetworkSettings: (Long) -> Unit,
     onDirectFile: (Uri) -> Unit = {},
     viewModel: AttachmentViewModel = hiltViewModel(),
 ) {
@@ -488,7 +489,7 @@ fun AttachmentSheets(
         )
     }
 
-    error?.let { message ->
+    error?.let { failure ->
         AlertDialog(
             onDismissRequest = {
                 viewModel.clearError()
@@ -496,7 +497,22 @@ fun AttachmentSheets(
             },
             icon = { Icon(Icons.Outlined.CloudUpload, null) },
             title = { Text(stringResource(R.string.upload_failed)) },
-            text = { Text(message) },
+            text = {
+                Column {
+                    Text(failure.message)
+                    failure.offHostNetworkId?.let { id ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(stringResource(R.string.upload_soju_off_host_override))
+                        TextButton(
+                            onClick = {
+                                viewModel.clearError()
+                                onDismiss()
+                                onOpenNetworkSettings(id)
+                            },
+                        ) { Text(stringResource(R.string.upload_soju_open_network_settings)) }
+                    }
+                }
+            },
             confirmButton = {
                 lastAttempt?.let { request ->
                     TextButton(onClick = {

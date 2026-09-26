@@ -732,6 +732,8 @@
     <string name="upload_soju_unavailable">This chat is not connected to a Soju file host.</string>
     <string name="upload_soju_private_title">Network file host</string>
     <string name="upload_soju_private_desc">The upload uses this chat network\'s authenticated Soju file host. Retention follows the server policy.</string>
+    <string name="upload_soju_off_host_override">If you trust the advertised host, add it as this network’s Trusted file host in Connection settings. This permits sending your network credentials to that host.</string>
+    <string name="upload_soju_open_network_settings">Open this network’s Connection settings</string>
     <string name="upload_uploading">Uploading…</string>
     <string name="upload_progress_of">%1$s of %2$s</string>
     <string name="upload_failed">Upload failed</string>

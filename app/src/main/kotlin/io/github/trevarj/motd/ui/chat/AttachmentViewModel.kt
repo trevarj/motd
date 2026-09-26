@@ -7,6 +7,7 @@ import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.AttachmentUploader
+import io.github.trevarj.motd.attachment.OffHostUploadException
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
@@ -20,6 +21,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+data class AttachmentError(
+    val message: String,
+    val offHostNetworkId: Long? = null,
+)
+
 @HiltViewModel
 class AttachmentViewModel
     @Inject
@@ -31,8 +37,8 @@ class AttachmentViewModel
         val recent = prefs.recentUploads.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
         private val _progress = MutableStateFlow<UploadProgress?>(null)
         val progress: StateFlow<UploadProgress?> = _progress.asStateFlow()
-        private val _error = MutableStateFlow<String?>(null)
-        val error: StateFlow<String?> = _error.asStateFlow()
+        private val _error = MutableStateFlow<AttachmentError?>(null)
+        val error: StateFlow<AttachmentError?> = _error.asStateFlow()
         private var job: Job? = null
 
         fun upload(
@@ -56,7 +62,11 @@ class AttachmentViewModel
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (failure: Throwable) {
-                        _error.value = failure.message ?: "Upload failed"
+                        _error.value =
+                            AttachmentError(
+                                failure.message ?: "Upload failed",
+                                (failure as? OffHostUploadException)?.networkId,
+                            )
                     } finally {
                         _progress.value = null
                     }
@@ -64,7 +74,7 @@ class AttachmentViewModel
         }
 
         fun fail(message: String) {
-            _error.value = message
+            _error.value = AttachmentError(message)
         }
 
         fun cancel() {
@@ -81,6 +91,6 @@ class AttachmentViewModel
                 runCatching {
                     uploader.delete(record)
                     prefs.removeUpload(record.url)
-                }.onFailure { _error.value = it.message ?: "Delete failed" }
+                }.onFailure { _error.value = AttachmentError(it.message ?: "Delete failed") }
             }
     }

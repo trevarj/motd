@@ -104,6 +104,7 @@ fun ChannelInfoScreen(
     onBack: () -> Unit = {},
     onOpenBuffer: (Long) -> Unit = {},
     onCreateInvite: (Long) -> Unit = {},
+    onOpenNetworkSettings: (Long) -> Unit = {},
     viewModel: ChannelInfoViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(bufferId) { viewModel.init(bufferId) }
@@ -307,6 +308,7 @@ fun ChannelInfoScreen(
                 viewModel.setAvatarUrl(it)
                 avatarUploadOpen = false
             },
+            onOpenNetworkSettings = onOpenNetworkSettings,
         )
     }
 

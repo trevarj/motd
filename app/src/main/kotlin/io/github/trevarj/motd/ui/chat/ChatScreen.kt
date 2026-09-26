@@ -336,6 +336,7 @@ fun ChatScreen(
     // Round 5: /list opens the channel browser. Body lands in WP-V3.
     onOpenChannelList: (Long) -> Unit = {},
     onOpenAccountSetup: (Long) -> Unit = {},
+    onOpenNetworkSettings: (Long) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
     voiceViewModel: VoiceMessageViewModel = hiltViewModel(),
     onOpenConversationList: (() -> Unit)? = null,
@@ -678,6 +679,7 @@ fun ChatScreen(
         onHistorySyncModeSelected = viewModel::setHistorySyncModeOverride,
         diagnostics = viewModel.diagnostics,
         avatarEvents = viewModel.avatarEvents,
+        onOpenNetworkSettings = onOpenNetworkSettings,
     )
 
     contextPreparation?.let { result ->
@@ -857,6 +859,7 @@ fun ChatScreen(
                 viewModel.setAvatarUrl(it)
                 avatarUploadOpen = false
             },
+            onOpenNetworkSettings = onOpenNetworkSettings,
         )
     }
 }
@@ -1039,6 +1042,7 @@ fun ChatContent(
     onStartWatch: (ChannelWatchDuration) -> Unit = {},
     onStopWatch: () -> Unit = {},
     onOpenConversationList: (() -> Unit)? = null,
+    onOpenNetworkSettings: (Long) -> Unit = {},
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
     val buffer = state.buffer
@@ -3257,6 +3261,7 @@ fun ChatContent(
                 uploadCurrentDraftDirectly = false
                 sharedFile = null
             },
+            onOpenNetworkSettings = onOpenNetworkSettings,
             onInsertUrl = {
                 composerText =
                     io.github.trevarj.motd.ui.components
