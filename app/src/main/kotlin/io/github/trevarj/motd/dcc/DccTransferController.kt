@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.core.net.toUri
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.DccDirection
@@ -107,7 +108,7 @@ class DccTransferControllerImpl
                 if (privateCache) {
                     resultCache.discard(destinationUri, transferId)
                 } else {
-                    transfer.destinationUri?.let { resultCache.discard(Uri.parse(it), transferId) }
+                    transfer.destinationUri?.let { resultCache.discard(it.toUri(), transferId) }
                 }
                 val now = System.currentTimeMillis()
                 transfers.update(

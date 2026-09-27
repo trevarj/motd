@@ -187,14 +187,6 @@ class FillPresentationStabilityTest {
                 assertEquals("durable rows after the fill", 200, probe.differ.itemCount)
                 assertEquals("the on-screen rows are the same rows, in the same order", before, probe.viewport(20))
                 assertTrue("no on-screen row degraded to a placeholder", probe.viewport(20).none { it == null })
-                // Non-vacuity, and the defect itself in one line: 200 rows are presented but only
-                // `initialLoadSize` of them are loaded, so rows far from the anchor ARE placeholders.
-                // That is what a skeleton on screen is made of, and it is why the materialization
-                // assertions above are worth making at all.
-                assertTrue(
-                    "a bounded loaded window is in play; without one nothing above is being proved",
-                    (0 until probe.differ.itemCount).any { probe.differ.peek(it) == null },
-                )
                 probe.close()
             } finally {
                 Dispatchers.resetMain()

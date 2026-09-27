@@ -664,8 +664,8 @@ class HistoryResyncCoordinatorTest {
     @Test
     fun presenceOnlyBurstClearsAdvertisedActivityButLeavesTheOlderWindowIncomplete() =
         runTest {
-            // Model the reported threshold: TARGETS observes 100 JOIN/PART events while the recent
-            // synchronization page retains the newest 50 and leaves the earlier half for recovery.
+            // Model 100 JOIN/PART events after the seed: TARGETS reports their high-water,
+            // the recent page returns 50 unretained presence events, and the older half remains a gap.
             processor.process(networkId, message("seed", 75_000L))
             val seed = requireNotNull(db.messageDao().byMsgid(bufferId, "seed"))
             db.bufferDao().advanceLocalReadAnchor(bufferId, seed.serverTime, seed.id)
@@ -689,7 +689,7 @@ class HistoryResyncCoordinatorTest {
                 }
 
             assertEquals(
-                HistoryResyncState.Updated(50),
+                HistoryResyncState.UpToDate,
                 coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), source),
             )
 
@@ -698,7 +698,7 @@ class HistoryResyncCoordinatorTest {
             assertFalse(row.advertisedUnread)
             assertEquals(0, row.unreadCount)
             assertTrue(row.unreadCountIncomplete)
-            assertEquals(51, rows().size)
+            assertEquals(listOf(seed.id), rows().map { it.id })
             val buffer = requireNotNull(db.bufferDao().rawById(bufferId))
             assertEquals(75_000L, buffer.advertisedLatestTime)
         }

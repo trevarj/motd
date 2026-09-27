@@ -3,6 +3,8 @@ package io.github.trevarj.motd
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -281,6 +283,12 @@ class MessagePagingDemandUiTest {
             compose.setContent {
                 val collected = pages.collectAsLazyPagingItems(Dispatchers.Main.immediate)
                 val timeline = rememberLazyListState()
+                val followingAtBottom =
+                    remember(timeline) {
+                        derivedStateOf {
+                            timeline.firstVisibleItemIndex == 0 && timeline.firstVisibleItemScrollOffset == 0
+                        }
+                    }
                 SideEffect {
                     items = collected
                     listState = timeline
@@ -291,7 +299,7 @@ class MessagePagingDemandUiTest {
                     policy = policy,
                     enabled = true,
                     scopeId = bufferId,
-                    followingAtBottom = timeline.firstVisibleItemIndex == 0 && timeline.firstVisibleItemScrollOffset == 0,
+                    followingAtBottom = followingAtBottom.value,
                     onAnchor = { viewport.value = it },
                 )
                 MotdTheme(dynamicColor = false) {
@@ -484,6 +492,12 @@ class MessagePagingDemandUiTest {
             compose.setContent {
                 val collected = pages.collectAsLazyPagingItems(Dispatchers.Main.immediate)
                 val timeline = rememberLazyListState()
+                val followingAtBottom =
+                    remember(timeline) {
+                        derivedStateOf {
+                            timeline.firstVisibleItemIndex == 0 && timeline.firstVisibleItemScrollOffset == 0
+                        }
+                    }
                 SideEffect {
                     items = collected
                     listState = timeline
@@ -494,7 +508,7 @@ class MessagePagingDemandUiTest {
                     policy = policy,
                     enabled = true,
                     scopeId = bufferId,
-                    followingAtBottom = timeline.firstVisibleItemIndex == 0 && timeline.firstVisibleItemScrollOffset == 0,
+                    followingAtBottom = followingAtBottom.value,
                     onAnchor = { viewport.value = it },
                 )
                 MotdTheme(dynamicColor = false) {
