@@ -13,10 +13,12 @@ import io.github.trevarj.motd.data.db.InvitationEventRow
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
+import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.BufferRepository
@@ -213,6 +215,7 @@ class ChatListViewModel
         dickordLabsPrefs: DickordLabsPrefs,
         private val savedStateHandle: SavedStateHandle,
         private val appVisibility: AppVisibility,
+        bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
     ) : ViewModel() {
         init {
             // The coordinator is process-scoped and observes persisted pending closes, so creating a
@@ -312,13 +315,14 @@ class ChatListViewModel
         val state: StateFlow<ChatListState> =
             combine(
                 chatListData,
-                networkRepository.observeNetworks(),
+                networkRepository.observeNetworks().combine(bouncerKindPrefs.zncNetworkIds, ::Pair),
                 connectionManager.connectionStates.combine(connectionManager.presenceStates) { connection, presence ->
                     connection to presence
                 },
                 settingsAndLabs,
                 selectionAndOrder,
-            ) { listData, networks, connectionAndPresence, settingsAndLabs, selectionAndOrder ->
+            ) { listData, networksAndZncIds, connectionAndPresence, settingsAndLabs, selectionAndOrder ->
+                val (networks, zncNetworkIds) = networksAndZncIds
                 val (rows, invitationEvents, folders) = listData
                 val (connection, presence) = connectionAndPresence
                 val (settingsAndOnboarding, dickordEnabled) = settingsAndLabs
@@ -328,7 +332,7 @@ class ChatListViewModel
                 val validSelection = selected?.takeIf { id -> networks.any { it.id == id } }
                 if (validSelection != selected) setSelection(validSelection)
 
-                val storedDrawerRows = buildDrawerRows(networks, rows.filterNot(ChatListRow::archived), connection)
+                val storedDrawerRows = buildDrawerRows(networks, rows.filterNot(ChatListRow::archived), connection, zncNetworkIds)
                 // The stored rows already display the pending arrangement: drop the overlay so stored
                 // state is authoritative again. The settled check tolerates rows that differ from what
                 // the write predicted (a network deleted or added in between) — the overlay must always

@@ -3,7 +3,7 @@ package io.github.trevarj.motd.ui.settings.bouncer
 import io.github.trevarj.motd.bouncer.BouncerServResult
 import io.github.trevarj.motd.bouncer.redactBouncerServReply
 
-enum class BouncerControlTab { NETWORKS, CHANNELS, ACCOUNT, ADMIN, CONSOLE }
+enum class BouncerControlTab { OVERVIEW, NETWORKS, CHANNELS, ACCOUNT, ADMIN, CONSOLE }
 
 data class BouncerTranscriptEntry(
     val sender: String,

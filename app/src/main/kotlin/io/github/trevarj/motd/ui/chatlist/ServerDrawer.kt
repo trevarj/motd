@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material.icons.outlined.Settings
@@ -122,6 +123,7 @@ fun ServerDrawerContent(
     onDisconnect: (Long) -> Unit,
     onServerMessages: (Long) -> Unit,
     onOpenNetworkSettings: (Long) -> Unit,
+    onOpenBouncerSettings: (Long) -> Unit = {},
     onAddNetwork: () -> Unit,
     onToggleOffline: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -286,6 +288,7 @@ fun ServerDrawerContent(
                             onDisconnect = { onDisconnect(row.networkId) },
                             onServerMessages = { onServerMessages(row.networkId) },
                             onOpenNetworkSettings = { onOpenNetworkSettings(row.networkId) },
+                            onOpenBouncerSettings = { onOpenBouncerSettings(row.networkId) },
                             onMove = { delta -> onMoveNetwork(row.networkId, delta) },
                             onDragStart = {
                                 draggedNetworkId = row.networkId
@@ -449,6 +452,7 @@ private fun DrawerNetworkItem(
     onDisconnect: () -> Unit,
     onServerMessages: () -> Unit,
     onOpenNetworkSettings: () -> Unit,
+    onOpenBouncerSettings: () -> Unit,
     modifier: Modifier = Modifier,
     dragging: Boolean = false,
     canMoveUp: Boolean = false,
@@ -545,9 +549,21 @@ private fun DrawerNetworkItem(
                         contentAlignment = Alignment.Center,
                     ) {
                         if (!iconLoaded) {
-                            IrcNetworkBadge(
-                                size = 40.dp,
-                            )
+                            if (row.role == NetworkRole.BOUNCER_ROOT || row.isZnc) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Dns,
+                                    contentDescription = stringResource(R.string.drawer_bouncer_icon),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier =
+                                        Modifier
+                                            .size(40.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                            .padding(8.dp),
+                                )
+                            } else {
+                                IrcNetworkBadge(size = 40.dp)
+                            }
                         }
                         iconUrl?.let { url ->
                             val iconRequest =
@@ -727,6 +743,16 @@ private fun DrawerNetworkItem(
                     menuOpen = false
                 },
             )
+            if (row.role == NetworkRole.BOUNCER_ROOT) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.drawer_bouncer_settings)) },
+                    leadingIcon = { Icon(Icons.Outlined.Dns, contentDescription = null) },
+                    onClick = {
+                        onOpenBouncerSettings()
+                        menuOpen = false
+                    },
+                )
+            }
         }
     }
 }

@@ -1,6 +1,6 @@
 package io.github.trevarj.motd.ui.settings.bouncer
 
-import androidx.compose.animation.Crossfade
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
@@ -31,10 +33,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -60,9 +60,10 @@ import io.github.trevarj.motd.bouncer.ChannelCommandFields
 import io.github.trevarj.motd.bouncer.NetworkCommandFields
 import io.github.trevarj.motd.bouncer.UserCommandFields
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.settings.SettingsGroup
+import io.github.trevarj.motd.ui.settings.SettingsNavigationRow
 import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
-import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 data class BouncerControlCallbacks(
@@ -158,9 +159,22 @@ fun BouncerNetworksContent(
     callbacks: BouncerControlCallbacks,
 ) {
     val ready = state.rootState is IrcClientState.Ready
+    val back = {
+        if (state.selectedTab == BouncerControlTab.OVERVIEW) onBack() else callbacks.onSelectTab(BouncerControlTab.OVERVIEW)
+    }
+    BackHandler(onBack = back)
+    val title =
+        when (state.selectedTab) {
+            BouncerControlTab.OVERVIEW -> R.string.bouncer_control_title
+            BouncerControlTab.NETWORKS -> R.string.bouncer_tab_networks
+            BouncerControlTab.CHANNELS -> R.string.bouncer_tab_channels
+            BouncerControlTab.ACCOUNT -> R.string.bouncer_tab_account
+            BouncerControlTab.ADMIN -> R.string.bouncer_tab_admin
+            BouncerControlTab.CONSOLE -> R.string.bouncer_tab_console
+        }
     SettingsScaffold(
-        title = stringResource(R.string.bouncer_control_title),
-        onBack = onBack,
+        title = stringResource(title),
+        onBack = back,
         scroll = false,
         pagePadding = false,
         topActions = {
@@ -173,17 +187,22 @@ fun BouncerNetworksContent(
             if (state.loading || state.probing || state.commandBusy) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
-            ConnectionAndCapabilityCard(state, callbacks)
-            BouncerTabs(state.selectedTab, state.capabilities.administrator, callbacks.onSelectTab)
-            Box(Modifier.fillMaxWidth().weight(1f)) {
-                // The tab indicator glides; crossfade the panel beneath it at the micro tempo so
-                // the content doesn't teleport while the indicator animates.
-                Crossfade(
-                    targetState = state.selectedTab,
-                    animationSpec = MotdMotion.microFadeIn,
-                    label = "bouncer_panel",
-                ) { tab ->
-                    when (tab) {
+            if (state.selectedTab != BouncerControlTab.OVERVIEW) {
+                ConnectionAndCapabilityHeader(state, callbacks)
+            }
+            if (state.notice != null || state.error != null) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    state.notice?.let { Text(it, modifier = Modifier.testTag("bouncer_command_notice")) }
+                    state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("bouncer_command_error")) }
+                    TextButton(onClick = callbacks.onClearFeedback) { Text(stringResource(R.string.action_dismiss)) }
+                }
+            }
+            if (state.selectedTab == BouncerControlTab.OVERVIEW) {
+                BouncerOverview(state, callbacks)
+            } else {
+                Box(Modifier.fillMaxWidth().weight(1f)) {
+                    when (state.selectedTab) {
+                        BouncerControlTab.OVERVIEW -> Unit
                         BouncerControlTab.NETWORKS -> NetworksPanel(state, ready, callbacks)
                         BouncerControlTab.CHANNELS -> ChannelsPanel(state, ready, callbacks)
                         BouncerControlTab.ACCOUNT -> AccountPanel(state, ready, callbacks)
@@ -214,80 +233,160 @@ fun BouncerNetworksContent(
 }
 
 @Composable
-private fun ConnectionAndCapabilityCard(
+private fun ConnectionAndCapabilityHeader(
     state: BouncerNetworksUiState,
     callbacks: BouncerControlCallbacks,
 ) {
     val ready = state.rootState is IrcClientState.Ready
-    val container =
-        when {
-            !ready -> MaterialTheme.colorScheme.errorContainer
-            !state.capabilities.verified -> MaterialTheme.colorScheme.tertiaryContainer
-            else -> MaterialTheme.colorScheme.secondaryContainer
-        }
-    Surface(
-        color = container,
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.weight(1f)) {
             Text(
-                when {
-                    !ready -> stringResource(R.string.bouncer_offline_cached)
-                    state.capabilities.verified -> stringResource(R.string.bouncer_commands_verified)
-                    else -> stringResource(R.string.bouncer_commands_unverified)
+                when (val connection = state.rootState) {
+                    is IrcClientState.Ready -> stringResource(R.string.network_settings_status_ready, connection.nick)
+                    IrcClientState.Connecting -> stringResource(R.string.network_settings_status_connecting)
+                    IrcClientState.Registering -> stringResource(R.string.network_settings_status_registering)
+                    IrcClientState.Disconnected -> stringResource(R.string.network_settings_status_disconnected)
+                    is IrcClientState.Failed -> stringResource(R.string.network_settings_status_failed, connection.reason)
                 },
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!ready) {
-                    Button(onClick = callbacks.onConnect) { Text(stringResource(R.string.bouncer_connect)) }
-                } else if (!state.capabilities.verified) {
-                    OutlinedButton(onClick = callbacks.onProbe, enabled = !state.probing) {
-                        Text(stringResource(R.string.bouncer_probe_again))
-                    }
-                }
-            }
-            state.notice?.let {
+            if (ready) {
                 Text(
-                    text = it,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.testTag("bouncer_command_notice"),
+                    stringResource(
+                        if (state.capabilities.verified) R.string.bouncer_commands_verified else R.string.bouncer_commands_unverified,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            state.error?.let {
-                Text(it, color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = callbacks.onClearFeedback) { Text(stringResource(R.string.action_dismiss)) }
+        }
+        if (state.rootState == IrcClientState.Disconnected || state.rootState is IrcClientState.Failed) {
+            TextButton(onClick = callbacks.onConnect) {
+                Text(stringResource(if (state.rootState is IrcClientState.Failed) R.string.onboarding_connect_retry else R.string.bouncer_connect))
+            }
+        } else if (ready && !state.capabilities.verified) {
+            TextButton(onClick = callbacks.onProbe, enabled = !state.probing) {
+                Text(stringResource(R.string.bouncer_probe_again))
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BouncerTabs(
-    selected: BouncerControlTab,
-    administrator: Boolean,
-    onSelect: (BouncerControlTab) -> Unit,
+private fun BouncerOverview(
+    state: BouncerNetworksUiState,
+    callbacks: BouncerControlCallbacks,
 ) {
-    val tabs =
-        buildList {
-            add(BouncerControlTab.NETWORKS to R.string.bouncer_tab_networks)
-            add(BouncerControlTab.CHANNELS to R.string.bouncer_tab_channels)
-            add(BouncerControlTab.ACCOUNT to R.string.bouncer_tab_account)
-            if (administrator) add(BouncerControlTab.ADMIN to R.string.bouncer_tab_admin)
-            add(BouncerControlTab.CONSOLE to R.string.bouncer_tab_console)
+    val ready = state.rootState is IrcClientState.Ready
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .testTag("bouncer_overview")
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(state.root?.name ?: "Soju", style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    when (val connection = state.rootState) {
+                        is IrcClientState.Ready -> stringResource(R.string.network_settings_status_ready, connection.nick)
+                        IrcClientState.Connecting -> stringResource(R.string.network_settings_status_connecting)
+                        IrcClientState.Registering -> stringResource(R.string.network_settings_status_registering)
+                        IrcClientState.Disconnected -> stringResource(R.string.network_settings_status_disconnected)
+                        is IrcClientState.Failed -> stringResource(R.string.network_settings_status_failed, connection.reason)
+                    },
+                )
+                if (state.rootState == IrcClientState.Disconnected || state.rootState is IrcClientState.Failed) {
+                    Button(onClick = callbacks.onConnect) {
+                        Text(
+                            stringResource(
+                                if (state.rootState is IrcClientState.Failed) R.string.onboarding_connect_retry else R.string.bouncer_connect,
+                            ),
+                        )
+                    }
+                } else if (ready && !state.capabilities.verified) {
+                    OutlinedButton(onClick = callbacks.onProbe, enabled = !state.probing) {
+                        Text(stringResource(R.string.bouncer_probe_again))
+                    }
+                }
+            }
         }
-    val visibleSelected = tabs.indexOfFirst { it.first == selected }.coerceAtLeast(0)
-    // Scrollable so each tab sizes to its label instead of being equally
-    // divided across the width (which truncates labels once Console is added).
-    PrimaryScrollableTabRow(selectedTabIndex = visibleSelected, edgePadding = 0.dp) {
-        tabs.forEach { (tab, label) ->
-            Tab(
-                selected = tab == selected,
-                onClick = { onSelect(tab) },
-                text = { Text(stringResource(label), maxLines = 1) },
-                modifier = Modifier.testTag("bouncer_tab_${tab.name.lowercase()}"),
+        SettingsGroup {
+            SettingsNavigationRow(
+                title = stringResource(R.string.bouncer_tab_networks),
+                summary =
+                    when {
+                        state.loading -> {
+                            stringResource(R.string.bouncer_overview_loading)
+                        }
+
+                        state.listingFailed -> {
+                            stringResource(R.string.bouncer_overview_listing_failed)
+                        }
+
+                        !ready && state.rows.isEmpty() -> {
+                            stringResource(R.string.bouncer_overview_connect_to_load)
+                        }
+
+                        state.rows.isEmpty() && state.listingLoaded -> {
+                            stringResource(R.string.bouncer_overview_no_networks)
+                        }
+
+                        state.rows.isEmpty() -> {
+                            stringResource(R.string.bouncer_overview_loading)
+                        }
+
+                        else -> {
+                            val count =
+                                stringResource(
+                                    R.string.bouncer_overview_counts,
+                                    state.rows.size,
+                                    state.rows.count { it.childNetworkId != null },
+                                )
+                            if (ready) count else stringResource(R.string.bouncer_overview_last_loaded, count)
+                        }
+                    },
+                modifier = Modifier.testTag("bouncer_overview_networks"),
+                onClick = { callbacks.onSelectTab(BouncerControlTab.NETWORKS) },
+            )
+            if (state.listingFailed) {
+                TextButton(onClick = callbacks.onRefresh, enabled = ready && !state.loading, modifier = Modifier.padding(horizontal = 16.dp)) {
+                    Text(stringResource(R.string.action_refresh))
+                }
+            }
+        }
+        SettingsGroup {
+            SettingsNavigationRow(
+                title = stringResource(R.string.bouncer_tab_channels),
+                modifier = Modifier.testTag("bouncer_overview_channels"),
+                onClick = { callbacks.onSelectTab(BouncerControlTab.CHANNELS) },
+            )
+            SettingsNavigationRow(
+                title = stringResource(R.string.bouncer_tab_account),
+                modifier = Modifier.testTag("bouncer_overview_account"),
+                onClick = { callbacks.onSelectTab(BouncerControlTab.ACCOUNT) },
+            )
+            if (state.capabilities.administrator) {
+                SettingsNavigationRow(
+                    title = stringResource(R.string.bouncer_tab_admin),
+                    modifier = Modifier.testTag("bouncer_overview_admin"),
+                    onClick = { callbacks.onSelectTab(BouncerControlTab.ADMIN) },
+                )
+            }
+            SettingsNavigationRow(
+                title = stringResource(R.string.bouncer_tab_console),
+                modifier = Modifier.testTag("bouncer_overview_console"),
+                onClick = { callbacks.onSelectTab(BouncerControlTab.CONSOLE) },
             )
         }
     }
@@ -314,6 +413,49 @@ private fun NetworksPanel(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        if (state.rows.isEmpty()) {
+            item {
+                Text(
+                    stringResource(
+                        when {
+                            state.loading -> R.string.bouncer_overview_loading
+                            state.listingFailed -> R.string.bouncer_overview_listing_failed
+                            !enabled -> R.string.bouncer_overview_connect_to_load
+                            state.listingLoaded -> R.string.bouncer_overview_no_networks
+                            else -> R.string.bouncer_overview_loading
+                        },
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (state.listingFailed) {
+                    TextButton(onClick = callbacks.onRefresh, enabled = enabled && !state.loading) {
+                        Text(stringResource(R.string.action_refresh))
+                    }
+                }
+            }
+        }
+        if (state.rows.isNotEmpty() && (state.loading || state.listingFailed || !enabled)) {
+            item {
+                if (state.loading || state.listingFailed) {
+                    Text(stringResource(if (state.loading) R.string.bouncer_overview_loading else R.string.bouncer_overview_listing_failed))
+                }
+                Text(
+                    stringResource(
+                        R.string.bouncer_overview_last_loaded,
+                        stringResource(
+                            R.string.bouncer_overview_counts,
+                            state.rows.size,
+                            state.rows.count { it.childNetworkId != null },
+                        ),
+                    ),
+                )
+                if (state.listingFailed) {
+                    TextButton(onClick = callbacks.onRefresh, enabled = enabled && !state.loading) {
+                        Text(stringResource(R.string.action_refresh))
+                    }
+                }
+            }
         }
         if (state.rows.isNotEmpty()) {
             item {

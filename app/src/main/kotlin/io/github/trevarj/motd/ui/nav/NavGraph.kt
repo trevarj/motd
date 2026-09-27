@@ -749,6 +749,7 @@ private fun ChatListPane(
         onOpenFolderEditor = { navController.navigate(FolderEditorRoute(it)) },
         onOpenOnboarding = { navController.navigate(OnboardingRoute) },
         onOpenNetworkSettings = { navController.navigate(NetworkSettingsRoute(it)) },
+        onOpenBouncerSettings = { navController.navigate(BouncerNetworksRoute(rootNetworkId = it)) },
         onOpenAddNetwork = { navController.navigate(AddNetworkRoute) },
         onCreateContactInvite = { navController.navigate(CreateContactInviteRoute(it)) },
         onScanInvite = { navController.navigate(QrInviteScannerRoute) },

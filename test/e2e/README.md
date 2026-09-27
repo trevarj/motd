@@ -80,6 +80,11 @@ The four journeys cover:
   frozen read state, canonical ordering, exactly-once recovery, and deliberate read advancement; and
 - navigation, settings, themes, and Soju control-center panels.
 
+The Soju Control Center opens on an overview; its Networks, Channels, Account,
+and Console cards open full-page panels, and Back returns to the overview.
+The networks drawer marks Soju roots and configured ZNC connections with a
+bouncer badge; only a Soju root offers the Bouncer Settings shortcut.
+
 The production Activity, Room database, services, TLS transport, and bouncer
 connection are used. The fixture replaces only the remote IRC network. This is
 therefore strong evidence for functional Android behavior, including semantics,

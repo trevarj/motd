@@ -106,6 +106,54 @@ class BouncerNetworksViewModelTest {
             assertTrue(viewModel.state.value.rootState is IrcClientState.Ready)
         }
 
+    @Test
+    fun `losing administrator capability returns admin detail to overview`() =
+        runTest(dispatcher) {
+            val root = rootNetwork()
+            val repository =
+                object : NetworkRepository {
+                    override fun observeNetworks() = flowOf(listOf(root))
+
+                    override suspend fun addNetwork(n: NetworkEntity) = error("unused")
+
+                    override suspend fun updateNetwork(n: NetworkEntity) = error("unused")
+
+                    override suspend fun deleteNetwork(id: Long) = error("unused")
+
+                    override suspend fun reorderNetworks(orderedIds: List<Long>) = error("unused")
+
+                    override suspend fun networkById(id: Long) = root
+
+                    override suspend fun childrenOf(rootId: Long) = emptyList<NetworkEntity>()
+                }
+            var capabilities = BouncerServCapabilities(setOf("server status"), verified = true)
+            val serv =
+                object : BouncerServClient by FakeBouncerServClient {
+                    override suspend fun probe(rootNetworkId: Long) = capabilities
+                }
+            val viewModel =
+                BouncerNetworksViewModel(
+                    networkRepository = repository,
+                    connectionManager =
+                        FakeConnectionManager(
+                            mapOf(root.id to IrcClientState.Ready("motd", emptySet(), emptyMap())),
+                        ),
+                    bouncerServ = serv,
+                    messageDao = database.messageDao(),
+                )
+
+            viewModel.init(root.id)
+            runCurrent()
+            assertTrue(viewModel.state.value.capabilities.administrator)
+            viewModel.selectTab(BouncerControlTab.ADMIN)
+            capabilities = BouncerServCapabilities(setOf("network create"), verified = true)
+            viewModel.probeCapabilities()
+            runCurrent()
+
+            assertEquals(BouncerControlTab.OVERVIEW, viewModel.state.value.selectedTab)
+            assertTrue(!viewModel.state.value.capabilities.administrator)
+        }
+
     private class FakeConnectionManager(
         initial: Map<Long, IrcClientState>,
     ) : NoopConnectionManager() {

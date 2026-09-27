@@ -1253,6 +1253,8 @@
     <string name="drawer_move_down">Move down</string>
     <string name="drawer_server_messages">Server messages</string>
     <string name="drawer_network_settings">Network settings</string>
+    <string name="drawer_bouncer_icon">Bouncer</string>
+    <string name="drawer_bouncer_settings">Bouncer Settings</string>
     <string name="drawer_state_connecting">Connecting…</string>
     <string name="drawer_state_registering">Registering…</string>
     <string name="drawer_state_connected">Connected</string>
@@ -1382,9 +1384,14 @@
     <string name="bouncer_tab_account">Account</string>
     <string name="bouncer_tab_admin">Admin</string>
     <string name="bouncer_tab_console">Console</string>
-    <string name="bouncer_offline_cached">Offline. Cached BouncerServ output remains available; reconnect to make changes.</string>
-    <string name="bouncer_commands_verified">BouncerServ commands verified for this connection.</string>
-    <string name="bouncer_commands_unverified">BouncerServ capabilities could not be verified. Guided actions are paused; the console remains available.</string>
+    <string name="bouncer_overview_loading">Loading networks…</string>
+    <string name="bouncer_overview_connect_to_load">Connect to load networks</string>
+    <string name="bouncer_overview_no_networks">No networks yet. Open Networks to add one.</string>
+    <string name="bouncer_overview_listing_failed">Could not load networks</string>
+    <string name="bouncer_overview_counts">%1$d listed · %2$d shown in motd</string>
+    <string name="bouncer_overview_last_loaded">Last loaded: %1$s</string>
+    <string name="bouncer_commands_verified">Commands verified</string>
+    <string name="bouncer_commands_unverified">Commands unverified</string>
     <string name="bouncer_probe_again">Check commands again</string>
     <string name="bouncer_networks_help">Networks come from soju’s machine-readable listing. “Shown in motd” controls the local chat mirror; editing changes the bouncer itself.</string>
     <string name="bouncer_network_create_title">Add network</string>

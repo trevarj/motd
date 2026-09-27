@@ -8,11 +8,13 @@ import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
+import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.Settings
@@ -40,6 +42,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -65,8 +68,9 @@ class ChatListReorderTest {
         val networks = MutableStateFlow(initial)
         val writes = mutableListOf<List<Long>>()
         var failWrites = false
+        var observedNetworkEmissions = 0
 
-        override fun observeNetworks(): Flow<List<NetworkEntity>> = networks
+        override fun observeNetworks(): Flow<List<NetworkEntity>> = networks.onEach { observedNetworkEmissions++ }
 
         override suspend fun addNetwork(n: NetworkEntity): Long = 0
 
@@ -87,6 +91,18 @@ class ChatListReorderTest {
         fun publishLastWrite() {
             val order = writes.last()
             networks.value = networks.value.sortedBy { order.indexOf(it.id) }
+        }
+    }
+
+    private class FakeBouncerKindPrefs : BouncerKindPrefs {
+        override val zncNetworkIds = MutableStateFlow<Set<Long>>(emptySet())
+
+        override suspend fun markZnc(networkId: Long) {
+            zncNetworkIds.value += networkId
+        }
+
+        override suspend fun clear(networkId: Long) {
+            zncNetworkIds.value -= networkId
         }
     }
 
@@ -238,62 +254,100 @@ class ChatListReorderTest {
             net(5, "hackint"),
         )
 
-    private fun vm(repository: NetworkRepository) =
-        ChatListViewModel(
-            bufferRepository = FakeBufferRepository(),
-            networkRepository = repository,
-            connectionManager = FakeConnectionManager(),
-            gapFiller = NoopHistoryGapFiller,
-            historyResync =
-                object : HistoryResyncController {
-                    override fun syncStatus(bufferId: Long) = flowOf<HistorySyncStatus>(HistorySyncStatus.Idle)
+    private fun vm(
+        repository: NetworkRepository,
+        bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
+    ) = ChatListViewModel(
+        bufferRepository = FakeBufferRepository(),
+        networkRepository = repository,
+        connectionManager = FakeConnectionManager(),
+        gapFiller = NoopHistoryGapFiller,
+        historyResync =
+            object : HistoryResyncController {
+                override fun syncStatus(bufferId: Long) = flowOf<HistorySyncStatus>(HistorySyncStatus.Idle)
 
-                    override suspend fun reconcileBuffer(
-                        buffer: BufferEntity,
-                        client: IrcClient,
-                        preserveUnread: Boolean,
-                        isCurrent: () -> Boolean,
-                    ) = HistoryResyncState.Idle
+                override suspend fun reconcileBuffer(
+                    buffer: BufferEntity,
+                    client: IrcClient,
+                    preserveUnread: Boolean,
+                    isCurrent: () -> Boolean,
+                ) = HistoryResyncState.Idle
 
-                    override suspend fun reconcilePendingMessage(
-                        buffer: BufferEntity,
-                        client: IrcClient,
-                        isCurrent: () -> Boolean,
-                    ) = HistoryResyncState.Idle
-                },
-            channelCloseCoordinator =
-                object : ChannelCloseCoordinator {
-                    override fun start() = Unit
+                override suspend fun reconcilePendingMessage(
+                    buffer: BufferEntity,
+                    client: IrcClient,
+                    isCurrent: () -> Boolean,
+                ) = HistoryResyncState.Idle
+            },
+        channelCloseCoordinator =
+            object : ChannelCloseCoordinator {
+                override fun start() = Unit
 
-                    override suspend fun requestClose(bufferId: Long) = Unit
-                },
-            readMarkerRepository =
-                object : ReadMarkerSnapshotter {
-                    override suspend fun latestIncoming(bufferIds: Collection<Long>): List<BufferReadMarker> = emptyList()
-                },
-            settingsRepository = FakeSettingsRepository(),
-            onboardingPrefs =
-                object : OnboardingPrefs {
-                    override val completed = flowOf(true)
+                override suspend fun requestClose(bufferId: Long) = Unit
+            },
+        readMarkerRepository =
+            object : ReadMarkerSnapshotter {
+                override suspend fun latestIncoming(bufferIds: Collection<Long>): List<BufferReadMarker> = emptyList()
+            },
+        settingsRepository = FakeSettingsRepository(),
+        onboardingPrefs =
+            object : OnboardingPrefs {
+                override val completed = flowOf(true)
 
-                    override suspend fun markCompleted() = Unit
-                },
-            globalFeedPrefs =
-                object : GlobalFeedPrefs {
-                    override val enabled = flowOf(false)
+                override suspend fun markCompleted() = Unit
+            },
+        globalFeedPrefs =
+            object : GlobalFeedPrefs {
+                override val enabled = flowOf(false)
 
-                    override suspend fun setEnabled(enabled: Boolean) = Unit
-                },
-            dickordLabsPrefs = fakeDickordLabsPrefs(),
-            savedStateHandle = SavedStateHandle(),
-            appVisibility = AlwaysOnScreen,
-        )
+                override suspend fun setEnabled(enabled: Boolean) = Unit
+            },
+        dickordLabsPrefs = fakeDickordLabsPrefs(),
+        bouncerKindPrefs = bouncerKindPrefs,
+        savedStateHandle = SavedStateHandle(),
+        appVisibility = AlwaysOnScreen,
+    )
 
     private fun TestScope.collecting(viewModel: ChatListViewModel): Job = launch { viewModel.state.collect {} }.also { runCurrent() }
 
     private fun order(viewModel: ChatListViewModel) =
         viewModel.state.value.drawerRows
             .map(DrawerRow::networkId)
+
+    @Test
+    fun znc_preference_updates_drawer_badge_classification() =
+        runTest {
+            val repository = FakeNetworkRepository(networks)
+            val prefs = FakeBouncerKindPrefs()
+            val viewModel = vm(repository, prefs)
+            val collection = collecting(viewModel)
+            val observedBefore = repository.observedNetworkEmissions
+
+            assertEquals(
+                mapOf(1L to false, 2L to false, 3L to false, 4L to false, 5L to false),
+                viewModel.state.value.drawerRows
+                    .associate { it.networkId to it.isZnc },
+            )
+            prefs.zncNetworkIds.value = setOf(1L, 2L, 3L)
+            runCurrent()
+
+            assertEquals(
+                mapOf(1L to true, 2L to false, 3L to false, 4L to false, 5L to false),
+                viewModel.state.value.drawerRows
+                    .associate { it.networkId to it.isZnc },
+            )
+            prefs.zncNetworkIds.value = emptySet()
+            runCurrent()
+            assertEquals(
+                false,
+                viewModel.state.value.drawerRows
+                    .first { it.networkId == 1L }
+                    .isZnc,
+            )
+            assertEquals(observedBefore, repository.observedNetworkEmissions)
+            assertEquals(emptyList<List<Long>>(), repository.writes)
+            collection.cancel()
+        }
 
     @Test
     fun `a move action is persisted at once and shown before Room agrees`() =

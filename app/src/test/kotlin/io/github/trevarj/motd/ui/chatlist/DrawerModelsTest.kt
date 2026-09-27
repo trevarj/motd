@@ -122,6 +122,27 @@ class DrawerModelsTest {
         assertTrue(drawer.all { it.depth == 0 })
     }
 
+    @Test
+    fun `only configured direct id is ZNC including when roots and children are configured`() {
+        val networks =
+            listOf(
+                net(1, "ordinary"),
+                net(2, "znc"),
+                net(3, "soju", NetworkRole.BOUNCER_ROOT),
+                net(4, "child", NetworkRole.BOUNCER_CHILD, parentId = 3),
+            )
+
+        assertEquals(
+            listOf(false, false, false, false),
+            buildDrawerRows(networks, emptyList(), emptyMap()).map { it.isZnc },
+        )
+        val drawer = buildDrawerRows(networks, emptyList(), emptyMap(), zncNetworkIds = setOf(2L, 3L, 4L))
+        assertEquals(
+            mapOf(1L to false, 2L to true, 3L to false, 4L to false),
+            drawer.associate { it.networkId to it.isZnc },
+        )
+    }
+
     // -- scopeRows --
 
     @Test

@@ -109,13 +109,11 @@ internal class BouncerRobot(
 ) : BaseRobot(compose) {
     fun assertPanels() {
         scrollToAndClick("network_settings_bouncer_networks")
-        click("bouncer_tab_networks")
-        assertDisplayed("bouncer_networks_panel")
-        click("bouncer_tab_channels")
-        assertDisplayed("bouncer_channels_panel")
-        click("bouncer_tab_account")
-        assertDisplayed("bouncer_account_panel")
-        click("bouncer_tab_console")
-        assertDisplayed("bouncer_console_panel")
+        for (section in listOf("networks", "channels", "account", "console")) {
+            scrollToAndClick("bouncer_overview_$section")
+            assertDisplayed("bouncer_${section}_panel")
+            click("settings_back")
+            assertDisplayed("bouncer_overview")
+        }
     }
 }

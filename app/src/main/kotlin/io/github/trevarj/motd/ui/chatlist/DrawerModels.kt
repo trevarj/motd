@@ -23,6 +23,7 @@ data class DrawerRow(
     val iconUrl: String? = null,
     val unreadIncomplete: Boolean = false,
     val mentionsIncomplete: Boolean = false,
+    val isZnc: Boolean = false,
 )
 
 /** Rollup of unread + mention counts for a single set of non-muted rows. */
@@ -66,6 +67,7 @@ fun buildDrawerRows(
     networks: List<NetworkEntity>,
     rows: List<ChatListRow>,
     states: Map<Long, IrcClientState>,
+    zncNetworkIds: Set<Long> = emptySet(),
 ): List<DrawerRow> {
     val childrenByParent =
         networks
@@ -87,6 +89,7 @@ fun buildDrawerRows(
             state = state,
             nick = (state as? IrcClientState.Ready)?.nick,
             iconUrl = net.serverIconUrl,
+            isZnc = net.role == NetworkRole.DIRECT && net.id in zncNetworkIds,
             unread = own.unread + extra.unread,
             mentions = own.mentions + extra.mentions,
             unreadIncomplete = own.unreadIncomplete || extra.unreadIncomplete,

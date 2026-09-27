@@ -23,11 +23,13 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -165,6 +167,111 @@ class ServerDrawerUiTest {
             }
         }
         compose.onNodeWithTag("drawer_open_feed").assertIsDisplayed()
+    }
+
+    @Test
+    fun bouncer_roots_and_znc_get_distinct_badges_and_root_shortcut() {
+        val ready = IrcClientState.Ready("alice", emptySet(), emptyMap())
+        val rows =
+            listOf(
+                drawerRow(1, ready).copy(role = NetworkRole.BOUNCER_ROOT),
+                drawerRow(2, ready).copy(isZnc = true),
+                drawerRow(3, ready),
+                drawerRow(4, ready).copy(role = NetworkRole.BOUNCER_CHILD, depth = 1),
+            )
+        lateinit var selectTheme: (ColorThemePreset) -> Unit
+        var openedRootId: Long? = null
+        var networkSettingsId: Long? = null
+        var connectedColor = 0
+        var iconSurfaceColor = 0
+        compose.setContent {
+            var theme by remember { mutableStateOf(ColorThemePreset.LIGHT) }
+            selectTheme = { theme = it }
+            MotdTheme(themePreset = theme, dynamicColor = false) {
+                connectedColor = LocalMotdSemanticColors.current.success.toArgb()
+                iconSurfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.toArgb()
+                ServerDrawerContent(
+                    drawerRows = rows,
+                    selectedNetworkId = null,
+                    allUnread = 0,
+                    allMentions = 0,
+                    scopedUnreadCount = 0,
+                    allOffline = false,
+                    onSelectNetwork = {},
+                    onConnect = {},
+                    onDisconnect = {},
+                    onServerMessages = {},
+                    onOpenNetworkSettings = { networkSettingsId = it },
+                    onOpenBouncerSettings = { openedRootId = it },
+                    onAddNetwork = {},
+                    onToggleOffline = {},
+                    onOpenSettings = {},
+                    onMarkAllRead = {},
+                )
+            }
+        }
+
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        for (theme in listOf(ColorThemePreset.LIGHT, ColorThemePreset.DARK)) {
+            compose.runOnUiThread { selectTheme(theme) }
+            val icons =
+                (1L..4L).associateWith { id ->
+                    val icon =
+                        compose
+                            .onNodeWithTag("drawer_network_icon_$id", useUnmergedTree = true)
+                            .performScrollTo()
+                            .assertIsDisplayed()
+                            .assertWidthIsEqualTo(40.dp)
+                            .assertHeightIsEqualTo(40.dp)
+                            .assert(
+                                SemanticsMatcher.expectValue(
+                                    SemanticsProperties.StateDescription,
+                                    context.getString(R.string.drawer_state_connected),
+                                ),
+                            )
+                    val pixels = icon.captureToImage().asAndroidBitmap()
+                    assertEquals(iconSurfaceColor, sample(pixels, 0.5f, 0.075f))
+                    val dot =
+                        compose
+                            .onNodeWithTag("drawer_network_status_$id", useUnmergedTree = true)
+                            .assertIsDisplayed()
+                            .assertWidthIsEqualTo(14.dp)
+                            .assertHeightIsEqualTo(14.dp)
+                    val iconBounds = icon.fetchSemanticsNode().boundsInRoot
+                    val dotBounds = dot.fetchSemanticsNode().boundsInRoot
+                    assertEquals(iconBounds.right, dotBounds.right, 0.5f)
+                    assertEquals(iconBounds.bottom, dotBounds.bottom, 0.5f)
+                    assertEquals(connectedColor, sample(dot.captureToImage().asAndroidBitmap(), 0.5f, 0.25f))
+                    pixels
+                }
+            // Rasterization can shift by a subpixel between rows; verify each bouncer mark
+            // differs from both topology marks rather than requiring pixel-identical siblings.
+            for (bouncerId in 1L..2L) {
+                for (topologyId in 3L..4L) {
+                    assertTrue(
+                        "Bouncer $bouncerId must differ visually from network $topologyId",
+                        !icons.getValue(bouncerId).sameAs(icons.getValue(topologyId)),
+                    )
+                }
+            }
+            compose
+                .onAllNodesWithContentDescription(context.getString(R.string.drawer_bouncer_icon), useUnmergedTree = true)
+                .assertCountEquals(2)
+        }
+
+        val bouncerSettings = context.getString(R.string.drawer_bouncer_settings)
+        val networkSettings = context.getString(R.string.drawer_network_settings)
+        for (id in listOf(2L, 3L, 4L)) {
+            compose.onNodeWithTag("drawer_network_row_$id").performScrollTo().performTouchInput { longClick() }
+            compose.onNodeWithText(bouncerSettings).assertDoesNotExist()
+            compose.onNodeWithText(networkSettings).assertIsDisplayed().performClick()
+            compose.runOnIdle { assertEquals(id, networkSettingsId) }
+        }
+        compose.onNodeWithTag("drawer_network_row_1").performScrollTo().performTouchInput { longClick() }
+        compose.onNodeWithText(networkSettings).assertIsDisplayed()
+        compose.onNodeWithText(bouncerSettings).assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(1L, openedRootId) }
+        compose.onNodeWithText(bouncerSettings).assertDoesNotExist()
     }
 
     @Test

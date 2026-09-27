@@ -216,6 +216,7 @@ fun ChatListScreen(
     onOpenOnboarding: () -> Unit = {},
     // Round 5: drawer/network-management pass-throughs.
     onOpenNetworkSettings: (Long) -> Unit = {},
+    onOpenBouncerSettings: (Long) -> Unit = {},
     onOpenAddNetwork: () -> Unit = {},
     onCreateContactInvite: (Long?) -> Unit = {},
     onScanInvite: () -> Unit = {},
@@ -295,6 +296,7 @@ fun ChatListScreen(
         onGoOnline = viewModel::goOnline,
         onServerMessages = { networkId -> viewModel.openServerBuffer(networkId, onOpenBuffer) },
         onOpenNetworkSettings = onOpenNetworkSettings,
+        onOpenBouncerSettings = onOpenBouncerSettings,
         onOpenAddNetwork = onOpenAddNetwork,
         onCreateContactInvite = onCreateContactInvite,
         onScanInvite = onScanInvite,
@@ -381,6 +383,7 @@ fun ChatListContent(
     onGoOnline: () -> Unit = {},
     onServerMessages: (Long) -> Unit = {},
     onOpenNetworkSettings: (Long) -> Unit = {},
+    onOpenBouncerSettings: (Long) -> Unit = {},
     onOpenAddNetwork: () -> Unit = {},
     onCreateContactInvite: (Long?) -> Unit = {},
     onScanInvite: () -> Unit = {},
@@ -532,6 +535,10 @@ fun ChatListContent(
                 },
                 onOpenNetworkSettings = { id ->
                     onOpenNetworkSettings(id)
+                    scope.launch { drawerState.close() }
+                },
+                onOpenBouncerSettings = { id ->
+                    onOpenBouncerSettings(id)
                     scope.launch { drawerState.close() }
                 },
                 onAddNetwork = {

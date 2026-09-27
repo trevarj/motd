@@ -31,8 +31,10 @@ data class BouncerNetworksUiState(
     val capabilities: BouncerServCapabilities = BouncerServCapabilities(),
     val transcript: List<BouncerTranscriptEntry> = emptyList(),
     val channels: List<BouncerChannelRow> = emptyList(),
-    val selectedTab: BouncerControlTab = BouncerControlTab.NETWORKS,
+    val selectedTab: BouncerControlTab = BouncerControlTab.OVERVIEW,
     val loading: Boolean = false,
+    val listingLoaded: Boolean = false,
+    val listingFailed: Boolean = false,
     val probing: Boolean = false,
     val commandBusy: Boolean = false,
     val busyNetIds: Set<String> = emptySet(),
@@ -324,7 +326,7 @@ class BouncerNetworksViewModel
                         if (
                             _state.value.selectedTab == BouncerControlTab.ADMIN && !capabilities.administrator
                         ) {
-                            BouncerControlTab.CONSOLE
+                            BouncerControlTab.OVERVIEW
                         } else {
                             _state.value.selectedTab
                         },
@@ -339,7 +341,7 @@ class BouncerNetworksViewModel
                     emptyList()
                 } else {
                     runCatching { client.bouncerListNetworks() }.getOrElse {
-                        _state.value = _state.value.copy(loading = false, error = it.message)
+                        _state.value = _state.value.copy(loading = false, listingFailed = true, error = it.message)
                         return
                     }
                 }
@@ -354,6 +356,8 @@ class BouncerNetworksViewModel
             _state.value =
                 _state.value.copy(
                     loading = false,
+                    listingLoaded = client != null,
+                    listingFailed = false,
                     rows = mergeBouncerRows(listing, children),
                 )
         }
