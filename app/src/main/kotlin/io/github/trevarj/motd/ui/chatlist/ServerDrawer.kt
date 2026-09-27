@@ -1,10 +1,5 @@
 package io.github.trevarj.motd.ui.chatlist
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,7 +8,9 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -38,8 +35,8 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
@@ -64,6 +61,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -72,12 +70,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -96,15 +99,13 @@ import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.components.routedRemoteMediaData
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
-import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
 
 /**
- * Server-drawer content. Stateless: takes the built [DrawerRow]s + rollups and
- * emits selection / connectivity / nav callbacks. Hosted by [ChatListScreen] inside a
- * `ModalNavigationDrawer`; previewable without a ViewModel.
+ * Server-drawer content. Takes the built [DrawerRow]s + rollups and emits selection /
+ * connectivity / navigation callbacks. Only an active drag stays local.
  */
 @Composable
 fun ServerDrawerContent(
@@ -127,7 +128,7 @@ fun ServerDrawerContent(
     onOpenFeed: () -> Unit = {},
     onOpenMentions: () -> Unit = {},
     mentionsEnabled: Boolean = true,
-    /** Global Feed lab flag; the feed row exists only while the lab is on. */
+    /** Global Feed lab flag; its shortcut exists only while the lab is on. */
     globalFeedEnabled: Boolean = false,
     onMarkAllRead: () -> Unit,
     onCreateContactInvite: (Long?) -> Unit = {},
@@ -173,82 +174,98 @@ fun ServerDrawerContent(
 
     ModalDrawerSheet {
         Column(modifier = Modifier.fillMaxHeight()) {
-            Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                // Compact brand header: bubble mark plus the app name in the same plain bold platform
-                // typography as the chat-list title bar, kept smaller than a navigation row so the
-                // network list, rather than the branding, owns the drawer's visual hierarchy.
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
-                ) {
-                    Image(
-                        painter = painterResource(R.drawable.motd_logo_mark),
-                        contentDescription = null,
-                        colorFilter =
-                            ColorFilter.colorMatrix(
-                                ColorMatrix(ceramicLogoColorMatrix(MaterialTheme.colorScheme.onSurface.toArgb())),
-                            ),
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.size(26.dp).testTag("drawer_logo_mark"),
-                    )
-                    Text(
-                        text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-
-                // The mention shortcut stays above the networks it merges.
-                if (mentionsEnabled) {
-                    NavigationDrawerItem(
-                        icon = { Icon(Icons.Outlined.AlternateEmail, contentDescription = null) },
-                        label = {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(stringResource(R.string.mentions_title))
-                                if (allMentions > 0) MentionBadge(allMentions, lowerBound = allMentionsIncomplete)
-                            }
-                        },
-                        selected = false,
-                        onClick = onOpenMentions,
-                        modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_open_mentions"),
-                    )
-                }
-
-                // Global Feed stays above the per-network rows it merges. Lab-gated:
-                // hiding the row is what keeps the feed unreachable while the lab is off.
-                if (globalFeedEnabled) {
-                    NavigationDrawerItem(
-                        icon = { Icon(Icons.Outlined.DynamicFeed, contentDescription = null) },
-                        label = { Text(stringResource(R.string.drawer_feed)) },
-                        selected = false,
-                        onClick = onOpenFeed,
-                        modifier =
-                            Modifier
-                                .padding(horizontal = 12.dp)
-                                .testTag("drawer_open_feed"),
-                    )
-                }
-
-                // 2. Networks section header. The unscoped ("all chats") state is simply "no network
-                // selected" — reflected by the title-bar wordmark — so there is no standalone row for
-                // it. A subtle clear-filter action appears only while scoped.
-                NetworksHeader(
-                    totalUnread = allUnread,
-                    totalMentions = allMentions,
-                    unreadIncomplete = allUnreadIncomplete,
-                    mentionsIncomplete = allMentionsIncomplete,
-                    scoped = selectedNetworkId != null,
-                    onClearFilter = { onSelectNetwork(null) },
+            // Compact brand header, kept smaller than a navigation row.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.motd_logo_mark),
+                    contentDescription = null,
+                    colorFilter =
+                        ColorFilter.colorMatrix(
+                            ColorMatrix(ceramicLogoColorMatrix(MaterialTheme.colorScheme.onSurface.toArgb())),
+                        ),
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(26.dp).testTag("drawer_logo_mark"),
                 )
+                Text(
+                    text = stringResource(R.string.app_name),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
 
-                // 3. One entry per network (children indented under their soju root). While a drag is
-                // live its local order overlays the published rows, so fresh unread/connection state
-                // keeps flowing into rows the drag has already moved.
+            FlowRow(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                maxItemsInEachRow = 4,
+            ) {
+                if (mentionsEnabled) {
+                    val label = stringResource(R.string.mentions_title)
+                    DrawerActionTile(
+                        icon = Icons.Outlined.AlternateEmail,
+                        visibleLabel = label,
+                        accessibilityLabel = label,
+                        onClick = onOpenMentions,
+                        modifier = Modifier.weight(1f).testTag("drawer_open_mentions"),
+                    )
+                }
+                if (globalFeedEnabled) {
+                    val label = stringResource(R.string.drawer_feed)
+                    DrawerActionTile(
+                        icon = Icons.Outlined.DynamicFeed,
+                        visibleLabel = label,
+                        accessibilityLabel = label,
+                        onClick = onOpenFeed,
+                        modifier = Modifier.weight(1f).testTag("drawer_open_feed"),
+                    )
+                }
+                DrawerActionTile(
+                    icon = Icons.Filled.QrCode2,
+                    visibleLabel = stringResource(R.string.invite_share),
+                    accessibilityLabel = stringResource(R.string.contact_invite_create_title),
+                    onClick = { onCreateContactInvite(selectedNetworkId) },
+                    modifier = Modifier.weight(1f).testTag("drawer_create_contact_invite"),
+                )
+                val scanLabel = stringResource(R.string.invite_scan_title)
+                DrawerActionTile(
+                    icon = Icons.Filled.QrCodeScanner,
+                    visibleLabel = scanLabel,
+                    accessibilityLabel = scanLabel,
+                    onClick = onScanInvite,
+                    modifier = Modifier.weight(1f).testTag("drawer_scan_invite"),
+                )
+                val settingsLabel = stringResource(R.string.drawer_settings)
+                DrawerActionTile(
+                    icon = Icons.Outlined.Settings,
+                    visibleLabel = settingsLabel,
+                    accessibilityLabel = settingsLabel,
+                    onClick = onOpenSettings,
+                    modifier = Modifier.weight(1f).testTag("drawer_open_settings"),
+                )
+                // Weighted blanks keep a partial last row in quarter-width cells.
+                val actionCount = 3 + (if (mentionsEnabled) 1 else 0) + (if (globalFeedEnabled) 1 else 0)
+                val missingSlots = (4 - actionCount % 4) % 4
+                repeat(missingSlots) { Spacer(Modifier.weight(1f)) }
+            }
+
+            NetworksHeader(
+                totalUnread = allUnread,
+                totalMentions = allMentions,
+                unreadIncomplete = allUnreadIncomplete,
+                mentionsIncomplete = allMentionsIncomplete,
+                scoped = selectedNetworkId != null,
+                allOffline = allOffline,
+                onToggleOffline = onToggleOffline,
+                onAddNetwork = onAddNetwork,
+                showMarkAllRead = scopedUnreadCount > 0,
+                onMarkAllRead = onMarkAllRead,
+                onClearFilter = { onSelectNetwork(null) },
+            )
+
+            Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                // A local drag overlay keeps the published row state flowing into reordered entries.
                 val displayRows = dragOrderIds?.let { applyDrawerOrder(drawerRows, it) } ?: drawerRows
                 val dragUnit = draggedNetworkId?.let { drawerDragUnit(displayRows, it) }.orEmpty()
                 for (row in displayRows) {
@@ -307,87 +324,47 @@ fun ServerDrawerContent(
                         )
                     }
                 }
-
-                // Eased in/out so the actions below never jump a full row height when the
-                // scoped unread count crosses zero while the drawer is open.
-                AnimatedVisibility(
-                    visible = scopedUnreadCount > 0,
-                    enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
-                    exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
-                ) {
-                    NavigationDrawerItem(
-                        icon = { Icon(Icons.Outlined.DoneAll, contentDescription = null) },
-                        label = { Text(stringResource(R.string.drawer_mark_all_read)) },
-                        selected = false,
-                        onClick = onMarkAllRead,
-                        modifier =
-                            Modifier
-                                .padding(horizontal = 12.dp)
-                                .testTag("drawer_mark_all_read"),
-                    )
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-                // 4. Network and invite actions.
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    label = { Text(stringResource(R.string.drawer_add_network)) },
-                    selected = false,
-                    onClick = onAddNetwork,
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                )
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Filled.QrCode2, contentDescription = null) },
-                    label = { Text(stringResource(R.string.contact_invite_create_title)) },
-                    selected = false,
-                    onClick = { onCreateContactInvite(selectedNetworkId) },
-                    modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_create_contact_invite"),
-                )
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Filled.QrCodeScanner, contentDescription = null) },
-                    label = { Text(stringResource(R.string.invite_scan_title)) },
-                    selected = false,
-                    onClick = onScanInvite,
-                    modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_scan_invite"),
-                )
-            }
-            HorizontalDivider()
-            Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
-                NavigationDrawerItem(
-                    icon = {
-                        Icon(
-                            if (allOffline) Icons.Outlined.Cloud else Icons.Outlined.CloudOff,
-                            contentDescription = null,
-                        )
-                    },
-                    label = {
-                        Text(
-                            stringResource(
-                                if (allOffline) R.string.drawer_go_online else R.string.drawer_go_offline,
-                            ),
-                        )
-                    },
-                    selected = false,
-                    onClick = onToggleOffline,
-                    modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_toggle_offline"),
-                )
-                NavigationDrawerItem(
-                    icon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
-                    label = { Text(stringResource(R.string.drawer_settings)) },
-                    selected = false,
-                    onClick = onOpenSettings,
-                    modifier = Modifier.padding(horizontal = 12.dp).testTag("drawer_open_settings"),
-                )
             }
         }
     }
 }
 
+@Composable
+private fun DrawerActionTile(
+    icon: ImageVector,
+    visibleLabel: String,
+    accessibilityLabel: String,
+    onClick: () -> Unit,
+    modifier: Modifier,
+) {
+    TextButton(
+        onClick = onClick,
+        modifier =
+            modifier.heightIn(min = 48.dp).clearAndSetSemantics {
+                contentDescription = accessibilityLabel
+                role = Role.Button
+                this.onClick {
+                    onClick()
+                    true
+                }
+            },
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                text = visibleLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+            )
+        }
+    }
+}
+
 /**
- * "NETWORKS" section label with rolled-up unread/mention badges. While a network is scoped, a
- * subtle "Show all chats" text button clears the filter (there is nothing to clear when unscoped,
- * so it stays hidden — keeping the header uncluttered).
+ * Network actions sit beside the label; scoped filter clearing and rollups get
+ * a second line only when needed, leaving room for all three 48dp controls.
  */
 @Composable
 private fun NetworksHeader(
@@ -396,33 +373,66 @@ private fun NetworksHeader(
     unreadIncomplete: Boolean,
     mentionsIncomplete: Boolean,
     scoped: Boolean,
+    allOffline: Boolean,
+    onToggleOffline: () -> Unit,
+    onAddNetwork: () -> Unit,
+    showMarkAllRead: Boolean,
+    onMarkAllRead: () -> Unit,
     onClearFilter: () -> Unit,
 ) {
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 28.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(start = 28.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
     ) {
-        Text(
-            text = stringResource(R.string.drawer_networks).uppercase(),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f),
-        )
-        if (scoped) {
-            // Clear-scope affordance; only meaningful while filtered.
-            TextButton(
-                onClick = onClearFilter,
-                modifier = Modifier.testTag("drawer_clear_filter"),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.drawer_networks).uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            val offlineLabel = stringResource(if (allOffline) R.string.drawer_go_online else R.string.drawer_go_offline)
+            IconButton(
+                onClick = onToggleOffline,
+                modifier = Modifier.size(48.dp).testTag("drawer_toggle_offline").semantics { contentDescription = offlineLabel },
             ) {
-                Text(stringResource(R.string.drawer_clear_filter))
+                Icon(if (allOffline) Icons.Outlined.Cloud else Icons.Outlined.CloudOff, contentDescription = null)
             }
-        } else {
-            // Unscoped: surface the aggregate unread/mention rollup where "All chats" used to.
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            val addLabel = stringResource(R.string.drawer_add_network)
+            IconButton(
+                onClick = onAddNetwork,
+                modifier = Modifier.size(48.dp).testTag("drawer_add_network").semantics { contentDescription = addLabel },
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = null)
+            }
+            if (showMarkAllRead) {
+                val label = stringResource(R.string.drawer_mark_all_read)
+                IconButton(
+                    onClick = onMarkAllRead,
+                    modifier = Modifier.size(48.dp).testTag("drawer_mark_all_read").semantics { contentDescription = label },
+                ) {
+                    Icon(Icons.Outlined.DoneAll, contentDescription = null)
+                }
+            }
+        }
+        if (scoped) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(
+                    onClick = onClearFilter,
+                    modifier = Modifier.testTag("drawer_clear_filter"),
+                ) {
+                    Text(stringResource(R.string.drawer_clear_filter))
+                }
+            }
+        } else if (totalMentions > 0 || totalUnread > 0) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 if (totalMentions > 0) MentionBadge(totalMentions, lowerBound = mentionsIncomplete)
                 if (totalUnread > 0) UnreadBadge(totalUnread, lowerBound = unreadIncomplete)
             }

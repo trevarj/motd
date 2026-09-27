@@ -468,8 +468,8 @@ phase_b() {
   tap_desc "Open navigation drawer"
   assert_text "NETWORKS"
   assert_text "libera"
-  assert_text "Add network"
-  assert_text "Settings"
+  assert_tag_present "drawer_add_network"
+  assert_tag_present "drawer_open_settings"
   assert_no_crash
 
   # 12. Network subtitle (Ready as nick, or a state string).
