@@ -1,0 +1,5 @@
+- Improved chat timeline and presence updates.
+- Added an option to disable swipe-to-reply (#97).
+- Clarified trust messaging for uploads to off-host file servers.
+- Cached DCC ZIP results in book search.
+- Added drawer shortcuts and kept network controls visible while scrolling.
