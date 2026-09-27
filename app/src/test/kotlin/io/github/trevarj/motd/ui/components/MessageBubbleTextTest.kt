@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -8,11 +9,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IRC_HEX_COLOR
 import io.github.trevarj.motd.irc.format.IRC_REVERSE
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.ui.theme.MotdDarkScheme
+import io.github.trevarj.motd.ui.theme.MotdLightScheme
+import io.github.trevarj.motd.ui.theme.contrastRatio
+import io.github.trevarj.motd.ui.theme.semanticColors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -193,6 +199,136 @@ class MessageBubbleTextTest {
     }
 
     @Test
+    fun irc_grey_fits_the_painted_notice_container_in_each_theme() {
+        val grey = Color(0xFFD2D2D2)
+        val light =
+            messageBubbleRoleColors(
+                MotdLightScheme,
+                isSelf = false,
+                mentionHighlighted = false,
+                MessageKind.NOTICE,
+                semanticColors(MotdLightScheme, false),
+            )
+        assertTrue(contrastRatio(grey, light.container) < 4.5)
+        for ((scheme, dark) in listOf(MotdLightScheme to false, MotdDarkScheme to true)) {
+            val role =
+                messageBubbleRoleColors(
+                    scheme,
+                    isSelf = false,
+                    mentionHighlighted = false,
+                    MessageKind.NOTICE,
+                    semanticColors(scheme, dark),
+                )
+            val body =
+                linkifiedBody(
+                    "\u000315received",
+                    scheme.primary,
+                    mentionsActive = false,
+                    containerColor = role.container,
+                    contentColor = role.content,
+                )
+            val color =
+                body.spanStyles
+                    .last { it.start == 0 && it.end == body.length && it.item.color != Color.Unspecified }
+                    .item.color
+            assertEquals("received", body.text)
+            assertTrue("$dark NOTICE: ${contrastRatio(color, role.container)}", contrastRatio(color, role.container) >= 4.5)
+            if (dark) assertEquals(grey, color) else assertTrue(color != grey)
+        }
+    }
+
+    @Test
+    fun irc_background_and_inline_code_use_the_background_actually_painted() {
+        val container = Color.White
+        val grey = Color(0xFFD2D2D2)
+        val body =
+            linkifiedBody(
+                "\u000315outside `inside` outside",
+                Color.Blue,
+                mentionsActive = false,
+                codeBackground = Color.Black,
+                codeColor = Color.White,
+                containerColor = container,
+                contentColor = Color.Black,
+            )
+        val outside =
+            body.spanStyles
+                .last { it.start == 0 && it.item.color != Color.Unspecified }
+                .item.color
+        val insideIndex = body.text.indexOf("inside")
+        val inside =
+            body.spanStyles
+                .last { it.start <= insideIndex && it.end > insideIndex && it.item.color != Color.Unspecified }
+                .item.color
+        assertTrue(contrastRatio(outside, container) >= 4.5)
+        assertEquals(grey, inside)
+        assertTrue(contrastRatio(inside, Color.Black) >= 4.5)
+
+        val explicit =
+            linkifiedBody(
+                "\u000314,00dim \u000315,01safe",
+                Color.Blue,
+                mentionsActive = false,
+                containerColor = Color.Black,
+                contentColor = Color.White,
+            )
+        val dimStyle = explicit.spanStyles.last { it.start == 0 && it.item.color != Color.Unspecified }.item
+        val safeIndex = explicit.text.indexOf("safe")
+        val safeStyle = explicit.spanStyles.last { it.start <= safeIndex && it.end > safeIndex && it.item.color != Color.Unspecified }.item
+        assertEquals(Color.White, dimStyle.background)
+        assertTrue(contrastRatio(dimStyle.color, Color.White) >= 4.5)
+        assertEquals(Color.Black, safeStyle.background)
+        assertEquals(grey, safeStyle.color)
+    }
+
+    @Test
+    fun tinted_two_line_row_rechecks_irc_grey_after_theme_change() {
+        for (scheme in listOf(MotdLightScheme, MotdDarkScheme)) {
+            val paintedRow = scheme.onSurfaceVariant.copy(alpha = 0.10f).compositeOver(scheme.background)
+            val body =
+                linkifiedBody(
+                    "\u000315received",
+                    scheme.primary,
+                    mentionsActive = false,
+                    containerColor = paintedRow,
+                    contentColor = scheme.onSurface,
+                )
+            val color =
+                body.spanStyles
+                    .last { it.item.color != Color.Unspecified }
+                    .item.color
+            assertTrue(contrastRatio(color, paintedRow) >= 4.5)
+        }
+    }
+
+    @Test
+    fun reversed_background_keeps_safe_link_color_and_repairs_unsafe_mention() {
+        val background = Color(0xFFD2D2D2)
+        val body =
+            linkifiedBody(
+                "\u000315${IRC_REVERSE}text https://example.com @bob",
+                Color.Blue,
+                mentionColor = { if (it == "bob") Color.Red else null },
+                containerColor = Color.White,
+                contentColor = Color.Black,
+            )
+        val urlIndex = body.text.indexOf("https://")
+        val mentionIndex = body.text.indexOf("@bob")
+        val urlColor =
+            body.spanStyles
+                .last { it.start <= urlIndex && it.end > urlIndex && it.item.color != Color.Unspecified }
+                .item.color
+        val mentionColor =
+            body.spanStyles
+                .last { it.start <= mentionIndex && it.end > mentionIndex && it.item.color != Color.Unspecified }
+                .item.color
+        assertTrue(body.hasLinkAnnotations(urlIndex, urlIndex + 1))
+        assertEquals(Color.Blue, urlColor)
+        assertTrue(contrastRatio(mentionColor, background) >= 4.5)
+        assertTrue(mentionColor != Color.Red)
+    }
+
+    @Test
     fun reverse_hex_and_equal_colors_remain_readable() {
         val reversed = mircFormattedText("$IRC_HEX_COLOR" + "ff0000,0000ff${IRC_REVERSE}text")
         val equal = mircFormattedText("$IRC_HEX_COLOR" + "ffffff,fffffftext")
@@ -200,7 +336,7 @@ class MessageBubbleTextTest {
         val reversedStyle = reversed.spanStyles.last().item
         val equalStyle = equal.spanStyles.last().item
         assertEquals("text", reversed.text)
-        assertEquals(Color.Blue, reversedStyle.color)
+        assertTrue(contrastRatio(reversedStyle.color, Color.Red) >= 4.5)
         assertEquals(Color.Red, reversedStyle.background)
         assertEquals(Color.Black, equalStyle.color)
         assertEquals(Color.White, equalStyle.background)

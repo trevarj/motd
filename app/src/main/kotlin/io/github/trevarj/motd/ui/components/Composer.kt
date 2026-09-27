@@ -159,6 +159,7 @@ import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ensureContrast
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -1245,7 +1246,7 @@ private fun ComposerColorSheet(
             Surface(color = previewBackground, shape = MotdShapes.card) {
                 Text(
                     "Formatting preview",
-                    color = previewForeground,
+                    color = ensureContrast(previewForeground, listOf(previewBackground)),
                     modifier = Modifier.fillMaxWidth().padding(12.dp).testTag("chat_composer_color_preview"),
                 )
             }
@@ -1599,13 +1600,17 @@ private fun ComposerTextField(
     val boldSelected = selection?.let { document.isStyleSelected(it.start, it.end, IrcTextStyle.BOLD) } == true
     val boldLabel = if (hasSelection && boldSelected) "Remove bold" else "Bold"
     val latestDocument = rememberUpdatedState(document)
+    val fieldBackground = MaterialTheme.colorScheme.surfaceContainerHigh
+    val fieldForeground = MaterialTheme.colorScheme.onSurface
     val outputTransformation =
-        remember(ircFormattingEnabled) {
+        remember(ircFormattingEnabled, fieldBackground, fieldForeground) {
             if (ircFormattingEnabled) {
                 OutputTransformation {
                     val visibleText = toString()
                     val displayed = latestDocument.value.let { if (it.text == visibleText) it else it.replaceText(visibleText) }
-                    displayed.runs.forEach { run -> addStyle(run.state.toSpanStyle(), run.start, run.end) }
+                    displayed.runs.forEach { run ->
+                        addStyle(run.state.toSpanStyle(fieldBackground, fieldForeground), run.start, run.end)
+                    }
                 }
             } else {
                 null
@@ -1663,7 +1668,7 @@ private fun ComposerTextField(
                     onFocusChanged(it.isFocused)
                     if (it.isFocused) onFocused()
                 }.testTag("chat_composer_field"),
-        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+        textStyle = MaterialTheme.typography.bodyLarge.copy(color = fieldForeground),
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
         keyboardOptions =
             KeyboardOptions(

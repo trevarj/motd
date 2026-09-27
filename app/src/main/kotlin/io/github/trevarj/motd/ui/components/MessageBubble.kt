@@ -48,6 +48,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.layout
@@ -492,6 +493,10 @@ fun MessageBubble(
             scheme.primaryContainer,
             scheme.primary,
             scheme.onPrimaryContainer,
+            scheme.tertiaryContainer,
+            scheme.onTertiaryContainer,
+            scheme.surfaceContainerHigh,
+            scheme.onSurface,
             isSelf,
             mentionHighlighted,
             kind,
@@ -591,7 +596,7 @@ fun MessageBubble(
                 )
             }
 
-            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, bubbleColor) }
 
             if (text.isNotBlank()) {
                 // Linkify http(s) URLs so the body is tappable even when the preview fails
@@ -615,6 +620,8 @@ fun MessageBubble(
                         mentionColor,
                         codeBackground,
                         codeColor,
+                        bubbleColor,
+                        textColor,
                     ) {
                         linkifiedBody(
                             text,
@@ -623,6 +630,8 @@ fun MessageBubble(
                             mentionColor,
                             codeBackground,
                             codeColor,
+                            bubbleColor,
+                            textColor,
                         ).withoutMediaPreviewUrl(imageUrl)
                     }
                 if (body.isNotBlank()) {
@@ -814,6 +823,7 @@ private fun ComfortableActionBubble(
             codeBackground,
             codeColor,
             senderLink,
+            rowColor,
             hideAvatar,
         ) {
             buildActionLine(
@@ -830,6 +840,7 @@ private fun ComfortableActionBubble(
                 codeColor = codeColor,
                 senderLink = senderLink,
                 includeStar = hideAvatar,
+                containerColor = rowColor,
             ).withoutMediaPreviewUrl(imageUrl)
         }
 
@@ -859,7 +870,7 @@ private fun ComfortableActionBubble(
                         onLongPressLabel = actionsLabel,
                     ).padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
         ) {
-            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, rowColor) }
 
             Row(verticalAlignment = Alignment.Top) {
                 if (!hideAvatar) {
@@ -1001,6 +1012,7 @@ private fun ActionMessageRow(
         } else {
             MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = ACTION_ROW_TINT_ALPHA)
         }
+    val paintedRow = rowColor.compositeOver(MaterialTheme.colorScheme.background)
     val bodyColor = MaterialTheme.colorScheme.onSurfaceVariant
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
     val linkColor = MaterialTheme.colorScheme.primary
@@ -1039,6 +1051,7 @@ private fun ActionMessageRow(
             codeBackground,
             codeColor,
             senderLink,
+            paintedRow,
         ) {
             buildActionLine(
                 sender = botDisplayName(displaySender, isBot),
@@ -1053,6 +1066,7 @@ private fun ActionMessageRow(
                 codeBackground = codeBackground,
                 codeColor = codeColor,
                 senderLink = senderLink,
+                containerColor = paintedRow,
             ).withoutMediaPreviewUrl(imageUrl)
         }
 
@@ -1079,7 +1093,9 @@ private fun ActionMessageRow(
                         vertical = spacing.actionVPad,
                     ),
         ) {
-            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
+            reply?.let {
+                ReplyMiniBubble(it, nickColors, onReplyClick, rowColor.compositeOver(MaterialTheme.colorScheme.background))
+            }
 
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
@@ -1156,6 +1172,7 @@ internal fun buildActionBody(
     mentionColor: (String) -> Color? = { null },
     codeBackground: Color = Color.Unspecified,
     codeColor: Color = Color.Unspecified,
+    containerColor: Color = Color.Unspecified,
 ): AnnotatedString =
     buildAnnotatedString {
         // fontSynthesis is explicit because some OEM system fonts (e.g. Nothing OS) ship no italic
@@ -1185,6 +1202,8 @@ internal fun buildActionBody(
                     fontStyle = FontStyle.Normal,
                 ),
             mentionColor = if (mentionsActive) mentionColor else ({ null }),
+            containerColor = containerColor,
+            contentColor = bodyColor,
         )
     }
 
@@ -1207,6 +1226,7 @@ internal fun buildActionLine(
     codeColor: Color = Color.Unspecified,
     senderLink: LinkAnnotation? = null,
     includeStar: Boolean = true,
+    containerColor: Color = Color.Unspecified,
 ): AnnotatedString =
     buildAnnotatedString {
         if (includeStar) {
@@ -1234,6 +1254,7 @@ internal fun buildActionLine(
                 mentionColor = mentionColor,
                 codeBackground = codeBackground,
                 codeColor = codeColor,
+                containerColor = containerColor,
             ),
         )
     }
@@ -1319,6 +1340,7 @@ private fun TwoLineMessageRow(
         } else {
             nameColor.copy(alpha = TWO_LINE_ROW_TINT_ALPHA)
         }
+    val paintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
 
     Column(
         modifier =
@@ -1403,7 +1425,9 @@ private fun TwoLineMessageRow(
                         top = if (showSender) spacing.bubbleInnerVPad else 0.dp,
                     ).testTag("message_two_line_body"),
         ) {
-            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
+            reply?.let {
+                ReplyMiniBubble(it, nickColors, onReplyClick, rowTint.compositeOver(MaterialTheme.colorScheme.background))
+            }
 
             if (kind == MessageKind.NOTICE) {
                 Text(
@@ -1428,6 +1452,8 @@ private fun TwoLineMessageRow(
                         mentionColor,
                         codeBackground,
                         codeColor,
+                        paintedRow,
+                        bodyColor,
                     ) {
                         linkifiedBody(
                             text,
@@ -1436,6 +1462,8 @@ private fun TwoLineMessageRow(
                             mentionColor,
                             codeBackground,
                             codeColor,
+                            paintedRow,
+                            bodyColor,
                         ).withoutMediaPreviewUrl(imageUrl)
                     }
                 if (richBody.isNotBlank()) {
@@ -1765,11 +1793,13 @@ internal fun AnnotatedString.withoutMediaPreviewUrl(url: String?): AnnotatedStri
  */
 internal fun linkifiedBody(
     text: String,
-    linkColor: androidx.compose.ui.graphics.Color,
+    linkColor: Color,
     mentionsActive: Boolean = true,
-    mentionColor: (String) -> androidx.compose.ui.graphics.Color? = { null },
-    codeBackground: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
-    codeColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+    mentionColor: (String) -> Color? = { null },
+    codeBackground: Color = Color.Unspecified,
+    codeColor: Color = Color.Unspecified,
+    containerColor: Color = Color.Unspecified,
+    contentColor: Color = Color.Unspecified,
 ): AnnotatedString {
     // Most chat rows are plain text. Avoid the URL regex, nick token walk, and builder allocation
     // when neither link annotations, mention styling, nor mIRC formatting can affect the result.
@@ -1791,6 +1821,8 @@ internal fun linkifiedBody(
                     fontStyle = FontStyle.Normal,
                 ),
             mentionColor = if (mentionsActive) mentionColor else ({ null }),
+            containerColor = containerColor,
+            contentColor = contentColor,
         )
     }
 }
@@ -1799,12 +1831,14 @@ internal fun linkifiedBody(
  * mIRC formatting codes are resolved first since they can wrap around code spans/URLs/mentions;
  * code segmentation then precedes URL and mention annotation so code contents stay inert.
  */
-internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendRichText(
+internal fun AnnotatedString.Builder.appendRichText(
     text: String,
     plainStyle: SpanStyle,
     linkStyle: SpanStyle,
     codeStyle: SpanStyle,
-    mentionColor: (String) -> androidx.compose.ui.graphics.Color? = { null },
+    mentionColor: (String) -> Color? = { null },
+    containerColor: Color = Color.Unspecified,
+    contentColor: Color = Color.Unspecified,
 ) {
     val formatted = parseIrcFormatting(text)
     val segments = parseInlineCode(formatted.visibleText)
@@ -1826,10 +1860,45 @@ internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendRichText(
             }
         }
     }
+    // Only color-bearing IRC runs need the overlay boundaries: a single IRC run may cross a
+    // mention, link, or code span, whose foreground/background differs from its neighbors.
+    val overlays =
+        if (containerColor != Color.Unspecified && formatted.runs.any { it.state.foreground != null || it.state.background != null }) {
+            toAnnotatedString().spanStyles
+        } else {
+            emptyList()
+        }
     formatted.runs.forEach { run ->
-        val start = renderedOffsets[run.start]
-        val end = renderedOffsets[run.end]
-        if (start < end) addStyle(run.state.toSpanStyle(), bodyStart + start, bodyStart + end)
+        val start = bodyStart + renderedOffsets[run.start]
+        val end = bodyStart + renderedOffsets[run.end]
+        if (start >= end || run.state.isDefault) return@forEach
+        if (overlays.isEmpty() || run.state.foreground == null && run.state.background == null) {
+            addStyle(run.state.toSpanStyle(containerColor, contentColor), start, end)
+        } else {
+            val boundaries = mutableSetOf(start, end)
+            overlays.forEach { overlay ->
+                if (overlay.start < end && overlay.end > start) {
+                    boundaries.add(overlay.start.coerceAtLeast(start))
+                    boundaries.add(overlay.end.coerceAtMost(end))
+                }
+            }
+            val sorted = boundaries.sorted()
+            for (index in 0 until sorted.lastIndex) {
+                val from = sorted[index]
+                val to = sorted[index + 1]
+                var ink = contentColor
+                var background = containerColor
+                overlays.forEach { overlay ->
+                    if (overlay.start <= from && overlay.end >= to) {
+                        if (overlay.item.color != Color.Unspecified) ink = overlay.item.color
+                        if (overlay.item.background != Color.Unspecified) {
+                            background = overlay.item.background.compositeOver(containerColor)
+                        }
+                    }
+                }
+                addStyle(run.state.toSpanStyle(background, ink), from, to)
+            }
+        }
     }
 }
 
@@ -1982,9 +2051,14 @@ internal fun ReplyMiniBubble(
     reply: ReplyPreviewData,
     nickColors: NickColorScheme,
     onClick: (() -> Unit)? = null,
+    parentColor: Color = MaterialTheme.colorScheme.background,
 ) {
     val accent = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val openLabel = stringResource(R.string.chat_reply_open)
+    val previewColor =
+        MaterialTheme.colorScheme.surfaceContainerHighest
+            .copy(alpha = 0.6f)
+            .compositeOver(parentColor)
     Row(
         modifier =
             Modifier
@@ -1994,7 +2068,7 @@ internal fun ReplyMiniBubble(
                     alignment = Alignment.TopStart,
                 ).padding(vertical = 2.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+                .background(previewColor)
                 .let { modifier ->
                     if (onClick != null) {
                         modifier.clickable(onClickLabel = openLabel, onClick = onClick)
@@ -2017,7 +2091,12 @@ internal fun ReplyMiniBubble(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = mircFormattedText(reply.ircFormattedText ?: reply.text),
+                text =
+                    mircFormattedText(
+                        reply.ircFormattedText ?: reply.text,
+                        previewColor,
+                        MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,

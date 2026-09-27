@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -110,6 +111,7 @@ internal fun CompactMessageRow(
         } else {
             nameColor.copy(alpha = COMPACT_ROW_TINT_ALPHA)
         }
+    val paintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
 
     // The `nick: text` content is a single flowing AnnotatedString so it wraps as one paragraph
     // like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
@@ -132,6 +134,7 @@ internal fun CompactMessageRow(
             codeBackground,
             codeColor,
             nickFontSize,
+            paintedRow,
         ) {
             buildCompactLine(
                 displaySender,
@@ -147,6 +150,7 @@ internal fun CompactMessageRow(
                 codeBackground,
                 codeColor,
                 nickFontSize = nickFontSize,
+                containerColor = paintedRow,
             ).withoutMediaPreviewUrl(imageUrl)
         }
 
@@ -164,7 +168,9 @@ internal fun CompactMessageRow(
                     onLongPressLabel = actionsLabel,
                 ).padding(horizontal = spacing.messageOuterHPad, vertical = spacing.compactRowVPad),
     ) {
-        reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick) }
+        reply?.let {
+            ReplyMiniBubble(it, nickColors, onReplyClick, rowTint.compositeOver(MaterialTheme.colorScheme.background))
+        }
 
         Row(verticalAlignment = Alignment.Top) {
             Text(
@@ -243,6 +249,7 @@ internal fun buildCompactLine(
     codeBackground: Color = Color.Unspecified,
     codeColor: Color = Color.Unspecified,
     nickFontSize: androidx.compose.ui.unit.TextUnit = 14.sp,
+    containerColor: Color = Color.Unspecified,
 ): AnnotatedString =
     buildAnnotatedString {
         val nickStyle =
@@ -279,6 +286,8 @@ internal fun buildCompactLine(
                     fontStyle = FontStyle.Normal,
                 ),
             mentionColor = mentionColor,
+            containerColor = containerColor,
+            contentColor = bodyColor,
         )
     }
 

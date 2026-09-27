@@ -1,11 +1,15 @@
 package io.github.trevarj.motd.ui.components
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.PlatformTextInputSession
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotSelected
@@ -14,14 +18,19 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.UiDispatcherResetRule
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IRC_COLOR
 import io.github.trevarj.motd.irc.format.IRC_RESET
@@ -30,6 +39,7 @@ import io.github.trevarj.motd.irc.format.IrcTextStyle
 import io.github.trevarj.motd.irc.format.ircStateAtRawOffset
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.contrastRatio
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -239,6 +249,98 @@ class ComposerEditorStateTest {
     }
 
     @Test
+    fun ircColorsFollowComposerSurfaceWhenThemeChangesWithoutChangingDraftOrCaret() {
+        val raw = "${IRC_COLOR}15grey ${IRC_COLOR}01black ${IRC_COLOR}15,00paper$IRC_RESET"
+        val draft = mutableStateOf(TextFieldValue(raw, TextRange(raw.length)))
+        val preset = mutableStateOf(ColorThemePreset.LIGHT)
+        var surface = Color.Unspecified
+        compose.setContent {
+            MotdTheme(dynamicColor = false, themePreset = preset.value) {
+                surface = MaterialTheme.colorScheme.surfaceContainerHigh
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        val field = compose.onNodeWithTag("chat_composer_field")
+
+        fun renderedStyle(word: String): SpanStyle {
+            val text = field.textLayout().layoutInput.text
+            val offset = text.indexOf(word)
+            assertTrue("Missing $word in transformed draft", offset >= 0)
+            return text.spanStyles.last { offset in it.start until it.end }.item
+        }
+
+        compose.runOnIdle {
+            assertEquals(raw, draft.value.text)
+            assertEquals(TextRange(raw.length), draft.value.selection)
+        }
+        assertTrue(contrastRatio(renderedStyle("grey").color, surface) >= 4.49)
+        assertTrue(contrastRatio(renderedStyle("paper").color, Color.White) >= 4.49)
+        assertEquals(Color.White, renderedStyle("paper").background)
+
+        compose.runOnIdle { preset.value = ColorThemePreset.DARK }
+        compose.waitForIdle()
+        assertTrue(contrastRatio(renderedStyle("black").color, surface) >= 4.49)
+        compose.runOnIdle {
+            assertEquals(raw, draft.value.text)
+            assertEquals(TextRange(raw.length), draft.value.selection)
+        }
+        field.performTextInput("!")
+        compose.runOnIdle {
+            val parsed = parseIrcFormatting(draft.value.text)
+            assertEquals("grey black paper!", parsed.visibleText)
+            assertEquals(parsed.visibleText.length, parsed.visibleOffset(draft.value.selection.start))
+            assertTrue(parsed.stateAtVisible(parsed.visibleText.lastIndex).isDefault)
+        }
+    }
+
+    @Test
+    fun colorSheetAdjustsPreviewButKeepsSelectedPaletteCodes() {
+        val draft = mutableStateOf(TextFieldValue("sample", TextRange(0, 6)))
+        val previewBackground = Color(0xFFD2D2D2)
+        compose.setContent {
+            MotdTheme(dynamicColor = false, themePreset = ColorThemePreset.LIGHT) {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        compose.onNodeWithTag("chat_composer_tools").performTouchInput { click() }
+        compose.onNodeWithTag("chat_format_color").performTouchInput { click() }
+        compose.onNodeWithTag("chat_color_15").performClick().assertIsSelected()
+        compose.onNodeWithText("Background").performClick()
+        compose.onNodeWithTag("chat_color_15").performClick().assertIsSelected()
+        val preview = compose.onNodeWithTag("chat_composer_color_preview")
+        val previewColor =
+            preview
+                .textLayout()
+                .layoutInput.style.color
+        assertTrue(contrastRatio(previewColor, previewBackground) >= 4.49)
+
+        compose.onNodeWithTag("chat_composer_color_apply").performClick()
+        compose.runOnIdle {
+            val parsed = parseIrcFormatting(draft.value.text)
+            assertEquals("sample", parsed.visibleText)
+            assertTrue(
+                parsed.runs.all {
+                    it.state.foreground == IrcColor.Numeric(15) && it.state.background == IrcColor.Numeric(15)
+                },
+            )
+        }
+    }
+
+    @Test
     fun applyingColorKeepsVisibleCursorInPlace() {
         val draft = mutableStateOf(TextFieldValue("first\n", TextRange(6)))
         compose.setContent {
@@ -396,5 +498,11 @@ class ComposerEditorStateTest {
             assertEquals("hello\nthere", parsed.visibleText)
             assertTrue(parsed.runs.all { it.state.isDefault })
         }
+    }
+
+    private fun SemanticsNodeInteraction.textLayout(): TextLayoutResult {
+        val results = mutableListOf<TextLayoutResult>()
+        performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
+        return results.single()
     }
 }

@@ -11,6 +11,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.IrcFormatState
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
+import io.github.trevarj.motd.ui.theme.ensureContrast
 
 /** mIRC 0-98 palette used by current mIRC/HexChat-compatible clients. */
 internal val MIRC_COLORS =
@@ -128,12 +129,16 @@ internal data class MircRun(
     val style: SpanStyle,
 )
 
-internal fun mircFormattedText(text: String): AnnotatedString {
+internal fun mircFormattedText(
+    text: String,
+    container: Color = Color.Unspecified,
+    inheritedColor: Color = Color.Unspecified,
+): AnnotatedString {
     val parsed = parseIrcFormatting(text)
     if (parsed.runs.all { it.state.isDefault }) return AnnotatedString(parsed.visibleText)
     return buildAnnotatedString {
         append(parsed.visibleText)
-        parsed.runs.forEach { run -> addStyle(run.state.toSpanStyle(), run.start, run.end) }
+        parsed.runs.forEach { run -> addStyle(run.state.toSpanStyle(container, inheritedColor), run.start, run.end) }
     }
 }
 
@@ -146,19 +151,31 @@ internal fun parseMircFormatting(text: String): List<MircRun> {
     }
 }
 
-internal fun IrcFormatState.toSpanStyle(): SpanStyle {
+internal fun IrcFormatState.toSpanStyle(
+    container: Color = Color.Unspecified,
+    inheritedColor: Color = Color.Unspecified,
+): SpanStyle {
     var foreground = if (reverse) background else foreground
     val effectiveBackground = if (reverse) this.foreground else background
-    if (foreground != null && foreground == effectiveBackground) {
+    if (container == Color.Unspecified && foreground != null && foreground == effectiveBackground) {
         foreground = contrastColor(effectiveBackground)
     }
+    val backgroundColor = ircColor(effectiveBackground) ?: container
+    val foregroundColor = ircColor(foreground)
+    val sourceColor = foregroundColor ?: if (effectiveBackground != null) inheritedColor else Color.Unspecified
+    val color =
+        if (sourceColor != Color.Unspecified && backgroundColor != Color.Unspecified) {
+            ensureContrast(sourceColor, listOf(backgroundColor))
+        } else {
+            sourceColor
+        }
     val decorations =
         buildList {
             if (underline) add(TextDecoration.Underline)
             if (strikethrough) add(TextDecoration.LineThrough)
         }
     return SpanStyle(
-        color = ircColor(foreground) ?: Color.Unspecified,
+        color = if (foregroundColor == null && color == inheritedColor) Color.Unspecified else color,
         background = ircColor(effectiveBackground) ?: Color.Unspecified,
         fontWeight = if (bold) FontWeight.Bold else null,
         fontStyle = if (italic) FontStyle.Italic else null,
