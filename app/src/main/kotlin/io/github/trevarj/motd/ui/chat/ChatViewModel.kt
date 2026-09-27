@@ -23,11 +23,14 @@ import io.github.trevarj.motd.bouncer.isBouncerConsole
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ComposerDraftEntity
+import io.github.trevarj.motd.data.db.DccDirection
 import io.github.trevarj.motd.data.db.DccTransferDao
 import io.github.trevarj.motd.data.db.DccTransferEntity
+import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.UserDao
@@ -36,6 +39,7 @@ import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.AccountReminderStore
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.EbooksLabsPrefs
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NoopAccountReminderStore
@@ -262,6 +266,7 @@ class ChatViewModel
         private val savedStateHandle: SavedStateHandle,
         private val messageRepository: MessageRepository,
         private val bufferRepository: BufferRepository,
+        private val networkDao: NetworkDao,
         private val networkIdentityDao: NetworkIdentityDao,
         private val dccTransferDao: DccTransferDao,
         private val dccTransferController: DccTransferController,
@@ -280,6 +285,7 @@ class ChatViewModel
         private val historyPageLoader: HistoryPageLoader,
         private val settingsRepository: SettingsRepository,
         private val replyPrefs: ReplyPrefs,
+        private val ebooksLabsPrefs: EbooksLabsPrefs,
         private val agentwirePrefs: AgentwirePrefs,
         private val visibilityReader: MessageVisibilityReader,
         private val historyResyncCoordinator: HistoryResyncController,
@@ -950,6 +956,41 @@ class ChatViewModel
                 }
             }.distinctUntilChanged()
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), IrcIdentityRules())
+
+        val ebooksHelperRoomId: StateFlow<Long?> =
+            combine(buffer, identityRules, ebooksLabsPrefs.enabled) { room, rules, enabled ->
+                room?.takeIf {
+                    enabled && it.type == BufferType.CHANNEL &&
+                        rules.normalize(it.displayName) == rules.normalize("#ebooks")
+                }
+            }.distinctUntilChanged()
+                .flatMapLatest { room ->
+                    room?.let { eligibleRoom ->
+                        networkDao.observeById(eligibleRoom.networkId).map { network ->
+                            eligibleRoom.id.takeIf {
+                                network != null && network.id == eligibleRoom.networkId &&
+                                    network.host.equals("irc.irchighway.net", ignoreCase = true)
+                            }
+                        }
+                    } ?: flowOf(null)
+                }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+        /** Network-wide offers are intentionally not matched to channel searches or their senders. */
+        val ebooksDccOffers: StateFlow<List<DccTransferEntity>> =
+            combine(buffer, ebooksHelperRoomId) { room, eligibleId ->
+                room?.takeIf { eligibleId != null && it.id == eligibleId }
+            }.flatMapLatest { room ->
+                if (room == null) {
+                    flowOf(emptyList())
+                } else {
+                    dccTransferDao.observeForNetwork(room.networkId).map { transfers ->
+                        transfers.filter {
+                            it.networkId == room.networkId && it.direction == DccDirection.INCOMING &&
+                                it.state != DccTransferState.REMOVED
+                        }
+                    }
+                }
+            }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
         /**
          * Normalized nicks whose @mentions are colored inside message bodies.

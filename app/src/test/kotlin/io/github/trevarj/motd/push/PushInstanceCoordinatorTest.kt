@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -195,6 +196,8 @@ class PushInstanceCoordinatorTest {
         override suspend fun connectable(): List<NetworkEntity> = flow.value.filter { it.autoConnect }
 
         override suspend fun byId(id: Long): NetworkEntity? = flow.value.firstOrNull { it.id == id }
+
+        override fun observeById(id: Long): Flow<NetworkEntity?> = flow.map { nets -> nets.firstOrNull { it.id == id } }
 
         override suspend fun insert(n: NetworkEntity): Long = 0
 

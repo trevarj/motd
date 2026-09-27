@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.agentwire.AgentwirePrefs
+import io.github.trevarj.motd.data.prefs.EbooksLabsPrefs
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
 import io.github.trevarj.motd.dickord.DickordLabsPrefs
 import io.github.trevarj.motd.gesture.GesturePrefs
@@ -20,6 +21,7 @@ data class LabsUiState(
     val agentwireEnabled: Boolean = false,
     val globalFeedEnabled: Boolean = false,
     val dickordEnabled: Boolean = false,
+    val ebooksEnabled: Boolean = false,
 )
 
 @HiltViewModel
@@ -30,6 +32,7 @@ class LabsViewModel
         private val agentwirePrefs: AgentwirePrefs,
         private val globalFeedPrefs: GlobalFeedPrefs,
         private val dickordLabsPrefs: DickordLabsPrefs,
+        private val ebooksLabsPrefs: EbooksLabsPrefs,
     ) : ViewModel() {
         val state: StateFlow<LabsUiState> =
             combine(
@@ -37,12 +40,14 @@ class LabsViewModel
                 agentwirePrefs.enabled,
                 globalFeedPrefs.enabled,
                 dickordLabsPrefs.enabled,
-            ) { gestures, agentwire, globalFeed, dickord ->
+                ebooksLabsPrefs.enabled,
+            ) { gestures, agentwire, globalFeed, dickord, ebooks ->
                 LabsUiState(
                     gesturesEnabled = gestures,
                     agentwireEnabled = agentwire,
                     globalFeedEnabled = globalFeed,
                     dickordEnabled = dickord,
+                    ebooksEnabled = ebooks,
                 )
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LabsUiState())
 
@@ -60,5 +65,9 @@ class LabsViewModel
 
         fun setDickordEnabled(enabled: Boolean) {
             viewModelScope.launch { dickordLabsPrefs.setEnabled(enabled) }
+        }
+
+        fun setEbooksEnabled(enabled: Boolean) {
+            viewModelScope.launch { ebooksLabsPrefs.setEnabled(enabled) }
         }
     }

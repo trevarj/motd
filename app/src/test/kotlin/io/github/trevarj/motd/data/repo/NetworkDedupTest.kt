@@ -39,6 +39,8 @@ class NetworkDedupTest {
 
         override suspend fun byId(id: Long): NetworkEntity? = rows[id]
 
+        override fun observeById(id: Long): Flow<NetworkEntity?> = flowOf(rows[id])
+
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = rows.values.filter { it.parentId == rootId }
 
         override suspend fun localTreeIds(id: Long): List<Long> =

@@ -25,6 +25,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -79,6 +80,8 @@ class DccTransferControllerImpl
         @param:ApplicationScope private val applicationScope: CoroutineScope,
     ) : DccTransferController {
         private val transfers: DccTransferDao get() = db.dccTransferDao()
+        private val resultCache = EbooksResultCache(context)
+        private val stateLock = Mutex()
         private val jobs = LinkedHashMap<Long, Job>()
         private val jobLock = Mutex()
 
@@ -91,34 +94,74 @@ class DccTransferControllerImpl
             destinationUri: Uri,
             allowPrivateEndpoint: Boolean,
         ) {
-            val transfer = transfers.byId(transferId) ?: return
-            if (transfer.direction != DccDirection.INCOMING) return
-            val now = System.currentTimeMillis()
-            transfers.update(
-                transfer.copy(
-                    state = DccTransferState.ACCEPTING,
-                    destinationUri = destinationUri.toString(),
-                    acceptedAt = transfer.acceptedAt ?: now,
-                    error = null,
-                    updatedAt = now,
-                ),
-            )
-            launchTransfer(transfer.id) {
-                receiveIncoming(transfer.id, destinationUri, allowPrivateEndpoint)
+            stateLock.withLock {
+                val transfer = transfers.byId(transferId) ?: return
+                if (transfer.direction != DccDirection.INCOMING ||
+                    transfer.state !in setOf(DccTransferState.OFFERED, DccTransferState.PARTIAL, DccTransferState.FAILED)
+                ) {
+                    return
+                }
+                val privateCache = resultCache.isOwned(destinationUri, transferId)
+                if (privateCache && !transfer.displayFilename.endsWith(".zip", ignoreCase = true)) return
+                if (destinationUri.scheme == "file" && resultCache.isOwned(destinationUri) && !privateCache) return
+                if (privateCache) {
+                    resultCache.discard(destinationUri, transferId)
+                } else {
+                    transfer.destinationUri?.let { resultCache.discard(Uri.parse(it), transferId) }
+                }
+                val now = System.currentTimeMillis()
+                transfers.update(
+                    transfer.copy(
+                        state = DccTransferState.ACCEPTING,
+                        destinationUri = destinationUri.toString(),
+                        bytesTransferred = 0,
+                        acceptedAt = transfer.acceptedAt ?: now,
+                        error = null,
+                        updatedAt = now,
+                    ),
+                )
+                launchTransfer(transfer.id) {
+                    receiveIncoming(transfer.id, destinationUri, allowPrivateEndpoint)
+                }
             }
         }
 
         override suspend fun reject(transferId: Long) {
-            cancelJob(transferId)
-            transitions(transferId) { transfer, now ->
-                transfer.copy(state = DccTransferState.REJECTED, error = null, updatedAt = now)
+            stateLock.withLock {
+                val transfer = transfers.byId(transferId) ?: return
+                if (transfer.direction != DccDirection.INCOMING ||
+                    transfer.state !in setOf(DccTransferState.OFFERED, DccTransferState.PARTIAL, DccTransferState.FAILED)
+                ) {
+                    return
+                }
+                cancelJob(transferId)
+                val cachedUri = transfer.destinationUri?.let(Uri::parse)?.takeIf { resultCache.isOwned(it, transferId) }
+                cachedUri?.let { resultCache.discard(it, transferId) }
+                transitions(transferId) { current, now ->
+                    current.copy(
+                        state = DccTransferState.REJECTED,
+                        destinationUri = if (cachedUri != null) null else current.destinationUri,
+                        error = null,
+                        updatedAt = now,
+                    )
+                }
             }
         }
 
         override suspend fun removeRecord(transferId: Long) {
-            cancelJob(transferId)
-            transitions(transferId) { transfer, now ->
-                transfer.copy(state = DccTransferState.REMOVED, error = null, updatedAt = now)
+            stateLock.withLock {
+                val transfer = transfers.byId(transferId) ?: return
+                cancelJob(transferId)
+                val cachedUri = transfer.destinationUri?.let(Uri::parse)?.takeIf { resultCache.isOwned(it, transferId) }
+                cachedUri?.let { resultCache.discard(it, transferId) }
+                transitions(transferId) { current, now ->
+                    current.copy(
+                        state = DccTransferState.REMOVED,
+                        destinationUri = if (cachedUri != null) null else current.destinationUri,
+                        error = null,
+                        updatedAt = now,
+                    )
+                }
             }
         }
 
@@ -183,7 +226,9 @@ class DccTransferControllerImpl
             allowPrivateEndpoint: Boolean,
         ) {
             val snapshot = transfers.byId(transferId) ?: return
-            runCatching {
+            val privateCache = resultCache.isOwned(destinationUri, transferId)
+            var completed = false
+            try {
                 val network =
                     effectiveNetworkFor(snapshot.networkId)
                         ?: error("Network no longer exists")
@@ -192,8 +237,11 @@ class DccTransferControllerImpl
                 if (risk != DccEndpointRisk.PUBLIC && !allowPrivateEndpoint) {
                     error("Endpoint is ${risk.name.lowercase().replace('_', ' ')}; allow once to receive")
                 }
-                if ((snapshot.sizeBytes ?: 0L) > MAX_DCC_FILE_SIZE_BYTES) {
-                    error("File is larger than the 4 GiB safety limit")
+                val maxBytes = if (privateCache) EbooksResultCache.MAX_COMPRESSED_BYTES else MAX_DCC_FILE_SIZE_BYTES
+                if ((snapshot.sizeBytes ?: 0L) > maxBytes) {
+                    error(
+                        if (privateCache) "Results ZIP is larger than the 16 MiB cache limit" else "File is larger than the 4 GiB safety limit",
+                    )
                 }
                 val proxy = proxyFor(network, transferId)
                 val socket = withContext(Dispatchers.IO) { openConnectedSocket(address, snapshot.port, proxy) }
@@ -217,6 +265,7 @@ class DccTransferControllerImpl
                             output = output,
                             ack = active.getOutputStream(),
                             expectedBytes = snapshot.sizeBytes,
+                            maxBytes = maxBytes,
                         )
                     }
                 }
@@ -229,9 +278,23 @@ class DccTransferControllerImpl
                         updatedAt = now,
                     )
                 }
-            }.onFailure { error ->
-                if (error is CancellationException) throw error
+                completed = true
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
                 failTransfer(transferId, error.message ?: "DCC receive failed")
+            } finally {
+                if (privateCache && !completed) {
+                    resultCache.discard(destinationUri, transferId)
+                    transitions(transferId) { transfer, now ->
+                        transfer.copy(
+                            state = if (transfer.state == DccTransferState.PARTIAL) DccTransferState.FAILED else transfer.state,
+                            bytesTransferred = 0,
+                            destinationUri = null,
+                            updatedAt = now,
+                        )
+                    }
+                }
             }
         }
 
@@ -315,6 +378,7 @@ class DccTransferControllerImpl
             output: OutputStream,
             ack: OutputStream,
             expectedBytes: Long?,
+            maxBytes: Long,
         ): Long {
             transitions(transferId) { transfer, now ->
                 transfer.copy(state = DccTransferState.ACTIVE, error = null, updatedAt = now)
@@ -324,7 +388,7 @@ class DccTransferControllerImpl
                 output = output,
                 ack = ack,
                 expectedBytes = expectedBytes,
-                maxBytes = MAX_DCC_FILE_SIZE_BYTES,
+                maxBytes = maxBytes,
                 progressStepBytes = PROGRESS_STEP_BYTES,
             ) { total -> persistProgress(transferId, total) }
         }
@@ -387,7 +451,7 @@ class DccTransferControllerImpl
 
         private suspend fun cancelJob(transferId: Long) {
             val job = jobLock.withLock { jobs.remove(transferId) }
-            job?.cancel()
+            job?.cancelAndJoin()
         }
 
         private suspend fun transitions(

@@ -18,7 +18,11 @@ import io.github.trevarj.motd.avatar.LocalAvatarStore
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
+import io.github.trevarj.motd.data.db.DccAddressKind
+import io.github.trevarj.motd.data.db.DccDirection
 import io.github.trevarj.motd.data.db.DccTransferEntity
+import io.github.trevarj.motd.data.db.DccTransferProtocol
+import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.EventRedirectEntity
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.JoinedChannelRow
@@ -38,6 +42,7 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.EbooksLabsPrefs
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
@@ -232,6 +237,123 @@ class ChatViewModelTest {
             assertNull(clearedState.replyTo)
             assertNull(db.composerDraftDao().byRoom(channel.id))
             assertEquals("", clearedDraft.text)
+        }
+
+    @Test
+    fun `ebooks helper requires enabled Highway network and canonical channel`() =
+        runTest {
+            val highway =
+                network
+                    .copy(
+                        id = 0,
+                        name = "Highway",
+                        host = "IRC.IRCHIGHWAY.NET",
+                    ).let { it.copy(id = db.networkDao().insert(it)) }
+            val ebooks =
+                channel
+                    .copy(
+                        id = 0,
+                        networkId = highway.id,
+                        name = "#ebooks",
+                        displayName = "#EBOOKS",
+                    ).let { it.copy(id = db.bufferDao().insert(it)) }
+            val buffers = FakeBufferRepository(ebooks)
+            val prefs = FakeEbooksLabsPrefs()
+            val vm = viewModel(ebooks, FakeConnectionManager(highway.id), buffers = buffers, ebooksPrefs = prefs)
+
+            assertNull(vm.ebooksHelperRoomId.value)
+            vm.state.first { it.buffer?.id == ebooks.id }
+            prefs.setEnabled(true)
+            assertEquals(ebooks.id, vm.ebooksHelperRoomId.first { it == ebooks.id })
+
+            // A similarly named network cannot make a room on a different host eligible.
+            val ineligible =
+                listOf(
+                    ebooks.copy(networkId = network.id),
+                    ebooks.copy(type = BufferType.QUERY),
+                    ebooks.copy(name = "#other", displayName = "#other"),
+                    ebooks.copy(networkId = Long.MAX_VALUE),
+                )
+            for (other in ineligible) {
+                buffers.update(other)
+                assertNull(vm.ebooksHelperRoomId.first { it == null })
+                buffers.update(ebooks)
+                assertEquals(ebooks.id, vm.ebooksHelperRoomId.first { it == ebooks.id })
+            }
+
+            db.networkDao().update(highway.copy(host = "irc.other.net"))
+            assertNull(vm.ebooksHelperRoomId.first { it == null })
+            db.networkDao().update(highway)
+            assertEquals(ebooks.id, vm.ebooksHelperRoomId.first { it == ebooks.id })
+
+            prefs.setEnabled(false)
+            assertNull(vm.ebooksHelperRoomId.first { it == null })
+        }
+
+    @Test
+    fun `ebooks network offers include incoming only and clear on eligibility loss`() =
+        runTest {
+            val highway =
+                network
+                    .copy(id = 0, name = "Highway", host = "irc.irchighway.net")
+                    .let { it.copy(id = db.networkDao().insert(it)) }
+            val ebooks =
+                channel
+                    .copy(id = 0, networkId = highway.id, name = "#ebooks", displayName = "#ebooks")
+                    .let { it.copy(id = db.bufferDao().insert(it)) }
+            val buffers = FakeBufferRepository(ebooks)
+            val prefs = FakeEbooksLabsPrefs()
+            val vm = viewModel(ebooks, FakeConnectionManager(highway.id), buffers = buffers, ebooksPrefs = prefs)
+            assertEquals(emptyList<DccTransferEntity>(), vm.ebooksDccOffers.value)
+            prefs.setEnabled(true)
+            vm.ebooksHelperRoomId.first { it == ebooks.id }
+
+            val offer =
+                DccTransferEntity(
+                    networkId = highway.id,
+                    timelineEventId = null,
+                    offerKey = "search-zip",
+                    direction = DccDirection.INCOMING,
+                    protocol = DccTransferProtocol.SEND,
+                    peerNick = "searchbot",
+                    normalizedPeer = "searchbot",
+                    filename = "results.zip",
+                    displayFilename = "results.zip",
+                    address = "203.0.113.1",
+                    addressKind = DccAddressKind.IPV4_DOTTED,
+                    port = 9000,
+                    sizeBytes = 123,
+                    token = null,
+                    state = DccTransferState.OFFERED,
+                    createdAt = 1,
+                    expiresAt = null,
+                    updatedAt = 1,
+                )
+            val id = db.dccTransferDao().insertIgnore(offer)
+            assertEquals(listOf(id), vm.ebooksDccOffers.first { it.size == 1 }.map { it.id })
+            db.dccTransferDao().insertIgnore(offer.copy(id = 0, offerKey = "outbound", direction = DccDirection.OUTGOING))
+            db.dccTransferDao().insertIgnore(offer.copy(id = 0, offerKey = "removed", state = DccTransferState.REMOVED))
+            db.dccTransferDao().insertIgnore(offer.copy(id = 0, networkId = network.id, offerKey = "other-network"))
+            db.dccTransferDao().update(offer.copy(id = id, state = DccTransferState.ACTIVE, bytesTransferred = 42))
+            assertEquals(
+                listOf(id),
+                vm.ebooksDccOffers.first { it.singleOrNull()?.state == DccTransferState.ACTIVE }.map { it.id },
+            )
+            db.dccTransferDao().update(offer.copy(id = id, state = DccTransferState.COMPLETED, destinationUri = "content://saved/results"))
+            val completed = vm.ebooksDccOffers.first { it.singleOrNull()?.state == DccTransferState.COMPLETED }
+            assertEquals("content://saved/results", completed.single().destinationUri)
+
+            buffers.update(ebooks.copy(networkId = network.id))
+            vm.ebooksHelperRoomId.first { it == null }
+            assertEquals(emptyList<DccTransferEntity>(), vm.ebooksDccOffers.first { it.isEmpty() })
+            buffers.update(ebooks.copy(type = BufferType.QUERY))
+            assertEquals(emptyList<DccTransferEntity>(), vm.ebooksDccOffers.value)
+            buffers.update(ebooks)
+            vm.ebooksHelperRoomId.first { it == ebooks.id }
+            vm.ebooksDccOffers.first { it.singleOrNull()?.id == id }
+            prefs.setEnabled(false)
+            vm.ebooksHelperRoomId.first { it == null }
+            assertEquals(emptyList<DccTransferEntity>(), vm.ebooksDccOffers.first { it.isEmpty() })
         }
 
     @Test
@@ -4229,6 +4351,7 @@ class ChatViewModelTest {
         drafts: ComposerDraftStore = ComposerDraftStore(db),
         replyPrefs: ReplyPrefs = FakeReplyPrefs(),
         agentwirePrefs: AgentwirePrefs = FakeAgentwirePrefs(),
+        ebooksPrefs: EbooksLabsPrefs = FakeEbooksLabsPrefs(),
         shares: PendingShareStore = PendingShareStore(),
         notificationSettings: NotificationSettings = NotificationSettings.Noop,
         clock: AppClock = AppClock(System::currentTimeMillis),
@@ -4243,6 +4366,7 @@ class ChatViewModelTest {
             savedStateHandle = savedStateHandle,
             messageRepository = messages,
             bufferRepository = buffers,
+            networkDao = db.networkDao(),
             networkIdentityDao = db.networkIdentityDao(),
             dccTransferDao = db.dccTransferDao(),
             dccTransferController = FakeDccTransferController(),
@@ -4263,6 +4387,7 @@ class ChatViewModelTest {
             settingsRepository = settings,
             replyPrefs = replyPrefs,
             agentwirePrefs = agentwirePrefs,
+            ebooksLabsPrefs = ebooksPrefs,
             visibilityReader = MessageVisibilityReader(db),
             historyResyncCoordinator = history,
             userDao = db.userDao(),
@@ -4874,6 +4999,16 @@ class ChatViewModelTest {
         ) = Unit
 
         override suspend fun markUnresolvedActionsUnknown(scope: String) = Unit
+    }
+
+    private class FakeEbooksLabsPrefs(
+        initial: Boolean = false,
+    ) : EbooksLabsPrefs(ApplicationProvider.getApplicationContext()) {
+        override val enabled = MutableStateFlow(initial)
+
+        override suspend fun setEnabled(enabled: Boolean) {
+            this.enabled.value = enabled
+        }
     }
 
     private class FakeReplyPrefs(

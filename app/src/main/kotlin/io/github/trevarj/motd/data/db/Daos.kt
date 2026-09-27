@@ -27,6 +27,9 @@ interface NetworkDao {
     @Query("SELECT * FROM networks ORDER BY ordering, id")
     fun observeAll(): Flow<List<NetworkEntity>>
 
+    @Query("SELECT * FROM networks WHERE id = :id")
+    fun observeById(id: Long): Flow<NetworkEntity?>
+
     @Query("SELECT * FROM networks WHERE autoConnect = 1")
     suspend fun connectable(): List<NetworkEntity>
 

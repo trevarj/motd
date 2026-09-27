@@ -71,6 +71,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -315,6 +316,7 @@ fun MessageList(
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     bufferId: Long? = null,
+    ebooksQuietFeed: Boolean = false,
     conversationName: String? = null,
     directMessage: Boolean = false,
     collapseSystemEvents: Boolean = true,
@@ -631,6 +633,25 @@ fun MessageList(
             // A Column lays them out top-to-bottom so each affordance owns its own space and taps.
             val rowContent: @Composable () -> Unit = {
                 Column(modifier = Modifier.fillMaxWidth().background(highlightColor)) {
+                    if (
+                        ebooksQuietFeed &&
+                        !msg.isSelf &&
+                        (msg.kind == MessageKind.PRIVMSG || msg.kind == MessageKind.NOTICE)
+                    ) {
+                        var expanded by rememberSaveable(msg.id) { mutableStateOf(false) }
+                        if (!expanded) {
+                            QuietEbooksMessageRow(
+                                msg = msg,
+                                older = older,
+                                readMarkerTime = readMarkerTime,
+                                readMarkerLabel = readMarkerLabel,
+                                seam = rowSeam(msg, older, timelineSeams),
+                                onLoadGap = onLoadGap,
+                                onExpand = { expanded = true },
+                            )
+                            return@Column
+                        }
+                    }
                     MessageRow(
                         msg = msg,
                         networkId = networkId,
@@ -777,11 +798,13 @@ private fun DccTransferCard(
 }
 
 @Composable
-private fun ActiveDccTransferCard(
+internal fun ActiveDccTransferCard(
     transfer: DccTransferEntity,
     onAccept: (Long, String, Boolean) -> Unit,
     onReject: (Long) -> Unit,
     onRemove: (Long) -> Unit,
+    onReceiveResultsPrivately: ((DccTransferEntity, Boolean) -> Unit)? = null,
+    onViewResults: ((DccTransferEntity) -> Unit)? = null,
 ) {
     val privateRisk =
         remember(transfer.address, transfer.addressKind) {
@@ -845,7 +868,16 @@ private fun ActiveDccTransferCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            DccTransferActions(transfer, privateRisk, onAccept, onReject, onRemove)
+            DccTransferActions(transfer, privateRisk, onAccept, onReject, onRemove, onReceiveResultsPrivately)
+            if (onViewResults != null && transfer.direction == DccDirection.INCOMING &&
+                transfer.state == DccTransferState.COMPLETED && transfer.destinationUri != null &&
+                transfer.displayFilename.endsWith(".zip", ignoreCase = true)
+            ) {
+                TextButton(
+                    onClick = { onViewResults(transfer) },
+                    modifier = Modifier.testTag("chat_ebooks_view_results_${transfer.id}"),
+                ) { Text("View results") }
+            }
         }
     }
 }
@@ -857,6 +889,7 @@ private fun DccTransferActions(
     onAccept: (Long, String, Boolean) -> Unit,
     onReject: (Long) -> Unit,
     onRemove: (Long) -> Unit,
+    onReceiveResultsPrivately: ((DccTransferEntity, Boolean) -> Unit)?,
 ) {
     val incoming = transfer.direction == DccDirection.INCOMING
     val canAccept =
@@ -866,6 +899,7 @@ private fun DccTransferActions(
                 DccTransferState.PARTIAL,
                 DccTransferState.FAILED,
             )
+    val privateResults = onReceiveResultsPrivately != null && transfer.displayFilename.endsWith(".zip", ignoreCase = true)
     val terminal =
         transfer.state in
             setOf(
@@ -876,35 +910,45 @@ private fun DccTransferActions(
                 DccTransferState.REMOVED,
             )
     if (!canAccept && !terminal) return
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (canAccept) {
-            Button(
-                onClick = {
-                    onAccept(transfer.id, transfer.displayFilename, privateRisk != null)
-                },
-                modifier = Modifier.testTag("chat_dcc_accept_${transfer.id}"),
-            ) {
-                Text(if (privateRisk == null) "Save" else "Allow once & save")
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (canAccept) {
+                if (!privateResults) {
+                    Button(
+                        onClick = { onAccept(transfer.id, transfer.displayFilename, privateRisk != null) },
+                        modifier = Modifier.testTag("chat_dcc_accept_${transfer.id}"),
+                    ) {
+                        Text(if (privateRisk == null) "Save" else "Allow once & save")
+                    }
+                }
+                OutlinedButton(
+                    onClick = { onReject(transfer.id) },
+                    modifier = Modifier.testTag("chat_dcc_reject_${transfer.id}"),
+                ) {
+                    Text("Reject")
+                }
             }
-            OutlinedButton(
-                onClick = { onReject(transfer.id) },
-                modifier = Modifier.testTag("chat_dcc_reject_${transfer.id}"),
-            ) {
-                Text("Reject")
+            if (terminal) {
+                TextButton(
+                    onClick = { onRemove(transfer.id) },
+                    modifier = Modifier.testTag("chat_dcc_remove_${transfer.id}"),
+                ) {
+                    Text("Remove record")
+                }
             }
         }
-        if (terminal) {
-            TextButton(
-                onClick = { onRemove(transfer.id) },
-                modifier = Modifier.testTag("chat_dcc_remove_${transfer.id}"),
+        if (canAccept && privateResults && onReceiveResultsPrivately != null) {
+            OutlinedButton(
+                onClick = { onReceiveResultsPrivately(transfer, privateRisk != null) },
+                modifier = Modifier.testTag("chat_ebooks_receive_results_${transfer.id}"),
             ) {
-                Text("Remove record")
+                Text(if (privateRisk == null) "Receive results privately" else "Allow once & receive results privately")
             }
         }
     }
 }
 
-private fun dccStatusText(transfer: DccTransferEntity): String =
+internal fun dccStatusText(transfer: DccTransferEntity): String =
     when (transfer.state) {
         DccTransferState.OFFERED -> "Waiting"
         DccTransferState.ACCEPTING -> "Starting"
@@ -1873,6 +1917,64 @@ private fun MessageRow(
                 onDelete = { onDelete(msg) },
             )
         }
+    }
+}
+
+private val quietEbooksWhitespace = Regex("\\s+")
+
+private fun quietEbooksPreview(text: String): String {
+    val line = text.replace(quietEbooksWhitespace, " ").trim()
+    val search = listOf("@Search ", "@Searchook ").firstOrNull { line.startsWith(it, ignoreCase = true) }
+    if (search != null) return "Search · ${line.drop(search.length).trim()}"
+    if (line.startsWith("File request:", ignoreCase = true)) return "File request · ${line.substringAfter(':').trim()}"
+    if (line.startsWith("!") && " | " in line) return "File request · ${line.substringAfter(" | ").trim()}"
+    return line
+}
+
+/** Keep the Paging slot, dividers and stable message identity while deferring the full bubble. */
+@Composable
+private fun QuietEbooksMessageRow(
+    msg: MessageEntity,
+    older: MessageEntity?,
+    readMarkerTime: TimelineAnchor?,
+    readMarkerLabel: String?,
+    seam: RowSeam?,
+    onLoadGap: (Long) -> Unit,
+    onExpand: () -> Unit,
+) {
+    TimelineSeamDivider(seam, onLoadGap)
+    if (older == null || dayStart(msg.serverTime) != dayStart(older.serverTime)) {
+        DaySeparator(timeMs = msg.serverTime)
+    }
+    if (
+        readMarkerTime != null &&
+        msg.timelineAnchor() > readMarkerTime &&
+        (older == null || older.timelineAnchor() <= readMarkerTime)
+    ) {
+        NewMessagesDivider(
+            label = readMarkerLabel ?: stringResource(R.string.chat_new_messages),
+            modifier = Modifier.testTag("chat_read_marker_divider"),
+        )
+    }
+    val preview = remember(msg.text) { quietEbooksPreview(msg.text) }
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag(messageTag(msg))
+                .clickable(onClick = onExpand)
+                .heightIn(min = 32.dp)
+                .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "${msg.sender} · $preview",
+            modifier = Modifier.testTag("chat_ebooks_quiet_${msg.id}"),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

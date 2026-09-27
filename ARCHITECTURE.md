@@ -74,6 +74,18 @@ flowchart TD
   the normal harness, converting supported Markdown to IRC formatting for display
   while retaining the original text. Agentwire uses its own backend credentials,
   not a motd subscription gateway. Search remains keyword-based; there is no semantic index.
+- Book search Labs is a local default-off preference. The chat helper appears only in IRC Highway
+  `#ebooks`; it starts a plain `@Search` draft. The DCC offers entry shows incoming, non-removed
+  offers from the same network. Review sender, endpoint risk, and transfer status there.
+  Receive results privately accepts an offered ZIP into app-private cache (16 MiB compressed cap,
+  including unknown-size transfers); Save still selects a SAF destination for other files.
+  Private/local endpoints require explicit Allow once consent. Completed ZIPs have View results;
+  Open results ZIP remains available for manual selection. Removing a record discards only owned
+  cached files; generic SAF destinations are never deleted. Bounded text-entry parsing displays
+  validated requests. Request sends the selected exact channel message immediately through the
+  ordinary composer draft/submit path, only in the eligible joined, ready room with an unoccupied
+  draft and no reply. Rejected sends restore the draft. Offers are not correlated to searches and
+  transfers are never accepted automatically; users explicitly receive or save them.
 - `NotificationSettings` resolves device-local global, exact-network, and canonical-channel
   policies. The first LIVE/PUSH observation freezes each event's eligibility and watch mute
   bypass; HISTORY/REPLAY supply notification context without resolving that decision.

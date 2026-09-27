@@ -370,6 +370,7 @@ fun Composer(
     onValueChange: (TextFieldValue) -> Unit,
     onSend: () -> Unit,
     enabled: Boolean,
+    sendEnabled: Boolean = true,
     modifier: Modifier = Modifier,
     reply: ComposerReply? = null,
     replyVisible: Boolean = reply != null,
@@ -920,7 +921,7 @@ fun Composer(
                         }
                     }
 
-                    val canSend = enabled && plainIrcText(editorValue.text).isNotBlank()
+                    val canSend = enabled && sendEnabled && plainIrcText(editorValue.text).isNotBlank()
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {

@@ -49,6 +49,7 @@ fun LabsScreen(
         onAgentwireChanged = viewModel::setAgentwireEnabled,
         onGlobalFeedChanged = viewModel::setGlobalFeedEnabled,
         onDickordChanged = viewModel::setDickordEnabled,
+        onEbooksChanged = viewModel::setEbooksEnabled,
         onOpenGestureMenu = onOpenGestureMenu,
         onOpenAi = onOpenAi,
         target = target,
@@ -63,6 +64,7 @@ fun LabsContent(
     onAgentwireChanged: (Boolean) -> Unit,
     onGlobalFeedChanged: (Boolean) -> Unit = {},
     onDickordChanged: (Boolean) -> Unit,
+    onEbooksChanged: (Boolean) -> Unit = {},
     onOpenGestureMenu: () -> Unit = {},
     onOpenAi: () -> Unit = {},
     target: SettingsTarget? = null,
@@ -100,6 +102,15 @@ fun LabsContent(
                     switchTag = "labs_dickord_switch",
                 )
             }
+        }
+        SettingsGroup {
+            SwitchRow(
+                title = stringResource(R.string.labs_ebooks),
+                subtitle = stringResource(R.string.labs_ebooks_desc),
+                checked = state.ebooksEnabled,
+                onCheckedChange = onEbooksChanged,
+                switchTag = "labs_ebooks_switch",
+            )
         }
         SettingsTargetAnchor(
             if (target == SettingsTarget.LABS) SettingsTarget.GESTURES.name else target?.name,
@@ -174,6 +185,7 @@ private fun LabsScreenPreview() {
             onAgentwireChanged = {},
             onGlobalFeedChanged = {},
             onDickordChanged = {},
+            onEbooksChanged = {},
         )
     }
 }

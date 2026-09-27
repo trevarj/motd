@@ -46,7 +46,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -184,7 +186,9 @@ import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.avatar.ConversationAvatarOutcome
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.DccDirection
 import io.github.trevarj.motd.data.db.DccTransferEntity
+import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
@@ -193,6 +197,7 @@ import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.dcc.EbooksResultCache
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
@@ -246,6 +251,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** Pause after the last keystroke before the nick-autocomplete panel becomes visible, so fast
@@ -270,6 +276,8 @@ private const val MAX_UNREAD_BADGE_COUNT = 100
 private data class PendingDccAccept(
     val transferId: Long,
     val allowPrivateEndpoint: Boolean,
+    val ebooksRoomId: Long? = null,
+    val ebooksNetworkId: Long? = null,
 )
 
 /** How long (ms) the scroll-to-bottom FAB must be held to skip the mention walk and jump to newest. */
@@ -377,6 +385,8 @@ fun ChatScreen(
         viewModel.composerPrefills.collect { mentionRequest = System.nanoTime() to it }
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val ebooksHelperRoomId by viewModel.ebooksHelperRoomId.collectAsStateWithLifecycle()
+    val ebooksDccOffers by viewModel.ebooksDccOffers.collectAsStateWithLifecycle()
     // Collect paging off the frame-aligned AndroidUiDispatcher. Bounded-window paging swaps the
     // whole Pager when a persisted older page recedes the gap edge, which emits two PagingData
     // back-to-back (the old Pager's invalidation generation plus the new Pager's first). cachedIn
@@ -504,6 +514,8 @@ fun ChatScreen(
 
     ChatContent(
         state = state,
+        ebooksHelperRoomId = ebooksHelperRoomId,
+        ebooksDccOffers = ebooksDccOffers,
         items = items,
         composerEnabled = (!isServerBuffer || state.connState is IrcClientState.Ready) && !state.parted,
         friends = settings.friends,
@@ -870,6 +882,8 @@ fun ChatContent(
     state: ChatState,
     items: LazyPagingItems<MessageEntity>,
     composerEnabled: Boolean,
+    ebooksHelperRoomId: Long? = null,
+    ebooksDccOffers: List<DccTransferEntity> = emptyList(),
     onBack: () -> Unit,
     showBack: Boolean = true,
     onOpenChannelInfo: (Long) -> Unit,
@@ -1138,8 +1152,18 @@ fun ChatContent(
     var expandedFools by remember { mutableStateOf(setOf<Long>()) }
     val clipboard: Clipboard = LocalClipboard.current
     val ctx = LocalContext.current
+    val ebooksCache = remember(ctx) { EbooksResultCache(ctx) }
     val resources = LocalResources.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val eligibleEbooksRoomId =
+        state.buffer?.let { room ->
+            ebooksHelperRoomId?.takeIf {
+                it == room.id && room.type == BufferType.CHANNEL &&
+                    identityRules.normalize(room.displayName) == identityRules.normalize("#ebooks")
+            }
+        }
+    val latestEligibleEbooksRoomId by rememberUpdatedState(eligibleEbooksRoomId)
+    val latestNetworkId by rememberUpdatedState(state.buffer?.networkId)
     var pendingDccAccept by remember { mutableStateOf<PendingDccAccept?>(null) }
     val dccDestinationPicker =
         rememberLauncherForActivityResult(
@@ -1148,7 +1172,10 @@ fun ChatContent(
             val pending = pendingDccAccept
             pendingDccAccept = null
             if (uri != null && pending != null) {
-                onAcceptDccTransfer(pending.transferId, uri, pending.allowPrivateEndpoint)
+                val sameRoom =
+                    pending.ebooksRoomId == null ||
+                        (pending.ebooksRoomId == latestEligibleEbooksRoomId && pending.ebooksNetworkId == latestNetworkId)
+                if (sameRoom) onAcceptDccTransfer(pending.transferId, uri, pending.allowPrivateEndpoint)
             }
         }
     LaunchedEffect(voiceState.notice) {
@@ -1175,6 +1202,54 @@ fun ChatContent(
     var composerText by remember(traceBufferId) {
         mutableStateOf(TextFieldValue(""))
     }
+    var pendingEbooksRequestRevision by remember(traceBufferId) { mutableStateOf<Long?>(null) }
+    var ebooksHelpOpen by remember(eligibleEbooksRoomId) { mutableStateOf(false) }
+    var ebooksResults by remember(eligibleEbooksRoomId) { mutableStateOf<List<EbooksResult>?>(null) }
+    var ebooksResultsError by remember(eligibleEbooksRoomId) { mutableStateOf<String?>(null) }
+    var ebooksOffersOpen by remember(eligibleEbooksRoomId) { mutableStateOf(false) }
+    val visibleEbooksOffers =
+        if (eligibleEbooksRoomId != null) {
+            ebooksDccOffers.filter {
+                it.networkId == state.buffer?.networkId && it.direction == DccDirection.INCOMING &&
+                    it.state != DccTransferState.REMOVED
+            }
+        } else {
+            emptyList()
+        }
+    val latestVisibleEbooksOffers by rememberUpdatedState(visibleEbooksOffers)
+
+    fun showEbooksResults(
+        roomId: Long,
+        uri: Uri,
+    ) {
+        if (roomId != latestEligibleEbooksRoomId) return
+        scope.launch {
+            try {
+                val parsed =
+                    withContext(Dispatchers.IO) {
+                        ctx.contentResolver.openInputStream(uri)?.use(::parseEbooksResults)
+                            ?: throw IllegalArgumentException("Cannot open results ZIP")
+                    }
+                if (roomId == latestEligibleEbooksRoomId) ebooksResults = parsed
+            } catch (e: IllegalArgumentException) {
+                if (roomId == latestEligibleEbooksRoomId) ebooksResultsError = e.message ?: "Invalid results ZIP file"
+            } catch (_: java.io.IOException) {
+                if (roomId == latestEligibleEbooksRoomId) ebooksResultsError = "Could not read results ZIP; choose it again"
+            } catch (_: SecurityException) {
+                if (roomId == latestEligibleEbooksRoomId) ebooksResultsError = "Cannot access results ZIP; choose it again"
+            }
+        }
+    }
+    var pickingEbooksRoomId by remember { mutableStateOf<Long?>(null) }
+    val ebooksResultsPicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            val roomId = pickingEbooksRoomId
+            pickingEbooksRoomId = null
+            if (uri != null && roomId != null) showEbooksResults(roomId, uri)
+        }
+
+    fun isEbooksSearchOnly(text: String) = eligibleEbooksRoomId != null && plainIrcText(text).trim() == "@Search"
+
     // Anchors for the send flight. Held in their own holder so the per-layout writes recompose the
     // overlay that reads them and nothing else on this surface.
     val flightAnchors = remember(traceBufferId) { SendFlightAnchors() }
@@ -1356,6 +1431,10 @@ fun ChatContent(
     // Apply hydration/accepted-send clears without re-saving the same value from the screen.
     LaunchedEffect(traceBufferId, composerDraft.hydrated, composerDraft.revision) {
         if (traceBufferId == null || !composerDraft.hydrated) return@LaunchedEffect
+        // Saving a Request immediately before submitting creates a draft revision that must not
+        // rehydrate the optimistically cleared field. A rejection republishes a newer revision.
+        if (composerDraft.revision == pendingEbooksRequestRevision) return@LaunchedEffect
+        pendingEbooksRequestRevision = null
         if (composerText.text != composerDraft.text) {
             composerText =
                 TextFieldValue(
@@ -1375,6 +1454,27 @@ fun ChatContent(
         mentionPrefill?.second?.let {
             composerText = appendPrefill(composerText, it)
             onDraftChanged(composerText.text)
+        }
+    }
+    // An eligibility/reply change must not rehydrate an optimistic send's old draft. Only the
+    // accepted empty revision (or initial hydration) offers another search, after share/mention prefills.
+    LaunchedEffect(
+        eligibleEbooksRoomId,
+        composerDraft.hydrated,
+        composerDraft.revision,
+        prefillConsumed,
+        state.replyTo,
+    ) {
+        if (
+            eligibleEbooksRoomId != null &&
+            composerDraft.hydrated &&
+            prefillConsumed &&
+            composerDraft.text.isEmpty() &&
+            composerText.text.isEmpty() &&
+            state.replyTo == null
+        ) {
+            composerText = TextFieldValue("@Search ", selection = TextRange(8))
+            onDraftChanged("@Search ")
         }
     }
     val latestComposerText by rememberUpdatedState(composerText)
@@ -2874,6 +2974,7 @@ fun ChatContent(
                                             listShift = flightListShift,
                                             networkId = state.buffer?.networkId,
                                             bufferId = state.buffer?.id,
+                                            ebooksQuietFeed = eligibleEbooksRoomId != null,
                                             conversationName = conversationLabel,
                                             directMessage = state.buffer?.type == BufferType.QUERY,
                                             collapseSystemEvents = !isServerBuffer,
@@ -3093,6 +3194,33 @@ fun ChatContent(
                                 onRejoin = onRejoin,
                             )
                         }
+                        if (eligibleEbooksRoomId != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(
+                                    onClick = { ebooksHelpOpen = true },
+                                    modifier = Modifier.weight(1f).testTag("chat_ebooks_help"),
+                                ) { Text("Book search · How it works") }
+                                TextButton(
+                                    onClick = {
+                                        pickingEbooksRoomId = eligibleEbooksRoomId
+                                        ebooksResultsPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                                    },
+                                    modifier = Modifier.testTag("chat_ebooks_open_results"),
+                                ) { Text("Open results ZIP") }
+                            }
+                            TextButton(
+                                onClick = { ebooksOffersOpen = true },
+                                modifier = Modifier.fillMaxWidth().testTag("chat_ebooks_dcc_offers"),
+                            ) {
+                                Text(
+                                    if (visibleEbooksOffers.isEmpty()) {
+                                        "DCC offers (0) · No offers yet"
+                                    } else {
+                                        "DCC offers (${visibleEbooksOffers.size})"
+                                    },
+                                )
+                            }
+                        }
                         Composer(
                             value = composerText,
                             onValueChange = {
@@ -3107,7 +3235,7 @@ fun ChatContent(
                             },
                             onSend = {
                                 val text = composerText.text
-                                if (plainIrcText(text).isNotBlank()) {
+                                if (plainIrcText(text).isNotBlank() && !isEbooksSearchOnly(text)) {
                                     if (isLongDraft(text)) {
                                         AutoFollowTrace.record("long_draft_prompt_open", traceBufferId, traceSessionId)
                                         longDraftPrompt = true
@@ -3128,6 +3256,7 @@ fun ChatContent(
                                 }
                             },
                             enabled = composerEnabled,
+                            sendEnabled = !isEbooksSearchOnly(composerText.text),
                             onFieldPositioned = { flightAnchors.composerField = it },
                             onFieldTextPositioned = { flightAnchors.composerTextOrigin = it },
                             // Keep the reply content mounted while its banner exits, but start that exit on
@@ -3239,6 +3368,155 @@ fun ChatContent(
         }
     }
 
+    if (eligibleEbooksRoomId != null && ebooksOffersOpen) {
+        ModalBottomSheet(
+            onDismissRequest = { ebooksOffersOpen = false },
+            modifier = Modifier.testTag("chat_ebooks_dcc_sheet"),
+        ) {
+            SheetSystemBars()
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                Text(
+                    "DCC offers (${visibleEbooksOffers.size})",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                )
+                Text(
+                    "Incoming offers on this network; they are not matched to a search. Review the sender and endpoint before saving.",
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                )
+                if (visibleEbooksOffers.isEmpty()) {
+                    Text(
+                        "No offers yet. Send a search or request in #ebooks, then check here. Offers may arrive later.",
+                        modifier = Modifier.padding(20.dp).testTag("chat_ebooks_dcc_empty"),
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
+                        items(visibleEbooksOffers, key = { it.id }) { transfer ->
+                            Text("From ${transfer.peerNick}", modifier = Modifier.padding(start = 28.dp, top = 12.dp))
+                            ActiveDccTransferCard(
+                                transfer = transfer,
+                                onAccept = { id, filename, allowPrivate ->
+                                    pendingDccAccept =
+                                        PendingDccAccept(id, allowPrivate, eligibleEbooksRoomId, transfer.networkId)
+                                    dccDestinationPicker.launch(filename)
+                                },
+                                onReceiveResultsPrivately = { offered, allowPrivate ->
+                                    val canReceive =
+                                        offered.state == DccTransferState.OFFERED ||
+                                            offered.state == DccTransferState.PARTIAL ||
+                                            offered.state == DccTransferState.FAILED
+                                    if (eligibleEbooksRoomId == latestEligibleEbooksRoomId &&
+                                        offered in latestVisibleEbooksOffers && canReceive &&
+                                        offered.displayFilename.endsWith(".zip", ignoreCase = true)
+                                    ) {
+                                        onAcceptDccTransfer(offered.id, ebooksCache.uriFor(offered.id), allowPrivate)
+                                    }
+                                },
+                                onReject = onRejectDccTransfer,
+                                onRemove = onRemoveDccTransfer,
+                                onViewResults = { completed ->
+                                    val uri = completed.destinationUri
+                                    if (completed in visibleEbooksOffers && completed.state == DccTransferState.COMPLETED &&
+                                        uri != null && completed.displayFilename.endsWith(".zip", ignoreCase = true)
+                                    ) {
+                                        ebooksOffersOpen = false
+                                        showEbooksResults(eligibleEbooksRoomId, uri.toUri())
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (eligibleEbooksRoomId != null && ebooksHelpOpen) {
+        AlertDialog(
+            onDismissRequest = { ebooksHelpOpen = false },
+            modifier = Modifier.testTag("chat_ebooks_dialog"),
+            title = { Text("Book search in #ebooks") },
+            text = {
+                Text(
+                    "An empty draft starts with @Search; add title/author and tap send yourself.\n" +
+                        "@Search or @Searchook plus title/author is ordinary channel text.\n" +
+                        "@TEXTBOOKS points to the channel's textbook instructions.\n" +
+                        "@Oatmeal is the new-book route.\n" +
+                        "@sbclient is mIRC help. DCC is required for files.\n\n" +
+                        "Read the current topic by tapping #ebooks above.\n\n" +
+                        "Tap DCC offers here to review incoming network offers (not linked to a search). " +
+                        "Choose Receive results privately on a ZIP offer to use temporary app-private storage " +
+                        "(16 MiB limit); private/local endpoints still require Allow once. " +
+                        "Other Save actions pick a destination. The sender's conversation still has the same offer.\n\n" +
+                        "After receiving a results ZIP, tap View results on its completed offer, or use Open results ZIP " +
+                        "to choose one manually. Request sends this channel message immediately. " +
+                        "Save the later book DCC from DCC offers here too.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { ebooksHelpOpen = false }) { Text("Close") }
+            },
+        )
+    }
+
+    val selectedEbooksResults = ebooksResults
+    if (eligibleEbooksRoomId != null && selectedEbooksResults != null) {
+        fun canRequest() =
+            eligibleEbooksRoomId == state.buffer?.id &&
+                composerDraft.hydrated && composerDraft.text == "@Search " && composerText.text == "@Search " &&
+                state.replyTo == null && state.buffer?.joined == true && !state.parted &&
+                state.connState is IrcClientState.Ready
+        AlertDialog(
+            onDismissRequest = { ebooksResults = null },
+            modifier = Modifier.testTag("chat_ebooks_results"),
+            title = { Text("Book results") },
+            text = {
+                Column {
+                    Text("Incoming offers are in DCC offers here and in the sender's conversation; no offer is matched to this search. Request sends this channel message immediately.")
+                    LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
+                        items(selectedEbooksResults) { result ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(result.filename, style = MaterialTheme.typography.bodyMedium)
+                                    Text(result.size, style = MaterialTheme.typography.bodySmall)
+                                }
+                                TextButton(
+                                    onClick = {
+                                        if (ebooksResults === selectedEbooksResults && canRequest()) {
+                                            ebooksResults = null
+                                            pendingEbooksRequestRevision = composerDraft.revision + 1
+                                            onDraftChanged(result.request)
+                                            onSubmit(result.request)
+                                            // Only the ViewModel clears the durable draft after acceptance;
+                                            // a rejected send republishes it to restore this optimistic clear.
+                                            composerText = TextFieldValue("")
+                                        }
+                                    },
+                                    enabled = canRequest(),
+                                    modifier = Modifier.testTag("chat_ebooks_request"),
+                                ) { Text("Request") }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { ebooksResults = null }) { Text("Close") } },
+        )
+    }
+    val selectedEbooksError = ebooksResultsError
+    if (eligibleEbooksRoomId != null && selectedEbooksError != null) {
+        AlertDialog(
+            onDismissRequest = { ebooksResultsError = null },
+            modifier = Modifier.testTag("chat_ebooks_results_error"),
+            title = { Text("Cannot open results ZIP") },
+            text = { Text(selectedEbooksError) },
+            confirmButton = { TextButton(onClick = { ebooksResultsError = null }) { Text("Close") } },
+        )
+    }
+
     if (attachmentSheetOpen) {
         AttachmentSheets(
             open = true,
@@ -3300,10 +3578,11 @@ fun ChatContent(
                 Row {
                     androidx.compose.material3.TextButton(onClick = {
                         AutoFollowTrace.record("long_draft_send_messages", traceBufferId, traceSessionId)
-                        longDraftPrompt = false
-                        onSubmit(composerText.text)
-                        composerText = TextFieldValue("")
-                        scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
+                        if (!isEbooksSearchOnly(composerText.text)) {
+                            onSubmit(composerText.text)
+                            composerText = TextFieldValue("")
+                            scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
+                        }
                     }) { Text("Send as messages") }
                     androidx.compose.material3.TextButton(onClick = {
                         AutoFollowTrace.record("long_draft_cancel", traceBufferId, traceSessionId)

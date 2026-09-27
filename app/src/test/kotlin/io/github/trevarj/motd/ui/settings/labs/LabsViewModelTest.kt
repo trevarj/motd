@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.settings.labs
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.agentwire.AgentwirePrefs
+import io.github.trevarj.motd.data.prefs.EbooksLabsPrefs
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
 import io.github.trevarj.motd.dickord.DickordLabsPrefs
 import io.github.trevarj.motd.gesture.GestureMenuConfig
@@ -32,6 +33,7 @@ class LabsViewModelTest {
     private val agentwire = FakeAgentwirePrefs()
     private val globalFeed = FakeGlobalFeedPrefs()
     private val dickord = FakeDickordLabsPrefs()
+    private val ebooks = FakeEbooksLabsPrefs()
 
     @Before fun setUp() {
         Dispatchers.setMain(dispatcher)
@@ -41,7 +43,7 @@ class LabsViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun vm() = LabsViewModel(gestures, agentwire, globalFeed, dickord)
+    private fun vm() = LabsViewModel(gestures, agentwire, globalFeed, dickord, ebooks)
 
     @Test fun everyLabStartsOff() =
         runTest {
@@ -51,6 +53,7 @@ class LabsViewModelTest {
                     agentwireEnabled = false,
                     globalFeedEnabled = false,
                     dickordEnabled = false,
+                    ebooksEnabled = false,
                 ),
                 vm().state.first(),
             )
@@ -82,6 +85,26 @@ class LabsViewModelTest {
             assertEquals(false, gestures.enabled.first())
             assertEquals(false, agentwire.enabled.first())
             assertEquals(false, globalFeed.enabled.first())
+        }
+
+    @Test fun ebooksToggle_startsOffAndWritesOnlyItsOwnStore() =
+        runTest {
+            dickord.flag.value = true
+            val model = vm()
+            assertEquals(false, ebooks.enabled.first())
+            assertEquals(false, model.state.first { it.dickordEnabled }.ebooksEnabled)
+
+            model.setEbooksEnabled(true)
+            assertEquals(true, model.state.first { it.ebooksEnabled && it.dickordEnabled }.ebooksEnabled)
+            assertEquals(false, gestures.enabled.first())
+            assertEquals(false, agentwire.enabled.first())
+            assertEquals(false, globalFeed.enabled.first())
+            assertEquals(true, dickord.enabled.first())
+
+            model.setEbooksEnabled(false)
+            assertEquals(false, model.state.first { !it.ebooksEnabled }.ebooksEnabled)
+            assertEquals(false, ebooks.enabled.first())
+            assertEquals(true, dickord.enabled.first())
         }
 
     @Test fun gestureToggle_writesOnlyTheGestureStore() =
@@ -161,6 +184,15 @@ class LabsViewModelTest {
     }
 
     private class FakeDickordLabsPrefs : DickordLabsPrefs(ApplicationProvider.getApplicationContext<Context>()) {
+        val flag = MutableStateFlow(false)
+        override val enabled: Flow<Boolean> = flag
+
+        override suspend fun setEnabled(enabled: Boolean) {
+            flag.value = enabled
+        }
+    }
+
+    private class FakeEbooksLabsPrefs : EbooksLabsPrefs(ApplicationProvider.getApplicationContext<Context>()) {
         val flag = MutableStateFlow(false)
         override val enabled: Flow<Boolean> = flag
 

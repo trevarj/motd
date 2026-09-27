@@ -7,6 +7,8 @@ import org.junit.Assert.fail
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.io.OutputStream
 
 class DccStreamsTest {
     @Test fun `receive streams declared bytes and writes acknowledgements`() =
@@ -84,6 +86,55 @@ class DccStreamsTest {
             assertEquals("Transfer exceeded the DCC size limit", error.message)
             assertArrayEquals(byteArrayOf(1, 2, 3), output.toByteArray())
             assertEquals(listOf(3L), progress)
+        }
+
+    @Test fun `cached results cap also applies to unknown size receive stream`() =
+        runTest {
+            var remaining = EbooksResultCache.MAX_COMPRESSED_BYTES + 1
+            var written = 0L
+            val input =
+                object : InputStream() {
+                    override fun read(): Int = if (remaining-- > 0) 0 else -1
+
+                    override fun read(
+                        buffer: ByteArray,
+                        offset: Int,
+                        length: Int,
+                    ): Int {
+                        if (remaining <= 0) return -1
+                        val count = minOf(length.toLong(), remaining).toInt()
+                        remaining -= count
+                        return count
+                    }
+                }
+            val output =
+                object : OutputStream() {
+                    override fun write(value: Int) {
+                        written++
+                    }
+
+                    override fun write(
+                        buffer: ByteArray,
+                        offset: Int,
+                        length: Int,
+                    ) {
+                        written += length
+                    }
+                }
+            val error =
+                expectIntegrityFailure {
+                    receiveDccBytes(
+                        input = input,
+                        output = output,
+                        ack = ByteArrayOutputStream(),
+                        expectedBytes = null,
+                        maxBytes = EbooksResultCache.MAX_COMPRESSED_BYTES,
+                        progressStepBytes = EbooksResultCache.MAX_COMPRESSED_BYTES,
+                        persistProgress = {},
+                    )
+                }
+            assertEquals("Transfer exceeded the DCC size limit", error.message)
+            assertEquals(EbooksResultCache.MAX_COMPRESSED_BYTES, written)
         }
 
     private suspend fun expectIntegrityFailure(block: suspend () -> Unit): DccTransferIntegrityException =
