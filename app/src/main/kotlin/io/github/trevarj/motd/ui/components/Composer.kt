@@ -97,11 +97,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
@@ -125,7 +128,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -151,6 +157,7 @@ import io.github.trevarj.motd.irc.format.IrcEditorDocument
 import io.github.trevarj.motd.irc.format.IrcTextStyle
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
+import io.github.trevarj.motd.ui.chat.COMMAND_HINTS
 import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
 import io.github.trevarj.motd.ui.chat.messageFormattingRange
 import io.github.trevarj.motd.ui.chat.searchSystemEmojis
@@ -1567,6 +1574,13 @@ private fun EmojiPickerReplacementSurface(
     }
 }
 
+private fun completedCommandEnd(text: String): Int? {
+    if (!text.startsWith("/") || text.startsWith("//")) return null
+    val separator = text.indexOfFirst { it.isWhitespace() }
+    if (separator > 1) return separator
+    return text.length.takeIf { separator == -1 && COMMAND_HINTS.any { hint -> hint.equals(text, ignoreCase = true) } }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ComposerTextField(
@@ -1602,14 +1616,23 @@ private fun ComposerTextField(
     val latestDocument = rememberUpdatedState(document)
     val fieldBackground = MaterialTheme.colorScheme.surfaceContainerHigh
     val fieldForeground = MaterialTheme.colorScheme.onSurface
+    val commandBackground = MaterialTheme.colorScheme.primary
+    val commandForeground = MaterialTheme.colorScheme.onPrimary
+    val commandFontSize = MaterialTheme.typography.bodyMedium.fontSize
+    val text = state.text.toString()
+    val commandEnd = if (ircFormattingEnabled) completedCommandEnd(text) else null
+    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val outputTransformation =
-        remember(ircFormattingEnabled, fieldBackground, fieldForeground) {
+        remember(ircFormattingEnabled, fieldBackground, fieldForeground, commandForeground, commandFontSize) {
             if (ircFormattingEnabled) {
                 OutputTransformation {
                     val visibleText = toString()
                     val displayed = latestDocument.value.let { if (it.text == visibleText) it else it.replaceText(visibleText) }
                     displayed.runs.forEach { run ->
                         addStyle(run.state.toSpanStyle(fieldBackground, fieldForeground), run.start, run.end)
+                    }
+                    completedCommandEnd(visibleText)?.let { end ->
+                        addStyle(SpanStyle(color = commandForeground, fontFamily = FontFamily.Monospace, fontSize = commandFontSize), 0, end)
                     }
                 }
             } else {
@@ -1677,6 +1700,7 @@ private fun ComposerTextField(
             ),
         lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = if (expanded) Int.MAX_VALUE else 6),
         outputTransformation = outputTransformation,
+        onTextLayout = { getResult -> textLayout = getResult() },
         decorator = { inner ->
             Box(
                 modifier =
@@ -1693,7 +1717,35 @@ private fun ComposerTextField(
                 if (state.text.isEmpty()) {
                     Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Box(Modifier.onGloballyPositioned { onTextPositioned(it.positionInWindow()) }) {
+                Box(
+                    modifier =
+                        Modifier
+                            .then(if (commandEnd != null) Modifier.testTag("chat_composer_command_chip") else Modifier)
+                            .drawBehind {
+                                val end = commandEnd ?: return@drawBehind
+                                val layout = textLayout?.takeIf { it.layoutInput.text.text == text } ?: return@drawBehind
+                                val horizontalPadding = 3.dp.toPx()
+                                val verticalPadding = 1.dp.toPx()
+                                // ponytail: paint behind the same editor glyphs; no second field or draft state.
+                                for (line in 0..layout.getLineForOffset(end - 1)) {
+                                    val start = layout.getLineStart(line)
+                                    val lineEnd = minOf(end, layout.getLineEnd(line, visibleEnd = true))
+                                    if (lineEnd <= start) continue
+                                    val first = layout.getBoundingBox(start)
+                                    val last = layout.getBoundingBox(lineEnd - 1)
+                                    drawRoundRect(
+                                        color = commandBackground,
+                                        topLeft = Offset(first.left - horizontalPadding, first.top - verticalPadding),
+                                        size =
+                                            Size(
+                                                last.right - first.left + horizontalPadding * 2,
+                                                first.height + verticalPadding * 2,
+                                            ),
+                                        cornerRadius = CornerRadius(6.dp.toPx()),
+                                    )
+                                }
+                            }.onGloballyPositioned { onTextPositioned(it.positionInWindow()) },
+                ) {
                     inner()
                 }
             }

@@ -1,12 +1,18 @@
 package io.github.trevarj.motd
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -18,6 +24,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -464,6 +471,57 @@ class ComposerUiTest {
         compose.waitForIdle()
         compose.onNodeWithTag("chat_composer_emoji_picker").assertIsNotDisplayed()
         compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+    }
+
+    @Test
+    fun completedSlashCommandRendersChipWithoutChangingEditableDraftOrSend() {
+        val draft = mutableStateOf(TextFieldValue())
+        val formattingEnabled = mutableStateOf(true)
+        var sent: String? = null
+        var chipColor = Color.Unspecified
+        compose.setContent {
+            MotdTheme {
+                chipColor = MaterialTheme.colorScheme.primary
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = { sent = draft.value.text },
+                    enabled = true,
+                    ircFormattingEnabled = formattingEnabled.value,
+                )
+            }
+        }
+
+        val field = compose.onNodeWithTag("chat_composer_field")
+        val chip = compose.onNodeWithTag("chat_composer_command_chip", useUnmergedTree = true)
+        field.performTextInput("/jo")
+        chip.assertDoesNotExist()
+        field.performTextInput("in")
+        chip.assertIsDisplayed()
+        val pixels = chip.captureToImage().asAndroidBitmap()
+        assertEquals(chipColor.toArgb(), pixels.getPixel(1, pixels.height / 2))
+        field.performTextInput(" ")
+        chip.assertIsDisplayed()
+        field.performTextInput("#motd")
+        field.assertTextEquals("/join #motd")
+        compose.runOnIdle {
+            assertEquals("/join #motd", draft.value.text)
+            assertEquals(TextRange(11), draft.value.selection)
+        }
+        compose.onNodeWithTag("chat_composer_send").performClick()
+        compose.runOnIdle { assertEquals("/join #motd", sent) }
+
+        field.performTextReplacement("//join #motd")
+        field.assertTextEquals("//join #motd")
+        chip.assertDoesNotExist()
+        compose.runOnIdle { assertEquals("//join #motd", draft.value.text) }
+
+        compose.runOnIdle {
+            formattingEnabled.value = false
+            draft.value = TextFieldValue("/join #motd")
+        }
+        field.assertTextEquals("/join #motd")
+        chip.assertDoesNotExist()
     }
 
     @Test
