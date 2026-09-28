@@ -73,6 +73,22 @@ class IrcClientTest {
             .groupValues[1]
 
     @Test
+    fun `CTCP VERSION replies with framed app version only to PRIVMSG`() =
+        runTest {
+            val ft = FakeTransport()
+            registered(ft, clientVersion = "motd 0.19.0-debug")
+
+            ft.feed(":alice!u@h PRIVMSG motd :\u0001VERSION\u0001")
+            runCurrent()
+            val notices = ft.sent.filter { it.startsWith("NOTICE ") }
+            assertEquals(listOf("NOTICE alice :\u0001VERSION motd 0.19.0-debug\u0001"), notices)
+
+            ft.feed(":alice!u@h NOTICE motd :\u0001VERSION\u0001")
+            runCurrent()
+            assertEquals(notices, ft.sent.filter { it.startsWith("NOTICE ") })
+        }
+
+    @Test
     fun `sensitive NickServ self echo is not published`() =
         runTest {
             val ft = FakeTransport()
@@ -1977,8 +1993,16 @@ class IrcClientTest {
         ft: FakeTransport,
         caps: String = fullLs,
         observerBufferCapacity: Int = 4096,
+        clientVersion: String = "motd",
     ): IrcClient {
-        val client = IrcClient(config(), ft.factory(), clientScope(), observerBufferCapacity)
+        val client =
+            IrcClient(
+                config(),
+                ft.factory(),
+                clientScope(),
+                observerBufferCapacity,
+                clientVersion = clientVersion,
+            )
         client.start()
         runCurrent()
         ft.feed(":srv CAP * LS :$caps")

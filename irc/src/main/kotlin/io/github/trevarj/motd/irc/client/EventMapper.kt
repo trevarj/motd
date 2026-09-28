@@ -32,6 +32,7 @@ class EventMapper(
     private val sojuReadCap: () -> Boolean = { true },
     private val maxPendingNamesChannels: Int = MAX_PENDING_NAMES_CHANNELS,
     private val maxPendingNamesMembers: Int = MAX_PENDING_NAMES_MEMBERS,
+    private val clientVersion: String = "motd",
 ) {
     init {
         require(maxPendingNamesChannels > 0)
@@ -357,7 +358,7 @@ class EventMapper(
                     ctcpReply(
                         IrcMessage(
                             command = "NOTICE",
-                            params = listOf(source.nick, "VERSION motd"),
+                            params = listOf(source.nick, "\u0001VERSION $clientVersion\u0001"),
                         ),
                     )
                     return null

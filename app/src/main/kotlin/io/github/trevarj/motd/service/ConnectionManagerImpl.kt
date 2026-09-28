@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.BuildConfig
 import io.github.trevarj.motd.audio.AUDIO_MESSAGE_TAG
 import io.github.trevarj.motd.audio.AUDIO_MESSAGE_TAG_VERSION
 import io.github.trevarj.motd.audio.isCanonicalVoiceFallback
@@ -1775,7 +1776,13 @@ class ConnectionManagerImpl
                     },
                 )
             return IrcClientConnection(
-                IrcClient(config, factory, scope, nickRecoveryGuard = nickRecoveryGuard),
+                IrcClient(
+                    config,
+                    factory,
+                    scope,
+                    nickRecoveryGuard = nickRecoveryGuard,
+                    clientVersion = "motd ${BuildConfig.VERSION_NAME}",
+                ),
                 proxyResolution.release,
             )
         }

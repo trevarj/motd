@@ -188,6 +188,7 @@ class IrcClient(
     private val scope: CoroutineScope,
     private val observerBufferCapacity: Int = OBSERVER_EVENT_CAPACITY,
     private val nickRecoveryGuard: NickRecoveryGuard = NickRecoveryGuard(),
+    clientVersion: String = "motd",
 ) {
     private val _state = MutableStateFlow<IrcClientState>(IrcClientState.Disconnected)
     val state: StateFlow<IrcClientState> = _state.asStateFlow()
@@ -264,6 +265,7 @@ class IrcClient(
             selfNick = { selfNick.get() },
             isupport = { _isupport.get() },
             sojuReadCap = { hasCap("soju.im/read") },
+            clientVersion = clientVersion,
         )
     private val whoxRequests = ConcurrentHashMap<String, Deferred<WhoxResult>>()
     private val whoxTokens = WhoxTokenPool()
