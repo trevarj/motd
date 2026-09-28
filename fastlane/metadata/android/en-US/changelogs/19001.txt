@@ -1,0 +1,4 @@
+- Added bouncer dashboard controls and drawer shortcuts.
+- Made slash commands easier to spot and discover while composing.
+- Added saved commands that run after connecting to a network.
+- Improved IRC color contrast and CTCP VERSION replies.
