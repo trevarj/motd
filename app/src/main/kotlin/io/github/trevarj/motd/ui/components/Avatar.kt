@@ -114,9 +114,10 @@ fun avatarsHidden(): Boolean = LocalAvatarStyle.current == AvatarStyle.NONE
  * and queries/people as circles, across every style. [AvatarStyle.MONOGRAM] is a quiet
  * theme-tinted disc with a single initial; [AvatarStyle.INITIALS] is the bolder solid nick-color
  * chip with two initials; and [AvatarStyle.IRC_SPRITE] (default) renders deterministic IRC robot
- * sprites for people. Project-named channels instead receive a matched Devicons mark, with a
- * neutral IRC fallback. [AvatarStyle.NONE] renders nothing and occupies no space. All other styles
- * take their identity color from [name] via the current LocalNickColors scheme.
+ * sprites for people. #motd uses the bundled logo, other project-named channels use matched
+ * Devicons marks, and unmatched channels keep a neutral IRC fallback. [AvatarStyle.NONE] renders
+ * nothing and occupies no space. All other styles take their identity color from [name] via
+ * the current LocalNickColors scheme.
  *
  * [isChannel] uses the name as-is (channels keep the leading `#`); queries fall back to their nick.
  */

@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -13,18 +14,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdShapes
+import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
 import io.github.trevarj.motd.ui.theme.identityRamp
 import kotlin.math.min
 
@@ -233,10 +242,10 @@ private fun channelTokens(channelName: String): List<String> {
 }
 
 /**
- * Contextual channel badge: named technical channels get a Devicons mark; ordinary channels keep
- * a quiet IRC sigil. Channels are rounded-square tiles ([MotdShapes.channelAvatar]) filled with
- * the vivid mid tone of the deterministic channel hue, so they read as places while people stay
- * circular sprites.
+ * Contextual channel badge: #motd uses the bundled logo, named technical channels get a
+ * Devicons mark, and ordinary channels keep a quiet IRC sigil. Channels are rounded-square tiles
+ * ([MotdShapes.channelAvatar]) filled with the vivid mid tone of the deterministic channel hue,
+ * so they read as places while people stay circular sprites.
  */
 @Composable
 internal fun IrcChannelBadge(
@@ -244,7 +253,8 @@ internal fun IrcChannelBadge(
     size: Dp,
     modifier: Modifier = Modifier,
 ) {
-    val glyph = remember(name) { matchedChannelDevicon(name) }
+    val isMotd = name.equals("#motd", ignoreCase = true)
+    val glyph = remember(name) { if (isMotd) null else matchedChannelDevicon(name) }
     val background = LocalNickColors.current.avatar(name)
     // The identity fill is the tile, its highlight step is the border, and the mark takes
     // whichever of black/white reads on the tile.
@@ -260,7 +270,15 @@ internal fun IrcChannelBadge(
                 .border(1.dp, border.copy(alpha = 0.90f), MotdShapes.channelAvatar),
         contentAlignment = Alignment.Center,
     ) {
-        if (glyph == null) {
+        if (isMotd) {
+            Image(
+                painter = painterResource(R.drawable.motd_logo_mark),
+                contentDescription = null,
+                colorFilter = remember(mark) { ColorFilter.colorMatrix(ColorMatrix(ceramicLogoColorMatrix(mark.toArgb()))) },
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(size * 0.70f).testTag("motd_channel_logo"),
+            )
+        } else if (glyph == null) {
             Text(
                 text = "#",
                 color = mark,
