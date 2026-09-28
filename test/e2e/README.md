@@ -67,6 +67,11 @@ the direct launcher discovers exactly four annotated `Class#method` cases from
 the installed test package, clears the target package before each one, and does
 not retain raw instrumentation output. Connected Gradle runs use the same fixture
 configuration and enforce isolation with Android Test Orchestrator.
+
+Required CI uses the direct launcher: AGP 9.4's connected task can report success
+after `Invalid userId -2` without starting any case. Direct mode requires a
+completed instrumentation result from each of the four discovered methods.
+
 The four journeys cover:
 
 - onboarding, self-signed fixture trust, soju login, and network import;

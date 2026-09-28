@@ -75,7 +75,7 @@ class ImageViewerGestureUiTest {
         }
 
         // Telephoto ignores gestures until it has measured the loaded image.
-        compose.waitUntil(IMAGE_LOAD_WAIT_MS) { state.isImageDisplayed }
+        compose.waitUntil(IMAGE_LOAD_WAIT_MS) { compose.runOnIdle { state.isImageDisplayed } }
 
         compose.onNodeWithTag(IMAGE_VIEWER_IMAGE_TAG).performTouchInput {
             down(0, Offset(75f, 200f))

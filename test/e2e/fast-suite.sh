@@ -110,6 +110,7 @@ run_direct_suite() {
       -e sojuTlsSha256 "$TLS_SHA256" -e e2eRunId "$FAST_E2E_RUN_ID" "$runner" 2>&1)" || rc=$?
     if [ "$rc" -eq 0 ]; then
       printf '%s\n' "$instrument_output" | tr -d '\r' | grep -qx 'INSTRUMENTATION_CODE: -1' || rc=1
+      printf '%s\n' "$instrument_output" | tr -d '\r' | grep -qx 'INSTRUMENTATION_STATUS_CODE: 0' || rc=1
       if printf '%s\n' "$instrument_output" | grep -Eq 'INSTRUMENTATION_(FAILED|ABORTED)|FAILURES!!!|Process crashed'; then
         rc=1
       fi
