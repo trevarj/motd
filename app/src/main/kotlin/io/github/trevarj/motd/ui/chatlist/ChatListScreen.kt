@@ -120,7 +120,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -2338,11 +2337,10 @@ internal const val CHAT_LIST_SWIPE_THRESHOLD_FRACTION = 0.65f
 
 internal fun chatListSwipePositionalThreshold(totalDistance: Float): Float = totalDistance * CHAT_LIST_SWIPE_THRESHOLD_FRACTION
 
-internal fun shouldPerformChatListSwipeHaptic(
-    previous: SwipeToDismissBoxValue,
-    current: SwipeToDismissBoxValue,
-    enabled: Boolean,
-): Boolean = enabled && previous != SwipeToDismissBoxValue.EndToStart && current == SwipeToDismissBoxValue.EndToStart
+internal fun isChatListSwipePastThreshold(
+    offset: Float,
+    width: Float,
+): Boolean = offset <= -chatListSwipePositionalThreshold(width)
 
 /** Use the compat threshold effect while honoring the user's touch-feedback preference. */
 private fun View.performThresholdHaptic() {
@@ -2474,7 +2472,7 @@ private fun FoolsSectionHeader(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SelectableChatListRow(
+internal fun SelectableChatListRow(
     row: ChatListRow,
     presence: io.github.trevarj.motd.service.PresenceState?,
     isFriend: Boolean,
@@ -2497,31 +2495,45 @@ private fun SelectableChatListRow(
     val dismissState = rememberSwipeToDismissBoxState(positionalThreshold = ::chatListSwipePositionalThreshold)
     val scope = rememberCoroutineScope()
     val view = LocalView.current
-    LaunchedEffect(dismissState, swipeEnabled) {
-        var previous = dismissState.targetValue
-        snapshotFlow { dismissState.targetValue }.collect { current ->
-            if (shouldPerformChatListSwipeHaptic(previous, current, enabled = swipeEnabled)) {
-                view.performThresholdHaptic()
-            }
-            previous = current
-        }
-    }
+    var releasedPastThreshold by remember { mutableStateOf(false) }
     SwipeToDismissBox(
         state = dismissState,
         enableDismissFromStartToEnd = false,
         enableDismissFromEndToStart = swipeEnabled,
         onDismiss = { direction ->
+            val shouldSwipe = releasedPastThreshold
+            releasedPastThreshold = false
             if (direction == SwipeToDismissBoxValue.EndToStart && swipeEnabled) {
                 scope.launch {
                     // Lazy items may retain composition after moving between active/archive lists.
                     // Settle before moving the row so a reused state cannot fire the inverse action.
                     dismissState.snapTo(SwipeToDismissBoxValue.Settled)
-                    currentSwipe()
+                    if (shouldSwipe) currentSwipe()
                 }
             }
         },
         backgroundContent = { ChatListSwipeBackground(row, swipeAction, archiveMode) },
-        modifier = modifier.testTag("chatlist_swipe_${row.bufferId}"),
+        modifier =
+            modifier
+                .pointerInput(dismissState, swipeEnabled) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        releasedPastThreshold = false
+                        var armed = false
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Final)
+                            if (event.changes.none { it.pressed }) {
+                                // Only the finger's final drag position, never a fling animation, may arm the action.
+                                releasedPastThreshold = event.type == PointerEventType.Release && armed
+                                break
+                            }
+                            val pastThreshold =
+                                swipeEnabled && isChatListSwipePastThreshold(dismissState.requireOffset(), size.width.toFloat())
+                            if (pastThreshold && !armed) view.performThresholdHaptic()
+                            armed = pastThreshold
+                        }
+                    }
+                }.testTag("chatlist_swipe_${row.bufferId}"),
     ) {
         // Keep the normal foreground opaque so the action affordance appears only during drag.
         Box(
