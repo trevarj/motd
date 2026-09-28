@@ -26,7 +26,9 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IrcColor
@@ -203,6 +205,39 @@ class ComposerUiTest {
         compose.runOnIdle {
             assertEquals("alice", picked)
         }
+    }
+
+    @Test
+    fun commandAutocomplete_describesCommandsWithoutChangingNickRowsOrPicks() {
+        val command = mutableStateOf(true)
+        var picked: String? = null
+        compose.setContent {
+            MotdTheme {
+                AutocompletePanel(
+                    candidates = if (command.value) listOf("/join", "/away") else listOf("alice"),
+                    onPick = { picked = it },
+                    isCommand = command.value,
+                )
+            }
+        }
+
+        compose.onNodeWithText("Join a channel", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Set or clear your away status", useUnmergedTree = true).assertIsDisplayed()
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose
+            .onNodeWithText("/join", useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        assertEquals(FontFamily.Monospace, layout.layoutInput.style.fontFamily)
+        compose.onNodeWithTag("autocomplete_item_1").performClick()
+        compose.runOnIdle { assertEquals("/away", picked) }
+
+        compose.runOnIdle { command.value = false }
+        compose.onNodeWithText("alice", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Join a channel", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("Set or clear your away status", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("autocomplete_item_0").performClick()
+        compose.runOnIdle { assertEquals("alice", picked) }
     }
 
     @Test
