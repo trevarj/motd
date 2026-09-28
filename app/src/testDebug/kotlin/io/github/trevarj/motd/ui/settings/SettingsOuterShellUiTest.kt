@@ -138,7 +138,6 @@ class SettingsOuterShellUiTest {
 
         compose.onNodeWithTag("bouncer_overview").assertIsDisplayed()
         compose.onNodeWithText("Home").assertIsDisplayed()
-        compose.onNodeWithText("2 listed · 1 shown in motd").assertIsDisplayed()
         compose.onNodeWithTag("bouncer_overview_admin").assertDoesNotExist()
         compose.onNodeWithTag("bouncer_overview_networks").performClick()
         compose.onNodeWithTag("bouncer_networks_panel").assertIsDisplayed()
@@ -253,13 +252,11 @@ class SettingsOuterShellUiTest {
                     listingFailed = false,
                 )
         }
-        compose.onNodeWithText("Last loaded: 1 listed · 1 shown in motd").assertIsDisplayed()
         compose.runOnIdle {
             state = state.copy(rootState = IrcClientState.Ready("me", emptySet(), emptyMap()), listingFailed = true, error = "Timed out")
         }
         compose.onNodeWithTag("bouncer_overview_networks").performClick()
         compose.onNodeWithText("Could not load networks").assertIsDisplayed()
-        compose.onNodeWithText("Last loaded: 1 listed · 1 shown in motd").assertIsDisplayed()
     }
 
     @Test

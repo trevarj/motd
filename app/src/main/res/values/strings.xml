@@ -1414,7 +1414,10 @@
     <string name="bouncer_overview_connect_to_load">Connect to load networks</string>
     <string name="bouncer_overview_no_networks">No networks yet. Open Networks to add one.</string>
     <string name="bouncer_overview_listing_failed">Could not load networks</string>
-    <string name="bouncer_overview_counts">%1$d listed · %2$d shown in motd</string>
+    <plurals name="bouncer_overview_counts">
+        <item quantity="one">%1$d listed · %2$d shown in motd</item>
+        <item quantity="other">%1$d listed · %2$d shown in motd</item>
+    </plurals>
     <string name="bouncer_overview_last_loaded">Last loaded: %1$s</string>
     <string name="bouncer_commands_verified">Commands verified</string>
     <string name="bouncer_commands_unverified">Commands unverified</string>

@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -348,8 +349,9 @@ private fun BouncerOverview(
 
                         else -> {
                             val count =
-                                stringResource(
-                                    R.string.bouncer_overview_counts,
+                                pluralStringResource(
+                                    R.plurals.bouncer_overview_counts,
+                                    state.rows.size,
                                     state.rows.size,
                                     state.rows.count { it.childNetworkId != null },
                                 )
@@ -443,8 +445,9 @@ private fun NetworksPanel(
                 Text(
                     stringResource(
                         R.string.bouncer_overview_last_loaded,
-                        stringResource(
-                            R.string.bouncer_overview_counts,
+                        pluralStringResource(
+                            R.plurals.bouncer_overview_counts,
+                            state.rows.size,
                             state.rows.size,
                             state.rows.count { it.childNetworkId != null },
                         ),
