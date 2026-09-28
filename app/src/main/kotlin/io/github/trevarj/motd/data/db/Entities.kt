@@ -152,10 +152,12 @@ data class NetworkEntity(
     val serverIconUrl: String? = null,
     /** Exact HTTPS file-host authority explicitly allowed to receive this network's upload credential. */
     val trustedFileHost: String? = null,
+    /** Ordered commands run after registration on each physical connection; may contain secrets. */
+    @ColumnInfo(defaultValue = "''") val onConnectCommands: String = "",
 ) {
-    // Redact secrets (saslPassword, serverPassword, nickServPassword, obfsLink) from logs; proxyHost/port are
-    // non-sensitive so keep them out
-    // too for brevity — the endpoint host:port is enough to identify the row.
+    // Redact secrets (saslPassword, serverPassword, nickServPassword, obfsLink,
+    // onConnectCommands) from logs; keep non-sensitive proxyHost/port out for brevity too —
+    // the endpoint host:port is enough to identify the row.
     override fun toString() = "NetworkEntity(id=$id, name=$name, role=$role, host=$host:$port)"
 }
 

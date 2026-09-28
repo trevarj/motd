@@ -44,6 +44,9 @@ flowchart TD
   go through `ConnectionManager` instead of constructing IRC clients in screens.
 - TLS policy, Android KeyChain integration, proxy selection, and embedded
   obfuscation are injected at the `:app` boundary so `:irc` stays pure JVM.
+- Each saved network owns its own ordered post-connect commands. `ConnectionActor`
+  runs them once per physical Ready connection after registration; plaintext
+  configuration backups omit them because commands can contain credentials.
 - IRC TCP/TLS uses okio over `Socket`/`SSLSocket`. App-side WebSocket transport
   uses the pinned OkHttp dependency. Link metadata and attachment uploads retain
   their `HttpURLConnection`-based streaming implementations.

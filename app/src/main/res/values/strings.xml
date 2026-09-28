@@ -547,6 +547,11 @@
     <string name="network_settings_trusted_filehost">Trusted file host</string>
     <string name="network_settings_trusted_filehost_desc">Optional exact hostname for a Soju file host. Uploads to this additional host send your network credentials; HTTPS certificate and hostname checks still apply.</string>
     <string name="network_settings_trusted_filehost_error">Enter a hostname only, without a scheme, path, port, or IP address.</string>
+    <string name="network_settings_on_connect_commands">Commands after connecting</string>
+    <string name="network_settings_on_connect_commands_placeholder">/mode +i\n/delay 2\n/msg Gatekeeper hello</string>
+    <string name="network_settings_on_connect_commands_desc">One line at a time, after registration, on every connection. Raw IRC or slash commands; /delay uses seconds. Commands needing a chat are skipped. May contain secrets; encrypted backup only.</string>
+    <string name="network_settings_on_connect_commands_root">Root bouncer session only</string>
+    <string name="network_settings_on_connect_commands_child">This bouncer network only.</string>
     <string name="network_settings_identity_section">Identity and authentication</string>
     <string name="network_settings_presence_section">Presence</string>
     <string name="network_settings_initial_away">Initial away message</string>

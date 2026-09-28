@@ -480,6 +480,30 @@ class NetworkSettingsViewModelTest {
         }
 
     @Test
+    fun onConnectCommandsEdit_savesAndReopensWithoutChangingChild() =
+        runTest {
+            val original = root().copy(onConnectCommands = "/mode +i")
+            val importedChild = child(2).copy(onConnectCommands = "/msg Child hello")
+            val repo = FakeNetworkRepository(listOf(original, importedChild))
+            val vm = loadedVm(repo)
+
+            assertEquals("/mode +i", vm.state.value.onConnectCommands)
+            assertFalse(vm.state.value.hasUnsavedChanges)
+            vm.editOnConnectCommands("/mode +i\n/msg Gatekeeper hello")
+            assertTrue(vm.state.value.canSave)
+            vm.save {}
+            runCurrent()
+
+            assertEquals(listOf("update:1"), repo.operations)
+            assertNull(vm.state.value.pendingBouncerIdentityChange)
+            assertEquals("/mode +i\n/msg Gatekeeper hello", repo.networks.getValue(1).onConnectCommands)
+            assertEquals("/msg Child hello", repo.networks.getValue(2).onConnectCommands)
+            val reopened = loadedVm(repo)
+            assertEquals("/mode +i\n/msg Gatekeeper hello", reopened.state.value.onConnectCommands)
+            assertFalse(reopened.state.value.hasUnsavedChanges)
+        }
+
+    @Test
     fun unavailableAvatarPublishing_isNotAttempted_andShowsFailure() =
         runTest {
             val repo = FakeNetworkRepository(listOf(root()))

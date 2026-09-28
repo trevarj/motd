@@ -57,6 +57,7 @@ data class NetworkSettingsUiState(
     val wsUrl: String = "",
     /** Exact file-host authority that may receive this selected network's HTTP credentials. */
     val trustedFileHost: String = "",
+    val onConnectCommands: String = "",
     // Opt-in obfuscation/proxy. NONE = direct; SOCKS5/REALITY reveal host/port;
     // TOR pins Orbot's 127.0.0.1:9050. Port kept as a string for text-field editing.
     val obfsMode: ObfsMode = ObfsMode.NONE,
@@ -86,6 +87,7 @@ data class NetworkSettingsUiState(
         return displayName.trim().ifBlank { current.name } != current.name ||
             wsUrl.trim().ifBlank { null } != current.wsUrl?.trim()?.ifBlank { null } ||
             normalizeTrustedFileHost(trustedFileHost) != current.trustedFileHost ||
+            onConnectCommands != current.onConnectCommands ||
             obfsMode != (current.obfsMode ?: ObfsMode.NONE) ||
             (
                 obfsMode == ObfsMode.SOCKS5 && (
@@ -224,6 +226,7 @@ class NetworkSettingsViewModel
                         displayName = n?.name.orEmpty(),
                         wsUrl = n?.wsUrl.orEmpty(),
                         trustedFileHost = n?.trustedFileHost.orEmpty(),
+                        onConnectCommands = n?.onConnectCommands.orEmpty(),
                         obfsMode = n?.obfsMode ?: ObfsMode.NONE,
                         proxyHost = n?.proxyHost.orEmpty(),
                         proxyPort = n?.proxyPort?.toString().orEmpty(),
@@ -284,6 +287,10 @@ class NetworkSettingsViewModel
 
         fun editTrustedFileHost(host: String) {
             _state.value = _state.value.copy(trustedFileHost = host)
+        }
+
+        fun editOnConnectCommands(commands: String) {
+            _state.value = _state.value.copy(onConnectCommands = commands)
         }
 
         fun editInitialAwayMessage(message: String) {
@@ -459,6 +466,7 @@ class NetworkSettingsViewModel
             ).copy(
                 autoConnect = _state.value.autoConnect,
                 trustedFileHost = normalizeTrustedFileHost(_state.value.trustedFileHost),
+                onConnectCommands = state.onConnectCommands,
                 initialAwayMessage =
                     _state.value.initialAwayMessage
                         .trim()

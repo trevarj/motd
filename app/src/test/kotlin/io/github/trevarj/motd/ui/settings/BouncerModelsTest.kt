@@ -81,7 +81,12 @@ class BouncerModelsTest {
 
     @Test
     fun missing_children_are_enabled_from_the_root_defaults() {
-        val root = child(1, "root").copy(role = NetworkRole.BOUNCER_ROOT, parentId = null)
+        val root =
+            child(1, "root").copy(
+                role = NetworkRole.BOUNCER_ROOT,
+                parentId = null,
+                onConnectCommands = "/oper me root-secret\n/mode +i",
+            )
         val rows =
             listOf(
                 BouncerNetRow("existing", "Existing", null, null, 7),
@@ -96,5 +101,7 @@ class BouncerModelsTest {
         assertEquals(NetworkRole.BOUNCER_CHILD, children.single().role)
         assertEquals(root.id, children.single().parentId)
         assertEquals(true, children.single().autoConnect)
+        assertEquals("", children.single().onConnectCommands)
+        assertEquals("/oper me root-secret\n/mode +i", root.onConnectCommands)
     }
 }

@@ -199,11 +199,94 @@ class ConfigurationBackupRepositoryTest {
         }
 
     @Test
+    fun plaintextBackupOmitsCommandsAndCannotReplaceLocalCommands() =
+        runTest {
+            val sourceDb = inMemoryDb()
+            val source = repository(sourceDb)
+            sourceDb.networkDao().insert(
+                secretNetwork(clientCertAlias = null).copy(onConnectCommands = "/oper me script-secret"),
+            )
+            val raw = source.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+            assertTrue(raw.contains("\"onConnectCommands\": null"))
+            assertFalse(raw.contains("script-secret"))
+
+            val tampered = raw.replace("\"onConnectCommands\": null", "\"onConnectCommands\": \"/oper me attacker-secret\"")
+            val targetDb = inMemoryDb()
+            targetDb.networkDao().insert(secretNetwork(clientCertAlias = null).copy(onConnectCommands = "/mode +i"))
+            repository(targetDb).import(tampered, importMode = BackupImportMode.MERGE)
+            assertEquals(
+                "/mode +i",
+                targetDb
+                    .networkDao()
+                    .allNow()
+                    .single()
+                    .onConnectCommands,
+            )
+
+            val newDb = inMemoryDb()
+            repository(newDb).import(tampered, importMode = BackupImportMode.MERGE)
+            assertEquals(
+                "",
+                newDb
+                    .networkDao()
+                    .allNow()
+                    .single()
+                    .onConnectCommands,
+            )
+            sourceDb.close()
+            targetDb.close()
+            newDb.close()
+        }
+
+    @Test
+    fun legacyBackupWithoutCommandsPreservesLocalAndDefaultsNewNetworkToEmpty() =
+        runTest {
+            val sourceDb = inMemoryDb()
+            sourceDb.networkDao().insert(secretNetwork(clientCertAlias = null))
+            val legacy =
+                repository(sourceDb)
+                    .exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    .lineSequence()
+                    .filterNot { it.contains("\"onConnectCommands\":") }
+                    .joinToString("\n")
+            assertFalse(legacy.contains("\"onConnectCommands\""))
+
+            val targetDb = inMemoryDb()
+            targetDb.networkDao().insert(secretNetwork(clientCertAlias = null).copy(onConnectCommands = "/mode +i"))
+            repository(targetDb).import(legacy, importMode = BackupImportMode.MERGE)
+            assertEquals(
+                "/mode +i",
+                targetDb
+                    .networkDao()
+                    .allNow()
+                    .single()
+                    .onConnectCommands,
+            )
+
+            val newDb = inMemoryDb()
+            repository(newDb).import(legacy, importMode = BackupImportMode.MERGE)
+            assertEquals(
+                "",
+                newDb
+                    .networkDao()
+                    .allNow()
+                    .single()
+                    .onConnectCommands,
+            )
+            sourceDb.close()
+            targetDb.close()
+            newDb.close()
+        }
+
+    @Test
     fun encryptedExportRoundTripsCredentials() =
         runTest {
             val sourceDb = inMemoryDb()
             val source = repository(sourceDb)
-            sourceDb.networkDao().insert(secretNetwork(clientCertAlias = null).copy(trustedFileHost = "files.example"))
+            val commands = "/mode +i\n/oper me script-secret\n/msg Gatekeeper script-secret"
+            sourceDb.networkDao().insert(
+                secretNetwork(clientCertAlias = null).copy(trustedFileHost = "files.example", onConnectCommands = commands),
+            )
 
             val raw =
                 source.exportToString(
@@ -216,6 +299,7 @@ class ConfigurationBackupRepositoryTest {
             assertFalse(raw.contains("server-secret"))
             assertFalse(raw.contains("nickserv-secret"))
             assertFalse(raw.contains("vless://secret"))
+            assertFalse(raw.contains("script-secret"))
 
             val targetDb = inMemoryDb()
             val target = repository(targetDb)
@@ -239,6 +323,7 @@ class ConfigurationBackupRepositoryTest {
             assertEquals("GHOST,REGAIN", imported.nickServRecoverySequence)
             assertEquals("vless://secret", imported.obfsLink)
             assertEquals("files.example", imported.trustedFileHost)
+            assertEquals(commands, imported.onConnectCommands)
             assertNull(imported.pendingCredentialRequirements)
             assertEquals(true, imported.autoConnect)
         }

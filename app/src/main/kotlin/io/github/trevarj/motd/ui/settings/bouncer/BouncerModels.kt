@@ -48,6 +48,7 @@ fun missingBouncerChildren(
             parentId = root.id,
             bouncerNetId = row.netId,
             host = row.host ?: root.host,
+            onConnectCommands = "",
         )
     }
 }

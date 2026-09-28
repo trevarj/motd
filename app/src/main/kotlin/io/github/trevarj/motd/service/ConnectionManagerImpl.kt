@@ -73,6 +73,8 @@ import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.push.PushHealthStore
 import io.github.trevarj.motd.push.WebPushRegistrar
 import io.github.trevarj.motd.push.pushSuspendedNetworkIds
+import io.github.trevarj.motd.ui.chat.ChatCommand
+import io.github.trevarj.motd.ui.chat.parseCommand
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -540,6 +542,132 @@ internal suspend fun attemptMessageRedactionWrite(
         throw cancelled
     } catch (_: Exception) {
         false
+    }
+}
+
+private val ON_CONNECT_WHITESPACE = Regex("\\s+")
+private val ON_CONNECT_SECONDS = Regex("(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)")
+
+/** Execute one saved script on the socket that just became Ready, never through a chat buffer. */
+internal suspend fun runOnConnectCommands(
+    script: String,
+    nick: () -> String?,
+    send: suspend (IrcMessage) -> Boolean,
+    onSkipped: (Int) -> Unit = {},
+    onWriteFailed: (Int, String) -> Unit = { _, _ -> },
+) {
+    var number = 0
+    for (raw in script.lineSequence()) {
+        number++
+        val line = raw.trim()
+        if (line.isEmpty()) continue
+        if (line.startsWith("/delay", ignoreCase = true) && (line.length == 6 || line[6].isWhitespace())) {
+            val arguments = line.split(ON_CONNECT_WHITESPACE)
+            val seconds =
+                arguments
+                    .getOrNull(1)
+                    ?.takeIf { it.matches(ON_CONNECT_SECONDS) }
+                    ?.toDoubleOrNull()
+            if (arguments.size != 2 || seconds == null || !seconds.isFinite() || seconds > 3600.0) {
+                onSkipped(number)
+            } else {
+                delay((seconds * 1_000).toLong())
+            }
+            continue
+        }
+        val message =
+            try {
+                val parsed =
+                    if (!line.startsWith("/")) {
+                        IrcMessage.parse(line)
+                    } else {
+                        when (val cmd = parseCommand(line)) {
+                            is ChatCommand.Join -> {
+                                IrcMessage(command = "JOIN", params = listOfNotNull(cmd.channels, cmd.keys))
+                            }
+
+                            is ChatCommand.Msg -> {
+                                IrcMessage(command = "PRIVMSG", params = listOf(cmd.nick, cmd.text))
+                            }
+
+                            is ChatCommand.Notice -> {
+                                IrcMessage(command = "NOTICE", params = listOf(cmd.target, cmd.text))
+                            }
+
+                            is ChatCommand.Nick -> {
+                                IrcMessage(command = "NICK", params = listOf(cmd.nick))
+                            }
+
+                            is ChatCommand.SetName -> {
+                                IrcMessage(command = "SETNAME", params = listOf(cmd.realname))
+                            }
+
+                            is ChatCommand.Mode -> {
+                                val target = cmd.target ?: nick()
+                                target?.takeIf { it.isNotBlank() }?.let {
+                                    IrcMessage(
+                                        command = "MODE",
+                                        params =
+                                            listOf(it) +
+                                                cmd.modes
+                                                    ?.split(' ')
+                                                    ?.filter(String::isNotEmpty)
+                                                    .orEmpty(),
+                                    )
+                                }
+                            }
+
+                            is ChatCommand.Away -> {
+                                IrcMessage(command = "AWAY", params = listOfNotNull(cmd.message))
+                            }
+
+                            is ChatCommand.Invite -> {
+                                cmd.channel?.let { IrcMessage(command = "INVITE", params = listOf(cmd.nick, it)) }
+                            }
+
+                            is ChatCommand.Knock -> {
+                                IrcMessage(command = "KNOCK", params = listOfNotNull(cmd.channel, cmd.reason))
+                            }
+
+                            is ChatCommand.Ctcp -> {
+                                IrcMessage(command = "PRIVMSG", params = listOf(cmd.nick, "\u0001${cmd.request}\u0001"))
+                            }
+
+                            is ChatCommand.Motd -> {
+                                IrcMessage(command = "MOTD", params = listOfNotNull(cmd.server))
+                            }
+
+                            is ChatCommand.Whois -> {
+                                IrcMessage(command = "WHOIS", params = listOf(cmd.nick))
+                            }
+
+                            is ChatCommand.RawLine -> {
+                                IrcMessage.parse(cmd.line)
+                            }
+
+                            else -> {
+                                null
+                            } // ponytail: chat-bound commands have no unattended target.
+                        }
+                    }
+                parsed?.takeIf { it.command.isNotBlank() }?.also { it.serialize() }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+        if (message == null) {
+            onSkipped(number)
+            continue
+        }
+        try {
+            if (!send(message)) return
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            onWriteFailed(number, error::class.simpleName.orEmpty())
+            return
+        }
     }
 }
 
@@ -1787,13 +1915,46 @@ class ConnectionManagerImpl
             )
         }
 
-        /** On Ready: persist any STS policy, re-establish bouncer children, then run catch-up. */
+        /** On Ready: run the saved socket's commands alongside regular connection setup. */
         private suspend fun onReady(
             row: NetworkEntity,
             client: IrcClient,
             generation: Long,
             isCurrent: () -> Boolean,
-        ) {
+        ) = coroutineScope {
+            launch {
+                val script =
+                    try {
+                        networkDao.byId(row.id)?.onConnectCommands.orEmpty()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Log.w(TAG, "On-connect read failed for network ${row.id}: ${error::class.simpleName.orEmpty()}")
+                        return@launch
+                    }
+                runOnConnectCommands(
+                    script = script,
+                    nick = { (client.state.value as? IrcClientState.Ready)?.nick },
+                    send = { message ->
+                        if (!isCurrent() || client.state.value !is IrcClientState.Ready) {
+                            false
+                        } else if (
+                            message.command == "PRIVMSG" &&
+                            message.params.size == 2 &&
+                            message.tags.isEmpty() &&
+                            message.source == null
+                        ) {
+                            client.sendSensitivePrivmsg(message.params[0], message.params[1])
+                        } else {
+                            client.sendIfConnected(message)
+                        }
+                    },
+                    onSkipped = { step -> Log.w(TAG, "On-connect step $step skipped for network ${row.id}") },
+                    onWriteFailed = { step, category ->
+                        Log.w(TAG, "On-connect step $step write failed for network ${row.id}: $category")
+                    },
+                )
+            }
             onReadySession(row, client, generation, isCurrent)
         }
 

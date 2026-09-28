@@ -122,6 +122,7 @@ fun NetworkSettingsScreen(
         onDisplayNameChange = viewModel::editDisplayName,
         onWsUrlChange = viewModel::editWsUrl,
         onTrustedFileHostChange = viewModel::editTrustedFileHost,
+        onOnConnectCommandsChange = viewModel::editOnConnectCommands,
         onInitialAwayMessageChange = viewModel::editInitialAwayMessage,
         onObfsModeChange = viewModel::editObfsMode,
         onProxyHostChange = viewModel::editProxyHost,
@@ -158,6 +159,7 @@ fun NetworkSettingsContent(
     onDisplayNameChange: (String) -> Unit = {},
     onWsUrlChange: (String) -> Unit = {},
     onTrustedFileHostChange: (String) -> Unit = {},
+    onOnConnectCommandsChange: (String) -> Unit = {},
     onInitialAwayMessageChange: (String) -> Unit = {},
     onObfsModeChange: (ObfsMode) -> Unit = {},
     onProxyHostChange: (String) -> Unit = {},
@@ -239,6 +241,7 @@ fun NetworkSettingsContent(
                     )
                     TrustedFileHostField(state, onTrustedFileHostChange)
                     InitialAwayField(state, onInitialAwayMessageChange)
+                    OnConnectCommandsField(state, onOnConnectCommandsChange)
                 }
             }
         } else {
@@ -266,6 +269,7 @@ fun NetworkSettingsContent(
                         onProxyPortChange = onProxyPortChange,
                         onObfsLinkChange = onObfsLinkChange,
                     )
+                    OnConnectCommandsField(state, onOnConnectCommandsChange)
                 }
             }
             SettingsTarget(target?.name, NetworkSettingsTarget.AUTHENTICATION.name) { targetModifier ->
@@ -685,6 +689,31 @@ private fun TrustedFileHostField(
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
         modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("network_trusted_filehost"),
+    )
+}
+
+@Composable
+private fun OnConnectCommandsField(
+    state: NetworkSettingsUiState,
+    onValueChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = state.onConnectCommands,
+        onValueChange = onValueChange,
+        label = { Text(stringResource(R.string.network_settings_on_connect_commands)) },
+        placeholder = { Text(stringResource(R.string.network_settings_on_connect_commands_placeholder)) },
+        supportingText = {
+            val scope =
+                when (state.entity?.role) {
+                    NetworkRole.BOUNCER_ROOT -> stringResource(R.string.network_settings_on_connect_commands_root)
+                    NetworkRole.BOUNCER_CHILD -> stringResource(R.string.network_settings_on_connect_commands_child)
+                    else -> null
+                }
+            Text(stringResource(R.string.network_settings_on_connect_commands_desc) + (scope?.let { " $it" } ?: ""))
+        },
+        minLines = 4,
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("network_on_connect_commands"),
     )
 }
 
