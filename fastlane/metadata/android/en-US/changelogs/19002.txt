@@ -1,0 +1,5 @@
+- Added a nickname chip while composing messages.
+- Fixed direct image previews opening in the image viewer.
+- Added donation options and branded buttons on the About screen.
+- Improved the swipe-action drag threshold in the chat list.
+- Show the motd logo as the #motd channel avatar.
