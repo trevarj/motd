@@ -28,6 +28,7 @@ networks too, falling back to local-only history and a persistent socket.
 - [Development](#development)
 - [Community](#community)
 - [License](#license)
+- [Donations](#donations)
 
 ## Screenshots
 
@@ -116,3 +117,12 @@ Copyright 2026 Trevor Arjeski. Licensed under the
 This project has been developed with assistance from large language models;
 contributions are reviewed, tested, and maintained by the project maintainer,
 who remains responsible for the published code and releases.
+
+## Donations
+
+Donations are optional. To support development, use any of these destinations:
+
+- Bitcoin: `bc1quyz4krs97k5d408kupukdu72pnghaahsuattfz`
+- Ethereum: `0xBD82C33D5812fb0F712f342f0B2b1394988541BD`
+- Monero: `8462JtvFaUqGEGpsZbToiv22FjSXN3wWrdXU4NPB898aG6zeyxD1xwC8hkVErGHHXnW2XYvmdhd75K3MRdeVizDU1BAENGq`
+- PayPal recipient email: `tmarjeski@gmail.com`

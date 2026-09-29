@@ -2119,6 +2119,18 @@
     <string name="about_support_section">Support and diagnostics</string>
     <string name="about_project_section">Project</string>
     <string name="about_license_url" translatable="false">https://github.com/trevarj/motd/blob/main/LICENSE</string>
+    <string name="about_donations_section">Donations</string>
+    <string name="about_donations_summary">Optional support. Tap a button to copy an address or PayPal email.</string>
+    <string name="about_donation_bitcoin">Bitcoin</string>
+    <string name="about_donation_ethereum">Ethereum</string>
+    <string name="about_donation_monero">Monero</string>
+    <string name="about_donation_paypal">PayPal</string>
+    <string name="about_donation_copy_address">Copy %1$s address</string>
+    <string name="about_donation_copy_paypal">Copy PayPal email</string>
+    <string name="about_donation_bitcoin_address" translatable="false">bc1quyz4krs97k5d408kupukdu72pnghaahsuattfz</string>
+    <string name="about_donation_ethereum_address" translatable="false">0xBD82C33D5812fb0F712f342f0B2b1394988541BD</string>
+    <string name="about_donation_monero_address" translatable="false">8462JtvFaUqGEGpsZbToiv22FjSXN3wWrdXU4NPB898aG6zeyxD1xwC8hkVErGHHXnW2XYvmdhd75K3MRdeVizDU1BAENGq</string>
+    <string name="about_donation_paypal_email" translatable="false">tmarjeski@gmail.com</string>
     <string name="settings_direct_transfer_summary">%1$s · %2$s · %3$s</string>
     <string name="dcc_protocol_send" translatable="false">SEND</string>
     <string name="dcc_protocol_ssend" translatable="false">SSEND</string>
