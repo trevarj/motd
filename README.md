@@ -122,7 +122,7 @@ who remains responsible for the published code and releases.
 
 Donations are optional. To support development, use any of these destinations:
 
-- Bitcoin: `bc1quyz4krs97k5d408kupukdu72pnghaahsuattfz`
-- Ethereum: `0xBD82C33D5812fb0F712f342f0B2b1394988541BD`
-- Monero: `8462JtvFaUqGEGpsZbToiv22FjSXN3wWrdXU4NPB898aG6zeyxD1xwC8hkVErGHHXnW2XYvmdhd75K3MRdeVizDU1BAENGq`
-- PayPal recipient email: `tmarjeski@gmail.com`
+- ![Bitcoin](https://img.shields.io/badge/Donate-Bitcoin-F7931A?logo=bitcoin&logoColor=white) `bc1quyz4krs97k5d408kupukdu72pnghaahsuattfz`
+- ![Ethereum](https://img.shields.io/badge/Donate-Ethereum-627EEA?logo=ethereum&logoColor=white) `0xBD82C33D5812fb0F712f342f0B2b1394988541BD`
+- ![Monero](https://img.shields.io/badge/Donate-Monero-FF6600?logo=monero&logoColor=white) `8462JtvFaUqGEGpsZbToiv22FjSXN3wWrdXU4NPB898aG6zeyxD1xwC8hkVErGHHXnW2XYvmdhd75K3MRdeVizDU1BAENGq`
+- [![PayPal](https://img.shields.io/badge/Donate-PayPal-003087?logo=paypal&logoColor=white)](https://www.paypal.com/donate/?business=tmarjeski%40gmail.com)
