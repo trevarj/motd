@@ -3,6 +3,8 @@ package io.github.trevarj.motd.ui.components
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
@@ -14,6 +16,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -38,9 +41,13 @@ import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.IrcTextStyle
 import io.github.trevarj.motd.irc.format.ircStateAtRawOffset
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.NickColorScheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -498,6 +505,139 @@ class ComposerEditorStateTest {
             assertEquals("hello\nthere", parsed.visibleText)
             assertTrue(parsed.runs.all { it.state.isDefault })
         }
+    }
+
+    @Test
+    fun plainDraftColorsKnownNicksWithoutChangingEditsOrSentText() = verifyNickStyling(ircFormattingEnabled = false)
+
+    @Test
+    fun formattedDraftColorsKnownNicksWithoutChangingEditsOrSentText() = verifyNickStyling(ircFormattingEnabled = true)
+
+    private fun verifyNickStyling(ircFormattingEnabled: Boolean) {
+        val rules = IrcIdentityRules()
+        val visible = "[Alice]: hello @BoB and unknown"
+        val original = if (ircFormattingEnabled) "$IRC_BOLD$visible$IRC_RESET" else visible
+        val draft = mutableStateOf(TextFieldValue(original, TextRange(original.length)))
+        val roster = mutableStateOf(setOf(rules.normalize("{alice}"), rules.normalize("bob")))
+        val nickColorsEnabled = mutableStateOf(true)
+        val overrides = mutableStateOf(emptyMap<String, Int>())
+        var scheme: NickColorScheme? = null
+        var fieldBackground = Color.Unspecified
+        var sent: String? = null
+        compose.setContent {
+            MotdTheme(dynamicColor = false, nickColorsEnabled = nickColorsEnabled.value, nickColorOverrides = overrides.value) {
+                scheme = LocalNickColors.current
+                fieldBackground = MaterialTheme.colorScheme.surfaceContainerHigh
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = { sent = draft.value.text },
+                    enabled = true,
+                    ircFormattingEnabled = ircFormattingEnabled,
+                    knownNicks = roster.value,
+                    identityRules = rules,
+                )
+            }
+        }
+        val field = compose.onNodeWithTag("chat_composer_field")
+
+        fun layout() = field.textLayout().layoutInput.text
+
+        fun isColored(token: String): Boolean {
+            val displayed = layout()
+            val start = displayed.indexOf(token)
+            assertTrue("Missing $token", start >= 0)
+            val color = scheme!!.nick(token.removePrefix("@"), Color.Unspecified)
+            return displayed.spanStyles.any { it.start == start && it.end == start + token.length && it.item.color == color }
+        }
+
+        val chip = compose.onNodeWithTag("chat_composer_nick_chip", useUnmergedTree = true)
+
+        fun chipPixel(): Int {
+            chip.assertExists()
+            val pixels = chip.captureToImage().asAndroidBitmap()
+            val y = pixels.height / 2
+            val fill = pixels.getPixel(1, y)
+            assertNotEquals(fieldBackground.toArgb(), fill)
+            return fill
+        }
+
+        fun noChip() {
+            chip.assertDoesNotExist()
+            assertTrue(layout().spanStyles.none { it.item.background != Color.Unspecified })
+        }
+
+        assertEquals(visible, layout().text)
+        assertTrue(layout().spanStyles.none { it.item.background != Color.Unspecified })
+        val firstPixel = chipPixel()
+        assertTrue(isColored("[Alice]"))
+        assertTrue(isColored("@BoB"))
+        assertTrue(!isColored("unknown"))
+        if (ircFormattingEnabled) {
+            assertTrue(layout().spanStyles.any { it.start == 0 && it.end == visible.length && it.item.fontWeight != null })
+        }
+        compose.runOnIdle {
+            assertEquals(original, draft.value.text)
+            assertEquals(TextRange(original.length), draft.value.selection)
+        }
+
+        val moved = "hello [Alice]: @BoB and unknown"
+        compose.runOnIdle { draft.value = TextFieldValue(moved, TextRange(moved.length)) }
+        compose.waitForIdle()
+        noChip()
+        compose.runOnIdle { draft.value = TextFieldValue("[Alice]2: hello", TextRange(15)) }
+        compose.waitForIdle()
+        noChip()
+        compose.runOnIdle { draft.value = TextFieldValue(moved, TextRange(moved.length)) }
+        compose.waitForIdle()
+        assertTrue(isColored("[Alice]"))
+        compose.runOnIdle { roster.value = setOf(rules.normalize("{alice}")) }
+        compose.waitForIdle()
+        assertTrue(!isColored("@BoB"))
+        compose.runOnIdle { roster.value = setOf(rules.normalize("{alice}"), rules.normalize("bob")) }
+        compose.waitForIdle()
+        assertTrue(isColored("@BoB"))
+        compose.runOnIdle { roster.value = setOf(rules.normalize("bob")) }
+        compose.waitForIdle()
+        assertTrue(!isColored("[Alice]"))
+        noChip()
+        compose.runOnIdle { roster.value = setOf(rules.normalize("{alice}"), rules.normalize("bob")) }
+        compose.waitForIdle()
+        compose.runOnIdle { draft.value = TextFieldValue(visible, TextRange(visible.length)) }
+        compose.waitForIdle()
+        compose.runOnIdle { nickColorsEnabled.value = false }
+        compose.waitForIdle()
+        assertTrue(!isColored("[Alice]"))
+        noChip()
+        compose.runOnIdle { nickColorsEnabled.value = true }
+        compose.waitForIdle()
+        assertTrue(isColored("[Alice]"))
+        assertEquals(firstPixel, chipPixel())
+        compose.runOnIdle { overrides.value = mapOf("[alice]" to 180) }
+        compose.waitForIdle()
+        assertNotEquals(firstPixel, chipPixel())
+
+        val command = "/msg [Alice] @BoB"
+        compose.runOnIdle { draft.value = TextFieldValue(command, TextRange(command.length)) }
+        compose.waitForIdle()
+        assertTrue(!isColored("[Alice]"))
+        assertTrue(!isColored("@BoB"))
+        noChip()
+        if (ircFormattingEnabled) compose.onNodeWithTag("chat_composer_command_chip", useUnmergedTree = true).assertExists()
+
+        compose.runOnIdle { draft.value = TextFieldValue(original, TextRange(original.length)) }
+        compose.waitForIdle()
+        field.performTextInput("!")
+        compose.runOnIdle {
+            val expected = if (ircFormattingEnabled) parseIrcFormatting(draft.value.text).visibleText else draft.value.text
+            assertEquals("$visible!", expected)
+            val caret = if (ircFormattingEnabled) parseIrcFormatting(draft.value.text).visibleOffset(draft.value.selection.start) else draft.value.selection.start
+            assertEquals(expected.length, caret)
+        }
+        chipPixel()
+        val editedRaw = draft.value.text
+        compose.onNodeWithTag("chat_composer_send").performClick()
+        compose.runOnIdle { assertEquals(editedRaw, sent) }
     }
 
     private fun SemanticsNodeInteraction.textLayout(): TextLayoutResult {

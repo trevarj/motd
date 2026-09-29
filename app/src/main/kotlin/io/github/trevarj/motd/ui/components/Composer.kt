@@ -157,6 +157,7 @@ import io.github.trevarj.motd.irc.format.IrcEditorDocument
 import io.github.trevarj.motd.irc.format.IrcTextStyle
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.COMMAND_HINTS
 import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
 import io.github.trevarj.motd.ui.chat.messageFormattingRange
@@ -407,6 +408,8 @@ fun Composer(
     // send animation pins its stand-in line to this point so the typed glyphs never visibly move.
     onFieldTextPositioned: (Offset) -> Unit = {},
     autocomplete: (@Composable () -> Unit)? = null,
+    knownNicks: Set<String> = emptySet(),
+    identityRules: IrcIdentityRules = IrcIdentityRules(),
     ircFormattingEnabled: Boolean = false,
 ) {
     val initialEditor = remember { IrcEditorDocument.fromRaw(value.text, value.selection.start, value.selection.end) }
@@ -848,6 +851,8 @@ fun Composer(
                                 ComposerTextField(
                                     state = textFieldState,
                                     document = editorDocument,
+                                    knownNicks = knownNicks,
+                                    identityRules = identityRules,
                                     placeholder = placeholder,
                                     onFocusChanged = { inputFocused = it },
                                     onFocused = { dismissEmojiPicker() },
@@ -1581,11 +1586,15 @@ private fun completedCommandEnd(text: String): Int? {
     return text.length.takeIf { separator == -1 && COMMAND_HINTS.any { hint -> hint.equals(text, ignoreCase = true) } }
 }
 
+private fun Char.isComposerNickChar(): Boolean = isLetterOrDigit() || this in "_-[]{}\\|^`"
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ComposerTextField(
     state: TextFieldState,
     document: IrcEditorDocument,
+    knownNicks: Set<String>,
+    identityRules: IrcIdentityRules,
     placeholder: String,
     onFocusChanged: (Boolean) -> Unit,
     onFocused: () -> Unit,
@@ -1619,24 +1628,56 @@ private fun ComposerTextField(
     val commandBackground = MaterialTheme.colorScheme.primary
     val commandForeground = MaterialTheme.colorScheme.onPrimary
     val commandFontSize = MaterialTheme.typography.bodyMedium.fontSize
+    val nickColors = LocalNickColors.current
+    val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
+    val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
     val text = state.text.toString()
+    val prefixChip =
+        if (mentionsActive && !text.startsWith("/")) {
+            val end = text.indexOfFirst { !it.isComposerNickChar() }
+            if (end > 0 && end < text.length && text[end] == ':') {
+                mentionColor(text.substring(0, end))?.let { end + 1 to it }
+            } else {
+                null
+            }
+        } else {
+            null
+        }
     val commandEnd = if (ircFormattingEnabled) completedCommandEnd(text) else null
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val outputTransformation =
-        remember(ircFormattingEnabled, fieldBackground, fieldForeground, commandForeground, commandFontSize) {
-            if (ircFormattingEnabled) {
+        remember(ircFormattingEnabled, fieldBackground, fieldForeground, commandForeground, commandFontSize, mentionsActive, mentionColor) {
+            if (!ircFormattingEnabled && !mentionsActive) {
+                null
+            } else {
                 OutputTransformation {
                     val visibleText = toString()
-                    val displayed = latestDocument.value.let { if (it.text == visibleText) it else it.replaceText(visibleText) }
-                    displayed.runs.forEach { run ->
-                        addStyle(run.state.toSpanStyle(fieldBackground, fieldForeground), run.start, run.end)
+                    if (ircFormattingEnabled) {
+                        val displayed = latestDocument.value.let { if (it.text == visibleText) it else it.replaceText(visibleText) }
+                        displayed.runs.forEach { run ->
+                            addStyle(run.state.toSpanStyle(fieldBackground, fieldForeground), run.start, run.end)
+                        }
+                        completedCommandEnd(visibleText)?.let { end ->
+                            addStyle(SpanStyle(color = commandForeground, fontFamily = FontFamily.Monospace, fontSize = commandFontSize), 0, end)
+                        }
                     }
-                    completedCommandEnd(visibleText)?.let { end ->
-                        addStyle(SpanStyle(color = commandForeground, fontFamily = FontFamily.Monospace, fontSize = commandFontSize), 0, end)
+                    if (mentionsActive && !visibleText.startsWith("/")) {
+                        var i = 0
+                        while (i < visibleText.length) {
+                            val start = i
+                            val atMention = visibleText[i] == '@' && i + 1 < visibleText.length && visibleText[i + 1].isComposerNickChar()
+                            if (atMention) i++
+                            if (!visibleText[i].isComposerNickChar()) {
+                                i++
+                                continue
+                            }
+                            val nickStart = i
+                            while (i < visibleText.length && visibleText[i].isComposerNickChar()) i++
+                            val color = mentionColor(visibleText.substring(nickStart, i)) ?: continue
+                            addStyle(SpanStyle(color = color, fontWeight = FontWeight.Medium), start, i)
+                        }
                     }
                 }
-            } else {
-                null
             }
         }
     val contextMenuModifier =
@@ -1721,8 +1762,10 @@ private fun ComposerTextField(
                     modifier =
                         Modifier
                             .then(if (commandEnd != null) Modifier.testTag("chat_composer_command_chip") else Modifier)
+                            .then(if (prefixChip != null) Modifier.testTag("chat_composer_nick_chip") else Modifier)
                             .drawBehind {
-                                val end = commandEnd ?: return@drawBehind
+                                val end = commandEnd ?: prefixChip?.first ?: return@drawBehind
+                                val color = if (commandEnd != null) commandBackground else prefixChip!!.second.copy(alpha = 0.16f)
                                 val layout = textLayout?.takeIf { it.layoutInput.text.text == text } ?: return@drawBehind
                                 val horizontalPadding = 3.dp.toPx()
                                 val verticalPadding = 1.dp.toPx()
@@ -1734,7 +1777,7 @@ private fun ComposerTextField(
                                     val first = layout.getBoundingBox(start)
                                     val last = layout.getBoundingBox(lineEnd - 1)
                                     drawRoundRect(
-                                        color = commandBackground,
+                                        color = color,
                                         topLeft = Offset(first.left - horizontalPadding, first.top - verticalPadding),
                                         size =
                                             Size(

@@ -3295,6 +3295,8 @@ fun ChatContent(
                                 },
                             showEmojiTool = showComposerEmoji,
                             showFormattingTools = showComposerFormattingTools,
+                            knownNicks = knownNicks,
+                            identityRules = identityRules,
                             ircFormattingEnabled =
                                 !isServerBuffer &&
                                     !state.buffer?.displayName.equals("BouncerServ", ignoreCase = true),
