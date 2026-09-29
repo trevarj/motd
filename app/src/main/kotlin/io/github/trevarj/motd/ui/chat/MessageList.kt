@@ -1820,7 +1820,11 @@ private fun MessageRow(
                                 }
 
                                 else -> {
-                                    linkUrl?.let(onOpenLink)
+                                    if (preview?.imageUrl == preview?.url && preview?.description?.startsWith("image/", ignoreCase = true) == true) {
+                                        onImageClick(preview.url)
+                                    } else {
+                                        linkUrl?.let(onOpenLink)
+                                    }
                                 }
                             }
                         },

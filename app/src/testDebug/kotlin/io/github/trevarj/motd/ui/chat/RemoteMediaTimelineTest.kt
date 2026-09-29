@@ -85,6 +85,35 @@ class RemoteMediaTimelineTest {
     }
 
     @Test
+    fun extensionlessImagePreviewOpensViewerInsteadOfBrowser() {
+        RoutedInlineMediaFixture().use { fixture ->
+            fixture.server.enqueue(imageResponse())
+            val original = "http://media.invalid/${UUID.randomUUID()}"
+            val resolved = "$original/photo"
+            val openedImages = mutableListOf<String>()
+            val openedLinks = mutableListOf<String>()
+            render(
+                automatic = true,
+                networkId = fixture.networkId,
+                networkMediaHttp = fixture.http,
+                text = original,
+                loadPreview = { _, _ ->
+                    PREVIEW.copy(url = resolved, imageUrl = resolved, description = "IMAGE/PNG")
+                },
+                onImageClick = openedImages::add,
+                onOpenLink = openedLinks::add,
+            )
+
+            awaitTag("link_preview_thumbnail")
+            compose.onNodeWithTag("link_preview_thumbnail", useUnmergedTree = true).performTouchInput { click() }
+            compose.runOnIdle {
+                assertEquals(listOf(resolved), openedImages)
+                assertEquals(emptyList<String>(), openedLinks)
+            }
+        }
+    }
+
+    @Test
     fun automaticLinkPreviewLoadsOnce() {
         var loads = 0
         render(
