@@ -5,13 +5,16 @@ import android.content.ClipboardManager
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -168,16 +171,16 @@ internal fun AboutContent(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DonationCopyButton(
-                    "₿",
+                DonationButton(
+                    R.drawable.ic_donation_bitcoin,
                     stringResource(R.string.about_donation_bitcoin),
                     stringResource(R.string.about_donation_bitcoin_address),
                     stringResource(R.string.about_donation_copy_address, stringResource(R.string.about_donation_bitcoin)),
                     "about_donate_bitcoin",
                     Modifier.weight(1f),
                 )
-                DonationCopyButton(
-                    "Ξ",
+                DonationButton(
+                    R.drawable.ic_donation_ethereum,
                     stringResource(R.string.about_donation_ethereum),
                     stringResource(R.string.about_donation_ethereum_address),
                     stringResource(R.string.about_donation_copy_address, stringResource(R.string.about_donation_ethereum)),
@@ -189,21 +192,22 @@ internal fun AboutContent(
                 Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                DonationCopyButton(
-                    "ɱ",
+                DonationButton(
+                    R.drawable.ic_donation_monero,
                     stringResource(R.string.about_donation_monero),
                     stringResource(R.string.about_donation_monero_address),
                     stringResource(R.string.about_donation_copy_address, stringResource(R.string.about_donation_monero)),
                     "about_donate_monero",
                     Modifier.weight(1f),
                 )
-                DonationCopyButton(
-                    "P",
+                DonationButton(
+                    R.drawable.ic_donation_paypal,
                     stringResource(R.string.about_donation_paypal),
-                    stringResource(R.string.about_donation_paypal_email),
-                    stringResource(R.string.about_donation_copy_paypal),
+                    stringResource(R.string.about_donation_paypal_url),
+                    stringResource(R.string.about_donation_open_paypal),
                     "about_donate_paypal",
                     Modifier.weight(1f),
+                    openUrl = true,
                 )
             }
         }
@@ -218,25 +222,32 @@ internal fun AboutContent(
 }
 
 @Composable
-private fun DonationCopyButton(
-    symbol: String,
+private fun DonationButton(
+    @DrawableRes icon: Int,
     label: String,
     value: String,
     contentDescription: String,
     tag: String,
     modifier: Modifier,
+    openUrl: Boolean = false,
 ) {
     val context = LocalContext.current
     OutlinedButton(
         onClick = {
-            context
-                .getSystemService(ClipboardManager::class.java)
-                ?.setPrimaryClip(ClipData.newPlainText(label, value))
+            if (openUrl) {
+                context.startActivity(Intent(Intent.ACTION_VIEW, value.toUri()))
+            } else {
+                context
+                    .getSystemService(ClipboardManager::class.java)
+                    ?.setPrimaryClip(ClipData.newPlainText(label, value))
+            }
         },
         modifier = modifier.semantics { this.contentDescription = contentDescription }.testTag(tag),
         contentPadding = PaddingValues(horizontal = 8.dp),
     ) {
-        Text("$symbol $label", maxLines = 1, style = MaterialTheme.typography.bodySmall)
+        Image(painterResource(icon), contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(label, maxLines = 1, style = MaterialTheme.typography.bodySmall)
     }
 }
 
