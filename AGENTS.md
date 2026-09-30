@@ -31,6 +31,9 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
   constructor injection. Compose screens should be stateless where practical,
   with ViewModels owning state and side effects. Add stable semantics/test tags
   when UI behavior needs automation.
+- AI writing styles should transform the whole message with style-appropriate
+  expressions, vernacular, idioms and grammar. Prefer natural, full rewrites over
+  proofreading, appended flourishes or theatrical exaggeration; preserve meaning.
 - Keep dependency versions centralized in `gradle/libs.versions.toml`. Do not
   add or change dependencies casually; explain and test any necessary catalog
   change. Hilt and Room use KSP only—never kapt. Release minification remains

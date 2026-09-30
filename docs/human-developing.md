@@ -97,31 +97,91 @@ exercise joined load/prefill/decode cancellation, and compare one-shot
 isolation with a fresh engine. Examples print actual output and check completion,
 known correction errors, unchanged already-correct text, deliberately informal
 style rewrites, protected literals and instruction-only content. Use
-`--composer-examples` instead of `--self-checks --examples` for the focused
-editing cases. These mechanical checks do not establish semantic quality.
+`--composer-examples` instead of `--self-checks --examples` for editing cases,
+or `--style-examples` for only Formal, Business, Silly and Custom. The latter
+includes contrasting pirate and terse professional requests on the same
+already-correct source, checking requested vocabulary/direct wording, the
+request for the recipient to send, first-person review, deadline of 5 and tomorrow.
+The time guard rejects any added AM/PM spelling, including `5:00PM`, `5PM`
+and dotted forms, because these fixtures contain no meridiem.
+The warm-style check also rejects new first-person future commitments when the
+source contains no promise. Custom demonstrations contain only one request, so
+their review/read wording cannot leak into an unrelated message.
+Silly must change the message body rather than only its closing thanks.
+An author-created casual spoken-English
+instruction is printed for human review, not scored by a dialect heuristic.
+These mechanical checks do not establish semantic quality.
 Host results do not measure Android RAM, latency, thermals, battery or gestures.
 
-Composer prompts prioritize the editing task, explicitly allow wording changes
-while preserving facts, and demonstrate style changes with trusted examples.
-Custom instructions guide the style; they are not message text to append.
-The translation prompt is unchanged. With these prompts, the pinned host model
-corrected “I has recieved teh report” to “I have received the report”, fixed the
-Spanish “por que”/accent example, and rewrote the informal report request for
-Formal and Business without inventing AM/PM. The warmer custom style returned
-“I'd appreciate it if you could send the draft today. Thank you!”; Silly only
-changed “thanks!” to “thanks a bunch!” and remains a weak style example.
+All operations use one JSON object: `text`, plus `style_instruction` only for
+Custom or `target_language` only for Translate. The actual untrusted object stays
+in the single sentinel segment tokenized with `parse_special=false`. Style tasks
+rewrite `text` according to guidance without copying that guidance, preserving
+actors, requests versus commitments, negation, facts and unspecified times.
+Formal and Business retain their stronger tone instructions and inline examples,
+without chat demonstrations. Silly requests a creative, naturally playful rewrite
+of the whole message, using appropriate colloquial expressions, vernacular and
+idioms to reshape its grammar, structure and cadence, not a few word edits or an
+appended riff. Its static trusted pair demonstrates a natural notes-by-3 request,
+without theatrical exaggeration, fantasy or added content. Custom applies the
+requested voice, register or dialect consistently to every existing clause,
+with fitting expressions, idioms, vocabulary, vernacular and grammatical changes.
+Natural usage and the original meaning take precedence over forced cliches.
+Professional, restrained and terse styles remain possible; neither extra length
+nor a universally casual voice is required. Its contrasting warm and casual
+spoken-English pairs use the same single notes-send-me-by-3 request, without a
+review/read promise. The separate multi-clause smoke source already contains the
+speaker's next-day review commitment; style changes must preserve both clauses.
+The shared style policy treats the model as an editor for the same author, not
+an assistant answering the message. It forbids adding help offers, promises,
+actions or intentions absent from the source, while allowing fact-neutral courtesy.
+All demonstration user messages use the actual JSON field
+schema; assistant responses are plain unquoted text. No private saved style is
+embedded.
+All operations use greedy decoding on both host and Android. Creative expression
+comes from stronger style instructions and trusted role examples, not randomness.
+The higher-randomness trial changed actors and unspecified times, so it was
+abandoned in favor of meaning preservation. These are editing policy choices,
+not a claim of measured creative or semantic quality.
+Correct and Translate prompts and payloads, model/runtime pins, nonthinking
+template/parser, token boundaries and limits are unchanged.
+An earlier prompt revision's eight focused style cases completed and passed their
+mechanical checks; the final editor-policy revision has not completed verification.
+Formal/Business changed the informal report request; Silly rephrased its
+body; warm Custom no longer added an unsolicited review promise. Pirate and
+terse professional instructions produced different wording for the same correct
+source, retaining the send request, deadline and next-day review.
+The literal Custom case retained the source's literal tag and mention without
+copying instruction-only content, but omitted other source wording.
+
+Physical-device checks in `##motdtest` observed:
+
+- Silly previously only added “Thanks a bunch!”; the revised request used
+  “Hey squad” and “send the report my way by 5”.
+- The existing private register style previously returned ordinary wording;
+  the latest observed result was “Send the report my way by 5, yeah? I'll check it
+  tomorrow, sure.” for `Please send the report by 5. I will review it tomorrow.`
+- An author-created pirate instruction produced “Ahoy matey! Send the report my
+  way by 5, and I'll be reviewing it tomorrow, ahoy!” for that same source.
+  The temporary diagnostic style remains on the test device.
+
+These are limited observations, not dialect fidelity or semantic-quality proof.
+The model still sometimes encloses results in quotes, omits wording or adds an
+implicit recipient. Review every result. Style-name special cases, semantic
+detectors, retries, source fallbacks and model substitutions are not used.
 
 Experimental limitations remain: French translation changed the time spelling;
 Japanese inserted a paragraph break and reverse translation added “me”. Hindi's
 first sentence was “मैंने भविष्य में नहीं जा सकता।”, losing “tomorrow”; Arabic
-reverse translation lost the explicit count of two files. The current hostile
-literal-source correction completed but changed tag whitespace and JSON escaping;
-the custom instruction-only literal content was not appended. Earlier prompts
-produced unchanged styles and a literal-source `OUTPUT_LIMIT` result. Apply and
-Copy remain disabled for incomplete output. There is no semantic detector,
+reverse translation lost the explicit count of two files. Hostile literal-source
+correction previously completed but changed tag whitespace and JSON escaping.
+Still-earlier prompts produced unchanged styles and a literal-source
+`OUTPUT_LIMIT` result. Apply and Copy remain disabled for incomplete output.
+There is no semantic detector,
 source-text fallback, or guarantee that prompt edits fix every model error.
 Users must review every result; original IRC formatting is not retained.
-Android-native quality and performance remain unmeasured.
+These limited device samples are not a quality/performance benchmark; Android
+RAM, latency, thermals and battery remain unmeasured.
 
 ## Device and E2E testing
 
