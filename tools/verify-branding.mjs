@@ -42,6 +42,14 @@ function inspect(file, width, height, radius = null, holeY = .5) {
   return { min: opaqueMin, max: opaqueMax };
 }
 
+const splashMaster = path.join(brand, "motd-splash-master.png");
+const [splashWidth, splashHeight] = magick([splashMaster, "-format", "%w %h", "info:"]).toString().split(" ").map(Number);
+assert.ok(Math.min(splashWidth, splashHeight) >= 1024, "Splash master must support downsampling at every Android density");
+inspect(splashMaster, splashWidth, splashHeight);
+const [visibleWidth, visibleHeight, visibleX, visibleY] = magick([splashMaster, "-alpha", "extract", "-threshold", "50%", "-format", "%@", "info:"]).toString().match(/\d+/g).map(Number);
+const padding = Math.max(2, Math.round(Math.max(splashWidth, splashHeight) / 512));
+const splashBounds = `${visibleWidth + 2 * padding}x${visibleHeight + 2 * padding}+${visibleX - padding}+${visibleY - padding}`;
+
 let checked = 0;
 for (const [density, factor] of [["mdpi", 1], ["hdpi", 1.5], ["xhdpi", 2], ["xxhdpi", 3], ["xxxhdpi", 4]]) {
   const folder = path.join(res, `drawable-${density}`);
@@ -55,7 +63,20 @@ for (const [density, factor] of [["mdpi", 1], ["hdpi", 1.5], ["xhdpi", 2], ["xxh
     assert.deepEqual(alpha, silhouette, `${name} must retain the authoritative silhouette`);
     checked++;
   }
-  inspect(path.join(folder, "ic_splash_logo.png"), Math.round(200 * factor), Math.round(200 * factor), 76 * factor);
+  const splashFile = path.join(folder, "ic_splash_logo.png");
+  const splashSize = Math.round(200 * factor);
+  const splash = inspect(splashFile, splashSize, splashSize, 76 * factor);
+  assert.ok(splash.max - splash.min > 15, "Splash ceramic shading was flattened");
+  const unit = splashSize / 192;
+  const width = Math.round(164 * unit * .66);
+  const height = Math.round(158 * unit * .66);
+  const x = Math.round((96 + (16 - 96) * .66) * unit);
+  const y = Math.round((96 + (24 - 96) * .66) * unit);
+  // Compare the exported contour to direct master downsampling. Reapplying the
+  // old raster mask or thresholding alpha must fail even if safe zones pass.
+  const expectedAlpha = magick([splashMaster, "-crop", splashBounds, "+repage", "-filter", "Lanczos", "-resize", `${width}x${height}!`, "-alpha", "extract", "-depth", "8", "gray:-"]);
+  const actualAlpha = magick([splashFile, "-crop", `${width}x${height}+${x}+${y}`, "+repage", "-alpha", "extract", "-depth", "8", "gray:-"]);
+  assert.deepEqual(actualAlpha, expectedAlpha, `${splashFile}: regenerated splash contour changed`);
   checked++;
   const notification = inspect(path.join(folder, "ic_notification_motd.png"), Math.round(24 * factor), Math.round(24 * factor), null, .46);
   assert.equal(notification.min, 255, "Notification artwork must be a flat white system-tinted mask");

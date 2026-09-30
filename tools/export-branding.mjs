@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Run with nix develop .#sprite-studies -c node tools/export-branding.mjs.
+// Add --splash-only to regenerate just the splash density assets.
 // Raster-only sources retain the approved ceramic finish and original lettering.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const brand = path.join(root, "docs/assets/brand");
@@ -53,10 +54,10 @@ function canonicalCrop(data) {
   }
   return canonicalCache.get(data);
 }
-const [sourceWidth, sourceHeight] = convert(["png:-", "-format", "%w %h", "info:"], source).toString().split(" ").map(Number);
-const pixels = convert(["png:-", "-depth", "8", "rgba:-"], source);
-function shade([r, g, b]) {
+function shade([r, g, b], data = source) {
   // Same polarity-aware affine mapping as ceramicLogoColorMatrix in the app.
+  const [sourceWidth, sourceHeight] = convert(["png:-", "-format", "%w %h", "info:"], data).toString().split(" ").map(Number);
+  const pixels = convert(["png:-", "-depth", "8", "rgba:-"], data);
   const light = (.2126 * r + .7152 * g + .0722 * b) / 255 >= .5;
   const result = Buffer.from(pixels);
   for (let offset = 0; offset < result.length; offset += 4) {
@@ -67,12 +68,8 @@ function shade([r, g, b]) {
   }
   return png(["-size", `${sourceWidth}x${sourceHeight}`, "-depth", "8", "rgba:-"], result);
 }
-const black = shade([0, 0, 0]);
-const white = shade([255, 255, 255]);
-const terminal = shade([51, 255, 102]);
-function normalized(data, size, scale = 1) {
+function aligned(cropped, size, scale = 1) {
   // Align the approved artwork to the original 192-unit symbol canvas and bounds.
-  const cropped = canonicalCrop(data);
   const unit = size / 192;
   const width = Math.round(164 * unit * scale);
   const height = Math.round(158 * unit * scale);
@@ -80,6 +77,29 @@ function normalized(data, size, scale = 1) {
   const y = Math.round((96 + (24 - 96) * scale) * unit);
   return layer(resize(cropped, width, height), size, size, x, y);
 }
+function normalized(data, size, scale = 1) {
+  return aligned(canonicalCrop(data), size, scale);
+}
+
+const densities = [["mdpi", 1], ["hdpi", 1.5], ["xhdpi", 2], ["xxhdpi", 3], ["xxxhdpi", 4]];
+const splashMaster = readFileSync(path.join(brand, "motd-splash-master.png"));
+const [splashWidth, splashHeight] = convert(["png:-", "-format", "%w %h", "info:"], splashMaster).toString().split(" ").map(Number);
+const [visibleWidth, visibleHeight, visibleX, visibleY] = convert(["png:-", "-alpha", "extract", "-threshold", "50%", "-format", "%@", "info:"], splashMaster).toString().match(/\d+/g).map(Number);
+// Keep the generated contour's soft alpha; the older symbol mask has rough edges.
+// Pad the optical bounds so trimming does not clip antialiasing at the extrema.
+const padding = Math.max(2, Math.round(Math.max(splashWidth, splashHeight) / 512));
+const splashCrop = png(["png:-", "-crop", `${visibleWidth + 2 * padding}x${visibleHeight + 2 * padding}+${visibleX - padding}+${visibleY - padding}`, "+repage"], shade([255, 255, 255], splashMaster));
+for (const [density, factor] of densities) {
+  save(path.join(res, `drawable-${density}`, "ic_splash_logo.png"), aligned(splashCrop, Math.round(200 * factor), .66));
+}
+if (process.argv.includes("--splash-only")) {
+  console.log(`Exported ${outputs.length} splash PNGs from the dedicated raster master.`);
+  process.exit(0);
+}
+
+const black = shade([0, 0, 0]);
+const white = shade([255, 255, 255]);
+const terminal = shade([51, 255, 102]);
 
 save(path.join(brand, "motd-symbol.png"), normalized(black, 512));
 save(path.join(brand, "motd-symbol-white.png"), normalized(white, 512));
@@ -102,14 +122,12 @@ const stackedText = layer(resize(textCrop, Math.round(textW / 2), Math.round(tex
   Math.round(textX / 2 - 73 * 2), Math.round(textY / 2 + 167 * 2));
 save(path.join(brand, "motd-lockup-stacked.png"), over(stackedMark, stackedText));
 
-const densities = [["mdpi", 1], ["hdpi", 1.5], ["xhdpi", 2], ["xxhdpi", 3], ["xxxhdpi", 4]];
 for (const [density, factor] of densities) {
   const folder = path.join(res, `drawable-${density}`);
   save(path.join(folder, "motd_logo_mark.png"), resize(canonicalCrop(source), Math.round(96 * factor), Math.round(92 * factor)));
   for (const [name, data] of [["ic_launcher_foreground", white], ["ic_launcher_foreground_light", black], ["ic_launcher_foreground_terminal", terminal], ["ic_launcher_monochrome", mask]]) {
     save(path.join(folder, `${name}.png`), normalized(data, Math.round(108 * factor), .54));
   }
-  save(path.join(folder, "ic_splash_logo.png"), normalized(white, Math.round(200 * factor), .66));
   // System notification tinting requires an unshaded white alpha silhouette.
   save(path.join(folder, "ic_notification_motd.png"), resize(mask, Math.round(24 * factor), Math.round(24 * factor)));
   save(path.join(folder, "motd_onboarding_wordmark.png"), resize(textCrop, Math.round(91 * factor), Math.round(31 * factor)));
