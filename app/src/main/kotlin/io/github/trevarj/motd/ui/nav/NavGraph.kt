@@ -283,6 +283,7 @@ fun MotdNavGraph(
                             showBack = showBack,
                             showComposerEmoji = showComposerEmoji,
                             showComposerFormattingTools = showComposerFormattingTools,
+                            onOpenAiSetup = { navController.navigate(AiLabsRoute(SettingsTarget.AI_TEXT_TOOLS)) },
                         ) {
                             ChatScreen(
                                 bufferId = route.bufferId,
@@ -315,6 +316,7 @@ fun MotdNavGraph(
                                 },
                                 onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
                                 onOpenAccountSetup = { navController.navigate(AccountSetupRoute(it)) },
+                                onOpenAiSetup = { navController.navigate(AiLabsRoute(SettingsTarget.AI_TEXT_TOOLS)) },
                                 onOpenNetworkSettings = {
                                     navController.navigate(NetworkSettingsRoute(it, NetworkSettingsTarget.CONNECTION))
                                 },
@@ -553,6 +555,7 @@ fun MotdNavGraph(
             SearchScreen(
                 bufferId = route.bufferId,
                 onBack = { navController.popBackStack() },
+                onOpenAiSetup = { navController.navigate(AiLabsRoute(SettingsTarget.AI_TEXT_TOOLS)) },
                 onOpenHit = { bufferId, msgid, time, eventId ->
                     navController.navigate(ChatRoute(bufferId, msgid, time, eventId))
                 },
@@ -561,6 +564,7 @@ fun MotdNavGraph(
         composable<GlobalFeedRoute> {
             GlobalFeedScreen(
                 onBack = { navController.popBackStack() },
+                onOpenAiSetup = { navController.navigate(AiLabsRoute(SettingsTarget.AI_TEXT_TOOLS)) },
                 // The search-hit deep-jump path: the canonical row id is identity, the time anchors.
                 onOpenMessage = { bufferId, eventId, time ->
                     navController.navigate(
@@ -572,6 +576,7 @@ fun MotdNavGraph(
         composable<MentionsRoute> {
             MentionsScreen(
                 onBack = { navController.popBackStack() },
+                onOpenAiSetup = { navController.navigate(AiLabsRoute(SettingsTarget.AI_TEXT_TOOLS)) },
                 onOpenMessage = { bufferId, eventId, time ->
                     navController.navigate(ChatRoute(bufferId, jumpToTime = time, jumpToEventId = eventId))
                 },

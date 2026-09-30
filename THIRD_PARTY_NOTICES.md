@@ -52,6 +52,32 @@ MIT license, motd's native/Kotlin wrapper, and the reproducible build lock.
 Imported model weights remain user-owned; motd never includes them in the app
 or source asset and does not redistribute them.
 
+## Local text runtime: llama.cpp / GGML
+
+The source-built `:ai-text` module uses [llama.cpp v0.5.0](https://github.com/ggml-org/llama.cpp/tree/7fe450e19305b828c199d602c23a8337aaa1f03b),
+commit `7fe450e19305b828c199d602c23a8337aaa1f03b`, under MIT.
+Its GGML source and upstream copyright/license notices are retained in
+`third_party/llama.cpp/source`; the runtime is CPU-only and has no network JNI API.
+Build-info patches apply only to a build-directory copy, not upstream source.
+The annotated upstream tag is unsigned; the commit pin is not signature verification.
+
+Retained vendor notices include nlohmann JSON (Niels Lohmann, MIT),
+cpp-httplib (yhirose, MIT), xxHash (Yann Collet, BSD-2-Clause), and
+rotate-bits (William Casarin, MIT), with their license text in upstream
+`vendor/` headers/license files. Upstream source also retains notices for
+optional image/audio/subprocess components; those features are not enabled
+by this text wrapper. Runtime and vendor licenses must remain in source distributions.
+
+The optional, separately installed instruction artifact is
+[Qwen/Qwen3.5-2B](https://huggingface.co/Qwen/Qwen3.5-2B) (Apache-2.0),
+quantized by [Unsloth](https://huggingface.co/unsloth/Qwen3.5-2B-GGUF).
+The selected `Qwen3.5-2B-Q4_K_M.gguf` revision is
+`f6d5376be1edb4d416d56da11e5397a961aca8ae`, length `1280835840` bytes,
+SHA-256 `aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223`.
+Weights are not bundled in the app or corresponding-source archive.
+Model identity and native/toolchain pins are recorded in
+[`third_party/ai/source.lock`](third_party/ai/source.lock).
+
 ## QR encoding: ZXing
 
 QR invitation generation and decoding use

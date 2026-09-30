@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -20,6 +21,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.paging.LoadState
 import androidx.paging.LoadStates
@@ -30,11 +32,16 @@ import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.UiDispatcherResetRule
+import io.github.trevarj.motd.ai.text.TextTermination
+import io.github.trevarj.motd.ai.text.TextTransformResult
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
+import io.github.trevarj.motd.ui.ai.AiTextSheet
+import io.github.trevarj.motd.ui.ai.AiTextSource
+import io.github.trevarj.motd.ui.ai.AiTextUiState
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.Dispatchers
@@ -96,6 +103,45 @@ class GlobalFeedScreenTest {
         bufferType = BufferType.CHANNEL,
         networkId = 1L,
     )
+
+    @Test
+    @org.robolectric.annotation.Config(qualifiers = "w411dp-h891dp")
+    fun feedAndMentionsHoldsTranslateWithoutChangingOriginClicks() {
+        val hit = row(42, text = "The report is ready.")
+        val stream = flowOf(PagingData.from(listOf(hit)))
+        var mentions by mutableStateOf(false)
+        var ai by mutableStateOf<AiTextUiState>(AiTextUiState.Closed)
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                GlobalFeedContent(
+                    stream.collectAsLazyPagingItems(context = Dispatchers.Unconfined),
+                    false,
+                    onOpenMessage = { room, event, time -> opened = Triple(room, event, time) },
+                    mentions = mentions,
+                    onTranslateMessage = { message ->
+                        ai = AiTextUiState.Choosing(AiTextSource.StoredMessage(message.bufferId, message.id, message.msgid, message.text))
+                    },
+                )
+                AiTextSheet(ai, emptyList(), null, onGenerate = {
+                    val source = (ai as AiTextUiState.Choosing).source as AiTextSource.StoredMessage
+                    ai = AiTextUiState.Result(1, source, source.text, TextTransformResult("Le rapport est prêt.", TextTermination.EOG), 1)
+                }, onTargetSelected = {}, onDismiss = { ai = AiTextUiState.Closed }, onOpenSetup = {}, onManageStyles = {})
+            }
+        }
+        listOf(false, true).forEach { mentionMode ->
+            compose.runOnIdle { mentions = mentionMode }
+            val text = compose.onNodeWithText(hit.message.text)
+            text.performClick()
+            compose.runOnIdle { assertEquals(Triple(hit.message.bufferId, 42L, hit.message.serverTime), opened) }
+            text.performSemanticsAction(SemanticsActions.OnLongClick)
+            compose.onNodeWithTag("ai_text_source").assertIsDisplayed()
+            compose.runOnIdle { assertEquals(42L, ((ai as AiTextUiState.Choosing).source as AiTextSource.StoredMessage).eventId) }
+            compose.onNodeWithTag("ai_text_translate").performClick()
+            compose.onNodeWithText("Le rapport est prêt.").assertIsDisplayed()
+            compose.onNodeWithTag("ai_text_apply").assertDoesNotExist()
+            compose.onNodeWithTag("ai_text_close").performClick()
+        }
+    }
 
     /** Source states for a stream that has finished refreshing, however that refresh ended. */
     private fun settled(refresh: LoadState) =

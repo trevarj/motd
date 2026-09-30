@@ -7,3 +7,6 @@
 [submodule "third_party/whisper.cpp/source"]
 	path = third_party/whisper.cpp/source
 	url = https://github.com/ggml-org/whisper.cpp.git
+[submodule "third_party/llama.cpp/source"]
+	path = third_party/llama.cpp/source
+	url = https://github.com/ggml-org/llama.cpp.git

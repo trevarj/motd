@@ -211,8 +211,22 @@ private fun InlineVideoPreview(
             }
         } else {
             AndroidView(
-                factory = { PlayerView(it).apply { this.player = player } },
-                update = { it.player = player },
+                factory = {
+                    PlayerView(it).apply {
+                        this.player = player
+                        setOnLongClickListener {
+                            onLongPress()
+                            true
+                        }
+                    }
+                },
+                update = {
+                    it.player = player
+                    it.setOnLongClickListener {
+                        onLongPress()
+                        true
+                    }
+                },
                 modifier = modifier.testTag("inline_video_preview"),
             )
         }

@@ -10,6 +10,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
@@ -116,11 +117,17 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.withResumed
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ai.AiFeature
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.irc.agentwire.AgentwireTopicDefect
 import io.github.trevarj.motd.irc.format.markdownToIrcFormatting
+import io.github.trevarj.motd.irc.format.plainIrcText
+import io.github.trevarj.motd.ui.ai.AiTextSheet
+import io.github.trevarj.motd.ui.ai.AiTextSource
+import io.github.trevarj.motd.ui.ai.AiTextViewModel
+import io.github.trevarj.motd.ui.ai.source
 import io.github.trevarj.motd.ui.chat.ChatForegroundLifecycleGate
 import io.github.trevarj.motd.ui.chat.ScrollToBottomFab
 import io.github.trevarj.motd.ui.chat.VoiceComposerPanel
@@ -145,6 +152,7 @@ fun AgentwireGateScreen(
     showComposerFormattingTools: Boolean,
     viewModel: AgentwireViewModel = hiltViewModel(),
     voiceViewModel: VoiceMessageViewModel = hiltViewModel(),
+    onOpenAiSetup: () -> Unit = {},
     ordinaryChat: @Composable () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -228,6 +236,7 @@ fun AgentwireGateScreen(
                 onComposerChange = { composer = it },
                 onComposerAccepted = { sent -> if (composer == sent) composer = TextFieldValue("") },
                 onBack = onBack,
+                onOpenAiSetup = onOpenAiSetup,
                 showBack = showBack,
                 showComposerEmoji = showComposerEmoji,
                 showComposerFormattingTools = showComposerFormattingTools,
@@ -398,7 +407,40 @@ private fun AgentwireScreen(
     onVoiceDestinationSelected: (PasteBackendConfig?) -> Unit,
     onVoiceErrorDismissed: () -> Unit,
     onVoiceNoticeDismissed: () -> Unit,
+    aiTextViewModel: AiTextViewModel = hiltViewModel(),
+    onOpenAiSetup: () -> Unit = {},
 ) {
+    val aiState by aiTextViewModel.state.collectAsStateWithLifecycle()
+    val aiLabs by aiTextViewModel.labsState.collectAsStateWithLifecycle()
+    var selectedKind by remember { mutableStateOf<String?>(null) }
+    var selectedSession by remember { mutableStateOf<String?>(null) }
+    var selectedBody by remember { mutableStateOf<String?>(null) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, aiTextViewModel) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) aiTextViewModel.close() }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            aiTextViewModel.close()
+        }
+    }
+    LaunchedEffect(state.epoch, state.activeSid, state.timeline, aiState.source()) {
+        val selected = aiState.source() as? AiTextSource.TransientMessage ?: return@LaunchedEffect
+        aiTextViewModel.updateTransientMessage(
+            selected.key,
+            state.translationLeaseBody(selected.key, selectedKind, selectedSession, selectedBody),
+        )
+    }
+    AiTextSheet(
+        aiState,
+        aiLabs.customStyles,
+        aiLabs.translationTarget,
+        aiTextViewModel::generate,
+        aiTextViewModel::selectTranslationTarget,
+        aiTextViewModel::close,
+        onOpenAiSetup,
+        onOpenAiSetup,
+    )
     var sheet by remember { mutableStateOf<AgentwireSheet?>(null) }
     var questionRequestId by remember { mutableStateOf<String?>(null) }
     var overflow by remember { mutableStateOf(false) }
@@ -641,6 +683,19 @@ private fun AgentwireScreen(
                                                 actionStatus = state.actionStatus[row.item.id],
                                                 expandedOverride = expandedKeys[row.key],
                                                 onToggleExpanded = { expandedKeys[row.key] = it },
+                                                onTranslateBody =
+                                                    if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures && !row.item.body.isNullOrBlank() && (row.item.kind == "user.prompt" || row.item.kind.startsWith("assistant."))) {
+                                                        {
+                                                            selectedKind = row.item.kind
+                                                            selectedSession = state.activeSid
+                                                            selectedBody = row.item.body
+                                                            aiTextViewModel.openTransientMessage(
+                                                                AiTextSource.TransientMessage("agentwire:${state.epoch}:${row.item.timelineKey()}", row.item.translationBody()!!),
+                                                            )
+                                                        }
+                                                    } else {
+                                                        null
+                                                    },
                                                 activity =
                                                     if (row.item.kind in setOf("turn.started", "turn.completed", "turn.failed")) {
                                                         row.item.sid?.let { sid -> row.item.tid?.let { tid -> turnActivity[sid to tid] } }
@@ -1401,7 +1456,27 @@ internal fun AgentwireComposer(
     }
 }
 
+internal fun AgentwireUiState.translationLeaseBody(
+    key: String,
+    kind: String?,
+    session: String?,
+    body: String?,
+): String? =
+    timeline
+        .firstOrNull { key == "agentwire:$epoch:${it.timelineKey()}" }
+        ?.takeIf { it.kind == kind && it.body == body && activeSid == session }
+        ?.translationBody()
+
 @SuppressLint("HardcodedText")
+internal fun AgentwireTimelineItem.translationBody(): String? {
+    val body = body?.takeIf { it.isNotBlank() } ?: return null
+    return when {
+        kind == "user.prompt" -> body
+        kind.startsWith("assistant.") -> plainIrcText(markdownToIrcFormatting(body))
+        else -> null
+    }
+}
+
 @Composable
 internal fun AgentwireTimelineCard(
     item: AgentwireTimelineItem,
@@ -1409,6 +1484,7 @@ internal fun AgentwireTimelineCard(
     expandedOverride: Boolean?,
     onToggleExpanded: (Boolean) -> Unit,
     activity: AgentwireActivity? = null,
+    onTranslateBody: (() -> Unit)? = null,
 ) {
     // Tool kinds never reach this card; they render as compact rows. The override is the user's
     // explicit fold choice, hoisted so it survives the item's lifecycle transitions.
@@ -1482,7 +1558,16 @@ internal fun AgentwireTimelineCard(
                         }
                     Text(
                         text,
-                        modifier = Modifier.padding(top = 8.dp),
+                        modifier =
+                            Modifier.padding(top = 8.dp).then(
+                                onTranslateBody?.takeIf { !item.body.isNullOrBlank() && (item.kind == "user.prompt" || item.kind.startsWith("assistant.")) }?.let {
+                                    Modifier.combinedClickable(
+                                        onClick = {},
+                                        onLongClick = it,
+                                        onLongClickLabel = stringResource(R.string.ai_text_translate_message),
+                                    )
+                                } ?: Modifier,
+                            ),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }

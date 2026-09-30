@@ -33,8 +33,10 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -222,6 +224,7 @@ class SearchViewModelTest {
         available: Boolean = false,
         private val result: List<SearchResultMessage>? = emptyList(),
         private val failure: Throwable? = null,
+        private val delayed: (suspend (IrcSearchRequest) -> List<SearchResultMessage>?)? = null,
     ) : NoopConnectionManager() {
         override val connectionStates = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
         val searchAvailable = MutableStateFlow(available)
@@ -234,6 +237,7 @@ class SearchViewModelTest {
             request: IrcSearchRequest,
         ): List<SearchResultMessage>? {
             requests += request
+            delayed?.let { return it(request) }
             failure?.let { throw it }
             return result
         }
@@ -487,31 +491,54 @@ class SearchViewModelTest {
         }
 
     @Test
-    fun hitsWithoutTimeOrMsgidAreDropped() =
-        runTest {
-            val connections =
-                FakeConnectionManager(
-                    available = true,
-                    result =
-                        listOf(
-                            serverHit("jumpable", serverTime = 2_000, msgid = "m1"),
-                            // Nothing to resolve a jump target from, so it is not a usable result.
-                            serverHit("unjumpable", serverTime = null, msgid = null),
-                        ),
-                )
-            val vm = serverViewModel(connections)
-
-            vm.state.test {
-                enterServerScope(vm)
-                vm.onServerSearchSubmit()
-                val results =
-                    awaitStateWhere { it.server is ServerSearchState.Results }
-                        .server as ServerSearchState.Results
-                assertEquals(listOf("jumpable"), results.hits.map { it.text })
-                assertTrue("a short page is not truncated", !results.truncated)
-                cancelAndIgnoreRemainingEvents()
+    fun cancelledServerGenerationCannotPublishLateResultsOrFailure() {
+        val dispatcher = kotlinx.coroutines.test.StandardTestDispatcher()
+        kotlinx.coroutines.Dispatchers.setMain(dispatcher)
+        try {
+            runTest(dispatcher) {
+                val releases = List(3) { kotlinx.coroutines.CompletableDeferred<Unit>() }
+                var index = 0
+                val connections =
+                    FakeConnectionManager(available = true, delayed = {
+                        val requestIndex = index++
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                            releases[requestIndex].await()
+                            if (requestIndex == 0) throw IrcCommandException("SEARCH", "REJECTED", "late failure")
+                            listOf(serverHit(if (requestIndex == 1) "stale body" else "current body", null, null))
+                        }
+                    })
+                val vm = serverViewModel(connections)
+                vm.state.test {
+                    enterServerScope(vm)
+                    vm.onServerSearchSubmit()
+                    runCurrent()
+                    assertEquals(1, connections.requests.size)
+                    vm.onServerSearchSubmit()
+                    runCurrent()
+                    assertEquals(2, connections.requests.size)
+                    releases[0].complete(Unit)
+                    runCurrent()
+                    assertTrue(vm.state.value.server is ServerSearchState.Searching)
+                    vm.onServerSearchSubmit()
+                    runCurrent()
+                    assertEquals(3, connections.requests.size)
+                    releases[1].complete(Unit)
+                    runCurrent()
+                    assertTrue(vm.state.value.server is ServerSearchState.Searching)
+                    releases[2].complete(Unit)
+                    runCurrent()
+                    val current = awaitStateWhere { it.server is ServerSearchState.Results }.server as ServerSearchState.Results
+                    assertEquals(listOf("current body"), current.hits.map { it.text })
+                    vm.onQueryChange("another")
+                    runCurrent()
+                    assertEquals(ServerSearchState.Idle, vm.state.value.server)
+                    cancelAndIgnoreRemainingEvents()
+                }
             }
+        } finally {
+            kotlinx.coroutines.Dispatchers.resetMain()
         }
+    }
 
     @Test
     fun msgidOnlyHitsAreKeptWithZeroTime() =

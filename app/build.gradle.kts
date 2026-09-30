@@ -147,6 +147,10 @@ abstract class VerifyAiNativeArtifacts : DefaultTask() {
 
     @get:InputFile
     @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val textAar: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val debugApk: RegularFileProperty
 
     @get:InputFile
@@ -156,6 +160,7 @@ abstract class VerifyAiNativeArtifacts : DefaultTask() {
     @TaskAction
     fun verify() {
         AiNativeArtifactVerifier.verifyAar(whisperAar.get().asFile, "ai-whisper debug AAR", "libmotd_whisper.so")
+        AiNativeArtifactVerifier.verifyAar(textAar.get().asFile, "ai-text debug AAR", "libmotd_text.so")
         AiNativeArtifactVerifier.verifyApk(debugApk.get().asFile, "app debug APK", "arm64-v8a", rejectLibbox = false)
         AiNativeArtifactVerifier.verifyApk(e2eApk.get().asFile, "app e2e APK", "x86_64", rejectLibbox = true)
     }
@@ -194,6 +199,7 @@ object AiNativeArtifactVerifier {
         val entries = readEntries(archive, label)
         val expectedAiLibraries =
             listOf(
+                "lib/$abi/libmotd_text.so",
                 "lib/$abi/libmotd_whisper.so",
             )
         val aiLibraries = entries.filter(::isMotdAiLibrary)
@@ -457,6 +463,7 @@ tasks.register<VerifyAiNativeArtifacts>("verifyAiNativeArtifacts") {
     description = "Verifies AI runtime AAR and app APK native packaging contracts."
     dependsOn(
         ":ai-whisper:bundleDebugAar",
+        ":ai-text:bundleDebugAar",
         "assembleDebug",
         "assembleE2e",
     )
@@ -465,6 +472,7 @@ tasks.register<VerifyAiNativeArtifacts>("verifyAiNativeArtifacts") {
             "ai-whisper/build/outputs/aar/ai-whisper-debug.aar",
         ),
     )
+    textAar.set(rootProject.layout.projectDirectory.file("ai-text/build/outputs/aar/ai-text-debug.aar"))
     debugApk.set(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
     e2eApk.set(layout.buildDirectory.file("outputs/apk/e2e/app-e2e.apk"))
 }
@@ -488,6 +496,7 @@ kotlin { jvmToolchain(21) }
 dependencies {
     implementation(project(":irc"))
     implementation(project(":ai-whisper"))
+    implementation(project(":ai-text"))
     debugImplementation(files(libboxAar))
     releaseImplementation(files(libboxAar))
     add("e2eImplementation", files(libboxE2eAar))

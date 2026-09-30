@@ -71,6 +71,58 @@ Require all applicable hosted `Required CI / gate` checks before merge. Inspect
 an individual failed job's existing diagnostics and begin fixing it immediately
 rather than waiting for aggregate `gate`; remaining coverage continues normally.
 
+## Portable text-engine proof
+
+`:ai-text` builds the same CPU engine for JNI and the host-only
+`motd_text_smoke` executable. It does not bundle weights or fetch them during
+configuration or inference. Keep the independently verified pinned model
+outside the checkout (identity, byte length and SHA-256 are in
+`third_party/ai/source.lock`).
+
+From the repository Nix shell, after verifying that artifact:
+
+```sh
+cmake="$ANDROID_HOME/cmake/3.31.6/bin/cmake"
+"$cmake" -S ai-text/src/main/cpp -B ai-text/build/host-smoke -G Ninja \
+  -DMOTD_HOST_SMOKE=ON -DCMAKE_BUILD_TYPE=Release
+"$cmake" --build ai-text/build/host-smoke --target motd_text_smoke --parallel 2
+ai-text/build/host-smoke/bin/motd_text_smoke \
+  --model "${XDG_CACHE_HOME:-$HOME/.cache}/motd-ai-smoke/Qwen3.5-2B-Q4_K_M.gguf" \
+  --self-checks --examples
+```
+
+The CMake wrapper enforces the production CPU/privacy flags for both targets.
+Self-checks distinguish tokenizer/parser fixtures from real inference,
+exercise joined load/prefill/decode cancellation, and compare one-shot
+isolation with a fresh engine. Examples print actual output and check completion,
+known correction errors, unchanged already-correct text, deliberately informal
+style rewrites, protected literals and instruction-only content. Use
+`--composer-examples` instead of `--self-checks --examples` for the focused
+editing cases. These mechanical checks do not establish semantic quality.
+Host results do not measure Android RAM, latency, thermals, battery or gestures.
+
+Composer prompts prioritize the editing task, explicitly allow wording changes
+while preserving facts, and demonstrate style changes with trusted examples.
+Custom instructions guide the style; they are not message text to append.
+The translation prompt is unchanged. With these prompts, the pinned host model
+corrected “I has recieved teh report” to “I have received the report”, fixed the
+Spanish “por que”/accent example, and rewrote the informal report request for
+Formal and Business without inventing AM/PM. The warmer custom style returned
+“I'd appreciate it if you could send the draft today. Thank you!”; Silly only
+changed “thanks!” to “thanks a bunch!” and remains a weak style example.
+
+Experimental limitations remain: French translation changed the time spelling;
+Japanese inserted a paragraph break and reverse translation added “me”. Hindi's
+first sentence was “मैंने भविष्य में नहीं जा सकता।”, losing “tomorrow”; Arabic
+reverse translation lost the explicit count of two files. The current hostile
+literal-source correction completed but changed tag whitespace and JSON escaping;
+the custom instruction-only literal content was not appended. Earlier prompts
+produced unchanged styles and a literal-source `OUTPUT_LIMIT` result. Apply and
+Copy remain disabled for incomplete output. There is no semantic detector,
+source-text fallback, or guarantee that prompt edits fix every model error.
+Users must review every result; original IRC formatting is not retained.
+Android-native quality and performance remain unmeasured.
+
 ## Device and E2E testing
 
 Do not run the headless emulator suite during routine local development; it

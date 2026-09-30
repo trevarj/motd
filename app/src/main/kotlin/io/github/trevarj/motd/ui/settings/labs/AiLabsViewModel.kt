@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ai.AiCustomStyle
 import io.github.trevarj.motd.ai.AiDerivedCacheCleaner
 import io.github.trevarj.motd.ai.AiFeature
 import io.github.trevarj.motd.ai.AiImportState
@@ -15,11 +16,13 @@ import io.github.trevarj.motd.ai.AiLabsRepository
 import io.github.trevarj.motd.ai.AiLabsState
 import io.github.trevarj.motd.ai.AiModelCapability
 import io.github.trevarj.motd.ai.AiModelRecord
+import io.github.trevarj.motd.ai.AiTranslationTarget
 import io.github.trevarj.motd.ai.TranscriptionSettings
 import io.github.trevarj.motd.ai.assignedModelId
-import io.github.trevarj.motd.ai.isReadyFor
+import io.github.trevarj.motd.ai.isModelReadyFor
 import io.github.trevarj.motd.ai.requiredCapability
-import io.github.trevarj.motd.ai.settingsFor
+import io.github.trevarj.motd.ai.transcriptionSettingsFor
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -39,19 +42,19 @@ internal data class AiImportProgress(
 internal data class AiFeatureUiState(
     val feature: AiFeature,
     val enabled: Boolean,
+    val ready: Boolean,
     val assignedModel: AiModelRecord?,
     val settings: TranscriptionSettings?,
     val compatibleModels: List<AiModelRecord>,
     val selectableModels: List<AiModelRecord>,
 ) {
     val capability: AiModelCapability get() = feature.requiredCapability
-    val ready: Boolean get() = assignedModel?.isReadyFor(capability, settings) == true
 }
 
 internal data class AiModelUiState(
     val record: AiModelRecord,
     val assignments: Set<AiFeature>,
-    val settings: Map<AiModelCapability, TranscriptionSettings>,
+    val settings: TranscriptionSettings?,
 )
 
 internal data class AiLabsStatus(
@@ -65,8 +68,10 @@ internal data class AiLabsUiState(
     val importProgress: AiImportProgress? = null,
     val clearingCaches: Boolean = false,
     val status: AiLabsStatus? = null,
+    val customStyles: List<AiCustomStyle> = emptyList(),
+    val translationTarget: AiTranslationTarget? = null,
 ) {
-    fun feature(feature: AiFeature): AiFeatureUiState = features[feature] ?: AiFeatureUiState(feature, false, null, null, emptyList(), emptyList())
+    fun feature(feature: AiFeature): AiFeatureUiState = features[feature] ?: AiFeatureUiState(feature, false, false, null, null, emptyList(), emptyList())
 
     val importing: Boolean get() = importProgress != null
 }
@@ -74,11 +79,15 @@ internal data class AiLabsUiState(
 internal class AiLabsCalls(
     val persistedState: StateFlow<AiLabsState>,
     val setFeatureEnabled: suspend (AiFeature, Boolean) -> Result<Unit>,
-    val importModel: suspend (Uri) -> Result<AiModelRecord>,
+    val importModel: suspend (Uri, AiModelCapability) -> Result<AiModelRecord>,
     val assignModel: suspend (AiFeature, String) -> Result<Unit>,
-    val updateSettings: suspend (String, AiModelCapability, TranscriptionSettings) -> Result<Unit>,
+    val updateTranscriptionSettings: suspend (String, TranscriptionSettings) -> Result<Unit>,
     val deleteModel: suspend (String) -> Result<Unit>,
     val clearCaches: suspend () -> Result<Unit>,
+    val downloadTextModel: suspend () -> Result<AiModelRecord>,
+    val upsertCustomStyle: suspend (AiCustomStyle) -> Result<Unit>,
+    val deleteCustomStyle: suspend (String) -> Result<Unit>,
+    val setTranslationTarget: suspend (AiTranslationTarget) -> Result<Unit>,
 ) {
     @Inject
     constructor(
@@ -87,11 +96,15 @@ internal class AiLabsCalls(
     ) : this(
         persistedState = repository.state,
         setFeatureEnabled = repository::setFeatureEnabled,
-        importModel = { uri -> repository.importModel(uri, AiModelCapability.TRANSCRIPTION) },
+        importModel = { uri, capability -> repository.importModel(uri, capability) },
         assignModel = repository::assignModel,
-        updateSettings = repository::updateSettings,
+        updateTranscriptionSettings = repository::updateTranscriptionSettings,
         deleteModel = repository::deleteModel,
         clearCaches = cacheCleaner::clear,
+        downloadTextModel = { repository.downloadRecommendedTextModel() },
+        upsertCustomStyle = repository::upsertCustomStyle,
+        deleteCustomStyle = repository::deleteCustomStyle,
+        setTranslationTarget = repository::setTranslationTarget,
     )
 }
 
@@ -103,6 +116,7 @@ class AiLabsViewModel
     ) : ViewModel() {
         private val status = MutableStateFlow<AiLabsStatus?>(null)
         private val clearingCaches = MutableStateFlow(false)
+        private var setupJob: Job? = null
 
         internal val state: StateFlow<AiLabsUiState> =
             combine(calls.persistedState, status, clearingCaches, ::deriveAiLabsUiState)
@@ -114,10 +128,31 @@ class AiLabsViewModel
         ) = mutate {
             calls
                 .setFeatureEnabled(feature, enabled)
-                .andClearTranscripts(clear = !enabled)
+                .andClearTranscripts(clear = !enabled && feature == AiFeature.TRANSCRIPTION)
         }
 
-        fun importModel(uri: Uri) = mutate(R.string.ai_model_imported) { calls.importModel(uri).map {} }
+        fun importModel(
+            uri: Uri,
+            capability: AiModelCapability,
+        ) {
+            if (setupJob?.isActive == true) return
+            setupJob = mutate(R.string.ai_model_imported) { calls.importModel(uri, capability).map {} }
+        }
+
+        fun downloadTextModel() {
+            if (setupJob?.isActive == true) return
+            setupJob = mutate(R.string.ai_model_imported) { calls.downloadTextModel().map {} }
+        }
+
+        fun cancelSetup() {
+            setupJob?.cancel()
+        }
+
+        fun upsertCustomStyle(style: AiCustomStyle) = mutate(R.string.ai_settings_saved) { calls.upsertCustomStyle(style) }
+
+        fun deleteCustomStyle(styleId: String) = mutate(R.string.ai_settings_saved) { calls.deleteCustomStyle(styleId) }
+
+        fun setTranslationTarget(target: AiTranslationTarget) = mutate(R.string.ai_settings_saved) { calls.setTranslationTarget(target) }
 
         fun assignModel(
             feature: AiFeature,
@@ -129,18 +164,22 @@ class AiLabsViewModel
                     ?.let { it != modelId } == true
             calls
                 .assignModel(feature, modelId)
-                .andClearTranscripts(clear = replaced)
+                .andClearTranscripts(clear = replaced && feature == AiFeature.TRANSCRIPTION)
         }
 
-        fun updateSettings(
+        fun updateTranscriptionSettings(
             modelId: String,
-            capability: AiModelCapability,
             settings: TranscriptionSettings,
-        ) = mutate(R.string.ai_settings_saved) { calls.updateSettings(modelId, capability, settings) }
+        ) = mutate(R.string.ai_settings_saved) { calls.updateTranscriptionSettings(modelId, settings) }
 
         fun deleteModel(modelId: String) =
             mutate(R.string.ai_model_deleted) {
-                calls.deleteModel(modelId).andClearTranscripts(clear = true)
+                val speech =
+                    calls.persistedState.value.models
+                        .firstOrNull { it.id == modelId }
+                        ?.capabilities
+                        ?.contains(AiModelCapability.TRANSCRIPTION) == true
+                calls.deleteModel(modelId).andClearTranscripts(clear = speech)
             }
 
         fun clearCaches() {
@@ -167,9 +206,9 @@ class AiLabsViewModel
         private fun mutate(
             @StringRes successMessage: Int? = null,
             operation: suspend () -> Result<Unit>,
-        ) {
+        ): Job {
             status.value = null
-            viewModelScope.launch {
+            return viewModelScope.launch {
                 val result = operation()
                 status.value =
                     result.fold(
@@ -190,14 +229,16 @@ internal fun deriveAiLabsUiState(
             val capability = feature.requiredCapability
             val compatible = persisted.models.filter { capability in it.capabilities }
             val assigned = persisted.assignedModelId(feature)?.let { id -> persisted.models.firstOrNull { it.id == id } }
-            val assignedSettings = assigned?.let { persisted.settingsFor(it.id, capability) }
+            val assignedSettings = assigned?.takeIf { capability == AiModelCapability.TRANSCRIPTION }?.let { persisted.transcriptionSettingsFor(it.id) }
+            val ready = assigned?.let { persisted.isModelReadyFor(it, capability) } == true
             AiFeatureUiState(
                 feature = feature,
-                enabled = feature in persisted.enabledFeatures && assigned?.isReadyFor(capability, assignedSettings) == true,
+                enabled = feature in persisted.enabledFeatures && ready,
+                ready = ready,
                 assignedModel = assigned,
                 settings = assignedSettings,
                 compatibleModels = compatible,
-                selectableModels = compatible.filter { it.isReadyFor(capability, persisted.settingsFor(it.id, capability)) },
+                selectableModels = compatible.filter { persisted.isModelReadyFor(it, capability) },
             )
         }
     val modelStates =
@@ -205,18 +246,14 @@ internal fun deriveAiLabsUiState(
             AiModelUiState(
                 record = model,
                 assignments = persisted.assignments.filter { it.modelId == model.id }.mapTo(linkedSetOf()) { it.feature },
-                settings =
-                    model.capabilities
-                        .mapNotNull { capability ->
-                            persisted.settingsFor(model.id, capability)?.let { capability to it }
-                        }.toMap(),
+                settings = persisted.transcriptionSettingsFor(model.id),
             )
         }
     val progress =
         (persisted.importState as? AiImportState.Importing)?.let {
             AiImportProgress(it.bytesCopied, it.totalBytes)
         }
-    return AiLabsUiState(featureStates, modelStates, progress, clearingCaches, status)
+    return AiLabsUiState(featureStates, modelStates, progress, clearingCaches, status, persisted.customStyles, persisted.translationTarget)
 }
 
 @StringRes
@@ -244,5 +281,7 @@ internal fun AiLabsFailureKind.messageResource(): Int =
         AiLabsFailureKind.MODEL_NOT_READY -> R.string.ai_error_model_not_ready
         AiLabsFailureKind.INVALID_SETTINGS -> R.string.ai_error_invalid_settings
         AiLabsFailureKind.PERSISTENCE -> R.string.ai_error_persistence
+        AiLabsFailureKind.NETWORK -> R.string.ai_error_network
+        AiLabsFailureKind.CHECKSUM_MISMATCH -> R.string.ai_error_checksum_mismatch
         AiLabsFailureKind.INTERNAL -> R.string.ai_error_internal
     }

@@ -1,25 +1,37 @@
 package io.github.trevarj.motd.ui.search
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import io.github.trevarj.motd.UiDispatcherResetRule
+import io.github.trevarj.motd.ai.text.TextTermination
+import io.github.trevarj.motd.ai.text.TextTransformResult
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
+import io.github.trevarj.motd.irc.ext.SearchResultKind
+import io.github.trevarj.motd.ui.ai.AiTextSheet
+import io.github.trevarj.motd.ui.ai.AiTextSource
+import io.github.trevarj.motd.ui.ai.AiTextUiState
+import io.github.trevarj.motd.ui.ai.source
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -37,6 +49,60 @@ class SearchScreenUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun localAndTransientServerHoldsUseFullSelectedText() {
+        val fullText = "The report is ready.\nSecond paragraph.\nThird line.\nFourth line beyond the row preview."
+        val local = hit(42, "local", fullText)
+        val server = ServerHitUi(7, "nick", fullText, SearchResultKind.PRIVMSG, 123, null)
+        var state by mutableStateOf(SearchUiState(rawQuery = "report", groups = listOf(group(local))))
+        var ai by mutableStateOf<AiTextUiState>(AiTextUiState.Closed)
+        var opened: Long? = null
+        compose.setContent {
+            LaunchedEffect(state, ai.source()) {
+                val selected = ai.source() as? AiTextSource.TransientMessage ?: return@LaunchedEffect
+                if (state.serverTranslationBody(selected.key) != selected.text) ai = AiTextUiState.Closed
+            }
+            MotdTheme {
+                SearchContent(
+                    state,
+                    onQueryChange = {
+                        state = state.copy(rawQuery = it, server = ServerSearchState.Idle)
+                        ai = AiTextUiState.Closed
+                    },
+                    onScopeChange = {},
+                    onBack = {},
+                    onOpenHit = { opened = it.message.id },
+                    onTranslateLocalHit = { ai = AiTextUiState.Choosing(AiTextSource.StoredMessage(it.message.bufferId, it.message.id, it.message.msgid, it.message.text)) },
+                    onTranslateServerHit = { hit, generation, index -> ai = AiTextUiState.Choosing(AiTextSource.TransientMessage("server-search:$generation:$index", hit.text, hit.bufferId, hit.msgid)) },
+                )
+                AiTextSheet(ai, emptyList(), null, onGenerate = {
+                    val source = (ai as AiTextUiState.Choosing).source
+                    ai = AiTextUiState.Result(1, source, fullText, TextTransformResult("Le rapport est prêt.", TextTermination.EOG), 1)
+                }, onTargetSelected = {}, onDismiss = { ai = AiTextUiState.Closed }, onOpenSetup = {}, onManageStyles = {})
+            }
+        }
+        compose.onNodeWithTag("search_result_local").performClick()
+        compose.runOnIdle { assertEquals(42L, opened) }
+        compose.onNodeWithTag("search_result_local").performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onNodeWithTag("ai_text_source").assertTextEquals(fullText)
+        compose.onNodeWithTag("ai_text_translate").performClick()
+        compose.onNodeWithText("Le rapport est prêt.").assertIsDisplayed()
+        compose.onNodeWithTag("ai_text_apply").assertDoesNotExist()
+        compose.onNodeWithTag("ai_text_close").performClick()
+        compose.runOnIdle { state = state.copy(scope = SearchScope.SERVER, server = ServerSearchState.Results(listOf(server), false, 9)) }
+        compose.onNodeWithTag("search_result_123").performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.onNodeWithTag("ai_text_source").assertTextEquals(fullText)
+        compose.runOnIdle { assertEquals("server-search:9:0", ((ai as AiTextUiState.Choosing).source as AiTextSource.TransientMessage).key) }
+        compose.onNodeWithTag("ai_text_translate").performClick()
+        compose.onNodeWithText("Le rapport est prêt.").assertIsDisplayed()
+        // Even identical replacement text belongs to a different server response lease.
+        compose.runOnIdle { state = state.copy(server = ServerSearchState.Results(listOf(server), false, 10)) }
+        compose.onNodeWithTag("ai_text_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("search_field").performTextClearance()
+        compose.onNodeWithTag("search_field").performTextInput("replacement")
+        compose.onNodeWithTag("search_result_123").assertDoesNotExist()
+    }
 
     @Test
     fun localQueryChange_hidesStaleExternalRowsUntilMatchingResultsArrive() {

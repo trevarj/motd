@@ -10,6 +10,7 @@ import androidx.paging.cachedIn
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.agentwire.AgentwirePrefs
 import io.github.trevarj.motd.agentwire.prepareAgentwireContext
+import io.github.trevarj.motd.ai.isValidAiText
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioMetadataRepository
@@ -71,6 +72,7 @@ import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.service.ChannelWatchDuration
@@ -86,6 +88,7 @@ import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.service.SendRejectionReason
 import io.github.trevarj.motd.service.TypingTracker
+import io.github.trevarj.motd.ui.ai.AiComposerDraftSnapshot
 import io.github.trevarj.motd.ui.components.ChannelNotificationPresentation
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
@@ -783,6 +786,9 @@ class ChatViewModel
         private var nextDraftRevision = 0L
         private var draftTextEdited = false
         private var draftReplyEdited = false
+        private var nextAiRequestId = 0L
+        private var activeAiDraft: AiComposerDraftSnapshot? = null
+        private var draftWriter: Job? = null
 
         // A duplicate click can arrive before the UI has observed the accepted draft clear. Keep the
         // reservation with the draft state so every entry point gets the same exactly-once behavior.
@@ -858,7 +864,10 @@ class ChatViewModel
 
         init {
             viewModelScope.launch {
-                operationalBufferId.drop(1).collect { viewportRefreshAnchor.value = null }
+                operationalBufferId.drop(1).collect {
+                    invalidateAiDraftTransform()
+                    viewportRefreshAnchor.value = null
+                }
             }
         }
 
@@ -1072,7 +1081,18 @@ class ChatViewModel
         private val visibleSession = MutableStateFlow<Long?>(null)
 
         init {
-            viewModelScope.launch { runDraftWriter() }
+            // Dispatch rather than re-enter trySend before the candidate revision is published.
+            draftWriter =
+                viewModelScope.launch(Dispatchers.Main) {
+                    try {
+                        runDraftWriter()
+                    } finally {
+                        synchronized(draftStateLock) {
+                            activeAiDraft = null
+                            draftCommands.close()
+                        }
+                    }
+                }
             viewModelScope.launch {
                 combine(buffer, visibleSession) { currentBuffer, session ->
                     currentBuffer?.id?.takeIf { session != null }
@@ -2231,6 +2251,43 @@ class ChatViewModel
                 .filter { it == operationalBufferId.value && attachmentRequestStore.consume(it) }
                 .map { }
 
+        fun beginAiDraftTransform(): AiComposerDraftSnapshot? =
+            synchronized(draftStateLock) {
+                if (!_composerDraft.value.hydrated || plainIrcText(currentDraftText).isBlank() || inFlightDraftSubmissions.isNotEmpty() || draftWriter?.isActive != true) return@synchronized null
+                AiComposerDraftSnapshot(++nextAiRequestId, operationalBufferId.value, _composerDraft.value.revision, currentDraftText, currentReplyToEventId).also { activeAiDraft = it }
+            }
+
+        fun invalidateAiDraftTransform() {
+            synchronized(draftStateLock) { activeAiDraft = null }
+        }
+
+        fun applyAiDraftTransform(
+            snapshot: AiComposerDraftSnapshot,
+            replacement: String,
+        ): Boolean {
+            if (replacement.isBlank() || !replacement.isValidAiText(65_536)) return false
+            return synchronized(draftStateLock) {
+                if (activeAiDraft != snapshot || operationalBufferId.value != snapshot.roomId ||
+                    !_composerDraft.value.hydrated || _composerDraft.value.revision != snapshot.revision ||
+                    currentDraftText != snapshot.text || currentReplyToEventId != snapshot.replyToEventId ||
+                    inFlightDraftSubmissions.isNotEmpty() || draftWriter?.isActive != true
+                ) {
+                    return@synchronized false
+                }
+                val candidate = DraftSnapshot(snapshot.roomId, replacement, currentReplyToEventId, nextDraftRevision + 1)
+                if (draftCommands.trySend(DraftCommand.Persist(candidate)).isFailure) return@synchronized false
+                currentDraftText = replacement
+                draftTextEdited = true
+                advanceDraftRevisionLocked()
+                true
+            }
+        }
+
+        override fun onCleared() {
+            invalidateAiDraftTransform()
+            super.onCleared()
+        }
+
         fun saveDraft(text: String) {
             synchronized(draftStateLock) {
                 draftTextEdited = true
@@ -2333,6 +2390,7 @@ class ChatViewModel
         }
 
         private fun advanceDraftRevisionLocked(hydrated: Boolean = _composerDraft.value.hydrated): DraftSnapshot {
+            activeAiDraft = null
             val revision = ++nextDraftRevision
             _composerDraft.value = ComposerDraftState(currentDraftText, hydrated, revision)
             return DraftSnapshot(
@@ -2369,6 +2427,7 @@ class ChatViewModel
                         duplicate = true
                         return@synchronized null
                     }
+                    activeAiDraft = null
                     if (draftCommands.trySend(DraftCommand.PrepareSubmission(candidate, result)).isFailure) {
                         inFlightDraftSubmissions.remove(key)
                         return@synchronized null

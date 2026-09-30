@@ -303,6 +303,7 @@ fun MessageBubble(
     // that ripples. Label it so TalkBack names the destination.
     onClick: (() -> Unit)? = null,
     onClickLabel: String? = null,
+    onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
@@ -357,6 +358,7 @@ fun MessageBubble(
                 onLongPress = onLongPress,
                 onClick = onClick,
                 onClickLabel = onClickLabel,
+                onLongPressLabel = onLongPressLabel,
                 onReact = onReact,
                 onImageClick = onImageClick,
                 onLinkPreviewClick = onLinkPreviewClick,
@@ -392,6 +394,7 @@ fun MessageBubble(
                 onLongPress = onLongPress,
                 onClick = onClick,
                 onClickLabel = onClickLabel,
+                onLongPressLabel = onLongPressLabel,
                 onReact = onReact,
                 onImageClick = onImageClick,
                 onLinkPreviewClick = onLinkPreviewClick,
@@ -432,6 +435,7 @@ fun MessageBubble(
             onLongPress = onLongPress,
             onClick = onClick,
             onClickLabel = onClickLabel,
+            onLongPressLabel = onLongPressLabel,
             onReact = onReact,
             onImageClick = onImageClick,
             onLinkPreviewClick = onLinkPreviewClick,
@@ -473,6 +477,7 @@ fun MessageBubble(
             onLongPress = onLongPress,
             onClick = onClick,
             onClickLabel = onClickLabel,
+            onLongPressLabel = onLongPressLabel,
             onReact = onReact,
             onImageClick = onImageClick,
             onLinkPreviewClick = onLinkPreviewClick,
@@ -556,7 +561,7 @@ fun MessageBubble(
                         onClick = onClick,
                         onClickLabel = onClickLabel,
                         onLongPress = onLongPress,
-                        onLongPressLabel = actionsLabel,
+                        onLongPressLabel = onLongPressLabel ?: actionsLabel,
                     ).padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
         ) {
             if (showSender && !isSelf) {
@@ -750,6 +755,7 @@ private fun ComfortableActionBubble(
     onLongPress: () -> Unit = {},
     onClick: (() -> Unit)? = null,
     onClickLabel: String? = null,
+    onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
@@ -867,7 +873,7 @@ private fun ComfortableActionBubble(
                         onClick = onClick,
                         onClickLabel = onClickLabel,
                         onLongPress = onLongPress,
-                        onLongPressLabel = actionsLabel,
+                        onLongPressLabel = onLongPressLabel ?: actionsLabel,
                     ).padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
         ) {
             reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, rowColor) }
@@ -990,6 +996,7 @@ private fun ActionMessageRow(
     onLongPress: () -> Unit = {},
     onClick: (() -> Unit)? = null,
     onClickLabel: String? = null,
+    onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
@@ -1087,7 +1094,7 @@ private fun ActionMessageRow(
                         onClick = onClick,
                         onClickLabel = onClickLabel,
                         onLongPress = onLongPress,
-                        onLongPressLabel = actionsLabel,
+                        onLongPressLabel = onLongPressLabel ?: actionsLabel,
                     ).padding(
                         horizontal = spacing.messageOuterHPad,
                         vertical = spacing.actionVPad,
@@ -1321,6 +1328,7 @@ private fun TwoLineMessageRow(
     onLongPress: () -> Unit = {},
     onClick: (() -> Unit)? = null,
     onClickLabel: String? = null,
+    onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
@@ -1353,7 +1361,7 @@ private fun TwoLineMessageRow(
                     onClick = onClick,
                     onClickLabel = onClickLabel,
                     onLongPress = onLongPress,
-                    onLongPressLabel = actionsLabel,
+                    onLongPressLabel = onLongPressLabel ?: actionsLabel,
                 ).padding(horizontal = spacing.messageOuterHPad, vertical = spacing.bubbleRowVPad),
     ) {
         // Line 1 (header): avatar + nick + (own) sent check + timestamp — only on a group's first

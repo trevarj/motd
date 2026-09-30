@@ -9,18 +9,26 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.activity.result.contract.ActivityResultContract
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -29,13 +37,22 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityOptionsCompat
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.room.Room
+import io.github.trevarj.motd.ai.AiCustomStyle
+import io.github.trevarj.motd.ai.AiRuntimeFailure
+import io.github.trevarj.motd.ai.AiTranslationTarget
+import io.github.trevarj.motd.ai.text.TextOperation
+import io.github.trevarj.motd.ai.text.TextTermination
+import io.github.trevarj.motd.ai.text.TextTransformResult
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.DccAddressKind
@@ -45,18 +62,30 @@ import io.github.trevarj.motd.data.db.DccTransferProtocol
 import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.dcc.EbooksResultCache
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.ai.AiComposerDraftSnapshot
+import io.github.trevarj.motd.ui.ai.AiTextAction
+import io.github.trevarj.motd.ui.ai.AiTextSheet
+import io.github.trevarj.motd.ui.ai.AiTextSource
+import io.github.trevarj.motd.ui.ai.AiTextUiState
+import io.github.trevarj.motd.ui.ai.source
 import io.github.trevarj.motd.ui.chat.ChatContent
 import io.github.trevarj.motd.ui.chat.ChatState
 import io.github.trevarj.motd.ui.chat.ComposerDraftState
+import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.EntryPositionState
 import io.github.trevarj.motd.ui.chat.OutgoingFlight
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -169,6 +198,7 @@ class ComposerSendClearUiTest {
 
     /** Renders the real chat surface over an empty timeline, with the draft under test control. */
     private fun setContent(
+        liveConnection: (() -> IrcClientState?)? = null,
         draft: () -> ComposerDraftState,
         pages: Flow<PagingData<MessageEntity>> = flowOf(PagingData.from(emptyList())),
         outgoingFlight: () -> OutgoingFlight? = { null },
@@ -185,6 +215,11 @@ class ComposerSendClearUiTest {
         onRemoveDccTransfer: (Long) -> Unit = {},
         activityResults: ActivityResultRegistryOwner? = null,
         onDraftChanged: (String) -> Unit = {},
+        aiEnabled: () -> Boolean = { false },
+        aiState: () -> AiTextUiState = { AiTextUiState.Closed },
+        onAi: () -> Unit = {},
+        aiSheet: @Composable () -> Unit = {},
+        onTranslateMessage: ((MessageEntity) -> Unit)? = null,
         onSubmit: (String) -> Unit,
     ) {
         compose.setContent {
@@ -196,7 +231,7 @@ class ComposerSendClearUiTest {
                         state =
                             ChatState(
                                 buffer = chatBuffer(),
-                                connState = connectionState,
+                                connState = liveConnection?.invoke() ?: connectionState,
                                 replyTo = replyTo(),
                                 parted = parted,
                             ),
@@ -220,14 +255,389 @@ class ComposerSendClearUiTest {
                         onRetry = {},
                         loadPreview = { _, _ -> null },
                         composerDraft = draft(),
+                        aiTextEnabled = aiEnabled(),
+                        aiTextState = aiState(),
+                        onAiComposer = onAi,
+                        onTranslateMessage = onTranslateMessage,
                         outgoingFlight = outgoingFlight(),
                         onDraftChanged = onDraftChanged,
                         onFlightSettled = onFlightSettled,
                         entryState = EntryPositionState.Settled,
                     )
+                    aiSheet()
                 }
             }
         }
+    }
+
+    @Test
+    fun messageTranslationNeverMutatesDraftReplyOrHistory() {
+        val draft = ComposerDraftState("Unsent draft", hydrated = true, revision = 17)
+        val parent = MessageEntity(id = 88, bufferId = buffer.id, serverTime = 1, sender = "alice", kind = MessageKind.PRIVMSG, text = "The report is ready.", dedupKey = "parent")
+        var ai by mutableStateOf<AiTextUiState>(AiTextUiState.Closed)
+        val db =
+            Room
+                .inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), MotdDatabase::class.java)
+                .allowMainThreadQueries()
+                .setQueryExecutor { it.run() }
+                .setTransactionExecutor { it.run() }
+                .build()
+        val store = ComposerDraftStore(db)
+        runBlocking {
+            db.networkDao().insert(NetworkEntity(id = buffer.networkId, name = "test", role = NetworkRole.DIRECT, host = "irc.example", port = 6697, nick = "me", username = "me", realname = "Me"))
+            db.bufferDao().insert(buffer)
+            db.messageDao().insertAll(listOf(parent))
+            store.saveDraft(buffer.id, draft.text, parent.id)
+        }
+        try {
+            setContent(
+                draft = { draft },
+                replyTo = { parent },
+                pages = flowOf(PagingData.from(listOf(parent))),
+                onDraftChanged = { error("translation changed draft") },
+                onSubmit = { error("translation sent") },
+                onTranslateMessage = { ai = AiTextUiState.Choosing(AiTextSource.StoredMessage(it.bufferId, it.id, it.msgid, it.text)) },
+                aiSheet = {
+                    AiTextSheet(ai, emptyList(), null, onGenerate = {
+                        val source = (ai as AiTextUiState.Choosing).source
+                        ai = AiTextUiState.Result(1, source, parent.text, TextTransformResult("Le rapport est prêt.", TextTermination.EOG), 1)
+                    }, onTargetSelected = {}, onDismiss = { ai = AiTextUiState.Closed }, onOpenSetup = {}, onManageStyles = {})
+                },
+            )
+            compose
+                .onNodeWithTag("chat_message_88", useUnmergedTree = true)
+                .performTouchInput { longClick() }
+            compose.onNodeWithTag("message_action_translate").performClick()
+            compose.onNodeWithTag("ai_text_source").assertIsDisplayed()
+            compose.onNodeWithTag("ai_text_translate").performClick()
+            compose.onNodeWithText("Le rapport est prêt.").assertIsDisplayed()
+            compose.onNodeWithTag("ai_text_apply").assertDoesNotExist()
+            compose.onNodeWithTag("ai_text_copy").performClick()
+            compose.onNodeWithTag("ai_text_close").performClick()
+            compose.runOnIdle {
+                assertEquals("Unsent draft", draft.text)
+                assertEquals(17L, draft.revision)
+                val stored = runBlocking { store.loadDraft(buffer.id) }
+                assertEquals(draft.text, stored?.text)
+                assertEquals(parent.id, stored?.replyToEventId)
+                assertEquals(parent.text, runBlocking { db.messageDao().byId(parent.id) }?.text)
+            }
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun aiPreviewApplyCancelAndSendKeepAuthoritativeDraft() {
+        var draft by mutableStateOf(ComposerDraftState("I has a report.", hydrated = true, revision = 1))
+        val parent = MessageEntity(id = 88, bufferId = buffer.id, serverTime = 1, sender = "alice", kind = MessageKind.PRIVMSG, text = "parent", dedupKey = "parent")
+        var reply by mutableStateOf<MessageEntity?>(parent)
+        var enabled by mutableStateOf(true)
+        var connection by mutableStateOf<IrcClientState>(IrcClientState.Disconnected)
+        var ai by mutableStateOf<AiTextUiState>(AiTextUiState.Closed)
+        val sends = mutableListOf<String>()
+        val db =
+            Room
+                .inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), MotdDatabase::class.java)
+                .allowMainThreadQueries()
+                .setQueryExecutor { it.run() }
+                .setTransactionExecutor { it.run() }
+                .build()
+        val store = ComposerDraftStore(db)
+        runBlocking {
+            db.networkDao().insert(NetworkEntity(id = buffer.networkId, name = "test", role = NetworkRole.DIRECT, host = "irc.example", port = 6697, nick = "me", username = "me", realname = "Me"))
+            db.bufferDao().insert(buffer)
+            db.messageDao().insertAll(listOf(parent))
+            store.saveDraft(buffer.id, draft.text, parent.id)
+        }
+        try {
+            setContent(
+                draft = { draft },
+                liveConnection = { connection },
+                replyTo = { reply },
+                aiEnabled = { enabled },
+                aiState = { ai },
+                onDraftChanged = {
+                    draft = draft.copy(text = it, revision = draft.revision + 1)
+                    runBlocking { store.saveDraft(buffer.id, draft.text, reply?.id) }
+                },
+                onAi = { ai = AiTextUiState.Choosing(AiTextSource.Composer(AiComposerDraftSnapshot(1, buffer.id, draft.revision, draft.text, reply?.id))) },
+                aiSheet = {
+                    AiTextSheet(
+                        ai,
+                        emptyList(),
+                        null,
+                        onGenerate = {
+                            val source = (ai as AiTextUiState.Choosing).source
+                            ai = AiTextUiState.Result(1, source, draft.text, TextTransformResult("I have a report.", TextTermination.EOG), 1)
+                        },
+                        onTargetSelected = {},
+                        onDismiss = { ai = AiTextUiState.Closed },
+                        onOpenSetup = {},
+                        onManageStyles = {},
+                        onApply = {
+                            val result = ai as AiTextUiState.Result
+                            draft = draft.copy(text = result.result.text, revision = draft.revision + 1)
+                            runBlocking { store.saveDraft(buffer.id, draft.text, reply?.id) }
+                            ai = AiTextUiState.Closed
+                        },
+                    )
+                },
+                onSubmit = {
+                    sends += it
+                    draft = draft.copy(text = "", revision = draft.revision + 1)
+                    reply = null
+                    runBlocking { store.saveDraft(buffer.id, "", null) }
+                },
+            )
+            compose.onNodeWithTag("chat_composer_ai").assertIsDisplayed().performClick()
+            compose.onNodeWithText("Grammar & spelling").performClick()
+            compose.onNodeWithTag("ai_text_result").assertTextEquals("I have a report.")
+            compose.runOnIdle {
+                assertEquals("I has a report.", draft.text)
+                assertEquals(parent, reply)
+                assertEquals(emptyList<String>(), sends)
+            }
+            compose.runOnIdle {
+                runBlocking {
+                    assertEquals("I has a report.", store.loadDraft(buffer.id)?.text)
+                    assertEquals(parent.id, store.loadDraft(buffer.id)?.replyToEventId)
+                }
+            }
+            compose.onNodeWithTag("ai_text_close").performClick()
+            compose.onNodeWithTag("chat_composer_field").assertTextEquals("I has a report.")
+            compose.onNodeWithTag("chat_composer_ai").performClick()
+            compose.onNodeWithText("Grammar & spelling").performClick()
+            compose.runOnIdle {
+                val result = ai as AiTextUiState.Result
+                ai = result.copy(result = result.result.copy(termination = TextTermination.OUTPUT_LIMIT))
+            }
+            compose.onNodeWithTag("ai_text_apply").assertIsNotEnabled()
+            compose.onNodeWithTag("ai_text_copy").assertIsNotEnabled()
+            compose.runOnIdle { assertEquals("I has a report.", draft.text) }
+            compose.runOnIdle {
+                val result = ai as AiTextUiState.Result
+                ai = result.copy(result = result.result.copy(termination = TextTermination.EOG))
+            }
+            compose.onNodeWithTag("ai_text_apply").performClick()
+            compose.onNodeWithTag("chat_composer_field").assertTextEquals("I have a report.")
+            compose.runOnIdle {
+                assertEquals(parent, reply)
+                assertEquals(2L, draft.revision)
+            }
+            compose.runOnIdle {
+                runBlocking {
+                    assertEquals("I have a report.", store.loadDraft(buffer.id)?.text)
+                    assertEquals(parent.id, store.loadDraft(buffer.id)?.replyToEventId)
+                }
+            }
+            compose.onNodeWithTag("chat_composer_field").performTextInput(" More")
+            compose.runOnIdle { assertEquals("I have a report. More", draft.text) }
+            compose.onNodeWithTag("chat_composer_ai").performClick()
+            compose.runOnIdle { ai = AiTextUiState.Running(2, (ai as AiTextUiState.Choosing).source) }
+            compose.onNodeWithTag("ai_text_apply").assertDoesNotExist()
+            compose.runOnIdle {
+                enabled = false
+                ai = AiTextUiState.Closed
+            }
+            compose.onNodeWithTag("chat_composer_ai").assertDoesNotExist()
+            compose.runOnIdle { connection = IrcClientState.Ready("me", emptySet(), emptyMap()) }
+            compose.onNodeWithTag("chat_composer_send").performClick()
+            compose.runOnIdle {
+                assertEquals(listOf("I have a report. More"), sends)
+                assertEquals("", draft.text)
+                assertEquals(null, reply)
+            }
+            compose.runOnIdle { runBlocking { assertEquals("parent", db.messageDao().byId(parent.id)?.text) } }
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w320dp-h480dp")
+    fun longSourceAndSavedStylesKeepActionsAndCancelReachable() {
+        val original = (1..200).joinToString("\n") { "Paragraph $it: please review the report before tomorrow." }
+        val draft = ComposerDraftState(original, hydrated = true, revision = 12)
+        val source = AiTextSource.Composer(AiComposerDraftSnapshot(7, buffer.id, draft.revision, original, 88))
+        val styles = (1..20).map { AiCustomStyle("00000000-0000-4000-8000-${it.toString().padStart(12, '0')}", "Saved style", "Use a friendly tone.") }
+        var ai by mutableStateOf<AiTextUiState>(AiTextUiState.Choosing(source))
+        var target by mutableStateOf<AiTranslationTarget?>(null)
+        var pendingTarget: AiTranslationTarget? = null
+        val actions = mutableListOf<AiTextAction>()
+        setContent(
+            draft = { draft },
+            aiEnabled = { true },
+            aiState = { ai },
+            onDraftChanged = { error("tools changed the original draft") },
+            onSubmit = { error("tools sent the original draft") },
+            aiSheet = {
+                AiTextSheet(
+                    ai,
+                    styles,
+                    target,
+                    onGenerate = {
+                        actions += it
+                        ai = AiTextUiState.Running(actions.size.toLong(), checkNotNull(ai.source()))
+                    },
+                    onTargetSelected = {
+                        pendingTarget = it
+                        ai = AiTextUiState.Choosing(checkNotNull(ai.source()), isSavingTarget = true)
+                    },
+                    onDismiss = { ai = AiTextUiState.Closed },
+                    onOpenSetup = {},
+                    onManageStyles = {},
+                    onApply = { error("no completed result") },
+                )
+            },
+        )
+
+        fun assertPreviewStartsAtTop(tag: String) {
+            val root = compose.onNode(isRoot() and hasAnyDescendant(hasTestTag("ai_text_sheet")), useUnmergedTree = true).getUnclippedBoundsInRoot()
+            val preview = compose.onNodeWithTag(tag).assertIsDisplayed().getUnclippedBoundsInRoot()
+            val footer = compose.onNodeWithTag("ai_text_close").getUnclippedBoundsInRoot()
+            assertTrue("$tag must start inside the fresh viewport", preview.top >= root.top && preview.top < footer.top)
+        }
+        compose.onNodeWithTag("ai_text_correct").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag("ai_text_source").assertTextEquals(original)
+        // Duplicate names must still select the exact saved ID at every scroll position.
+        styles.forEach { style ->
+            compose
+                .onNodeWithTag("ai_text_style_${style.id}")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
+            compose.onNodeWithTag("ai_text_close").assertIsDisplayed()
+            compose
+                .onNode(
+                    SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo.Indeterminate) and
+                        hasAnyAncestor(hasTestTag("ai_text_sheet")),
+                ).assertIsDisplayed()
+            compose.runOnIdle {
+                assertEquals(style.id, actions.last().customStyleId)
+                assertEquals(source, (ai as AiTextUiState.Running).source)
+                ai = AiTextUiState.Choosing(source)
+            }
+        }
+        compose.onNodeWithTag("ai_text_target").performScrollTo().assertHeightIsAtLeast(48.dp)
+        val targetTop = compose.onNodeWithTag("ai_text_target").getUnclippedBoundsInRoot().top
+        compose.onNodeWithTag("ai_text_target").performClick()
+        compose.onNodeWithTag("ai_language_fr").performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals(styles.size, actions.size) // Picking a target must not start inference.
+            assertEquals(AiTranslationTarget("fr", "French"), pendingTarget)
+            assertEquals(source, (ai as AiTextUiState.Choosing).source)
+        }
+        assertEquals(
+            targetTop.value,
+            compose
+                .onNodeWithTag("ai_text_target")
+                .getUnclippedBoundsInRoot()
+                .top
+                .value,
+            0.5f,
+        )
+        compose.onNodeWithTag("ai_text_translate").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("ai_text_target").assertIsNotEnabled()
+        compose.onNodeWithTag("ai_text_manage_styles").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("ai_text_style_${styles.last().id}").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("ai_text_correct").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("ai_text_close").assertIsDisplayed()
+        compose.runOnIdle {
+            target = pendingTarget
+            ai = AiTextUiState.Choosing(source)
+        }
+        compose
+            .onNodeWithTag("ai_text_translate")
+            .performScrollTo()
+            .assertIsEnabled()
+            .performClick()
+        compose.runOnIdle {
+            assertEquals(TextOperation.TRANSLATE, actions.last().operation)
+            assertEquals(target, actions.last().translationTarget)
+            assertEquals(source, (ai as AiTextUiState.Running).source)
+        }
+        compose
+            .onNode(
+                SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo.Indeterminate) and
+                    hasAnyAncestor(hasTestTag("ai_text_sheet")),
+            ).assertIsDisplayed()
+        compose.runOnIdle {
+            ai = AiTextUiState.Result(21, source, original, TextTransformResult((1..120).joinToString("\n") { "Reviewed paragraph $it." }, TextTermination.EOG), 1)
+        }
+        assertPreviewStartsAtTop("ai_text_result")
+        compose.onNodeWithTag("ai_text_source").performScrollTo()
+        compose.runOnIdle {
+            ai = AiTextUiState.Failed(source, AiRuntimeFailure.INVALID_OUTPUT)
+        }
+        assertPreviewStartsAtTop("ai_text_error")
+        compose.onNodeWithTag("ai_text_manage_styles").assertDoesNotExist()
+        compose.onNodeWithTag("ai_text_style_${styles.last().id}").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("ai_text_formal").performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals(TextOperation.FORMAL, actions.last().operation)
+            assertEquals(source, (ai as AiTextUiState.Running).source)
+            assertEquals(original, draft.text)
+            assertEquals(12L, draft.revision)
+        }
+        compose.onNodeWithTag("ai_text_close").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("ai_text_sheet").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(original, draft.text) }
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w320dp-h480dp")
+    fun smallScreenResultFooterRestrictsIncompleteAndMessageActions() {
+        val original = (1..80).joinToString("\n") { "Source paragraph $it." }
+        val composerSource = AiTextSource.Composer(AiComposerDraftSnapshot(9, buffer.id, 1, original, null))
+        val messageSource = AiTextSource.StoredMessage(buffer.id, 88, null, original)
+        var ai by mutableStateOf<AiTextUiState>(
+            AiTextUiState.Result(9, composerSource, original, TextTransformResult("A reviewed report.", TextTermination.EOG), 1),
+        )
+        var applied = false
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                AiTextSheet(
+                    ai,
+                    emptyList(),
+                    null,
+                    onGenerate = { error("results cannot regenerate") },
+                    onTargetSelected = {},
+                    onDismiss = { ai = AiTextUiState.Closed },
+                    onOpenSetup = {},
+                    onManageStyles = {},
+                    onApply = { applied = true },
+                )
+            }
+        }
+        compose.onNodeWithTag("ai_text_source").performScrollTo()
+        compose.onNodeWithTag("ai_text_close").assertIsDisplayed()
+        compose.onNodeWithTag("ai_text_apply").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("ai_text_copy").assertIsDisplayed().assertIsEnabled()
+        compose.runOnIdle {
+            val result = ai as AiTextUiState.Result
+            ai = result.copy(result = result.result.copy(termination = TextTermination.OUTPUT_LIMIT))
+        }
+        compose.onNodeWithTag("ai_text_incomplete").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("ai_text_apply").assertIsNotEnabled().performClick()
+        compose.onNodeWithTag("ai_text_copy").assertIsNotEnabled()
+        compose.runOnIdle {
+            assertEquals(false, applied)
+            ai = (ai as AiTextUiState.Result).copy(source = messageSource)
+        }
+        compose.onNodeWithTag("ai_text_apply").assertDoesNotExist()
+        compose.onNodeWithTag("ai_text_copy").assertIsNotEnabled()
+        compose.onNodeWithTag("ai_text_close").assertIsDisplayed()
+        compose.runOnIdle {
+            val result = ai as AiTextUiState.Result
+            ai = result.copy(result = result.result.copy(termination = TextTermination.EOG))
+        }
+        compose.onNodeWithTag("ai_text_apply").assertDoesNotExist()
+        compose.onNodeWithTag("ai_text_copy").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("ai_text_correct").assertDoesNotExist()
+        compose.onNodeWithTag("ai_text_translate").assertDoesNotExist()
+        compose.onNodeWithTag("ai_text_close").performClick()
+        compose.runOnIdle { assertEquals(false, applied) }
     }
 
     @Test

@@ -1,8 +1,10 @@
 # Architecture
 
-motd has three Gradle modules: `:app` is the Android application, `:irc` is a
-pure-JVM IRC engine with no Android dependencies, and `:ai-whisper` isolates
-the source-built Android voice-transcription runtime.
+motd has four Gradle modules: `:app` is the Android application, `:irc` is a
+pure-JVM IRC engine with no Android dependencies, `:ai-whisper` isolates
+the source-built Android voice-transcription runtime, and `:ai-text` contains
+the source-built CPU text engine shared by Android JNI and a host smoke runner.
+The text module has no network API and does not download or bundle model weights.
 
 ```mermaid
 flowchart TD

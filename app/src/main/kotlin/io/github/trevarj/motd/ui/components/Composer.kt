@@ -389,6 +389,7 @@ fun Composer(
     showEmojiTool: Boolean = true,
     showFormattingTools: Boolean = true,
     onAttachment: (() -> Unit)? = null,
+    onAi: (() -> Unit)? = null,
     onUploadDraft: (() -> Unit)? = onAttachment,
     voiceEnabled: Boolean = false,
     voiceRecording: Boolean = false,
@@ -800,7 +801,7 @@ fun Composer(
                     verticalAlignment = Alignment.Bottom,
                 ) {
                     Surface(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).testTag("chat_composer_input_area"),
                         shape = MotdShapes.composer,
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
@@ -886,6 +887,20 @@ fun Composer(
                                                 .semantics {
                                                     contentDescription = closeEmojiPickerDescription
                                                 },
+                                    )
+                                }
+                            }
+
+                            if (onAi != null) {
+                                IconButton(
+                                    onClick = onAi,
+                                    modifier = Modifier.size(48.dp).testTag("chat_composer_ai"),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.AutoFixHigh,
+                                        contentDescription = stringResource(R.string.ai_text_tools),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 12.dp).size(20.dp),
                                     )
                                 }
                             }

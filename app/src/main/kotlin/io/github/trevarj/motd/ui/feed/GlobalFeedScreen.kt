@@ -31,6 +31,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -52,6 +53,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
@@ -59,11 +63,15 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ai.AiFeature
+import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.dickord.dickordChannelLabel
 import io.github.trevarj.motd.dickord.dickordNickLabel
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.ui.ai.AiTextSheet
+import io.github.trevarj.motd.ui.ai.AiTextViewModel
 import io.github.trevarj.motd.ui.chat.messageContentType
 import io.github.trevarj.motd.ui.chat.showsSender
 import io.github.trevarj.motd.ui.components.EmptyState
@@ -85,9 +93,32 @@ fun GlobalFeedScreen(
     onBack: () -> Unit = {},
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit = { _, _, _ -> },
     viewModel: GlobalFeedViewModel = hiltViewModel(),
+    aiTextViewModel: AiTextViewModel = hiltViewModel(),
+    onOpenAiSetup: () -> Unit = {},
 ) {
     val rows = viewModel.items.collectAsLazyPagingItems()
     val showNetwork by viewModel.showNetwork.collectAsStateWithLifecycle()
+    val aiState by aiTextViewModel.state.collectAsStateWithLifecycle()
+    val aiLabs by aiTextViewModel.labsState.collectAsStateWithLifecycle()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, aiTextViewModel) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) aiTextViewModel.close() }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            aiTextViewModel.close()
+        }
+    }
+    AiTextSheet(
+        aiState,
+        aiLabs.customStyles,
+        aiLabs.translationTarget,
+        aiTextViewModel::generate,
+        aiTextViewModel::selectTranslationTarget,
+        aiTextViewModel::close,
+        onOpenAiSetup,
+        onOpenAiSetup,
+    )
     Scaffold(
         topBar = {
             TopAppBar(
@@ -107,6 +138,12 @@ fun GlobalFeedScreen(
             rows = rows,
             showNetwork = showNetwork,
             onOpenMessage = onOpenMessage,
+            onTranslateMessage =
+                if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
+                    { message -> aiTextViewModel.openStoredMessage(message.bufferId, message.id) }
+                } else {
+                    null
+                },
             modifier = Modifier.padding(padding),
         )
     }
@@ -119,9 +156,32 @@ fun MentionsScreen(
     onBack: () -> Unit = {},
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit = { _, _, _ -> },
     viewModel: MentionsViewModel = hiltViewModel(),
+    aiTextViewModel: AiTextViewModel = hiltViewModel(),
+    onOpenAiSetup: () -> Unit = {},
 ) {
     val rows = viewModel.items.collectAsLazyPagingItems()
     val showNetwork by viewModel.showNetwork.collectAsStateWithLifecycle()
+    val aiState by aiTextViewModel.state.collectAsStateWithLifecycle()
+    val aiLabs by aiTextViewModel.labsState.collectAsStateWithLifecycle()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, aiTextViewModel) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) aiTextViewModel.close() }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            aiTextViewModel.close()
+        }
+    }
+    AiTextSheet(
+        aiState,
+        aiLabs.customStyles,
+        aiLabs.translationTarget,
+        aiTextViewModel::generate,
+        aiTextViewModel::selectTranslationTarget,
+        aiTextViewModel::close,
+        onOpenAiSetup,
+        onOpenAiSetup,
+    )
     val listState = rememberLazyListState()
     ReportMentionsViewportAtNewest(
         listState = listState,
@@ -152,6 +212,12 @@ fun MentionsScreen(
             modifier = Modifier.padding(padding),
             mentions = true,
             listState = listState,
+            onTranslateMessage =
+                if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
+                    { message -> aiTextViewModel.openStoredMessage(message.bufferId, message.id) }
+                } else {
+                    null
+                },
         )
     }
 }
@@ -187,6 +253,7 @@ internal fun GlobalFeedContent(
     modifier: Modifier = Modifier,
     mentions: Boolean = false,
     listState: LazyListState = rememberLazyListState(),
+    onTranslateMessage: ((MessageEntity) -> Unit)? = null,
 ) {
     val refresh = rows.loadState.refresh
     when {
@@ -221,6 +288,7 @@ internal fun GlobalFeedContent(
                 modifier = modifier,
                 mentions = mentions,
                 listState = listState,
+                onTranslateMessage = onTranslateMessage,
             )
         }
     }
@@ -234,6 +302,7 @@ private fun GlobalFeedList(
     modifier: Modifier = Modifier,
     mentions: Boolean = false,
     listState: LazyListState,
+    onTranslateMessage: ((MessageEntity) -> Unit)? = null,
 ) {
     // One list-scoped formatter: MessageBubble's per-row fallback ignores the app's timestamp
     // preference.
@@ -258,6 +327,7 @@ private fun GlobalFeedList(
                     formatTime = formatTime,
                     onOpenMessage = onOpenMessage,
                     mentions = mentions,
+                    onTranslateMessage = onTranslateMessage,
                 )
             }
         }
@@ -444,6 +514,7 @@ private fun GlobalFeedLineRow(
     formatTime: (Long) -> String,
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit,
     mentions: Boolean,
+    onTranslateMessage: ((MessageEntity) -> Unit)? = null,
 ) {
     val message = row.message
     val dickordEnabled = LocalDickordLabsEnabled.current
@@ -496,6 +567,8 @@ private fun GlobalFeedLineRow(
             formattedTime = remember(message.serverTime, formatTime) { formatTime(message.serverTime) },
             onClick = { onOpenMessage(message.bufferId, message.id, message.serverTime) },
             onClickLabel = stringResource(if (mentions) R.string.mentions_open_message else R.string.feed_open_message),
+            onLongPress = { onTranslateMessage?.invoke(message) },
+            onLongPressLabel = onTranslateMessage?.let { stringResource(R.string.ai_text_translate_message) },
         )
     }
 }

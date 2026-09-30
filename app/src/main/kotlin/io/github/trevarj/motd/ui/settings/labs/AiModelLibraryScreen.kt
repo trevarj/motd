@@ -25,6 +25,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -35,9 +36,14 @@ import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ai.AiCustomStyle
 import io.github.trevarj.motd.ai.AiModelCapability
 import io.github.trevarj.motd.ai.AiModelRecord
+import io.github.trevarj.motd.ai.AiTranslationTarget
 import io.github.trevarj.motd.ai.TranscriptionSettings
+import io.github.trevarj.motd.ui.ai.AiCustomStylesSheet
+import io.github.trevarj.motd.ui.ai.AiTranslationTargetPicker
+import io.github.trevarj.motd.ui.ai.defaultTranslationTarget
 import io.github.trevarj.motd.ui.settings.PersistentStatusNotice
 import io.github.trevarj.motd.ui.settings.SettingsActionRow
 import io.github.trevarj.motd.ui.settings.SettingsDivider
@@ -59,9 +65,14 @@ fun AiModelLibraryScreen(
         state = state,
         onBack = onBack,
         onImport = viewModel::importModel,
-        onUpdateSettings = viewModel::updateSettings,
+        onUpdateTranscriptionSettings = viewModel::updateTranscriptionSettings,
         onDelete = viewModel::deleteModel,
         onDismissStatus = viewModel::dismissStatus,
+        onDownloadTextModel = viewModel::downloadTextModel,
+        onCancelSetup = viewModel::cancelSetup,
+        onUpsertCustomStyle = viewModel::upsertCustomStyle,
+        onDeleteCustomStyle = viewModel::deleteCustomStyle,
+        onTranslationTarget = viewModel::setTranslationTarget,
     )
 }
 
@@ -69,15 +80,27 @@ fun AiModelLibraryScreen(
 internal fun AiModelLibraryContent(
     state: AiLabsUiState,
     onBack: () -> Unit,
-    onImport: (Uri) -> Unit,
-    onUpdateSettings: (String, AiModelCapability, TranscriptionSettings) -> Unit,
+    onImport: (Uri, AiModelCapability) -> Unit,
+    onUpdateTranscriptionSettings: (String, TranscriptionSettings) -> Unit,
     onDelete: (String) -> Unit,
     onDismissStatus: () -> Unit = {},
+    onDownloadTextModel: () -> Unit = {},
+    onCancelSetup: () -> Unit = {},
+    onUpsertCustomStyle: (AiCustomStyle) -> Unit = {},
+    onDeleteCustomStyle: (String) -> Unit = {},
+    onTranslationTarget: (AiTranslationTarget) -> Unit = {},
 ) {
     var pendingDelete by rememberSaveable { mutableStateOf<String?>(null) }
+    var importCapability by rememberSaveable { mutableStateOf(AiModelCapability.TRANSCRIPTION) }
+    var confirmDownload by rememberSaveable { mutableStateOf(false) }
+    var managingStyles by rememberSaveable { mutableStateOf(false) }
+    var pickingTarget by rememberSaveable { mutableStateOf(false) }
+    val effectiveTarget = state.translationTarget ?: defaultTranslationTarget(LocalLocale.current.platformLocale)
+    val context = LocalContext.current
+    val modelLicenseUrl = stringResource(R.string.ai_text_model_license_url)
     val picker =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri != null) onImport(uri)
+            if (uri != null) onImport(uri, importCapability)
         }
 
     SettingsScaffold(
@@ -105,7 +128,26 @@ internal fun AiModelLibraryContent(
                 summary = stringResource(R.string.ai_import_model_summary),
                 enabled = !state.importing,
                 modifier = Modifier.testTag("ai_import_model"),
-                onClick = { picker.launch(MODEL_MIME_TYPES) },
+                onClick = {
+                    importCapability = AiModelCapability.TRANSCRIPTION
+                    picker.launch(MODEL_MIME_TYPES)
+                },
+            )
+            SettingsActionRow(
+                title = stringResource(R.string.ai_import_text_model),
+                summary = stringResource(R.string.ai_import_text_model_summary),
+                enabled = !state.importing,
+                modifier = Modifier.testTag("ai_import_text_model"),
+                onClick = {
+                    importCapability = AiModelCapability.TEXT_TOOLS
+                    picker.launch(MODEL_MIME_TYPES)
+                },
+            )
+            SettingsActionRow(
+                title = stringResource(R.string.ai_download_text_model),
+                enabled = !state.importing,
+                modifier = Modifier.testTag("ai_download_text_model"),
+                onClick = { confirmDownload = true },
             )
             state.importProgress?.let { progress ->
                 SettingsDivider()
@@ -121,6 +163,9 @@ internal fun AiModelLibraryContent(
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 8.dp),
                     )
+                    TextButton(onClick = onCancelSetup, modifier = Modifier.testTag("ai_setup_cancel")) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
                 }
             }
         }
@@ -136,12 +181,58 @@ internal fun AiModelLibraryContent(
             state.models.forEach { model ->
                 AiModelCard(
                     modelState = model,
-                    onUpdateSettings = onUpdateSettings,
+                    onUpdateTranscriptionSettings = onUpdateTranscriptionSettings,
                     onDelete = { pendingDelete = model.record.id },
                 )
             }
         }
+        SettingsGroup(title = stringResource(R.string.ai_text_preferences)) {
+            SettingsNavigationRow(
+                title = stringResource(R.string.ai_text_translation_language),
+                value = effectiveTarget.name,
+                modifier = Modifier.testTag("ai_translation_target"),
+                onClick = { pickingTarget = true },
+            )
+            SettingsNavigationRow(
+                title = stringResource(R.string.ai_text_custom_styles),
+                value = state.customStyles.size.toString(),
+                modifier = Modifier.testTag("ai_manage_styles"),
+                onClick = { managingStyles = true },
+            )
+        }
         RecommendedModels()
+    }
+
+    if (pickingTarget) {
+        AiTranslationTargetPicker(effectiveTarget, {
+            onTranslationTarget(it)
+            pickingTarget = false
+        }, { pickingTarget = false })
+    }
+    if (managingStyles) AiCustomStylesSheet(state.customStyles, onUpsertCustomStyle, onDeleteCustomStyle, { managingStyles = false })
+
+    if (confirmDownload) {
+        AlertDialog(
+            onDismissRequest = { confirmDownload = false },
+            title = { Text(stringResource(R.string.ai_download_text_model)) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.ai_text_download_disclosure))
+                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, modelLicenseUrl.toUri())) }, modifier = Modifier.testTag("ai_text_model_license")) {
+                        Text(stringResource(R.string.ai_text_model_license))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDownload = false
+                    onDownloadTextModel()
+                }, modifier = Modifier.testTag("ai_download_text_confirm")) {
+                    Text(stringResource(R.string.ai_download_text_model))
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmDownload = false }) { Text(stringResource(R.string.action_cancel)) } },
+        )
     }
 
     pendingDelete?.let { modelId ->
@@ -174,7 +265,7 @@ internal fun AiModelLibraryContent(
 @Composable
 private fun AiModelCard(
     modelState: AiModelUiState,
-    onUpdateSettings: (String, AiModelCapability, TranscriptionSettings) -> Unit,
+    onUpdateTranscriptionSettings: (String, TranscriptionSettings) -> Unit,
     onDelete: () -> Unit,
 ) {
     val model = modelState.record
@@ -194,13 +285,19 @@ private fun AiModelCard(
                     if (modelState.assignments.isEmpty()) {
                         stringResource(R.string.ai_model_not_assigned)
                     } else {
-                        stringResource(R.string.ai_model_assigned_to, stringResource(R.string.ai_transcription))
+                        stringResource(
+                            R.string.ai_model_assigned_to,
+                            modelState.assignments
+                                .map { feature ->
+                                    stringResource(if (feature == io.github.trevarj.motd.ai.AiFeature.TRANSCRIPTION) R.string.ai_transcription else R.string.ai_text_tools)
+                                }.joinToString(),
+                        )
                     },
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.testTag("ai_model_${model.id}_assignments"),
             )
         }
-        modelState.settings[AiModelCapability.TRANSCRIPTION]?.let { settings ->
+        modelState.settings?.let { settings ->
             SettingsDivider()
             SettingsNavigationRow(
                 title = stringResource(R.string.ai_transcription_settings),
@@ -214,7 +311,7 @@ private fun AiModelCard(
                     model = model,
                     settings = settings,
                     tag = "ai_model_${model.id}_transcription",
-                    onSave = { onUpdateSettings(model.id, AiModelCapability.TRANSCRIPTION, it) },
+                    onSave = { onUpdateTranscriptionSettings(model.id, it) },
                 )
             }
         }
@@ -234,7 +331,7 @@ private fun CapabilityBadges(model: AiModelRecord) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("ai_model_${model.id}_capabilities")) {
         model.capabilities.forEach { capability ->
             Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.testTag("ai_model_${model.id}_capability_${capability.tag()}")) {
-                Text(stringResource(R.string.ai_role_transcription), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                Text(stringResource(if (capability == AiModelCapability.TRANSCRIPTION) R.string.ai_role_transcription else R.string.ai_text_tools), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
             }
         }
     }
@@ -276,6 +373,8 @@ private fun detailedMetadata(model: AiModelRecord): String {
     if (cpuThreads != null) parts += stringResource(R.string.ai_metadata_cpu_threads, cpuThreads)
     val multilingual = model.metadata.isMultilingual
     if (multilingual != null) parts += stringResource(if (multilingual) R.string.ai_metadata_multilingual else R.string.ai_metadata_single_language)
+    model.metadata.maximumContextTokens?.let { parts += "$it context tokens" }
+    model.metadata.textTemplateId?.let { parts += it }
     return parts.joinToString(" · ")
 }
 

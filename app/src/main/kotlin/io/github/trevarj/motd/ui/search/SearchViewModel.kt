@@ -64,6 +64,7 @@ sealed interface ServerSearchState {
     data class Results(
         val hits: List<ServerHitUi>,
         val truncated: Boolean,
+        val generation: Long,
     ) : ServerSearchState
 
     data class Failed(
@@ -185,8 +186,10 @@ class SearchViewModel
         private var serverBuffer: BufferEntity? = null
         private var availabilityJob: Job? = null
         private var serverJob: Job? = null
+        private var serverGeneration = 0L
 
         fun init(bufferId: Long?) {
+            cancelServerSearch()
             searchKey.update { key ->
                 val scoped = bufferId != null
                 key.copy(
@@ -204,6 +207,7 @@ class SearchViewModel
                         bufferRepository.observeBuffer(bufferId),
                         connectionManager.connectionStates,
                     ) { buffer, _ -> buffer }.collect { buffer ->
+                        if (serverBuffer?.id != buffer?.id) cancelServerSearch()
                         serverBuffer = buffer
                         val available =
                             buffer != null &&
@@ -233,6 +237,7 @@ class SearchViewModel
                 return
             }
             cancelServerSearch()
+            val generation = ++serverGeneration
             serverSection.update { it.copy(state = ServerSearchState.Searching) }
             serverJob =
                 viewModelScope.launch {
@@ -247,7 +252,7 @@ class SearchViewModel
                                         from = parsed.fromNick,
                                         limit = SOJU_SEARCH_MAX_LIMIT,
                                     ),
-                                )?.let { raw -> raw.toResults(buffer.id) }
+                                )?.let { raw -> raw.toResults(buffer.id, generation) }
                                 ?: ServerSearchState.Failed(ServerSearchError.UNAVAILABLE)
                         } catch (cancelled: CancellationException) {
                             throw cancelled
@@ -258,33 +263,34 @@ class SearchViewModel
                         ) {
                             ServerSearchState.Failed(ServerSearchError.UNAVAILABLE)
                         }
-                    serverSection.update { it.copy(state = outcome) }
+                    if (serverGeneration == generation && searchKey.value == key && serverBuffer?.id == buffer.id) {
+                        serverSection.update { it.copy(state = outcome) }
+                    }
                 }
         }
 
         private fun List<SearchResultMessage>.toResults(
             bufferId: Long,
+            generation: Long,
         ): ServerSearchState.Results =
             ServerSearchState.Results(
+                generation = generation,
                 hits =
-                    mapNotNull { hit ->
-                        if (hit.serverTime == null && hit.msgid == null) {
-                            null
-                        } else {
-                            ServerHitUi(
-                                bufferId = bufferId,
-                                sender = hit.sender,
-                                text = hit.text,
-                                kind = hit.kind,
-                                serverTime = hit.serverTime ?: 0L,
-                                msgid = hit.msgid,
-                            )
-                        }
+                    map { hit ->
+                        ServerHitUi(
+                            bufferId = bufferId,
+                            sender = hit.sender,
+                            text = hit.text,
+                            kind = hit.kind,
+                            serverTime = hit.serverTime ?: 0L,
+                            msgid = hit.msgid,
+                        )
                     }.sortedByDescending { it.serverTime },
                 truncated = size >= SOJU_SEARCH_MAX_LIMIT,
             )
 
         private fun cancelServerSearch() {
+            serverGeneration++
             serverJob?.cancel()
             serverJob = null
             serverSection.update { it.copy(state = ServerSearchState.Idle) }

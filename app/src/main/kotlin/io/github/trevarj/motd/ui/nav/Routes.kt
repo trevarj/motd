@@ -60,6 +60,7 @@ enum class SettingsTarget {
     AI,
     AI_MODELS,
     AI_TRANSCRIPTION,
+    AI_TEXT_TOOLS,
     ABOUT,
     THEME,
     FOLLOW_SYSTEM,

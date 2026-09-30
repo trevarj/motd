@@ -176,21 +176,92 @@ class AiExecutionCoordinatorTest {
             assertEquals("transcript", world.transcribe(OTHER_TRANSCRIPTION_ID))
         }
 
+    @Test
+    fun switchingSpeechAndTextJoinsCleanupBeforeLoad() =
+        runTest {
+            val world = world()
+            world.speech.blockTranscription = true
+            val active = async { runCatching { world.transcribe() } }
+            world.speech.transcriptionStarted.await()
+            val text =
+                async {
+                    world.coordinator.transform(
+                        TRANSCRIPTION_ID,
+                        File("tiny.bin"),
+                        io.github.trevarj.motd.ai.text
+                            .TextTransformRequest(io.github.trevarj.motd.ai.text.TextOperation.CORRECT, "Draft"),
+                        { true },
+                    )
+                }
+            runCurrent()
+            active.cancel()
+            runCurrent()
+            assertFalse("text.load" in world.events)
+            world.speech.allowTranscriptionCleanup.complete(Unit)
+            active.join()
+            text.await()
+            assertTrue(world.events.indexOf("speech.transcribe.cleanup.end") < world.events.indexOf("speech.unload"))
+            assertTrue(world.events.indexOf("speech.unload") < world.events.indexOf("text.load"))
+            world.speech.blockTranscription = false
+            world.transcribe()
+            assertTrue(world.events.indexOf("text.unload") < world.events.lastIndexOf("speech.load:tiny.bin"))
+        }
+
+    @Test
+    fun backgroundAndDeletionCancelTextWaitersBeforeUnloading() =
+        runTest {
+            for (background in listOf(false, true)) {
+                val world = world()
+                world.text.block = true
+
+                suspend fun transform() =
+                    world.coordinator.transform(
+                        TRANSCRIPTION_ID,
+                        File("text.model"),
+                        io.github.trevarj.motd.ai.text
+                            .TextTransformRequest(io.github.trevarj.motd.ai.text.TextOperation.CORRECT, "Draft"),
+                        { true },
+                    )
+                val active = async { runCatching { transform() } }
+                world.text.started.await()
+                val waiter = async { runCatching { transform() } }
+                runCurrent()
+                val deletion = if (!background) async { world.coordinator.unloadForDeletion(TRANSCRIPTION_ID) } else null
+                if (background) world.visibility.state.value = false
+                runCurrent()
+                assertTrue(waiter.isCompleted)
+                assertFalse("text.unload" in world.events)
+                assertFalse(deletion?.isCompleted == true)
+                if (background) assertTrue(runCatching { transform() }.exceptionOrNull() is AiExecutionUnavailableException)
+                world.text.cleanup.complete(Unit)
+                active.join()
+                waiter.join()
+                deletion?.await()
+                runCurrent()
+                assertTrue(active.await().exceptionOrNull() is CancellationException)
+                assertTrue(waiter.await().exceptionOrNull() is CancellationException)
+                assertEquals(1, world.events.count { it == "text.load" })
+                assertTrue(world.events.indexOf("text.cleanup") < world.events.indexOf("text.unload"))
+            }
+        }
+
     private fun TestScope.world(
         unloadDispatcher: CoroutineDispatcher = StandardTestDispatcher(testScheduler),
     ): World {
         val events = mutableListOf<String>()
         val speech = FakeSpeechRuntime(events)
+        val text = FakeTextRuntime(events)
         val visibility = FakeVisibility(true)
-        val coordinator = AiExecutionCoordinator(speech, visibility, unloadDispatcher, backgroundScope)
+        val coordinator = AiExecutionCoordinator(speech, text, visibility, unloadDispatcher, backgroundScope)
         coordinator.start()
         runCurrent()
-        return World(coordinator, speech, visibility, events)
+        return World(coordinator, speech, text, visibility, events)
     }
 
     private data class World(
         val coordinator: AiExecutionCoordinator,
         val speech: FakeSpeechRuntime,
+        val text: FakeTextRuntime,
         val visibility: FakeVisibility,
         val events: MutableList<String>,
     ) {
@@ -213,6 +284,38 @@ class AiExecutionCoordinatorTest {
     ) : AppVisibility {
         val state = MutableStateFlow(initiallyVisible)
         override val onScreen: StateFlow<Boolean> = state
+    }
+
+    private class FakeTextRuntime(
+        private val events: MutableList<String>,
+    ) : TextModelRuntime {
+        var block = false
+        val started = CompletableDeferred<Unit>()
+        val cleanup = CompletableDeferred<Unit>()
+
+        override suspend fun inspect(modelFile: File) = AiModelMetadata("qwen35", "Q4_K_M", maximumContextTokens = 4096, textTemplateId = "qwen35-nonthinking-v1")
+
+        override suspend fun load(modelFile: File) {
+            events += "text.load"
+        }
+
+        override suspend fun transform(request: io.github.trevarj.motd.ai.text.TextTransformRequest): io.github.trevarj.motd.ai.text.TextTransformResult {
+            if (block) {
+                started.complete(Unit)
+                try {
+                    kotlinx.coroutines.awaitCancellation()
+                } finally {
+                    withContext(NonCancellable) { cleanup.await() }
+                    events += "text.cleanup"
+                }
+            }
+            return io.github.trevarj.motd.ai.text
+                .TextTransformResult("Corrected", io.github.trevarj.motd.ai.text.TextTermination.EOG)
+        }
+
+        override fun unload() {
+            events += "text.unload"
+        }
     }
 
     private class FakeSpeechRuntime(

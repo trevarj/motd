@@ -7,7 +7,9 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import io.github.trevarj.motd.ai.LlamaTextModelRuntime
 import io.github.trevarj.motd.ai.SpeechModelRuntime
+import io.github.trevarj.motd.ai.TextModelRuntime
 import io.github.trevarj.motd.ai.WhisperSpeechModelRuntime
 import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
@@ -208,6 +210,9 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun speechModelRuntime(impl: WhisperSpeechModelRuntime): SpeechModelRuntime
+
+    @Binds @Singleton
+    abstract fun textModelRuntime(impl: LlamaTextModelRuntime): TextModelRuntime
 
     @Binds @Singleton
     abstract fun voiceRecorder(impl: AndroidVoiceRecorder): VoiceRecorder

@@ -1,7 +1,10 @@
 package io.github.trevarj.motd.ui.components
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
@@ -12,13 +15,16 @@ import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.PlatformTextInputSession
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -53,6 +59,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
@@ -136,6 +143,8 @@ class ComposerEditorStateTest {
         val showEmoji = mutableStateOf(true)
         val showFormatting = mutableStateOf(true)
         val ircFormatting = mutableStateOf(false)
+        val aiEnabled = mutableStateOf(false)
+        var aiOpens = 0
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 Composer(
@@ -143,6 +152,8 @@ class ComposerEditorStateTest {
                     onValueChange = {},
                     onSend = {},
                     enabled = true,
+                    sendEnabled = false,
+                    onAi = if (aiEnabled.value) ({ aiOpens++ }) else null,
                     showEmojiTool = showEmoji.value,
                     showFormattingTools = showFormatting.value,
                     onUploadDraft = {},
@@ -187,6 +198,113 @@ class ComposerEditorStateTest {
         compose.onNodeWithTag("chat_format_bold").assertDoesNotExist()
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
         compose.onNodeWithTag("chat_format_bold").assertExists()
+
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.runOnIdle {
+            showEmoji.value = false
+            ircFormatting.value = false
+            aiEnabled.value = true
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_send").assertIsNotEnabled()
+        compose.onNodeWithTag("chat_composer_tools").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+        compose
+            .onNodeWithTag("chat_composer_ai")
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .performClick()
+        compose.runOnIdle { assertEquals(1, aiOpens) }
+        compose.runOnIdle { aiEnabled.value = false }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_ai").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_tools").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h640dp")
+    fun narrowInputKeepsAiAndExpandAccessibleWhileSendIsDisabled() {
+        val draft = mutableStateOf(TextFieldValue("draft", TextRange(5)))
+        val aiEnabled = mutableStateOf(true)
+        val formatting = mutableStateOf(true)
+        var aiOpens = 0
+        var attachments = 0
+        var minimumTarget = 0f
+        compose.setContent {
+            minimumTarget = with(LocalDensity.current) { 48.dp.toPx() }
+            MotdTheme(dynamicColor = false) {
+                Box(Modifier.width(320.dp)) {
+                    Composer(
+                        value = draft.value,
+                        onValueChange = { draft.value = it },
+                        onSend = {},
+                        enabled = true,
+                        sendEnabled = false,
+                        onAi = if (aiEnabled.value) ({ aiOpens++ }) else null,
+                        onAttachment = { attachments++ },
+                        showEmojiTool = false,
+                        showFormattingTools = true,
+                        ircFormattingEnabled = formatting.value,
+                    )
+                }
+            }
+        }
+
+        fun assertInputTargets(trailingTag: String) {
+            val ai =
+                compose
+                    .onNodeWithTag("chat_composer_ai")
+                    .assertIsDisplayed()
+                    .assertIsEnabled()
+                    .fetchSemanticsNode()
+            val trailing =
+                compose
+                    .onNodeWithTag(trailingTag)
+                    .assertIsDisplayed()
+                    .assertIsEnabled()
+                    .fetchSemanticsNode()
+            val input = compose.onNodeWithTag("chat_composer_input_area").fetchSemanticsNode().boundsInRoot
+            val field = compose.onNodeWithTag("chat_composer_field").fetchSemanticsNode().boundsInRoot
+            for (target in listOf(ai.boundsInRoot, trailing.boundsInRoot)) {
+                assertTrue(target.width >= minimumTarget - 0.5f)
+                assertTrue(target.height >= minimumTarget - 0.5f)
+                assertTrue(target.left >= input.left && target.right <= input.right)
+                assertTrue(target.top >= input.top && target.bottom <= input.bottom)
+            }
+            assertTrue(field.width > 0f)
+            assertTrue(field.right <= ai.boundsInRoot.left)
+            assertTrue(ai.boundsInRoot.right <= trailing.boundsInRoot.left)
+        }
+
+        compose.onNodeWithTag("chat_composer_send").assertIsNotEnabled()
+        assertInputTargets("chat_composer_format_expand")
+        compose.onNodeWithTag("chat_composer_field").performTextInput(" typed")
+        compose.runOnIdle { assertEquals("draft typed", draft.value.text) }
+        compose.onNodeWithTag("chat_composer_ai").performClick()
+        compose.onNodeWithTag("chat_composer_format_expand").performClick().assertIsSelected()
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onAllNodesWithTag("chat_composer_ai").assertCountEquals(1)
+        assertInputTargets("chat_composer_format_expand")
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.runOnIdle { formatting.value = false }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_tools").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+        assertInputTargets("chat_composer_attachment")
+        compose.onNodeWithTag("chat_composer_ai").performClick()
+        compose.onNodeWithTag("chat_composer_attachment").performClick()
+        compose.runOnIdle {
+            assertEquals(2, aiOpens)
+            assertEquals(1, attachments)
+            aiEnabled.value = false
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_composer_ai").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_tools").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_attachment").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("chat_composer_send").assertIsNotEnabled()
     }
 
     @Test

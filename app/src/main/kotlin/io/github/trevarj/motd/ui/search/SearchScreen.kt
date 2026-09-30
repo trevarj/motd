@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,6 +41,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,8 +66,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ai.AiFeature
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -76,6 +82,10 @@ import io.github.trevarj.motd.data.repo.SearchCoverage
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.dickord.dickordChannelLabel
 import io.github.trevarj.motd.dickord.dickordNickLabel
+import io.github.trevarj.motd.ui.ai.AiTextSheet
+import io.github.trevarj.motd.ui.ai.AiTextSource
+import io.github.trevarj.motd.ui.ai.AiTextViewModel
+import io.github.trevarj.motd.ui.ai.source
 import io.github.trevarj.motd.ui.chatlist.relativeChatTime
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.EmptyState
@@ -88,6 +98,16 @@ import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
+
+internal fun SearchUiState.serverTranslationBody(key: String): String? {
+    val results = server as? ServerSearchState.Results ?: return null
+    return results.hits
+        .withIndex()
+        .firstOrNull {
+            key == "server-search:${results.generation}:${it.index}"
+        }?.value
+        ?.text
+}
 
 /** Stateful entry: wires the ViewModel, applies the nav buffer scope, drives navigation. */
 @Composable
@@ -102,15 +122,56 @@ fun SearchScreen(
     onOpenHit: (bufferId: Long, msgid: String?, serverTime: Long, eventId: Long?) -> Unit =
         { b, _, _, _ -> onOpenBuffer(b) },
     viewModel: SearchViewModel = hiltViewModel(),
+    aiTextViewModel: AiTextViewModel = hiltViewModel(),
+    onOpenAiSetup: () -> Unit = {},
 ) {
     LaunchedEffect(bufferId) { viewModel.init(bufferId) }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val aiState by aiTextViewModel.state.collectAsStateWithLifecycle()
+    val aiLabs by aiTextViewModel.labsState.collectAsStateWithLifecycle()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, aiTextViewModel) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) aiTextViewModel.close() }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            aiTextViewModel.close()
+        }
+    }
+    LaunchedEffect(state.rawQuery, state.scope, state.server, state.groups, aiState.source()) {
+        val stored = aiState.source() as? AiTextSource.StoredMessage
+        if (stored != null && state.groups.none { group -> group.hits.any { it.message.id == stored.eventId } }) {
+            aiTextViewModel.close()
+            return@LaunchedEffect
+        }
+        val selected = aiState.source() as? AiTextSource.TransientMessage ?: return@LaunchedEffect
+        aiTextViewModel.updateTransientMessage(selected.key, state.serverTranslationBody(selected.key))
+    }
+    AiTextSheet(
+        aiState,
+        aiLabs.customStyles,
+        aiLabs.translationTarget,
+        aiTextViewModel::generate,
+        aiTextViewModel::selectTranslationTarget,
+        aiTextViewModel::close,
+        onOpenAiSetup,
+        onOpenAiSetup,
+    )
 
     SearchContent(
         state = state,
-        onQueryChange = viewModel::onQueryChange,
-        onScopeChange = viewModel::onScopeChange,
-        onServerSearchSubmit = viewModel::onServerSearchSubmit,
+        onQueryChange = {
+            aiTextViewModel.close()
+            viewModel.onQueryChange(it)
+        },
+        onScopeChange = {
+            aiTextViewModel.close()
+            viewModel.onScopeChange(it)
+        },
+        onServerSearchSubmit = {
+            aiTextViewModel.close()
+            viewModel.onServerSearchSubmit()
+        },
         onBack = onBack,
         onOpenHit = { hit ->
             onOpenHit(
@@ -124,6 +185,22 @@ fun SearchScreen(
         // A name match carries no message target — same "open the buffer, no jump" shape as a
         // server hit missing both a time and an id would need, just without that ever happening.
         onOpenBufferMatch = { bufferId -> onOpenHit(bufferId, null, 0L, null) },
+        onTranslateLocalHit =
+            if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
+                { hit -> aiTextViewModel.openStoredMessage(hit.message.bufferId, hit.message.id) }
+            } else {
+                null
+            },
+        onTranslateServerHit =
+            if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
+                { hit, generation, index ->
+                    aiTextViewModel.openTransientMessage(
+                        AiTextSource.TransientMessage("server-search:$generation:$index", hit.text, hit.bufferId, hit.msgid),
+                    )
+                }
+            } else {
+                null
+            },
     )
 }
 
@@ -138,6 +215,8 @@ fun SearchContent(
     onServerSearchSubmit: () -> Unit = {},
     onOpenServerHit: (ServerHitUi) -> Unit = {},
     onOpenBufferMatch: (Long) -> Unit = {},
+    onTranslateLocalHit: ((SearchHit) -> Unit)? = null,
+    onTranslateServerHit: ((ServerHitUi, Long, Int) -> Unit)? = null,
 ) {
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -283,6 +362,7 @@ fun SearchContent(
                             query = parseSearchQuery(visibleState.rawQuery).text,
                             onRetry = onServerSearchSubmit,
                             onOpenHit = onOpenServerHit,
+                            onTranslateHit = onTranslateServerHit,
                         )
                     }
 
@@ -320,6 +400,7 @@ fun SearchContent(
                             truncated = visibleState.truncated,
                             onOpenHit = onOpenHit,
                             onOpenBufferMatch = onOpenBufferMatch,
+                            onTranslateHit = onTranslateLocalHit,
                         )
                     }
                 }
@@ -387,6 +468,7 @@ private fun SearchResults(
     truncated: Boolean,
     onOpenHit: (SearchHit) -> Unit,
     onOpenBufferMatch: (Long) -> Unit = {},
+    onTranslateHit: ((SearchHit) -> Unit)? = null,
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
     LazyColumn(modifier = Modifier.fillMaxSize().testTag("search_results")) {
@@ -444,7 +526,12 @@ private fun SearchResults(
                 }
             }
             items(group.hits, key = { it.message.id }) { hit ->
-                SearchHitRow(hit = hit, query = query, onClick = { onOpenHit(hit) })
+                SearchHitRow(
+                    hit = hit,
+                    query = query,
+                    onClick = { onOpenHit(hit) },
+                    onLongPress = onTranslateHit?.let { { it(hit) } },
+                )
             }
         }
         if (truncated) {
@@ -505,6 +592,7 @@ private fun SearchHitRow(
     hit: SearchHit,
     query: String,
     onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
 ) = SearchRow(
     sender = hit.message.sender,
     text = hit.message.text,
@@ -514,6 +602,7 @@ private fun SearchHitRow(
     tag = "search_result_${hit.message.msgid ?: hit.message.id}",
     networkId = hit.networkId,
     onClick = onClick,
+    onLongPress = onLongPress,
 )
 
 @Composable
@@ -521,6 +610,7 @@ private fun ServerHitRow(
     hit: ServerHitUi,
     query: String,
     onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
 ) = SearchRow(
     sender = hit.sender,
     text = hit.text,
@@ -529,6 +619,7 @@ private fun ServerHitRow(
     tag = "search_result_${hit.msgid ?: hit.serverTime}",
     networkId = null,
     onClick = onClick,
+    onLongPress = onLongPress,
 )
 
 /** Shared visual row for a local or a server hit. */
@@ -541,6 +632,7 @@ private fun SearchRow(
     tag: String,
     networkId: Long?,
     onClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
 ) {
     // Search results always show a time, independent of the in-chat "show timestamps" toggle.
     val context = LocalContext.current
@@ -559,8 +651,11 @@ private fun SearchRow(
                 .clip(MotdShapes.card)
                 .background(MaterialTheme.colorScheme.surfaceContainerLow)
                 .testTag(tag)
-                .clickable(onClick = onClick)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = onLongPress,
+                    onLongClickLabel = stringResource(R.string.ai_text_translate_message),
+                ).padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Avatar(
@@ -608,6 +703,7 @@ private fun ServerSearchSection(
     query: String,
     onRetry: () -> Unit,
     onOpenHit: (ServerHitUi) -> Unit,
+    onTranslateHit: ((ServerHitUi, Long, Int) -> Unit)? = null,
 ) {
     when (server) {
         ServerSearchState.Idle -> {
@@ -674,9 +770,14 @@ private fun ServerSearchSection(
                     itemsIndexed(
                         server.hits,
                         // Msgid-less hits share a timestamp only by accident; the index keeps keys unique.
-                        key = { index, hit -> hit.msgid ?: "t-${hit.serverTime}-$index" },
-                    ) { _, hit ->
-                        ServerHitRow(hit = hit, query = query, onClick = { onOpenHit(hit) })
+                        key = { index, _ -> "server-search:${server.generation}:$index" },
+                    ) { index, hit ->
+                        ServerHitRow(
+                            hit = hit,
+                            query = query,
+                            onClick = { onOpenHit(hit) },
+                            onLongPress = onTranslateHit?.let { { it(hit, server.generation, index) } },
+                        )
                     }
                     if (server.truncated) {
                         item(key = "truncated_footer") {

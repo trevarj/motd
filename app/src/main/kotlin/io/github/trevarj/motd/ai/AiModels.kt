@@ -21,27 +21,32 @@ private val WHISPER_LANGUAGE_CODES =
 @Serializable
 enum class AiFeature {
     TRANSCRIPTION,
+    TEXT_TOOLS,
 }
 
 @Serializable
 enum class AiModelCapability {
     TRANSCRIPTION,
+    TEXT_TOOLS,
 }
 
 @Serializable
 enum class AiModelFormat {
     WHISPER_GGML,
+    QWEN35_GGUF,
 }
 
 val AiFeature.requiredCapability: AiModelCapability
     get() =
         when (this) {
             AiFeature.TRANSCRIPTION -> AiModelCapability.TRANSCRIPTION
+            AiFeature.TEXT_TOOLS -> AiModelCapability.TEXT_TOOLS
         }
 
 fun AiModelFormat.supports(capability: AiModelCapability): Boolean =
     when (this) {
         AiModelFormat.WHISPER_GGML -> capability == AiModelCapability.TRANSCRIPTION
+        AiModelFormat.QWEN35_GGUF -> capability == AiModelCapability.TEXT_TOOLS
     }
 
 @Serializable
@@ -51,6 +56,8 @@ data class AiModelMetadata(
     val maximumAudioSeconds: Int? = null,
     val maximumCpuThreads: Int? = null,
     val isMultilingual: Boolean? = null,
+    val maximumContextTokens: Int? = null,
+    val textTemplateId: String? = null,
 ) {
     init {
         require(architecture.isNotBlank()) { "Model architecture must not be blank" }
@@ -60,6 +67,9 @@ data class AiModelMetadata(
         }
         require(maximumCpuThreads == null || maximumCpuThreads > 0) {
             "Maximum CPU threads must be positive"
+        }
+        require(maximumContextTokens == null || maximumContextTokens > 0) {
+            "Maximum context must be positive"
         }
     }
 }
@@ -162,12 +172,22 @@ private fun String.isValidWhisperPrompt(): Boolean {
     return true
 }
 
-fun AiModelRecord.isReadyFor(
+fun AiLabsState.isModelReadyFor(
+    model: AiModelRecord,
     capability: AiModelCapability,
-    settings: TranscriptionSettings?,
 ): Boolean {
-    if (capability !in capabilities || !format.supports(capability)) return false
-    return settings != null && settings.isRuntimeCompatible(metadata)
+    if (capability !in model.capabilities || !model.format.supports(capability)) return false
+    return when (capability) {
+        AiModelCapability.TRANSCRIPTION -> {
+            transcriptionSettingsFor(model.id)?.isRuntimeCompatible(model.metadata) == true
+        }
+
+        AiModelCapability.TEXT_TOOLS -> {
+            model.metadata.architecture == "qwen35" &&
+                (model.metadata.maximumContextTokens ?: 0) >= 4096 &&
+                model.metadata.textTemplateId == "qwen35-nonthinking-v1"
+        }
+    }
 }
 
 @Serializable
@@ -205,17 +225,93 @@ data class AiLabsState(
     val models: List<AiModelRecord> = emptyList(),
     val assignments: List<AiFeatureAssignment> = emptyList(),
     val transcriptionSettings: List<AiTranscriptionSettingsRecord> = emptyList(),
+    val customStyles: List<AiCustomStyle> = emptyList(),
+    val translationTarget: AiTranslationTarget? = null,
     @Transient val importState: AiImportState = AiImportState.Idle,
 )
 
 fun AiLabsState.assignedModelId(feature: AiFeature): String? = assignments.firstOrNull { it.feature == feature }?.modelId
 
-fun AiLabsState.settingsFor(
-    modelId: String,
-    capability: AiModelCapability,
-): TranscriptionSettings? =
-    when (capability) {
-        AiModelCapability.TRANSCRIPTION -> transcriptionSettings.firstOrNull { it.modelId == modelId }?.settings
+fun AiLabsState.transcriptionSettingsFor(modelId: String): TranscriptionSettings? = transcriptionSettings.firstOrNull { it.modelId == modelId }?.settings
+
+@Serializable
+data class AiCustomStyle(
+    val id: String,
+    val name: String,
+    val instruction: String,
+)
+
+@Serializable
+data class AiTranslationTarget(
+    val code: String,
+    val name: String,
+)
+
+val aiTranslationTargets: List<AiTranslationTarget> =
+    listOf(
+        "en" to "English",
+        "ar" to "Arabic",
+        "bn" to "Bengali",
+        "zh-Hans" to "Chinese (Simplified)",
+        "zh-Hant" to "Chinese (Traditional)",
+        "cs" to "Czech",
+        "nl" to "Dutch",
+        "fr" to "French",
+        "de" to "German",
+        "el" to "Greek",
+        "he" to "Hebrew",
+        "hi" to "Hindi",
+        "id" to "Indonesian",
+        "it" to "Italian",
+        "ja" to "Japanese",
+        "ko" to "Korean",
+        "ms" to "Malay",
+        "fa" to "Persian",
+        "pl" to "Polish",
+        "pt" to "Portuguese",
+        "ro" to "Romanian",
+        "ru" to "Russian",
+        "es" to "Spanish",
+        "sv" to "Swedish",
+        "th" to "Thai",
+        "tr" to "Turkish",
+        "uk" to "Ukrainian",
+        "vi" to "Vietnamese",
+    ).map { (code, name) -> AiTranslationTarget(code, name) }
+
+internal fun String.isValidAiText(maximumBytes: Int): Boolean {
+    var index = 0
+    while (index < length) {
+        val char = this[index]
+        if (char.isHighSurrogate()) {
+            if (index + 1 >= length || !this[index + 1].isLowSurrogate()) return false
+            index += 2
+            continue
+        }
+        if (char.isSurrogate() || ((char.code < 32 || char.code in 127..159) && char != '\n' && char != '\t')) return false
+        index++
+    }
+    return toByteArray(Charsets.UTF_8).size <= maximumBytes
+}
+
+internal fun AiCustomStyle.isValid(): Boolean =
+    runCatching {
+        java.util.UUID
+            .fromString(id)
+            .toString() == id
+    }.getOrDefault(false) &&
+        name == name.trim() && name.codePointCount(0, name.length) in 1..40 &&
+        name.isValidAiText(160) && instruction.isNotEmpty() && instruction.isValidAiText(4096)
+
+internal fun AiTranslationTarget.isValid(): Boolean =
+    if (code != "other") {
+        this in aiTranslationTargets
+    } else {
+        name == name.trim() && name.codePointCount(0, name.length) in 2..48 &&
+            name.isValidAiText(128) &&
+            name.codePoints().allMatch {
+                Character.isLetter(it) || it == 32 || it == 45 || it == 39 || it == 40 || it == 41
+            }
     }
 
 private fun clampCpuThreads(

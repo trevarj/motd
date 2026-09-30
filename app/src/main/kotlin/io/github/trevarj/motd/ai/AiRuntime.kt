@@ -29,6 +29,10 @@ enum class AiRuntimeFailure {
     TRUNCATED_MODEL,
     CORRUPT_MODEL,
     UNSUPPORTED_ARCHITECTURE,
+    UNSUPPORTED_TEMPLATE,
+    INPUT_TOO_LONG,
+    INVALID_OUTPUT,
+    NO_TEXT,
     INVALID_REQUEST,
     OUT_OF_MEMORY,
     INVALID_AUDIO,
@@ -143,6 +147,10 @@ private val AiRuntimeFailure.safeMessage: String
             AiRuntimeFailure.TRUNCATED_MODEL -> "The model file is incomplete"
             AiRuntimeFailure.CORRUPT_MODEL -> "The model file is corrupt"
             AiRuntimeFailure.UNSUPPORTED_ARCHITECTURE -> "The model architecture is unsupported"
+            AiRuntimeFailure.UNSUPPORTED_TEMPLATE -> "The model template is unsupported"
+            AiRuntimeFailure.INPUT_TOO_LONG -> "The text is too long"
+            AiRuntimeFailure.INVALID_OUTPUT -> "The generated text is invalid"
+            AiRuntimeFailure.NO_TEXT -> "No text to translate"
             AiRuntimeFailure.INVALID_REQUEST -> "The AI request is invalid"
             AiRuntimeFailure.OUT_OF_MEMORY -> "There is not enough memory to run this model"
             AiRuntimeFailure.INVALID_AUDIO -> "The audio input is unsupported"
@@ -150,3 +158,73 @@ private val AiRuntimeFailure.safeMessage: String
             AiRuntimeFailure.INFERENCE -> "The AI operation failed"
             AiRuntimeFailure.NATIVE -> "The local AI runtime failed"
         }
+
+interface TextModelRuntime {
+    suspend fun inspect(modelFile: File): AiModelMetadata
+
+    suspend fun load(modelFile: File)
+
+    suspend fun transform(request: io.github.trevarj.motd.ai.text.TextTransformRequest): io.github.trevarj.motd.ai.text.TextTransformResult
+
+    fun unload()
+}
+
+@Singleton
+class LlamaTextModelRuntime
+    @Inject
+    constructor() : TextModelRuntime {
+        override suspend fun inspect(modelFile: File): AiModelMetadata =
+            textCall {
+                val info =
+                    io.github.trevarj.motd.ai.text.TextRuntime
+                        .inspect(modelFile)
+                AiModelMetadata(
+                    architecture = info.architecture,
+                    quantization = info.quantization,
+                    maximumCpuThreads = info.maximumCpuThreads,
+                    maximumContextTokens = info.maximumContextTokens,
+                    textTemplateId = info.templateId,
+                )
+            }
+
+        override suspend fun load(modelFile: File) {
+            textCall {
+                io.github.trevarj.motd.ai.text.TextRuntime
+                    .load(modelFile, defaultAiCpuThreads())
+            }
+        }
+
+        override suspend fun transform(request: io.github.trevarj.motd.ai.text.TextTransformRequest): io.github.trevarj.motd.ai.text.TextTransformResult =
+            textCall {
+                io.github.trevarj.motd.ai.text.TextRuntime
+                    .transform(request)
+            }
+
+        override fun unload() =
+            textCall {
+                io.github.trevarj.motd.ai.text.TextRuntime
+                    .unload()
+            }
+    }
+
+private inline fun <T> textCall(block: () -> T): T =
+    try {
+        block()
+    } catch (failure: io.github.trevarj.motd.ai.text.TextException) {
+        throw AiRuntimeException(
+            when (failure.code) {
+                1 -> AiRuntimeFailure.MODEL_OPEN
+                2 -> AiRuntimeFailure.INVALID_FORMAT
+                3 -> AiRuntimeFailure.CORRUPT_MODEL
+                4 -> AiRuntimeFailure.UNSUPPORTED_ARCHITECTURE
+                5 -> AiRuntimeFailure.UNSUPPORTED_TEMPLATE
+                6 -> AiRuntimeFailure.INVALID_REQUEST
+                7 -> AiRuntimeFailure.INPUT_TOO_LONG
+                8 -> AiRuntimeFailure.OUT_OF_MEMORY
+                9 -> AiRuntimeFailure.NO_MODEL_LOADED
+                10 -> AiRuntimeFailure.INFERENCE
+                11 -> AiRuntimeFailure.INVALID_OUTPUT
+                else -> AiRuntimeFailure.NATIVE
+            },
+        )
+    }

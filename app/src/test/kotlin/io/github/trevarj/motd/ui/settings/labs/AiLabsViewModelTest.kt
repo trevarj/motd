@@ -124,6 +124,25 @@ class AiLabsViewModelTest {
             val vm = AiLabsViewModel(calls(persisted, AiDerivedCacheCleaner(cache)::clear))
             cache.put(key, "completed transcript")
 
+            vm.setFeatureEnabled(AiFeature.TEXT_TOOLS, enabled = false)
+            vm.assignModel(AiFeature.TEXT_TOOLS, "d".repeat(64))
+            vm.deleteModel("d".repeat(64))
+            vm.upsertCustomStyle(
+                io.github.trevarj.motd.ai
+                    .AiCustomStyle(
+                        java.util.UUID
+                            .randomUUID()
+                            .toString(),
+                        "Warm",
+                        "Be warm",
+                    ),
+            )
+            vm.setTranslationTarget(
+                io.github.trevarj.motd.ai
+                    .AiTranslationTarget("ja", "Japanese"),
+            )
+            runCurrent()
+            assertEquals("completed transcript", cache.get(key))
             vm.setFeatureEnabled(AiFeature.TRANSCRIPTION, enabled = true)
             vm.assignModel(AiFeature.TRANSCRIPTION, speech.id)
             runCurrent()
@@ -195,11 +214,15 @@ class AiLabsViewModelTest {
     ) = AiLabsCalls(
         persistedState = persisted,
         setFeatureEnabled = { _, _ -> mutationResult },
-        importModel = { Result.failure(IllegalStateException("unused")) },
+        importModel = { _, _ -> Result.failure(IllegalStateException("unused")) },
         assignModel = { _, _ -> mutationResult },
-        updateSettings = { _, _, _ -> mutationResult },
+        updateTranscriptionSettings = { _, _ -> mutationResult },
         deleteModel = { mutationResult },
         clearCaches = clearCaches,
+        downloadTextModel = { Result.failure(IllegalStateException("unused")) },
+        upsertCustomStyle = { mutationResult },
+        deleteCustomStyle = { mutationResult },
+        setTranslationTarget = { mutationResult },
     )
 
     private fun model(idCharacter: Char) =

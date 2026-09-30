@@ -83,6 +83,7 @@ the source tree.
       - third_party/gomobile/internal/binres/testdata/bootstrap.bin
       - third_party/sing-box/source/clients/android/settings.gradle.kts
       - third_party/whisper.cpp/source/models
+      - third_party/llama.cpp/source/models
     prebuild:
       - printf '\nmotdVersionName=%s\nmotdVersionCode=%s\nmotdSourceCommit=%s\n' "$$VERSION$$"
         "$$VERCODE$$" "$$COMMIT$$" >> ../gradle.properties
@@ -143,8 +144,12 @@ The published release asset keeps the name `motd-<tag>-foss.apk` because the
 ## Native source build
 
 F-Droid's `rm` step removes the checked-in AAR and the upstream whisper.cpp
-model-fixture directory before scanning, while retaining its runtime sources
-and license file. The `build` step, which runs after scanning
+and llama.cpp model-fixture directories before scanning, while retaining runtime
+sources and vendor licenses. The pinned llama.cpp `models` directory includes
+tokenizer GGUF fixtures; the runtime build does not require them. The external
+fdroiddata recipe must add `third_party/llama.cpp/source/models` to `rm`;
+this repository documentation change does not submit or apply that remote change.
+The `build` step, which runs after scanning
 and source-tarball creation, regenerates the AAR in the build directory from the
 recursively initialized upstream submodules and F-Droid's pinned Go toolchain.
 The `preassemble` task then runs the AI native artifact assertions.

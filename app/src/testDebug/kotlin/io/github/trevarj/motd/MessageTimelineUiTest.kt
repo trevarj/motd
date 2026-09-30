@@ -2,15 +2,21 @@ package io.github.trevarj.motd
 
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -18,9 +24,18 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
+import io.github.trevarj.motd.ai.text.TextTermination
+import io.github.trevarj.motd.ai.text.TextTransformResult
 import io.github.trevarj.motd.audio.AudioPlaybackRequest
+import io.github.trevarj.motd.data.db.DccAddressKind
+import io.github.trevarj.motd.data.db.DccDirection
+import io.github.trevarj.motd.data.db.DccTransferEntity
+import io.github.trevarj.motd.data.db.DccTransferProtocol
+import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -30,6 +45,9 @@ import io.github.trevarj.motd.data.sync.COMMAND_RESPONSE_PAYLOAD_PREFIX
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
+import io.github.trevarj.motd.ui.ai.AiTextSheet
+import io.github.trevarj.motd.ui.ai.AiTextSource
+import io.github.trevarj.motd.ui.ai.AiTextUiState
 import io.github.trevarj.motd.ui.chat.MessageList
 import io.github.trevarj.motd.ui.chat.ReplyTarget
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
@@ -417,6 +435,124 @@ class MessageTimelineUiTest {
         compose.onNodeWithText("carol quit", useUnmergedTree = true).assertIsDisplayed()
     }
 
+    @Test
+    fun specialMessageHoldsPreserveNestedActions() {
+        var joined = 0L
+        var dismissed = 0L
+        var rejected = 0L
+        var foolOpen by mutableStateOf(false)
+        val transfer =
+            DccTransferEntity(
+                id = 8,
+                networkId = 1,
+                timelineEventId = 8,
+                offerKey = "offer-8",
+                direction = DccDirection.INCOMING,
+                protocol = DccTransferProtocol.SEND,
+                peerNick = "alice",
+                normalizedPeer = "alice",
+                filename = "report.txt",
+                displayFilename = "report.txt",
+                address = "8.8.8.8",
+                addressKind = DccAddressKind.IPV4_DOTTED,
+                port = 9000,
+                sizeBytes = 100,
+                token = null,
+                state = DccTransferState.OFFERED,
+                bytesTransferred = 0,
+                destinationUri = null,
+                createdAt = 1,
+                expiresAt = null,
+                updatedAt = 1,
+            )
+        val rows =
+            listOf(
+                message(8, 800, MessageKind.DCC_TRANSFER, "active file offer"),
+                message(7, 700, MessageKind.NETJOIN, "network healed", payload = NetworkBatchPayloadV1("a.example", "b.example", listOf("alice", "bob")).encode()),
+                message(6, 600, MessageKind.INVITE, "historical invite", inviteState = InviteState.HISTORICAL),
+                message(5, 500, MessageKind.INVITE, "alice invited you", payload = InvitePayloadV1("alice", "me", "#room").encode(), inviteState = InviteState.PENDING),
+                message(4, 400, MessageKind.NETSPLIT, "network split fallback"),
+                message(3, 300, MessageKind.DCC_TRANSFER, "file offer fallback"),
+                message(2, 200, MessageKind.PRIVMSG, "concealed fool prose").copy(normalizedActor = "alice"),
+                message(1, 100, MessageKind.PRIVMSG, "quiet ebook prose").copy(sender = "bob", normalizedActor = "bob"),
+            )
+        render(
+            flowOf(PagingData.from(rows)),
+            onAcceptInvite = { joined = it },
+            onDismissInvite = { dismissed = it },
+            translation = true,
+            dccTransfer = { MutableStateFlow(if (it.id == 8L) transfer else null) },
+            onRejectDccTransfer = { rejected = it },
+            fools = setOf("alice"),
+            foolExpanded = { foolOpen },
+            onToggleFool = { foolOpen = !foolOpen },
+            quietFeed = true,
+        )
+        scrollTo("chat_invite_card_5")
+        compose.onNodeWithTag("chat_invite_join_5").performClick()
+        compose.onNodeWithTag("chat_invite_dismiss_5").performClick()
+        compose.runOnIdle {
+            assertEquals(5L, joined)
+            assertEquals(5L, dismissed)
+        }
+        scrollTo("chat_dcc_transfer_8")
+        compose.onNodeWithTag("chat_dcc_reject_8").performClick()
+        compose.runOnIdle { assertEquals(8L, rejected) }
+        listOf(
+            "chat_dcc_transfer_8" to rows[0],
+            "chat_network_batch_netjoin_7" to rows[1],
+            "chat_invite_compact_6" to rows[2],
+            "chat_invite_card_5" to rows[3],
+            "chat_network_batch_4" to rows[4],
+            "chat_dcc_transfer_compact_3" to rows[5],
+        ).forEach { (tag, row) ->
+            scrollTo(tag)
+            compose.onNodeWithTag(tag, useUnmergedTree = true).performTouchInput { longClick() }
+            compose.onNodeWithTag("ai_text_source").assertIsDisplayed()
+            compose.onNodeWithTag("ai_text_source").assertTextEquals(row.text)
+            compose.runOnIdle { assertEquals(row.id, translatedEventId) }
+            compose.onNodeWithTag("ai_text_translate").performClick()
+            compose.onNodeWithTag("ai_text_result").assertTextEquals("Traduction locale.")
+            compose.onNodeWithTag("ai_text_apply").assertDoesNotExist()
+            compose.onNodeWithTag("ai_text_close").performClick()
+        }
+        scrollTo(messageTag(2))
+        compose.onNodeWithTag(messageTag(2), useUnmergedTree = true).performTouchInput { longClick() }
+        compose.onNodeWithTag("ai_text_sheet").assertDoesNotExist()
+        // Quiet-feed concealment remains a second deliberate reveal, even for an expanded fool.
+        compose.onNodeWithTag(messageTag(2), useUnmergedTree = true).performTouchInput { longClick() }
+        compose.onNodeWithTag("ai_text_sheet").assertDoesNotExist()
+        compose.onNodeWithTag(messageTag(2), useUnmergedTree = true).performTouchInput { longClick() }
+        compose.onNodeWithTag("ai_text_source").assertTextEquals("concealed fool prose")
+        compose.onNodeWithTag("ai_text_close").performClick()
+        scrollTo(messageTag(1))
+        compose.onNodeWithTag(messageTag(1), useUnmergedTree = true).performTouchInput { longClick() }
+        compose.onNodeWithTag("ai_text_sheet").assertDoesNotExist()
+        compose.onNodeWithTag(messageTag(1), useUnmergedTree = true).performTouchInput { longClick() }
+        compose.onNodeWithTag("ai_text_source").assertTextEquals("quiet ebook prose")
+    }
+
+    @Test
+    fun groupedDuplicateLinesKeepExactIdentityAfterPaging() {
+        val rows = listOf(message(1002, 300, MessageKind.JOIN, "duplicate"), message(1001, 200, MessageKind.PART, "duplicate"))
+        val pages = MutableStateFlow(PagingData.from(rows))
+        render(pages, translation = true)
+        scrollTo("chat_system_pill")
+        compose.onNodeWithTag("chat_system_pill", useUnmergedTree = true).performTouchInput { longClick() }
+        listOf(1001L, 1002L).forEach { id ->
+            compose.onNodeWithTag("chat_system_event_$id", useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnLongClick)
+            compose.runOnIdle { assertEquals(id, translatedEventId) }
+            compose.onNodeWithTag("ai_text_source").assertIsDisplayed()
+            compose.onNodeWithTag("ai_text_close").performClick()
+        }
+        compose.runOnIdle { pages.value = PagingData.from(rows + message(1000, 100, MessageKind.QUIT, "older")) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_system_event_1001", useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnLongClick)
+        compose.runOnIdle { assertEquals(1001L, translatedEventId) }
+    }
+
+    private var translatedEventId: Long? = null
+
     private fun render(
         pages: Flow<PagingData<MessageEntity>>,
         marker: TimelineAnchor? = null,
@@ -431,8 +567,14 @@ class MessageTimelineUiTest {
         fools: Set<String> = emptySet(),
         foolExpanded: (Long) -> Boolean = { false },
         onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
+        translation: Boolean = false,
+        dccTransfer: (MessageEntity) -> StateFlow<DccTransferEntity?> = { MutableStateFlow(null) },
+        onRejectDccTransfer: (Long) -> Unit = {},
+        onToggleFool: (Long) -> Unit = {},
+        quietFeed: Boolean = false,
     ) {
         compose.setContent {
+            var ai by androidx.compose.runtime.remember { mutableStateOf<AiTextUiState>(AiTextUiState.Closed) }
             CompositionLocalProvider(LocalDickordLabsEnabled provides dickordEnabled) {
                 MotdTheme(dynamicColor = false) {
                     MessageList(
@@ -440,10 +582,26 @@ class MessageTimelineUiTest {
                         listState = rememberLazyListState(),
                         networkId = 1,
                         bufferId = 1,
+                        ebooksQuietFeed = quietFeed,
+                        onToggleFool = onToggleFool,
                         conversationName = conversationName,
                         directMessage = directMessage,
                         readMarkerTime = marker,
-                        onLongPress = {},
+                        onLongPress = { message ->
+                            if (translation) {
+                                translatedEventId = message.id
+                                ai = AiTextUiState.Choosing(AiTextSource.StoredMessage(message.bufferId, message.id, message.msgid, message.text))
+                            }
+                        },
+                        onTranslateMessage =
+                            if (translation) {
+                                { message ->
+                                    translatedEventId = message.id
+                                    ai = AiTextUiState.Choosing(AiTextSource.StoredMessage(message.bufferId, message.id, message.msgid, message.text))
+                                }
+                            } else {
+                                null
+                            },
                         onReply = {},
                         onReact = { _, _ -> },
                         onImageClick = {},
@@ -461,7 +619,20 @@ class MessageTimelineUiTest {
                         replyPreview = replyPreview,
                         onReplyPreviewClick = onReplyPreviewClick,
                         onDismissInvite = onDismissInvite,
+                        dccTransfer = dccTransfer,
+                        onRejectDccTransfer = onRejectDccTransfer,
                     )
+                    AiTextSheet(ai, emptyList(), null, onGenerate = {
+                        val source = (ai as AiTextUiState.Choosing).source as AiTextSource.StoredMessage
+                        ai =
+                            AiTextUiState.Result(
+                                source.eventId,
+                                source,
+                                source.text,
+                                TextTransformResult("Traduction locale.", TextTermination.EOG),
+                                1,
+                            )
+                    }, onTargetSelected = {}, onDismiss = { ai = AiTextUiState.Closed }, onOpenSetup = {}, onManageStyles = {})
                 }
             }
         }

@@ -1,7 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,10 +12,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -51,6 +53,9 @@ fun SystemEventPill(
     contentKey: Any,
     modifier: Modifier = Modifier,
     forceCollapsible: Boolean = false,
+    onLongPress: (() -> Unit)? = null,
+    onLineLongPress: ((Int) -> Unit)? = null,
+    lineKey: ((Int) -> Any)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     SystemEventPill(
@@ -62,6 +67,9 @@ fun SystemEventPill(
         onExpandedChange = { expanded = it },
         modifier = modifier,
         forceCollapsible = forceCollapsible,
+        onLongPress = onLongPress,
+        onLineLongPress = onLineLongPress,
+        lineKey = lineKey,
     )
 }
 
@@ -76,6 +84,9 @@ internal fun SystemEventPill(
     onExpandedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     forceCollapsible: Boolean = false,
+    onLongPress: (() -> Unit)? = null,
+    onLineLongPress: ((Int) -> Unit)? = null,
+    lineKey: ((Int) -> Any)? = null,
 ) {
     // Materializing every line of a large JOIN/PART burst while scrolling is expensive. Keep the
     // collapsed path to its bounded summary and build lines only if the user opens the pill.
@@ -118,10 +129,12 @@ internal fun SystemEventPill(
                             Modifier
                         },
                     ).then(
-                        if (collapsible) {
-                            Modifier.clickable {
-                                onExpandedChange(!showLines)
-                            }
+                        if (collapsible || onLongPress != null) {
+                            Modifier.combinedClickable(
+                                onClick = { if (collapsible) onExpandedChange(!showLines) },
+                                onLongClickLabel = stringResource(R.string.ai_text_translate),
+                                onLongClick = onLongPress,
+                            )
                         } else {
                             Modifier
                         },
@@ -133,13 +146,27 @@ internal fun SystemEventPill(
             // producing a full-row flash on physical devices.
             if (showLines) {
                 Column {
-                    lines.forEach { line ->
-                        Text(
-                            text = line,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                        )
+                    lines.forEachIndexed { index, line ->
+                        key(lineKey?.invoke(index) ?: index) {
+                            Text(
+                                text = line,
+                                modifier =
+                                    Modifier
+                                        .then(lineKey?.let { Modifier.testTag("chat_system_event_${it(index)}") } ?: Modifier)
+                                        .then(
+                                            onLineLongPress?.let { callback ->
+                                                Modifier.combinedClickable(
+                                                    onClick = {},
+                                                    onLongClickLabel = stringResource(R.string.ai_text_translate),
+                                                    onLongClick = { callback(index) },
+                                                )
+                                            } ?: Modifier,
+                                        ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
                     }
                 }
             } else {

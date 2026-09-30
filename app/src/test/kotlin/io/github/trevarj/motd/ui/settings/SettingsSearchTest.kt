@@ -93,13 +93,16 @@ class SettingsSearchTest {
     }
 
     @Test
-    fun `voice search opens local transcription targets without retired features or model data`() {
+    fun `AI search opens shared setup and independent feature targets without retired features or model data`() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
 
         listOf(
             "ggml" to SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_MODELS),
             "speech audio" to SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_TRANSCRIPTION),
             "local on device" to SettingsSearchDestination.Page(SettingsSearchPage.LABS, SettingsTarget.AI),
+            "GGUF" to SettingsSearchDestination.Page(SettingsSearchPage.LABS, SettingsTarget.AI),
+            "Qwen" to SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_MODELS),
+            "grammar spelling" to SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_TEXT_TOOLS),
         ).forEach { (query, destination) ->
             assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
         }
@@ -214,12 +217,14 @@ class SettingsSearchTest {
             R.string.settings_folder_layout_desc -> "Choose how folders appear in the chat list."
             R.string.settings_show_folder_chats_in_all -> "Show folder chats in All"
             R.string.settings_show_folder_chats_in_all_desc -> "Include chats assigned to folders in the All tab."
-            R.string.labs_ai -> "Local voice"
-            R.string.labs_ai_desc -> "Local voice transcription"
+            R.string.labs_ai -> "AI"
+            R.string.labs_ai_desc -> "Local voice transcription, composer correction, writing styles and translation. Off by default."
             R.string.ai_model_library -> "Model Library"
-            R.string.ai_model_library_summary -> "Import local voice models"
+            R.string.ai_model_library_summary -> "Set up local Whisper models for voice transcription and the Qwen model for composer correction, writing styles and translation."
             R.string.ai_transcription -> "Voice transcription"
             R.string.ai_transcription_summary -> "Transcribe voice messages locally"
+            R.string.ai_text_tools -> "Composer text tools"
+            R.string.ai_text_tools_summary -> "Experimental on-device correction, writing styles and translation"
             else -> "resource-$id"
         }
 

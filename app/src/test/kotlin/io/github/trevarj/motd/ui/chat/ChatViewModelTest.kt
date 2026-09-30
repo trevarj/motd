@@ -212,6 +212,71 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun aiApplyPreservesReplyAndPersistsOnlyTheCurrentRevision() =
+        runTest {
+            val vm = viewModel(channel, FakeConnectionManager(network.id))
+            vm.composerDraft.first { it.hydrated }
+            val parent = message(channel.id, "parent", "parent", "alice", 88)
+            vm.setReply(parent)
+            vm.saveDraft("I has a report.")
+            advanceUntilIdle()
+            val abandoned = requireNotNull(vm.beginAiDraftTransform())
+            val snapshot = requireNotNull(vm.beginAiDraftTransform())
+            assertFalse(vm.applyAiDraftTransform(abandoned, "abandoned"))
+            assertEquals("I has a report.", db.composerDraftDao().byRoom(channel.id)?.text)
+            assertTrue(vm.applyAiDraftTransform(snapshot, "I have a report."))
+            assertFalse(vm.applyAiDraftTransform(snapshot, "duplicate"))
+            advanceUntilIdle()
+            assertEquals("I have a report.", vm.composerDraft.value.text)
+            assertEquals(snapshot.revision + 1, vm.composerDraft.value.revision)
+            assertEquals("I have a report.", db.composerDraftDao().byRoom(channel.id)?.text)
+            assertEquals(parent.id, db.composerDraftDao().byRoom(channel.id)?.replyToEventId)
+            assertEquals(parent, vm.state.first { it.replyTo != null }.replyTo)
+            val deadWriterSnapshot = requireNotNull(vm.beginAiDraftTransform())
+            val field = ChatViewModel::class.java.getDeclaredField("draftWriter").apply { isAccessible = true }
+            (field.get(vm) as kotlinx.coroutines.Job).cancelAndJoin()
+            assertFalse(vm.applyAiDraftTransform(deadWriterSnapshot, "lost"))
+            assertEquals("I have a report.", vm.composerDraft.value.text)
+        }
+
+    @Test
+    fun aiApplyRejectsEditAbaReplyRoomAndSendReservation() =
+        runTest {
+            for (accepted in listOf(true, false)) {
+                val gate = CompletableDeferred<Unit>()
+                val manager = FakeConnectionManager(network.id, sendAccepted = accepted, sendGate = gate)
+                val buffers = FakeBufferRepository(channel)
+                val vm = viewModel(channel, manager, buffers = buffers)
+                vm.composerDraft.first { it.hydrated }
+                vm.saveDraft("original")
+                val edited = requireNotNull(vm.beginAiDraftTransform())
+                vm.saveDraft("different")
+                vm.saveDraft("original")
+                assertFalse(vm.applyAiDraftTransform(edited, "stale"))
+                val reply = requireNotNull(vm.beginAiDraftTransform())
+                vm.setReply(message(channel.id, "parent", null, "alice", 88))
+                assertFalse(vm.applyAiDraftTransform(reply, "stale"))
+                val navigation = requireNotNull(vm.beginAiDraftTransform())
+                buffers.update(query)
+                runCurrent()
+                assertFalse(vm.applyAiDraftTransform(navigation, "stale"))
+                buffers.update(channel)
+                runCurrent()
+                assertFalse(vm.applyAiDraftTransform(navigation, "stale"))
+                val send = requireNotNull(vm.beginAiDraftTransform())
+                val sending = vm.submit("original", {}, {})
+                manager.messageStarted.await()
+                assertFalse(vm.applyAiDraftTransform(send, "stale"))
+                assertNull(vm.beginAiDraftTransform())
+                gate.complete(Unit)
+                sending.join()
+                advanceUntilIdle()
+                assertFalse(vm.applyAiDraftTransform(send, "stale"))
+                assertEquals(if (accepted) "" else "original", vm.composerDraft.value.text)
+            }
+        }
+
+    @Test
     fun `message submission sends reply metadata and stops typing`() =
         runTest {
             val manager = FakeConnectionManager(network.id, IrcClientState.Ready("me", emptySet(), emptyMap()))
@@ -566,13 +631,16 @@ class ChatViewModelTest {
             val third = vm.submit(link, {}, {})
             runCurrent()
 
-            assertEquals(listOf(SentMessage(channel.id, link, null)), manager.messages)
+            // The fake records accepted messages only after sendGate; count admission while held.
+            assertEquals(listOf(SentMessage(channel.id, link, null)), manager.messageAttempts)
 
             sendGate.complete(Unit)
             advanceUntilIdle()
             first.join()
             second.join()
             third.join()
+
+            assertEquals(listOf(SentMessage(channel.id, link, null)), manager.messages)
 
             // A callback held by Compose until after the accepted draft clear is stale, not a new edit.
             val staleCallback = vm.submit(link, {}, {})
@@ -4502,6 +4570,7 @@ class ChatViewModelTest {
         val invites = mutableListOf<Pair<Long, String>>()
         val readMarkers = mutableListOf<Pair<Long, TimelineAnchor>>()
         val messageStarted = CompletableDeferred<Unit>()
+        val messageAttempts = mutableListOf<SentMessage>()
         val typingSent = CompletableDeferred<Unit>()
         val memberRequests = mutableListOf<Long>()
         var clientForCalls = 0
@@ -4545,6 +4614,9 @@ class ChatViewModelTest {
             replyToEventId: Long?,
             channelContext: String?,
         ): io.github.trevarj.motd.service.SendAcceptance {
+            messageAttempts += SentMessage(bufferId, text, replyToEventId, channelContext)
+            messageStarted.complete(Unit)
+            sendGate?.await()
             sendRejection?.let {
                 return io.github.trevarj.motd.service.SendAcceptance
                     .Rejected(it)
@@ -4555,8 +4627,6 @@ class ChatViewModelTest {
                 )
             }
             messages += SentMessage(bufferId, text, replyToEventId, channelContext)
-            messageStarted.complete(Unit)
-            sendGate?.await()
             // Mirror the real manager, which reports what it actually persisted: a reply can gain
             // a visible prefix and newlines split one submission into several rows.
             val stored = storedTexts?.invoke(text) ?: listOf(text)

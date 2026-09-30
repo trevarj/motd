@@ -353,6 +353,51 @@ class RemoteMediaTimelineTest {
         assertEquals(1, probes)
     }
 
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Config(qualifiers = "w411dp-h891dp")
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    fun activePlayerViewLongHoldPreservesControllerChildren() {
+        RoutedInlineMediaFixture().use { fixture ->
+            fixture.server.enqueue(imageResponse())
+            // Keep playback active without a decoder error replacing the AndroidView.
+            fixture.server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE))
+            val held = mutableListOf<MessageEntity>()
+            render(
+                automatic = true,
+                networkId = fixture.networkId,
+                networkMediaHttp = fixture.http,
+                loadPreview = { _, _ -> null },
+                text = "http://media.invalid/${UUID.randomUUID()}.mp4",
+                onLongPress = held::add,
+            )
+            awaitTag("inline_media_loaded")
+            compose.onNodeWithTag("inline_video_preview", useUnmergedTree = true).performTouchInput { click() }
+            compose.runOnIdle {
+                val activity =
+                    androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+                        .getInstance()
+                        .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED)
+                        .single()
+
+                fun find(view: android.view.View): androidx.media3.ui.PlayerView? {
+                    if (view is androidx.media3.ui.PlayerView) return view
+                    if (view is android.view.ViewGroup) {
+                        for (index in 0 until view.childCount) find(view.getChildAt(index))?.let { return it }
+                    }
+                    return null
+                }
+                val playerView = checkNotNull(find(activity.window.decorView))
+                assertTrue(playerView.player != null)
+                assertTrue(playerView.performLongClick())
+                assertEquals(1, held.size)
+                assertEquals("http://media.invalid/", held.single().text.substringBeforeLast('/') + "/")
+                val play = playerView.findViewById<android.view.View>(androidx.media3.ui.R.id.exo_play_pause)
+                assertTrue("controller child remains clickable", play.hasOnClickListeners())
+            }
+        }
+    }
+
     private fun render(
         automatic: Boolean,
         networkId: Long = 1L,

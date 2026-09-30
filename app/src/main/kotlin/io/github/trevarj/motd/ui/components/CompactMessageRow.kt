@@ -87,6 +87,7 @@ internal fun CompactMessageRow(
     onLongPress: () -> Unit = {},
     onClick: (() -> Unit)? = null,
     onClickLabel: String? = null,
+    onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
@@ -165,7 +166,7 @@ internal fun CompactMessageRow(
                     onClick = onClick,
                     onClickLabel = onClickLabel,
                     onLongPress = onLongPress,
-                    onLongPressLabel = actionsLabel,
+                    onLongPressLabel = onLongPressLabel ?: actionsLabel,
                 ).padding(horizontal = spacing.messageOuterHPad, vertical = spacing.compactRowVPad),
     ) {
         reply?.let {

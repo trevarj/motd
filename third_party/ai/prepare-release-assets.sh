@@ -28,6 +28,7 @@ done
 
 root_inputs=(
   ai-whisper
+  ai-text
   third_party/ai/source.lock
   third_party/ai/patches
   third_party/ai/prepare-release-assets.sh
@@ -41,13 +42,16 @@ git -C "$root_dir" diff --cached --quiet HEAD -- "${root_inputs[@]}" || fail "AI
 # shellcheck disable=SC1090
 source "$lock_file"
 for required in WHISPER_REPOSITORY WHISPER_COMMIT WHISPER_LICENSE WHISPER_LICENSE_FILE \
-  ANDROID_NDK_VERSION CMAKE_VERSION; do
+  ANDROID_NDK_VERSION CMAKE_VERSION LLAMA_REPOSITORY LLAMA_COMMIT LLAMA_LICENSE LLAMA_LICENSE_FILE \
+  TEXT_MODEL_REPOSITORY TEXT_MODEL_REVISION TEXT_MODEL_FILE TEXT_MODEL_BYTES TEXT_MODEL_SHA256 TEXT_MODEL_LICENSE; do
   [[ -n "${!required:-}" ]] || fail "source.lock does not define $required"
 done
 [[ "$WHISPER_COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail "source.lock contains an invalid commit"
 [[ "$WHISPER_LICENSE" == MIT ]] || fail "whisper.cpp must remain pinned as MIT licensed"
 [[ "$WHISPER_LICENSE_FILE" == third_party/whisper.cpp/source/LICENSE ]] || \
   fail "unexpected whisper.cpp license path"
+[[ "$LLAMA_COMMIT" =~ ^[0-9a-f]{40}$ && "$LLAMA_LICENSE" == MIT ]] || fail "invalid llama.cpp pin"
+[[ "$LLAMA_LICENSE_FILE" == third_party/llama.cpp/source/LICENSE ]] || fail "unexpected llama.cpp license path"
 
 verify_source() {
   local name="$1" relative="$2" expected_commit="$3" expected_repository="$4" license_file="$5"
@@ -76,6 +80,7 @@ verify_source() {
 }
 
 verify_source "whisper.cpp" "third_party/whisper.cpp/source" "$WHISPER_COMMIT" "$WHISPER_REPOSITORY" "$WHISPER_LICENSE_FILE"
+verify_source "llama.cpp" "third_party/llama.cpp/source" "$LLAMA_COMMIT" "$LLAMA_REPOSITORY" "$LLAMA_LICENSE_FILE"
 
 mkdir -p "$output_dir"
 output_dir="$(cd "$output_dir" && pwd)"
@@ -105,17 +110,29 @@ copy_tracked() {
 }
 
 copy_tracked "$root_dir" "$package_dir" \
-  ai-whisper third_party/ai/source.lock third_party/ai/patches \
+  ai-whisper ai-text third_party/ai/source.lock third_party/ai/patches \
   third_party/ai/prepare-release-assets.sh THIRD_PARTY_NOTICES.md
 copy_tracked "$root_dir/third_party/whisper.cpp/source" "$package_dir/third_party/whisper.cpp/source" .
+copy_tracked "$root_dir/third_party/llama.cpp/source" "$package_dir/third_party/llama.cpp/source" .
 
 whisper_license_sha256="$(sha256sum "$root_dir/$WHISPER_LICENSE_FILE" | awk '{ print $1 }')"
+llama_license_sha256="$(sha256sum "$root_dir/$LLAMA_LICENSE_FILE" | awk '{ print $1 }')"
 cat > "$package_dir/SOURCE-MANIFEST.txt" <<EOF
 release-tag=${release_tag}
 whisper-repository=${WHISPER_REPOSITORY}
 whisper-commit=${WHISPER_COMMIT}
 whisper-license=${WHISPER_LICENSE}
 whisper-license-sha256=${whisper_license_sha256}
+llama-repository=${LLAMA_REPOSITORY}
+llama-commit=${LLAMA_COMMIT}
+llama-license=${LLAMA_LICENSE}
+llama-license-sha256=${llama_license_sha256}
+text-model-repository=${TEXT_MODEL_REPOSITORY}
+text-model-revision=${TEXT_MODEL_REVISION}
+text-model-file=${TEXT_MODEL_FILE}
+text-model-bytes=${TEXT_MODEL_BYTES}
+text-model-sha256=${TEXT_MODEL_SHA256}
+text-model-license=${TEXT_MODEL_LICENSE}
 android-ndk-version=${ANDROID_NDK_VERSION}
 cmake-version=${CMAKE_VERSION}
 model-weights=excluded
@@ -160,6 +177,15 @@ for required_entry in \
   "$package_name/ai-whisper/src/main/cpp/CMakeLists.txt" \
   "$package_name/third_party/ai/patches/whisper-allocation-failure.cmake" \
   "$package_name/ai-whisper/src/main/cpp/whisper_jni.cpp" \
+  "$package_name/third_party/llama.cpp/source/LICENSE" \
+  "$package_name/third_party/llama.cpp/source/include/llama.h" \
+  "$package_name/third_party/ai/patches/llama-build-info.cmake" \
+  "$package_name/ai-text/build.gradle.kts" \
+  "$package_name/ai-text/src/main/cpp/CMakeLists.txt" \
+  "$package_name/ai-text/src/main/cpp/text_engine.h" \
+  "$package_name/ai-text/src/main/cpp/text_engine.cpp" \
+  "$package_name/ai-text/src/main/cpp/text_jni.cpp" \
+  "$package_name/ai-text/src/main/kotlin/io/github/trevarj/motd/ai/text/TextRuntime.kt" \
   "$package_name/ai-whisper/src/main/kotlin/io/github/trevarj/motd/ai/whisper/WhisperRuntime.kt"; do
   grep -Fqx "$required_entry" "$work_dir/archive-entries.txt" || fail "source archive is missing $required_entry"
 done
@@ -174,20 +200,20 @@ cat >> "$notice_path" <<EOF
 
 ## Release-specific AI source provenance: ${release_tag}
 
-- Pinned whisper.cpp source: [${archive_name}](${source_url})
+- Pinned whisper.cpp and llama.cpp sources: [${archive_name}](${source_url})
 - AI source archive SHA-256: \`${source_sha256}\`
 
-The archive contains the exact source tree and MIT license, motd's JNI/Kotlin/CMake/Gradle
-wrapper, and the reproducible toolchain lock. It intentionally contains no model weights;
-user-imported weights are not redistributed by motd.
+The archive contains the exact runtime source trees and MIT/vendor licenses, motd's
+JNI/Kotlin/CMake/Gradle wrappers, and the reproducible toolchain lock. It intentionally
+contains no model weights; optional imported/downloaded weights are not redistributed.
 EOF
 
 cat >> "$compliance_path" <<EOF
 
-The optional on-device transcription runtime uses pinned MIT-licensed whisper.cpp source.
-Its [source archive](${source_url}) (SHA-256: \`${source_sha256}\`) includes the source tree,
-license, wrapper, and pinned build settings. It contains no model weights; users supply their
-own model files and motd does not redistribute them.
+The optional on-device speech and text runtimes use pinned MIT-licensed whisper.cpp and
+llama.cpp sources. Their [source archive](${source_url}) (SHA-256: \`${source_sha256}\`)
+includes source trees, licenses, wrappers, and pinned build settings. It contains no model
+weights; Qwen/Unsloth artifact identity and Apache-2.0 provenance are recorded separately.
 EOF
 
 checksums_tmp="$work_dir/SHA256SUMS"

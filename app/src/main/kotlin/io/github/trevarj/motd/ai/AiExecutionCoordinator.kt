@@ -36,6 +36,7 @@ class AiExecutionCoordinator
     @Inject
     constructor(
         private val speechRuntime: SpeechModelRuntime,
+        private val textRuntime: TextModelRuntime,
         private val appVisibility: AppVisibility,
         @DefaultDispatcher private val unloadDispatcher: CoroutineDispatcher,
         @ApplicationScope private val applicationScope: CoroutineScope,
@@ -43,11 +44,19 @@ class AiExecutionCoordinator
         private val executionMutex = Mutex()
         private val registryLock = Any()
         private val started = AtomicBoolean(false)
-        private val operations = mutableSetOf<Job>()
+
+        private data class Operation(
+            val job: Job,
+            val modelId: String,
+            val capability: AiModelCapability,
+        )
+
+        private val operations = mutableSetOf<Operation>()
 
         private var acceptingOperations = false
         private var activeOperation: Job? = null
         private var residentModelId: String? = null
+        private var residentCapability: AiModelCapability? = null
         private var residentReady = false
 
         fun start() {
@@ -72,13 +81,18 @@ class AiExecutionCoordinator
             capability: AiModelCapability,
         ): AiModelMetadata {
             requireModelId(modelId)
-            return withRegisteredExecution {
+            return withRegisteredExecution(modelId, capability) {
                 unloadResident()
                 residentModelId = modelId
+                residentCapability = capability
                 residentReady = false
                 var operationFailure: Throwable? = null
                 try {
-                    val metadata = speechRuntime.inspect(modelFile, capability)
+                    val metadata =
+                        when (capability) {
+                            AiModelCapability.TRANSCRIPTION -> speechRuntime.inspect(modelFile, capability)
+                            AiModelCapability.TEXT_TOOLS -> textRuntime.inspect(modelFile)
+                        }
                     currentCoroutineContext().ensureActive()
                     metadata
                 } catch (failure: Throwable) {
@@ -103,7 +117,7 @@ class AiExecutionCoordinator
             onProgress: (Int) -> Unit,
         ): String {
             requireModelId(modelId)
-            return withRegisteredExecution {
+            return withRegisteredExecution(modelId, capability) {
                 ensureResident(modelId, modelFile, capability)
                 val operation = currentCoroutineContext()[Job]!!
                 val result =
@@ -115,25 +129,52 @@ class AiExecutionCoordinator
             }
         }
 
+        suspend fun transform(
+            modelId: String,
+            modelFile: File,
+            request: io.github.trevarj.motd.ai.text.TextTransformRequest,
+            isAuthorized: () -> Boolean,
+        ): io.github.trevarj.motd.ai.text.TextTransformResult {
+            requireModelId(modelId)
+            return withRegisteredExecution(modelId, AiModelCapability.TEXT_TOOLS, isAuthorized) {
+                ensureResident(modelId, modelFile, AiModelCapability.TEXT_TOOLS)
+                if (!isAuthorized()) throw CancellationException("Text configuration changed")
+                val result = textRuntime.transform(request)
+                currentCoroutineContext().ensureActive()
+                result
+            }
+        }
+
+        suspend fun cancelTextTools(unload: Boolean = false) {
+            drain({ it.capability == AiModelCapability.TEXT_TOOLS }) {
+                if (unload && residentCapability == AiModelCapability.TEXT_TOOLS) unloadResident()
+            }
+        }
+
         /** Must complete before the caller removes the matching model file. */
         suspend fun unloadForDeletion(modelId: String) {
             requireModelId(modelId)
-            withRegisteredExecution {
+            drain({ it.modelId == modelId }) {
                 if (residentModelId == modelId) unloadResident()
             }
         }
 
+        private suspend fun drain(
+            matches: (Operation) -> Boolean,
+            cleanup: suspend () -> Unit,
+        ) {
+            val self = currentCoroutineContext()[Job]
+            withContext(NonCancellable) {
+                val registered = synchronized(registryLock) { operations.filter(matches).map { it.job }.filter { it !== self } }
+                registered.forEach { it.cancel(CancellationException("AI execution cancelled")) }
+                registered.joinAll()
+                executionMutex.withLock { cleanup() }
+            }
+        }
+
         private suspend fun moveToBackground() {
-            val registered =
-                synchronized(registryLock) {
-                    acceptingOperations = false
-                    val active = activeOperation
-                    listOfNotNull(active) + operations.filter { it !== active }
-                }
-            val cancellation = CancellationException("AI execution cancelled because the app entered the background")
-            registered.forEach { it.cancel(cancellation) }
-            registered.joinAll()
-            executionMutex.withLock { unloadResident() }
+            synchronized(registryLock) { acceptingOperations = false }
+            drain({ true }) { unloadResident() }
         }
 
         private suspend fun ensureResident(
@@ -141,13 +182,17 @@ class AiExecutionCoordinator
             modelFile: File,
             capability: AiModelCapability,
         ) {
-            if (residentModelId == modelId && residentReady) return
+            if (residentModelId == modelId && residentCapability == capability && residentReady) return
             unloadResident()
             // Record partial loads so cancellation always unloads the native model.
             residentModelId = modelId
+            residentCapability = capability
             residentReady = false
             try {
-                speechRuntime.load(modelFile, capability)
+                when (capability) {
+                    AiModelCapability.TRANSCRIPTION -> speechRuntime.load(modelFile, capability)
+                    AiModelCapability.TEXT_TOOLS -> textRuntime.load(modelFile)
+                }
                 residentReady = true
                 currentCoroutineContext().ensureActive()
             } catch (failure: Throwable) {
@@ -164,13 +209,23 @@ class AiExecutionCoordinator
         private suspend fun unloadResident() {
             if (residentModelId == null) return
             withContext(NonCancellable + unloadDispatcher) {
-                speechRuntime.unload()
+                when (residentCapability) {
+                    AiModelCapability.TRANSCRIPTION -> speechRuntime.unload()
+                    AiModelCapability.TEXT_TOOLS -> textRuntime.unload()
+                    null -> Unit
+                }
                 residentModelId = null
+                residentCapability = null
                 residentReady = false
             }
         }
 
-        private suspend fun <T> withRegisteredExecution(block: suspend () -> T): T =
+        private suspend fun <T> withRegisteredExecution(
+            modelId: String,
+            capability: AiModelCapability,
+            isAuthorized: () -> Boolean = { true },
+            block: suspend () -> T,
+        ): T =
             kotlinx.coroutines.coroutineScope {
                 val operation =
                     async(start = CoroutineStart.LAZY) {
@@ -179,6 +234,7 @@ class AiExecutionCoordinator
                             synchronized(registryLock) { activeOperation = job }
                             try {
                                 currentCoroutineContext().ensureActive()
+                                if (!isAuthorized()) throw CancellationException("Text configuration changed")
                                 block()
                             } finally {
                                 synchronized(registryLock) {
@@ -190,10 +246,10 @@ class AiExecutionCoordinator
                 val accepted =
                     synchronized(registryLock) {
                         if (!appVisibility.onScreen.value) acceptingOperations = false
-                        if (!acceptingOperations) {
+                        if (!acceptingOperations || !isAuthorized()) {
                             false
                         } else {
-                            operations += operation
+                            operations += Operation(operation, modelId, capability)
                             true
                         }
                     }
@@ -203,7 +259,7 @@ class AiExecutionCoordinator
                     throw rejection
                 }
                 operation.invokeOnCompletion {
-                    synchronized(registryLock) { operations -= operation }
+                    synchronized(registryLock) { operations.removeAll { it.job === operation } }
                 }
                 operation.start()
                 operation.await()

@@ -151,6 +151,7 @@ fun MessageActionSheet(
     isServerBuffer: Boolean = false,
     canPrepareThreadContext: Boolean = false,
     onPrepareThreadContext: () -> Unit = {},
+    onTranslate: (() -> Unit)? = null,
 ) {
     var showGrid by remember { mutableStateOf(false) }
     val hasReactions = reactions.isNotEmpty()
@@ -265,6 +266,14 @@ fun MessageActionSheet(
                         )
                     }
                 } // end !isServerBuffer (reactions + reply hidden for SERVER buffers)
+                onTranslate?.let {
+                    ActionItem(
+                        Icons.Outlined.AutoAwesome,
+                        stringResource(R.string.ai_text_translate_message),
+                        it,
+                        modifier = Modifier.testTag("message_action_translate"),
+                    )
+                }
                 ActionItem(Icons.Filled.ContentCopy, stringResource(R.string.chat_action_copy), onCopy)
                 ActionItem(
                     Icons.Filled.Share,

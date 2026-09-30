@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -28,10 +29,15 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ai.AiCustomStyle
 import io.github.trevarj.motd.ai.AiFeature
 import io.github.trevarj.motd.ai.AiModelCapability
 import io.github.trevarj.motd.ai.AiModelRecord
+import io.github.trevarj.motd.ai.AiTranslationTarget
 import io.github.trevarj.motd.ai.TranscriptionSettings
+import io.github.trevarj.motd.ui.ai.AiCustomStylesSheet
+import io.github.trevarj.motd.ui.ai.AiTranslationTargetPicker
+import io.github.trevarj.motd.ui.ai.defaultTranslationTarget
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.settings.PersistentStatusNotice
 import io.github.trevarj.motd.ui.settings.RadioRow
@@ -57,10 +63,13 @@ fun AiLabsScreen(
         onOpenModelLibrary = onOpenModelLibrary,
         onFeatureEnabled = viewModel::setFeatureEnabled,
         onAssignModel = viewModel::assignModel,
-        onUpdateSettings = viewModel::updateSettings,
+        onUpdateTranscriptionSettings = viewModel::updateTranscriptionSettings,
         onClearCaches = viewModel::clearCaches,
         onDismissStatus = viewModel::dismissStatus,
         target = target,
+        onUpsertCustomStyle = viewModel::upsertCustomStyle,
+        onDeleteCustomStyle = viewModel::deleteCustomStyle,
+        onTranslationTarget = viewModel::setTranslationTarget,
     )
 }
 
@@ -71,12 +80,18 @@ internal fun AiLabsContent(
     onOpenModelLibrary: () -> Unit,
     onFeatureEnabled: (AiFeature, Boolean) -> Unit,
     onAssignModel: (AiFeature, String) -> Unit,
-    onUpdateSettings: (String, AiModelCapability, TranscriptionSettings) -> Unit,
+    onUpdateTranscriptionSettings: (String, TranscriptionSettings) -> Unit,
     onClearCaches: () -> Unit,
     onDismissStatus: () -> Unit = {},
     target: SettingsTarget? = null,
+    onUpsertCustomStyle: (AiCustomStyle) -> Unit = {},
+    onDeleteCustomStyle: (String) -> Unit = {},
+    onTranslationTarget: (AiTranslationTarget) -> Unit = {},
 ) {
     var selectingFeature by rememberSaveable { mutableStateOf<AiFeature?>(null) }
+    var managingStyles by rememberSaveable { mutableStateOf(false) }
+    var pickingTarget by rememberSaveable { mutableStateOf(false) }
+    val effectiveTarget = state.translationTarget ?: defaultTranslationTarget(LocalLocale.current.platformLocale)
     val requestedTarget = if (target == SettingsTarget.AI) SettingsTarget.AI_MODELS else target
     val statusContent: (@Composable () -> Unit)? =
         state.status?.let { status ->
@@ -120,8 +135,33 @@ internal fun AiLabsContent(
             onSelectModel = { selectingFeature = AiFeature.TRANSCRIPTION },
             onOpenModelLibrary = onOpenModelLibrary,
             onFeatureEnabled = onFeatureEnabled,
-            onUpdateSettings = onUpdateSettings,
+            onUpdateTranscriptionSettings = onUpdateTranscriptionSettings,
         )
+        AiFeatureSection(
+            featureState = state.feature(AiFeature.TEXT_TOOLS),
+            title = stringResource(R.string.ai_text_tools),
+            summary = stringResource(R.string.ai_text_tools_summary),
+            target = SettingsTarget.AI_TEXT_TOOLS,
+            requestedTarget = requestedTarget,
+            onSelectModel = { selectingFeature = AiFeature.TEXT_TOOLS },
+            onOpenModelLibrary = onOpenModelLibrary,
+            onFeatureEnabled = onFeatureEnabled,
+            onUpdateTranscriptionSettings = onUpdateTranscriptionSettings,
+        )
+        SettingsGroup(title = stringResource(R.string.ai_text_preferences)) {
+            SettingsNavigationRow(
+                title = stringResource(R.string.ai_text_translation_language),
+                value = effectiveTarget.name,
+                modifier = Modifier.testTag("ai_translation_target"),
+                onClick = { pickingTarget = true },
+            )
+            SettingsNavigationRow(
+                title = stringResource(R.string.ai_text_custom_styles),
+                value = state.customStyles.size.toString(),
+                modifier = Modifier.testTag("ai_manage_styles"),
+                onClick = { managingStyles = true },
+            )
+        }
         SettingsGroup(title = stringResource(R.string.ai_storage_section)) {
             SettingsActionRow(
                 title = if (state.clearingCaches) stringResource(R.string.ai_clearing_caches) else stringResource(R.string.ai_clear_caches),
@@ -141,6 +181,13 @@ internal fun AiLabsContent(
             onDismiss = { selectingFeature = null },
         )
     }
+    if (pickingTarget) {
+        AiTranslationTargetPicker(effectiveTarget, {
+            onTranslationTarget(it)
+            pickingTarget = false
+        }, { pickingTarget = false })
+    }
+    if (managingStyles) AiCustomStylesSheet(state.customStyles, onUpsertCustomStyle, onDeleteCustomStyle, { managingStyles = false })
 }
 
 @Composable
@@ -153,7 +200,7 @@ private fun AiFeatureSection(
     onSelectModel: () -> Unit,
     onOpenModelLibrary: () -> Unit,
     onFeatureEnabled: (AiFeature, Boolean) -> Unit,
-    onUpdateSettings: (String, AiModelCapability, TranscriptionSettings) -> Unit,
+    onUpdateTranscriptionSettings: (String, TranscriptionSettings) -> Unit,
 ) {
     val tag = featureState.feature.tag()
     var expanded by rememberSaveable(featureState.feature.name) { mutableStateOf(false) }
@@ -180,26 +227,28 @@ private fun AiFeatureSection(
                     },
                     switchTag = "${tag}_switch",
                 )
-                SettingsDivider()
-                SettingsNavigationRow(
-                    title = stringResource(R.string.ai_advanced_settings),
-                    summary = if (featureState.assignedModel == null) stringResource(R.string.ai_choose_model_first) else stringResource(R.string.ai_advanced_settings_summary),
-                    value = if (expanded) stringResource(R.string.ai_hide) else stringResource(R.string.ai_show),
-                    modifier = Modifier.testTag("${tag}_advanced"),
-                    onClick = {
-                        if (featureState.assignedModel == null) chooseModel() else expanded = !expanded
-                    },
-                )
-                AnimatedVisibility(expanded && featureState.assignedModel != null && featureState.settings != null) {
-                    val model = featureState.assignedModel
-                    val settings = featureState.settings
-                    if (model != null && settings != null) {
-                        TranscriptionSettingsEditor(
-                            model = model,
-                            settings = settings,
-                            tag = tag,
-                            onSave = { onUpdateSettings(model.id, featureState.capability, it) },
-                        )
+                if (featureState.feature == AiFeature.TRANSCRIPTION) {
+                    SettingsDivider()
+                    SettingsNavigationRow(
+                        title = stringResource(R.string.ai_advanced_settings),
+                        summary = if (featureState.assignedModel == null) stringResource(R.string.ai_choose_model_first) else stringResource(R.string.ai_advanced_settings_summary),
+                        value = if (expanded) stringResource(R.string.ai_hide) else stringResource(R.string.ai_show),
+                        modifier = Modifier.testTag("${tag}_advanced"),
+                        onClick = {
+                            if (featureState.assignedModel == null) chooseModel() else expanded = !expanded
+                        },
+                    )
+                    AnimatedVisibility(expanded && featureState.assignedModel != null && featureState.settings != null) {
+                        val model = featureState.assignedModel
+                        val settings = featureState.settings
+                        if (model != null && settings != null) {
+                            TranscriptionSettingsEditor(
+                                model = model,
+                                settings = settings,
+                                tag = tag,
+                                onSave = { onUpdateTranscriptionSettings(model.id, it) },
+                            )
+                        }
                     }
                 }
             }
@@ -341,6 +390,7 @@ private fun TextSettingField(
 internal fun AiFeature.tag(): String =
     when (this) {
         AiFeature.TRANSCRIPTION -> "ai_transcription"
+        AiFeature.TEXT_TOOLS -> "ai_text_tools"
     }
 
 internal fun modelMetadataSummary(model: AiModelRecord): String = listOf(model.format.name, model.metadata.architecture, model.metadata.quantization, formatModelBytes(model.sizeBytes)).joinToString(" · ")

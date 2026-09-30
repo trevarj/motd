@@ -14,6 +14,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -390,6 +391,7 @@ fun MessageList(
     highlightEventId: Long? = null,
     // Entry's exact target owns paging demand until it is positioned.
     pagingHintsEnabled: Boolean = true,
+    onTranslateMessage: ((MessageEntity) -> Unit)? = null,
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
@@ -471,6 +473,7 @@ fun MessageList(
                 MessagePlaceholderRow(placeholderHeight)
                 return@items
             }
+            val translationHold = onTranslateMessage.takeUnless { outgoingFlight?.matches(msg) == true }
             val older = if (index + 1 < snapshot.size) snapshot[index + 1] else null
             val newer = if (index > 0) snapshot[index - 1] else null
 
@@ -492,6 +495,7 @@ fun MessageList(
                             message = msg,
                             onJoin = { onAcceptInvite(msg.id) },
                             onDismiss = { onDismissInvite(msg.id) },
+                            onLongPress = translationHold?.let { { it(msg) } },
                         )
                     }
                 }
@@ -509,7 +513,7 @@ fun MessageList(
                         flightProgress,
                         onFlightRowPositioned,
                     ) {
-                        NetworkBatchPill(msg)
+                        NetworkBatchPill(msg, translationHold?.let { { it(msg) } })
                     }
                 }
                 return@items
@@ -534,6 +538,7 @@ fun MessageList(
                             onAccept = onAcceptDccTransfer,
                             onReject = onRejectDccTransfer,
                             onRemove = onRemoveDccTransfer,
+                            onLongPress = translationHold?.let { { it(msg) } },
                         )
                     }
                 }
@@ -568,6 +573,7 @@ fun MessageList(
                         timelineSeams = timelineSeams,
                         onLoadGap = onLoadGap,
                         expandedEventIds = expandedSystemEventIds,
+                        onTranslateMessage = translationHold,
                         onExpandedChange = { runIds, expanded ->
                             expandedSystemEventIds =
                                 updateExpandedSystemEvents(
@@ -764,6 +770,7 @@ private fun DccTransferCard(
     onAccept: (Long, String, Boolean) -> Unit,
     onReject: (Long) -> Unit,
     onRemove: (Long) -> Unit,
+    onLongPress: (() -> Unit)? = null,
 ) {
     // Latch the outgoing entity: by the time the card collapses into the compact pill the entity
     // is already gone, and the exiting frames must keep rendering the last real content.
@@ -782,6 +789,7 @@ private fun DccTransferCard(
                 loadLines = { listOf(message.text) },
                 contentKey = message.id,
                 modifier = Modifier.testTag("chat_dcc_transfer_compact_${message.id}"),
+                onLongPress = onLongPress,
             )
         } else {
             // An exiting card keeps composing through the card->pill collapse; its actions must
@@ -792,6 +800,7 @@ private fun DccTransferCard(
                 onAccept = { id, name, resume -> if (current) onAccept(id, name, resume) },
                 onReject = { id -> if (current) onReject(id) },
                 onRemove = { id -> if (current) onRemove(id) },
+                onLongPress = onLongPress,
             )
         }
     }
@@ -805,6 +814,7 @@ internal fun ActiveDccTransferCard(
     onRemove: (Long) -> Unit,
     onReceiveResultsPrivately: ((DccTransferEntity, Boolean) -> Unit)? = null,
     onViewResults: ((DccTransferEntity) -> Unit)? = null,
+    onLongPress: (() -> Unit)? = null,
 ) {
     val privateRisk =
         remember(transfer.address, transfer.addressKind) {
@@ -828,7 +838,16 @@ internal fun ActiveDccTransferCard(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 6.dp)
-                .testTag("chat_dcc_transfer_${transfer.id}"),
+                .testTag("chat_dcc_transfer_${transfer.id}")
+                .then(
+                    onLongPress?.let {
+                        Modifier.combinedClickable(
+                            onClick = {},
+                            onLongClick = it,
+                            onLongClickLabel = stringResource(R.string.ai_text_translate_message),
+                        )
+                    } ?: Modifier,
+                ),
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
@@ -1174,7 +1193,10 @@ private fun LiveMessageEntry(
 }
 
 @Composable
-private fun NetworkBatchPill(message: MessageEntity) {
+private fun NetworkBatchPill(
+    message: MessageEntity,
+    onLongPress: (() -> Unit)? = null,
+) {
     val payload = remember(message.eventPayload) { NetworkBatchPayloadV1.decode(message.eventPayload) }
     if (payload == null) {
         SystemEventPill(
@@ -1183,6 +1205,7 @@ private fun NetworkBatchPill(message: MessageEntity) {
             loadLines = { listOf(message.text) },
             contentKey = message.id,
             modifier = Modifier.testTag("chat_network_batch_${message.id}"),
+            onLongPress = onLongPress,
         )
         return
     }
@@ -1196,6 +1219,7 @@ private fun NetworkBatchPill(message: MessageEntity) {
         loadLines = { payload.nicks },
         contentKey = message.id,
         modifier = Modifier.testTag("chat_network_batch_${message.kind.name.lowercase()}_${message.id}"),
+        onLongPress = onLongPress,
     )
 }
 
@@ -1228,6 +1252,7 @@ private fun InvitationCard(
     message: MessageEntity,
     onJoin: () -> Unit,
     onDismiss: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
 ) {
     val payload = remember(message.eventPayload) { InvitePayloadV1.decode(message.eventPayload) }
     val state = message.inviteState
@@ -1267,6 +1292,7 @@ private fun InvitationCard(
                     loadLines = { listOf(message.text) },
                     contentKey = message.id,
                     modifier = Modifier.testTag(target.testTag),
+                    onLongPress = onLongPress,
                 )
             }
 
@@ -1276,7 +1302,16 @@ private fun InvitationCard(
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 6.dp)
-                            .testTag("chat_invite_card_${message.id}"),
+                            .testTag("chat_invite_card_${message.id}")
+                            .then(
+                                onLongPress?.let {
+                                    Modifier.combinedClickable(
+                                        onClick = {},
+                                        onLongClick = it,
+                                        onLongClickLabel = stringResource(R.string.ai_text_translate_message),
+                                    )
+                                } ?: Modifier,
+                            ),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Invitation to ${target.channel}", style = MaterialTheme.typography.titleMedium)
@@ -1328,6 +1363,7 @@ private fun SystemEventRun(
     onLoadGap: (Long) -> Unit,
     expandedEventIds: Set<Long>,
     onExpandedChange: (Collection<Long>, Boolean) -> Unit,
+    onTranslateMessage: ((MessageEntity) -> Unit)? = null,
 ) {
     // Gather exactly one chunk: newest first (index), then older neighbors while still system events
     // and not themselves a boundary — a boundary row heads the next chunk, so stopping there is what
@@ -1390,6 +1426,15 @@ private fun SystemEventRun(
             onExpandedChange = { expanded -> onExpandedChange(runIds, expanded) },
             forceCollapsible = commandResponse,
             modifier = Modifier.testTag("chat_system_pill"),
+            onLongPress =
+                onTranslateMessage?.let { callback ->
+                    { if (run.size == 1) callback(newest) else onExpandedChange(runIds, true) }
+                },
+            onLineLongPress =
+                onTranslateMessage?.let { callback ->
+                    { index -> callback(run[run.lastIndex - index]) }
+                },
+            lineKey = { index -> run[run.lastIndex - index].id },
         )
     }
 }
@@ -1966,7 +2011,7 @@ private fun QuietEbooksMessageRow(
             Modifier
                 .fillMaxWidth()
                 .testTag(messageTag(msg))
-                .clickable(onClick = onExpand)
+                .combinedClickable(onClick = onExpand, onLongClick = onExpand)
                 .heightIn(min = 32.dp)
                 .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2027,7 +2072,7 @@ private fun FoolPlaceholderRow(
                     .fillMaxWidth()
                     // Collapsed fool row is still a message container; keep it selectable/tappable.
                     .testTag(messageTag(msg))
-                    .clickable { onExpand() }
+                    .combinedClickable(onClick = onExpand, onLongClick = onExpand)
                     .alpha(0.7f)
                     .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,

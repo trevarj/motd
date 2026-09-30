@@ -20,6 +20,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -96,6 +98,8 @@ enum class AiLabsFailureKind {
     MODEL_NOT_READY,
     INVALID_SETTINGS,
     PERSISTENCE,
+    NETWORK,
+    CHECKSUM_MISMATCH,
     INTERNAL,
 }
 
@@ -125,6 +129,8 @@ private val AiLabsFailureKind.safeMessage: String
             AiLabsFailureKind.MODEL_NOT_READY -> "The selected model is not ready for this feature"
             AiLabsFailureKind.INVALID_SETTINGS -> "The model settings are invalid"
             AiLabsFailureKind.PERSISTENCE -> "The AI settings could not be read or saved"
+            AiLabsFailureKind.NETWORK -> "The model download failed"
+            AiLabsFailureKind.CHECKSUM_MISMATCH -> "The file is not the supported text model"
             AiLabsFailureKind.INTERNAL -> "The local AI model operation failed"
         }
 
@@ -158,6 +164,8 @@ internal interface AiLabsRuntimeBoundary {
     ): AiModelMetadata
 
     suspend fun unloadForDeletion(modelId: String)
+
+    suspend fun cancelTextTools(unload: Boolean)
 }
 
 private class ContentResolverModelSource(
@@ -221,6 +229,8 @@ private class CoordinatorBoundary(
         capability: AiModelCapability,
     ): AiModelMetadata = coordinator.inspect(modelId, modelFile, capability)
 
+    override suspend fun cancelTextTools(unload: Boolean) = coordinator.cancelTextTools(unload)
+
     override suspend fun unloadForDeletion(modelId: String) {
         coordinator.unloadForDeletion(modelId)
     }
@@ -241,6 +251,7 @@ class AiLabsRepository internal constructor(
     private val maximumModelBytes: Long = MAX_MODEL_BYTES,
     private val freeSpaceReserveBytes: Long = FREE_SPACE_RESERVE_BYTES,
     private val copyBufferBytes: Int = COPY_BUFFER_BYTES,
+    private val textArtifact: TextModelArtifact = TextModelArtifact.Pinned,
 ) {
     @Inject
     constructor(
@@ -271,6 +282,92 @@ class AiLabsRepository internal constructor(
     )
 
     private val mutations = Mutex()
+    private val textConfigurationLock = Any()
+    private var pendingTextMutations = 0
+    private val mutableTextToolsVersion = MutableStateFlow(0L)
+    val textToolsVersion: StateFlow<Long> = mutableTextToolsVersion
+
+    suspend fun textToolsConfiguration(): TextToolsConfiguration? =
+        mutations.withLock {
+            val committed = normalized(decodeForMutation(store.data.first()[AI_LABS_STATE]))
+            synchronized(textConfigurationLock) {
+                if (pendingTextMutations != 0) null else TextToolsConfiguration(mutableTextToolsVersion.value, committed)
+            }
+        }
+
+    fun isTextToolsVersionCurrent(version: Long): Boolean =
+        synchronized(textConfigurationLock) {
+            pendingTextMutations == 0 && mutableTextToolsVersion.value == version
+        }
+
+    fun applyIfTextToolsVersion(
+        version: Long,
+        apply: () -> Boolean,
+    ): Boolean =
+        synchronized(textConfigurationLock) {
+            pendingTextMutations == 0 && mutableTextToolsVersion.value == version && apply()
+        }
+
+    private suspend fun <T> textMutation(
+        affected: Boolean,
+        unload: Boolean = false,
+        block: suspend () -> T,
+    ): T {
+        if (!affected) return block()
+        synchronized(textConfigurationLock) {
+            pendingTextMutations++
+            mutableTextToolsVersion.value++
+        }
+        try {
+            runtime.cancelTextTools(unload)
+            return block()
+        } finally {
+            synchronized(textConfigurationLock) {
+                pendingTextMutations--
+                mutableTextToolsVersion.value++
+            }
+        }
+    }
+
+    suspend fun upsertCustomStyle(style: AiCustomStyle): Result<Unit> =
+        repositoryResult {
+            textMutation(true) {
+                mutations.withLock {
+                    val clean = style.copy(name = style.name.trim())
+                    if (!clean.isValid()) throw AiLabsException(AiLabsFailureKind.INVALID_SETTINGS)
+                    editState { current ->
+                        val index = current.customStyles.indexOfFirst { it.id == clean.id }
+                        if (index < 0 && current.customStyles.size >= 20) throw AiLabsException(AiLabsFailureKind.INVALID_SETTINGS)
+                        current.copy(
+                            customStyles =
+                                current.customStyles.toMutableList().apply {
+                                    if (index < 0) add(clean) else set(index, clean)
+                                },
+                        )
+                    }
+                }
+            }
+        }
+
+    suspend fun deleteCustomStyle(styleId: String): Result<Unit> =
+        repositoryResult {
+            textMutation(true) {
+                mutations.withLock {
+                    editState { it.copy(customStyles = it.customStyles.filterNot { style -> style.id == styleId }) }
+                }
+            }
+        }
+
+    suspend fun setTranslationTarget(target: AiTranslationTarget): Result<Unit> =
+        repositoryResult {
+            textMutation(true) {
+                mutations.withLock {
+                    if (!target.isValid()) throw AiLabsException(AiLabsFailureKind.INVALID_SETTINGS)
+                    editState { it.copy(translationTarget = target) }
+                }
+            }
+        }
+
     private val transientImportState = MutableStateFlow<AiImportState>(AiImportState.Idle)
     private val persistedState: Flow<AiLabsState> =
         store.data
@@ -293,21 +390,23 @@ class AiLabsRepository internal constructor(
         enabled: Boolean,
     ): Result<Unit> =
         repositoryResult {
-            mutations.withLock {
-                editState { current ->
-                    if (!enabled) {
-                        current.copy(enabledFeatures = current.enabledFeatures - feature)
-                    } else {
-                        val modelId =
-                            current.assignedModelId(feature)
-                                ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
-                        val model =
-                            current.models.firstOrNull { it.id == modelId }
-                                ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
-                        if (!model.isReadyFor(feature.requiredCapability, current.settingsFor(modelId, feature.requiredCapability))) {
-                            throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
+            textMutation(feature == AiFeature.TEXT_TOOLS, unload = !enabled) {
+                mutations.withLock {
+                    editState { current ->
+                        if (!enabled) {
+                            current.copy(enabledFeatures = current.enabledFeatures - feature)
+                        } else {
+                            val modelId =
+                                current.assignedModelId(feature)
+                                    ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
+                            val model =
+                                current.models.firstOrNull { it.id == modelId }
+                                    ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
+                            if (!current.isModelReadyFor(model, feature.requiredCapability)) {
+                                throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
+                            }
+                            current.copy(enabledFeatures = current.enabledFeatures + feature)
                         }
-                        current.copy(enabledFeatures = current.enabledFeatures + feature)
                     }
                 }
             }
@@ -319,8 +418,10 @@ class AiLabsRepository internal constructor(
         onProgress: (bytesCopied: Long, totalBytes: Long?) -> Unit = { _, _ -> },
     ): Result<AiModelRecord> =
         repositoryResult {
-            mutations.withLock {
-                withContext(ioDispatcher) { importLocked(uri, requestedCapability, onProgress) }
+            textMutation(requestedCapability == AiModelCapability.TEXT_TOOLS) {
+                mutations.withLock {
+                    withContext(ioDispatcher) { importLocked(uri, requestedCapability, onProgress) }
+                }
             }
         }
 
@@ -329,27 +430,28 @@ class AiLabsRepository internal constructor(
         modelId: String,
     ): Result<Unit> =
         repositoryResult {
-            mutations.withLock {
-                editState { current ->
-                    val model =
-                        current.models.firstOrNull { it.id == modelId }
-                            ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_FOUND)
-                    val capability = feature.requiredCapability
-                    if (!model.isReadyFor(capability, current.settingsFor(modelId, capability))) {
-                        throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
+            textMutation(feature == AiFeature.TEXT_TOOLS, unload = true) {
+                mutations.withLock {
+                    editState { current ->
+                        val model =
+                            current.models.firstOrNull { it.id == modelId }
+                                ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_FOUND)
+                        val capability = feature.requiredCapability
+                        if (!current.isModelReadyFor(model, capability)) {
+                            throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
+                        }
+                        current.copy(
+                            assignments =
+                                current.assignments.filterNot { it.feature == feature } +
+                                    AiFeatureAssignment(feature, modelId),
+                        )
                     }
-                    current.copy(
-                        assignments =
-                            current.assignments.filterNot { it.feature == feature } +
-                                AiFeatureAssignment(feature, modelId),
-                    )
                 }
             }
         }
 
-    suspend fun updateSettings(
+    suspend fun updateTranscriptionSettings(
         modelId: String,
-        capability: AiModelCapability,
         settings: TranscriptionSettings,
     ): Result<Unit> =
         repositoryResult {
@@ -358,6 +460,7 @@ class AiLabsRepository internal constructor(
                     val model =
                         current.models.firstOrNull { it.id == modelId }
                             ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_FOUND)
+                    val capability = AiModelCapability.TRANSCRIPTION
                     if (capability !in model.capabilities) {
                         throw AiLabsException(AiLabsFailureKind.INVALID_SETTINGS)
                     }
@@ -374,7 +477,7 @@ class AiLabsRepository internal constructor(
                     val affected =
                         updated.assignments
                             .filter { it.modelId == modelId && it.feature.requiredCapability == capability }
-                            .filterNot { model.isReadyFor(capability, updated.settingsFor(modelId, capability)) }
+                            .filterNot { updated.isModelReadyFor(model, capability) }
                             .mapTo(mutableSetOf()) { it.feature }
                     updated.copy(
                         assignments = updated.assignments.filterNot { it.feature in affected },
@@ -386,31 +489,57 @@ class AiLabsRepository internal constructor(
 
     suspend fun deleteModel(modelId: String): Result<Unit> =
         repositoryResult {
-            mutations.withLock { withContext(ioDispatcher) { deleteLocked(modelId) } }
+            textMutation(modelId == textArtifact.sha256, unload = false) { mutations.withLock { withContext(ioDispatcher) { deleteLocked(modelId) } } }
         }
 
     suspend fun reconcile(): Result<Unit> =
         repositoryResult {
-            mutations.withLock { withContext(ioDispatcher) { reconcileLocked() } }
+            textMutation(true) { mutations.withLock { withContext(ioDispatcher) { reconcileLocked() } } }
+        }
+
+    suspend fun downloadRecommendedTextModel(onProgress: (Long, Long?) -> Unit = { _, _ -> }): Result<AiModelRecord> =
+        repositoryResult {
+            textMutation(true) {
+                mutations.withLock {
+                    withContext(ioDispatcher) {
+                        installLocked(
+                            AiModelSourceMetadata(io.github.trevarj.motd.ai.text.BuildConfig.TEXT_MODEL_FILE, textArtifact.sizeBytes),
+                            AiModelCapability.TEXT_TOOLS,
+                            onProgress,
+                        ) { signal -> openTextModelDownload(textArtifact.url, signal) }
+                    }
+                }
+            }
         }
 
     private suspend fun importLocked(
         uri: Uri,
         capability: AiModelCapability,
         onProgress: (Long, Long?) -> Unit,
+    ): AiModelRecord = installLocked(advisoryMetadata(uri), capability, onProgress) { signal -> openSource(uri, signal) }
+
+    private suspend fun installLocked(
+        metadata: AiModelSourceMetadata,
+        capability: AiModelCapability,
+        onProgress: (Long, Long?) -> Unit,
+        opener: (CancellationSignal) -> InputStream,
     ): AiModelRecord {
         ensureModelDirectory()
-        val metadata = advisoryMetadata(uri)
-        val totalBytes = metadata.sizeBytes?.takeIf { it > 0 }
+        val expected = textArtifact.takeIf { capability == AiModelCapability.TEXT_TOOLS }
+        val totalBytes = expected?.sizeBytes ?: metadata.sizeBytes?.takeIf { it > 0 }
         reportImportProgress(0, totalBytes, onProgress)
         var temporary: File? = null
         var installed: File? = null
         var committed = false
         try {
-            ensureSpace(0)
-            temporary = createImportTemporary()
-            val copied = copySource(uri, temporary, totalBytes, onProgress)
-            preflight(temporary, copied.prefix, copied.bytesCopied)
+            ensureSpace(expected?.sizeBytes ?: 0)
+            val staged = createImportTemporary()
+            temporary = staged
+            val copied = copySource(opener, staged, totalBytes, expected, onProgress)
+            if (expected != null && (copied.bytesCopied != expected.sizeBytes || copied.sha256 != expected.sha256)) {
+                throw AiLabsException(AiLabsFailureKind.CHECKSUM_MISMATCH)
+            }
+            preflight(staged, capability, copied.prefix, copied.bytesCopied)
             val id = copied.sha256
             val destination = modelFile(id)
             val inspectionFile =
@@ -420,17 +549,20 @@ class AiLabsRepository internal constructor(
                     }
                     destination
                 } else {
-                    temporary
+                    staged
                 }
             val inspected = inspect(id, inspectionFile, capability)
-            if (!destination.exists()) {
-                atomicMove(temporary, destination, AiLabsFailureKind.ATOMIC_INSTALL)
-                installed = destination
-                temporary = null
+            currentCoroutineContext().ensureActive()
+            return withContext(NonCancellable) {
+                if (!destination.exists()) {
+                    atomicMove(checkNotNull(temporary), destination, AiLabsFailureKind.ATOMIC_INSTALL)
+                    installed = destination
+                    temporary = null
+                }
+                val record = addImportedModel(id, cleanDisplayName(metadata.displayName), copied.bytesCopied, capability, inspected)
+                committed = true
+                record
             }
-            val record = addImportedModel(id, cleanDisplayName(metadata.displayName), copied.bytesCopied, capability, inspected)
-            committed = true
-            return record
         } finally {
             transientImportState.value = AiImportState.Idle
             temporary?.deleteQuietly()
@@ -465,9 +597,10 @@ class AiLabsRepository internal constructor(
         }
 
     private suspend fun copySource(
-        uri: Uri,
+        opener: (CancellationSignal) -> InputStream,
         destination: File,
         totalBytes: Long?,
+        expected: TextModelArtifact?,
         onProgress: (Long, Long?) -> Unit,
     ): CopiedModel {
         val context = currentCoroutineContext()
@@ -480,7 +613,7 @@ class AiLabsRepository internal constructor(
             }
             try {
                 context.ensureActive()
-                val input = openSource(uri, cancellationSignal)
+                val input = opener(cancellationSignal)
                 activeInput.set(input)
                 context.ensureActive()
                 val digest = MessageDigest.getInstance("SHA-256")
@@ -510,6 +643,7 @@ class AiLabsRepository internal constructor(
                                 }
                             if (count < 0) break
                             if (count == 0) continue
+                            if (expected != null && copied > expected.sizeBytes - count) throw AiLabsException(AiLabsFailureKind.CHECKSUM_MISMATCH)
                             if (copied > maximumModelBytes - count) throw AiLabsException(AiLabsFailureKind.TOO_LARGE)
                             ensureSpace(count.toLong())
                             try {
@@ -588,6 +722,7 @@ class AiLabsRepository internal constructor(
 
     private fun preflight(
         file: File,
+        capability: AiModelCapability,
         prefix: ByteArray = readPrefix(file),
         sizeBytes: Long = file.length(),
     ) {
@@ -595,8 +730,9 @@ class AiLabsRepository internal constructor(
         val gguf = prefix.contentEquals(byteArrayOf(0x47, 0x47, 0x55, 0x46))
         val whisper = prefix.contentEquals(byteArrayOf(0x6c, 0x6d, 0x67, 0x67))
         when {
+            gguf && capability == AiModelCapability.TEXT_TOOLS -> Unit
             gguf -> throw AiLabsException(AiLabsFailureKind.UNSUPPORTED_ROLE)
-            !whisper -> throw AiLabsException(AiLabsFailureKind.INVALID_FORMAT)
+            !whisper || capability != AiModelCapability.TRANSCRIPTION -> throw AiLabsException(AiLabsFailureKind.INVALID_FORMAT)
         }
     }
 
@@ -651,7 +787,7 @@ class AiLabsRepository internal constructor(
                     id,
                     displayName,
                     sizeBytes,
-                    AiModelFormat.WHISPER_GGML,
+                    if (capability == AiModelCapability.TEXT_TOOLS) AiModelFormat.QWEN35_GGUF else AiModelFormat.WHISPER_GGML,
                     setOf(capability),
                     inspected,
                     now().coerceAtLeast(0),
@@ -675,25 +811,28 @@ class AiLabsRepository internal constructor(
             throw AiLabsException(AiLabsFailureKind.DELETION)
         }
 
-        val canonical = modelFile(modelId)
-        val staged = File(modelDirectory, "$DELETE_PREFIX$modelId$TEMP_SUFFIX")
-        if (staged.exists() && !staged.delete()) throw AiLabsException(AiLabsFailureKind.DELETION)
-        val moved = canonical.exists()
-        if (moved) atomicMove(canonical, staged, AiLabsFailureKind.DELETION)
-        var stateChanged = false
-        try {
-            editState { it.withoutModels(setOf(modelId)) }
-            stateChanged = true
-            if (moved && !staged.delete()) throw AiLabsException(AiLabsFailureKind.DELETION)
-        } catch (failure: CancellationException) {
-            rollbackDeletion(before, canonical, staged, moved, stateChanged)
-            throw failure
-        } catch (failure: AiLabsException) {
-            rollbackDeletion(before, canonical, staged, moved, stateChanged)
-            throw failure
-        } catch (_: Exception) {
-            rollbackDeletion(before, canonical, staged, moved, stateChanged)
-            throw AiLabsException(AiLabsFailureKind.DELETION)
+        currentCoroutineContext().ensureActive()
+        withContext(NonCancellable) {
+            val canonical = modelFile(modelId)
+            val staged = File(modelDirectory, "$DELETE_PREFIX$modelId$TEMP_SUFFIX")
+            if (staged.exists() && !staged.delete()) throw AiLabsException(AiLabsFailureKind.DELETION)
+            val moved = canonical.exists()
+            if (moved) atomicMove(canonical, staged, AiLabsFailureKind.DELETION)
+            var stateChanged = false
+            try {
+                editState { it.withoutModels(setOf(modelId)) }
+                stateChanged = true
+                if (moved && !staged.delete()) throw AiLabsException(AiLabsFailureKind.DELETION)
+            } catch (failure: CancellationException) {
+                rollbackDeletion(before, canonical, staged, moved, stateChanged)
+                throw failure
+            } catch (failure: AiLabsException) {
+                rollbackDeletion(before, canonical, staged, moved, stateChanged)
+                throw failure
+            } catch (_: Exception) {
+                rollbackDeletion(before, canonical, staged, moved, stateChanged)
+                throw AiLabsException(AiLabsFailureKind.DELETION)
+            }
         }
     }
 
@@ -739,7 +878,7 @@ class AiLabsRepository internal constructor(
                 file.isFile &&
                     file.length() == model.sizeBytes &&
                     try {
-                        preflight(file)
+                        preflight(file, model.capabilities.single())
                         sha256(file) == model.id
                     } catch (failure: CancellationException) {
                         throw failure
@@ -749,6 +888,7 @@ class AiLabsRepository internal constructor(
             if (!valid) invalid += model.id
         }
 
+        invalid.forEach { runtime.unloadForDeletion(it) }
         val reconciled = normalized(current.withoutModels(invalid))
         if (reconciled != current) {
             replaceState(reconciled)
@@ -843,10 +983,7 @@ class AiLabsRepository internal constructor(
         val validAssignments =
             value.assignments.filter { assignment ->
                 val model = models.firstOrNull { it.id == assignment.modelId } ?: return@filter false
-                model.isReadyFor(
-                    assignment.feature.requiredCapability,
-                    value.settingsFor(assignment.modelId, assignment.feature.requiredCapability),
-                )
+                value.isModelReadyFor(model, assignment.feature.requiredCapability)
             }
         return value.copy(
             assignments = validAssignments,
@@ -855,7 +992,7 @@ class AiLabsRepository internal constructor(
     }
 
     private fun AiLabsState.ensureSettings(model: AiModelRecord): AiLabsState =
-        if (transcriptionSettings.any { it.modelId == model.id }) {
+        if (AiModelCapability.TRANSCRIPTION !in model.capabilities || transcriptionSettings.any { it.modelId == model.id }) {
             this
         } else {
             copy(
@@ -975,27 +1112,59 @@ class AiLabsRepository internal constructor(
         } else {
             try {
                 val document = AI_LABS_JSON.parseToJsonElement(raw).jsonObject
-                val voiceOnly =
+                val supportedState =
                     JsonObject(
                         document.toMutableMap().apply {
                             // state_v1 also held text models. Filter retired enums before decoding.
                             put(
                                 "enabledFeatures",
-                                JsonArray(document["enabledFeatures"]?.jsonArray.orEmpty().filter { it.jsonPrimitive.content == "TRANSCRIPTION" }),
+                                JsonArray(document["enabledFeatures"]?.jsonArray.orEmpty().filter { it.jsonPrimitive.content in setOf("TRANSCRIPTION", "TEXT_TOOLS") }),
                             )
                             put(
                                 "models",
-                                JsonArray(document["models"]?.jsonArray.orEmpty().filter { it.jsonObject["format"]?.jsonPrimitive?.content == "WHISPER_GGML" }),
+                                JsonArray(
+                                    document["models"]?.jsonArray.orEmpty().filter {
+                                        val item = runCatching { it.jsonObject }.getOrNull() ?: return@filter false
+                                        item["format"]?.jsonPrimitive?.content == "WHISPER_GGML" ||
+                                            (
+                                                item["format"]?.jsonPrimitive?.content == "QWEN35_GGUF" &&
+                                                    item["id"]?.jsonPrimitive?.content == textArtifact.sha256 &&
+                                                    runCatching { AI_LABS_JSON.decodeFromJsonElement<AiModelRecord>(it) }.getOrNull()?.let { record ->
+                                                        record.sizeBytes == textArtifact.sizeBytes &&
+                                                            AiLabsState().isModelReadyFor(record, AiModelCapability.TEXT_TOOLS)
+                                                    } == true
+                                            )
+                                    },
+                                ),
                             )
                             put(
                                 "assignments",
-                                JsonArray(document["assignments"]?.jsonArray.orEmpty().filter { it.jsonObject["feature"]?.jsonPrimitive?.content == "TRANSCRIPTION" }),
+                                JsonArray(document["assignments"]?.jsonArray.orEmpty().filter { it.jsonObject["feature"]?.jsonPrimitive?.content in setOf("TRANSCRIPTION", "TEXT_TOOLS") }),
                             )
+                            val seen = mutableSetOf<String>()
+                            put(
+                                "customStyles",
+                                JsonArray(
+                                    (document["customStyles"] as? JsonArray)
+                                        .orEmpty()
+                                        .mapNotNull {
+                                            runCatching { AI_LABS_JSON.decodeFromJsonElement<AiCustomStyle>(it) }
+                                                .getOrNull()
+                                                ?.takeIf { style -> style.isValid() && seen.add(style.id) }
+                                                ?.let { style -> AI_LABS_JSON.encodeToJsonElement(AiCustomStyle.serializer(), style) }
+                                        }.take(20),
+                                ),
+                            )
+                            val target =
+                                document["translationTarget"]?.let {
+                                    runCatching { AI_LABS_JSON.decodeFromJsonElement<AiTranslationTarget>(it) }.getOrNull()?.takeIf { target -> target.isValid() }
+                                }
+                            if (target == null) remove("translationTarget")
                             remove("generationSettings")
                             remove("embeddingSettings")
                         },
                     )
-                AI_LABS_JSON.decodeFromJsonElement<AiLabsState>(voiceOnly)
+                AI_LABS_JSON.decodeFromJsonElement<AiLabsState>(supportedState)
             } catch (_: Exception) {
                 null
             }
@@ -1061,3 +1230,8 @@ private suspend inline fun <T> repositoryResult(crossinline block: suspend () ->
     } catch (_: Throwable) {
         Result.failure(AiLabsException(AiLabsFailureKind.INTERNAL))
     }
+
+data class TextToolsConfiguration(
+    val version: Long,
+    val state: AiLabsState,
+)

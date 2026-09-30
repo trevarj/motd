@@ -18,8 +18,8 @@ import io.github.trevarj.motd.ai.AiTranscriptionRequest
 import io.github.trevarj.motd.ai.MAX_TRANSCRIPT_BYTES
 import io.github.trevarj.motd.ai.TranscriptionSettings
 import io.github.trevarj.motd.ai.assignedModelId
-import io.github.trevarj.motd.ai.isReadyFor
-import io.github.trevarj.motd.ai.settingsFor
+import io.github.trevarj.motd.ai.isModelReadyFor
+import io.github.trevarj.motd.ai.transcriptionSettingsFor
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.normalizedConfig
@@ -738,7 +738,7 @@ class VoiceMessageViewModel
 private fun AiLabsState.voiceTranscriptionConfiguration(): VoiceTranscriptionConfiguration {
     val modelId = assignedModelId(AiFeature.TRANSCRIPTION)
     val model = models.firstOrNull { it.id == modelId }
-    val settings = modelId?.let { settingsFor(it, AiModelCapability.TRANSCRIPTION) }
+    val settings = modelId?.let { transcriptionSettingsFor(it) }
     val enabled = AiFeature.TRANSCRIPTION in enabledFeatures
     return VoiceTranscriptionConfiguration(
         enabled = enabled,
@@ -747,7 +747,7 @@ private fun AiLabsState.voiceTranscriptionConfiguration(): VoiceTranscriptionCon
         ready =
             enabled &&
                 settings != null &&
-                model?.isReadyFor(AiModelCapability.TRANSCRIPTION, settings) == true,
+                model?.let { isModelReadyFor(it, AiModelCapability.TRANSCRIPTION) } == true,
     )
 }
 
@@ -875,6 +875,14 @@ internal fun voiceTranscriptFailure(failure: Throwable): VoiceTranscriptFailureK
                 }
 
                 AiRuntimeFailure.NATIVE -> {
+                    VoiceTranscriptFailureKind.NATIVE_FAILURE
+                }
+
+                AiRuntimeFailure.UNSUPPORTED_TEMPLATE,
+                AiRuntimeFailure.INPUT_TOO_LONG,
+                AiRuntimeFailure.INVALID_OUTPUT,
+                AiRuntimeFailure.NO_TEXT,
+                -> {
                     VoiceTranscriptFailureKind.NATIVE_FAILURE
                 }
             }

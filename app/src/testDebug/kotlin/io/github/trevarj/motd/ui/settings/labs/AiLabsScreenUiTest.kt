@@ -10,6 +10,7 @@ import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -18,22 +19,41 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.core.app.ActivityOptionsCompat
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ai.AiFeature
 import io.github.trevarj.motd.ai.AiFeatureAssignment
+import io.github.trevarj.motd.ai.AiLabsRepository
+import io.github.trevarj.motd.ai.AiLabsRuntimeBoundary
 import io.github.trevarj.motd.ai.AiLabsState
 import io.github.trevarj.motd.ai.AiModelCapability
 import io.github.trevarj.motd.ai.AiModelFormat
 import io.github.trevarj.motd.ai.AiModelMetadata
 import io.github.trevarj.motd.ai.AiModelRecord
+import io.github.trevarj.motd.ai.AiModelSource
+import io.github.trevarj.motd.ai.AiModelSourceMetadata
 import io.github.trevarj.motd.ai.AiTranscriptionSettingsRecord
+import io.github.trevarj.motd.ai.AiTranslationTarget
+import io.github.trevarj.motd.ai.TextModelArtifact
 import io.github.trevarj.motd.ai.TranscriptionSettings
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -41,6 +61,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import java.io.File
+import java.io.InputStream
 
 @RunWith(RobolectricTestRunner::class)
 class AiLabsScreenUiTest {
@@ -48,25 +70,207 @@ class AiLabsScreenUiTest {
     val compose = createComposeRule()
 
     @Test
-    fun `Labs parent opens the anchored local voice settings row`() {
-        var opened = 0
+    fun textSetupStylesAndTargetPersistWithoutImplicitEnable() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val directory = File(context.cacheDir, "text-ui-${System.nanoTime()}").apply { mkdirs() }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val store = PreferenceDataStoreFactory.create(scope = scope, produceFile = { File(directory, "state.preferences_pb") })
+        val model = AiModelRecord(TextModelArtifact.Pinned.sha256, "Qwen", TextModelArtifact.Pinned.sizeBytes, AiModelFormat.QWEN35_GGUF, setOf(AiModelCapability.TEXT_TOOLS), AiModelMetadata("qwen35", "Q4_K_M", maximumContextTokens = 4096, textTemplateId = "qwen35-nonthinking-v1"), 1)
+        runBlocking { store.edit { it[stringPreferencesKey("state_v1")] = Json.encodeToString(AiLabsState(models = listOf(model))) } }
+
+        fun createRepository() =
+            AiLabsRepository(
+                store,
+                File(directory, "models").apply { mkdirs() },
+                object : AiModelSource {
+                    override fun metadata(uri: Uri) = AiModelSourceMetadata()
+
+                    override fun open(uri: Uri): InputStream = error("never download implicitly")
+                },
+                object : AiLabsRuntimeBoundary {
+                    override suspend fun inspect(
+                        modelId: String,
+                        modelFile: File,
+                        capability: AiModelCapability,
+                    ) = model.metadata
+
+                    override suspend fun unloadForDeletion(modelId: String) = Unit
+
+                    override suspend fun cancelTextTools(unload: Boolean) = Unit
+                },
+                scope,
+                availableBytes = { Long.MAX_VALUE },
+                allocateBytes = { _, _ -> },
+            )
+        var repository by mutableStateOf(createRepository())
+        var library by mutableStateOf(false)
+        var downloads = 0
+        compose.setContent {
+            val raw by repository.state.collectAsState()
+            MotdTheme {
+                if (library) {
+                    AiModelLibraryContent(deriveAiLabsUiState(raw, null, false), onBack = { library = false }, onImport = { _, _ -> }, onUpdateTranscriptionSettings = { _, _ -> }, onDelete = {}, onDownloadTextModel = { downloads++ })
+                } else {
+                    AiLabsContent(
+                        deriveAiLabsUiState(raw, null, false),
+                        onBack = {},
+                        onOpenModelLibrary = { library = true },
+                        onFeatureEnabled = { feature, enabled -> runBlocking { repository.setFeatureEnabled(feature, enabled).getOrThrow() } },
+                        onAssignModel = { feature, id -> runBlocking { repository.assignModel(feature, id).getOrThrow() } },
+                        onUpdateTranscriptionSettings = { _, _ -> },
+                        onClearCaches = {},
+                        target = SettingsTarget.AI_TEXT_TOOLS,
+                        onUpsertCustomStyle = { runBlocking { repository.upsertCustomStyle(it).getOrThrow() } },
+                        onDeleteCustomStyle = { runBlocking { repository.deleteCustomStyle(it).getOrThrow() } },
+                        onTranslationTarget = { runBlocking { repository.setTranslationTarget(it).getOrThrow() } },
+                    )
+                }
+            }
+        }
+        try {
+            compose.waitUntil(5_000) {
+                runBlocking {
+                    repository
+                        .textToolsConfiguration()!!
+                        .state.models
+                        .isNotEmpty()
+                }
+            }
+            compose
+                .onNodeWithTag("ai_text_tools_switch_row", useUnmergedTree = true)
+                .performScrollTo()
+                .assertIsOff()
+                .performClick()
+            compose.onNodeWithTag("ai_text_tools_model_option_${model.id}", useUnmergedTree = true).performClick()
+            compose.onNodeWithTag("ai_text_tools_switch_row", useUnmergedTree = true).assertIsOff()
+            compose.onNodeWithTag("ai_text_tools_advanced", useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithTag("ai_manage_styles", useUnmergedTree = true).performScrollTo().performClick()
+            compose.onNodeWithTag("ai_style_add").performClick()
+            compose.onNodeWithTag("ai_style_name").performTextReplacement("Warm")
+            compose.onNodeWithTag("ai_style_instruction").performTextReplacement("Be warmer.\\nKeep facts.")
+            compose.onNodeWithTag("ai_style_save").performClick()
+            compose.waitUntil(5_000) { repository.state.value.customStyles.size == 1 }
+            val styleId =
+                repository.state.value.customStyles
+                    .single()
+                    .id
+            compose.onNodeWithTag("ai_style_edit_$styleId").performClick()
+            compose.onNodeWithTag("ai_style_name").performTextReplacement("Warmer")
+            compose.onNodeWithTag("ai_style_save").performClick()
+            compose.runOnIdle {
+                assertEquals(
+                    styleId,
+                    repository.state.value.customStyles
+                        .single()
+                        .id,
+                )
+            }
+            compose.runOnIdle { library = true }
+            compose.onNodeWithTag("ai_download_text_model", useUnmergedTree = true).performScrollTo().performClick()
+            compose.onNodeWithText("Setup contacts Hugging Face", substring = true).assertExists()
+            compose.onNodeWithText(context.getString(R.string.action_cancel)).performClick()
+            assertEquals(0, downloads)
+            compose.runOnIdle { library = false }
+            compose.onNodeWithTag("ai_translation_target", useUnmergedTree = true).performScrollTo().performClick()
+            compose.onNodeWithTag("ai_language_other").performScrollTo().performClick()
+            compose.onNodeWithTag("ai_language_other_name").performTextReplacement("x")
+            compose.onNodeWithTag("ai_language_other_save").assertIsNotEnabled()
+            compose.onNodeWithTag("ai_language_other_name").performTextReplacement("Welsh (Cymraeg)")
+            compose.onNodeWithTag("ai_language_other_save").performClick()
+            compose.waitUntil(5_000) {
+                repository.state.value.translationTarget
+                    ?.code == "other"
+            }
+            compose.runOnIdle { repository = createRepository() }
+            compose.waitUntil(5_000) { repository.state.value.customStyles.size == 1 }
+            compose.runOnIdle {
+                assertEquals(
+                    styleId,
+                    repository.state.value.customStyles
+                        .single()
+                        .id,
+                )
+                assertEquals(
+                    "Warmer",
+                    repository.state.value.customStyles
+                        .single()
+                        .name,
+                )
+                assertEquals(AiTranslationTarget("other", "Welsh (Cymraeg)"), repository.state.value.translationTarget)
+                assertTrue(
+                    repository.state.value.enabledFeatures
+                        .isEmpty(),
+                )
+            }
+            compose.onNodeWithTag("ai_manage_styles", useUnmergedTree = true).performScrollTo().performClick()
+            compose.onNodeWithTag("ai_style_delete_$styleId").performClick()
+            compose.waitUntil(5_000) {
+                repository.state.value.customStyles
+                    .isEmpty()
+            }
+            assertEquals(1, repository.state.value.models.size)
+        } finally {
+            scope.cancel()
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun labsParentOpensCombinedAiWithIndependentDefaultOffSetup() {
+        var opened by mutableStateOf(false)
+        var setupOpens = 0
+        val enableRequests = mutableListOf<AiFeature>()
         compose.setContent {
             MotdTheme {
-                LabsContent(
-                    state = LabsUiState(),
-                    onBack = {},
-                    onGesturesChanged = {},
-                    onAgentwireChanged = {},
-                    onDickordChanged = {},
-                    onOpenAi = { opened++ },
-                    target = SettingsTarget.AI,
-                )
+                if (opened) {
+                    AiLabsContent(
+                        state = deriveAiLabsUiState(AiLabsState(), null, false),
+                        onBack = { opened = false },
+                        onOpenModelLibrary = { setupOpens++ },
+                        onFeatureEnabled = { feature, _ -> enableRequests += feature },
+                        onAssignModel = { _, _ -> },
+                        onUpdateTranscriptionSettings = { _, _ -> },
+                        onClearCaches = {},
+                        target = SettingsTarget.AI,
+                    )
+                } else {
+                    LabsContent(
+                        state = LabsUiState(),
+                        onBack = {},
+                        onGesturesChanged = {},
+                        onAgentwireChanged = {},
+                        onDickordChanged = {},
+                        onOpenAi = { opened = true },
+                        target = SettingsTarget.AI,
+                    )
+                }
             }
         }
 
-        compose.onNodeWithTag("labs_ai", useUnmergedTree = true).assertExists().performClick()
         compose.onNodeWithTag("settings_target_highlight_AI", useUnmergedTree = true).assertExists()
-        assertEquals(1, opened)
+        compose.onNodeWithTag("labs_ai", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("screen_ai_labs", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("ai_model_library", useUnmergedTree = true).performScrollTo().performClick()
+        assertEquals(1, setupOpens)
+        compose
+            .onNodeWithTag("ai_transcription_switch_row", useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsOff()
+            .performClick()
+        assertEquals(2, setupOpens)
+        compose
+            .onNodeWithTag("ai_text_tools_switch_row", useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsOff()
+            .performClick()
+        assertEquals(3, setupOpens)
+        compose.onNodeWithTag("ai_text_tools_model", useUnmergedTree = true).performScrollTo().performClick()
+        assertEquals(4, setupOpens)
+        compose.onNodeWithTag("ai_transcription_model", useUnmergedTree = true).performScrollTo().performClick()
+        assertEquals(5, setupOpens)
+        compose.onNodeWithTag("ai_transcription_switch_row", useUnmergedTree = true).performScrollTo().assertIsOff()
+        compose.onNodeWithTag("ai_text_tools_switch_row", useUnmergedTree = true).performScrollTo().assertIsOff()
+        assertTrue(enableRequests.isEmpty())
     }
 
     @Test
@@ -113,7 +317,7 @@ class AiLabsScreenUiTest {
                     onOpenModelLibrary = {},
                     onFeatureEnabled = { feature, enabled -> raw = raw.copy(enabledFeatures = if (enabled) setOf(feature) else emptySet()) },
                     onAssignModel = { feature, id -> raw = raw.copy(assignments = listOf(AiFeatureAssignment(feature, id))) },
-                    onUpdateSettings = { _, _, settings -> saves += settings },
+                    onUpdateTranscriptionSettings = { _, settings -> saves += settings },
                     onClearCaches = { clearingCaches = true },
                     target = SettingsTarget.AI_TRANSCRIPTION,
                 )
@@ -168,7 +372,7 @@ class AiLabsScreenUiTest {
                     onOpenModelLibrary = { opened++ },
                     onFeatureEnabled = { _, _ -> error("feature must stay off") },
                     onAssignModel = { _, _ -> },
-                    onUpdateSettings = { _, _, _ -> },
+                    onUpdateTranscriptionSettings = { _, _ -> },
                     onClearCaches = {},
                 )
             }
@@ -211,8 +415,8 @@ class AiLabsScreenUiTest {
                     AiModelLibraryContent(
                         state = deriveAiLabsUiState(AiLabsState(), null, false),
                         onBack = {},
-                        onImport = { imported += it },
-                        onUpdateSettings = { _, _, _ -> },
+                        onImport = { uri, _ -> imported += uri },
+                        onUpdateTranscriptionSettings = { _, _ -> },
                         onDelete = {},
                     )
                 }
@@ -242,8 +446,8 @@ class AiLabsScreenUiTest {
                             status = AiLabsStatus(R.string.ai_error_corrupt_model, error = true),
                         ),
                     onBack = {},
-                    onImport = {},
-                    onUpdateSettings = { _, _, _ -> },
+                    onImport = { _, _ -> },
+                    onUpdateTranscriptionSettings = { _, _ -> },
                     onDelete = {},
                 )
             }
@@ -270,8 +474,8 @@ class AiLabsScreenUiTest {
                 AiModelLibraryContent(
                     state = state,
                     onBack = {},
-                    onImport = {},
-                    onUpdateSettings = { _, _, settings -> saves += settings },
+                    onImport = { _, _ -> },
+                    onUpdateTranscriptionSettings = { _, settings -> saves += settings },
                     onDelete = { deleted = it },
                 )
             }
@@ -298,8 +502,8 @@ class AiLabsScreenUiTest {
                 AiModelLibraryContent(
                     state = deriveAiLabsUiState(AiLabsState(), null, false),
                     onBack = {},
-                    onImport = {},
-                    onUpdateSettings = { _, _, _ -> },
+                    onImport = { _, _ -> },
+                    onUpdateTranscriptionSettings = { _, _ -> },
                     onDelete = {},
                 )
             }

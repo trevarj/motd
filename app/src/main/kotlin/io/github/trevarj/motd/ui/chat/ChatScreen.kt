@@ -172,6 +172,7 @@ import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ai.AiFeature
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
 import io.github.trevarj.motd.audio.AudioAttachment
@@ -214,6 +215,12 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.ChannelWatchDuration
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.NotificationMode
+import io.github.trevarj.motd.ui.ai.AiCustomStylesSheet
+import io.github.trevarj.motd.ui.ai.AiTextSheet
+import io.github.trevarj.motd.ui.ai.AiTextSource
+import io.github.trevarj.motd.ui.ai.AiTextUiState
+import io.github.trevarj.motd.ui.ai.AiTextViewModel
+import io.github.trevarj.motd.ui.ai.source
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AutocompletePanel
@@ -347,6 +354,8 @@ fun ChatScreen(
     onOpenNetworkSettings: (Long) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel(),
     voiceViewModel: VoiceMessageViewModel = hiltViewModel(),
+    aiTextViewModel: AiTextViewModel = hiltViewModel(),
+    onOpenAiSetup: () -> Unit = {},
     onOpenConversationList: (() -> Unit)? = null,
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
@@ -401,6 +410,12 @@ fun ChatScreen(
     val joinedChannels by viewModel.joinedChannels.collectAsStateWithLifecycle()
     val channelNotifications by viewModel.channelNotifications.collectAsStateWithLifecycle()
     val voiceState by voiceViewModel.state.collectAsStateWithLifecycle()
+    val aiTextState by aiTextViewModel.state.collectAsStateWithLifecycle()
+    val aiLabsState by aiTextViewModel.labsState.collectAsStateWithLifecycle()
+    var managingAiStyles by remember { mutableStateOf(false) }
+    LaunchedEffect(aiTextState) {
+        if (aiTextState !is AiTextUiState.Choosing) managingAiStyles = false
+    }
     val context = LocalContext.current
     val voicePermissionGate =
         remember(context, voiceViewModel) {
@@ -430,7 +445,7 @@ fun ChatScreen(
     // resumed lifecycle instead of treating "still composed" as visible.
     val lifecycleOwner = LocalLifecycleOwner.current
     var destinationResumed by remember(lifecycleOwner) { mutableStateOf(false) }
-    DisposableEffect(lifecycleOwner, viewModel, voiceViewModel) {
+    DisposableEffect(lifecycleOwner, viewModel, voiceViewModel, aiTextViewModel) {
         val gate =
             ChatForegroundLifecycleGate(
                 onResume = {
@@ -441,6 +456,8 @@ fun ChatScreen(
                     destinationResumed = false
                     viewModel.onPause()
                     voiceViewModel.stopForBackground()
+                    aiTextViewModel.close()
+                    viewModel.invalidateAiDraftTransform()
                 },
             )
         val observer = LifecycleEventObserver { _, event -> gate.onEvent(event) }
@@ -449,6 +466,8 @@ fun ChatScreen(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             gate.dispose()
+            aiTextViewModel.close()
+            viewModel.invalidateAiDraftTransform()
         }
     }
 
@@ -477,6 +496,13 @@ fun ChatScreen(
     val rawNewestAnchor by viewModel.rawNewestAnchor.collectAsStateWithLifecycle()
     val composerDraft by viewModel.composerDraft.collectAsStateWithLifecycle()
     val outgoingFlight by viewModel.outgoingFlight.collectAsStateWithLifecycle()
+    LaunchedEffect(composerDraft.revision, state.buffer?.id, aiTextState) {
+        val source = aiTextState.source() as? AiTextSource.Composer
+        if (source != null && (source.draft.revision != composerDraft.revision || state.buffer?.id?.let { it != source.draft.roomId } == true)) {
+            aiTextViewModel.close()
+            viewModel.invalidateAiDraftTransform()
+        }
+    }
     // Timeline behavioral settings collected separately from ChatState.
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
@@ -642,6 +668,18 @@ fun ChatScreen(
         consumeAttachmentRequest = viewModel::consumeAttachmentRequest,
         attachmentSheetRequests = viewModel.attachmentSheetRequests,
         composerDraft = composerDraft,
+        aiTextState = aiTextState,
+        aiTextEnabled = AiFeature.TEXT_TOOLS in aiLabsState.enabledFeatures,
+        onTranslateMessage =
+            if (AiFeature.TEXT_TOOLS in aiLabsState.enabledFeatures) {
+                { message -> aiTextViewModel.openStoredMessage(message.bufferId, message.id) }
+            } else {
+                null
+            },
+        onAiComposer = {
+            val snapshot = viewModel.beginAiDraftTransform()
+            if (snapshot != null) aiTextViewModel.openComposer(snapshot) else aiTextViewModel.showUnavailable()
+        },
         onDraftChanged = viewModel::saveDraft,
         outgoingFlight = outgoingFlight,
         onFlightSettled = viewModel::onFlightSettled,
@@ -693,6 +731,28 @@ fun ChatScreen(
         avatarEvents = viewModel.avatarEvents,
         onOpenNetworkSettings = onOpenNetworkSettings,
     )
+    AiTextSheet(
+        state = aiTextState,
+        styles = aiLabsState.customStyles,
+        target = aiLabsState.translationTarget,
+        onGenerate = aiTextViewModel::generate,
+        onTargetSelected = aiTextViewModel::selectTranslationTarget,
+        onDismiss = {
+            aiTextViewModel.close()
+            viewModel.invalidateAiDraftTransform()
+        },
+        onOpenSetup = onOpenAiSetup,
+        onManageStyles = { managingAiStyles = true },
+        onApply =
+            if (aiTextState.source() is AiTextSource.Composer) {
+                { aiTextViewModel.applyComposerResult(viewModel::applyAiDraftTransform) }
+            } else {
+                null
+            },
+    )
+    if (managingAiStyles && aiTextState is AiTextUiState.Choosing) {
+        AiCustomStylesSheet(aiLabsState.customStyles, aiTextViewModel::upsertCustomStyle, aiTextViewModel::deleteCustomStyle, { managingAiStyles = false })
+    }
 
     contextPreparation?.let { result ->
         AlertDialog(
@@ -983,6 +1043,10 @@ fun ChatContent(
     // The same request aimed at this conversation while it is already open; see ChatViewModel.
     attachmentSheetRequests: Flow<Unit> = emptyFlow(),
     composerDraft: ComposerDraftState = ComposerDraftState(),
+    aiTextState: AiTextUiState = AiTextUiState.Closed,
+    aiTextEnabled: Boolean = false,
+    onAiComposer: () -> Unit = {},
+    onTranslateMessage: ((MessageEntity) -> Unit)? = null,
     onDraftChanged: (String) -> Unit = {},
     // The send currently travelling from the composer into the timeline, if any.
     outgoingFlight: OutgoingFlight? = null,
@@ -2965,6 +3029,7 @@ fun ChatContent(
                                             items = items,
                                             listState = listState,
                                             pagingHintsEnabled = initialPositionSettled,
+                                            onTranslateMessage = onTranslateMessage,
                                             liveEntryIds = liveEntryIds,
                                             onLiveEntryConsumed = onLiveEntryConsumed,
                                             outgoingFlight = outgoingFlight,
@@ -3223,6 +3288,7 @@ fun ChatContent(
                         }
                         Composer(
                             value = composerText,
+                            onAi = if (aiTextEnabled && plainIrcText(composerText.text).isNotBlank()) onAiComposer else null,
                             onValueChange = {
                                 val wasBlank = composerText.text.isBlank()
                                 composerText = it
@@ -3607,6 +3673,7 @@ fun ChatContent(
             sheetState = sheetState,
             isServerBuffer = isServerBuffer,
             onDismiss = { sheetTarget = null },
+            onTranslate = onTranslateMessage?.let { callback -> { hideThen { callback(target) } } },
             onReply = {
                 hideThen {
                     onSetReply(target)
