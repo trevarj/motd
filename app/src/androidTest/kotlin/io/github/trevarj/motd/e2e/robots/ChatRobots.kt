@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
@@ -102,14 +103,16 @@ internal class TimelineRobot(
         var nextResetAt = 0L
         try {
             rule.waitUntil("timeline scrolled to newest row $messageTag (key $rowId)", timeoutMs) {
-                if (isPresent(messageTag) || tryScrollContainerToKey("chat_timeline", rowId)) {
-                    // Composed is not the same as fully visible, and the details row below is
-                    // clicked. The row is composed by now, so this short-circuits on the descendant
-                    // match rather than sweeping.
+                if (isPresent(messageTag)) {
+                    // Align only an observed node; a successful key seek may not have composed it yet.
                     return@waitUntil runCatching {
-                        container("chat_timeline").performScrollToNode(hasTestTag(messageTag))
+                        rule
+                            .onNodeWithTag(messageTag, useUnmergedTree = true)
+                            .performScrollTo()
+                            .assertIsDisplayed()
                     }.isSuccess
                 }
+                if (tryScrollContainerToKey("chat_timeline", rowId)) return@waitUntil false
                 val now = System.currentTimeMillis()
                 if (now >= nextResetAt) {
                     nextResetAt = now + NEWEST_ROW_RESET_INTERVAL_MS

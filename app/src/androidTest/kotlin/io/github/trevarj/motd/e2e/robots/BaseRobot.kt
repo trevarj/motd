@@ -181,7 +181,8 @@ internal open class BaseRobot(
      * the viewport. Polling it is therefore safe in a way that polling [scrollContainerTo]'s sweep
      * is not: a miss never drags the list toward the older APPEND boundary.
      *
-     * Returns true when the container scrolled to [key], false when the row is not loaded yet.
+     * Returns true when the key-addressed seek was dispatched, false when it failed. Callers must
+     * still wait for the target node to be composed and visible.
      */
     fun tryScrollContainerToKey(
         containerTag: String,

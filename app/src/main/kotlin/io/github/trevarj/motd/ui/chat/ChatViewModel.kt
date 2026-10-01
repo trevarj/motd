@@ -2285,7 +2285,6 @@ class ChatViewModel
 
         override fun onCleared() {
             invalidateAiDraftTransform()
-            super.onCleared()
         }
 
         fun saveDraft(text: String) {

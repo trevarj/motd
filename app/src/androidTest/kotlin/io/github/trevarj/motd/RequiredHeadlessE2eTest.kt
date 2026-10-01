@@ -222,10 +222,9 @@ class RequiredHeadlessE2eTest {
             assertTrue("expires=" !in echo.text)
             val voice = runBlocking { probe.awaitCanonicalContaining("voice", upload.url, bufferId) }
             assertEquals(echo.text, voice.text)
-            // This is the journey's historically opaque failure: the row is provably in Room, yet
-            // the timeline neither composes it nor resolves its Paging key. Snapshot the presented
-            // list, the key map, Room, and the history window on both outcomes so the next run
-            // reports which of those disagrees instead of only that the wait expired.
+            // A persisted row may still be waiting for composition or viewport alignment. Snapshot
+            // the presented list, key map, Room, and history window on both outcomes so a timeout
+            // identifies the disagreeing boundary.
             TimelineRobot(compose).assertCompactAudioPlayer(
                 voice.tag(),
                 voice.id,

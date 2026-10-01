@@ -765,45 +765,52 @@ class VoiceMessageViewModelTest {
     @Test
     fun `all materializer decoder and runtime failures map to content free kinds`() {
         val inputExpected =
-            listOf(
-                VoiceTranscriptFailureKind.UNSUPPORTED_SCHEME,
-                VoiceTranscriptFailureKind.FILE_UNAVAILABLE,
-                VoiceTranscriptFailureKind.EXPIRED,
-                VoiceTranscriptFailureKind.MISSING_ENCRYPTION_KEY,
-                VoiceTranscriptFailureKind.INVALID_ENCRYPTION_KEY,
-                VoiceTranscriptFailureKind.AUTHENTICATION_FAILED,
-                VoiceTranscriptFailureKind.ROUTE_UNAVAILABLE,
-                VoiceTranscriptFailureKind.TLS_FAILED,
-                VoiceTranscriptFailureKind.HTTP_AUTHENTICATION_FAILED,
-                VoiceTranscriptFailureKind.HTTP_FAILED,
-                VoiceTranscriptFailureKind.READ_FAILED,
-                VoiceTranscriptFailureKind.INPUT_TOO_LARGE,
+            mapOf(
+                AudioInputFailureKind.UNSUPPORTED_SCHEME to VoiceTranscriptFailureKind.UNSUPPORTED_SCHEME,
+                AudioInputFailureKind.FILE_UNAVAILABLE to VoiceTranscriptFailureKind.FILE_UNAVAILABLE,
+                AudioInputFailureKind.EXPIRED to VoiceTranscriptFailureKind.EXPIRED,
+                AudioInputFailureKind.MISSING_ENCRYPTION_KEY to VoiceTranscriptFailureKind.MISSING_ENCRYPTION_KEY,
+                AudioInputFailureKind.INVALID_ENCRYPTION_KEY to VoiceTranscriptFailureKind.INVALID_ENCRYPTION_KEY,
+                AudioInputFailureKind.AUTHENTICATION_FAILED to VoiceTranscriptFailureKind.AUTHENTICATION_FAILED,
+                AudioInputFailureKind.ROUTE_UNAVAILABLE to VoiceTranscriptFailureKind.ROUTE_UNAVAILABLE,
+                AudioInputFailureKind.TLS_FAILED to VoiceTranscriptFailureKind.TLS_FAILED,
+                AudioInputFailureKind.HTTP_AUTHENTICATION_FAILED to VoiceTranscriptFailureKind.HTTP_AUTHENTICATION_FAILED,
+                AudioInputFailureKind.HTTP_FAILED to VoiceTranscriptFailureKind.HTTP_FAILED,
+                AudioInputFailureKind.READ_FAILED to VoiceTranscriptFailureKind.READ_FAILED,
+                AudioInputFailureKind.TOO_LARGE to VoiceTranscriptFailureKind.INPUT_TOO_LARGE,
             )
-        assertEquals(inputExpected, AudioInputFailureKind.entries.map { voiceTranscriptFailure(AudioInputException(it)) })
         assertEquals(
-            listOf(
-                VoiceTranscriptFailureKind.NO_AUDIO,
-                VoiceTranscriptFailureKind.UNSUPPORTED_CODEC,
-                VoiceTranscriptFailureKind.AUDIO_TOO_LONG,
-                VoiceTranscriptFailureKind.DECODE_FAILED,
-            ),
-            PcmAudioFailureKind.entries.map { voiceTranscriptFailure(PcmAudioException(it)) },
+            inputExpected,
+            AudioInputFailureKind.entries.associateWith { voiceTranscriptFailure(AudioInputException(it)) },
         )
         assertEquals(
-            listOf(
-                VoiceTranscriptFailureKind.MODEL_OPEN,
-                VoiceTranscriptFailureKind.INVALID_MODEL_FORMAT,
-                VoiceTranscriptFailureKind.TRUNCATED_MODEL,
-                VoiceTranscriptFailureKind.CORRUPT_MODEL,
-                VoiceTranscriptFailureKind.UNSUPPORTED_MODEL_ARCHITECTURE,
-                VoiceTranscriptFailureKind.INVALID_REQUEST,
-                VoiceTranscriptFailureKind.OUT_OF_MEMORY,
-                VoiceTranscriptFailureKind.INVALID_AUDIO,
-                VoiceTranscriptFailureKind.NO_MODEL_LOADED,
-                VoiceTranscriptFailureKind.INFERENCE_FAILED,
-                VoiceTranscriptFailureKind.NATIVE_FAILURE,
+            mapOf(
+                PcmAudioFailureKind.NO_AUDIO to VoiceTranscriptFailureKind.NO_AUDIO,
+                PcmAudioFailureKind.UNSUPPORTED_CODEC to VoiceTranscriptFailureKind.UNSUPPORTED_CODEC,
+                PcmAudioFailureKind.TOO_LONG to VoiceTranscriptFailureKind.AUDIO_TOO_LONG,
+                PcmAudioFailureKind.DECODE_FAILED to VoiceTranscriptFailureKind.DECODE_FAILED,
             ),
-            AiRuntimeFailure.entries.map { voiceTranscriptFailure(AiRuntimeException(it)) },
+            PcmAudioFailureKind.entries.associateWith { voiceTranscriptFailure(PcmAudioException(it)) },
+        )
+        assertEquals(
+            mapOf(
+                AiRuntimeFailure.MODEL_OPEN to VoiceTranscriptFailureKind.MODEL_OPEN,
+                AiRuntimeFailure.INVALID_FORMAT to VoiceTranscriptFailureKind.INVALID_MODEL_FORMAT,
+                AiRuntimeFailure.TRUNCATED_MODEL to VoiceTranscriptFailureKind.TRUNCATED_MODEL,
+                AiRuntimeFailure.CORRUPT_MODEL to VoiceTranscriptFailureKind.CORRUPT_MODEL,
+                AiRuntimeFailure.UNSUPPORTED_ARCHITECTURE to VoiceTranscriptFailureKind.UNSUPPORTED_MODEL_ARCHITECTURE,
+                AiRuntimeFailure.INVALID_REQUEST to VoiceTranscriptFailureKind.INVALID_REQUEST,
+                AiRuntimeFailure.OUT_OF_MEMORY to VoiceTranscriptFailureKind.OUT_OF_MEMORY,
+                AiRuntimeFailure.INVALID_AUDIO to VoiceTranscriptFailureKind.INVALID_AUDIO,
+                AiRuntimeFailure.NO_MODEL_LOADED to VoiceTranscriptFailureKind.NO_MODEL_LOADED,
+                AiRuntimeFailure.INFERENCE to VoiceTranscriptFailureKind.INFERENCE_FAILED,
+                AiRuntimeFailure.NATIVE to VoiceTranscriptFailureKind.NATIVE_FAILURE,
+                AiRuntimeFailure.UNSUPPORTED_TEMPLATE to VoiceTranscriptFailureKind.NATIVE_FAILURE,
+                AiRuntimeFailure.INPUT_TOO_LONG to VoiceTranscriptFailureKind.NATIVE_FAILURE,
+                AiRuntimeFailure.INVALID_OUTPUT to VoiceTranscriptFailureKind.NATIVE_FAILURE,
+                AiRuntimeFailure.NO_TEXT to VoiceTranscriptFailureKind.NATIVE_FAILURE,
+            ),
+            AiRuntimeFailure.entries.associateWith { voiceTranscriptFailure(AiRuntimeException(it)) },
         )
         assertEquals(
             VoiceTranscriptFailureKind.FEATURE_UNAVAILABLE,

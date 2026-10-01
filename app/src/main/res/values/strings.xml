@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:tools="http://schemas.android.com/tools">
+<resources xmlns:tools="http://schemas.android.com/tools" xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
     <string name="app_name">motd</string>
 
     <!-- Chat list (WP6) -->
@@ -2179,9 +2179,9 @@
     <string name="ai_text_tools">Composer text tools</string>
     <string name="ai_text_tools_summary">Experimental on-device correction, writing styles and translation. Review results: facts and formatting may change.</string>
     <string name="ai_import_text_model">Import Qwen text model</string>
-    <string name="ai_import_text_model_summary">Select the exact Qwen3.5-2B-Q4_K_M.gguf artifact. Other GGUF files are unsupported.</string>
+    <string name="ai_import_text_model_summary">Select the exact <xliff:g id="text_model_filename">Qwen3.5-2B-Q4_K_M.gguf</xliff:g> artifact. Other GGUF files are unsupported.</string>
     <string name="ai_download_text_model">Download Qwen text model</string>
-    <string name="ai_text_download_disclosure">1.28 GB download: Qwen/Qwen3.5-2B, quantized by Unsloth. Apache-2.0: https://www.apache.org/licenses/LICENSE-2.0\nRequires 1.28 GB plus 256 MiB free storage; runtime RAM is additional.\nSetup contacts Hugging Face/CDN and reveals ordinary network metadata; your text is never uploaded. Downloading does not enable the feature.</string>
+    <string name="ai_text_download_disclosure">1.28 GB download: <xliff:g id="text_model_id">Qwen/Qwen3.5-2B</xliff:g>, quantized by Unsloth. Apache-2.0: https://www.apache.org/licenses/LICENSE-2.0\nRequires 1.28 GB plus 256 MiB free storage; runtime RAM is additional.\nSetup contacts Hugging Face/CDN and reveals ordinary network metadata; your text is never uploaded. Downloading does not enable the feature.</string>
     <string name="ai_error_network">The model download failed</string>
     <string name="ai_error_checksum_mismatch">The file is not the supported text model</string>
     <string name="ai_error_unsupported_template">The model template is unsupported</string>
@@ -2207,11 +2207,9 @@
     <string name="ai_text_business">Business</string>
     <string name="ai_text_silly">Silly</string>
     <string name="ai_text_manage_styles">Manage styles</string>
-    <string name="ai_text_target">Target: %1$s</string>
     <string name="ai_text_saving_target">Saving target…</string>
     <string name="ai_text_translate">Translate</string>
     <string name="ai_text_working">Working on-device…</string>
-    <string name="ai_text_incomplete">Incomplete result</string>
     <string name="ai_text_incomplete_notice">Incomplete result — the output limit was reached. Apply and Copy are unavailable.</string>
     <string name="ai_text_apply">Apply</string>
     <string name="ai_text_copy">Copy</string>

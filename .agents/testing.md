@@ -50,6 +50,8 @@ existing local helpers rather than adding a second generic fixture framework.
 Keep security, persistence, migration, accessibility, and legitimate boundary
 assertions; remove coupling to incidental wording, catalog size, or default-menu
 layout outside tests of those contracts.
+For failure mappings, assert category-keyed expectations rather than enum order;
+shared runtime categories must each retain an explicit expected result.
 
 ## Optional local gate reproduction
 
