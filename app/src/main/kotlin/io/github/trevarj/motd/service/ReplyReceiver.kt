@@ -11,11 +11,13 @@ import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
  * Direct-reply / mark-read notification actions. The RemoteInput reply is forwarded to
- * [ConnectionManager.sendMessage]; the mark-read action to [ConnectionManager.markRead].
+ * [ConnectionManager.sendNotificationReply]; the mark-read action to [ConnectionManager.markRead].
  */
 @AndroidEntryPoint
 class ReplyReceiver : BroadcastReceiver() {
@@ -68,7 +70,7 @@ class ReplyReceiver : BroadcastReceiver() {
         retry: Boolean,
     ) = deliverNotificationReply(
         retry = retry,
-        send = { connectionManager.sendMessage(bufferId, text) },
+        send = { connectionManager.sendNotificationReply(bufferId, text) },
         preserveDraft = { preserveRejectedDraft(bufferId, text) },
         releaseDraft = { clearRetriedDraft(bufferId, text) },
         notifyFailed = { reason ->
@@ -78,22 +80,24 @@ class ReplyReceiver : BroadcastReceiver() {
             }
             notifications.onReplyFailed(bufferId, text, reason)
         },
+        notifyUncertain = { wireAcceptance ->
+            Log.w(TAG, "notification reply delivery uncertain: $wireAcceptance")
+            diagnostics.record("notification_reply", "send_uncertain") {
+                mapOf("buffer_id" to bufferId, "wire_acceptance" to wireAcceptance.name, "retry" to retry)
+            }
+            notifications.onReplyDeliveryUncertain(bufferId, text)
+        },
         notifyResolved = { notifications.onReplyFailureResolved(bufferId) },
     )
 
-    /** Never clobber an in-progress composer draft; the rejected text is appended to it. */
+    /** Never clobber an in-progress composer draft; the unsent text is appended to it. */
     private suspend fun preserveRejectedDraft(
         bufferId: Long,
         text: String,
     ) {
         runCatching {
-            val existing = draftStore.loadDraft(bufferId)
-            draftStore.saveDraft(
-                bufferId = bufferId,
-                text = mergeRejectedReply(existing?.text, text),
-                replyToEventId = existing?.replyToEventId,
-            )
-        }.onFailure { Log.w(TAG, "preserving rejected reply failed", it) }
+            draftStore.appendNotificationReply(bufferId, text)
+        }.onFailure { Log.w(TAG, "preserving notification reply failed", it) }
     }
 
     /** Drop the preserved copy once the retry lands, unless the user has since edited the draft. */
@@ -102,13 +106,7 @@ class ReplyReceiver : BroadcastReceiver() {
         text: String,
     ) {
         runCatching {
-            val existing = draftStore.loadDraft(bufferId) ?: return@runCatching
-            val remaining = withoutRetriedReply(existing.text, text) ?: return@runCatching
-            draftStore.saveDraft(
-                bufferId = bufferId,
-                text = remaining,
-                replyToEventId = existing.replyToEventId,
-            )
+            draftStore.removeNotificationReply(bufferId, text)
         }.onFailure { Log.w(TAG, "clearing retried reply draft failed", it) }
     }
 
@@ -125,25 +123,32 @@ class ReplyReceiver : BroadcastReceiver() {
     }
 }
 
-/**
- * A rejected send persisted nothing, so the RemoteInput UI's completion animation is a lie and no
- * failed timeline row exists to retry from. Keep the text in the buffer's composer draft — the same
- * place an in-app rejection leaves it — and raise a retryable failure notification. A successful
- * retry retires both.
- */
+/** Preserve first-attempt failures; only a wire-accepted manual retry retires the preserved copy. */
 internal suspend fun deliverNotificationReply(
     retry: Boolean,
     send: suspend () -> SendAcceptance,
     preserveDraft: suspend () -> Unit,
     releaseDraft: suspend () -> Unit,
     notifyFailed: suspend (SendRejectionReason) -> Unit,
+    notifyUncertain: suspend (ImmediateWireAcceptance) -> Unit,
     notifyResolved: suspend () -> Unit,
 ) {
     when (val acceptance = send()) {
         is SendAcceptance.Accepted -> {
-            if (retry) {
-                releaseDraft()
-                notifyResolved()
+            withContext(NonCancellable) {
+                when (acceptance.immediateWireAcceptance) {
+                    ImmediateWireAcceptance.ACCEPTED -> {
+                        if (retry) {
+                            releaseDraft()
+                            notifyResolved()
+                        }
+                    }
+
+                    ImmediateWireAcceptance.DISCONNECTED, ImmediateWireAcceptance.FAILED -> {
+                        if (!retry) preserveDraft()
+                        notifyUncertain(acceptance.immediateWireAcceptance)
+                    }
+                }
             }
         }
 
@@ -154,24 +159,3 @@ internal suspend fun deliverNotificationReply(
         }
     }
 }
-
-/** Append a rejected reply to whatever the composer already holds, preserving both. */
-internal fun mergeRejectedReply(
-    existing: String?,
-    rejected: String,
-): String = if (existing.isNullOrBlank()) rejected else "$existing\n$rejected"
-
-/**
- * The draft text left after a retried reply is accepted, or null when the draft no longer contains
- * the preserved copy (the user edited or replaced it) and must be left untouched.
- */
-internal fun withoutRetriedReply(
-    existing: String?,
-    retried: String,
-): String? =
-    when {
-        existing == null -> null
-        existing == retried -> ""
-        existing.endsWith("\n$retried") -> existing.removeSuffix("\n$retried")
-        else -> null
-    }

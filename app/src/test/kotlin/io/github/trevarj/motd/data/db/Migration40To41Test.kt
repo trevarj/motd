@@ -91,11 +91,11 @@ class Migration40To41Test {
                 )
                 assertEquals(
                     listOf(13L, 3L, 1L),
-                    migrated.messageDao().recentNotifiable(1, Long.MIN_VALUE, Long.MIN_VALUE, -1, 20).map { it.id },
+                    migrated.messageDao().recentNotifiable(1, Long.MIN_VALUE, Long.MIN_VALUE, -1, 20, null).map { it.id },
                 )
                 assertEquals(
                     listOf(12L, 5L, 4L, 2L),
-                    migrated.messageDao().recentNotifiable(2, Long.MIN_VALUE, Long.MIN_VALUE, -1, 20).map { it.id },
+                    migrated.messageDao().recentNotifiable(2, Long.MIN_VALUE, Long.MIN_VALUE, -1, 20, null).map { it.id },
                 )
             } finally {
                 migrated.close()

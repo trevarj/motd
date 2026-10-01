@@ -98,6 +98,16 @@ flowchart TD
   ordinary `ALL` policy never bypasses mute or broadens push delivery. Self, ignore, fool,
   foreground, and read suppression remain. Interrupted notification recovery reads the stored
   decision, never later settings, and always presents silently.
+  Android Auto support is notification-only in the same Google-free APK: DMs and channel
+  mentions expose no-UI semantic reply/mark-read actions. Ordinary `ALL`/watch channel
+  messages use disjoint local-only rows; body histories and canonical read/open anchors
+  stay lane-specific. Local-only is a bridging hint, not a security boundary. Channel
+  replies use the actual public `ircTarget`, never an internal alias or the mention sender.
+  Notification replies request one reconnect when not Ready and allow five seconds for
+  the current client to become Ready and, for channels, self-JOIN; expiry never queues
+  a later send. Submission uses the existing durable sender once. Pre-persistence rejection
+  preserves text with phone-only manual Retry; uncertain durable/wire delivery preserves
+  drafts and durable rows with a phone-only review notice, without text-based Retry.
 
 ## Where to work
 

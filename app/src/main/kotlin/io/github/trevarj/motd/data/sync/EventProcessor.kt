@@ -52,6 +52,7 @@ import io.github.trevarj.motd.irc.format.containsIrcFormatting
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.irc.proto.Prefix
 import io.github.trevarj.motd.irc.proto.replyReference
 import io.github.trevarj.motd.irc.proto.unreactionValue
 import io.github.trevarj.motd.service.IrcEventSink
@@ -74,6 +75,8 @@ data class DurableOutgoingEvent(
     val eventId: TimelineEventId,
     val label: String,
 )
+
+internal class OutgoingChannelNotJoinedException : Exception()
 
 data class ReplannedOutgoingPlan(
     val bufferId: RoomId,
@@ -838,6 +841,41 @@ class EventProcessor
                                 "event_id" to canonical.id,
                                 "error" to error::class.simpleName,
                             )
+                        }
+                    }
+                }
+                if (result is IngestResult.Enriched &&
+                    !canonical.isSelf && type == BufferType.CHANNEL &&
+                    canonical.notificationHandled && canonical.notificationEligible &&
+                    canonical.notificationEligibilityResolved && canonical.hasMention
+                ) {
+                    try {
+                        notifier.onCanonicalIncoming(
+                            networkId,
+                            canonical.bufferId,
+                            type,
+                            canonical.hasMention,
+                            canonical.id,
+                            e.copy(
+                                ctx =
+                                    e.ctx.copy(
+                                        msgid = canonical.msgid,
+                                        serverTime = canonical.serverTime,
+                                        account = canonical.senderAccount,
+                                    ),
+                                source = Prefix(canonical.sender),
+                                text = canonical.text,
+                                isSelf = canonical.isSelf,
+                                replyToMsgid = canonical.replyToMsgid,
+                            ),
+                            watched = canonical.notificationWatched,
+                            refreshOnly = true,
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        diagnostics.record("notifications", "refresh_failed") {
+                            mapOf("event_id" to canonical.id, "error" to error::class.simpleName)
                         }
                     }
                 }
@@ -3764,6 +3802,7 @@ class EventProcessor
             replyToEventId: TimelineEventId?,
             replyToMsgid: String?,
             channelContext: String? = null,
+            requireChannelMembership: Boolean = false,
         ): List<DurableOutgoingEvent> {
             require(events.isNotEmpty()) { "outgoing plan is empty" }
             val networkId =
@@ -3777,6 +3816,11 @@ class EventProcessor
                             "missing buffer $bufferId"
                         }
                     check(canonicalBuffer.networkId == networkId) { "buffer network changed" }
+                    if (requireChannelMembership && canonicalBuffer.type == BufferType.CHANNEL &&
+                        (!canonicalBuffer.joined || canonicalBuffer.pendingCloseAt != null)
+                    ) {
+                        throw OutgoingChannelNotJoinedException()
+                    }
                     if (canonicalBuffer.type == BufferType.QUERY && canonicalBuffer.dismissed) {
                         bufferDao.reviveQuery(canonicalBuffer.id)
                         canonicalBuffer = requireNotNull(bufferDao.observeById(canonicalBuffer.id))
@@ -4427,7 +4471,7 @@ class EventProcessor
             watchedChat: Boolean = false,
         ) {
             if (e.isSelf) return
-            notifier.onCanonicalIncoming(networkId, bufferId, type, hasMention, eventId, e, watchedChat)
+            notifier.onCanonicalIncoming(networkId, bufferId, type, hasMention, eventId, e, watchedChat, refreshOnly = false)
         }
 
         /**
@@ -4583,7 +4627,10 @@ interface MessageNotifier {
         message: IrcEvent.ChatMessage,
         // Qualified under a channel watch; overrides an explicit buffer mute downstream.
         watched: Boolean = false,
-    ) = onIncoming(networkId, bufferId, type, hasMention, message)
+        refreshOnly: Boolean,
+    ) {
+        if (!refreshOnly) onIncoming(networkId, bufferId, type, hasMention, message)
+    }
 
     /** A local or synchronized marker advanced through this exact timeline tuple. */
     suspend fun onRead(

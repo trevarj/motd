@@ -124,7 +124,42 @@ class NotificationRecoveryDaoTest {
             )
             assertEquals(
                 listOf(pushWatch, pushMention, unresolved, history, pushAll, liveAll),
-                db.messageDao().recentNotifiable(bufferId, Long.MIN_VALUE, Long.MIN_VALUE, -1, 20).map { it.id },
+                db.messageDao().recentNotifiable(bufferId, Long.MIN_VALUE, Long.MIN_VALUE, -1, 20, null).map { it.id },
+            )
+            assertEquals(
+                listOf(pushMention),
+                db.messageDao().recentNotifiable(bufferId, Long.MIN_VALUE, Long.MIN_VALUE, -1, 20, true).map { it.id },
+            )
+            assertEquals(
+                listOf(pushWatch, unresolved, history, pushAll, liveAll),
+                db.messageDao().recentNotifiable(bufferId, Long.MIN_VALUE, Long.MIN_VALUE, -1, 20, false).map { it.id },
+            )
+        }
+
+    @Test
+    fun recentNotifiable_filtersMentionLaneBeforeApplyingLimit() =
+        runTest {
+            val mention = liveMention(1_000, "early mention")
+            val ordinary =
+                (1..30).map { index ->
+                    observed(
+                        message(bufferId, "ordinary $index", serverTime = 1_000L + index, dedupKey = "ordinary-$index")
+                            .copy(notificationEligible = true, notificationEligibilityResolved = true),
+                        ObservationOrigin.LIVE,
+                    )
+                }
+
+            assertEquals(
+                listOf(mention),
+                db.messageDao().recentNotifiable(bufferId, Long.MIN_VALUE, Long.MIN_VALUE, -1, 24, true).map { it.id },
+            )
+            assertEquals(
+                ordinary.takeLast(24).asReversed(),
+                db.messageDao().recentNotifiable(bufferId, Long.MIN_VALUE, Long.MIN_VALUE, -1, 24, false).map { it.id },
+            )
+            assertEquals(
+                ordinary.takeLast(24).asReversed(),
+                db.messageDao().recentNotifiable(bufferId, Long.MIN_VALUE, Long.MIN_VALUE, -1, 24, null).map { it.id },
             )
         }
 }

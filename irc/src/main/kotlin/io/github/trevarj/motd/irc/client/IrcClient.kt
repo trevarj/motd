@@ -192,6 +192,8 @@ class IrcClient(
 ) {
     private val _state = MutableStateFlow<IrcClientState>(IrcClientState.Disconnected)
     val state: StateFlow<IrcClientState> = _state.asStateFlow()
+    private val _joinedChannels = MutableStateFlow<Set<String>>(emptySet())
+    val joinedChannels: StateFlow<Set<String>> = _joinedChannels.asStateFlow()
     private val _targetClassificationReady = MutableStateFlow(false)
 
     /** True once CHANTYPES is explicit or the registration burst confirms protocol defaults. */
@@ -317,6 +319,7 @@ class IrcClient(
     }
 
     fun stop() {
+        _joinedChannels.value = emptySet()
         watchdog?.stop()
         watchdog = null
         lagMonitor?.stop()
@@ -624,6 +627,7 @@ class IrcClient(
         ev: IrcEvent,
         criticalEvents: Channel<IrcEvent>,
     ) {
+        updateJoinedChannels(ev)
         if (ev is IrcEvent.BouncerNetworkState) {
             _bouncerNetworks.update { cur ->
                 // Empty attrs is soju's `BOUNCER NETWORK <id> *` deletion marker.
@@ -631,6 +635,43 @@ class IrcClient(
             }
         }
         publish(criticalEvents, ev)
+    }
+
+    private fun updateJoinedChannels(event: IrcEvent) {
+        val channel =
+            when (event) {
+                is IrcEvent.Joined -> {
+                    event.channel.takeIf { event.isSelf }
+                }
+
+                is IrcEvent.Parted -> {
+                    event.channel.takeIf { event.isSelf }
+                }
+
+                is IrcEvent.Kicked -> {
+                    event.channel.takeIf { event.isSelf }
+                }
+
+                is IrcEvent.NetworkBatch -> {
+                    if (event.historyMetadata?.isContext != true) {
+                        event.events.forEach(::updateJoinedChannels)
+                    }
+                    return
+                }
+
+                else -> {
+                    return
+                }
+            } ?: return
+        val normalized = isupport.normalize(channel)
+        _joinedChannels.update { joined ->
+            val containsChannel = joined.any { isupport.normalize(it) == normalized }
+            when {
+                event is IrcEvent.Joined -> if (containsChannel) joined else joined + channel
+                containsChannel -> joined.filterNotTo(linkedSetOf()) { isupport.normalize(it) == normalized }
+                else -> joined
+            }
+        }
     }
 
     private suspend fun emitBatch(
@@ -960,6 +1001,7 @@ class IrcClient(
         reason: String?,
     ) {
         if (!disconnectedPublished.compareAndSet(false, true)) return
+        _joinedChannels.value = emptySet()
         publish(criticalEvents, IrcEvent.Disconnected(reason))
     }
 

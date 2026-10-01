@@ -75,7 +75,10 @@ completed instrumentation result from each of the four discovered methods.
 The four journeys cover:
 
 - onboarding, self-signed fixture trust, soju login, and network import;
-- one real UI send whose canonical Room event remains visible after reconnect; and
+- one real UI send whose canonical Room event remains visible after reconnect, plus
+  dispatch of the actual posted semantic reply/read PendingIntents while outside the chat:
+  reply reconnects the network and produces one echoed public-channel row; the captured
+  read action covers the mention but leaves a later ordinary event unread; and
 - a second-client offline gap crossing a Paging window, first-unread viewport placement,
   frozen read state, canonical ordering, exactly-once recovery, and deliberate read advancement; and
 - navigation, settings, themes, and Soju control-center panels.
@@ -92,6 +95,11 @@ navigation, persistence boundaries, and protocol integration. It is not proof
 of physical input latency, GPU-specific rendering, Doze/background delivery,
 UnifiedPush, system picker/provider behavior, OEM notification behavior, or
 release signing/install upgrades; retain a physical-device check for those.
+
+Android Auto support is notification-only. Its posted PendingIntent reply/read coverage
+is part of the existing send/reconnect journey, not a fifth test. Head-unit bridging,
+read-aloud, voice recognition, and OEM behavior remain unverified locally without an
+explicitly authorized Android Auto host; the default AOSP emulator is not such a host.
 
 The emulator and stack remain alive after a passing run to make the next run
 fast. Manage their lifecycle explicitly:

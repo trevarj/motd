@@ -42,6 +42,7 @@ import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.MessageNotifier
+import io.github.trevarj.motd.data.sync.OutgoingChannelNotJoinedException
 import io.github.trevarj.motd.data.sync.OutgoingEventPlan
 import io.github.trevarj.motd.data.sync.historySource
 import io.github.trevarj.motd.di.ApplicationScope
@@ -80,6 +81,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -104,6 +106,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -114,6 +118,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.lang.ref.WeakReference
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -415,6 +420,80 @@ internal suspend fun completeDurableAcceptance(
         }
         SendAcceptance.Accepted(eventIds, wireAcceptance, storedTexts)
     }
+
+internal const val NOTIFICATION_REPLY_READY_TIMEOUT_MS = 5_000L
+
+internal fun retainNotificationReplyNetwork(
+    inFlight: ConcurrentHashMap<Long, Int>,
+    networkId: Long,
+) {
+    inFlight.compute(networkId) { _, count -> (count ?: 0) + 1 }
+}
+
+internal fun releaseNotificationReplyNetwork(
+    inFlight: ConcurrentHashMap<Long, Int>,
+    networkId: Long,
+) {
+    inFlight.computeIfPresent(networkId) { _, count -> (count - 1).takeIf { it > 0 } }
+}
+
+internal fun notificationReplySuspensions(
+    suspended: Set<Long>,
+    inFlight: Map<Long, Int>,
+): Set<Long> = suspended.filterTo(mutableSetOf()) { (inFlight[it] ?: 0) <= 0 }
+
+@OptIn(ExperimentalCoroutinesApi::class)
+internal suspend fun awaitNotificationReplyClient(
+    networkId: Long,
+    type: BufferType,
+    target: String,
+    snapshots: StateFlow<ConnectionRegistrySnapshot>,
+): IrcClient =
+    snapshots
+        .map { (it.actors[networkId]?.connection as? IrcClientConnection)?.client }
+        .distinctUntilChanged()
+        .flatMapLatest { client ->
+            if (client == null) {
+                flowOf<IrcClient?>(null)
+            } else {
+                combine(client.state, client.joinedChannels) { state, joined ->
+                    if (state !is IrcClientState.Ready) return@combine null
+                    if (type == BufferType.CHANNEL) {
+                        val normalizedTarget = client.isupport.normalize(target)
+                        if (joined.none { client.isupport.normalize(it) == normalizedTarget }) return@combine null
+                    }
+                    client
+                }
+            }
+        }.first { client ->
+            client != null &&
+                (snapshots.value.actors[networkId]?.connection as? IrcClientConnection)?.client === client
+        }!!
+
+internal suspend fun sendNotificationReplyWhenReady(
+    networkId: Long,
+    type: BufferType,
+    target: String,
+    snapshots: StateFlow<ConnectionRegistrySnapshot>,
+    start: suspend () -> Unit,
+    reconnect: suspend (Long) -> Unit,
+    submit: suspend (IrcClient) -> SendAcceptance,
+): SendAcceptance {
+    val client =
+        try {
+            withTimeoutOrNull(NOTIFICATION_REPLY_READY_TIMEOUT_MS) {
+                start()
+                val current = (snapshots.value.actors[networkId]?.connection as? IrcClientConnection)?.client
+                if (current?.state?.value !is IrcClientState.Ready) reconnect(networkId)
+                awaitNotificationReplyClient(networkId, type, target, snapshots)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        } ?: return SendAcceptance.Rejected(SendRejectionReason.CONNECTION_UNAVAILABLE)
+    return submit(client)
+}
 
 private const val ACTION_OVERHEAD_BYTES = 9 // SOH + "ACTION " + SOH
 
@@ -786,6 +865,7 @@ class ConnectionManagerImpl
         private val pushSuspendedIds =
             java.util.concurrent.ConcurrentHashMap
                 .newKeySet<Long>()
+        private val notificationRepliesInFlight = ConcurrentHashMap<Long, Int>()
         private val backgroundRetention =
             BackgroundConnectionRetention(
                 scope = scope,
@@ -801,6 +881,7 @@ class ConnectionManagerImpl
         // -- lifecycle ----------------------------------------------------------
 
         override suspend fun startAll() {
+            if (registry.snapshot.value.started) return
             var startBegan = false
             try {
                 val shouldStart =
@@ -910,13 +991,18 @@ class ConnectionManagerImpl
             val wanted = wantedNetworkIds(all, userIntents)
             val endpoints = pushPrefs.endpoints()
             val health = pushHealthStore.snapshot()
-            val suspend = pushSuspendedNetworkIds(all, wanted, endpoints, health)
+            val suspend =
+                notificationReplySuspensions(
+                    pushSuspendedNetworkIds(all, wanted, endpoints, health),
+                    notificationRepliesInFlight,
+                )
 
             pushSuspendedIds.clear()
             pushSuspendedIds.addAll(suspend)
             reconcile(all)
 
-            val needsSocket = wanted.any { it !in pushSuspendedIds }
+            val suspended = notificationReplySuspensions(pushSuspendedIds, notificationRepliesInFlight)
+            val needsSocket = wanted.any { it !in suspended }
             if (needsSocket) {
                 startForegroundKeeper()
             } else {
@@ -1289,13 +1375,14 @@ class ConnectionManagerImpl
             val deletedIds = networksById.keys - all.mapTo(mutableSetOf()) { it.id }
             // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
             networksById = all.associateBy { it.id }
-            val wantedIds = wantedNetworkIds(all, userIntents) - pushSuspendedIds
+            val suspended = notificationReplySuspensions(pushSuspendedIds, notificationRepliesInFlight)
+            val wantedIds = wantedNetworkIds(all, userIntents) - suspended
             diagnostics.record("connections", "reconcile") {
                 mapOf(
                     "configured" to all.size,
                     "wanted" to wantedIds.size,
                     "deleted" to deletedIds.size,
-                    "push_suspended" to pushSuspendedIds.size,
+                    "push_suspended" to suspended.size,
                 )
             }
             registry.reconcile(
@@ -2482,6 +2569,47 @@ class ConnectionManagerImpl
             text: String,
             replyToEventId: Long?,
             channelContext: String?,
+        ): SendAcceptance = sendMessageInternal(bufferId, text, replyToEventId, channelContext, notificationClient = null)
+
+        override suspend fun sendNotificationReply(
+            bufferId: Long,
+            text: String,
+        ): SendAcceptance {
+            val buffer =
+                bufferDao.observeById(bufferId)
+                    ?: return SendAcceptance.Rejected(SendRejectionReason.BUFFER_NOT_FOUND)
+            if (text.isBlank()) return SendAcceptance.Rejected(SendRejectionReason.INVALID_CONTENT)
+            if (buffer.type == BufferType.SERVER && !buffer.isBouncerConsole) {
+                return SendAcceptance.Rejected(SendRejectionReason.UNSUPPORTED_BUFFER)
+            }
+            if (buffer.type == BufferType.CHANNEL && (!buffer.joined || buffer.pendingCloseAt != null)) {
+                return SendAcceptance.Rejected(SendRejectionReason.NOT_IN_CHANNEL)
+            }
+            retainNotificationReplyNetwork(notificationRepliesInFlight, buffer.networkId)
+            try {
+                return sendNotificationReplyWhenReady(
+                    networkId = buffer.networkId,
+                    type = buffer.type,
+                    target = buffer.ircTarget,
+                    snapshots = registry.snapshot,
+                    start = ::startAll,
+                    reconnect = ::connect,
+                    submit = { client ->
+                        sendMessageInternal(buffer.id, text, null, null, notificationClient = client)
+                    },
+                )
+            } finally {
+                releaseNotificationReplyNetwork(notificationRepliesInFlight, buffer.networkId)
+                scope.launch { evaluatePushMode() }
+            }
+        }
+
+        private suspend fun sendMessageInternal(
+            bufferId: Long,
+            text: String,
+            replyToEventId: Long?,
+            channelContext: String?,
+            notificationClient: IrcClient?,
         ): SendAcceptance =
             sendLifecycle.sending {
                 ensurePendingRecovered()
@@ -2498,7 +2626,7 @@ class ConnectionManagerImpl
                 if (buffer.type == BufferType.CHANNEL && !buffer.joined && buffer.pendingCloseAt == null) {
                     return@sending SendAcceptance.Rejected(SendRejectionReason.NOT_IN_CHANNEL)
                 }
-                val client = clientFor(buffer.networkId)
+                val client = notificationClient ?: clientFor(buffer.networkId)
                 val ready = client?.state?.value as? IrcClientState.Ready
                 val parentId: Long? = replyToEventId
                 val canonicalParent: MessageEntity? =
@@ -2572,17 +2700,20 @@ class ConnectionManagerImpl
                                 replyToEventId = parent?.id,
                                 replyToMsgid = parent?.msgid,
                                 channelContext = channelContext,
+                                requireChannelMembership = notificationClient != null,
                             )
                         }
+                    } catch (_: OutgoingChannelNotJoinedException) {
+                        return@sending SendAcceptance.Rejected(SendRejectionReason.NOT_IN_CHANNEL)
                     } catch (_: Exception) {
                         return@sending SendAcceptance.Rejected(SendRejectionReason.PERSISTENCE_FAILED)
                     }
                 val eventIds = durable.map { it.eventId }
-                // The lock now serializes only the wire: frames from concurrent sends must not interleave.
-                sendLocks.getOrPut(buffer.networkId) { Mutex() }.withLock {
-                    completeDurableAcceptance(
-                        eventIds = eventIds,
-                        transition = {
+                completeDurableAcceptance(
+                    eventIds = eventIds,
+                    transition = {
+                        // Serialize only the wire, inside post-commit cancellation protection.
+                        sendLocks.getOrPut(buffer.networkId) { Mutex() }.withLock {
                             writeDurablePlan(
                                 buffer = bufferDao.observeById(bufferId) ?: buffer,
                                 client = client,
@@ -2592,11 +2723,11 @@ class ConnectionManagerImpl
                                 replyToMsgid = delivery.wireReplyToMsgid,
                                 channelContext = channelContext,
                             )
-                        },
-                        secondaryEffect = { notifyOutgoingAccepted(buffer.id) },
-                        storedTexts = planned.map { it.chunk.ircFormattedText ?: it.chunk.displayText },
-                    )
-                }
+                        }
+                    },
+                    secondaryEffect = { notifyOutgoingAccepted(buffer.id) },
+                    storedTexts = planned.map { it.chunk.ircFormattedText ?: it.chunk.displayText },
+                )
             }
 
         override suspend fun retryMessage(eventId: Long): SendAcceptance =

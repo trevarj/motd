@@ -12,6 +12,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -239,6 +241,48 @@ class OutgoingMessagePlanTest {
                 SendAcceptance.Accepted(listOf(40L, 41L), ImmediateWireAcceptance.ACCEPTED),
                 accepted.await(),
             )
+        }
+
+    @Test
+    fun `caller cancellation while waiting for the wire mutex still returns durable ids`() =
+        runTest {
+            val wireMutex = Mutex(locked = true)
+            val waiting = CompletableDeferred<Unit>()
+            val accepted = CompletableDeferred<SendAcceptance.Accepted>()
+            val written = mutableListOf<Long>()
+            val lifecycle = DurableSendLifecycle()
+            val job =
+                launch {
+                    val result =
+                        lifecycle.sending {
+                            completeDurableAcceptance(
+                                eventIds = listOf(45L, 46L),
+                                transition = {
+                                    waiting.complete(Unit)
+                                    wireMutex.withLock {
+                                        written += listOf(45L, 46L)
+                                        ImmediateWireAcceptance.ACCEPTED
+                                    }
+                                },
+                                secondaryEffect = {},
+                            )
+                        }
+                    accepted.complete(result)
+                }
+            waiting.await()
+            job.cancel()
+            runCurrent()
+            assertFalse(accepted.isCompleted)
+            assertEquals(emptyList<Long>(), written)
+
+            wireMutex.unlock()
+            job.join()
+
+            assertEquals(
+                SendAcceptance.Accepted(listOf(45L, 46L), ImmediateWireAcceptance.ACCEPTED),
+                accepted.await(),
+            )
+            assertEquals(listOf(45L, 46L), written)
         }
 
     @Test

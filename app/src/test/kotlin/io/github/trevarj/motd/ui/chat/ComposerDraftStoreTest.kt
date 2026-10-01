@@ -7,7 +7,10 @@ import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
@@ -155,6 +158,152 @@ class ComposerDraftStoreTest {
 
             assertTrue(store.clearIfUnchanged(submitted))
             assertNull(store.loadDraft(roomId))
+        }
+
+    @Test
+    fun `notification reply append retains text and canonical reply identity`() =
+        runTest {
+            val (loserId, winnerId) =
+                db.messageDao().insertAll(
+                    listOf(
+                        message(roomId, "reply", serverTime = 100, dedupKey = "notification-reply-loser"),
+                        message(roomId, "reply", serverTime = 200, dedupKey = "notification-reply-winner"),
+                    ),
+                )
+            store.saveDraft(roomId, "typing", replyToEventId = loserId)
+            db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
+
+            val appended = store.appendNotificationReply(roomId, "voice reply")!!
+
+            assertEquals("typing\nvoice reply", appended.text)
+            assertEquals(winnerId, appended.replyToEventId)
+            assertEquals(appended, ComposerDraftStore(db).loadDraft(roomId))
+        }
+
+    @Test
+    fun `notification reply replaces blank draft without dropping its reply target`() =
+        runTest {
+            assertEquals("first", store.appendNotificationReply(roomId, "first")?.text)
+            store.saveDraft(roomId, "   ", replyToEventId = 9L)
+
+            val appended = store.appendNotificationReply(roomId, "second")!!
+
+            assertEquals("second", appended.text)
+            assertEquals(9L, appended.replyToEventId)
+        }
+
+    @Test
+    fun `notification retry removes only exact or trailing text and retains reply-only drafts`() =
+        runTest {
+            store.appendNotificationReply(roomId, "reply")
+            assertTrue(store.removeNotificationReply(roomId, "reply"))
+            assertNull(store.loadDraft(roomId))
+            assertFalse(store.removeNotificationReply(roomId, "reply"))
+
+            store.saveDraft(roomId, "typing", replyToEventId = 9L)
+            store.appendNotificationReply(roomId, "reply")
+            assertTrue(store.removeNotificationReply(roomId, "reply"))
+            assertEquals("typing", store.loadDraft(roomId)?.text)
+            assertEquals(9L, store.loadDraft(roomId)?.replyToEventId)
+
+            store.saveDraft(roomId, "reply", replyToEventId = 9L)
+            assertTrue(store.removeNotificationReply(roomId, "reply"))
+            assertEquals("", store.loadDraft(roomId)?.text)
+            assertEquals(9L, store.loadDraft(roomId)?.replyToEventId)
+        }
+
+    @Test
+    fun `notification retry leaves edited or nontrailing copies untouched`() =
+        runTest {
+            for (text in listOf("typing\nreply and more", "reply\ntyping", "replacement")) {
+                val edited = store.saveDraft(roomId, text, replyToEventId = 9L)
+
+                assertFalse(store.removeNotificationReply(roomId, "reply"))
+                assertEquals(edited, store.loadDraft(roomId))
+            }
+        }
+
+    @Test
+    fun `notification reply mutations resolve redirected room and preserve winner reply`() =
+        runTest {
+            val networkId = db.bufferDao().rawById(roomId)!!.networkId
+            val winner = db.bufferDao().insert(buffer(networkId, "#winner"))
+            store.saveDraft(winner, "winner draft", replyToEventId = 9L)
+            db.roomAliasDao().markRedirect(roomId, winner)
+
+            assertEquals(winner, store.appendNotificationReply(roomId, "reply")?.roomId)
+            assertEquals("winner draft\nreply", store.loadDraft(winner)?.text)
+            assertTrue(store.removeNotificationReply(roomId, "reply"))
+            assertEquals("winner draft", store.loadDraft(winner)?.text)
+            assertEquals(9L, store.loadDraft(winner)?.replyToEventId)
+            assertNull(db.composerDraftDao().byRoom(roomId))
+        }
+
+    @Test
+    fun `notification replies cannot recreate missing or dismissed room drafts`() =
+        runTest {
+            val networkId = db.bufferDao().rawById(roomId)!!.networkId
+            val query = db.bufferDao().insert(buffer(networkId, "alice", BufferType.QUERY))
+            store.appendNotificationReply(query, "reply")
+            db.bufferDao().deleteBuffer(query)
+            db.bufferDao().deleteBuffer(roomId)
+
+            for (id in listOf(roomId, query, 4_242L)) {
+                assertNull(store.appendNotificationReply(id, "reply"))
+                assertFalse(store.removeNotificationReply(id, "reply"))
+                assertNull(store.loadDraft(id))
+            }
+            assertTrue(db.bufferDao().rawById(query)!!.dismissed)
+        }
+
+    @Test
+    fun `overlapping notification appends retain both replies and composer identity`() =
+        runTest {
+            store.saveDraft(roomId, "typing", replyToEventId = 9L)
+            val start = CompletableDeferred<Unit>()
+            val first =
+                async(Dispatchers.Default) {
+                    start.await()
+                    store.appendNotificationReply(roomId, "first")
+                }
+            val second =
+                async(Dispatchers.Default) {
+                    start.await()
+                    ComposerDraftStore(db).appendNotificationReply(roomId, "second")
+                }
+            start.complete(Unit)
+            first.await()
+            second.await()
+
+            val final = store.loadDraft(roomId)!!
+            assertTrue(final.text in setOf("typing\nfirst\nsecond", "typing\nsecond\nfirst"))
+            assertEquals(9L, final.replyToEventId)
+        }
+
+    @Test
+    fun `overlapping append and retry removal never lose new reply or composer text`() =
+        runTest {
+            store.saveDraft(roomId, "typing\nretried", replyToEventId = 9L)
+            val start = CompletableDeferred<Unit>()
+            val appended =
+                async(Dispatchers.Default) {
+                    start.await()
+                    store.appendNotificationReply(roomId, "new reply")
+                }
+            val removed =
+                async(Dispatchers.Default) {
+                    start.await()
+                    ComposerDraftStore(db).removeNotificationReply(roomId, "retried")
+                }
+            start.complete(Unit)
+            appended.await()
+            val didRemove = removed.await()
+
+            assertEquals(
+                if (didRemove) "typing\nnew reply" else "typing\nretried\nnew reply",
+                store.loadDraft(roomId)?.text,
+            )
+            assertEquals(9L, store.loadDraft(roomId)?.replyToEventId)
         }
 
     @Test

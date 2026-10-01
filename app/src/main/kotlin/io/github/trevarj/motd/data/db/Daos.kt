@@ -1308,6 +1308,7 @@ interface MessageDao {
               )
              AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
              AND notificationEligible = 1
+             AND (:hasMention IS NULL OR hasMention = :hasMention)
            ORDER BY serverTime DESC, timelineOrder DESC, id DESC
            LIMIT :limit""",
     )
@@ -1317,6 +1318,7 @@ interface MessageDao {
         afterEventId: TimelineEventId,
         excludeEventId: Long,
         limit: Int,
+        hasMention: Boolean?,
     ): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId AND eventKey = :eventKey LIMIT 1")

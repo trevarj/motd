@@ -88,6 +88,28 @@ class ComposerDraftStore
                 draft
             }
 
+        /** Atomically append a failed first notification reply without replacing composer edits. */
+        suspend fun appendNotificationReply(
+            bufferId: Long,
+            text: String,
+        ): ComposerDraftEntity? =
+            db.withTransaction {
+                val existing = loadDraft(bufferId)
+                saveDraft(bufferId, mergeRejectedReply(existing?.text, text), existing?.replyToEventId)
+            }
+
+        /** Remove only an unchanged preserved copy, retaining any other text and reply identity. */
+        suspend fun removeNotificationReply(
+            bufferId: Long,
+            text: String,
+        ): Boolean =
+            db.withTransaction {
+                val existing = loadDraft(bufferId) ?: return@withTransaction false
+                val remaining = withoutRetriedReply(existing.text, text) ?: return@withTransaction false
+                saveDraft(bufferId, remaining, existing.replyToEventId)
+                true
+            }
+
         /** Clear only the exact accepted version; a concurrent edit/reply change wins. */
         suspend fun clearIfUnchanged(draft: ComposerDraftEntity): Boolean =
             db.withTransaction {
@@ -120,4 +142,22 @@ class ComposerDraftStore
             /** A prefill is one user gesture; a handful in flight is already more than realistic. */
             const val PREFILL_PUSH_BUFFER = 8
         }
+    }
+
+/** Append a failed reply to whatever the composer already holds, preserving both. */
+internal fun mergeRejectedReply(
+    existing: String?,
+    rejected: String,
+): String = if (existing.isNullOrBlank()) rejected else "$existing\n$rejected"
+
+/** Null means the user edited or replaced the preserved copy, so the draft must remain untouched. */
+internal fun withoutRetriedReply(
+    existing: String?,
+    retried: String,
+): String? =
+    when {
+        existing == null -> null
+        existing == retried -> ""
+        existing.endsWith("\n$retried") -> existing.removeSuffix("\n$retried")
+        else -> null
     }

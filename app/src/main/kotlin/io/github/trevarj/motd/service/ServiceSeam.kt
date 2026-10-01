@@ -23,6 +23,7 @@ enum class SendRejectionReason {
     EVENT_NOT_RETRYABLE,
     PERSISTENCE_FAILED,
     NOT_IN_CHANNEL,
+    CONNECTION_UNAVAILABLE,
 }
 
 enum class ImmediateWireAcceptance {
@@ -236,6 +237,12 @@ interface ConnectionManager {
         text: String,
         replyToEventId: TimelineEventId? = null,
         channelContext: String? = null,
+    ): SendAcceptance
+
+    /** Prepare the current connection before accepting a notification reply into the timeline. */
+    suspend fun sendNotificationReply(
+        bufferId: Long,
+        text: String,
     ): SendAcceptance
 
     /** Retry the same durable row with a new attempt label. */

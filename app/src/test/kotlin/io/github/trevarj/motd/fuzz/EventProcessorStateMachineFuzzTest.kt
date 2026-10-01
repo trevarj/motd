@@ -512,8 +512,9 @@ class EventProcessorStateMachineFuzzTest {
             eventId: Long,
             message: IrcEvent.ChatMessage,
             watched: Boolean,
+            refreshOnly: Boolean,
         ) {
-            eventIds += eventId
+            if (!refreshOnly) eventIds += eventId
         }
     }
 

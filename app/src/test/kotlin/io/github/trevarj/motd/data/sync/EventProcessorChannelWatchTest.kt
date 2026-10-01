@@ -55,7 +55,9 @@ class EventProcessorChannelWatchTest {
             eventId: TimelineEventId,
             message: IrcEvent.ChatMessage,
             watched: Boolean,
+            refreshOnly: Boolean,
         ) {
+            if (refreshOnly) return
             watchedFlags += watched
             onIncoming(networkId, bufferId, type, hasMention, message)
         }

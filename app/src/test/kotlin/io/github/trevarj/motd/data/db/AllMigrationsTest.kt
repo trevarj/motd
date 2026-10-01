@@ -504,6 +504,7 @@ class AllMigrationsTest {
                             afterEventId = Long.MIN_VALUE,
                             excludeEventId = -1,
                             limit = 10,
+                            hasMention = null,
                         ).map { it.text },
                 )
             } finally {

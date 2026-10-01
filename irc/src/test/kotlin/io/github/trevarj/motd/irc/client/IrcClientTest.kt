@@ -7,12 +7,14 @@ import io.github.trevarj.motd.irc.ext.SearchRequest
 import io.github.trevarj.motd.irc.ext.SearchResultKind
 import io.github.trevarj.motd.irc.ext.SearchResultMessage
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.irc.transport.TransportFactory
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
@@ -71,6 +73,199 @@ class IrcClientTest {
     private fun responseLabel(line: String): String =
         checkNotNull(Regex("label=(motd-\\d+)").find(line)) { "missing response label in $line" }
             .groupValues[1]
+
+    @Test
+    fun `joined channels track only self membership before event publication`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registered(ft)
+            val observed = mutableListOf<Set<String>>()
+            val job =
+                launch(UnconfinedTestDispatcher(testScheduler)) {
+                    client.broadcastEvents.collect { event ->
+                        if (event is IrcEvent.Joined || event is IrcEvent.Parted || event is IrcEvent.Kicked) {
+                            observed += client.joinedChannels.value
+                        }
+                    }
+                }
+
+            ft.feed(":alice!u@h JOIN #Room")
+            runCurrent()
+            assertEquals(emptySet<String>(), client.joinedChannels.value)
+            ft.feed(":MOTD!u@h JOIN #Room")
+            runCurrent()
+            assertEquals(setOf("#Room"), client.joinedChannels.value)
+            ft.feed(":motd!u@h JOIN #rOOM")
+            ft.feed(":motd!u@h JOIN #Other")
+            runCurrent()
+            assertEquals(setOf("#Room", "#Other"), client.joinedChannels.value)
+            ft.feed(":alice!u@h PART #Room :leaving")
+            ft.feed(":op!u@h KICK #Room alice :removed")
+            runCurrent()
+            assertEquals(setOf("#Room", "#Other"), client.joinedChannels.value)
+            ft.feed(":motd!u@h PART #ROOM :leaving")
+            runCurrent()
+            assertEquals(setOf("#Other"), client.joinedChannels.value)
+            ft.feed(":motd!u@h JOIN #Room")
+            ft.feed(":op!u@h KICK #rOoM MOTD :removed")
+            runCurrent()
+            assertEquals(setOf("#Other"), client.joinedChannels.value)
+            job.cancelAndJoin()
+
+            assertEquals(
+                listOf(
+                    emptySet(),
+                    setOf("#Room"),
+                    setOf("#Room"),
+                    setOf("#Room", "#Other"),
+                    setOf("#Room", "#Other"),
+                    setOf("#Room", "#Other"),
+                    setOf("#Other"),
+                    setOf("#Room", "#Other"),
+                    setOf("#Other"),
+                ),
+                observed,
+            )
+        }
+
+    @Test
+    fun `joined channels keep server spelling and use current CASEMAPPING`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredWithIsupport(ft, "CASEMAPPING=ascii")
+            ft.feed(":motd!u@h JOIN #Room[")
+            ft.feed(":motd!u@h JOIN #Room{")
+            runCurrent()
+            assertEquals(setOf("#Room[", "#Room{"), client.joinedChannels.value)
+
+            ft.feed(":srv 005 motd CASEMAPPING=rfc1459 :are supported")
+            ft.feed(":motd!u@h JOIN #ROOM{")
+            runCurrent()
+            assertEquals(setOf("#Room[", "#Room{"), client.joinedChannels.value)
+            ft.feed(":motd!u@h PART #rOOM{ :leaving")
+            runCurrent()
+            assertEquals(emptySet<String>(), client.joinedChannels.value)
+
+            ft.feed(":motd!u@h JOIN #Spelling[")
+            ft.feed(":srv 005 motd CASEMAPPING=ascii :are supported")
+            ft.feed(":motd!u@h PART #spelling{ :different channel")
+            runCurrent()
+            assertEquals(setOf("#Spelling["), client.joinedChannels.value)
+            ft.feed(":op!u@h KICK #sPELLING[ motd :removed")
+            runCurrent()
+            assertEquals(emptySet<String>(), client.joinedChannels.value)
+        }
+
+    @Test
+    fun `stop restart and EOF clear current socket membership`() =
+        runTest {
+            val first = FakeTransport()
+            val second = FakeTransport()
+            var currentTransport = first
+            val client =
+                registered(
+                    first,
+                    factory = TransportFactory { _, _, _, _, _ -> currentTransport },
+                )
+            first.feed(":motd!u@h JOIN #First")
+            runCurrent()
+            assertEquals(setOf("#First"), client.joinedChannels.value)
+
+            client.stop()
+            assertEquals(emptySet<String>(), client.joinedChannels.value)
+            runCurrent()
+            currentTransport = second
+            client.start()
+            assertEquals(emptySet<String>(), client.joinedChannels.value)
+            runCurrent()
+            second.feed(":srv CAP * LS :$fullLs")
+            runCurrent()
+            second.feed(":srv CAP motd ACK :$fullLs")
+            runCurrent()
+            second.feed(":srv 001 motd :Welcome")
+            second.feed(":srv 005 motd CHATHISTORY=100 :are supported")
+            runCurrent()
+            assertTrue(client.state.value is IrcClientState.Ready)
+            assertEquals(emptySet<String>(), client.joinedChannels.value)
+            second.feed(":motd!u@h JOIN #Second")
+            runCurrent()
+            assertEquals(setOf("#Second"), client.joinedChannels.value)
+
+            val membershipAtDisconnect =
+                clientScope().async {
+                    client.broadcastEvents.filterIsInstance<IrcEvent.Disconnected>().first()
+                    client.joinedChannels.value
+                }
+            second.eof()
+            runCurrent()
+            client.awaitTermination()
+            assertEquals(IrcClientState.Disconnected, client.state.value)
+            assertEquals(emptySet<String>(), client.joinedChannels.value)
+            assertEquals(emptySet<String>(), membershipAtDisconnect.await())
+        }
+
+    @Test
+    fun `live netjoin updates membership but parsed context and playback do not`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registered(ft)
+            val observed = mutableListOf<Pair<IrcEvent, Set<String>>>()
+            val job =
+                launch(UnconfinedTestDispatcher(testScheduler)) {
+                    client.broadcastEvents.collect { event ->
+                        observed += event to client.joinedChannels.value
+                    }
+                }
+
+            ft.feed("BATCH +peers netjoin server.a server.b")
+            ft.feed("@batch=peers :alice!u@h JOIN #Peer")
+            ft.feed("BATCH -peers")
+            runCurrent()
+            assertEquals(emptySet<String>(), client.joinedChannels.value)
+
+            ft.feed("BATCH +live netjoin server.a server.b")
+            ft.feed("@batch=live :motd!u@h JOIN #Live")
+            ft.feed("@batch=live :alice!u@h JOIN #Peer")
+            runCurrent()
+            assertEquals(emptySet<String>(), client.joinedChannels.value)
+            ft.feed("BATCH -live")
+            runCurrent()
+            assertEquals(setOf("#Live"), client.joinedChannels.value)
+            val live = observed.last()
+            val liveBatch = live.first as IrcEvent.NetworkBatch
+            assertEquals(false, liveBatch.historyMetadata?.isContext)
+            assertEquals(setOf("#Live"), live.second)
+
+            ft.feed("@draft/chathistory-context BATCH +context netjoin server.a server.b")
+            ft.feed("@batch=context :motd!u@h JOIN #Context")
+            ft.feed("BATCH -context")
+            runCurrent()
+            assertEquals(setOf("#Live"), client.joinedChannels.value)
+            val context = observed.last().first as IrcEvent.NetworkBatch
+            assertEquals(true, context.historyMetadata?.isContext)
+            assertEquals("#Context", (context.events.single() as IrcEvent.Joined).channel)
+
+            for ((batchType, source, channel) in listOf(
+                Triple("chathistory", IrcEvent.PlaybackSource.CHATHISTORY, "#History"),
+                Triple("znc.in/playback", IrcEvent.PlaybackSource.ZNC_PLAYBACK, "#Playback"),
+            )) {
+                ft.feed("BATCH +history $batchType $channel")
+                ft.feed("@batch=history BATCH +nested netjoin server.a server.b")
+                ft.feed("@batch=nested :motd!u@h JOIN $channel")
+                ft.feed("@batch=history BATCH -nested")
+                ft.feed("BATCH -history")
+                runCurrent()
+                assertEquals(setOf("#Live"), client.joinedChannels.value)
+                val playback = observed.last().first as IrcEvent.PlaybackBatch
+                assertEquals(source, playback.source)
+                val nested = playback.events.single() as IrcEvent.NetworkBatch
+                assertEquals(false, nested.historyMetadata?.isContext)
+                assertTrue((nested.events.single() as IrcEvent.Joined).isSelf)
+                assertEquals(channel, (nested.events.single() as IrcEvent.Joined).channel)
+                assertEquals(setOf("#Live"), observed.last().second)
+            }
+            job.cancelAndJoin()
+        }
 
     @Test
     fun `CTCP VERSION replies with framed app version only to PRIVMSG`() =
@@ -1994,11 +2189,12 @@ class IrcClientTest {
         caps: String = fullLs,
         observerBufferCapacity: Int = 4096,
         clientVersion: String = "motd",
+        factory: TransportFactory = ft.factory(),
     ): IrcClient {
         val client =
             IrcClient(
                 config(),
-                ft.factory(),
+                factory,
                 clientScope(),
                 observerBufferCapacity,
                 clientVersion = clientVersion,

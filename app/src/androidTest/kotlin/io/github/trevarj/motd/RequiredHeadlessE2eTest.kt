@@ -1,10 +1,15 @@
 package io.github.trevarj.motd
 
 import android.Manifest
+import android.app.Notification
+import android.app.NotificationManager
+import android.app.RemoteInput
 import android.content.Intent
+import android.os.Bundle
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.core.app.NotificationCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
@@ -33,8 +38,10 @@ import io.github.trevarj.motd.e2e.robots.OnboardingRobot
 import io.github.trevarj.motd.e2e.robots.SettingsRobot
 import io.github.trevarj.motd.e2e.robots.ThemeSheetRobot
 import io.github.trevarj.motd.e2e.robots.TimelineRobot
+import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.MotdNotifications
+import io.github.trevarj.motd.service.ReplyReceiver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -174,6 +181,88 @@ class RequiredHeadlessE2eTest {
         val after = runBlocking { probe.awaitCanonical(token, bufferId) }
         assertEquals(canonical.id, after.id)
         TimelineRobot(compose).assertMessageVisible(after.tag())
+
+        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        ChatListRobot(compose).awaitTag("chatlist_row_$bufferId")
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val notificationManager = checkNotNull(context.getSystemService(NotificationManager::class.java))
+        val connectionProbe = ConnectionProbe(bootstrap.seams.connections(), milestones)
+        val currentClient = checkNotNull(bootstrap.seams.connections().clientFor(network.childId))
+        val nick = (currentClient.state.value as IrcClientState.Ready).nick
+        val mentionText = "$nick: automention$token"
+        val replyToken = "autoreply$token"
+        val ordinaryToken = "autoordinary$token"
+        FixtureIrcClient.connect(bootstrap.args).use { sender ->
+            sender.sendMessage(bootstrap.args.channel, mentionText)
+            sender.flushThroughServer("automention$token")
+            val mention = runBlocking { probe.awaitCanonicalFromAnySender(mentionText, bufferId) }
+            assertTrue(mention.hasMention)
+            var postedMention: Notification? = null
+            compose.waitUntil("posted channel mention for buffer=$bufferId", 20_000) {
+                postedMention =
+                    notificationManager.activeNotifications
+                        .firstOrNull {
+                            it.id == MotdNotifications.messageNotificationId(bufferId) &&
+                                it.tag == "channel_mentions" &&
+                                NotificationCompat.MessagingStyle
+                                    .extractMessagingStyleFromNotification(it.notification)
+                                    ?.messages
+                                    ?.any { message -> message.text.toString() == mentionText } == true
+                        }?.notification
+                postedMention != null
+            }
+            val actions = checkNotNull(postedMention?.actions)
+            val replyAction = actions.single { it.semanticAction == Notification.Action.SEMANTIC_ACTION_REPLY }
+            val readAction = actions.single { it.semanticAction == Notification.Action.SEMANTIC_ACTION_MARK_AS_READ }
+            runBlocking {
+                bootstrap.seams.connections().disconnect(network.childId)
+                connectionProbe.awaitDisconnected(network.childId)
+            }
+            val fillIn = Intent()
+            RemoteInput.addResultsToIntent(
+                replyAction.remoteInputs,
+                fillIn,
+                Bundle().apply { putCharSequence(ReplyReceiver.KEY_REPLY, replyToken) },
+            )
+            replyAction.actionIntent.send(context, 0, fillIn)
+            val replied = runBlocking { probe.awaitCanonical(replyToken, bufferId) }
+            assertEquals(bufferId, replied.bufferId)
+            sender.flushThroughServer("autoreply$token")
+            val replyRows =
+                runBlocking {
+                    bootstrap.seams
+                        .search()
+                        .search(replyToken, bufferId)
+                        .first()
+                        .hits
+                        .map { it.message }
+                        .filter { it.text == replyToken }
+                }
+            assertEquals(listOf(replied.id), replyRows.map { it.id })
+            ChatListRobot(compose).awaitTag("chatlist_row_$bufferId")
+
+            // Another mention would update the captured mark-read PendingIntent's boundary.
+            runBlocking { awaitWallClockAfter(mention.serverTime) }
+            sender.sendMessage(bootstrap.args.channel, ordinaryToken)
+            sender.flushThroughServer("autoordinary$token")
+            val ordinary = runBlocking { probe.awaitCanonicalFromAnySender(ordinaryToken, bufferId) }
+            assertTrue(!ordinary.hasMention)
+            assertTrue(mention.serverTime < ordinary.serverTime)
+            readAction.actionIntent.send(context, 0, Intent())
+            val markedRoom =
+                runBlocking {
+                    withTimeout(20_000) {
+                        bootstrap.seams.buffers().observeBuffer(bufferId).first { room ->
+                            room != null &&
+                                markerAtLeast(room.localReadAnchorTime, room.localReadAnchorEventId, mention.anchor())
+                        }
+                    }
+                }
+            assertTrue(checkNotNull(markedRoom?.localReadAnchorTime) < ordinary.serverTime)
+            ChatListRobot(compose).awaitTag("chatlist_row_$bufferId")
+            milestones.record("notification_reply_and_read", "buffer=$bufferId reply=${replied.id} unread=${ordinary.id}")
+        }
+        ChatListRobot(compose).open(bufferId)
 
         WhisperNativeAssertions.assertMalformedModelsDoNotAbortOrPoisonLaterInspections()
 

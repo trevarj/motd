@@ -2,6 +2,7 @@ package io.github.trevarj.motd.service
 
 import android.content.Context
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
@@ -179,13 +180,13 @@ class MotdNotificationsFoolTest {
         }
 
     @Test
-    fun dickordNotificationCleansPresentationButKeepsRawPersonIdentity() =
+    fun dickordNotificationCleansSenderButKeepsActualMentionChannelTitleAndRawIdentity() =
         runTest {
             val dickordBufferId =
                 db.bufferDao().insert(
                     BufferEntity(
                         networkId = networkId,
-                        name = "#discord.me.chat.alice",
+                        name = "#internal-alias",
                         displayName = "#discord.me.chat.alice",
                         type = BufferType.CHANNEL,
                     ),
@@ -217,9 +218,30 @@ class MotdNotificationsFoolTest {
                     .notification
             val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted)
             val person = style?.messages?.single()?.person
-            assertEquals("#me.chat.alice", style?.conversationTitle.toString())
+            assertEquals("#discord.me.chat.alice", style?.conversationTitle.toString())
             assertEquals("Alice", person?.name.toString())
             assertEquals("irc:$networkId:alice/discord", person?.key)
+            assertEquals(dickordBufferId, shadowOf(posted.contentIntent).savedIntent.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1))
+            val reply = requireNotNull(NotificationCompat.getAction(posted, 0))
+            assertEquals(NotificationCompat.Action.SEMANTIC_ACTION_REPLY, reply.semanticAction)
+            assertEquals(dickordBufferId, shadowOf(reply.actionIntent).savedIntent.getLongExtra(ReplyReceiver.EXTRA_BUFFER_ID, -1))
+
+            notifications.onIncoming(
+                networkId,
+                dickordBufferId,
+                BufferType.CHANNEL,
+                false,
+                chat("Alice/discord", "ordinary"),
+            )
+            val ordinary =
+                shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+                    .activeNotifications
+                    .single { it.tag == null }
+                    .notification
+            val ordinaryStyle = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(ordinary)
+            assertEquals("#me.chat.alice", ordinaryStyle?.conversationTitle.toString())
+            assertEquals(listOf("ordinary"), ordinaryStyle?.messages?.map { it.text.toString() })
+            assertEquals(listOf("me: hello"), style?.messages?.map { it.text.toString() })
         }
 
     @Test
@@ -288,6 +310,7 @@ class MotdNotificationsFoolTest {
                 false,
                 eventId,
                 delivered,
+                refreshOnly = false,
             )
 
             assertEquals(0, postedCount())
@@ -345,6 +368,7 @@ class MotdNotificationsFoolTest {
                 false,
                 eventId,
                 afterMerge,
+                refreshOnly = false,
             )
             assertEquals(
                 listOf(MotdNotifications.messageNotificationId(bufferId)),
@@ -386,6 +410,7 @@ class MotdNotificationsFoolTest {
                 false,
                 loserId,
                 delivered,
+                refreshOnly = false,
             )
             val winnerId =
                 db
@@ -747,6 +772,10 @@ class MotdNotificationsFoolTest {
                     .notification
             assertEquals(MotdNotifications.CHANNEL_INVITATIONS, posted.channelId)
             assertSilent(posted)
+            assertNull(NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted))
+            for (index in posted.actions.indices) {
+                assertEquals(NotificationCompat.Action.SEMANTIC_ACTION_NONE, requireNotNull(NotificationCompat.getAction(posted, index)).semanticAction)
+            }
             assertEquals(MotdNotifications.ACTION_OPEN_BUFFER, shadowOf(posted.contentIntent).savedIntent.action)
             assertEquals(
                 listOf("Join", "Dismiss"),
@@ -800,5 +829,56 @@ class MotdNotificationsFoolTest {
 
             notifications.onInvitationResolved(winnerId)
             assertEquals(0, postedCount())
+        }
+
+    @Test
+    fun channelRoomMergeRetiresBothLosingLanesAndPreservesWinnerAndStatus() =
+        runTest {
+            val winnerId =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "#room", displayName = "#room", type = BufferType.CHANNEL),
+                )
+            val loserId =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "#other", displayName = "#other", type = BufferType.CHANNEL),
+                )
+            for ((id, target) in listOf(winnerId to "#room", loserId to "#other")) {
+                notifications.onIncoming(networkId, id, BufferType.CHANNEL, false, chat("troll", "ordinary $target").copy(target = target))
+                notifications.onIncoming(networkId, id, BufferType.CHANNEL, true, chat("troll", "me: mention $target").copy(target = target))
+            }
+            NotificationManagerCompat.from(context).notify(
+                IrcForegroundService.STATUS_ID,
+                notifications.statusNotification(connectedCount = 1, reconnecting = false),
+            )
+            val manager = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+            assertEquals(5, manager.activeNotifications.size)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+
+            BufferStore(db, notifications).mergeRooms(winnerId, loserId)
+
+            assertEquals(
+                setOf(
+                    null to IrcForegroundService.STATUS_ID,
+                    null to MotdNotifications.messageNotificationId(winnerId),
+                    "channel_mentions" to MotdNotifications.messageNotificationId(winnerId),
+                ),
+                manager.activeNotifications.map { it.tag to it.id }.toSet(),
+            )
+            for ((tag, body) in listOf(null to "ordinary #room", "channel_mentions" to "me: mention #room")) {
+                val posted = manager.activeNotifications.single { it.tag == tag && it.id == MotdNotifications.messageNotificationId(winnerId) }.notification
+                assertEquals(
+                    listOf(body),
+                    NotificationCompat.MessagingStyle
+                        .extractMessagingStyleFromNotification(posted)
+                        ?.messages
+                        ?.map { it.text.toString() },
+                )
+            }
+            assertEquals(
+                MotdNotifications.CHANNEL_STATUS,
+                manager.activeNotifications
+                    .single { it.id == IrcForegroundService.STATUS_ID }
+                    .notification.channelId,
+            )
         }
 }

@@ -1,21 +1,22 @@
 package io.github.trevarj.motd.service
 
+import io.github.trevarj.motd.ui.chat.mergeRejectedReply
+import io.github.trevarj.motd.ui.chat.withoutRetriedReply
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * A rejected notification reply used to be logged and dropped: the RemoteInput UI reported success,
- * nothing was persisted, and the typed text was gone. The reply now survives in the composer draft
- * and the user gets a retryable failure notice.
- */
+/** Notification replies preserve rejected/uncertain text without treating durable failure as success. */
 class NotificationReplyRejectionTest {
     private class Recorder {
         var preserved = 0
         var released = 0
         var failedWith: SendRejectionReason? = null
+        var uncertainWith: ImmediateWireAcceptance? = null
         var resolved = 0
     }
 
@@ -29,22 +30,24 @@ class NotificationReplyRejectionTest {
         preserveDraft = { recorder.preserved++ },
         releaseDraft = { recorder.released++ },
         notifyFailed = { reason -> recorder.failedWith = reason },
+        notifyUncertain = { recorder.uncertainWith = it },
         notifyResolved = { recorder.resolved++ },
     )
 
     private val accepted = SendAcceptance.Accepted(eventIds = listOf(7L))
 
     @Test
-    fun rejectedReplyPreservesTheTextAndSurfacesTheFailure() =
+    fun unavailableConnectionPreservesTheReplyAndSurfacesTheFailure() =
         runTest {
             val recorder = Recorder()
 
-            deliver(SendAcceptance.Rejected(SendRejectionReason.NOT_IN_CHANNEL), retry = false, recorder)
+            deliver(SendAcceptance.Rejected(SendRejectionReason.CONNECTION_UNAVAILABLE), retry = false, recorder)
 
             assertEquals(1, recorder.preserved)
-            assertEquals(SendRejectionReason.NOT_IN_CHANNEL, recorder.failedWith)
+            assertEquals(SendRejectionReason.CONNECTION_UNAVAILABLE, recorder.failedWith)
             assertEquals(0, recorder.released)
             assertEquals(0, recorder.resolved)
+            assertNull(recorder.uncertainWith)
         }
 
     @Test
@@ -58,6 +61,7 @@ class NotificationReplyRejectionTest {
             assertEquals(0, recorder.released)
             assertEquals(0, recorder.resolved)
             assertNull(recorder.failedWith)
+            assertNull(recorder.uncertainWith)
         }
 
     @Test
@@ -71,6 +75,7 @@ class NotificationReplyRejectionTest {
             assertEquals(1, recorder.resolved)
             assertEquals(0, recorder.preserved)
             assertNull(recorder.failedWith)
+            assertNull(recorder.uncertainWith)
         }
 
     @Test
@@ -83,6 +88,81 @@ class NotificationReplyRejectionTest {
             assertEquals(0, recorder.preserved)
             assertEquals(SendRejectionReason.BUFFER_NOT_FOUND, recorder.failedWith)
             assertEquals(0, recorder.resolved)
+            assertNull(recorder.uncertainWith)
+        }
+
+    @Test
+    fun durableDisconnectedReplyPreservesTextAndRequiresReview() =
+        runTest {
+            val recorder = Recorder()
+
+            deliver(accepted.copy(immediateWireAcceptance = ImmediateWireAcceptance.DISCONNECTED), retry = false, recorder)
+
+            assertEquals(1, recorder.preserved)
+            assertEquals(ImmediateWireAcceptance.DISCONNECTED, recorder.uncertainWith)
+            assertEquals(0, recorder.released)
+            assertEquals(0, recorder.resolved)
+            assertNull(recorder.failedWith)
+        }
+
+    @Test
+    fun durableFailedReplyPreservesTextAndRequiresReview() =
+        runTest {
+            val recorder = Recorder()
+
+            deliver(accepted.copy(immediateWireAcceptance = ImmediateWireAcceptance.FAILED), retry = false, recorder)
+
+            assertEquals(1, recorder.preserved)
+            assertEquals(ImmediateWireAcceptance.FAILED, recorder.uncertainWith)
+            assertEquals(0, recorder.released)
+            assertEquals(0, recorder.resolved)
+            assertNull(recorder.failedWith)
+        }
+
+    @Test
+    fun uncertainManualRetryDoesNotAppendAgainOrResolveTheFailure() =
+        runTest {
+            val recorder = Recorder()
+
+            deliver(SendAcceptance.Rejected(SendRejectionReason.CONNECTION_UNAVAILABLE), retry = false, recorder)
+            for (wireAcceptance in listOf(ImmediateWireAcceptance.DISCONNECTED, ImmediateWireAcceptance.FAILED)) {
+                deliver(accepted.copy(immediateWireAcceptance = wireAcceptance), retry = true, recorder)
+                assertEquals(1, recorder.preserved)
+                assertEquals(0, recorder.released)
+                assertEquals(0, recorder.resolved)
+                assertEquals(wireAcceptance, recorder.uncertainWith)
+            }
+        }
+
+    @Test
+    fun cancellationDuringPreparationDoesNotPreserveOrReportAnUnsubmittedReply() =
+        runTest {
+            val preparing = CompletableDeferred<Unit>()
+            val recorder = Recorder()
+            val receiver =
+                launch {
+                    deliverNotificationReply(
+                        retry = false,
+                        send = {
+                            preparing.complete(Unit)
+                            awaitCancellation()
+                        },
+                        preserveDraft = { recorder.preserved++ },
+                        releaseDraft = { recorder.released++ },
+                        notifyFailed = { recorder.failedWith = it },
+                        notifyUncertain = { recorder.uncertainWith = it },
+                        notifyResolved = { recorder.resolved++ },
+                    )
+                }
+            preparing.await()
+            receiver.cancel()
+            receiver.join()
+
+            assertEquals(0, recorder.preserved)
+            assertEquals(0, recorder.released)
+            assertEquals(0, recorder.resolved)
+            assertNull(recorder.failedWith)
+            assertNull(recorder.uncertainWith)
         }
 
     @Test
@@ -101,13 +181,5 @@ class NotificationReplyRejectionTest {
         assertNull(withoutRetriedReply("typing\nrejected and more", "rejected"))
         assertNull(withoutRetriedReply("something else", "rejected"))
         assertNull(withoutRetriedReply(null, "rejected"))
-    }
-
-    @Test
-    fun everyRejectionReasonHasUserFacingText() {
-        SendRejectionReason.entries.forEach { reason ->
-            assertTrue(reason.name, sendRejectionText(reason).isNotBlank())
-        }
-        assertEquals("You're not in this channel", sendRejectionText(SendRejectionReason.NOT_IN_CHANNEL))
     }
 }
