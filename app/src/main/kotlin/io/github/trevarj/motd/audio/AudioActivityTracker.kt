@@ -12,6 +12,11 @@ class AudioActivityTracker
     constructor() {
         private val _recording = MutableStateFlow(false)
         val recording: StateFlow<Boolean> = _recording.asStateFlow()
+        internal var stopIncomingReading: (() -> Unit)? = null
+
+        fun stopReadingBeforeRecording() {
+            stopIncomingReading?.invoke()
+        }
 
         fun setRecording(active: Boolean) {
             _recording.value = active

@@ -56,6 +56,7 @@ them in motion on the [landing page](https://trevs.site/motd/).
 - **Multi-network** — several networks over one bouncer connection (`soju.im/bouncer-networks`)
 - **Push or persistent socket** — UnifiedPush + `soju.im/webpush` with on-device decryption, or a foreground service
 - **Modern composer** — nick autocomplete, replies, reactions, typing indicators, and editable slash-command chips with described suggestions
+- **Read incoming chats aloud** — opt-in installed Android speech or a one-click local Kokoro download in AI Labs, English male/female voices, independent voice/pace settings, and a top-of-chat player with previous, pause/resume, skip, latest, and stop
 - **CTCP VERSION** — identifies motd and the running app version when a request reaches the client
 - **Full-text search** — across all history or one buffer, with jump-to-message
 - **Theming** — Material You dynamic color plus curated editor/terminal palettes (Ayu, Gruvbox, Catppuccin, Modus, and more)

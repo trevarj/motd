@@ -11,6 +11,10 @@ captures/
 .externalNativeBuild/
 .cxx/
 
+# Checked TTS archive cache and extracted source/build workspaces (never model weights).
+third_party/ai/tts/
+third_party/ai/__pycache__/
+
 # Signing (never commit)
 *.jks
 *.keystore

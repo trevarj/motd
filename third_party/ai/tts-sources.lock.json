@@ -1,0 +1,233 @@
+{
+  "schema": 1,
+  "archives": [
+    {
+      "name": "abseil_cpp",
+      "group": "ort",
+      "commit": "987c57f325f7fa8472fa84e1f885f7534d391b0d",
+      "url": "https://github.com/abseil/abseil-cpp/archive/refs/tags/20250814.0.zip",
+      "archive": "ort/github.com/abseil/abseil-cpp/archive/refs/tags/20250814.0.zip",
+      "size": 3194036,
+      "sha256": "b2bdcf6682d8cb53df365bcc5d6c318a22e55821d9978a10fdb61404c026daff",
+      "sha1": "a9eb1d648cbca4d4d788737e971a6a7a63726b07"
+    },
+    {
+      "name": "date",
+      "group": "ort",
+      "commit": "6e921e1b1d21e84a5c82416ba7ecd98e33a436d0",
+      "url": "https://github.com/HowardHinnant/date/archive/refs/tags/v3.0.1.zip",
+      "archive": "ort/github.com/HowardHinnant/date/archive/refs/tags/v3.0.1.zip",
+      "size": 941286,
+      "sha256": "f4300b96f7a304d4ef9bf6e0fa3ded72159f7f2d0f605bdde3e030a0dba7cf9f",
+      "sha1": "2dac0c81dc54ebdd8f8d073a75c053b04b56e159"
+    },
+    {
+      "name": "eigen",
+      "group": "ort",
+      "commit": "1d8b82b0740839c0de7f1242a3585e3390ff5f33",
+      "url": "https://github.com/eigen-mirror/eigen/archive/1d8b82b0740839c0de7f1242a3585e3390ff5f33/eigen-1d8b82b0740839c0de7f1242a3585e3390ff5f33.zip",
+      "archive": "ort/github.com/eigen-mirror/eigen/archive/1d8b82b0740839c0de7f1242a3585e3390ff5f33/eigen-1d8b82b0740839c0de7f1242a3585e3390ff5f33.zip",
+      "size": 4075744,
+      "sha256": "6a60d76351f97132669daeeb721d6bf14b008101883ad2d687a3201c5c461eb0",
+      "sha1": "05b19b49e6fbb91246be711d801160528c135e34"
+    },
+    {
+      "name": "flatbuffers",
+      "group": "ort",
+      "commit": "0100f6a5779831fa7a651e4b67ef389a8752bd9b",
+      "url": "https://github.com/google/flatbuffers/archive/refs/tags/v23.5.26.zip",
+      "archive": "ort/github.com/google/flatbuffers/archive/refs/tags/v23.5.26.zip",
+      "size": 3209602,
+      "sha256": "57bd580c0772fd1a726c34ab8bf05325293bc5f9c165060a898afa1feeeb95e1",
+      "sha1": "59422c3b5e573dd192fead2834d25951f1c1670c"
+    },
+    {
+      "name": "json",
+      "group": "ort",
+      "commit": "9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03",
+      "url": "https://github.com/nlohmann/json/archive/refs/tags/v3.11.3.zip",
+      "archive": "ort/github.com/nlohmann/json/archive/refs/tags/v3.11.3.zip",
+      "size": 8489998,
+      "sha256": "04022b05d806eb5ff73023c280b68697d12b93e1b7267a0b22a1a39ec7578069",
+      "sha1": "5e88795165cc8590138d1f47ce94ee567b85b4d6"
+    },
+    {
+      "name": "microsoft_gsl",
+      "group": "ort",
+      "commit": "249146590e322123cd0b378b1f364d6069717687",
+      "url": "https://github.com/microsoft/GSL/archive/refs/tags/v4.2.1.zip",
+      "archive": "ort/github.com/microsoft/GSL/archive/refs/tags/v4.2.1.zip",
+      "size": 84222,
+      "sha256": "c9291d95f5f6e5c561990d06a589b01d89e553d0f366f0ce723dd1788e7a6076",
+      "sha1": "1094e3bb7a8af763dcb136ccd676e6e75e614eec"
+    },
+    {
+      "name": "mp11",
+      "group": "ort",
+      "commit": "0a0b5fb001ce0233ae3a6f99d849c0649e5a7361",
+      "url": "https://github.com/boostorg/mp11/archive/refs/tags/boost-1.82.0.zip",
+      "archive": "ort/github.com/boostorg/mp11/archive/refs/tags/boost-1.82.0.zip",
+      "size": 232716,
+      "sha256": "81431bdc44c439a324e02c07ed067f8f556419fd86f2d8b486ff568df6aac899",
+      "sha1": "9bc9e01dffb64d9e0773b2e44d2f22c51aace063"
+    },
+    {
+      "name": "onnx",
+      "group": "ort",
+      "commit": "be2b5fde82d9c8874f3d19328bdfe3b6962dc67b",
+      "url": "https://github.com/onnx/onnx/archive/refs/tags/v1.21.0.zip",
+      "archive": "ort/github.com/onnx/onnx/archive/refs/tags/v1.21.0.zip",
+      "size": 18072652,
+      "sha256": "b8b56570d94ecce49fee94e6380db456bb42035722b967015c9dd6459359433e",
+      "sha1": "321d4acc807c8e0fb0bbcc0424a143dffde1e846"
+    },
+    {
+      "name": "protobuf",
+      "group": "ort",
+      "commit": "f0dc78d7e6e331b8c6bb2d5283e06aa26883ca7c",
+      "url": "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip",
+      "archive": "ort/github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip",
+      "size": 7180794,
+      "sha256": "6a31b662deaeb0ac35e6287bda2f3369b19836e6c9f8828d4da444346f420298",
+      "sha1": "7cf2733949036c7d52fda017badcab093fe73bfa"
+    },
+    {
+      "name": "pytorch_cpuinfo",
+      "group": "ort",
+      "commit": "403d652dca4c1046e8145950b1c0997a9f748b57",
+      "url": "https://github.com/pytorch/cpuinfo/archive/403d652dca4c1046e8145950b1c0997a9f748b57.zip",
+      "archive": "ort/github.com/pytorch/cpuinfo/archive/403d652dca4c1046e8145950b1c0997a9f748b57.zip",
+      "size": 3853314,
+      "sha256": "357d9824b8d3f4c05f0b2287e45b4e0d982422c27b67b968eb23a643dc52b5e2",
+      "sha1": "30b2a07fe4bae8574f89176e56274cacdd6d135b"
+    },
+    {
+      "name": "re2",
+      "group": "ort",
+      "commit": "6dcd83d60f7944926bfd308cc13979fc53dd69ca",
+      "url": "https://github.com/google/re2/archive/refs/tags/2024-07-02.zip",
+      "archive": "ort/github.com/google/re2/archive/refs/tags/2024-07-02.zip",
+      "size": 451539,
+      "sha256": "a835fe55fbdcd8e80f38584ab22d0840662c67f2feb36bd679402da9641dc71e",
+      "sha1": "646e1728269cde7fcef990bf4a8e87b047882e88"
+    },
+    {
+      "name": "safeint",
+      "group": "ort",
+      "commit": "4cafc9196c4da9c817992b20f5253ef967685bf8",
+      "url": "https://github.com/dcleblanc/SafeInt/archive/refs/tags/3.0.28.zip",
+      "archive": "ort/github.com/dcleblanc/SafeInt/archive/refs/tags/3.0.28.zip",
+      "size": 626378,
+      "sha256": "3ffbd9a2fdff45da77da3e7269e9aa512ea43bed5c38ce8fd8f3d1068a032c3f",
+      "sha1": "23f252040ff6cb9f1fd18575b32fa8fb5928daac"
+    },
+    {
+      "name": "eigen",
+      "group": "sherpa",
+      "commit": "3147391d946bb4b6c68edd901f2add6ac1f31f8c",
+      "url": "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz",
+      "archive": "sherpa/eigen-3.4.0.tar.gz",
+      "size": 2705005,
+      "sha256": "8586084f71f9bde545ee7fa6d00288b264a2b7ac3607b974e54d13e7162c1c72"
+    },
+    {
+      "name": "espeak_ng",
+      "group": "sherpa",
+      "commit": "ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "url": "https://github.com/csukuangfj/espeak-ng/archive/ed530aa113046142eb5115cf2fc9157854d0ffe1.zip",
+      "archive": "sherpa/espeak-ng-ed530aa113046142eb5115cf2fc9157854d0ffe1.zip",
+      "size": 18011501,
+      "sha256": "e4e262cbe34f7fe21f91f1ba3397f2728e1f30eafbae7853f2b753a9ed13f0dd"
+    },
+    {
+      "name": "json",
+      "group": "sherpa",
+      "commit": "55f93686c01528224f448c19128836e7df245f72",
+      "url": "https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz",
+      "archive": "sherpa/json-3.12.0.tar.gz",
+      "size": 9678593,
+      "sha256": "4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187"
+    },
+    {
+      "name": "kaldi_decoder",
+      "group": "sherpa",
+      "commit": "62fda2d74246a90db9570e46fb16b012f813fae7",
+      "url": "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.3.0.tar.gz",
+      "archive": "sherpa/kaldi-decoder-0.3.0.tar.gz",
+      "size": 51199,
+      "sha256": "b9f34cfb4fd3b1344100eead79ef4d37aa15962274b9e3056de345021f76a1b0"
+    },
+    {
+      "name": "kaldi_native_fbank",
+      "group": "sherpa",
+      "commit": "b09e686fe2084732ddd30d1ef80acfc0f13eaf01",
+      "url": "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/v1.22.3.tar.gz",
+      "archive": "sherpa/kaldi-native-fbank-1.22.3.tar.gz",
+      "size": 71144,
+      "sha256": "9176cc66fc7ce1edf85cf355b06e320c57db6297df74277f575183468893cf61"
+    },
+    {
+      "name": "kaldifst",
+      "group": "sherpa",
+      "commit": "ab5bdd013bdf13921e6aeee77db5722ebf9955fb",
+      "url": "https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.8.0.tar.gz",
+      "archive": "sherpa/kaldifst-1.8.0.tar.gz",
+      "size": 172147,
+      "sha256": "3f247b7e5a2409071202f5e2bc6200060f66728c0a3443c03923ad2723e040b3"
+    },
+    {
+      "name": "kissfft",
+      "group": "sherpa",
+      "commit": "febd4caeed32e33ad8b2e0bb5ea77542c40f18ec",
+      "url": "https://github.com/mborgerding/kissfft/archive/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip",
+      "archive": "sherpa/kissfft-febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip",
+      "size": 74252,
+      "sha256": "497103e664168ebe39580b757adbe616f6cf85a16572af581ca7bc42d0ab13fd"
+    },
+    {
+      "name": "openfst",
+      "group": "sherpa",
+      "commit": "f702a6317d600ac953fdbb4978674c3a28b6115c",
+      "url": "https://github.com/csukuangfj/openfst/archive/refs/tags/v1.8.5-2026-07-09.tar.gz",
+      "archive": "sherpa/openfst-1.8.5-2026-07-09.tar.gz",
+      "size": 1501685,
+      "sha256": "2ff712a32952fcb01d351121a6bc8ccf4fdc6b2aa06ce8df2b3095dedd518c0e"
+    },
+    {
+      "name": "piper_phonemize",
+      "group": "sherpa",
+      "commit": "f3ff95afc03640bc1399e113e83361192a2fafb4",
+      "url": "https://github.com/csukuangfj/piper-phonemize/archive/f3ff95afc03640bc1399e113e83361192a2fafb4.zip",
+      "archive": "sherpa/piper-phonemize-f3ff95afc03640bc1399e113e83361192a2fafb4.zip",
+      "size": 9805962,
+      "sha256": "d9cca4e2bdc7d6dd8dffb96a4668283dbd3f77a9c194a3e530c1e8eba9406a5d"
+    },
+    {
+      "name": "simple-sentencepiece",
+      "group": "sherpa",
+      "commit": "62dd423df1d51da5ea06f1c3a046fc04f01b4f39",
+      "url": "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz",
+      "archive": "sherpa/simple-sentencepiece-0.7.tar.gz",
+      "size": 355335,
+      "sha256": "1748a822060a35baa9f6609f84efc8eb54dc0e74b9ece3d82367b7119fdc75af"
+    },
+    {
+      "name": "onnxruntime",
+      "group": "top",
+      "commit": "df2ba1cf8108aa63627cf4cdf8f807880b938616",
+      "url": "https://codeload.github.com/microsoft/onnxruntime/tar.gz/df2ba1cf8108aa63627cf4cdf8f807880b938616",
+      "archive": "top/onnxruntime-df2ba1cf8108aa63627cf4cdf8f807880b938616.tar.gz",
+      "size": 285782599,
+      "sha256": "37a7e138f7f29fa7692186b823963e2dc01af2bb217e8b04bd303ae27d63e529"
+    },
+    {
+      "name": "sherpa-onnx",
+      "group": "top",
+      "commit": "917bed95c8e5c7c18aa4d69fea42e9ef8ef0a60e",
+      "url": "https://codeload.github.com/k2-fsa/sherpa-onnx/tar.gz/917bed95c8e5c7c18aa4d69fea42e9ef8ef0a60e",
+      "archive": "top/sherpa-onnx-917bed95c8e5c7c18aa4d69fea42e9ef8ef0a60e.tar.gz",
+      "size": 11614988,
+      "sha256": "acf539e930283442c4237b7b23a06ebe3bff10cbc00694a4f09a3580e3c10e9e"
+    }
+  ]
+}

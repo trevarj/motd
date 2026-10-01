@@ -134,6 +134,7 @@ class EventProcessor
         private val canonicalTimeline: CanonicalTimelineStore = CanonicalTimelineStore(db),
         private val networkIgnoreCache: NetworkIgnoreCache = NetworkIgnoreCache(db.networkIgnoreDao()),
         private val notificationSettings: NotificationSettings = NotificationSettings.Noop,
+        private val incomingMessageReader: IncomingMessageReader = IncomingMessageReader.Noop,
     ) : IrcEventSink {
         private val networkDao get() = db.networkDao()
         private val networkIdentityDao get() = db.networkIdentityDao()
@@ -835,6 +836,25 @@ class EventProcessor
                         throw cancelled
                     } catch (error: Exception) {
                         diagnostics.record("chat_sound", "incoming_failed") {
+                            mapOf(
+                                "network_id" to networkId,
+                                "buffer_id" to canonical.bufferId,
+                                "event_id" to canonical.id,
+                                "error" to error::class.simpleName,
+                            )
+                        }
+                    }
+                }
+                if (result is IngestResult.Inserted && origin == EventOrigin.LIVE &&
+                    !canonical.isSelf && (type == BufferType.CHANNEL || type == BufferType.QUERY) &&
+                    (canonical.kind == MessageKind.PRIVMSG || canonical.kind == MessageKind.ACTION)
+                ) {
+                    try {
+                        incomingMessageReader.onIncoming(canonical)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        diagnostics.record("read_aloud", "incoming_failed") {
                             mapOf(
                                 "network_id" to networkId,
                                 "buffer_id" to canonical.bufferId,

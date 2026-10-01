@@ -141,6 +141,9 @@ abstract class VerifyLibboxArtifact : DefaultTask() {
 }
 
 abstract class VerifyAiNativeArtifacts : DefaultTask() {
+    @get:Internal
+    abstract val rootDirectory: DirectoryProperty
+
     @get:InputFile
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val whisperAar: RegularFileProperty
@@ -148,6 +151,10 @@ abstract class VerifyAiNativeArtifacts : DefaultTask() {
     @get:InputFile
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val textAar: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val ttsAar: RegularFileProperty
 
     @get:InputFile
     @get:PathSensitive(PathSensitivity.RELATIVE)
@@ -159,10 +166,12 @@ abstract class VerifyAiNativeArtifacts : DefaultTask() {
 
     @TaskAction
     fun verify() {
-        AiNativeArtifactVerifier.verifyAar(whisperAar.get().asFile, "ai-whisper debug AAR", "libmotd_whisper.so")
-        AiNativeArtifactVerifier.verifyAar(textAar.get().asFile, "ai-text debug AAR", "libmotd_text.so")
-        AiNativeArtifactVerifier.verifyApk(debugApk.get().asFile, "app debug APK", "arm64-v8a", rejectLibbox = false)
-        AiNativeArtifactVerifier.verifyApk(e2eApk.get().asFile, "app e2e APK", "x86_64", rejectLibbox = true)
+        val root = rootDirectory.get().asFile
+        AiNativeArtifactVerifier.verifyAar(whisperAar.get().asFile, "ai-whisper debug AAR", setOf("libmotd_whisper.so"), root)
+        AiNativeArtifactVerifier.verifyAar(textAar.get().asFile, "ai-text debug AAR", setOf("libmotd_text.so"), root)
+        AiNativeArtifactVerifier.verifyAar(ttsAar.get().asFile, "ai-tts debug AAR", setOf("libonnxruntime.so", "libsherpa-onnx-jni.so"), root)
+        AiNativeArtifactVerifier.verifyApk(debugApk.get().asFile, "app debug APK", "arm64-v8a", rejectLibbox = false, rootDirectory = root)
+        AiNativeArtifactVerifier.verifyApk(e2eApk.get().asFile, "app e2e APK", "x86_64", rejectLibbox = true, rootDirectory = root)
     }
 }
 
@@ -170,15 +179,15 @@ object AiNativeArtifactVerifier {
     fun verifyAar(
         archive: File,
         label: String,
-        libraryName: String,
+        libraryNames: Set<String>,
+        rootDirectory: File,
     ) {
         val entries = readEntries(archive, label)
         val expected =
-            listOf(
-                "jni/arm64-v8a/$libraryName",
-                "jni/x86_64/$libraryName",
-            )
-        val aiLibraries = entries.filter(::isMotdAiLibrary)
+            listOf("arm64-v8a", "x86_64")
+                .flatMap { abi -> libraryNames.map { name -> "jni/$abi/$name" } }
+                .sorted()
+        val aiLibraries = entries.filter(::isAiRuntimeLibrary)
         check(aiLibraries == expected) {
             "$label must contain exactly $expected; found AI JNI entries $aiLibraries"
         }
@@ -188,6 +197,7 @@ object AiNativeArtifactVerifier {
         }
         rejectLeakedRuntimeLibraries(label, entries)
         rejectModelWeights(label, entries)
+        if ("libonnxruntime.so" in libraryNames) verifyTtsElf(rootDirectory, archive, abi = null)
     }
 
     fun verifyApk(
@@ -195,14 +205,17 @@ object AiNativeArtifactVerifier {
         label: String,
         abi: String,
         rejectLibbox: Boolean,
+        rootDirectory: File,
     ) {
         val entries = readEntries(archive, label)
         val expectedAiLibraries =
             listOf(
                 "lib/$abi/libmotd_text.so",
                 "lib/$abi/libmotd_whisper.so",
-            )
-        val aiLibraries = entries.filter(::isMotdAiLibrary)
+                "lib/$abi/libonnxruntime.so",
+                "lib/$abi/libsherpa-onnx-jni.so",
+            ).sorted()
+        val aiLibraries = entries.filter(::isAiRuntimeLibrary)
         check(aiLibraries == expectedAiLibraries) {
             "$label must contain exactly $expectedAiLibraries; found AI JNI entries $aiLibraries"
         }
@@ -222,6 +235,18 @@ object AiNativeArtifactVerifier {
         }
         rejectLeakedRuntimeLibraries(label, entries)
         rejectModelWeights(label, entries)
+        verifyTtsElf(rootDirectory, archive, abi)
+    }
+
+    private fun verifyTtsElf(
+        rootDirectory: File,
+        archive: File,
+        abi: String?,
+    ) {
+        val command = mutableListOf("python3", File(rootDirectory, "third_party/ai/verify-tts-native.py").path, "--archive", archive.absolutePath)
+        abi?.let { command += listOf("--abi", it) }
+        val process = ProcessBuilder(command).directory(rootDirectory).inheritIO().start()
+        check(process.waitFor() == 0) { "TTS native ELF verification failed: $archive" }
     }
 
     private fun readEntries(
@@ -255,11 +280,19 @@ object AiNativeArtifactVerifier {
                     (
                         name.startsWith("libggml") ||
                             name.startsWith("libllama") ||
-                            name.startsWith("libwhisper")
+                            name.startsWith("libwhisper") ||
+                            name.startsWith("libespeak") ||
+                            name.startsWith("libpiper") ||
+                            name.startsWith("libkaldi") ||
+                            name.startsWith("libfst") ||
+                            name.startsWith("libkissfft") ||
+                            name.startsWith("libprotobuf") ||
+                            name.startsWith("libabsl") ||
+                            name == "libc++_shared.so"
                     )
             }
         check(leaked.isEmpty()) {
-            "$label must statically link GGML and whisper; found leaked shared libraries $leaked"
+            "$label must statically link private AI runtime dependencies; found leaked shared libraries $leaked"
         }
     }
 
@@ -273,9 +306,10 @@ object AiNativeArtifactVerifier {
         }
     }
 
-    private fun isMotdAiLibrary(path: String): Boolean {
+    private fun isAiRuntimeLibrary(path: String): Boolean {
         val name = path.substringAfterLast('/')
-        return name.startsWith("libmotd_") && name.endsWith(".so")
+        return (name.startsWith("libmotd_") || name in setOf("libonnxruntime.so", "libsherpa-onnx-jni.so")) &&
+            name.endsWith(".so")
     }
 
     private fun isModelWeight(path: String): Boolean {
@@ -297,6 +331,8 @@ object AiNativeArtifactVerifier {
             "model",
             "onnx",
             "pt",
+            "ort",
+            "pb",
             "pth",
             "safetensors",
             "tflite",
@@ -309,6 +345,9 @@ object AiNativeArtifactVerifier {
 }
 
 abstract class VerifyReleaseAiNativeArtifacts : DefaultTask() {
+    @get:Internal
+    abstract val rootDirectory: DirectoryProperty
+
     @get:InputDirectory
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val apkDirectory: DirectoryProperty
@@ -325,7 +364,7 @@ abstract class VerifyReleaseAiNativeArtifacts : DefaultTask() {
                 ?.elements
                 ?.singleOrNull()
                 ?: error("Expected exactly one release APK in ${apkDirectory.get().asFile}")
-        AiNativeArtifactVerifier.verifyApk(File(apk.outputFile), "app release APK", "arm64-v8a", rejectLibbox = false)
+        AiNativeArtifactVerifier.verifyApk(File(apk.outputFile), "app release APK", "arm64-v8a", rejectLibbox = false, rootDirectory = rootDirectory.get().asFile)
     }
 }
 
@@ -461,9 +500,11 @@ val verifyLibboxArtifact =
 tasks.register<VerifyAiNativeArtifacts>("verifyAiNativeArtifacts") {
     group = "verification"
     description = "Verifies AI runtime AAR and app APK native packaging contracts."
+    rootDirectory.set(rootProject.layout.projectDirectory)
     dependsOn(
         ":ai-whisper:bundleDebugAar",
         ":ai-text:bundleDebugAar",
+        ":ai-tts:bundleDebugAar",
         "assembleDebug",
         "assembleE2e",
     )
@@ -473,6 +514,7 @@ tasks.register<VerifyAiNativeArtifacts>("verifyAiNativeArtifacts") {
         ),
     )
     textAar.set(rootProject.layout.projectDirectory.file("ai-text/build/outputs/aar/ai-text-debug.aar"))
+    ttsAar.set(rootProject.layout.projectDirectory.file("ai-tts/build/outputs/aar/ai-tts-debug.aar"))
     debugApk.set(layout.buildDirectory.file("outputs/apk/debug/app-debug.apk"))
     e2eApk.set(layout.buildDirectory.file("outputs/apk/e2e/app-e2e.apk"))
 }
@@ -481,6 +523,7 @@ androidComponents.onVariants(androidComponents.selector().withBuildType("release
     tasks.register<VerifyReleaseAiNativeArtifacts>("verifyReleaseAiNativeArtifacts") {
         group = "verification"
         description = "Verifies release APK native packaging without building debug or E2E artifacts."
+        rootDirectory.set(rootProject.layout.projectDirectory)
         dependsOn("assembleRelease")
         apkDirectory.set(variant.artifacts.get(SingleArtifact.APK))
         builtArtifactsLoader.set(variant.artifacts.getBuiltArtifactsLoader())
@@ -497,6 +540,7 @@ dependencies {
     implementation(project(":irc"))
     implementation(project(":ai-whisper"))
     implementation(project(":ai-text"))
+    implementation(project(":ai-tts"))
     debugImplementation(files(libboxAar))
     releaseImplementation(files(libboxAar))
     add("e2eImplementation", files(libboxE2eAar))

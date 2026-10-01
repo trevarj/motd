@@ -15,6 +15,8 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.audio.ReadAloudConfig
+import io.github.trevarj.motd.audio.ReadAloudSelection
 import io.github.trevarj.motd.di.ApplicationScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -54,6 +56,7 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -130,7 +133,7 @@ private val AiLabsFailureKind.safeMessage: String
             AiLabsFailureKind.INVALID_SETTINGS -> "The model settings are invalid"
             AiLabsFailureKind.PERSISTENCE -> "The AI settings could not be read or saved"
             AiLabsFailureKind.NETWORK -> "The model download failed"
-            AiLabsFailureKind.CHECKSUM_MISMATCH -> "The file is not the supported text model"
+            AiLabsFailureKind.CHECKSUM_MISMATCH -> "The downloaded assets do not match the supported model"
             AiLabsFailureKind.INTERNAL -> "The local AI model operation failed"
         }
 
@@ -166,6 +169,8 @@ internal interface AiLabsRuntimeBoundary {
     suspend fun unloadForDeletion(modelId: String)
 
     suspend fun cancelTextTools(unload: Boolean)
+
+    suspend fun cancelReadAloud(unload: Boolean)
 }
 
 private class ContentResolverModelSource(
@@ -231,6 +236,8 @@ private class CoordinatorBoundary(
 
     override suspend fun cancelTextTools(unload: Boolean) = coordinator.cancelTextTools(unload)
 
+    override suspend fun cancelReadAloud(unload: Boolean) = coordinator.cancelReadAloud(unload)
+
     override suspend fun unloadForDeletion(modelId: String) {
         coordinator.unloadForDeletion(modelId)
     }
@@ -252,6 +259,14 @@ class AiLabsRepository internal constructor(
     private val freeSpaceReserveBytes: Long = FREE_SPACE_RESERVE_BYTES,
     private val copyBufferBytes: Int = COPY_BUFFER_BYTES,
     private val textArtifact: TextModelArtifact = TextModelArtifact.Pinned,
+    private val kokoroBundle: KokoroBundle = KokoroBundle.Pinned,
+    private val kokoroOpener: (KokoroAsset, CancellationSignal) -> InputStream = { asset, signal ->
+        openModelDownload(
+            KokoroBundle.Pinned.url(asset),
+            signal,
+            allowedMimeTypes = setOf("application/octet-stream", "binary/octet-stream", "text/plain"),
+        )
+    },
 ) {
     @Inject
     constructor(
@@ -286,6 +301,88 @@ class AiLabsRepository internal constructor(
     private var pendingTextMutations = 0
     private val mutableTextToolsVersion = MutableStateFlow(0L)
     val textToolsVersion: StateFlow<Long> = mutableTextToolsVersion
+
+    private val readAloudConfigurationLock = Any()
+    private var pendingReadAloudMutations = 0
+    private val mutableReadAloudVersion = MutableStateFlow(0L)
+    val readAloudVersion: StateFlow<Long> = mutableReadAloudVersion
+
+    suspend fun readAloudConfiguration(): ReadAloudSelection? =
+        mutations.withLock {
+            val committed = normalized(decodeForMutation(store.data.first()[AI_LABS_STATE]))
+            synchronized(readAloudConfigurationLock) {
+                if (pendingReadAloudMutations != 0) {
+                    null
+                } else {
+                    val id = committed.assignedModelId(AiFeature.READ_ALOUD)
+                    ReadAloudSelection(
+                        localEnabled = AiFeature.READ_ALOUD in committed.enabledFeatures,
+                        modelId = id,
+                        localReady =
+                            committed.models.firstOrNull { it.id == id }?.let {
+                                committed.isModelReadyFor(it, AiModelCapability.SPEECH_SYNTHESIS) &&
+                                    Files.isDirectory(modelFile(it.id).toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                            } == true,
+                        options = committed.readAloudConfig.normalizedLocal(),
+                        localVersion = mutableReadAloudVersion.value,
+                    )
+                }
+            }
+        }
+
+    fun isReadAloudVersionCurrent(version: Long): Boolean =
+        synchronized(readAloudConfigurationLock) {
+            pendingReadAloudMutations == 0 && mutableReadAloudVersion.value == version
+        }
+
+    private suspend fun <T> readAloudMutation(
+        affected: Boolean,
+        unload: Boolean = false,
+        expectedVersion: Long? = null,
+        block: suspend () -> T,
+    ): T {
+        if (!affected) return block()
+        synchronized(readAloudConfigurationLock) {
+            if (expectedVersion != null && (pendingReadAloudMutations != 0 || mutableReadAloudVersion.value != expectedVersion)) {
+                throw AiLabsException(AiLabsFailureKind.INVALID_SETTINGS)
+            }
+            pendingReadAloudMutations++
+            mutableReadAloudVersion.value++
+        }
+        try {
+            runtime.cancelReadAloud(unload)
+            return block()
+        } finally {
+            synchronized(readAloudConfigurationLock) {
+                pendingReadAloudMutations--
+                mutableReadAloudVersion.value++
+            }
+        }
+    }
+
+    suspend fun saveSystemReadAloudConfig(
+        config: ReadAloudConfig,
+        expectedVersion: Long,
+        prefs: io.github.trevarj.motd.audio.ReadAloudPrefs,
+    ): Result<Unit> =
+        repositoryResult {
+            readAloudMutation(true, expectedVersion = expectedVersion) {
+                mutations.withLock { prefs.replaceSystem(config) }
+            }
+        }
+
+    suspend fun updateReadAloudConfig(
+        config: ReadAloudConfig,
+        expectedVersion: Long,
+    ): Result<Unit> =
+        repositoryResult {
+            readAloudMutation(true, expectedVersion = expectedVersion) {
+                mutations.withLock {
+                    if (config.voice != null && kokoroEnglishVoices.none { it.id == config.voice }) throw AiLabsException(AiLabsFailureKind.INVALID_SETTINGS)
+                    editState { it.copy(readAloudConfig = config.normalizedLocal()) }
+                }
+            }
+        }
 
     suspend fun textToolsConfiguration(): TextToolsConfiguration? =
         mutations.withLock {
@@ -390,22 +487,24 @@ class AiLabsRepository internal constructor(
         enabled: Boolean,
     ): Result<Unit> =
         repositoryResult {
-            textMutation(feature == AiFeature.TEXT_TOOLS, unload = !enabled) {
-                mutations.withLock {
-                    editState { current ->
-                        if (!enabled) {
-                            current.copy(enabledFeatures = current.enabledFeatures - feature)
-                        } else {
-                            val modelId =
-                                current.assignedModelId(feature)
-                                    ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
-                            val model =
-                                current.models.firstOrNull { it.id == modelId }
-                                    ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
-                            if (!current.isModelReadyFor(model, feature.requiredCapability)) {
-                                throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
+            readAloudMutation(feature == AiFeature.READ_ALOUD, unload = !enabled) {
+                textMutation(feature == AiFeature.TEXT_TOOLS, unload = !enabled) {
+                    mutations.withLock {
+                        editState { current ->
+                            if (!enabled) {
+                                current.copy(enabledFeatures = current.enabledFeatures - feature)
+                            } else {
+                                val modelId =
+                                    current.assignedModelId(feature)
+                                        ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
+                                val model =
+                                    current.models.firstOrNull { it.id == modelId }
+                                        ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
+                                if (!current.isModelReadyFor(model, feature.requiredCapability)) {
+                                    throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
+                                }
+                                current.copy(enabledFeatures = current.enabledFeatures + feature)
                             }
-                            current.copy(enabledFeatures = current.enabledFeatures + feature)
                         }
                     }
                 }
@@ -418,6 +517,7 @@ class AiLabsRepository internal constructor(
         onProgress: (bytesCopied: Long, totalBytes: Long?) -> Unit = { _, _ -> },
     ): Result<AiModelRecord> =
         repositoryResult {
+            if (requestedCapability == AiModelCapability.SPEECH_SYNTHESIS) throw AiLabsException(AiLabsFailureKind.UNSUPPORTED_ROLE)
             textMutation(requestedCapability == AiModelCapability.TEXT_TOOLS) {
                 mutations.withLock {
                     withContext(ioDispatcher) { importLocked(uri, requestedCapability, onProgress) }
@@ -430,21 +530,23 @@ class AiLabsRepository internal constructor(
         modelId: String,
     ): Result<Unit> =
         repositoryResult {
-            textMutation(feature == AiFeature.TEXT_TOOLS, unload = true) {
-                mutations.withLock {
-                    editState { current ->
-                        val model =
-                            current.models.firstOrNull { it.id == modelId }
-                                ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_FOUND)
-                        val capability = feature.requiredCapability
-                        if (!current.isModelReadyFor(model, capability)) {
-                            throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
+            readAloudMutation(feature == AiFeature.READ_ALOUD, unload = true) {
+                textMutation(feature == AiFeature.TEXT_TOOLS, unload = true) {
+                    mutations.withLock {
+                        editState { current ->
+                            val model =
+                                current.models.firstOrNull { it.id == modelId }
+                                    ?: throw AiLabsException(AiLabsFailureKind.MODEL_NOT_FOUND)
+                            val capability = feature.requiredCapability
+                            if (!current.isModelReadyFor(model, capability)) {
+                                throw AiLabsException(AiLabsFailureKind.MODEL_NOT_READY)
+                            }
+                            current.copy(
+                                assignments =
+                                    current.assignments.filterNot { it.feature == feature } +
+                                        AiFeatureAssignment(feature, modelId),
+                            )
                         }
-                        current.copy(
-                            assignments =
-                                current.assignments.filterNot { it.feature == feature } +
-                                    AiFeatureAssignment(feature, modelId),
-                        )
                     }
                 }
             }
@@ -489,12 +591,16 @@ class AiLabsRepository internal constructor(
 
     suspend fun deleteModel(modelId: String): Result<Unit> =
         repositoryResult {
-            textMutation(modelId == textArtifact.sha256, unload = false) { mutations.withLock { withContext(ioDispatcher) { deleteLocked(modelId) } } }
+            readAloudMutation(modelId == kokoroBundle.id) {
+                textMutation(modelId == textArtifact.sha256) { mutations.withLock { withContext(ioDispatcher) { deleteLocked(modelId) } } }
+            }
         }
 
     suspend fun reconcile(): Result<Unit> =
         repositoryResult {
-            textMutation(true) { mutations.withLock { withContext(ioDispatcher) { reconcileLocked() } } }
+            readAloudMutation(true) {
+                textMutation(true) { mutations.withLock { withContext(ioDispatcher) { reconcileLocked() } } }
+            }
         }
 
     suspend fun downloadRecommendedTextModel(onProgress: (Long, Long?) -> Unit = { _, _ -> }): Result<AiModelRecord> =
@@ -506,11 +612,106 @@ class AiLabsRepository internal constructor(
                             AiModelSourceMetadata(io.github.trevarj.motd.ai.text.BuildConfig.TEXT_MODEL_FILE, textArtifact.sizeBytes),
                             AiModelCapability.TEXT_TOOLS,
                             onProgress,
-                        ) { signal -> openTextModelDownload(textArtifact.url, signal) }
+                        ) { signal -> openModelDownload(textArtifact.url, signal) }
                     }
                 }
             }
         }
+
+    suspend fun downloadKokoroAndUse(onProgress: (Long, Long?) -> Unit = { _, _ -> }): Result<AiModelRecord> =
+        repositoryResult {
+            readAloudMutation(true, unload = true) {
+                mutations.withLock { withContext(ioDispatcher) { installKokoroLocked(onProgress) } }
+            }
+        }
+
+    private suspend fun installKokoroLocked(onProgress: (Long, Long?) -> Unit): AiModelRecord {
+        ensureModelDirectory()
+        if (kokoroBundle.sizeBytes > maximumModelBytes) throw AiLabsException(AiLabsFailureKind.TOO_LARGE)
+        val destination = modelFile(kokoroBundle.id)
+        var staged: File? = null
+        var installed = false
+        var committed = false
+        var backup: File? = null
+        try {
+            reportImportProgress(0, kokoroBundle.sizeBytes, onProgress)
+            val existingValid =
+                if (destination.exists()) {
+                    try {
+                        kokoroBundle.validate(destination)
+                        true
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        false
+                    }
+                } else {
+                    false
+                }
+            val checked =
+                if (existingValid) {
+                    destination
+                } else {
+                    ensureSpace(kokoroBundle.sizeBytes)
+                    val temporary = Files.createTempDirectory(modelDirectory.toPath(), IMPORT_PREFIX).toFile()
+                    // Same owned temporary namespace as single-file imports and restart cleanup.
+                    val directory = File(modelDirectory, temporary.name + TEMP_SUFFIX)
+                    atomicMove(temporary, directory, AiLabsFailureKind.ATOMIC_INSTALL)
+                    staged = directory
+                    var completed = 0L
+                    for (asset in kokoroBundle.assets) {
+                        currentCoroutineContext().ensureActive()
+                        val file = File(directory, asset.path)
+                        val parent = file.parentFile ?: throw AiLabsException(AiLabsFailureKind.STORAGE_WRITE)
+                        if (!parent.isDirectory && !parent.mkdirs()) throw AiLabsException(AiLabsFailureKind.STORAGE_WRITE)
+                        val copied =
+                            copySource({ signal -> kokoroOpener(asset, signal) }, file, asset.sizeBytes, asset.sizeBytes) { bytes, _ ->
+                                reportImportProgress(completed + bytes, kokoroBundle.sizeBytes, onProgress)
+                            }
+                        if (copied.bytesCopied != asset.sizeBytes || copied.sha256 != asset.sha256) throw AiLabsException(AiLabsFailureKind.CHECKSUM_MISMATCH)
+                        completed += copied.bytesCopied
+                    }
+                    kokoroBundle.validate(directory)
+                    directory
+                }
+            val metadata = inspect(kokoroBundle.id, checked, AiModelCapability.SPEECH_SYNTHESIS)
+            if (metadata.architecture != "kokoro" || metadata.quantization != "int8" || metadata.sampleRateHz != 24_000 || metadata.voiceCount != 54) {
+                throw AiLabsException(AiLabsFailureKind.UNSUPPORTED_ARCHITECTURE)
+            }
+            currentCoroutineContext().ensureActive()
+            return withContext(NonCancellable) {
+                if (staged != null) {
+                    runtime.unloadForDeletion(kokoroBundle.id)
+                    if (Files.exists(destination.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                        val retired = File(modelDirectory, "$DELETE_PREFIX${kokoroBundle.id}$TEMP_SUFFIX")
+                        deleteOrFail(retired)
+                        atomicMove(destination, retired, AiLabsFailureKind.ATOMIC_INSTALL)
+                        backup = retired
+                    }
+                    atomicMove(checkNotNull(staged), destination, AiLabsFailureKind.ATOMIC_INSTALL)
+                    installed = true
+                    staged = null
+                }
+                val record = addImportedModel(kokoroBundle.id, "Kokoro English", kokoroBundle.sizeBytes, AiModelCapability.SPEECH_SYNTHESIS, metadata, activateReadAloud = true)
+                committed = true
+                backup?.deleteQuietly()
+                record
+            }
+        } finally {
+            transientImportState.value = AiImportState.Idle
+            if (!committed) {
+                withContext(NonCancellable) {
+                    if (installed) {
+                        val rejected = File(modelDirectory, "$IMPORT_PREFIX${UUID.randomUUID()}$TEMP_SUFFIX")
+                        atomicMove(destination, rejected, AiLabsFailureKind.ATOMIC_INSTALL)
+                        staged = rejected
+                    }
+                    backup?.let { atomicMove(it, destination, AiLabsFailureKind.ATOMIC_INSTALL) }
+                }
+            }
+            staged?.deleteQuietly()
+        }
+    }
 
     private suspend fun importLocked(
         uri: Uri,
@@ -535,7 +736,7 @@ class AiLabsRepository internal constructor(
             ensureSpace(expected?.sizeBytes ?: 0)
             val staged = createImportTemporary()
             temporary = staged
-            val copied = copySource(opener, staged, totalBytes, expected, onProgress)
+            val copied = copySource(opener, staged, totalBytes, expected?.sizeBytes) { bytes, total -> reportImportProgress(bytes, total, onProgress) }
             if (expected != null && (copied.bytesCopied != expected.sizeBytes || copied.sha256 != expected.sha256)) {
                 throw AiLabsException(AiLabsFailureKind.CHECKSUM_MISMATCH)
             }
@@ -600,7 +801,7 @@ class AiLabsRepository internal constructor(
         opener: (CancellationSignal) -> InputStream,
         destination: File,
         totalBytes: Long?,
-        expected: TextModelArtifact?,
+        expectedBytes: Long?,
         onProgress: (Long, Long?) -> Unit,
     ): CopiedModel {
         val context = currentCoroutineContext()
@@ -643,7 +844,7 @@ class AiLabsRepository internal constructor(
                                 }
                             if (count < 0) break
                             if (count == 0) continue
-                            if (expected != null && copied > expected.sizeBytes - count) throw AiLabsException(AiLabsFailureKind.CHECKSUM_MISMATCH)
+                            if (expectedBytes != null && copied > expectedBytes - count) throw AiLabsException(AiLabsFailureKind.CHECKSUM_MISMATCH)
                             if (copied > maximumModelBytes - count) throw AiLabsException(AiLabsFailureKind.TOO_LARGE)
                             ensureSpace(count.toLong())
                             try {
@@ -659,7 +860,7 @@ class AiLabsRepository internal constructor(
                             }
                             digest.update(buffer, 0, count)
                             copied += count
-                            reportImportProgress(copied, totalBytes, onProgress)
+                            onProgress(copied, totalBytes)
                         }
                         context.ensureActive()
                         try {
@@ -775,6 +976,7 @@ class AiLabsRepository internal constructor(
         sizeBytes: Long,
         capability: AiModelCapability,
         inspected: AiModelMetadata,
+        activateReadAloud: Boolean = false,
     ): AiModelRecord {
         var result: AiModelRecord? = null
         editState { current ->
@@ -787,13 +989,25 @@ class AiLabsRepository internal constructor(
                     id,
                     displayName,
                     sizeBytes,
-                    if (capability == AiModelCapability.TEXT_TOOLS) AiModelFormat.QWEN35_GGUF else AiModelFormat.WHISPER_GGML,
+                    when (capability) {
+                        AiModelCapability.TRANSCRIPTION -> AiModelFormat.WHISPER_GGML
+                        AiModelCapability.TEXT_TOOLS -> AiModelFormat.QWEN35_GGUF
+                        AiModelCapability.SPEECH_SYNTHESIS -> AiModelFormat.KOKORO_ONNX
+                    },
                     setOf(capability),
                     inspected,
                     now().coerceAtLeast(0),
                 )
             result = record
-            current.copy(models = current.models.filterNot { it.id == id } + record).ensureSettings(record)
+            val registered = current.copy(models = current.models.filterNot { it.id == id } + record).ensureSettings(record)
+            if (activateReadAloud) {
+                registered.copy(
+                    assignments = registered.assignments.filterNot { it.feature == AiFeature.READ_ALOUD } + AiFeatureAssignment(AiFeature.READ_ALOUD, id),
+                    enabledFeatures = registered.enabledFeatures + AiFeature.READ_ALOUD,
+                )
+            } else {
+                registered
+            }
         }
         return checkNotNull(result)
     }
@@ -815,52 +1029,18 @@ class AiLabsRepository internal constructor(
         withContext(NonCancellable) {
             val canonical = modelFile(modelId)
             val staged = File(modelDirectory, "$DELETE_PREFIX$modelId$TEMP_SUFFIX")
-            if (staged.exists() && !staged.delete()) throw AiLabsException(AiLabsFailureKind.DELETION)
-            val moved = canonical.exists()
+            deleteOrFail(staged)
+            val moved = Files.exists(canonical.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)
             if (moved) atomicMove(canonical, staged, AiLabsFailureKind.DELETION)
-            var stateChanged = false
             try {
-                editState { it.withoutModels(setOf(modelId)) }
-                stateChanged = true
-                if (moved && !staged.delete()) throw AiLabsException(AiLabsFailureKind.DELETION)
-            } catch (failure: CancellationException) {
-                rollbackDeletion(before, canonical, staged, moved, stateChanged)
+                editState { it.withoutModels(setOf(modelId), explicitDelete = true) }
+            } catch (failure: Throwable) {
+                // Only the intact pre-commit rename is reversible. Never restore a partly deleted bundle.
+                if (moved) atomicMove(staged, canonical, AiLabsFailureKind.DELETION)
                 throw failure
-            } catch (failure: AiLabsException) {
-                rollbackDeletion(before, canonical, staged, moved, stateChanged)
-                throw failure
-            } catch (_: Exception) {
-                rollbackDeletion(before, canonical, staged, moved, stateChanged)
-                throw AiLabsException(AiLabsFailureKind.DELETION)
             }
+            if (moved) deleteOrFail(staged)
         }
-    }
-
-    private suspend fun rollbackDeletion(
-        before: AiLabsState,
-        canonical: File,
-        staged: File,
-        moved: Boolean,
-        stateChanged: Boolean,
-    ) {
-        var failed = false
-        if (moved && staged.exists()) {
-            try {
-                atomicMove(staged, canonical, AiLabsFailureKind.DELETION)
-            } catch (_: AiLabsException) {
-                failed = true
-            }
-        }
-        if (stateChanged) {
-            try {
-                replaceState(before)
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (_: Exception) {
-                failed = true
-            }
-        }
-        if (failed) throw AiLabsException(AiLabsFailureKind.DELETION)
     }
 
     private suspend fun reconcileLocked() {
@@ -875,16 +1055,23 @@ class AiLabsRepository internal constructor(
             currentCoroutineContext().ensureActive()
             val file = modelFile(model.id)
             val valid =
-                file.isFile &&
-                    file.length() == model.sizeBytes &&
-                    try {
-                        preflight(file, model.capabilities.single())
-                        sha256(file) == model.id
-                    } catch (failure: CancellationException) {
-                        throw failure
-                    } catch (_: Exception) {
-                        false
+                try {
+                    if (model.format == AiModelFormat.KOKORO_ONNX) {
+                        kokoroBundle.validate(file)
+                        model.id == kokoroBundle.id && model.sizeBytes == kokoroBundle.sizeBytes
+                    } else {
+                        Files.isRegularFile(file.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS) &&
+                            file.length() == model.sizeBytes &&
+                            run {
+                                preflight(file, model.capabilities.single())
+                                sha256(file) == model.id
+                            }
                     }
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (_: Exception) {
+                    false
+                }
             if (!valid) invalid += model.id
         }
 
@@ -911,7 +1098,7 @@ class AiLabsRepository internal constructor(
         }
     }
 
-    private fun recoverStagedDeletions(current: AiLabsState) {
+    private suspend fun recoverStagedDeletions(current: AiLabsState) {
         val records = current.models.mapTo(mutableSetOf()) { it.id }
         modelDirectory
             .listFiles { file -> file.name.startsWith(DELETE_PREFIX) && file.name.endsWith(TEMP_SUFFIX) }
@@ -920,6 +1107,7 @@ class AiLabsRepository internal constructor(
                 val id = staged.name.removePrefix(DELETE_PREFIX).removeSuffix(TEMP_SUFFIX)
                 val canonical = id.takeIf(::isValidAiModelId)?.let(::modelFile)
                 if (id in records && canonical != null && !canonical.exists()) {
+                    runtime.unloadForDeletion(id)
                     atomicMove(staged, canonical, AiLabsFailureKind.DELETION)
                 } else {
                     deleteOrFail(staged)
@@ -966,6 +1154,7 @@ class AiLabsRepository internal constructor(
                 models = models,
                 assignments = raw.assignments.distinctBy { it.feature },
                 transcriptionSettings = raw.transcriptionSettings.distinctBy { it.modelId },
+                readAloudConfig = raw.readAloudConfig.normalizedLocal(),
                 importState = AiImportState.Idle,
             )
         models.forEach { model ->
@@ -982,12 +1171,13 @@ class AiLabsRepository internal constructor(
             )
         val validAssignments =
             value.assignments.filter { assignment ->
+                if (assignment.feature == AiFeature.READ_ALOUD) return@filter true
                 val model = models.firstOrNull { it.id == assignment.modelId } ?: return@filter false
                 value.isModelReadyFor(model, assignment.feature.requiredCapability)
             }
         return value.copy(
             assignments = validAssignments,
-            enabledFeatures = value.enabledFeatures.intersect(validAssignments.mapTo(mutableSetOf()) { it.feature }),
+            enabledFeatures = value.enabledFeatures.filterTo(mutableSetOf()) { it == AiFeature.READ_ALOUD || validAssignments.any { assignment -> assignment.feature == it } },
         )
     }
 
@@ -1002,19 +1192,22 @@ class AiLabsRepository internal constructor(
             )
         }
 
-    private fun AiLabsState.withoutModels(ids: Set<String>): AiLabsState {
+    private fun AiLabsState.withoutModels(
+        ids: Set<String>,
+        explicitDelete: Boolean = false,
+    ): AiLabsState {
         if (ids.isEmpty()) return this
         val affected = assignments.filter { it.modelId in ids }.mapTo(mutableSetOf()) { it.feature }
         return copy(
-            enabledFeatures = enabledFeatures - affected,
+            enabledFeatures = enabledFeatures - (if (explicitDelete) affected else affected - AiFeature.READ_ALOUD),
             models = models.filterNot { it.id in ids },
-            assignments = assignments.filterNot { it.modelId in ids },
+            assignments = assignments.filterNot { it.modelId in ids && (explicitDelete || it.feature != AiFeature.READ_ALOUD) },
             transcriptionSettings = transcriptionSettings.filterNot { it.modelId in ids },
         )
     }
 
     private fun ensureModelDirectory() {
-        if ((!modelDirectory.exists() && !modelDirectory.mkdirs()) || !modelDirectory.isDirectory) {
+        if (Files.isSymbolicLink(modelDirectory.toPath()) || (!modelDirectory.exists() && !modelDirectory.mkdirs()) || !modelDirectory.isDirectory) {
             throw AiLabsException(AiLabsFailureKind.STORAGE_WRITE)
         }
     }
@@ -1095,12 +1288,16 @@ class AiLabsRepository internal constructor(
         }
 
     private fun deleteOrFail(file: File) {
-        if (file.exists() && !file.delete()) throw AiLabsException(AiLabsFailureKind.DELETION)
+        try {
+            deleteOwnedModelEntry(file)
+        } catch (_: Exception) {
+            throw AiLabsException(AiLabsFailureKind.DELETION)
+        }
     }
 
     private fun File.deleteQuietly() {
         try {
-            Files.deleteIfExists(toPath())
+            deleteOwnedModelEntry(this)
         } catch (_: Exception) {
             // reconcile() removes import temporaries; unregistered weights are retained.
         }
@@ -1118,7 +1315,7 @@ class AiLabsRepository internal constructor(
                             // state_v1 also held text models. Filter retired enums before decoding.
                             put(
                                 "enabledFeatures",
-                                JsonArray(document["enabledFeatures"]?.jsonArray.orEmpty().filter { it.jsonPrimitive.content in setOf("TRANSCRIPTION", "TEXT_TOOLS") }),
+                                JsonArray(document["enabledFeatures"]?.jsonArray.orEmpty().filter { it.jsonPrimitive.content in setOf("TRANSCRIPTION", "TEXT_TOOLS", "READ_ALOUD") }),
                             )
                             put(
                                 "models",
@@ -1133,13 +1330,21 @@ class AiLabsRepository internal constructor(
                                                         record.sizeBytes == textArtifact.sizeBytes &&
                                                             AiLabsState().isModelReadyFor(record, AiModelCapability.TEXT_TOOLS)
                                                     } == true
+                                            ) ||
+                                            (
+                                                item["format"]?.jsonPrimitive?.content == "KOKORO_ONNX" &&
+                                                    item["id"]?.jsonPrimitive?.content == kokoroBundle.id &&
+                                                    runCatching { AI_LABS_JSON.decodeFromJsonElement<AiModelRecord>(it) }.getOrNull()?.let { record ->
+                                                        record.sizeBytes == kokoroBundle.sizeBytes &&
+                                                            AiLabsState().isModelReadyFor(record, AiModelCapability.SPEECH_SYNTHESIS)
+                                                    } == true
                                             )
                                     },
                                 ),
                             )
                             put(
                                 "assignments",
-                                JsonArray(document["assignments"]?.jsonArray.orEmpty().filter { it.jsonObject["feature"]?.jsonPrimitive?.content in setOf("TRANSCRIPTION", "TEXT_TOOLS") }),
+                                JsonArray(document["assignments"]?.jsonArray.orEmpty().filter { it.jsonObject["feature"]?.jsonPrimitive?.content in setOf("TRANSCRIPTION", "TEXT_TOOLS", "READ_ALOUD") }),
                             )
                             val seen = mutableSetOf<String>()
                             put(

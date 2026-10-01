@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "motd"
-include(":irc", ":ai-whisper", ":ai-text", ":app")
+include(":irc", ":ai-whisper", ":ai-text", ":ai-tts", ":app")

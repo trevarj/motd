@@ -228,3 +228,78 @@ private inline fun <T> textCall(block: () -> T): T =
             },
         )
     }
+
+/** Synchronous methods deliberately drain native/file writes before returning. */
+interface KokoroModelRuntime {
+    suspend fun validate(modelDirectory: File)
+
+    fun load(modelDirectory: File): AiModelMetadata
+
+    fun generate(
+        text: String,
+        config: io.github.trevarj.motd.audio.ReadAloudConfig,
+        output: File,
+        isCancelled: () -> Boolean,
+    )
+
+    fun cancel()
+
+    fun unload()
+}
+
+@Singleton
+class NativeKokoroModelRuntime
+    @Inject
+    constructor() : KokoroModelRuntime {
+        @Volatile private var engine: io.github.trevarj.motd.ai.tts.KokoroEngine? = null
+
+        override suspend fun validate(modelDirectory: File) = KokoroBundle.Pinned.validate(modelDirectory)
+
+        override fun load(modelDirectory: File): AiModelMetadata =
+            kokoroCall {
+                check(engine == null)
+                val loaded =
+                    io.github.trevarj.motd.ai.tts.KokoroEngine
+                        .load(modelDirectory)
+                engine = loaded
+                AiModelMetadata("kokoro", "int8", maximumCpuThreads = 1, sampleRateHz = loaded.sampleRate, voiceCount = loaded.numSpeakers)
+            }
+
+        override fun generate(
+            text: String,
+            config: io.github.trevarj.motd.audio.ReadAloudConfig,
+            output: File,
+            isCancelled: () -> Boolean,
+        ): Unit =
+            kokoroCall {
+                val voice =
+                    kokoroEnglishVoices.firstOrNull { it.id == (config.voice ?: "3") }
+                        ?: throw AiLabsException(AiLabsFailureKind.INVALID_SETTINGS)
+                // eSpeak selects voice filenames, not locale tags: its British voice is "en".
+                val language =
+                    when (voice.locale) {
+                        "en-US" -> "en-us"
+                        "en-GB" -> "en"
+                        else -> throw AiLabsException(AiLabsFailureKind.INVALID_SETTINGS)
+                    }
+                checkNotNull(engine).generate(text, output, voice.id.toInt(), language, config.rate, isCancelled)
+            }
+
+        override fun cancel() {
+            engine?.cancel()
+        }
+
+        override fun unload() {
+            engine?.release()
+            engine = null
+        }
+    }
+
+private inline fun <T> kokoroCall(block: () -> T): T =
+    try {
+        block()
+    } catch (failure: OutOfMemoryError) {
+        throw AiRuntimeException(AiRuntimeFailure.OUT_OF_MEMORY, failure)
+    } catch (failure: LinkageError) {
+        throw AiRuntimeException(AiRuntimeFailure.NATIVE, failure)
+    }

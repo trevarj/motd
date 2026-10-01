@@ -7,7 +7,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import io.github.trevarj.motd.ai.AiReadAloudSynthesizer
+import io.github.trevarj.motd.ai.KokoroModelRuntime
 import io.github.trevarj.motd.ai.LlamaTextModelRuntime
+import io.github.trevarj.motd.ai.NativeKokoroModelRuntime
 import io.github.trevarj.motd.ai.SpeechModelRuntime
 import io.github.trevarj.motd.ai.TextModelRuntime
 import io.github.trevarj.motd.ai.WhisperSpeechModelRuntime
@@ -15,6 +18,7 @@ import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
 import io.github.trevarj.motd.attachment.AttachmentUploader
 import io.github.trevarj.motd.attachment.AttachmentUploaderImpl
+import io.github.trevarj.motd.audio.AndroidReadAloudOutput
 import io.github.trevarj.motd.audio.AndroidVoiceRecorder
 import io.github.trevarj.motd.audio.AudioMetadataRepository
 import io.github.trevarj.motd.audio.AudioMetadataRepositoryImpl
@@ -22,6 +26,9 @@ import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.audio.AudioPlaybackControllerImpl
 import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.audio.NetworkMediaRouteProvider
+import io.github.trevarj.motd.audio.ReadAloudController
+import io.github.trevarj.motd.audio.ReadAloudOutput
+import io.github.trevarj.motd.audio.ReadAloudSynthesizer
 import io.github.trevarj.motd.audio.VoiceMessageSender
 import io.github.trevarj.motd.audio.VoiceMessageSenderImpl
 import io.github.trevarj.motd.audio.VoicePrefs
@@ -84,6 +91,7 @@ import io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator
 import io.github.trevarj.motd.data.sync.HistoryGapFiller
 import io.github.trevarj.motd.data.sync.HistoryPruner
 import io.github.trevarj.motd.data.sync.HistoryPrunerImpl
+import io.github.trevarj.motd.data.sync.IncomingMessageReader
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.dcc.DccTransferController
@@ -215,6 +223,9 @@ internal abstract class AppModule {
     abstract fun textModelRuntime(impl: LlamaTextModelRuntime): TextModelRuntime
 
     @Binds @Singleton
+    abstract fun kokoroModelRuntime(impl: NativeKokoroModelRuntime): KokoroModelRuntime
+
+    @Binds @Singleton
     abstract fun voiceRecorder(impl: AndroidVoiceRecorder): VoiceRecorder
 
     @Binds @Singleton
@@ -275,6 +286,15 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun chatSoundPlayer(impl: AndroidChatSoundPlayer): ChatSoundPlayer
+
+    @Binds @Singleton
+    abstract fun incomingMessageReader(impl: ReadAloudController): IncomingMessageReader
+
+    @Binds @Singleton
+    abstract fun readAloudSynthesizer(impl: AiReadAloudSynthesizer): ReadAloudSynthesizer
+
+    @Binds @Singleton
+    abstract fun readAloudOutput(impl: AndroidReadAloudOutput): ReadAloudOutput
 
     @Binds @Singleton
     abstract fun notificationSettings(impl: NotificationSettingsImpl): NotificationSettings

@@ -17,6 +17,8 @@ import io.github.trevarj.motd.audio.AudioMetadataRepository
 import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.audio.CachedAudioMetadata
+import io.github.trevarj.motd.audio.ReadAloudController
+import io.github.trevarj.motd.audio.ReadAloudSelection
 import io.github.trevarj.motd.avatar.AvatarController
 import io.github.trevarj.motd.avatar.ConversationAvatarOutcome
 import io.github.trevarj.motd.avatar.NoopAvatarController
@@ -307,6 +309,7 @@ class ChatViewModel
         private val notificationSettings: NotificationSettings = NotificationSettings.Noop,
         private val clock: AppClock = AppClock(System::currentTimeMillis),
         contentPreviewPrefs: ContentPreviewPrefs,
+        private val readAloudController: ReadAloudController,
     ) : ViewModel() {
         val contentPreviews: StateFlow<ContentPreviewConfig> =
             contentPreviewPrefs.config
@@ -316,6 +319,32 @@ class ChatViewModel
                     SharingStarted.Eagerly,
                     ContentPreviewConfig(showImages = false, showLinkPreviews = false),
                 )
+
+        val readAloudState = readAloudController.state
+        val readAloudConfig = readAloudController.config
+        val readAloudVoices = readAloudController.voices
+
+        fun toggleReadAloud() {
+            val id = operationalBufferId.value
+            readAloudController.setEnabled(id, !(readAloudState.value.enabled && readAloudState.value.roomId == id))
+        }
+
+        fun readAloudPrevious() = readAloudController.previous()
+
+        fun readAloudPauseResume() = readAloudController.togglePaused()
+
+        fun readAloudSkip() = readAloudController.skip()
+
+        fun readAloudLatest() = readAloudController.latest()
+
+        fun stopReadAloud() = readAloudController.stop()
+
+        fun openReadAloudOptions() = readAloudController.openVoiceOptions()
+
+        fun saveReadAloudOptions(config: ReadAloudSelection) = readAloudController.saveVoiceOptions(config)
+
+        fun previewReadAloud(config: ReadAloudSelection) = readAloudController.preview(operationalBufferId.value, config)
+
         val replyConfig: StateFlow<ReplyConfig> =
             replyPrefs.config
                 .stateIn(viewModelScope, SharingStarted.Eagerly, ReplyConfig())
@@ -1435,6 +1464,7 @@ class ChatViewModel
         }
 
         fun onPause() {
+            readAloudController.stop()
             AutoFollowTrace.record("chat_pause", operationalBufferId.value)
             foregroundBufferTracker.set(null)
             visibleSession.value = null

@@ -91,8 +91,8 @@ jobs:
       - uses: ./.github/actions/setup-native-toolchain
       - name: Kotlin formatting
         run: ./gradlew ktlintCheck --stacktrace
-      - name: App unit and Robolectric component tests
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+      - name: App and speech unit and Robolectric component tests
+        run: ./gradlew :app:testDebugUnitTest :ai-tts:testDebugUnitTest --stacktrace
       - name: Upload app test failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -101,6 +101,7 @@ jobs:
           path: |
             app/build/fuzz-failures/**
             app/build/reports/tests/testDebugUnitTest/**
+            ai-tts/build/reports/tests/testDebugUnitTest/**
           if-no-files-found: ignore
           retention-days: 14
       - name: Verify checked-in Room schemas

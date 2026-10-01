@@ -143,16 +143,16 @@ The published release asset keeps the name `motd-<tag>-foss.apk` because the
 
 ## Native source build
 
-F-Droid's `rm` step removes the checked-in AAR and the upstream whisper.cpp
-and llama.cpp model-fixture directories before scanning, while retaining runtime
-sources and vendor licenses. The pinned llama.cpp `models` directory includes
-tokenizer GGUF fixtures; the runtime build does not require them. The external
-fdroiddata recipe must add `third_party/llama.cpp/source/models` to `rm`;
-this repository documentation change does not submit or apply that remote change.
-The `build` step, which runs after scanning
-and source-tarball creation, regenerates the AAR in the build directory from the
-recursively initialized upstream submodules and F-Droid's pinned Go toolchain.
-The `preassemble` task then runs the AI native artifact assertions.
+F-Droid's `rm` step removes the checked-in libbox AAR and the upstream
+whisper.cpp/llama.cpp model-fixture directories before scanning, while retaining
+runtime sources and vendor licenses. The pinned llama.cpp `models` directory
+includes tokenizer GGUF fixtures; the runtime build does not require them.
+The external fdroiddata recipe must add `third_party/llama.cpp/source/models`
+to `rm`; this repository documentation does not apply that remote change.
+The libbox `build` step runs after scanning and source-tarball creation and
+regenerates its AAR from recursively initialized submodules and F-Droid's pinned
+Go toolchain. Gradle builds Whisper, text and TTS libraries from source, and the
+`preassemble` task asserts the exact native packaging contracts.
 
 Go must be built from the exact `go1.25.12` source commit
 `d80d9a98f7e3a8f9b3a82d2c6079f84eb1101d46` with `src/make.bash`; a Nixpkgs
@@ -173,6 +173,143 @@ The Gradle verifier stays strict for normal GitHub builds: the tracked AAR must
 match its pinned SHA-256. `motdLibboxSource=true` relaxes only that
 byte-for-byte comparison for a source rebuild; the manifest hash, libbox version
 (`v1.13.12`), arm64 ABI, and exact JNI contents are still checked.
+
+### TTS source-only recipe addition (external update required)
+
+`:ai-tts` does not consume an official/precompiled Sherpa AAR, ONNX Runtime
+binary or downloaded `protoc`. Its 24 enabled source inputs (two top-level
+archives, 12 ORT dependencies and 10 Sherpa dependencies) are recorded in
+`third_party/ai/tts-sources.lock.json` with exact URLs, commits, byte sizes and
+SHA-256. ORT's upstream archive SHA-1 values are checked as well. Tag-addressed
+dependency archives are content-locked: a moved tag fails its digest check.
+The checked full-host/path ORT mirror names are preserved, including Eigen's
+unusual nested archive path.
+
+Before adopting a release containing this module, fdroiddata must add
+`python3`, `ninja-build` and `patch` to its existing build-tool installation,
+and append these commands to `prebuild`, after the current SDK setup:
+
+```yaml
+    prebuild:
+      # Keep the existing version/SDK/CMake steps, then add:
+      - python3 ../third_party/ai/prepare-tts-sources.py --fetch
+      - python3 ../third_party/ai/package-tts-sources.py ../third_party/ai/tts/source-pruned
+      - rm -rf ../third_party/ai/tts/source ../third_party/ai/tts/cache
+      - mv ../third_party/ai/tts/source-pruned ../third_party/ai/tts/source
+    build:
+      # Keep the existing libbox build steps; also expose the pinned NDK:
+      - export ANDROID_NDK_HOME="$$NDK$$"
+```
+
+Source fetching is explicit, limited to locked source URLs and verified before
+extraction. The packaging step retains every enabled runtime/build input and
+license but excludes upstream optional model/test/precompiled fixtures, so the
+source scanner and source tarball do not receive them. Its integrity manifest
+records those exclusions and the hashes of the retained trees. Afterward the
+Gradle preparation task verifies that source snapshot without fetching anything.
+The original archive cache is deliberately removed before scanning.
+
+The builder compiles protobuf 21.12's host `protoc` from the same source used
+for target static protobuf. ORT and Sherpa configure separately, with checked
+extracted dependency overrides and `FETCHCONTENT_FULLY_DISCONNECTED=ON`;
+no missing mirror file may trigger an upstream network fallback. All tests,
+optional bindings, training, pip installs, KleidiAI and accelerator providers
+are disabled. CPU EP/MLAS and ordinary ONNX/contrib operators remain enabled.
+Sherpa's full upstream core dependency graph remains, rather than a maintained
+TTS-only source-list fork.
+
+Both native libraries are built for arm64-v8a and x86_64; the production/debug
+APK remains arm64-only and the E2E APK remains x86_64. The AAR's exact two
+libraries per ABI are `libsherpa-onnx-jni.so` and `libonnxruntime.so`. The verifier
+checks 16 KiB LOAD alignment, absent GNU build IDs, hidden private/static
+symbols, and Android SONAME/DT_NEEDED compatibility; ORT's Unix `.so.1` SONAME
+is removed only for Android. The Android API preloads ORT before upstream JNI.
+Private dependencies and the C++ runtime are static.
+The native builder fixes `SOURCE_DATE_EPOCH=0` and remaps repository/NDK source
+paths in compiler macros, alongside removing build IDs and Android RPATHs.
+
+The combined runtime retains GPL-3.0-or-later eSpeak and all
+Apache/MIT/BSD/Boost/MPL/Unicode/vendor grants. Full checked license texts ship
+under `META-INF/motd-ai-tts-licenses/`. The deterministic
+`motd-ai-source-<tag>.tar.gz` asset includes all enabled source trees, licenses,
+archive/license locks, motd's binding, build-copy patches and rebuild/smoke
+scripts, not downloaded weights. No optional model retraining/regeneration
+claim is made. These recipe additions still require F-Droid review and
+reproducibility comparison; this repository change is not external acceptance.
+
+### Local source rebuild and real inference checks
+
+Use the existing pinned JDK 21, Android NDK `28.2.13676358`, SDK CMake `3.31.6`
+and Python 3.12 or newer. The Nix shell supplies Python, Ninja, `patch` and
+Clang for host builds. Host ORT retains upstream `-Werror`; pinned Clang avoids
+GCC 15's standard-library `-Wmaybe-uninitialized` false positive (GCC PR 121301).
+First provision sources (or seed the cache with the exact locked bytes):
+
+```sh
+nix develop -c python3 third_party/ai/prepare-tts-sources.py --fetch
+```
+
+The host build uses the same ORT/Sherpa/dependency pins, source-built `protoc`
+and CPU configuration; it compiles upstream `sherpa-onnx-offline-tts`, JNI and a
+real callback cancellation runner:
+
+```sh
+nix develop -c python3 third_party/ai/build-tts.py host --output ai-tts/build/host
+nix develop -c python3 third_party/ai/smoke-tts.py \
+  --runner-dir ai-tts/build/host \
+  --assets /tmp/motd-kokoro-speech-smoke \
+  --output /tmp/motd-kokoro-native-wavs
+```
+
+The smoke requires the checked 19-file English asset directory described by
+`third_party/ai/tts-host/kokoro-assets.lock.json`; it downloads nothing.
+It generates Heart (female, ID 3), Michael (male, ID 16), British Emma (ID 21),
+synthetic sender and ACTION speech, checks mono PCM16/24 kHz/non-silent distinct
+waveforms and a genuinely shorter same-voice/text WAV at 1.5× versus 1× rate.
+It cancels a four-sentence utterance at its first real chunk callback, compares
+the partial length to completed speech and joins the native worker
+before releasing its owner, discards partial PCM and synthesizes again after
+drain. Use an empty output directory. It cannot establish subjective voice
+quality or on-device playback/focus behavior.
+
+The JVM smoke also uses the actual compiled Kotlin wrapper and its erased
+callback ABI, not a C++ replacement. Enter `nix develop` so SDK variables are
+available, then set `KOTLIN_STDLIB` to the project-pinned Kotlin standard-library
+JAR in the Gradle cache:
+
+```sh
+bash ./gradlew :ai-tts:bundleLibRuntimeToJarDebug
+touch /tmp/motd-kokoro-jni.wav
+python3 third_party/ai/smoke-tts.py \
+  --runner-dir ai-tts/build/host \
+  --assets /tmp/motd-kokoro-speech-smoke \
+  --output-file /tmp/motd-kokoro-jni.wav \
+  --classes-jar ai-tts/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar \
+  --kotlin-stdlib "$KOTLIN_STDLIB" \
+  --android-jar "$ANDROID_HOME/platforms/android-37.0/android.jar"
+```
+
+Use a new zero-byte WAV target. This exercises real JNI audio generation,
+chunk cancellation, worker drain, partial-file cleanup, reuse after drain,
+and British female Emma (21) and male George (26). British pronunciation uses
+eSpeak's `en` voice filename; `en-GB` remains the displayed locale.
+
+Build and inspect both-ABI AARs and the existing single-ABI application variants:
+
+```sh
+nix develop -c bash ./gradlew :ai-tts:bundleDebugAar :ai-tts:bundleReleaseAar \
+  :app:verifyAiNativeArtifacts --stacktrace
+nix develop -c python3 third_party/ai/verify-tts-native.py \
+  --archive ai-tts/build/outputs/aar/ai-tts-release.aar
+nix develop -c bash ./gradlew :app:verifyReleaseAiNativeArtifacts --stacktrace
+nix develop -c bash ./gradlew :ai-tts:testDebugUnitTest \
+  --tests 'io.github.trevarj.motd.ai.tts.KokoroOutputTest' --stacktrace
+```
+
+Native compilation is bounded to at most four jobs and cached under ignored
+`third_party/ai/tts/build/`; source preparation fails on missing or mismatched
+inputs unless missing locked source downloads were explicitly requested.
+The library itself has no network, model download or playback API.
 
 ## Reproducible signing
 

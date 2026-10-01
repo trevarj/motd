@@ -10,11 +10,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -27,6 +31,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ai.AiCustomStyle
@@ -35,9 +42,15 @@ import io.github.trevarj.motd.ai.AiModelCapability
 import io.github.trevarj.motd.ai.AiModelRecord
 import io.github.trevarj.motd.ai.AiTranslationTarget
 import io.github.trevarj.motd.ai.TranscriptionSettings
+import io.github.trevarj.motd.ai.kokoroEnglishVoices
+import io.github.trevarj.motd.audio.ReadAloudSelection
+import io.github.trevarj.motd.audio.ReadAloudState
+import io.github.trevarj.motd.audio.ReadAloudVoices
 import io.github.trevarj.motd.ui.ai.AiCustomStylesSheet
 import io.github.trevarj.motd.ui.ai.AiTranslationTargetPicker
 import io.github.trevarj.motd.ui.ai.defaultTranslationTarget
+import io.github.trevarj.motd.ui.components.ReadAloudPlayer
+import io.github.trevarj.motd.ui.components.ReadAloudVoiceOptions
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.settings.PersistentStatusNotice
 import io.github.trevarj.motd.ui.settings.RadioRow
@@ -57,6 +70,9 @@ fun AiLabsScreen(
     viewModel: AiLabsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val readerConfig by viewModel.readAloudConfig.collectAsStateWithLifecycle()
+    val readerState by viewModel.readAloudState.collectAsStateWithLifecycle()
+    val readerVoices by viewModel.readAloudVoices.collectAsStateWithLifecycle()
     AiLabsContent(
         state = state,
         onBack = onBack,
@@ -66,6 +82,15 @@ fun AiLabsScreen(
         onUpdateTranscriptionSettings = viewModel::updateTranscriptionSettings,
         onClearCaches = viewModel::clearCaches,
         onDismissStatus = viewModel::dismissStatus,
+        readerConfig = readerConfig,
+        readerState = readerState,
+        readerVoices = readerVoices,
+        onDownloadKokoroAndUse = viewModel::downloadKokoroAndUse,
+        onCancelSetup = viewModel::cancelSetup,
+        onOpenVoiceOptions = viewModel::openVoiceOptions,
+        onSaveVoiceOptions = viewModel::saveVoiceOptions,
+        onPreviewLocal = viewModel::previewLocal,
+        onStopPreview = viewModel::stopPreview,
         target = target,
         onUpsertCustomStyle = viewModel::upsertCustomStyle,
         onDeleteCustomStyle = viewModel::deleteCustomStyle,
@@ -82,6 +107,15 @@ internal fun AiLabsContent(
     onAssignModel: (AiFeature, String) -> Unit,
     onUpdateTranscriptionSettings: (String, TranscriptionSettings) -> Unit,
     onClearCaches: () -> Unit,
+    readerConfig: ReadAloudSelection,
+    readerState: ReadAloudState,
+    readerVoices: ReadAloudVoices,
+    onDownloadKokoroAndUse: () -> Unit,
+    onCancelSetup: () -> Unit,
+    onOpenVoiceOptions: () -> Unit,
+    onSaveVoiceOptions: (ReadAloudSelection) -> Unit,
+    onPreviewLocal: (ReadAloudSelection) -> Unit,
+    onStopPreview: () -> Unit,
     onDismissStatus: () -> Unit = {},
     target: SettingsTarget? = null,
     onUpsertCustomStyle: (AiCustomStyle) -> Unit = {},
@@ -91,6 +125,22 @@ internal fun AiLabsContent(
     var selectingFeature by rememberSaveable { mutableStateOf<AiFeature?>(null) }
     var managingStyles by rememberSaveable { mutableStateOf(false) }
     var pickingTarget by rememberSaveable { mutableStateOf(false) }
+    var voiceOptions by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(readerConfig.localEnabled) {
+        if (!readerConfig.localEnabled) voiceOptions = false
+    }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, onStopPreview) {
+        val observer =
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) onStopPreview()
+            }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            onStopPreview()
+        }
+    }
     val effectiveTarget = state.translationTarget ?: defaultTranslationTarget(LocalLocale.current.platformLocale)
     val requestedTarget = if (target == SettingsTarget.AI) SettingsTarget.AI_MODELS else target
     val statusContent: (@Composable () -> Unit)? =
@@ -148,6 +198,63 @@ internal fun AiLabsContent(
             onFeatureEnabled = onFeatureEnabled,
             onUpdateTranscriptionSettings = onUpdateTranscriptionSettings,
         )
+        AiFeatureSection(
+            featureState = state.feature(AiFeature.READ_ALOUD),
+            title = stringResource(R.string.ai_read_aloud),
+            summary = stringResource(R.string.ai_read_aloud_summary),
+            target = SettingsTarget.AI_READ_ALOUD,
+            requestedTarget = requestedTarget,
+            onSelectModel = { selectingFeature = AiFeature.READ_ALOUD },
+            onOpenModelLibrary = onOpenModelLibrary,
+            onFeatureEnabled = onFeatureEnabled,
+            onUpdateTranscriptionSettings = onUpdateTranscriptionSettings,
+        )
+        SettingsGroup {
+            Text(stringResource(R.string.ai_read_aloud_disclosure), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
+            SettingsActionRow(
+                title = stringResource(R.string.ai_read_aloud_download),
+                enabled = !state.importing,
+                modifier = Modifier.testTag("ai_download_kokoro"),
+                onClick = onDownloadKokoroAndUse,
+            )
+            state.importProgress?.let { progress ->
+                Column(Modifier.fillMaxWidth().padding(16.dp).testTag("ai_kokoro_progress")) {
+                    progress.fraction?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+                        ?: LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(stringResource(R.string.ai_import_progress_of, formatModelBytes(progress.bytesCopied), formatModelBytes(progress.totalBytes ?: 0)))
+                    TextButton(onClick = onCancelSetup, modifier = Modifier.testTag("ai_setup_cancel")) { Text(stringResource(R.string.action_cancel)) }
+                }
+            }
+            val local = state.feature(AiFeature.READ_ALOUD)
+            if (local.enabled && (!local.ready || !readerConfig.localReady)) Text(stringResource(R.string.ai_read_aloud_unavailable), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
+            if (readerConfig.localEnabled) (readerState.error ?: readerVoices.error)?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
+            SettingsActionRow(
+                title = stringResource(R.string.read_aloud_options),
+                summary =
+                    if (local.enabled && local.ready) {
+                        val voice = kokoroEnglishVoices.firstOrNull { it.id == (readerConfig.options.voice ?: "3") }
+                        listOf(
+                            voice?.name ?: stringResource(R.string.read_aloud_unavailable_voice),
+                            voice?.locale.orEmpty(),
+                            stringResource(R.string.read_aloud_rate, (readerConfig.options.rate * 100).toInt()),
+                        ).filter { it.isNotBlank() }.joinToString(" · ")
+                    } else {
+                        stringResource(R.string.ai_read_aloud_preview_requires_enable)
+                    },
+                enabled = local.enabled && local.ready && readerConfig.localEnabled && readerConfig.localReady,
+                modifier = Modifier.testTag("ai_read_aloud_voice_options"),
+                onClick = {
+                    onOpenVoiceOptions()
+                    voiceOptions = true
+                },
+            )
+            if (readerState.previewing) {
+                ReadAloudPlayer(readerState, {}, {}, {}, {}, onStopPreview, {
+                    onOpenVoiceOptions()
+                    voiceOptions = true
+                })
+            }
+        }
         SettingsGroup(title = stringResource(R.string.ai_text_preferences)) {
             SettingsNavigationRow(
                 title = stringResource(R.string.ai_text_translation_language),
@@ -188,6 +295,22 @@ internal fun AiLabsContent(
         }, { pickingTarget = false })
     }
     if (managingStyles) AiCustomStylesSheet(state.customStyles, onUpsertCustomStyle, onDeleteCustomStyle, { managingStyles = false })
+    if (voiceOptions && readerConfig.localEnabled) {
+        ReadAloudVoiceOptions(
+            readerConfig,
+            readerVoices,
+            onSaveVoiceOptions,
+            onPreviewLocal,
+            onDismiss = {
+                voiceOptions = false
+                onStopPreview()
+            },
+            onStopPreview = onStopPreview,
+            onReloadVoices = onOpenVoiceOptions,
+            previewing = readerState.previewing,
+            error = readerState.error,
+        )
+    }
 }
 
 @Composable
@@ -391,6 +514,7 @@ internal fun AiFeature.tag(): String =
     when (this) {
         AiFeature.TRANSCRIPTION -> "ai_transcription"
         AiFeature.TEXT_TOOLS -> "ai_text_tools"
+        AiFeature.READ_ALOUD -> "ai_read_aloud"
     }
 
 internal fun modelMetadataSummary(model: AiModelRecord): String = listOf(model.format.name, model.metadata.architecture, model.metadata.quantization, formatModelBytes(model.sizeBytes)).joinToString(" · ")

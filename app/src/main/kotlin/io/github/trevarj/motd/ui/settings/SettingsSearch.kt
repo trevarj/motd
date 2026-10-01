@@ -209,6 +209,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.ai_model_library, R.string.ai_model_library_summary, "import download local whisper ggml speech model composer grammar spelling correction styles translation GGUF Qwen", SettingsSearchPage.AI_LABS, SettingsTarget.AI_MODELS),
         spec(R.string.ai_transcription, R.string.ai_transcription_summary, "voice speech audio text whisper", SettingsSearchPage.AI_LABS, SettingsTarget.AI_TRANSCRIPTION),
         spec(R.string.ai_text_tools, R.string.ai_text_tools_summary, "local grammar spelling correction styles translation GGUF Qwen", SettingsSearchPage.AI_LABS, SettingsTarget.AI_TEXT_TOOLS),
+        spec(R.string.ai_read_aloud, R.string.ai_read_aloud_summary, "read aloud TTS speech synthesis Kokoro local offline male female voice rate gap", SettingsSearchPage.AI_LABS, SettingsTarget.AI_READ_ALOUD),
         spec(R.string.about_diagnostic_logging, R.string.about_diagnostic_logging_summary, "support logs export", SettingsSearchPage.ABOUT, SettingsTarget.DIAGNOSTICS),
         spec(R.string.about_license, R.string.about_license_gpl, "legal free software", SettingsSearchPage.ABOUT, SettingsTarget.LICENSE),
         spec(R.string.settings_github, R.string.settings_github_url, "source project repository", SettingsSearchPage.ABOUT, SettingsTarget.PROJECT),

@@ -167,6 +167,8 @@ class AiTextViewModelTest {
             AiExecutionCoordinator(
                 speech,
                 text,
+                io.github.trevarj.motd.ai
+                    .NativeKokoroModelRuntime(),
                 object : AppVisibility {
                     override val onScreen: StateFlow<Boolean> = MutableStateFlow(true)
                 },
@@ -195,6 +197,8 @@ class AiTextViewModelTest {
                     override suspend fun unloadForDeletion(modelId: String) = coordinator.unloadForDeletion(modelId)
 
                     override suspend fun cancelTextTools(unload: Boolean) = coordinator.cancelTextTools(unload)
+
+                    override suspend fun cancelReadAloud(unload: Boolean) = coordinator.cancelReadAloud(unload)
                 },
                 backgroundScope,
                 dispatcher,

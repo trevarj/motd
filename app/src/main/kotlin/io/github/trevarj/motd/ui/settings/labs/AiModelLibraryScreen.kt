@@ -73,6 +73,7 @@ fun AiModelLibraryScreen(
         onUpsertCustomStyle = viewModel::upsertCustomStyle,
         onDeleteCustomStyle = viewModel::deleteCustomStyle,
         onTranslationTarget = viewModel::setTranslationTarget,
+        onDownloadKokoroAndUse = viewModel::downloadKokoroAndUse,
     )
 }
 
@@ -83,6 +84,7 @@ internal fun AiModelLibraryContent(
     onImport: (Uri, AiModelCapability) -> Unit,
     onUpdateTranscriptionSettings: (String, TranscriptionSettings) -> Unit,
     onDelete: (String) -> Unit,
+    onDownloadKokoroAndUse: () -> Unit,
     onDismissStatus: () -> Unit = {},
     onDownloadTextModel: () -> Unit = {},
     onCancelSetup: () -> Unit = {},
@@ -148,6 +150,13 @@ internal fun AiModelLibraryContent(
                 enabled = !state.importing,
                 modifier = Modifier.testTag("ai_download_text_model"),
                 onClick = { confirmDownload = true },
+            )
+            SettingsActionRow(
+                title = stringResource(R.string.ai_read_aloud_download),
+                summary = stringResource(R.string.ai_read_aloud_disclosure),
+                enabled = !state.importing,
+                modifier = Modifier.testTag("ai_download_kokoro"),
+                onClick = onDownloadKokoroAndUse,
             )
             state.importProgress?.let { progress ->
                 SettingsDivider()
@@ -289,7 +298,13 @@ private fun AiModelCard(
                             R.string.ai_model_assigned_to,
                             modelState.assignments
                                 .map { feature ->
-                                    stringResource(if (feature == io.github.trevarj.motd.ai.AiFeature.TRANSCRIPTION) R.string.ai_transcription else R.string.ai_text_tools)
+                                    stringResource(
+                                        when (feature) {
+                                            io.github.trevarj.motd.ai.AiFeature.TRANSCRIPTION -> R.string.ai_transcription
+                                            io.github.trevarj.motd.ai.AiFeature.TEXT_TOOLS -> R.string.ai_text_tools
+                                            io.github.trevarj.motd.ai.AiFeature.READ_ALOUD -> R.string.ai_read_aloud
+                                        },
+                                    )
                                 }.joinToString(),
                         )
                     },
@@ -331,7 +346,17 @@ private fun CapabilityBadges(model: AiModelRecord) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("ai_model_${model.id}_capabilities")) {
         model.capabilities.forEach { capability ->
             Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.testTag("ai_model_${model.id}_capability_${capability.tag()}")) {
-                Text(stringResource(if (capability == AiModelCapability.TRANSCRIPTION) R.string.ai_role_transcription else R.string.ai_text_tools), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                Text(
+                    stringResource(
+                        when (capability) {
+                            AiModelCapability.TRANSCRIPTION -> R.string.ai_role_transcription
+                            AiModelCapability.TEXT_TOOLS -> R.string.ai_text_tools
+                            AiModelCapability.SPEECH_SYNTHESIS -> R.string.ai_read_aloud
+                        },
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
             }
         }
     }
@@ -375,6 +400,8 @@ private fun detailedMetadata(model: AiModelRecord): String {
     if (multilingual != null) parts += stringResource(if (multilingual) R.string.ai_metadata_multilingual else R.string.ai_metadata_single_language)
     model.metadata.maximumContextTokens?.let { parts += "$it context tokens" }
     model.metadata.textTemplateId?.let { parts += it }
+    model.metadata.sampleRateHz?.let { parts += "$it Hz" }
+    model.metadata.voiceCount?.let { parts += "$it voices" }
     return parts.joinToString(" · ")
 }
 

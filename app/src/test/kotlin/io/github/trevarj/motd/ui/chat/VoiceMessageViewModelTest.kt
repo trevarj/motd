@@ -19,6 +19,7 @@ import io.github.trevarj.motd.ai.AiTranscriptionSettingsRecord
 import io.github.trevarj.motd.ai.MAX_TRANSCRIPT_BYTES
 import io.github.trevarj.motd.ai.TranscriptionSettings
 import io.github.trevarj.motd.audio.ActiveVoiceRecording
+import io.github.trevarj.motd.audio.AudioActivityTracker
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
 import io.github.trevarj.motd.audio.AudioInputException
@@ -75,6 +76,31 @@ import java.util.UUID
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class VoiceMessageViewModelTest {
+    @Test
+    fun `reader is stopped before recording starts even when microphone startup fails`() =
+        voiceTest {
+            val tracker = AudioActivityTracker()
+            var speechActive = true
+            tracker.stopIncomingReading = { speechActive = false }
+            val recorder =
+                object : VoiceRecorder by FakeRecorder {
+                    override fun start(
+                        profile: VoiceRecordingProfile,
+                        nowMs: Long,
+                    ): ActiveVoiceRecording {
+                        assertFalse("Speech overlapped recorder startup before the recording flag", speechActive)
+                        assertFalse(tracker.recording.value)
+                        throw IOException("microphone busy")
+                    }
+                }
+            val vm = fixture(Harness(), recorder = recorder, activityTracker = tracker)
+            vm.startRecording(false)
+            assertFalse(speechActive)
+            assertFalse(tracker.recording.value)
+            assertNull(vm.state.value.recording)
+            assertNotNull(vm.state.value.error)
+        }
+
     @Test
     fun `Agentwire sends a fifteen minute wire duration unencrypted without changing ordinary chat defaults`() =
         voiceTest {
@@ -850,6 +876,7 @@ class VoiceMessageViewModelTest {
         sender: VoiceMessageSender = FakeSender,
         playback: AudioPlaybackController = FakePlaybackController(),
         config: VoiceConfig = VoiceConfig(),
+        activityTracker: AudioActivityTracker = AudioActivityTracker(),
     ): VoiceMessageViewModel {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val prefs = VoicePrefs(context)
@@ -860,9 +887,7 @@ class VoiceMessageViewModelTest {
                 recorder = recorder,
                 sender = sender,
                 prefs = prefs,
-                activityTracker =
-                    io.github.trevarj.motd.audio
-                        .AudioActivityTracker(),
+                activityTracker = activityTracker,
                 playbackController = playback,
                 transcriptionCalls = harness.calls(),
             )

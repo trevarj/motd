@@ -36,9 +36,10 @@ connection ownership, or module boundaries.
    (class filter for handoff; `:irc:test` for protocol changes). Filters narrow
    execution, not compilation of test sources and dependencies; humans may
    enter `nix develop` once. Run each changed module's existing
-   `:app:ktlintCheck`, `:irc:ktlintCheck`, or `:ai-whisper:ktlintCheck` once before
-   handoff; root Gradle/style configuration changes still require root
-   `ktlintCheck`. Keep the nearest database regression and review/commit of
+   `:app:ktlintCheck`, `:irc:ktlintCheck`, `:ai-whisper:ktlintCheck`,
+   `:ai-text:ktlintCheck`, or `:ai-tts:ktlintCheck` once before handoff; root
+   Gradle/style configuration changes still require root `ktlintCheck`.
+   Keep the nearest database regression and review/commit of
    generated `app/schemas`, `:app:compileE2eAndroidTestKotlin` for affected
    instrumentation journeys, and `:app:assembleDebug` when resources, manifest,
    packaging, or an actual APK require it. Do not automatically append an

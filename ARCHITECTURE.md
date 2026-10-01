@@ -1,10 +1,11 @@
 # Architecture
 
-motd has four Gradle modules: `:app` is the Android application, `:irc` is a
+motd has five Gradle modules: `:app` is the Android application, `:irc` is a
 pure-JVM IRC engine with no Android dependencies, `:ai-whisper` isolates
-the source-built Android voice-transcription runtime, and `:ai-text` contains
-the source-built CPU text engine shared by Android JNI and a host smoke runner.
-The text module has no network API and does not download or bundle model weights.
+the source-built Android voice-transcription runtime, `:ai-text` contains
+the source-built CPU text engine, and `:ai-tts` contains the source-built
+Sherpa/ONNX Runtime Kokoro speech engine. Native modules have no download API
+and do not bundle model weights; text and speech also have host smoke runners.
 
 ```mermaid
 flowchart TD
@@ -65,8 +66,23 @@ flowchart TD
 - The app ships as a single Google-free build with no product flavors; push
   delivery is UnifiedPush only. The E2E build is x86_64-compatible and
   intentionally omits the arm64-only libbox JNI.
-- Labs voice transcription is opt-in and local-only. `AiExecutionCoordinator`
-  serializes Whisper inference and unloads models when the app backgrounds.
+- Incoming chat speech is explicitly enabled from a channel/query overflow menu
+  for the current resumed chat. `EventProcessor` admits only newly inserted live
+  peer messages; history, echoes, ignored speakers, muted rooms and fools do not
+  authorize speech. `ReadAloudController` owns a bounded, disposable session:
+  previous replays session entries, latest selects its newest entry, and leaving
+  or backgrounding clears it. Recording, competing playback and focus loss stop
+  speech. Both providers generate temporary audio for true pause/resume; playback
+  completion precedes the configurable inter-message gap. Only installed Android
+  voices reported as offline are offered; third-party speech engines still receive
+  text and are not a privacy sandbox. AI Labs can explicitly download, validate,
+  assign and enable the pinned Kokoro English bundle atomically. Its male/female
+  voices and profile are independent of installed speech. An enabled local override
+  fails visibly if unavailable or corrupt, never silently falling back. Labs voice
+  previews do not enable chat narration.
+- Local AI is opt-in. `AiExecutionCoordinator` serializes Whisper transcription,
+  text generation and Kokoro synthesis with one resident model, cancels and joins
+  actual native workers before unload or deletion, and unloads on backgrounding.
   Imported weights and settings are backup-excluded; transcripts are disposable
   caches and never enter IRC history. Legacy voice settings survive migration;
   retired text-model imports remain unused in private storage rather than being

@@ -14,6 +14,7 @@ import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioMetadataRepository
 import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.audio.AudioPlaybackState
+import io.github.trevarj.motd.audio.ReadAloudController
 import io.github.trevarj.motd.avatar.LocalAvatarStore
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
@@ -104,6 +105,7 @@ import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.testing.NoopConnectionManager
+import io.github.trevarj.motd.testing.ReadAloudHarness
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
@@ -1796,6 +1798,42 @@ class ChatViewModelTest {
             advanceUntilIdle()
 
             assertEquals(null, foreground.foregroundBufferId.value)
+        }
+
+    @Test
+    fun `read aloud toggle uses canonical room and leaving never reenables a session`() =
+        runTest {
+            val canonical = channel.copy(id = 42, name = "#canonical-reader")
+            db.bufferDao().insert(canonical)
+            val foreground = FakeForegroundBufferTracker()
+            val reader = ReadAloudHarness(ApplicationProvider.getApplicationContext(), db, backgroundScope, foreground)
+            val buffers = FakeBufferRepository(canonical, channel.id)
+            val vm =
+                viewModel(
+                    canonical,
+                    FakeConnectionManager(network.id),
+                    routeBufferId = channel.id,
+                    foreground = foreground,
+                    buffers = buffers,
+                    reader = reader.controller,
+                )
+            vm.state.first { it.buffer?.id == canonical.id }
+            vm.onResume()
+            runCurrent()
+            vm.toggleReadAloud()
+            runCurrent()
+            assertTrue(vm.readAloudState.value.enabled)
+            assertEquals(canonical.id, vm.readAloudState.value.roomId)
+            vm.onPause()
+            assertFalse(vm.readAloudState.value.enabled)
+            vm.onResume()
+            runCurrent()
+            assertFalse(vm.readAloudState.value.enabled)
+            vm.toggleReadAloud()
+            runCurrent()
+            buffers.update(query)
+            runCurrent()
+            assertFalse(vm.readAloudState.value.enabled)
         }
 
     @Test
@@ -4423,6 +4461,7 @@ class ChatViewModelTest {
         shares: PendingShareStore = PendingShareStore(),
         notificationSettings: NotificationSettings = NotificationSettings.Noop,
         clock: AppClock = AppClock(System::currentTimeMillis),
+        reader: ReadAloudController? = null,
     ): ChatViewModel {
         val routeState = mutableMapOf<String, Any>("bufferId" to routeBufferId)
         jumpToMsgid?.let { routeState["jumpToMsgid"] = it }
@@ -4465,6 +4504,14 @@ class ChatViewModelTest {
             gapFiller = gapFiller,
             notificationSettings = notificationSettings,
             clock = clock,
+            readAloudController =
+                reader ?: ReadAloudHarness(
+                    ApplicationProvider.getApplicationContext(),
+                    db,
+                    CoroutineScope(SupervisorJob() + dispatcher),
+                    foreground,
+                    settings,
+                ).controller,
         )
     }
 

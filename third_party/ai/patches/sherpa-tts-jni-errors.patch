@@ -1,0 +1,323 @@
+--- a/sherpa-onnx/jni/offline-tts.cc
++++ b/sherpa-onnx/jni/offline-tts.cc
+@@ -53,63 +53,100 @@
+   SHERPA_ONNX_JNI_READ_INT(ans.num_steps, numSteps, cls, config_obj);
+ 
+   // extra Map<String, String>
+-  fid = env->GetFieldID(cls, "extra", "Ljava/util/Map;");
+-  if (fid != nullptr) {
+-    jobject map_obj = env->GetObjectField(config_obj, fid);
+-    if (map_obj != nullptr) {
+-      jclass map_cls = env->GetObjectClass(map_obj);
+-      jmethodID entrySet =
+-          env->GetMethodID(map_cls, "entrySet", "()Ljava/util/Set;");
+-      jobject entry_set = env->CallObjectMethod(map_obj, entrySet);
+-
+-      jclass set_cls = env->GetObjectClass(entry_set);
+-      jmethodID iteratorMid =
+-          env->GetMethodID(set_cls, "iterator", "()Ljava/util/Iterator;");
+-      jobject iterator = env->CallObjectMethod(entry_set, iteratorMid);
+-
+-      jclass iter_cls = env->GetObjectClass(iterator);
+-      jmethodID hasNextMid = env->GetMethodID(iter_cls, "hasNext", "()Z");
+-      jmethodID nextMid =
+-          env->GetMethodID(iter_cls, "next", "()Ljava/lang/Object;");
+-
+-      jclass entry_cls = env->FindClass("java/util/Map$Entry");
+-      jmethodID getKeyMid =
+-          env->GetMethodID(entry_cls, "getKey", "()Ljava/lang/Object;");
+-      jmethodID getValueMid =
+-          env->GetMethodID(entry_cls, "getValue", "()Ljava/lang/Object;");
+-
+-      while (env->CallBooleanMethod(iterator, hasNextMid)) {
+-        jobject entry = env->CallObjectMethod(iterator, nextMid);
+-        if (!entry) {
+-          continue;
+-        }
+-
+-        jstring key = (jstring)env->CallObjectMethod(entry, getKeyMid);
+-        jstring value = (jstring)env->CallObjectMethod(entry, getValueMid);
+-
+-        if (key != nullptr && value != nullptr) {
+-          const char *keyChars = env->GetStringUTFChars(key, nullptr);
+-          const char *valueChars = env->GetStringUTFChars(value, nullptr);
+-          ans.extra[std::string(keyChars)] = std::string(valueChars);
+-
+-          env->ReleaseStringUTFChars(key, keyChars);
+-          env->ReleaseStringUTFChars(value, valueChars);
+-        }
+-
+-        env->DeleteLocalRef(key);
+-        env->DeleteLocalRef(value);
+-        env->DeleteLocalRef(entry);
+-      }
+-
+-      env->DeleteLocalRef(entry_set);
+-      env->DeleteLocalRef(iterator);
+-      env->DeleteLocalRef(entry_cls);
+-      env->DeleteLocalRef(iter_cls);
+-      env->DeleteLocalRef(set_cls);
+-      env->DeleteLocalRef(map_cls);
+-      env->DeleteLocalRef(map_obj);
+-    }
+-  }
++  fid = env->GetFieldID(cls, "extra", "Ljava/util/Map;");
++  if (env->ExceptionCheck()) {
++    env->DeleteLocalRef(cls);
++    return ans;
++  }
++  if (fid != nullptr) {
++    if (env->PushLocalFrame(16) < 0) {
++      env->DeleteLocalRef(cls);
++      return ans;
++    }
++    try {
++      do {
++        jobject map_obj = env->GetObjectField(config_obj, fid);
++        if (!map_obj || env->ExceptionCheck()) break;
++        jclass map_cls = env->GetObjectClass(map_obj);
++        if (!map_cls || env->ExceptionCheck()) break;
++        jmethodID entrySet =
++            env->GetMethodID(map_cls, "entrySet", "()Ljava/util/Set;");
++        if (!entrySet || env->ExceptionCheck()) break;
++        jobject entry_set = env->CallObjectMethod(map_obj, entrySet);
++        if (!entry_set || env->ExceptionCheck()) break;
++
++        jclass set_cls = env->GetObjectClass(entry_set);
++        if (!set_cls || env->ExceptionCheck()) break;
++        jmethodID iteratorMid =
++            env->GetMethodID(set_cls, "iterator", "()Ljava/util/Iterator;");
++        if (!iteratorMid || env->ExceptionCheck()) break;
++        jobject iterator = env->CallObjectMethod(entry_set, iteratorMid);
++        if (!iterator || env->ExceptionCheck()) break;
++
++        jclass iter_cls = env->GetObjectClass(iterator);
++        if (!iter_cls || env->ExceptionCheck()) break;
++        jmethodID hasNextMid = env->GetMethodID(iter_cls, "hasNext", "()Z");
++        if (!hasNextMid || env->ExceptionCheck()) break;
++        jmethodID nextMid =
++            env->GetMethodID(iter_cls, "next", "()Ljava/lang/Object;");
++        if (!nextMid || env->ExceptionCheck()) break;
++
++        jclass entry_cls = env->FindClass("java/util/Map$Entry");
++        if (!entry_cls || env->ExceptionCheck()) break;
++        jmethodID getKeyMid =
++            env->GetMethodID(entry_cls, "getKey", "()Ljava/lang/Object;");
++        if (!getKeyMid || env->ExceptionCheck()) break;
++        jmethodID getValueMid =
++            env->GetMethodID(entry_cls, "getValue", "()Ljava/lang/Object;");
++        if (!getValueMid || env->ExceptionCheck()) break;
++
++        while (true) {
++          jboolean has_next = env->CallBooleanMethod(iterator, hasNextMid);
++          if (!has_next || env->ExceptionCheck()) break;
++          jobject entry = env->CallObjectMethod(iterator, nextMid);
++          if (env->ExceptionCheck()) break;
++          if (!entry) continue;
++
++          jstring key = (jstring)env->CallObjectMethod(entry, getKeyMid);
++          if (env->ExceptionCheck()) break;
++          jstring value = (jstring)env->CallObjectMethod(entry, getValueMid);
++          if (env->ExceptionCheck()) break;
++
++          if (key != nullptr && value != nullptr) {
++            const char *keyChars = env->GetStringUTFChars(key, nullptr);
++            if (!keyChars || env->ExceptionCheck()) {
++              if (keyChars) env->ReleaseStringUTFChars(key, keyChars);
++              break;
++            }
++            const char *valueChars = env->GetStringUTFChars(value, nullptr);
++            if (!valueChars || env->ExceptionCheck()) {
++              if (valueChars) env->ReleaseStringUTFChars(value, valueChars);
++              env->ReleaseStringUTFChars(key, keyChars);
++              break;
++            }
++            try {
++              ans.extra[std::string(keyChars)] = std::string(valueChars);
++            } catch (...) {
++              env->ReleaseStringUTFChars(key, keyChars);
++              env->ReleaseStringUTFChars(value, valueChars);
++              throw;
++            }
++            env->ReleaseStringUTFChars(key, keyChars);
++            env->ReleaseStringUTFChars(value, valueChars);
++          }
++
++          env->DeleteLocalRef(key);
++          env->DeleteLocalRef(value);
++          env->DeleteLocalRef(entry);
++        }
++      } while (false);
++    } catch (...) {
++      env->PopLocalFrame(nullptr);
++      env->DeleteLocalRef(cls);
++      throw;
++    }
++    env->PopLocalFrame(nullptr);
++  }
+ 
+   env->DeleteLocalRef(cls);
+   return ans;
+@@ -362,11 +399,20 @@
+                                  int32_t sample_rate) {
+   // Step 1: Create a jfloatArray for samples
+   jfloatArray samples_arr = env->NewFloatArray(samples.size());
++  if (!samples_arr || env->ExceptionCheck()) {
++    env->DeleteLocalRef(samples_arr);
++    return nullptr;
++  }
+   env->SetFloatArrayRegion(samples_arr, 0, samples.size(), samples.data());
++  if (env->ExceptionCheck()) {
++    env->DeleteLocalRef(samples_arr);
++    return nullptr;
++  }
+ 
+   // Step 2: Find the GeneratedAudio class
+   jclass gen_audio_cls = env->FindClass("com/k2fsa/sherpa/onnx/GeneratedAudio");
+-  if (!gen_audio_cls) {
++  if (!gen_audio_cls || env->ExceptionCheck()) {
+     env->DeleteLocalRef(samples_arr);
++    env->DeleteLocalRef(gen_audio_cls);
+     return nullptr;
+   }
+@@ -374,18 +420,22 @@
+   // Step 3: Get the constructor: GeneratedAudio(float[] samples, int
+   // sampleRate)
+   jmethodID ctor = env->GetMethodID(gen_audio_cls, "<init>", "([FI)V");
+-  if (!ctor) {
++  if (!ctor || env->ExceptionCheck()) {
+     env->DeleteLocalRef(samples_arr);
+     env->DeleteLocalRef(gen_audio_cls);
+     return nullptr;
+   }
+ 
+   // Step 4: Create the object
+   jobject gen_audio_obj =
+       env->NewObject(gen_audio_cls, ctor, samples_arr, sample_rate);
+ 
+   // Step 5: Clean up local refs
+   env->DeleteLocalRef(samples_arr);
+   env->DeleteLocalRef(gen_audio_cls);
++  if (!gen_audio_obj || env->ExceptionCheck()) {
++    env->DeleteLocalRef(gen_audio_obj);
++    return nullptr;
++  }
+ 
+   return gen_audio_obj;
+@@ -402,7 +452,7 @@
+   }
+ 
+   jmethodID invoke_mid =
+-      env->GetMethodID(cls, "invoke", "([F)Ljava/lang/Integer;");
++      env->GetMethodID(cls, "invoke", "(Ljava/lang/Object;)Ljava/lang/Object;");
+   if (env->ExceptionCheck() || !invoke_mid) {
+     env->DeleteLocalRef(cls);
+     return 1;
+@@ -472,6 +522,7 @@
+       [&]() -> jlong {
+         bool ok = false;
+         auto config = sherpa_onnx::GetOfflineTtsConfig(env, _config, &ok);
++        if (env->ExceptionCheck()) return 0;
+ 
+         if (!ok) {
+           SHERPA_ONNX_LOGE("Please read the error message carefully");
+@@ -570,25 +621,39 @@
+   const char *p_text = env->GetStringUTFChars(text, nullptr);
+-  auto gen_config = sherpa_onnx::GetGenerationConfig(env, _gen_config);
+-  auto tts = reinterpret_cast<sherpa_onnx::OfflineTts *>(ptr);
+-
+-  sherpa_onnx::GeneratedAudio audio;
+-
+-  if (callback) {
+-    std::function<int32_t(const float *, int32_t, float)> callback_wrapper =
+-        [env, callback](const float *samples, int32_t n, float) -> int32_t {
+-      jfloatArray samples_arr = env->NewFloatArray(n);
+-      env->SetFloatArrayRegion(samples_arr, 0, n, samples);
+-      int32_t ret = CallCallback(env, callback, samples_arr);
+-      env->DeleteLocalRef(samples_arr);
+-      return ret;
+-    };
+-
+-    audio = tts->Generate(p_text, gen_config, callback_wrapper);
+-  } else {
+-    audio = tts->Generate(p_text, gen_config, nullptr);
+-  }
+-
+-  env->ReleaseStringUTFChars(text, p_text);
+-
+-  return CreateAudioObject(env, audio.samples, audio.sample_rate);
++  if (!p_text) return nullptr;
++  struct ReleaseText {
++    JNIEnv *env;
++    jstring text;
++    const char *chars;
++    ~ReleaseText() { env->ReleaseStringUTFChars(text, chars); }
++  } release_text{env, text, p_text};
++
++  return SafeJNI(
++      env, "OfflineTts_generateWithConfigImpl",
++      [&]() -> jobject {
++        auto gen_config = sherpa_onnx::GetGenerationConfig(env, _gen_config);
++        if (env->ExceptionCheck()) return nullptr;
++        auto tts = reinterpret_cast<sherpa_onnx::OfflineTts *>(ptr);
++        sherpa_onnx::GeneratedAudio audio;
++        if (callback) {
++          sherpa_onnx::GeneratedAudioCallback callback_wrapper =
++              [env, callback](const float *samples, int32_t n, float) -> int32_t {
++            jfloatArray samples_arr = env->NewFloatArray(n);
++            if (!samples_arr) return 0;
++            env->SetFloatArrayRegion(samples_arr, 0, n, samples);
++            if (env->ExceptionCheck()) {
++              env->DeleteLocalRef(samples_arr);
++              return 0;
++            }
++            int32_t ret = CallCallback(env, callback, samples_arr);
++            env->DeleteLocalRef(samples_arr);
++            return env->ExceptionCheck() ? 0 : ret;
++          };
++          audio = tts->Generate(p_text, gen_config, callback_wrapper);
++        } else {
++          audio = tts->Generate(p_text, gen_config, nullptr);
++        }
++        if (env->ExceptionCheck()) return nullptr;
++        return CreateAudioObject(env, audio.samples, audio.sample_rate);
++      },
++      static_cast<jobject>(nullptr));
+ }
+@@ -600,12 +665,21 @@
+   const char *p_filename = env->GetStringUTFChars(filename, nullptr);
++  if (!p_filename) return JNI_FALSE;
+ 
+   jfloat *p = env->GetFloatArrayElements(samples, nullptr);
+-  jsize n = env->GetArrayLength(samples);
++  if (!p) {
++    env->ReleaseStringUTFChars(filename, p_filename);
++    return JNI_FALSE;
++  }
+ 
+-  bool ok = sherpa_onnx::WriteWave(p_filename, sample_rate, p, n);
++  auto ok = SafeJNI(
++      env, "GeneratedAudio_saveImpl",
++      [&]() -> jboolean {
++        jsize n = env->GetArrayLength(samples);
++        return static_cast<jboolean>(sherpa_onnx::WriteWave(p_filename, sample_rate, p, n));
++      }, static_cast<jboolean>(JNI_FALSE));
+ 
+   env->ReleaseStringUTFChars(filename, p_filename);
+   env->ReleaseFloatArrayElements(samples, p, JNI_ABORT);
+ 
+   return ok;
+ }
+--- a/sherpa-onnx/jni/common.h
++++ b/sherpa-onnx/jni/common.h
+@@ -65,6 +65,10 @@
+     jstring s = (jstring)env->GetObjectField(config, fid);                    \
+     if (s != nullptr) {                                                       \
+       const char *p = env->GetStringUTFChars(s, nullptr);                     \
++      if (!p) {                                                              \
++        env->DeleteLocalRef(s);                                               \
++        return ans;                                                           \
++      }                                                                       \
+       cpp_field = p;                                                          \
+       env->ReleaseStringUTFChars(s, p);                                       \
+       env->DeleteLocalRef(s);                                                 \

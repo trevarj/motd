@@ -280,6 +280,7 @@ class VoiceMessageViewModel
         ) {
             if (_state.value.recording != null || _state.value.staged != null) return
             playbackController.pause()
+            activityTracker.stopReadingBeforeRecording()
             val active =
                 try {
                     recorder.start(

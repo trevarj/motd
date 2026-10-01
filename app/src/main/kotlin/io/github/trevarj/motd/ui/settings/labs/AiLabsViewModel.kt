@@ -22,6 +22,10 @@ import io.github.trevarj.motd.ai.assignedModelId
 import io.github.trevarj.motd.ai.isModelReadyFor
 import io.github.trevarj.motd.ai.requiredCapability
 import io.github.trevarj.motd.ai.transcriptionSettingsFor
+import io.github.trevarj.motd.audio.ReadAloudController
+import io.github.trevarj.motd.audio.ReadAloudSelection
+import io.github.trevarj.motd.audio.ReadAloudState
+import io.github.trevarj.motd.audio.ReadAloudVoices
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -88,11 +92,20 @@ internal class AiLabsCalls(
     val upsertCustomStyle: suspend (AiCustomStyle) -> Result<Unit>,
     val deleteCustomStyle: suspend (String) -> Result<Unit>,
     val setTranslationTarget: suspend (AiTranslationTarget) -> Result<Unit>,
+    val downloadKokoroAndUse: suspend () -> Result<AiModelRecord>,
+    val readAloudConfig: StateFlow<ReadAloudSelection>,
+    val readAloudState: StateFlow<ReadAloudState>,
+    val readAloudVoices: StateFlow<ReadAloudVoices>,
+    val openVoiceOptions: () -> Unit,
+    val saveVoiceOptions: (ReadAloudSelection) -> Unit,
+    val previewLocal: (ReadAloudSelection) -> Unit,
+    val stopPreview: () -> Unit,
 ) {
     @Inject
     constructor(
         repository: AiLabsRepository,
         cacheCleaner: AiDerivedCacheCleaner,
+        reader: ReadAloudController,
     ) : this(
         persistedState = repository.state,
         setFeatureEnabled = repository::setFeatureEnabled,
@@ -105,6 +118,14 @@ internal class AiLabsCalls(
         upsertCustomStyle = repository::upsertCustomStyle,
         deleteCustomStyle = repository::deleteCustomStyle,
         setTranslationTarget = repository::setTranslationTarget,
+        downloadKokoroAndUse = { repository.downloadKokoroAndUse() },
+        readAloudConfig = reader.config,
+        readAloudState = reader.state,
+        readAloudVoices = reader.voices,
+        openVoiceOptions = reader::openVoiceOptions,
+        saveVoiceOptions = reader::saveVoiceOptions,
+        previewLocal = reader::previewLocal,
+        stopPreview = reader::stopPreview,
     )
 }
 
@@ -117,6 +138,28 @@ class AiLabsViewModel
         private val status = MutableStateFlow<AiLabsStatus?>(null)
         private val clearingCaches = MutableStateFlow(false)
         private var setupJob: Job? = null
+
+        val readAloudConfig = calls.readAloudConfig
+        val readAloudState = calls.readAloudState
+        val readAloudVoices = calls.readAloudVoices
+
+        fun openVoiceOptions() = calls.openVoiceOptions()
+
+        fun saveVoiceOptions(value: ReadAloudSelection) = calls.saveVoiceOptions(value)
+
+        fun previewLocal(value: ReadAloudSelection) = calls.previewLocal(value)
+
+        fun stopPreview() = calls.stopPreview()
+
+        fun downloadKokoroAndUse() {
+            if (setupJob?.isActive == true) return
+            setupJob = mutate(R.string.ai_read_aloud_setup_complete) { calls.downloadKokoroAndUse().map {} }
+        }
+
+        override fun onCleared() {
+            calls.stopPreview()
+            super.onCleared()
+        }
 
         internal val state: StateFlow<AiLabsUiState> =
             combine(calls.persistedState, status, clearingCaches, ::deriveAiLabsUiState)
@@ -233,7 +276,7 @@ internal fun deriveAiLabsUiState(
             val ready = assigned?.let { persisted.isModelReadyFor(it, capability) } == true
             AiFeatureUiState(
                 feature = feature,
-                enabled = feature in persisted.enabledFeatures && ready,
+                enabled = feature in persisted.enabledFeatures && (feature == AiFeature.READ_ALOUD || ready),
                 ready = ready,
                 assignedModel = assigned,
                 settings = assignedSettings,

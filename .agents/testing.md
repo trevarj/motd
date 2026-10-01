@@ -9,9 +9,10 @@ exercises that branch. Do not automatically append an unfiltered suite, Android
 lint, APK assembly, or a full pre-push gate.
 
 Before handoff, run each changed module's existing `:app:ktlintCheck`,
-`:irc:ktlintCheck`, or `:ai-whisper:ktlintCheck` once through Nix. Root
-Gradle/style configuration changes still require root `ktlintCheck`. Use the
-corresponding `ktlintFormat` task to apply enforced style.
+`:irc:ktlintCheck`, `:ai-whisper:ktlintCheck`, `:ai-text:ktlintCheck`, or
+`:ai-tts:ktlintCheck` once through Nix. Root Gradle/style configuration changes
+still require root `ktlintCheck`. Use the corresponding `ktlintFormat` task to
+apply enforced style.
 
 ## Command matrix
 
@@ -27,6 +28,7 @@ corresponding `ktlintFormat` task to apply enforced style.
 | Instrumentation source or affected journey | `:app:compileE2eAndroidTestKotlin`; no routine local emulator/device run |
 | Ordinary app user journey | Nearest unit/integration method, then its class before handoff/push; assemble only when an APK is needed |
 | Cross-module or release-sensitive work | Nearest affected methods in each module while editing; their classes once before handoff/push |
+| Source-built speech runtime | `:ai-tts:testDebugUnitTest` with `KokoroOutputTest`; real host Kokoro smoke and Android artifact checks in `docs/fdroid.md` |
 
 Target one method while editing, then use the class filter once before
 handoff/push:

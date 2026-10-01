@@ -183,6 +183,9 @@ import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.CachedAudioMetadata
+import io.github.trevarj.motd.audio.ReadAloudSelection
+import io.github.trevarj.motd.audio.ReadAloudState
+import io.github.trevarj.motd.audio.ReadAloudVoices
 import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.avatar.ConversationAvatarOutcome
@@ -233,6 +236,8 @@ import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.HistorySyncModeSheet
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
+import io.github.trevarj.motd.ui.components.ReadAloudPlayer
+import io.github.trevarj.motd.ui.components.ReadAloudVoiceOptions
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.avatarsHidden
@@ -409,6 +414,9 @@ fun ChatScreen(
     val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
     val joinedChannels by viewModel.joinedChannels.collectAsStateWithLifecycle()
     val channelNotifications by viewModel.channelNotifications.collectAsStateWithLifecycle()
+    val readAloudState by viewModel.readAloudState.collectAsStateWithLifecycle()
+    val readAloudConfig by viewModel.readAloudConfig.collectAsStateWithLifecycle()
+    val readAloudVoices by viewModel.readAloudVoices.collectAsStateWithLifecycle()
     val voiceState by voiceViewModel.state.collectAsStateWithLifecycle()
     val aiTextState by aiTextViewModel.state.collectAsStateWithLifecycle()
     val aiLabsState by aiTextViewModel.labsState.collectAsStateWithLifecycle()
@@ -730,6 +738,18 @@ fun ChatScreen(
         diagnostics = viewModel.diagnostics,
         avatarEvents = viewModel.avatarEvents,
         onOpenNetworkSettings = onOpenNetworkSettings,
+        readAloudState = readAloudState.takeIf { it.roomId == state.buffer?.id } ?: ReadAloudState(),
+        readAloudConfig = readAloudConfig,
+        readAloudVoices = readAloudVoices,
+        onReadAloudToggle = viewModel::toggleReadAloud,
+        onReadAloudPrevious = viewModel::readAloudPrevious,
+        onReadAloudPauseResume = viewModel::readAloudPauseResume,
+        onReadAloudSkip = viewModel::readAloudSkip,
+        onReadAloudLatest = viewModel::readAloudLatest,
+        onReadAloudStop = viewModel::stopReadAloud,
+        onReadAloudOptions = viewModel::openReadAloudOptions,
+        onReadAloudSaveOptions = viewModel::saveReadAloudOptions,
+        onReadAloudPreview = viewModel::previewReadAloud,
     )
     AiTextSheet(
         state = aiTextState,
@@ -1121,6 +1141,18 @@ fun ChatContent(
     onStopWatch: () -> Unit = {},
     onOpenConversationList: (() -> Unit)? = null,
     onOpenNetworkSettings: (Long) -> Unit = {},
+    readAloudState: ReadAloudState = ReadAloudState(),
+    readAloudConfig: ReadAloudSelection = ReadAloudSelection(),
+    readAloudVoices: ReadAloudVoices = ReadAloudVoices(),
+    onReadAloudToggle: () -> Unit = {},
+    onReadAloudPrevious: () -> Unit = {},
+    onReadAloudPauseResume: () -> Unit = {},
+    onReadAloudSkip: () -> Unit = {},
+    onReadAloudLatest: () -> Unit = {},
+    onReadAloudStop: () -> Unit = {},
+    onReadAloudOptions: () -> Unit = {},
+    onReadAloudSaveOptions: (ReadAloudSelection) -> Unit = {},
+    onReadAloudPreview: (ReadAloudSelection) -> Unit = {},
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
     val buffer = state.buffer
@@ -1404,6 +1436,23 @@ fun ChatContent(
     var notificationSheetOpen by rememberSaveable { mutableStateOf(false) }
     var presenceModeSheetOpen by rememberSaveable { mutableStateOf(false) }
     var historySyncModeSheetOpen by rememberSaveable { mutableStateOf(false) }
+    var readAloudOptionsOpen by remember(state.buffer?.id) { mutableStateOf(false) }
+    if (readAloudOptionsOpen) {
+        ReadAloudVoiceOptions(
+            config = readAloudConfig,
+            voices = readAloudVoices,
+            onSave = onReadAloudSaveOptions,
+            onPreview = onReadAloudPreview,
+            onDismiss = {
+                readAloudOptionsOpen = false
+                if (!readAloudState.enabled) onReadAloudStop()
+            },
+            onStopPreview = onReadAloudStop,
+            onReloadVoices = onReadAloudOptions,
+            previewing = readAloudState.previewing,
+            error = readAloudState.error,
+        )
+    }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
     var highlightEventId by rememberSaveable { mutableStateOf<Long?>(null) }
     // Global fool expand/collapse toggle: when true every collapsed fool row in the
@@ -2696,7 +2745,7 @@ fun ChatContent(
                         ) {
                             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
                         }
-                        DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                        DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, modifier = Modifier.testTag("chat_overflow_menu")) {
                             if (buffer?.type == BufferType.CHANNEL && buffer.joined) {
                                 val inviteEnabled = state.connState is IrcClientState.Ready
                                 DropdownMenuItem(
@@ -2779,6 +2828,24 @@ fun ChatContent(
                                 },
                             )
                             if (buffer?.type == BufferType.CHANNEL || buffer?.type == BufferType.QUERY) {
+                                DropdownMenuItem(
+                                    modifier = Modifier.testTag("chat_read_aloud_toggle").semantics { selected = readAloudState.enabled },
+                                    text = { Text(stringResource(if (readAloudState.enabled) R.string.read_aloud_stop else R.string.read_aloud_start)) },
+                                    leadingIcon = { Icon(Icons.Outlined.Mic, null) },
+                                    onClick = {
+                                        overflowOpen = false
+                                        onReadAloudToggle()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    modifier = Modifier.testTag("chat_read_aloud_options"),
+                                    text = { Text(stringResource(R.string.read_aloud_options)) },
+                                    onClick = {
+                                        overflowOpen = false
+                                        onReadAloudOptions()
+                                        readAloudOptionsOpen = true
+                                    },
+                                )
                                 val historySync = state.conversationHistorySync
                                 DropdownMenuItem(
                                     modifier = Modifier.testTag("chat_history_sync_menu"),
@@ -3158,6 +3225,18 @@ fun ChatContent(
                             val stagedVoicePlaybackId = voiceState.staged?.let { "voice:${it.file.toURI()}" }
                             TimelineTopOverlays(
                                 audioPlayer = {
+                                    ReadAloudPlayer(
+                                        state = readAloudState,
+                                        onPrevious = onReadAloudPrevious,
+                                        onPauseResume = onReadAloudPauseResume,
+                                        onSkip = onReadAloudSkip,
+                                        onLatest = onReadAloudLatest,
+                                        onStop = onReadAloudStop,
+                                        onOptions = {
+                                            onReadAloudOptions()
+                                            readAloudOptionsOpen = true
+                                        },
+                                    )
                                     if (audioPlaybackState.activeId != stagedVoicePlaybackId) {
                                         AudioMiniPlayer(
                                             state = audioPlaybackState,

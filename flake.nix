@@ -66,7 +66,7 @@
         devShells.default = pkgs.mkShell {
           # imagemagick: test/e2e/showcase-composite.sh merges the light/dark
           # showcase captures into the tracked diagonal-split screenshots.
-          packages = [ pkgs.jdk21 pkgs.ninja pkgs.kotlin-language-server pkgs.nodejs_22 pkgs.imagemagick pkgs.actionlint pkgs.stdenv.cc pkgs.curl androidSdk ];
+          packages = [ pkgs.jdk21 pkgs.ninja pkgs.python3 pkgs.patch pkgs.clang pkgs.kotlin-language-server pkgs.nodejs_22 pkgs.imagemagick pkgs.actionlint pkgs.stdenv.cc pkgs.curl androidSdk ];
           JAVA_HOME = pkgs.jdk21.home;
           ANDROID_HOME = sdkRoot;
           ANDROID_SDK_ROOT = sdkRoot;
@@ -78,7 +78,7 @@
           GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2 -Dorg.gradle.workers.max=2";
         };
         devShells.native = pkgs.mkShell {
-          packages = [ pkgs.jdk21 pkgs.ninja pkgs.stdenv.cc pkgs.curl androidSdk ];
+          packages = [ pkgs.jdk21 pkgs.ninja pkgs.python3 pkgs.patch pkgs.clang pkgs.stdenv.cc pkgs.curl androidSdk ];
           JAVA_HOME = pkgs.jdk21.home;
           ANDROID_HOME = sdkRoot;
           ANDROID_SDK_ROOT = sdkRoot;

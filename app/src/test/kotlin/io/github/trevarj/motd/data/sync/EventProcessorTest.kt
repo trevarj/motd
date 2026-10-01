@@ -1811,6 +1811,98 @@ class EventProcessorTest {
         }
 
     @Test
+    fun readerAdmitsOnlyCommittedNewLivePeerChatNeverHistoryPushDuplicateOrSelf() =
+        runTest {
+            db.networkIgnoreDao().upsert(NetworkIgnoreEntity(networkId = networkId, pattern = "ignored!*@*", createdAt = 1))
+            val admitted = mutableListOf<MessageEntity>()
+            val reading =
+                EventProcessor(
+                    db,
+                    TypingTrackerImpl(),
+                    MessageNotifier.Noop,
+                    incomingMessageReader =
+                        object : IncomingMessageReader {
+                            override fun onIncoming(message: MessageEntity) {
+                                admitted += message
+                            }
+                        },
+                )
+            reading.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+
+            fun chat(
+                id: String,
+                text: String = id,
+                kind: IrcEvent.ChatKind = IrcEvent.ChatKind.PRIVMSG,
+            ) = IrcEvent.ChatMessage(ctx(id), kind, Prefix("trev"), "#chan", text, false, null)
+            val old = chat("old")
+            reading.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(old)))
+            reading.process(networkId, old)
+            val pushed = chat("push")
+            reading.processPush(networkId, pushed)
+            reading.process(networkId, pushed)
+            reading.process(networkId, IrcEvent.ReplayBatch("#chan", listOf(chat("replayed"))))
+            reading.process(networkId, chat("self").copy(source = Prefix("me"), isSelf = true))
+            reading.process(networkId, chat("notice", kind = IrcEvent.ChatKind.NOTICE))
+            val live = chat("live", "\u0002hello\u0002 how are you")
+            reading.process(networkId, live)
+            reading.process(networkId, live)
+            reading.process(networkId, live.copy(ctx = live.ctx.copy(account = "trev-account")))
+            reading.process(networkId, chat("action", "waves", IrcEvent.ChatKind.ACTION))
+            val dm = chat("dm", "hello").copy(target = "me")
+            reading.process(networkId, dm)
+            reading.process(networkId, chat("ignored").copy(source = Prefix("ignored")))
+
+            assertEquals(listOf("live", "action", "dm"), admitted.map { it.msgid })
+            assertEquals(listOf("hello how are you", "waves", "hello"), admitted.map { it.text })
+            assertEquals(listOf(MessageKind.PRIVMSG, MessageKind.ACTION, MessageKind.PRIVMSG), admitted.map { it.kind })
+            admitted.forEach { assertEquals(it.id, db.messageDao().byCanonicalId(it.id)?.id) }
+        }
+
+    @Test
+    fun readerFailureCannotInterruptCommittedMessageOrNotification() =
+        runTest {
+            var notified = 0
+            val reading =
+                EventProcessor(
+                    db,
+                    TypingTrackerImpl(),
+                    object : MessageNotifier {
+                        override suspend fun onIncoming(
+                            networkId: Long,
+                            bufferId: Long,
+                            type: BufferType,
+                            hasMention: Boolean,
+                            message: IrcEvent.ChatMessage,
+                        ) {
+                            notified++
+                        }
+                    },
+                    incomingMessageReader =
+                        object : IncomingMessageReader {
+                            override fun onIncoming(message: MessageEntity) {
+                                error("Installed engine unavailable")
+                            }
+                        },
+                )
+            reading.onRegistered(networkId, "me", emptyMap())
+            reading.process(
+                networkId,
+                IrcEvent.ChatMessage(
+                    ctx("reader-failure"),
+                    IrcEvent.ChatKind.PRIVMSG,
+                    Prefix("trev"),
+                    "#chan",
+                    "me: hello",
+                    false,
+                    null,
+                ),
+            )
+            val room = checkNotNull(db.bufferDao().byName(networkId, "#chan"))
+            assertEquals("me: hello", pagingList(room.id).single().text)
+            assertEquals(1, notified)
+        }
+
+    @Test
     fun chatSoundFailure_doesNotInterruptPersistenceOrNotification() =
         runTest {
             var notifications = 0

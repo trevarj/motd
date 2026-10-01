@@ -4,9 +4,11 @@ import io.github.trevarj.motd.service.AppVisibility
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -245,17 +247,182 @@ class AiExecutionCoordinatorTest {
             }
         }
 
+    @Test
+    fun blockingKokoroCancellationHoldsResidencyAndDeletionUntilWorkerWritesDrain() =
+        runTest {
+            Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { worker ->
+                for (background in listOf(false, true)) {
+                    val world = world(worker)
+                    val directory =
+                        java.nio.file.Files
+                            .createTempDirectory("kokoro-coordinator")
+                            .toFile()
+                    val output = File(directory, "speech.wav")
+                    world.kokoro.block = true
+                    val active =
+                        async {
+                            try {
+                                runCatching {
+                                    world.coordinator.synthesize(
+                                        "c".repeat(64),
+                                        directory,
+                                        "Hello",
+                                        io.github.trevarj.motd.audio
+                                            .ReadAloudConfig(),
+                                        output,
+                                    ) { true }
+                                }
+                            } finally {
+                                output.delete()
+                            }
+                        }
+                    var waiter: Job? = null
+                    var deletion: Job? = null
+                    try {
+                        runCurrent()
+                        world.kokoro.started.await()
+                        val queued =
+                            async {
+                                runCatching {
+                                    world.coordinator.synthesize(
+                                        "c".repeat(64),
+                                        directory,
+                                        "Never spoken",
+                                        io.github.trevarj.motd.audio
+                                            .ReadAloudConfig(),
+                                        File(directory, "waiter.wav"),
+                                    ) { true }
+                                }
+                            }
+                        waiter = queued
+                        runCurrent()
+                        val deleting =
+                            if (!background) {
+                                async {
+                                    world.coordinator.unloadForDeletion("c".repeat(64))
+                                    directory.deleteRecursively()
+                                }
+                            } else {
+                                null
+                            }
+                        deletion = deleting
+                        if (background) world.visibility.state.value = false
+                        runCurrent()
+                        world.kokoro.cancelled.await()
+                        assertFalse(active.isCompleted)
+                        assertFalse(deleting?.isCompleted == true)
+                        assertTrue(directory.exists())
+                        assertFalse(world.events.contains("kokoro.unload"))
+                        world.kokoro.finish.countDown()
+                        active.join()
+                        queued.join()
+                        deleting?.await()
+                        // runCurrent alone cannot wait for unloading on the real worker dispatcher.
+                        world.kokoro.unloaded.await()
+                        runCurrent()
+                        assertTrue(active.await().exceptionOrNull() is CancellationException)
+                        assertTrue(queued.await().exceptionOrNull() is CancellationException)
+                        assertFalse(output.exists())
+                        assertEquals(1, world.events.count { it == "kokoro.generate" })
+                        assertTrue(world.events.indexOf("kokoro.write.end") < world.events.indexOf("kokoro.unload"))
+                    } finally {
+                        world.kokoro.finish.countDown()
+                        withContext(NonCancellable) {
+                            active.cancelAndJoin()
+                            waiter?.cancelAndJoin()
+                            deletion?.cancelAndJoin()
+                        }
+                        directory.deleteRecursively()
+                    }
+                }
+            }
+        }
+
+    @Test
+    fun kokoroColdLoadsAreValidatedOnceAndSwitchThroughTheSameWhisperAndTextResidency() =
+        runTest {
+            val world = world()
+            val output =
+                java.nio.file.Files
+                    .createTempFile("speech", ".wav")
+                    .toFile()
+            try {
+                world.transcribe()
+                repeat(2) {
+                    world.coordinator.synthesize(
+                        "c".repeat(64),
+                        File("model-directory"),
+                        "Hello",
+                        io.github.trevarj.motd.audio
+                            .ReadAloudConfig(voice = "16"),
+                        output,
+                    ) { true }
+                }
+                assertEquals(1, world.events.count { it == "kokoro.validate" })
+                assertTrue(world.events.indexOf("speech.unload") < world.events.indexOf("kokoro.load"))
+                world.coordinator.transform(
+                    "d".repeat(64),
+                    File("text.gguf"),
+                    io.github.trevarj.motd.ai.text
+                        .TextTransformRequest(io.github.trevarj.motd.ai.text.TextOperation.CORRECT, "helo"),
+                ) { true }
+                assertTrue(world.events.indexOf("kokoro.unload") < world.events.indexOf("text.load"))
+                world.coordinator.synthesize(
+                    "c".repeat(64),
+                    File("model-directory"),
+                    "Again",
+                    io.github.trevarj.motd.audio
+                        .ReadAloudConfig(),
+                    output,
+                ) { true }
+                assertEquals(2, world.events.count { it == "kokoro.validate" })
+            } finally {
+                output.delete()
+            }
+        }
+
+    @Test
+    fun rejectedColdAssetValidationNeverLoadsOrGeneratesEvenWithReadyPersistedMetadata() =
+        runTest {
+            val world = world()
+            world.kokoro.validationFailure = AiLabsException(AiLabsFailureKind.CHECKSUM_MISMATCH)
+            val output =
+                java.nio.file.Files
+                    .createTempFile("speech-invalid", ".wav")
+                    .toFile()
+            try {
+                val failure =
+                    runCatching {
+                        world.coordinator.synthesize(
+                            "c".repeat(64),
+                            File("untrusted-model"),
+                            "Hello",
+                            io.github.trevarj.motd.audio
+                                .ReadAloudConfig(),
+                            output,
+                        ) { true }
+                    }.exceptionOrNull()
+                assertTrue(failure is AiLabsException)
+                assertFalse(world.events.contains("kokoro.load"))
+                assertFalse(world.events.contains("kokoro.generate"))
+                assertEquals(0L, output.length())
+            } finally {
+                output.delete()
+            }
+        }
+
     private fun TestScope.world(
         unloadDispatcher: CoroutineDispatcher = StandardTestDispatcher(testScheduler),
     ): World {
-        val events = mutableListOf<String>()
+        val events: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
         val speech = FakeSpeechRuntime(events)
         val text = FakeTextRuntime(events)
+        val kokoro = FakeKokoroRuntime(events)
         val visibility = FakeVisibility(true)
-        val coordinator = AiExecutionCoordinator(speech, text, visibility, unloadDispatcher, backgroundScope)
+        val coordinator = AiExecutionCoordinator(speech, text, kokoro, visibility, unloadDispatcher, backgroundScope)
         coordinator.start()
         runCurrent()
-        return World(coordinator, speech, text, visibility, events)
+        return World(coordinator, speech, text, visibility, events, kokoro)
     }
 
     private data class World(
@@ -264,6 +431,7 @@ class AiExecutionCoordinatorTest {
         val text: FakeTextRuntime,
         val visibility: FakeVisibility,
         val events: MutableList<String>,
+        val kokoro: FakeKokoroRuntime,
     ) {
         suspend fun transcribe(
             modelId: String = TRANSCRIPTION_ID,
@@ -315,6 +483,55 @@ class AiExecutionCoordinatorTest {
 
         override fun unload() {
             events += "text.unload"
+        }
+    }
+
+    private class FakeKokoroRuntime(
+        private val events: MutableList<String>,
+    ) : KokoroModelRuntime {
+        var block = false
+        var validationFailure: Throwable? = null
+        val started = CompletableDeferred<Unit>()
+        val cancelled = CompletableDeferred<Unit>()
+        val unloaded = CompletableDeferred<Unit>()
+        val finish = java.util.concurrent.CountDownLatch(1)
+        private val stopped =
+            java.util.concurrent.atomic
+                .AtomicBoolean(false)
+
+        override suspend fun validate(modelDirectory: File) {
+            events += "kokoro.validate"
+            validationFailure?.let { throw it }
+        }
+
+        override fun load(modelDirectory: File): AiModelMetadata {
+            events += "kokoro.load"
+            return AiModelMetadata("kokoro", "int8", sampleRateHz = 24_000, voiceCount = 54)
+        }
+
+        override fun generate(
+            text: String,
+            config: io.github.trevarj.motd.audio.ReadAloudConfig,
+            output: File,
+            isCancelled: () -> Boolean,
+        ) {
+            events += "kokoro.generate"
+            started.complete(Unit)
+            if (block) finish.await()
+            output.writeText(text)
+            events += "kokoro.write.end"
+            if (stopped.get() || isCancelled()) throw CancellationException("native callback stopped")
+        }
+
+        override fun cancel() {
+            stopped.set(true)
+            cancelled.complete(Unit)
+        }
+
+        override fun unload() {
+            events += "kokoro.unload"
+            stopped.set(false)
+            unloaded.complete(Unit)
         }
     }
 

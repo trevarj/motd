@@ -223,6 +223,26 @@ class AiLabsViewModelTest {
         upsertCustomStyle = { mutationResult },
         deleteCustomStyle = { mutationResult },
         setTranslationTarget = { mutationResult },
+        downloadKokoroAndUse = { Result.failure(IllegalStateException("unused")) },
+        readAloudConfig =
+            MutableStateFlow(
+                io.github.trevarj.motd.audio
+                    .ReadAloudSelection(),
+            ),
+        readAloudState =
+            MutableStateFlow(
+                io.github.trevarj.motd.audio
+                    .ReadAloudState(),
+            ),
+        readAloudVoices =
+            MutableStateFlow(
+                io.github.trevarj.motd.audio
+                    .ReadAloudVoices(),
+            ),
+        openVoiceOptions = {},
+        saveVoiceOptions = {},
+        previewLocal = {},
+        stopPreview = {},
     )
 
     private fun model(idCharacter: Char) =
