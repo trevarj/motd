@@ -94,8 +94,37 @@ for (const name of ["motd-symbol", "motd-app-icon", "motd-wordmark", "motd-locku
 for (const file of ["README.md", "site/build.sh", ...["index", "installation", "getting-started", "configuration", "guides"].map((name) => `site/${name}.html`)]) {
   assert.doesNotMatch(readFileSync(path.join(root, file), "utf8"), /motd-[\w-]+\.svg/, `${file} still references a brand SVG`);
 }
-// Lettering is composited verbatim, without a font substitution or image generation.
-const text = magick([path.join(brand, "motd-lettering-master.png"), "-filter", "Lanczos", "-resize", "1470x540!", "-crop", "780x540+690+0", "+repage", "-depth", "8", "rgba:-"]);
-const lockup = magick([path.join(brand, "motd-lockup-light.png"), "-crop", "780x540+690+0", "+repage", "-depth", "8", "rgba:-"]);
-assert.deepEqual(lockup, text, "Existing lettering pixels changed");
-console.log(`${checked} Android density assets verified; transparency, shading, safe zones, unchanged lettering, and raster references passed.`);
+// README marks retain the smooth master contour at the existing layout bounds.
+const markSize = Math.round(192 * .92 * 3);
+const markWidth = Math.round(164 * markSize / 192);
+const markHeight = Math.round(158 * markSize / 192);
+const markX = Math.round(23.7 * 3) + Math.round(16 * markSize / 192);
+const markY = 3 + Math.round(24 * markSize / 192);
+const markBounds = `${markWidth}x${markHeight}+${markX}+${markY}`;
+const expectedAlpha = magick([splashMaster, "-crop", splashBounds, "+repage", "-filter", "Lanczos", "-resize", `${markWidth}x${markHeight}!`, "-alpha", "extract", "-depth", "8", "gray:-"]);
+for (const [name, inverse] of [["light", false], ["dark", true]]) {
+  const file = path.join(brand, `motd-lockup-${name}.png`);
+  assert.equal(magick([file, "-format", "%wx%h", "info:"]).toString(), "1470x540", file);
+  const actualAlpha = magick([file, "-crop", markBounds, "+repage", "-alpha", "extract", "-depth", "8", "gray:-"]);
+  assert.ok(actualAlpha.equals(expectedAlpha), `${file}: smoothed README contour changed`);
+  const pixels = magick([file, "-crop", markBounds, "+repage", "-depth", "8", "rgba:-"]);
+  let min = 255;
+  let max = 0;
+  for (let i = 0; i < pixels.length; i += 4) {
+    if (pixels[i + 3] <= 127) continue;
+    min = Math.min(min, pixels[i]);
+    max = Math.max(max, pixels[i]);
+  }
+  assert.ok(max - min > 15, `${file}: ceramic shading was flattened`);
+  assert.ok(inverse ? min >= 128 : max < 128, `${file}: wrong light/dark contrast`);
+  // Lettering is composited verbatim, without a font substitution or generation.
+  // Compositing clears invisible RGB, so normalize fully transparent pixels.
+  const text = magick([path.join(brand, "motd-lettering-master.png"), ...(inverse ? ["-channel", "RGB", "-negate", "+channel"] : []), "-filter", "Lanczos", "-resize", "1470x540!", "-crop", "780x540+690+0", "+repage", "-depth", "8", "rgba:-"]);
+  const lockup = magick([file, "-crop", "780x540+690+0", "+repage", "-depth", "8", "rgba:-"]);
+  for (let i = 0; i < text.length; i += 4) {
+    if (text[i + 3] === 0) text.fill(0, i, i + 3);
+    if (lockup[i + 3] === 0) lockup.fill(0, i, i + 3);
+  }
+  assert.ok(lockup.equals(text), `${file}: existing lettering pixels changed`);
+}
+console.log(`${checked} Android density assets and 2 README lockups verified; transparency, smooth contours, contrast, shading, safe zones, unchanged lettering, and raster references passed.`);

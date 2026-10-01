@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 // Run with nix develop .#sprite-studies -c node tools/export-branding.mjs.
 // Add --splash-only to regenerate just the splash density assets.
+// Add --readme-only to regenerate just the light/dark README lockups.
 // Raster-only sources retain the approved ceramic finish and original lettering.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const brand = path.join(root, "docs/assets/brand");
@@ -88,12 +89,28 @@ const [visibleWidth, visibleHeight, visibleX, visibleY] = convert(["png:-", "-al
 // Keep the generated contour's soft alpha; the older symbol mask has rough edges.
 // Pad the optical bounds so trimming does not clip antialiasing at the extrema.
 const padding = Math.max(2, Math.round(Math.max(splashWidth, splashHeight) / 512));
-const splashCrop = png(["png:-", "-crop", `${visibleWidth + 2 * padding}x${visibleHeight + 2 * padding}+${visibleX - padding}+${visibleY - padding}`, "+repage"], shade([255, 255, 255], splashMaster));
-for (const [density, factor] of densities) {
-  save(path.join(res, `drawable-${density}`, "ic_splash_logo.png"), aligned(splashCrop, Math.round(200 * factor), .66));
+const splashBounds = `${visibleWidth + 2 * padding}x${visibleHeight + 2 * padding}+${visibleX - padding}+${visibleY - padding}`;
+const splashCrop = png(["png:-", "-crop", splashBounds, "+repage"], shade([255, 255, 255], splashMaster));
+const readmeOnly = process.argv.includes("--readme-only");
+if (!readmeOnly) {
+  for (const [density, factor] of densities) {
+    save(path.join(res, `drawable-${density}`, "ic_splash_logo.png"), aligned(splashCrop, Math.round(200 * factor), .66));
+  }
 }
 if (process.argv.includes("--splash-only")) {
   console.log(`Exported ${outputs.length} splash PNGs from the dedicated raster master.`);
+  process.exit(0);
+}
+
+const lettering = readFileSync(path.join(brand, "motd-lettering-master.png"));
+for (const [name, inverse] of [["light", false], ["dark", true]]) {
+  const text = inverse ? png(["png:-", "-channel", "RGB", "-negate", "+channel"], lettering) : lettering;
+  const ink = inverse ? splashCrop : png(["png:-", "-crop", splashBounds, "+repage"], shade([0, 0, 0], splashMaster));
+  const mark = layer(aligned(ink, Math.round(192 * .92 * 3)), 1470, 540, Math.round(23.7 * 3), 3);
+  save(path.join(brand, `motd-lockup-${name}.png`), over(mark, resize(text, 1470, 540)));
+}
+if (readmeOnly) {
+  console.log(`Exported ${outputs.length} README lockups from the smoothed raster master.`);
   process.exit(0);
 }
 
@@ -107,12 +124,6 @@ save(path.join(brand, "motd-favicon.png"), over(solid(64, 64, "white"), normaliz
 save(path.join(brand, "motd-app-icon.png"), over(solid(512, 512, "#006C70"), normalized(white, 512, .74)));
 save(path.join(root, "docs/assets/logo.png"), over(solid(1024, 1024, "#006C70"), normalized(white, 1024, .74)));
 
-const lettering = readFileSync(path.join(brand, "motd-lettering-master.png"));
-for (const [name, ink, inverse] of [["light", black, false], ["dark", white, true]]) {
-  const text = inverse ? png(["png:-", "-channel", "RGB", "-negate", "+channel"], lettering) : lettering;
-  const mark = layer(normalized(ink, Math.round(192 * .92 * 3)), 1470, 540, Math.round(23.7 * 3), 3);
-  save(path.join(brand, `motd-lockup-${name}.png`), over(mark, resize(text, 1470, 540)));
-}
 // Move the existing lettering as a single raster layer; never redraw the glyphs.
 const textCrop = png(["png:-", "-trim", "+repage"], lettering);
 const stackedMark = layer(normalized(black, Math.round(192 * .92 * 2)), 1070, 626, 356, 2);

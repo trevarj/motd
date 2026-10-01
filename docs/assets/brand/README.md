@@ -20,3 +20,26 @@ The final assets contain glyph outlines only; the font binary is not vendored.
 Use the pinned font and FontTools `pens.svgPathPen` when regenerating lettering,
 then preserve the current 2048-unit em advances (`m` 1774, `o` 1156, `t` 693,
 `d` 1153, `/` 760) and the 0.048828125 outline scale.
+
+## Raster exports
+
+The README uses `motd-lockup-light.png` and `motd-lockup-dark.png`. Their speech
+bubble comes from the smoothed `motd-splash-master.png`, retaining its soft alpha
+contours and ceramic shading rather than reapplying the older symbol mask.
+The original `motd-lettering-master.png` is composited unchanged for light mode
+and RGB-inverted for dark mode; both retain the 1470×540 horizontal layout.
+
+Regenerate only these two lockups (without rewriting Android or other assets):
+
+```sh
+nix develop .#sprite-studies -c node tools/export-branding.mjs --readme-only
+```
+
+Use `--splash-only` for the Android splash density assets, or omit the flag for
+all brand exports. Other marks continue to use `motd-ceramic-master.png` and
+`motd-symbol-mask.png`; the smoothing source is scoped to splash and README art.
+Verify dimensions, contours, transparency, shading, and preserved lettering with:
+
+```sh
+nix develop .#sprite-studies -c node tools/verify-branding.mjs
+```
