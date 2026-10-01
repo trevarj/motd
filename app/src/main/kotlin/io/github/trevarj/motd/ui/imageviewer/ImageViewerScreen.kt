@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
@@ -84,6 +85,8 @@ private const val IMAGE_DISPLAY_TIMEOUT_MS = 30_000L
 internal const val IMAGE_VIEWER_IMAGE_TAG = "image_viewer_image"
 internal const val IMAGE_VIEWER_SAVE_BUTTON_TAG = "image_viewer_save_button"
 internal const val IMAGE_VIEWER_SAVE_FEEDBACK_TAG = "image_viewer_save_feedback"
+internal const val IMAGE_VIEWER_COPY_BUTTON_TAG = "image_viewer_copy_button"
+internal const val IMAGE_VIEWER_COPY_FEEDBACK_TAG = "image_viewer_copy_feedback"
 internal val ImageViewerTransformKey =
     SemanticsPropertyKey<ImageViewerTransform>("ImageViewerTransform")
 private var SemanticsPropertyReceiver.imageViewerTransform by ImageViewerTransformKey
@@ -128,7 +131,7 @@ internal data class ImageViewerTransform(
 
 /**
  * Full-screen image viewer: black background, a Telephoto [ZoomableAsyncImage] for pinch/double-tap
- * zoom and bounded pan, share/save (MediaStore) actions, and a tap that toggles the chrome.
+ * zoom and bounded pan, share/copy/save actions, and a tap that toggles the chrome.
  *
  * Telephoto owns the gesture and transform math (focal-point anchored zoom, pan clamped to the
  * scaled bounds, rubber-band overzoom), so this screen only supplies the zoom spec and the
@@ -156,6 +159,7 @@ fun ImageViewerScreen(
         onBack = onBack,
         onShare = { shareImage(context, url) },
         onSave = { saveImage(context, url, mediaHttp?.callFactory(networkId)) },
+        onCopy = { copyImage(context, url, mediaHttp?.callFactory(networkId)) },
     )
 }
 
@@ -166,6 +170,7 @@ internal fun ImageViewerContent(
     onBack: () -> Unit,
     onShare: () -> Unit,
     onSave: suspend () -> ImageSaveFeedback,
+    onCopy: suspend () -> ImageSaveFeedback,
     state: ZoomableImageState =
         rememberZoomableImageState(
             rememberZoomableState(ZoomSpec(maxZoomFactor = MAX_IMAGE_SCALE)),
@@ -174,8 +179,9 @@ internal fun ImageViewerContent(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var chromeVisible by remember { mutableStateOf(true) }
-    var saveFeedback by remember { mutableStateOf<ImageSaveFeedback?>(null) }
-    var saveInProgress by remember { mutableStateOf(false) }
+    var feedback by remember { mutableStateOf<Int?>(null) }
+    var feedbackTag by remember { mutableStateOf(IMAGE_VIEWER_SAVE_FEEDBACK_TAG) }
+    var mediaInProgress by remember { mutableStateOf(false) }
     // Telephoto reports when an image is displayed but not why one failed, so the request listener
     // is the only signal for the error affordance. Both reset whenever the request changes.
     var loadFailed by remember(context, model) { mutableStateOf(false) }
@@ -265,23 +271,61 @@ internal fun ImageViewerContent(
                             tint = Color.White,
                         )
                     }
+                    IconButton(
+                        enabled = !mediaInProgress,
+                        onClick = {
+                            feedback = null
+                            feedbackTag = IMAGE_VIEWER_COPY_FEEDBACK_TAG
+                            mediaInProgress = true
+                            scope.launch {
+                                try {
+                                    val result = onCopy()
+                                    feedback =
+                                        when {
+                                            result == ImageSaveFeedback.FAILED -> R.string.image_viewer_copy_failed
+                                            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU -> R.string.image_viewer_copied
+                                            else -> null // Android 13+ already confirms clipboard changes.
+                                        }
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    feedback = R.string.image_viewer_copy_failed
+                                } finally {
+                                    mediaInProgress = false
+                                }
+                            }
+                        },
+                        modifier = Modifier.testTag(IMAGE_VIEWER_COPY_BUTTON_TAG),
+                    ) {
+                        Icon(
+                            Icons.Filled.ContentCopy,
+                            contentDescription = stringResource(R.string.image_viewer_copy),
+                            tint = Color.White,
+                        )
+                    }
                     // MediaStore RELATIVE_PATH is API 29+; pre-29 would need WRITE_EXTERNAL_STORAGE,
                     // so hide Save there rather than request a legacy permission.
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         IconButton(
-                            enabled = !saveInProgress,
+                            enabled = !mediaInProgress,
                             onClick = {
-                                saveFeedback = null
-                                saveInProgress = true
+                                feedback = null
+                                feedbackTag = IMAGE_VIEWER_SAVE_FEEDBACK_TAG
+                                mediaInProgress = true
                                 scope.launch {
                                     try {
-                                        saveFeedback = onSave()
+                                        feedback =
+                                            if (onSave() == ImageSaveFeedback.SAVED) {
+                                                R.string.image_viewer_saved
+                                            } else {
+                                                R.string.image_viewer_save_failed
+                                            }
                                     } catch (cancelled: CancellationException) {
                                         throw cancelled
                                     } catch (_: Exception) {
-                                        saveFeedback = ImageSaveFeedback.FAILED
+                                        feedback = R.string.image_viewer_save_failed
                                     } finally {
-                                        saveInProgress = false
+                                        mediaInProgress = false
                                     }
                                 }
                             },
@@ -301,10 +345,10 @@ internal fun ImageViewerContent(
 
         // The exit fade must not render an empty label after the state nulls out; hold the last
         // feedback for the outgoing frames, like the latched exits in ChatListScreen.
-        var lastFeedback by remember { mutableStateOf<ImageSaveFeedback?>(null) }
-        saveFeedback?.let { lastFeedback = it }
+        var lastFeedback by remember { mutableStateOf<Int?>(null) }
+        feedback?.let { lastFeedback = it }
         AnimatedVisibility(
-            visible = saveFeedback != null,
+            visible = feedback != null,
             enter = fadeIn(MotdMotion.fadeIn),
             exit = fadeOut(MotdMotion.microFadeOut),
             modifier =
@@ -312,16 +356,9 @@ internal fun ImageViewerContent(
                     .align(Alignment.BottomCenter)
                     .padding(24.dp),
         ) {
-            lastFeedback?.let { feedback ->
+            lastFeedback?.let { message ->
                 Text(
-                    text =
-                        stringResource(
-                            if (feedback == ImageSaveFeedback.SAVED) {
-                                R.string.image_viewer_saved
-                            } else {
-                                R.string.image_viewer_save_failed
-                            },
-                        ),
+                    text = stringResource(message),
                     color = Color.White,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier =
@@ -329,7 +366,7 @@ internal fun ImageViewerContent(
                             .background(Color.Black.copy(alpha = 0.72f), MaterialTheme.shapes.small)
                             .padding(horizontal = 16.dp, vertical = 10.dp)
                             .semantics { liveRegion = LiveRegionMode.Polite }
-                            .testTag(IMAGE_VIEWER_SAVE_FEEDBACK_TAG),
+                            .testTag(feedbackTag),
                 )
             }
         }
@@ -385,6 +422,21 @@ private suspend fun saveImage(
             ).save(url)
         }
     return result.feedback()
+}
+
+/** Copy exact original bytes through the owning network route, never a text URL or screenshot. */
+internal suspend fun copyImage(
+    context: Context,
+    url: String,
+    callFactory: Call.Factory?,
+): ImageSaveFeedback {
+    if (callFactory == null) return ImageSaveFeedback.FAILED
+    return withContext(Dispatchers.IO) {
+        ImageSaveOperation(
+            connectionFactory = OkHttpImageSaveConnectionFactory(callFactory),
+            store = ClipboardImageSaveStore(context),
+        ).save(url).feedback()
+    }
 }
 
 @Preview

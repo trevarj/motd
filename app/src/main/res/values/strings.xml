@@ -765,6 +765,7 @@
     <string name="upload_uploading">Uploading…</string>
     <string name="upload_progress_of">%1$s of %2$s</string>
     <string name="upload_failed">Upload failed</string>
+    <string name="upload_content_unavailable">Couldn\'t read the attachment. Paste or choose it again.</string>
     <string name="upload_retry">Retry</string>
     <string name="upload_delete_title">Delete upload?</string>
     <string name="upload_delete_body">This asks the server to permanently delete “%1$s”.</string>
@@ -842,6 +843,9 @@
     <string name="image_viewer_back">Back</string>
     <string name="image_viewer_share">Share</string>
     <string name="image_viewer_save">Save</string>
+    <string name="image_viewer_copy">Copy image</string>
+    <string name="image_viewer_copied">Image copied</string>
+    <string name="image_viewer_copy_failed">Couldn\'t copy image</string>
     <string name="image_viewer_share_chooser">Share image</string>
     <string name="image_viewer_saved">Saved to Pictures/motd</string>
     <string name="image_viewer_save_failed">Couldn\'t save image</string>

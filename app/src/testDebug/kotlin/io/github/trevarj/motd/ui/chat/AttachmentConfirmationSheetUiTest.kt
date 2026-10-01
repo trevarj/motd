@@ -1,8 +1,11 @@
 package io.github.trevarj.motd.ui.chat
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.LocalActivityResultRegistryOwner
@@ -19,20 +22,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.core.app.ActivityOptionsCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.R
@@ -51,6 +61,8 @@ import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
 import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
@@ -58,12 +70,14 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowContentResolver
 import java.io.File
 import java.io.IOException
 
@@ -77,6 +91,16 @@ class AttachmentConfirmationSheetUiTest {
     @get:Rule val compose = createComposeRule()
 
     private val context get() = ApplicationProvider.getApplicationContext<Context>()
+
+    @Before
+    fun attachClipboardProviderForThisSandbox() {
+        val authority = "${context.packageName}.camera"
+        val info = requireNotNull(context.packageManager.resolveContentProvider(authority, PackageManager.GET_META_DATA))
+        val provider = FileProvider()
+        provider.attachInfo(context, info)
+        ShadowContentResolver.registerProviderInternal(authority, provider)
+    }
+
     private var pickerRequestCode = 0
     private val pickerRegistry =
         object : ActivityResultRegistry() {
@@ -308,6 +332,37 @@ class AttachmentConfirmationSheetUiTest {
         file.delete()
     }
 
+    @Test
+    fun nativeImagePasteOpensConfirmationAndCancelPreservesDraftWithoutUploading() {
+        val file = context.cacheDir.resolve("image-clipboard/confirmation.png")
+        file.parentFile!!.mkdirs()
+        Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).also { bitmap ->
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
+        }
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.camera", file)
+        var uploads = 0
+        showConditionalAttachments(currentDraft = "keep this draft", pasteIntoComposer = true, onUploadAttempt = { uploads++ })
+        compose.onNodeWithTag("attachment_upload").assertDoesNotExist()
+        val field = compose.onNodeWithTag("chat_composer_field")
+        field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(5, 9, false) }
+        compose.runOnIdle {
+            context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                ClipData.newUri(context.contentResolver, "Image", uri),
+            )
+        }
+        field.performSemanticsAction(SemanticsActions.PasteText) { it() }
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("attachment_upload").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("attachment_thumbnail").assertIsDisplayed()
+        compose.onNodeWithTag("attachment_upload").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithText(context.getString(R.string.action_cancel)).performClick()
+        compose.onNodeWithTag("chat_composer_field").assertTextEquals("keep this draft")
+        assertEquals(TextRange(5, 9), compose.onNodeWithTag("chat_composer_field").fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange])
+        compose.runOnIdle { assertEquals(0, uploads) }
+        file.delete()
+    }
+
     private fun showConditionalAttachments(
         currentDraft: String = "",
         directFileTransferAvailable: Boolean = false,
@@ -317,6 +372,8 @@ class AttachmentConfirmationSheetUiTest {
         startWithCurrentDraft: Boolean = false,
         uploadFailure: (() -> Throwable)? = null,
         onOpenNetworkSettings: (Long) -> Unit = {},
+        pasteIntoComposer: Boolean = false,
+        onUploadAttempt: () -> Unit = {},
     ) {
         val viewModel =
             AttachmentViewModel(
@@ -339,8 +396,9 @@ class AttachmentConfirmationSheetUiTest {
                             source: AttachmentSource,
                             config: PasteBackendConfig,
                             context: AttachmentUploadContext,
-                        ): Flow<UploadProgress> =
-                            if (uploadFailure == null) {
+                        ): Flow<UploadProgress> {
+                            onUploadAttempt()
+                            return if (uploadFailure == null) {
                                 error("Source selection must not upload")
                             } else {
                                 flow {
@@ -349,6 +407,7 @@ class AttachmentConfirmationSheetUiTest {
                                     throw uploadFailure()
                                 }
                             }
+                        }
 
                         override suspend fun delete(record: UploadRecord): Unit = error("Source selection must not delete uploads")
                     },
@@ -363,7 +422,22 @@ class AttachmentConfirmationSheetUiTest {
             }
             CompositionLocalProvider(LocalActivityResultRegistryOwner provides registryOwner) {
                 MotdTheme {
-                    var open by remember { mutableStateOf(true) }
+                    var open by remember { mutableStateOf(!pasteIntoComposer) }
+                    var pastedFile by remember { mutableStateOf<PendingShare.File?>(null) }
+                    var draft by remember { mutableStateOf(TextFieldValue(currentDraft, TextRange(currentDraft.length))) }
+                    if (pasteIntoComposer) {
+                        Composer(
+                            value = draft,
+                            onValueChange = { draft = it },
+                            onSend = { error("Paste must not send") },
+                            enabled = true,
+                            onImageContent = { uri, mime ->
+                                pastedFile = PendingShare.File(uri, mime)
+                                open = true
+                                true
+                            },
+                        )
+                    }
                     var directFile by remember { mutableStateOf<Uri?>(null) }
                     if (open) {
                         Box(Modifier.testTag("attachment_owner")) {
@@ -374,6 +448,7 @@ class AttachmentConfirmationSheetUiTest {
                                 sojuFileHostAvailable = sojuFileHostAvailable(),
                                 startWithCurrentDraft = startWithCurrentDraft,
                                 preferSojuFileHost = preferSojuFileHost,
+                                sharedFile = pastedFile,
                                 directFileTransferAvailable = directFileTransferAvailable,
                                 onDismiss = { open = false },
                                 onInsertUrl = {},

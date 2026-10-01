@@ -1,11 +1,15 @@
 package io.github.trevarj.motd.ui.imageviewer
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ContentResolver
 import android.content.ContentValues
+import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import androidx.annotation.RequiresApi
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
@@ -13,6 +17,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Request
 import okhttp3.Response
+import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -40,7 +45,7 @@ internal fun interface ImageSaveConnectionFactory {
     fun open(url: String): ImageSaveConnection
 }
 
-/** A MediaStore transaction boundary. A location exists only after a pending row was inserted. */
+/** A destination transaction boundary. Only completed images may be published. */
 internal interface ImageSaveStore<Location : Any> {
     fun insert(metadata: ImageSaveMetadata): Location?
 
@@ -62,7 +67,7 @@ internal sealed interface ImageSaveResult {
     data object Failed : ImageSaveResult
 }
 
-/** The UI must not claim success until the MediaStore row has been published. */
+/** The UI must not claim success until the destination has been published. */
 internal enum class ImageSaveFeedback { SAVED, FAILED }
 
 internal fun ImageSaveResult.feedback(): ImageSaveFeedback =
@@ -72,8 +77,8 @@ internal fun ImageSaveResult.feedback(): ImageSaveFeedback =
     }
 
 /**
- * Streams an image response into a pending MediaStore row. Every failure after insert removes the
- * row, including cancellation, so gallery apps never observe an incomplete image.
+ * Streams an image response into an unpublished destination. Every failure after insert removes
+ * the destination, including cancellation, so consumers never observe an incomplete image.
  */
 internal class ImageSaveOperation<Location : Any>(
     private val connectionFactory: ImageSaveConnectionFactory,
@@ -270,5 +275,38 @@ internal class MediaStoreImageSaveStore(
 
     override fun delete(location: Uri) {
         resolver.delete(location, null, null)
+    }
+}
+
+/** Private cache destination; clipboard publication happens only after the bounded stream closes. */
+internal class ClipboardImageSaveStore(
+    private val context: Context,
+) : ImageSaveStore<File> {
+    private val directory = File(context.cacheDir, "image-clipboard")
+
+    override fun insert(metadata: ImageSaveMetadata): File {
+        check(directory.isDirectory || directory.mkdirs()) { "Cannot create image clipboard cache" }
+        return File.createTempFile("image-", ".${metadata.displayName.substringAfterLast('.')}", directory)
+    }
+
+    override fun openOutputStream(location: File): OutputStream = location.outputStream()
+
+    override fun publish(location: File): Boolean {
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.camera", location)
+        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+            ClipData.newUri(context.contentResolver, "Image", uri),
+        )
+        // Cache entries survive viewer dismissal; expire stale copies only after a new one succeeds.
+        val cutoff = System.currentTimeMillis() - 24L * 60L * 60L * 1_000L
+        runCatching {
+            directory.listFiles()?.forEach { file ->
+                if (file != location && file.lastModified() < cutoff) file.delete()
+            }
+        }
+        return true
+    }
+
+    override fun delete(location: File) {
+        location.delete()
     }
 }

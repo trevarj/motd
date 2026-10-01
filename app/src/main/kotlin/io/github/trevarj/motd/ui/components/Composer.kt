@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
+import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -14,6 +16,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -117,6 +121,7 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -389,6 +394,7 @@ fun Composer(
     showEmojiTool: Boolean = true,
     showFormattingTools: Boolean = true,
     onAttachment: (() -> Unit)? = null,
+    onImageContent: ((Uri, String) -> Boolean)? = null,
     onAi: (() -> Unit)? = null,
     onUploadDraft: (() -> Unit)? = onAttachment,
     voiceEnabled: Boolean = false,
@@ -423,6 +429,37 @@ fun Composer(
     var lastEmittedRaw by remember { mutableStateOf(value.text) }
     val latestValue by rememberUpdatedState(value)
     val latestOnValueChange by rememberUpdatedState(onValueChange)
+    val context = LocalContext.current
+    val latestOnImageContent by rememberUpdatedState(onImageContent)
+    val imageContentModifier =
+        if (onImageContent == null || !enabled) {
+            Modifier
+        } else {
+            Modifier.contentReceiver { content ->
+                // ponytail: the upload sheet accepts one file; leave additional items unconsumed.
+                var accepted = false
+                content.consume { item ->
+                    val uri = item.uri
+                    if (accepted || uri?.scheme != "content") {
+                        false
+                    } else {
+                        val mime =
+                            try {
+                                context.contentResolver.getType(uri)
+                            } catch (_: Exception) {
+                                Toast.makeText(context, R.string.upload_content_unavailable, Toast.LENGTH_SHORT).show()
+                                null
+                            }
+                        if (mime?.startsWith("image/") == true && latestOnImageContent?.invoke(uri, mime) == true) {
+                            accepted = true
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
+            }
+        }
 
     LaunchedEffect(value.text, value.selection) {
         if (value.text != lastEmittedRaw) {
@@ -857,7 +894,7 @@ fun Composer(
                                     placeholder = placeholder,
                                     onFocusChanged = { inputFocused = it },
                                     onFocused = { dismissEmojiPicker() },
-                                    modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                                    modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).then(imageContentModifier),
                                     onTextPositioned = onFieldTextPositioned,
                                     contentStartPadding = if (showToolsButton) 4.dp else 16.dp,
                                     ircFormattingEnabled = ircFormattingEnabled,

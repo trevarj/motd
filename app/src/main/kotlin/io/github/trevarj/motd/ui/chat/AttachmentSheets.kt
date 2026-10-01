@@ -116,6 +116,7 @@ import io.github.trevarj.motd.attachment.supports
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -191,7 +192,7 @@ fun AttachmentSheets(
     sojuFileHostAvailable: Boolean,
     preferSojuFileHost: Boolean = false,
     startWithCurrentDraft: Boolean = false,
-    // Inbound share hand-off: skip source selection and confirm this file directly.
+    // Shared/pasted image hand-off: skip source selection and confirm this file directly.
     sharedFile: PendingShare.File? = null,
     directFileTransferAvailable: Boolean = false,
     imageOnly: Boolean = false,
@@ -215,6 +216,7 @@ fun AttachmentSheets(
     var deleteTarget by remember { mutableStateOf<UploadRecord?>(null) }
     var backendPickerRequest by remember { mutableStateOf<AttachmentFlow.Confirm?>(null) }
     var cameraPermissionGranted by remember { mutableStateOf(context.hasCameraPermission()) }
+    var contentUnavailable by remember { mutableStateOf(false) }
     var photoAccessGranted by remember { mutableStateOf(context.hasPhotoAccess()) }
     val galleryPhotos by
         produceState(emptyList<GalleryPhoto>(), flow, photoAccessGranted) {
@@ -251,16 +253,25 @@ fun AttachmentSheets(
         flow =
             when {
                 sharedFile != null -> {
-                    // The sender's declared type wins; fall back to the provider's when it omitted one.
-                    val mime = sharedFile.mimeType ?: context.contentResolver.getType(sharedFile.uri)
-                    val meta = context.contentResolver.queryMeta(sharedFile.uri)
-                    val source =
-                        if (mime?.startsWith("image/") == true) {
-                            AttachmentSource.Photo(sharedFile.uri, meta.first, mime, meta.second)
-                        } else {
-                            AttachmentSource.Document(sharedFile.uri, meta.first, mime, meta.second)
-                        }
-                    AttachmentFlow.Confirm(source, false)
+                    try {
+                        val (mime, meta) =
+                            withContext(Dispatchers.IO) {
+                                (sharedFile.mimeType ?: context.contentResolver.getType(sharedFile.uri)) to
+                                    context.contentResolver.queryMeta(sharedFile.uri)
+                            }
+                        val source =
+                            if (mime?.startsWith("image/") == true) {
+                                AttachmentSource.Photo(sharedFile.uri, meta.first, mime, meta.second)
+                            } else {
+                                AttachmentSource.Document(sharedFile.uri, meta.first, mime, meta.second)
+                            }
+                        AttachmentFlow.Confirm(source, false)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        contentUnavailable = true
+                        AttachmentFlow.Idle
+                    }
                 }
 
                 startWithCurrentDraft && currentDraft.isNotBlank() -> {
@@ -536,6 +547,17 @@ fun AttachmentSheets(
                 } else {
                     null
                 },
+        )
+    }
+
+    if (contentUnavailable) {
+        AlertDialog(
+            onDismissRequest = ::closeSourceSheet,
+            title = { Text(stringResource(R.string.upload_failed)) },
+            text = { Text(stringResource(R.string.upload_content_unavailable)) },
+            confirmButton = {
+                TextButton(onClick = ::closeSourceSheet) { Text(stringResource(R.string.action_cancel)) }
+            },
         )
     }
 

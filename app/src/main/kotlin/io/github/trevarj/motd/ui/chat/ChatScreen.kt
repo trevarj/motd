@@ -1376,7 +1376,7 @@ fun ChatContent(
     }
     var attachmentSheetOpen by rememberSaveable { mutableStateOf(false) }
     var uploadCurrentDraftDirectly by rememberSaveable { mutableStateOf(false) }
-    // A file handed over by the share picker: open the upload confirmation sheet for it directly.
+    // A shared or pasted file opens the same upload confirmation without changing the draft.
     var sharedFile by remember(traceBufferId) { mutableStateOf<PendingShare.File?>(null) }
     LaunchedEffect(traceBufferId) {
         if (traceBufferId == null) return@LaunchedEffect
@@ -3369,6 +3369,16 @@ fun ChatContent(
                             onAttachment = {
                                 uploadCurrentDraftDirectly = false
                                 attachmentSheetOpen = true
+                            },
+                            onImageContent = { uri, mime ->
+                                if (attachmentSheetOpen) {
+                                    false
+                                } else {
+                                    sharedFile = PendingShare.File(uri, mime)
+                                    uploadCurrentDraftDirectly = false
+                                    attachmentSheetOpen = true
+                                    true
+                                }
                             },
                             onUploadDraft = {
                                 uploadCurrentDraftDirectly = true

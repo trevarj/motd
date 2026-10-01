@@ -1,5 +1,9 @@
 package io.github.trevarj.motd
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.pm.PackageManager
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
@@ -30,6 +34,8 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.core.content.FileProvider
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
@@ -39,12 +45,14 @@ import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowContentResolver
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -55,6 +63,16 @@ class ComposerUiTest {
 
     @get:Rule
     val compose: ComposeContentTestRule = createComposeRule()
+
+    @Before
+    fun attachClipboardProviderForThisSandbox() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val authority = "${context.packageName}.camera"
+        val info = requireNotNull(context.packageManager.resolveContentProvider(authority, PackageManager.GET_META_DATA))
+        // Real attachment refreshes FileProvider's static roots for Robolectric's per-test cache.
+        val provider = FileProvider().apply { attachInfo(context, info) }
+        ShadowContentResolver.registerProviderInternal(authority, provider)
+    }
 
     @Test
     fun emojiPicker_opensAlongsideTheComposerInput() {
@@ -334,6 +352,96 @@ class ComposerUiTest {
         compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
         compose.onNodeWithTag("chat_composer_format_expand").assertIsDisplayed()
         compose.onAllNodesWithTag("chat_composer_attachment").assertCountEquals(0)
+    }
+
+    @Test
+    fun nativeImagePastePreservesDraftAndSelectionWhileTextPasteReplacesSelection() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val image = context.cacheDir.resolve("image-clipboard/paste.png")
+        image.parentFile!!.mkdirs()
+        image.writeBytes(byteArrayOf(1, 2, 3))
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.camera", image)
+        val clipboard = context.getSystemService(ClipboardManager::class.java)
+        val original = TextFieldValue("before selected after", TextRange(7, 15))
+        val draft = mutableStateOf(original)
+        val received = mutableListOf<Pair<android.net.Uri, String>>()
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    onImageContent = { imageUri, mime ->
+                        received += imageUri to mime
+                        true
+                    },
+                )
+            }
+        }
+        val field = compose.onNodeWithTag("chat_composer_field")
+        field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(7, 15, false) }
+        compose.runOnIdle {
+            clipboard.setPrimaryClip(ClipData.newUri(context.contentResolver, "Image", uri))
+        }
+        field.performSemanticsAction(SemanticsActions.PasteText) { it() }
+        compose.runOnIdle {
+            assertEquals("Draft after image paste: ${draft.value}", listOf(uri to "image/png"), received)
+            assertEquals(original, draft.value)
+            clipboard.setPrimaryClip(ClipData.newPlainText("Text", "replacement"))
+        }
+        field.performSemanticsAction(SemanticsActions.PasteText) { it() }
+        compose.runOnIdle {
+            assertEquals(TextFieldValue("before replacement after", TextRange(18)), draft.value)
+            assertEquals(listOf(uri to "image/png"), received)
+        }
+        image.delete()
+    }
+
+    @Test
+    fun mixedClipboardChecksEachUriAndPastesRemainingText() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val directory = context.cacheDir.resolve("image-clipboard").also { it.mkdirs() }
+        val image = directory.resolve("mixed.gif").also { it.writeBytes(byteArrayOf(1)) }
+        val document = directory.resolve("mixed.txt").also { it.writeText("document text") }
+        val imageUri = FileProvider.getUriForFile(context, "${context.packageName}.camera", image)
+        val documentUri = FileProvider.getUriForFile(context, "${context.packageName}.camera", document)
+        val draft = mutableStateOf(TextFieldValue("draft", TextRange(5)))
+        val received = mutableListOf<android.net.Uri>()
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    onImageContent = { uri, _ ->
+                        received += uri
+                        true
+                    },
+                )
+            }
+        }
+        val field = compose.onNodeWithTag("chat_composer_field")
+        field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(5, 5, false) }
+        compose.runOnIdle {
+            context.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                ClipData("Mixed", arrayOf("image/gif", "text/plain"), ClipData.Item("document text", null, documentUri)).apply {
+                    addItem(ClipData.Item(imageUri))
+                    addItem(ClipData.Item(" plus text"))
+                },
+            )
+        }
+        field.performSemanticsAction(SemanticsActions.PasteText) { it() }
+        compose.runOnIdle {
+            assertEquals("Draft after mixed paste: ${draft.value}", listOf(imageUri), received)
+            assertTrue(draft.value.text.startsWith("draftdocument text"))
+            assertTrue(draft.value.text.endsWith(" plus text"))
+        }
+        image.delete()
+        document.delete()
     }
 
     @Test

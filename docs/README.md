@@ -30,6 +30,15 @@ exact `nix develop` commands for one activity.
 - [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) — third-party
   licensing and libbox source provenance.
 
+## Clipboard images
+
+Paste an image into the chat input (or insert one from your keyboard) to open
+the existing attachment preview and destination chooser. The draft and cursor
+stay unchanged; nothing uploads until you tap Upload. Ordinary text pastes normally.
+In the full-screen image viewer, Copy image copies the original image bytes as
+a readable image URI, not its URL. Copy uses the image's owning network route
+and the same 25 MiB streaming limit as Save; Share still shares the URL.
+
 ## Local composer text tools
 
 Labs → AI → Composer text tools is default-off. Set up the exact Qwen artifact
