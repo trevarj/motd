@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.components
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -15,8 +16,6 @@ import io.github.trevarj.motd.irc.format.IRC_HEX_COLOR
 import io.github.trevarj.motd.irc.format.IRC_REVERSE
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
-import io.github.trevarj.motd.ui.theme.MotdDarkScheme
-import io.github.trevarj.motd.ui.theme.MotdLightScheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.semanticColors
 import org.junit.Assert.assertEquals
@@ -199,41 +198,69 @@ class MessageBubbleTextTest {
     }
 
     @Test
-    fun irc_grey_fits_the_painted_notice_container_in_each_theme() {
-        val grey = Color(0xFFD2D2D2)
-        val light =
-            messageBubbleRoleColors(
-                MotdLightScheme,
-                isSelf = false,
-                mentionHighlighted = false,
-                MessageKind.NOTICE,
-                semanticColors(MotdLightScheme, false),
-            )
-        assertTrue(contrastRatio(grey, light.container) < 4.5)
-        for ((scheme, dark) in listOf(MotdLightScheme to false, MotdDarkScheme to true)) {
-            val role =
-                messageBubbleRoleColors(
-                    scheme,
-                    isSelf = false,
-                    mentionHighlighted = false,
-                    MessageKind.NOTICE,
-                    semanticColors(scheme, dark),
+    fun richMessageInks_fitEveryPaletteAndActualPaintedSurface() {
+        val raw =
+            "plain https://example.com @bob `code` \u000315grey\u000f \u000314,00paper\u000f " +
+                "$IRC_HEX_COLOR" + "FF0000,0000FF${IRC_REVERSE}reverse\u000f"
+        messageContrastSchemes().forEach { (name, scheme, dark) ->
+            val semantic = semanticColors(scheme, dark)
+            val surfaces =
+                listOf(
+                    "incoming" to messageBubbleRoleColors(scheme, false, false, MessageKind.PRIVMSG, semantic),
+                    "outgoing" to messageBubbleRoleColors(scheme, true, false, MessageKind.PRIVMSG, semantic),
+                    "mention" to messageBubbleRoleColors(scheme, false, true, MessageKind.PRIVMSG, semantic),
+                    "notice/action" to messageBubbleRoleColors(scheme, false, false, MessageKind.ACTION, semantic),
                 )
-            val body =
-                linkifiedBody(
-                    "\u000315received",
+            surfaces.forEach { (roleName, role) ->
+                val body =
+                    linkifiedBody(
+                        raw,
+                        scheme.primary,
+                        mentionColor = { if (it == "bob") scheme.secondary else null },
+                        codeBackground = scheme.surfaceVariant.copy(alpha = 0.72f),
+                        codeColor = scheme.onSurfaceVariant,
+                        containerColor = role.container,
+                        contentColor = role.content,
+                    )
+                assertRenderedInks("$name $roleName", body, role.content, role.container)
+                val previewFill = scheme.surfaceContainerHighest.copy(alpha = 0.6f).compositeOver(role.container)
+                val preview = mircFormattedText("\u000315grey\u000f \u000314,00paper", previewFill, role.content, MESSAGE_TEXT_CONTRAST)
+                assertRenderedInks("$name reply", preview, role.content, previewFill)
+            }
+
+            // These are the solid flattened row fills, not a wallpaper composition.
+            val rowFill = scheme.onSurfaceVariant.copy(alpha = 0.10f).compositeOver(scheme.background)
+            val compact =
+                buildCompactLine(
+                    "bob",
+                    raw,
+                    MessageKind.PRIVMSG,
+                    scheme.secondary,
+                    scheme.onSurface,
                     scheme.primary,
-                    mentionsActive = false,
-                    containerColor = role.container,
-                    contentColor = role.content,
+                    scheme.primary.copy(alpha = 0.12f),
+                    mentionColor = { if (it == "bob") scheme.secondary else null },
+                    codeBackground = scheme.surfaceVariant.copy(alpha = 0.72f),
+                    codeColor = scheme.onSurfaceVariant,
+                    containerColor = rowFill,
                 )
-            val color =
-                body.spanStyles
-                    .last { it.start == 0 && it.end == body.length && it.item.color != Color.Unspecified }
-                    .item.color
-            assertEquals("received", body.text)
-            assertTrue("$dark NOTICE: ${contrastRatio(color, role.container)}", contrastRatio(color, role.container) >= 4.5)
-            if (dark) assertEquals(grey, color) else assertTrue(color != grey)
+            assertRenderedInks("$name compact/two-line", compact, scheme.onSurface, rowFill)
+            val actionFill = semantic.warningContainer.copy(alpha = MENTION_ROW_TINT_ALPHA).compositeOver(scheme.background)
+            val action =
+                buildActionLine(
+                    "bob",
+                    raw,
+                    scheme.tertiary,
+                    scheme.secondary,
+                    scheme.onSurfaceVariant,
+                    scheme.primary,
+                    friendTint = scheme.primary.copy(alpha = 0.12f),
+                    mentionColor = { if (it == "bob") scheme.secondary else null },
+                    codeBackground = scheme.surfaceVariant,
+                    codeColor = scheme.onSurfaceVariant,
+                    containerColor = actionFill,
+                )
+            assertRenderedInks("$name action row", action, scheme.onSurfaceVariant, actionFill)
         }
     }
 
@@ -260,9 +287,9 @@ class MessageBubbleTextTest {
             body.spanStyles
                 .last { it.start <= insideIndex && it.end > insideIndex && it.item.color != Color.Unspecified }
                 .item.color
-        assertTrue(contrastRatio(outside, container) >= 4.5)
+        assertReadingContrast("IRC outside code", outside, container)
         assertEquals(grey, inside)
-        assertTrue(contrastRatio(inside, Color.Black) >= 4.5)
+        assertReadingContrast("IRC inside code", inside, Color.Black)
 
         val explicit =
             linkifiedBody(
@@ -276,33 +303,13 @@ class MessageBubbleTextTest {
         val safeIndex = explicit.text.indexOf("safe")
         val safeStyle = explicit.spanStyles.last { it.start <= safeIndex && it.end > safeIndex && it.item.color != Color.Unspecified }.item
         assertEquals(Color.White, dimStyle.background)
-        assertTrue(contrastRatio(dimStyle.color, Color.White) >= 4.5)
+        assertReadingContrast("explicit white background", dimStyle.color, Color.White)
         assertEquals(Color.Black, safeStyle.background)
         assertEquals(grey, safeStyle.color)
     }
 
     @Test
-    fun tinted_two_line_row_rechecks_irc_grey_after_theme_change() {
-        for (scheme in listOf(MotdLightScheme, MotdDarkScheme)) {
-            val paintedRow = scheme.onSurfaceVariant.copy(alpha = 0.10f).compositeOver(scheme.background)
-            val body =
-                linkifiedBody(
-                    "\u000315received",
-                    scheme.primary,
-                    mentionsActive = false,
-                    containerColor = paintedRow,
-                    contentColor = scheme.onSurface,
-                )
-            val color =
-                body.spanStyles
-                    .last { it.item.color != Color.Unspecified }
-                    .item.color
-            assertTrue(contrastRatio(color, paintedRow) >= 4.5)
-        }
-    }
-
-    @Test
-    fun reversed_background_keeps_safe_link_color_and_repairs_unsafe_mention() {
+    fun reversed_background_preserves_links_and_repairs_link_and_mention_ink() {
         val background = Color(0xFFD2D2D2)
         val body =
             linkifiedBody(
@@ -323,9 +330,9 @@ class MessageBubbleTextTest {
                 .last { it.start <= mentionIndex && it.end > mentionIndex && it.item.color != Color.Unspecified }
                 .item.color
         assertTrue(body.hasLinkAnnotations(urlIndex, urlIndex + 1))
-        assertEquals(Color.Blue, urlColor)
-        assertTrue(contrastRatio(mentionColor, background) >= 4.5)
-        assertTrue(mentionColor != Color.Red)
+        assertReadingContrast("reverse link", urlColor, background)
+        assertReadingContrast("reverse mention", mentionColor, background)
+        assertTrue(body.spanStyles.any { it.start <= urlIndex && it.end > urlIndex && it.item.background == background })
     }
 
     @Test
@@ -499,5 +506,24 @@ class MessageBubbleTextTest {
                     body.text.substring(it.start, it.end) == "hello"
             },
         )
+    }
+}
+
+private fun assertRenderedInks(
+    label: String,
+    body: AnnotatedString,
+    inheritedInk: Color,
+    container: Color,
+) {
+    for (word in listOf("bob", "plain", "https://", "@bob", "code", "grey", "paper", "reverse")) {
+        val offset = body.text.indexOf(word)
+        if (offset < 0) continue
+        var ink = inheritedInk
+        var fill = container
+        body.spanStyles.filter { offset in it.start until it.end }.forEach { span ->
+            if (span.item.color != Color.Unspecified) ink = span.item.color
+            if (span.item.background != Color.Unspecified) fill = span.item.background.compositeOver(container)
+        }
+        assertReadingContrast("$label $word", ink, fill)
     }
 }

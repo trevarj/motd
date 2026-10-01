@@ -12,6 +12,16 @@ surfaces where they appear. Component boundaries, outlines, and other non-text i
 3:1. Success, warning, and error use stable semantic color families instead of borrowing an accent
 whose meaning changes between palettes.
 
+Message text uses a stronger **7:1 reading target** against the actual painted bubble, row, reply,
+or inline-code fill. Links, nick mentions, and explicit IRC foreground colors are tone-adjusted
+with the same hue-preserving rule; explicit IRC backgrounds and reverse formatting stay intact.
+Some mid-luminance fills cannot reach 7:1 with any ink, so these retain their palette color and use
+the most readable black or white ink, with at least 4.5:1 contrast.
+
+Compact, two-line, and full-width ACTION rows paint their existing nick/attention tint composited
+onto the theme canvas as an **opaque text backdrop**. Wallpaper remains visible outside those rows;
+its selected intensity still controls artwork ink opacity directly, including 100%.
+
 Every dark palette can optionally use **True black backgrounds**. This keeps the selected palette's
 accents while replacing the canvas with black and using subtly palette-tinted near-black elevation
 layers. The setting is remembered while a light theme is active and takes effect again when the app

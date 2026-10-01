@@ -40,6 +40,7 @@ import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
+import io.github.trevarj.motd.ui.theme.ensureContrast
 
 /** Alpha for the per-nick row background wash in COMPACT density: strong enough to band messages
  *  by speaker, faint enough to stay readable in light and dark themes. */
@@ -97,7 +98,6 @@ internal fun CompactMessageRow(
     val spacing = LocalSpacing.current
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     // Self text stays on the default body color; others too (IRC is uniform). The nick carries color.
-    val bodyColor = MaterialTheme.colorScheme.onSurface
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
     val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -113,6 +113,8 @@ internal fun CompactMessageRow(
             nameColor.copy(alpha = COMPACT_ROW_TINT_ALPHA)
         }
     val paintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
+    val bodyInk = MaterialTheme.colorScheme.onSurface
+    val bodyColor = remember(bodyInk, paintedRow) { ensureContrast(bodyInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
 
     // The `nick: text` content is a single flowing AnnotatedString so it wraps as one paragraph
     // like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
@@ -129,6 +131,7 @@ internal fun CompactMessageRow(
             nameColor,
             bodyColor,
             linkColor,
+            friendTint,
             senderIsFriend,
             showSender,
             mentionColor,
@@ -161,7 +164,8 @@ internal fun CompactMessageRow(
                 .fillMaxWidth()
                 // Tint fills the full row width (behind the horizontal padding) so the speaker band is
                 // unbroken edge to edge.
-                .background(rowTint)
+                // Paint the flattened wash opaquely so wallpaper ink cannot intrude under text.
+                .background(paintedRow)
                 .messageRowClicks(
                     onClick = onClick,
                     onClickLabel = onClickLabel,
@@ -170,13 +174,14 @@ internal fun CompactMessageRow(
                 ).padding(horizontal = spacing.messageOuterHPad, vertical = spacing.compactRowVPad),
     ) {
         reply?.let {
-            ReplyMiniBubble(it, nickColors, onReplyClick, rowTint.compositeOver(MaterialTheme.colorScheme.background))
+            ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow)
         }
 
         Row(verticalAlignment = Alignment.Top) {
             Text(
                 text = line,
                 style = MaterialTheme.typography.bodyLarge,
+                color = bodyColor,
                 modifier =
                     Modifier
                         .weight(1f)
@@ -186,17 +191,14 @@ internal fun CompactMessageRow(
             )
             // Trailing timestamp keeps the IRC "right gutter" feel without a bubble.
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                val metadataInk = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                val metadataColor = remember(metadataInk, paintedRow) { ensureContrast(metadataInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
                 MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                 if (LocalTimestampConfig.current.show) {
                     Text(
                         text = formattedTime,
                         style = MaterialTheme.typography.labelSmall,
-                        color =
-                            if (failed) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                        color = metadataColor,
                     )
                 }
             }
@@ -216,7 +218,7 @@ internal fun CompactMessageRow(
                         .aspectRatio(4f / 3f)
                         .clip(RoundedCornerShape(8.dp)),
             )
-            MediaOriginCaption(url, modifier = Modifier.widthIn(max = 280.dp))
+            MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
         }
 
         if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
@@ -253,9 +255,11 @@ internal fun buildCompactLine(
     containerColor: Color = Color.Unspecified,
 ): AnnotatedString =
     buildAnnotatedString {
+        val nameBackground =
+            if (friendTint == Color.Unspecified || containerColor == Color.Unspecified) containerColor else friendTint.compositeOver(containerColor)
         val nickStyle =
             SpanStyle(
-                color = nameColor,
+                color = if (nameBackground == Color.Unspecified) nameColor else ensureContrast(nameColor, listOf(nameBackground), MESSAGE_TEXT_CONTRAST),
                 fontSize = nickFontSize,
                 fontWeight = FontWeight.Bold,
                 background = friendTint,

@@ -133,12 +133,13 @@ internal fun mircFormattedText(
     text: String,
     container: Color = Color.Unspecified,
     inheritedColor: Color = Color.Unspecified,
+    minimumContrast: Double = 4.5,
 ): AnnotatedString {
     val parsed = parseIrcFormatting(text)
     if (parsed.runs.all { it.state.isDefault }) return AnnotatedString(parsed.visibleText)
     return buildAnnotatedString {
         append(parsed.visibleText)
-        parsed.runs.forEach { run -> addStyle(run.state.toSpanStyle(container, inheritedColor), run.start, run.end) }
+        parsed.runs.forEach { run -> addStyle(run.state.toSpanStyle(container, inheritedColor, minimumContrast), run.start, run.end) }
     }
 }
 
@@ -154,6 +155,7 @@ internal fun parseMircFormatting(text: String): List<MircRun> {
 internal fun IrcFormatState.toSpanStyle(
     container: Color = Color.Unspecified,
     inheritedColor: Color = Color.Unspecified,
+    minimumContrast: Double = 4.5,
 ): SpanStyle {
     var foreground = if (reverse) background else foreground
     val effectiveBackground = if (reverse) this.foreground else background
@@ -165,7 +167,7 @@ internal fun IrcFormatState.toSpanStyle(
     val sourceColor = foregroundColor ?: if (effectiveBackground != null) inheritedColor else Color.Unspecified
     val color =
         if (sourceColor != Color.Unspecified && backgroundColor != Color.Unspecified) {
-            ensureContrast(sourceColor, listOf(backgroundColor))
+            ensureContrast(sourceColor, listOf(backgroundColor), minimumContrast)
         } else {
             sourceColor
         }

@@ -111,6 +111,9 @@ import java.text.DateFormat as JavaDateFormat
 private const val TWO_LINE_ROW_TINT_ALPHA = 0.10f
 internal const val MENTION_ROW_TINT_ALPHA = 0.55f
 private const val ACTION_ROW_TINT_ALPHA = 0.22f
+
+/** Sustained message reading targets 7:1; ensureContrast keeps the best ink on mid-tone fills. */
+internal const val MESSAGE_TEXT_CONTRAST = 7.0
 private val COMFORTABLE_BUBBLE_ELEVATION = 2.dp
 private val COMFORTABLE_CONTENT_ELEVATION = 1.dp
 
@@ -141,47 +144,40 @@ internal data class MessageBubbleRoleColors(
 /** How far an own bubble's container is pulled off `primaryContainer` toward the primary accent. */
 private const val SELF_BUBBLE_ACCENT_BLEND = 0.28f
 
-/**
- * Dynamic/accessible schemes flatten `primaryContainer` toward `surfaceContainerHigh`; blend back
- * toward the accent and re-fit the ink against the color actually painted.
- */
-private fun selfBubbleRoleColors(scheme: ColorScheme): MessageBubbleRoleColors {
-    val container = lerp(scheme.primaryContainer, scheme.primary, SELF_BUBBLE_ACCENT_BLEND)
-    return MessageBubbleRoleColors(container, ensureContrast(scheme.onPrimaryContainer, listOf(container)))
-}
-
+/** Fit every message role against its final painted fill, including the outgoing accent blend. */
 internal fun messageBubbleRoleColors(
     scheme: ColorScheme,
     isSelf: Boolean,
     mentionHighlighted: Boolean,
     kind: MessageKind,
     semantic: MotdSemanticColors,
-): MessageBubbleRoleColors =
-    when {
-        mentionHighlighted && !isSelf -> {
-            // The theme's notice/warning role, not a bespoke color: a mention is an attention cue,
-            // and warning already reads that way without success's positive connotation.
-            MessageBubbleRoleColors(
-                semantic.warningContainer,
-                semantic.onWarningContainer,
-            )
-        }
+): MessageBubbleRoleColors {
+    val content: Color
+    val container =
+        when {
+            mentionHighlighted && !isSelf -> {
+                // Warning is an attention cue without success's positive connotation.
+                content = semantic.onWarningContainer
+                semantic.warningContainer
+            }
 
-        isSelf -> {
-            selfBubbleRoleColors(scheme)
-        }
+            kind == MessageKind.ACTION || kind == MessageKind.NOTICE && !isSelf -> {
+                content = scheme.onTertiaryContainer
+                scheme.tertiaryContainer
+            }
 
-        kind == MessageKind.NOTICE -> {
-            MessageBubbleRoleColors(
-                scheme.tertiaryContainer,
-                scheme.onTertiaryContainer,
-            )
-        }
+            isSelf -> {
+                content = scheme.onPrimaryContainer
+                lerp(scheme.primaryContainer, scheme.primary, SELF_BUBBLE_ACCENT_BLEND)
+            }
 
-        else -> {
-            MessageBubbleRoleColors(scheme.surfaceContainerHigh, scheme.onSurface)
+            else -> {
+                content = scheme.onSurface
+                scheme.surfaceContainerHigh
+            }
         }
-    }
+    return MessageBubbleRoleColors(container, ensureContrast(content, listOf(container), MESSAGE_TEXT_CONTRAST))
+}
 
 /**
  * Measure against the containing chat pane, not the whole device window.
@@ -505,7 +501,8 @@ fun MessageBubble(
             isSelf,
             mentionHighlighted,
             kind,
-            semantic,
+            semantic.warningContainer,
+            semantic.onWarningContainer,
         ) { messageBubbleRoleColors(scheme, isSelf, mentionHighlighted, kind, semantic) }
     val bubbleColor = bubbleRoles.container
     val textColor = bubbleRoles.content
@@ -565,7 +562,16 @@ fun MessageBubble(
                     ).padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
         ) {
             if (showSender && !isSelf) {
-                val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
+                val nameInk = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
+                val nameBackground =
+                    if (senderIsFriend) {
+                        MaterialTheme.colorScheme.primary
+                            .copy(alpha = 0.12f)
+                            .compositeOver(bubbleColor)
+                    } else {
+                        bubbleColor
+                    }
+                val nameColor = remember(nameInk, nameBackground) { ensureContrast(nameInk, listOf(nameBackground), MESSAGE_TEXT_CONTRAST) }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = if (onSenderClick != null) Modifier.clickable(onClick = onSenderClick) else Modifier,
@@ -596,7 +602,7 @@ fun MessageBubble(
                 Text(
                     text = stringResource(R.string.chat_notice_label),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    color = textColor,
                     fontWeight = FontWeight.Medium,
                 )
             }
@@ -664,7 +670,7 @@ fun MessageBubble(
                 )
                 MediaOriginCaption(
                     url,
-                    color = if (isSelf || mentionHighlighted || kind == MessageKind.NOTICE) textColor else scheme.onSurfaceVariant,
+                    color = textColor,
                 )
             }
 
@@ -683,7 +689,8 @@ fun MessageBubble(
                 modifier = Modifier.align(Alignment.End).testTag("message_metadata"),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val metadataColor = if (failed) MaterialTheme.colorScheme.error else textColor
+                val metadataInk = if (failed) MaterialTheme.colorScheme.error else textColor
+                val metadataColor = remember(metadataInk, bubbleColor) { ensureContrast(metadataInk, listOf(bubbleColor), MESSAGE_TEXT_CONTRAST) }
                 if (isSelf && showSender) {
                     Text(
                         text = botDisplayName(displaySender, isBot),
@@ -764,19 +771,14 @@ private fun ComfortableActionBubble(
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val actionDescription = stringResource(R.string.chat_action_message)
     val actionLabel = remember(displaySender, text) { actionAccessibilityLabel(displaySender, text) }
+    val scheme = MaterialTheme.colorScheme
     val semanticColors = LocalMotdSemanticColors.current
-    val rowColor =
-        if (hasMention) {
-            semanticColors.warningContainer
-        } else {
-            MaterialTheme.colorScheme.tertiaryContainer
+    val roles =
+        remember(scheme.tertiaryContainer, scheme.onTertiaryContainer, semanticColors.warningContainer, semanticColors.onWarningContainer, isSelf, hasMention) {
+            messageBubbleRoleColors(scheme, isSelf, hasMention, MessageKind.ACTION, semanticColors)
         }
-    val bodyColor =
-        if (hasMention) {
-            semanticColors.onWarningContainer
-        } else {
-            MaterialTheme.colorScheme.onTertiaryContainer
-        }
+    val rowColor = roles.container
+    val bodyColor = roles.content
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
     val linkColor = bodyColor
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
@@ -914,7 +916,8 @@ private fun ComfortableActionBubble(
                             .align(Alignment.Bottom)
                             .padding(start = 8.dp, bottom = 1.dp),
                 ) {
-                    val metadataColor = if (failed) MaterialTheme.colorScheme.error else bodyColor
+                    val metadataInk = if (failed) MaterialTheme.colorScheme.error else bodyColor
+                    val metadataColor = remember(metadataInk, rowColor) { ensureContrast(metadataInk, listOf(rowColor), MESSAGE_TEXT_CONTRAST) }
                     MessageStatusIcon(
                         isSelf = isSelf,
                         pending = pending,
@@ -1020,7 +1023,8 @@ private fun ActionMessageRow(
             MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = ACTION_ROW_TINT_ALPHA)
         }
     val paintedRow = rowColor.compositeOver(MaterialTheme.colorScheme.background)
-    val bodyColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val bodyInk = MaterialTheme.colorScheme.onSurfaceVariant
+    val bodyColor = remember(bodyInk, paintedRow) { ensureContrast(bodyInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
@@ -1088,7 +1092,7 @@ private fun ActionMessageRow(
                     .semantics {
                         contentDescription = actionLabel
                         stateDescription = actionDescription
-                    }.background(rowColor)
+                    }.background(paintedRow)
                     .actionAccentRail(accent)
                     .messageRowClicks(
                         onClick = onClick,
@@ -1101,7 +1105,7 @@ private fun ActionMessageRow(
                     ),
         ) {
             reply?.let {
-                ReplyMiniBubble(it, nickColors, onReplyClick, rowColor.compositeOver(MaterialTheme.colorScheme.background))
+                ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow)
             }
 
             Row(verticalAlignment = Alignment.Bottom) {
@@ -1121,17 +1125,14 @@ private fun ActionMessageRow(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
                 ) {
+                    val metadataInk = if (failed) MaterialTheme.colorScheme.error else bodyInk
+                    val metadataColor = remember(metadataInk, paintedRow) { ensureContrast(metadataInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
                     MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                     if (LocalTimestampConfig.current.show) {
                         Text(
                             text = formattedTime,
                             style = MaterialTheme.typography.labelSmall,
-                            color =
-                                if (failed) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                            color = metadataColor,
                         )
                     }
                 }
@@ -1151,7 +1152,7 @@ private fun ActionMessageRow(
                             .aspectRatio(4f / 3f)
                             .clip(RoundedCornerShape(10.dp)),
                 )
-                MediaOriginCaption(url, modifier = Modifier.widthIn(max = 280.dp))
+                MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
             }
 
             if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
@@ -1237,11 +1238,15 @@ internal fun buildActionLine(
 ): AnnotatedString =
     buildAnnotatedString {
         if (includeStar) {
-            withStyle(SpanStyle(color = accentColor, fontStyle = FontStyle.Normal)) { append("* ") }
+            val starColor =
+                if (containerColor == Color.Unspecified) accentColor else ensureContrast(accentColor, listOf(containerColor), MESSAGE_TEXT_CONTRAST)
+            withStyle(SpanStyle(color = starColor, fontStyle = FontStyle.Normal)) { append("* ") }
         }
+        val nameBackground =
+            if (friendTint == Color.Unspecified || containerColor == Color.Unspecified) containerColor else friendTint.compositeOver(containerColor)
         val senderStyle =
             SpanStyle(
-                color = nameColor,
+                color = if (nameBackground == Color.Unspecified) nameColor else ensureContrast(nameColor, listOf(nameBackground), MESSAGE_TEXT_CONTRAST),
                 fontWeight = FontWeight.Bold,
                 fontStyle = FontStyle.Normal,
                 background = friendTint,
@@ -1336,8 +1341,7 @@ private fun TwoLineMessageRow(
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val hideAvatar = avatarsHidden()
-    val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
-    val bodyColor = MaterialTheme.colorScheme.onSurface
+    val nameInk = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
     val codeColor = MaterialTheme.colorScheme.onSurfaceVariant
     // Per-nick row wash (same treatment as COMPACT): a faint tint of the sender's own nick color
@@ -1346,9 +1350,20 @@ private fun TwoLineMessageRow(
         if (hasMention) {
             LocalMotdSemanticColors.current.warningContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
         } else {
-            nameColor.copy(alpha = TWO_LINE_ROW_TINT_ALPHA)
+            nameInk.copy(alpha = TWO_LINE_ROW_TINT_ALPHA)
         }
     val paintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
+    val bodyInk = MaterialTheme.colorScheme.onSurface
+    val bodyColor = remember(bodyInk, paintedRow) { ensureContrast(bodyInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
+    val nameBackground =
+        if (senderIsFriend) {
+            MaterialTheme.colorScheme.primary
+                .copy(alpha = 0.12f)
+                .compositeOver(paintedRow)
+        } else {
+            paintedRow
+        }
+    val nameColor = remember(nameInk, nameBackground) { ensureContrast(nameInk, listOf(nameBackground), MESSAGE_TEXT_CONTRAST) }
 
     Column(
         modifier =
@@ -1356,7 +1371,8 @@ private fun TwoLineMessageRow(
                 .fillMaxWidth()
                 // Tint fills the full row width (behind the horizontal padding) so the speaker band is
                 // unbroken edge to edge, matching COMPACT.
-                .background(rowTint)
+                // Flatten the wash onto the canvas so wallpaper never becomes the text backdrop.
+                .background(paintedRow)
                 .messageRowClicks(
                     onClick = onClick,
                     onClickLabel = onClickLabel,
@@ -1404,17 +1420,14 @@ private fun TwoLineMessageRow(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(start = 6.dp),
                 ) {
+                    val metadataInk = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                    val metadataColor = remember(metadataInk, paintedRow) { ensureContrast(metadataInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
                     MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
                     if (LocalTimestampConfig.current.show) {
                         Text(
                             text = formattedTime,
                             style = MaterialTheme.typography.labelSmall,
-                            color =
-                                if (failed) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                            color = metadataColor,
                         )
                     }
                 }
@@ -1434,14 +1447,14 @@ private fun TwoLineMessageRow(
                     ).testTag("message_two_line_body"),
         ) {
             reply?.let {
-                ReplyMiniBubble(it, nickColors, onReplyClick, rowTint.compositeOver(MaterialTheme.colorScheme.background))
+                ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow)
             }
 
             if (kind == MessageKind.NOTICE) {
                 Text(
                     text = stringResource(R.string.chat_notice_label),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.tertiary,
+                    color = bodyColor,
                     fontWeight = FontWeight.Medium,
                 )
             }
@@ -1496,7 +1509,7 @@ private fun TwoLineMessageRow(
                             .aspectRatio(4f / 3f)
                             .clip(RoundedCornerShape(10.dp)),
                 )
-                MediaOriginCaption(url, modifier = Modifier.widthIn(max = 280.dp))
+                MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
             }
 
             if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
@@ -1852,18 +1865,33 @@ internal fun AnnotatedString.Builder.appendRichText(
     val segments = parseInlineCode(formatted.visibleText)
     val renderedOffsets = inlineCodeRenderedOffsets(formatted.visibleText, segments)
     val bodyStart = length
+
+    fun readingStyle(style: SpanStyle): SpanStyle {
+        if (containerColor == Color.Unspecified || style.color == Color.Unspecified) return style
+        val background =
+            if (style.background == Color.Unspecified) containerColor else style.background.compositeOver(containerColor)
+        return style.copy(color = ensureContrast(style.color, listOf(background), MESSAGE_TEXT_CONTRAST))
+    }
+    val readingPlain = readingStyle(plainStyle)
+    val readingLink = readingStyle(linkStyle)
+    val readingCode = readingStyle(codeStyle)
+    val readingMention: (String) -> Color? = { nick ->
+        mentionColor(nick)?.let { ink ->
+            if (containerColor == Color.Unspecified) ink else ensureContrast(ink, listOf(containerColor), MESSAGE_TEXT_CONTRAST)
+        }
+    }
     for (segment in segments) {
         when (segment) {
             is InlineTextSegment.Code -> {
-                withStyle(codeStyle) { append(segment.text) }
+                withStyle(readingCode) { append(segment.text) }
             }
 
             is InlineTextSegment.Plain -> {
                 appendPlainLinksAndMentions(
                     segment.text,
-                    plainStyle,
-                    linkStyle,
-                    mentionColor,
+                    readingPlain,
+                    readingLink,
+                    readingMention,
                 )
             }
         }
@@ -1881,7 +1909,7 @@ internal fun AnnotatedString.Builder.appendRichText(
         val end = bodyStart + renderedOffsets[run.end]
         if (start >= end || run.state.isDefault) return@forEach
         if (overlays.isEmpty() || run.state.foreground == null && run.state.background == null) {
-            addStyle(run.state.toSpanStyle(containerColor, contentColor), start, end)
+            addStyle(run.state.toSpanStyle(containerColor, contentColor, MESSAGE_TEXT_CONTRAST), start, end)
         } else {
             val boundaries = mutableSetOf(start, end)
             overlays.forEach { overlay ->
@@ -1904,7 +1932,7 @@ internal fun AnnotatedString.Builder.appendRichText(
                         }
                     }
                 }
-                addStyle(run.state.toSpanStyle(background, ink), from, to)
+                addStyle(run.state.toSpanStyle(background, ink, MESSAGE_TEXT_CONTRAST), from, to)
             }
         }
     }
@@ -2061,12 +2089,20 @@ internal fun ReplyMiniBubble(
     onClick: (() -> Unit)? = null,
     parentColor: Color = MaterialTheme.colorScheme.background,
 ) {
-    val accent = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val openLabel = stringResource(R.string.chat_reply_open)
     val previewColor =
         MaterialTheme.colorScheme.surfaceContainerHighest
             .copy(alpha = 0.6f)
             .compositeOver(parentColor)
+    val bodyInk = MaterialTheme.colorScheme.onSurfaceVariant
+    val bodyColor = remember(bodyInk, previewColor) { ensureContrast(bodyInk, listOf(previewColor), MESSAGE_TEXT_CONTRAST) }
+    val nameInk = nickColors.nick(reply.sender, bodyInk)
+    val accent = remember(nameInk, previewColor) { ensureContrast(nameInk, listOf(previewColor), MESSAGE_TEXT_CONTRAST) }
+    val formattedText = reply.ircFormattedText ?: reply.text
+    val previewText =
+        remember(formattedText, previewColor, bodyColor) {
+            mircFormattedText(formattedText, previewColor, bodyColor, MESSAGE_TEXT_CONTRAST)
+        }
     Row(
         modifier =
             Modifier
@@ -2099,14 +2135,9 @@ internal fun ReplyMiniBubble(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text =
-                    mircFormattedText(
-                        reply.ircFormattedText ?: reply.text,
-                        previewColor,
-                        MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
+                text = previewText,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = bodyColor,
                 maxLines = 2,
             )
         }
