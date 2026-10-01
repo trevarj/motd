@@ -9,11 +9,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -29,6 +31,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
@@ -166,6 +169,87 @@ class MessageBubbleFooterUiTest {
         val body = compose.onNodeWithText(BODY, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertTrue("two-line sender must remain in its header", nick.bottom <= body.top)
         compose.onNodeWithTag("self_sender_label", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun twoLineLongSenderLeavesMetadataVisibleAtLargeFontScales() {
+        val fontScale = mutableStateOf(1.5f)
+        val self = mutableStateOf(false)
+        val friend = mutableStateOf(false)
+        val showTime = mutableStateOf(true)
+        val showSender = mutableStateOf(true)
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale.value)) {
+                Sample(
+                    sender = LONG_NICK,
+                    width = 320.dp,
+                    density = LayoutDensity.TWO_LINE,
+                    avatarStyle = AvatarStyle.MONOGRAM,
+                    isSelf = self.value,
+                    senderIsFriend = friend.value,
+                    showTime = showTime.value,
+                    showSender = showSender.value,
+                )
+            }
+        }
+
+        for (scale in listOf(1.5f, 2f)) {
+            for (own in listOf(false, true)) {
+                for (isFriend in listOf(false, true)) {
+                    compose.runOnIdle {
+                        fontScale.value = scale
+                        self.value = own
+                        friend.value = isFriend
+                        showTime.value = true
+                        showSender.value = true
+                    }
+                    val nick = compose.onNodeWithText(LONG_NICK, useUnmergedTree = true).assertIsDisplayed()
+                    val time = compose.onNodeWithText(TIME, useUnmergedTree = true).assertIsDisplayed()
+                    val nickBounds = nick.fetchSemanticsNode().boundsInRoot
+                    val timeBounds = time.fetchSemanticsNode().boundsInRoot
+                    val pane = compose.onNodeWithTag("sample").fetchSemanticsNode().boundsInRoot
+                    val body = compose.onNodeWithText(BODY, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                    val nickLayout = nick.textLayout()
+                    val timeLayout = time.textLayout()
+                    assertEquals(1, nickLayout.lineCount)
+                    assertTrue("long sender must ellipsize at fontScale=$scale", nickLayout.isLineEllipsized(0))
+                    assertTrue("sender must remain above the body", nickBounds.bottom <= body.top)
+                    if (!isFriend) assertEquals("sender and body must align after the avatar gap", body.left, nickBounds.left, 1f)
+                    assertEquals(1, timeLayout.lineCount)
+                    assertFalse("timestamp must not ellipsize", timeLayout.isLineEllipsized(0))
+                    assertEquals(TIME.length, timeLayout.getLineEnd(0, visibleEnd = true))
+                    TIME.indices.forEach { offset ->
+                        val glyph = timeLayout.getBoundingBox(offset)
+                        assertTrue(
+                            "timestamp character $offset must be wholly visible at fontScale=$scale: $glyph in $timeBounds",
+                            glyph.left >= 0 && glyph.top >= 0 && glyph.right <= timeBounds.width && glyph.bottom <= timeBounds.height,
+                        )
+                    }
+                    assertEquals(timeLayout.size.width.toFloat(), timeBounds.width, 1f)
+                    assertTrue("timestamp must stay within the pane", timeBounds.right <= pane.right)
+                    assertTrue("sender must leave room for metadata", nickBounds.right < timeBounds.left)
+                    if (own) {
+                        val status = sent().assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                        assertTrue("status must retain positive bounds", status.width > 0 && status.height > 0)
+                        assertTrue("sender must leave room for status", nickBounds.right <= status.left)
+                        assertTrue("status must precede time", status.right <= timeBounds.left)
+                        assertTrue("status must share the header band", status.top < nickBounds.bottom && nickBounds.top < status.bottom)
+                        assertTrue("status must remain inside pane", status.left >= pane.left && status.right <= pane.right)
+                    } else {
+                        sent().assertDoesNotExist()
+                    }
+
+                    compose.runOnIdle { showTime.value = false }
+                    compose.onNodeWithText(TIME, useUnmergedTree = true).assertDoesNotExist()
+                    nick.assertIsDisplayed()
+                    if (own) sent().assertIsDisplayed()
+                    compose.runOnIdle { showSender.value = false }
+                    nick.assertDoesNotExist()
+                    sent().assertDoesNotExist()
+                    compose.onNodeWithText(BODY, useUnmergedTree = true).assertIsDisplayed()
+                }
+            }
+        }
     }
 
     @Test
@@ -382,11 +466,14 @@ class MessageBubbleFooterUiTest {
         shadows: Boolean = true,
         reactions: List<ReactionChip> = emptyList(),
         onSenderClick: (() -> Unit)? = null,
+        senderIsFriend: Boolean = false,
+        avatarStyle: AvatarStyle = AvatarStyle.IRC_SPRITE,
     ) {
         MotdTheme(
             dynamicColor = false,
             themePreset = ColorThemePreset.LIGHT,
             layoutDensity = density,
+            avatarStyle = avatarStyle,
             chatShadowsEnabled = shadows,
             timestampConfig = TimestampConfig(show = showTime),
         ) {
@@ -401,6 +488,7 @@ class MessageBubbleFooterUiTest {
                     showSender = showSender,
                     reactions = reactions,
                     onSenderClick = onSenderClick,
+                    senderIsFriend = senderIsFriend,
                 )
             }
         }

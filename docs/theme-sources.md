@@ -22,6 +22,9 @@ Compact, two-line, and full-width ACTION rows paint their existing nick/attentio
 onto the theme canvas as an **opaque text backdrop**. Wallpaper remains visible outside those rows;
 its selected intensity still controls artwork ink opacity directly, including 100%.
 
+Two-line headers keep sender names on one ellipsized line, reserving room for the avatar, friend
+indicator, delivery status, and timestamp even in narrow panes with large system fonts.
+
 Every dark palette can optionally use **True black backgrounds**. This keeps the selected palette's
 accents while replacing the canvas with black and using subtly palette-tinted near-black elevation
 layers. The setting is remembered while a light theme is active and takes effect again when the app

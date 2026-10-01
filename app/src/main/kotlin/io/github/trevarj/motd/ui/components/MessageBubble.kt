@@ -1404,8 +1404,11 @@ private fun TwoLineMessageRow(
                     color = nameColor,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier =
                         (if (senderIsFriend) Modifier.friendNickTint() else Modifier)
+                            .weight(1f, fill = false)
                             .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it },
                 )
                 if (senderIsFriend) {
