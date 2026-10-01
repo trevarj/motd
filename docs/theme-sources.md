@@ -25,6 +25,9 @@ its selected intensity still controls artwork ink opacity directly, including 10
 Two-line headers keep sender names on one ellipsized line, reserving room for the avatar, friend
 indicator, delivery status, and timestamp even in narrow panes with large system fonts.
 
+Decorative monogram letters stay proportional to their fixed avatar discs, including the 20dp
+two-line avatar, at enlarged system font sizes. Message and sender text still follow font scaling.
+
 Every dark palette can optionally use **True black backgrounds**. This keeps the selected palette's
 accents while replacing the canvas with black and using subtly palette-tinted near-black elevation
 layers. The setting is remembered while a light theme is active and takes effect again when the app

@@ -11,9 +11,12 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
@@ -21,6 +24,9 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import coil.Coil
@@ -49,6 +55,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.PinningTrustManager
 import io.github.trevarj.motd.ui.chatlist.DrawerRow
 import io.github.trevarj.motd.ui.chatlist.ServerDrawerContent
+import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -56,6 +63,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -72,6 +80,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
+import kotlin.math.abs
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -84,6 +93,84 @@ class AvatarRoutingTest {
 
     @get:Rule
     val temporaryFolder = TemporaryFolder()
+
+    @Test
+    fun monogramGlyphRemainsPaintedAndCenteredAtLargeFontScales() {
+        val size = mutableStateOf(20.dp)
+        val fontScale = mutableStateOf(1f)
+        compose.setContent {
+            MaterialTheme(colorScheme = lightColorScheme(surfaceContainerHigh = Color.White, onSurface = Color.Black)) {
+                CompositionLocalProvider(
+                    LocalDensity provides Density(LocalDensity.current.density, fontScale.value),
+                    LocalAvatarStyle provides AvatarStyle.MONOGRAM,
+                ) {
+                    Box(Modifier.background(Color.White)) {
+                        Avatar("trev", size = size.value, modifier = Modifier.testTag("monogram"))
+                    }
+                }
+            }
+        }
+        for (avatarSize in listOf(20.dp, 40.dp)) {
+            var baselineGlyph: Rect? = null
+            var baselineInk: Rect? = null
+            for (scale in listOf(1f, 1.5f, 2f)) {
+                compose.runOnIdle {
+                    size.value = avatarSize
+                    fontScale.value = scale
+                }
+                val label = "$avatarSize, fontScale=$scale"
+                val letter = compose.onNodeWithText("T", useUnmergedTree = true).assertIsDisplayed()
+                val layouts = mutableListOf<TextLayoutResult>()
+                letter.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                val layout = layouts.single()
+                val glyph = layout.getBoundingBox(0)
+                val letterBounds = letter.fetchSemanticsNode().boundsInRoot
+                val avatar = compose.onNodeWithTag("monogram")
+                val avatarBounds = avatar.fetchSemanticsNode().boundsInRoot
+                assertEquals(label, 1, layout.lineCount)
+                assertFalse("$label must not overflow vertically", layout.didOverflowHeight)
+                assertTrue("$label glyph must fit", glyph.top >= 0 && glyph.bottom <= letterBounds.height)
+                assertEquals("$label horizontal layout center", avatarBounds.center.x, letterBounds.center.x, 1f)
+                assertEquals("$label vertical layout center", avatarBounds.center.y, letterBounds.center.y, 1f)
+
+                val pixels = avatar.captureToImage().toPixelMap()
+                var minX = pixels.width
+                var minY = pixels.height
+                var maxX = -1
+                var maxY = -1
+                // Tiny antialiased strokes need not contain any fully ink-colored pixels.
+                // Compare against the painted gradient on the same row, away from the ring.
+                for (y in pixels.height / 4 until pixels.height * 3 / 4) {
+                    val backdrop = pixels[pixels.width / 4, y]
+                    for (x in pixels.width / 4 + 1 until pixels.width * 3 / 4) {
+                        val color = pixels[x, y]
+                        if (abs(color.red - backdrop.red) + abs(color.green - backdrop.green) +
+                            abs(color.blue - backdrop.blue) > 0.12f
+                        ) {
+                            minX = minOf(minX, x)
+                            minY = minOf(minY, y)
+                            maxX = maxOf(maxX, x)
+                            maxY = maxOf(maxY, y)
+                        }
+                    }
+                }
+                val ink = Rect(minX.toFloat(), minY.toFloat(), (maxX + 1).toFloat(), (maxY + 1).toFloat())
+                assertTrue("$label must paint a letter, not an empty disc or sliver: $ink", ink.width >= pixels.width * 0.15f && ink.height >= pixels.height * 0.2f)
+                assertEquals("$label horizontal painted center", pixels.width / 2f, ink.center.x, pixels.width * 0.1f)
+                assertEquals("$label vertical painted center", pixels.height / 2f, ink.center.y, pixels.height * 0.1f)
+                baselineGlyph?.let {
+                    assertEquals("$label glyph width must retain its geometry", it.width, glyph.width, 1f)
+                    assertEquals("$label glyph height must retain its geometry", it.height, glyph.height, 1f)
+                }
+                baselineInk?.let {
+                    assertEquals("$label painted width", it.width, ink.width, 1f)
+                    assertEquals("$label painted height", it.height, ink.height, 1f)
+                }
+                baselineGlyph = baselineGlyph ?: glyph
+                baselineInk = baselineInk ?: ink
+            }
+        }
+    }
 
     @Test
     fun defaultNetworkGlyphIsCenteredWithinItsCircularBackground() {

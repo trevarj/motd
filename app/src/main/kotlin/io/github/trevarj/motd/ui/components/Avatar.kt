@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -220,6 +221,8 @@ private fun MonogramAvatar(
     // Pull the glyph toward the theme's guaranteed-contrast on-color while keeping the hue identity,
     // which fixes borderline pastel-on-light without any contrast-ratio math.
     val glyph = lerp(nick, scheme.onSurface, 0.30f)
+    // ponytail: this decorative glyph follows the fixed disc, not scalable message typography.
+    val glyphSize = with(LocalDensity.current) { (size * 0.42f).toSp() }
 
     Box(
         modifier =
@@ -233,11 +236,12 @@ private fun MonogramAvatar(
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            // A single glyph stays crisp down to 24dp (autocomplete) where two chars would smear.
+            // A single glyph stays crisp even in the 20dp two-line header.
             text = initials(name, isChannel).take(1),
             color = glyph,
             fontWeight = FontWeight.Medium,
-            fontSize = (size.value * 0.42f).sp,
+            fontSize = glyphSize,
+            lineHeight = glyphSize,
         )
     }
 }
