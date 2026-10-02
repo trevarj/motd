@@ -1,6 +1,5 @@
 package io.github.trevarj.motd.ai
 
-import io.github.trevarj.motd.audio.ReadAloudConfig
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import java.util.Locale
@@ -23,21 +22,18 @@ private val WHISPER_LANGUAGE_CODES =
 enum class AiFeature {
     TRANSCRIPTION,
     TEXT_TOOLS,
-    READ_ALOUD,
 }
 
 @Serializable
 enum class AiModelCapability {
     TRANSCRIPTION,
     TEXT_TOOLS,
-    SPEECH_SYNTHESIS,
 }
 
 @Serializable
 enum class AiModelFormat {
     WHISPER_GGML,
     QWEN35_GGUF,
-    KOKORO_ONNX,
 }
 
 val AiFeature.requiredCapability: AiModelCapability
@@ -45,14 +41,12 @@ val AiFeature.requiredCapability: AiModelCapability
         when (this) {
             AiFeature.TRANSCRIPTION -> AiModelCapability.TRANSCRIPTION
             AiFeature.TEXT_TOOLS -> AiModelCapability.TEXT_TOOLS
-            AiFeature.READ_ALOUD -> AiModelCapability.SPEECH_SYNTHESIS
         }
 
 fun AiModelFormat.supports(capability: AiModelCapability): Boolean =
     when (this) {
         AiModelFormat.WHISPER_GGML -> capability == AiModelCapability.TRANSCRIPTION
         AiModelFormat.QWEN35_GGUF -> capability == AiModelCapability.TEXT_TOOLS
-        AiModelFormat.KOKORO_ONNX -> capability == AiModelCapability.SPEECH_SYNTHESIS
     }
 
 @Serializable
@@ -64,8 +58,6 @@ data class AiModelMetadata(
     val isMultilingual: Boolean? = null,
     val maximumContextTokens: Int? = null,
     val textTemplateId: String? = null,
-    val sampleRateHz: Int? = null,
-    val voiceCount: Int? = null,
 ) {
     init {
         require(architecture.isNotBlank()) { "Model architecture must not be blank" }
@@ -195,11 +187,6 @@ fun AiLabsState.isModelReadyFor(
                 (model.metadata.maximumContextTokens ?: 0) >= 4096 &&
                 model.metadata.textTemplateId == "qwen35-nonthinking-v1"
         }
-
-        AiModelCapability.SPEECH_SYNTHESIS -> {
-            model.metadata.architecture == "kokoro" && model.metadata.quantization == "int8" &&
-                model.metadata.sampleRateHz == 24_000 && model.metadata.voiceCount == 54
-        }
     }
 }
 
@@ -240,7 +227,6 @@ data class AiLabsState(
     val transcriptionSettings: List<AiTranscriptionSettingsRecord> = emptyList(),
     val customStyles: List<AiCustomStyle> = emptyList(),
     val translationTarget: AiTranslationTarget? = null,
-    val readAloudConfig: ReadAloudConfig = ReadAloudConfig(),
     @Transient val importState: AiImportState = AiImportState.Idle,
 )
 

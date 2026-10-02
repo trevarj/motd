@@ -7,11 +7,13 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -518,71 +520,119 @@ class AiLabsRepositoryTest {
         }
 
     @Test
-    fun `legacy mixed Labs state preserves voice configuration and retired weight files`() =
+    fun `legacy mixed Labs state preserves current features Android voice profile and retired model data`() =
         runTest {
-            val fixture = fixture()
-            val voiceBytes = whisper(25)
-            val retiredBytes = gguf(26)
-            val voiceId = voiceBytes.sha256()
-            val retiredId = retiredBytes.sha256()
-            assertTrue(fixture.modelDirectory.mkdirs())
-            fixture.repository.modelFile(voiceId).writeBytes(voiceBytes)
-            fixture.repository.modelFile(retiredId).writeBytes(retiredBytes)
-            val before = fixture.diskSnapshot()
-            fixture.store.edit {
-                it[stringPreferencesKey("state_v1")] =
-                    """
-                    {
-                      "enabledFeatures": ["BRIEFS", "SEMANTIC_SEARCH", "TRANSCRIPTION"],
-                      "models": [
+            val textBytes = gguf(27)
+            val artifact = TextModelArtifact("https://huggingface.co/test", textBytes.size.toLong(), textBytes.sha256())
+            val fixture = fixture(textArtifact = artifact)
+            val textModel =
+                fixture.repository.importModel(fixture.source.add(textBytes), AiModelCapability.TEXT_TOOLS).getOrThrow()
+            val context =
+                androidx.test.core.app.ApplicationProvider
+                    .getApplicationContext<android.content.Context>()
+            val androidPrefs =
+                io.github.trevarj.motd.audio
+                    .ReadAloudPrefs(context)
+            val originalProfile = androidPrefs.systemConfig.first()
+            val androidProfile =
+                io.github.trevarj.motd.audio
+                    .ReadAloudConfig("installed-en-US", 1.2f, .8f, 650)
+            androidPrefs.replaceSystem(androidProfile)
+            try {
+                val voiceBytes = whisper(25)
+                val retiredBytes = gguf(26)
+                val voiceId = voiceBytes.sha256()
+                val retiredId = retiredBytes.sha256()
+                val retiredSpeechId = "e".repeat(64)
+                val retiredDirectory = fixture.repository.modelFile(retiredSpeechId).apply { mkdirs() }
+                retiredDirectory.resolve("model.int8.onnx").writeBytes(byteArrayOf(9, 8, 7))
+                File(fixture.modelDirectory, ".delete-${"f".repeat(64)}.tmp").apply {
+                    mkdirs()
+                    resolve("voices.bin").writeBytes(byteArrayOf(6, 5, 4))
+                }
+                File(fixture.modelDirectory, ".import-retired.tmp").apply {
+                    mkdirs()
+                    resolve("tokens.txt").writeText("retired pronunciation")
+                }
+                fixture.repository.modelFile(voiceId).writeBytes(voiceBytes)
+                fixture.repository.modelFile(retiredId).writeBytes(retiredBytes)
+                val before = fixture.diskSnapshot()
+                fixture.store.edit {
+                    it[stringPreferencesKey("state_v1")] =
+                        """
                         {
-                          "id": "$retiredId", "displayName": "Retired text model", "sizeBytes": ${retiredBytes.size},
-                          "format": "GGUF", "capabilities": ["GENERATION", "EMBEDDING"],
-                          "metadata": {
-                            "architecture": "legacy", "quantization": "Q4", "maximumContextTokens": 2048,
-                            "embeddingDimensions": 64, "requiresPromptTemplate": true
-                          },
-                          "importedAtEpochMillis": 1000
-                        },
-                        {
-                          "id": "$voiceId", "displayName": "Whisper Japanese", "sizeBytes": ${voiceBytes.size},
-                          "format": "WHISPER_GGML", "capabilities": ["TRANSCRIPTION"],
-                          "metadata": {
-                            "architecture": "whisper", "quantization": "F16", "maximumAudioSeconds": 900,
-                            "maximumCpuThreads": 2, "isMultilingual": true
-                          },
-                          "importedAtEpochMillis": 2000
+                          "enabledFeatures": ["BRIEFS", "SEMANTIC_SEARCH", "READ_ALOUD", "TRANSCRIPTION", "TEXT_TOOLS"],
+                          "models": [
+                            ${Json.encodeToString(textModel)},
+                            {
+                              "id": "$retiredSpeechId", "displayName": "Kokoro English", "sizeBytes": 149000000,
+                              "format": "KOKORO_ONNX", "capabilities": ["SPEECH_SYNTHESIS"],
+                              "metadata": {"architecture": "kokoro", "quantization": "int8", "sampleRateHz": 24000, "voiceCount": 54},
+                              "importedAtEpochMillis": 1000
+                            },
+                            {
+                              "id": "$retiredId", "displayName": "Retired text model", "sizeBytes": ${retiredBytes.size},
+                              "format": "GGUF", "capabilities": ["GENERATION", "EMBEDDING"],
+                              "metadata": {
+                                "architecture": "legacy", "quantization": "Q4", "maximumContextTokens": 2048,
+                                "embeddingDimensions": 64, "requiresPromptTemplate": true
+                              },
+                              "importedAtEpochMillis": 1000
+                            },
+                            {
+                              "id": "$voiceId", "displayName": "Whisper Japanese", "sizeBytes": ${voiceBytes.size},
+                              "format": "WHISPER_GGML", "capabilities": ["TRANSCRIPTION"],
+                              "metadata": {
+                                "architecture": "whisper", "quantization": "F16", "maximumAudioSeconds": 900,
+                                "maximumCpuThreads": 2, "isMultilingual": true
+                              },
+                              "importedAtEpochMillis": 2000
+                            }
+                          ],
+                          "assignments": [
+                            {"feature": "READ_ALOUD", "modelId": "$retiredSpeechId"},
+                            {"feature": "TEXT_TOOLS", "modelId": "${textModel.id}"},
+                            {"feature": "BRIEFS", "modelId": "$retiredId"},
+                            {"feature": "SEMANTIC_SEARCH", "modelId": "$retiredId"},
+                            {"feature": "TRANSCRIPTION", "modelId": "$voiceId"}
+                          ],
+                          "generationSettings": [{"modelId": "$retiredId", "settings": {"promptTemplateOverride": "{messages}"}}],
+                          "embeddingSettings": [{"modelId": "$retiredId", "settings": {"dimensions": 64}}],
+                          "readAloudConfig": {"voice": "26", "rate": 0.7, "gapMs": 1000},
+                          "customStyles": [{"id": "00000000-0000-0000-0000-000000000027", "name": "Friendly", "instruction": "Use a friendly tone."}],
+                          "translationTarget": {"code": "fr", "name": "French"},
+                          "transcriptionSettings": [
+                            {"modelId": "$voiceId", "settings": {"language": "ja", "initialPrompt": "nicknames", "cpuThreads": 1}}
+                          ]
                         }
-                      ],
-                      "assignments": [
-                        {"feature": "BRIEFS", "modelId": "$retiredId"},
-                        {"feature": "SEMANTIC_SEARCH", "modelId": "$retiredId"},
-                        {"feature": "TRANSCRIPTION", "modelId": "$voiceId"}
-                      ],
-                      "generationSettings": [{"modelId": "$retiredId", "settings": {"promptTemplateOverride": "{messages}"}}],
-                      "embeddingSettings": [{"modelId": "$retiredId", "settings": {"dimensions": 64}}],
-                      "transcriptionSettings": [
-                        {"modelId": "$voiceId", "settings": {"language": "ja", "initialPrompt": "nicknames", "cpuThreads": 1}}
-                      ]
-                    }
-                    """.trimIndent()
+                        """.trimIndent()
+                }
+
+                val migrated = fixture.repository.state.first { it.models.size == 2 && it.transcriptionSettingsFor(voiceId)?.language == "ja" }
+                assertEquals(setOf(AiFeature.TRANSCRIPTION, AiFeature.TEXT_TOOLS), migrated.enabledFeatures)
+                assertEquals(voiceId, migrated.assignedModelId(AiFeature.TRANSCRIPTION))
+                assertEquals(
+                    TranscriptionSettings(language = "ja", initialPrompt = "nicknames", cpuThreads = 1),
+                    migrated.transcriptionSettingsFor(voiceId),
+                )
+                val migratedVoice = migrated.models.single { it.id == voiceId }
+                assertEquals("Whisper Japanese", migratedVoice.displayName)
+                assertEquals(2000L, migratedVoice.importedAtEpochMillis)
+                assertEquals(textModel, migrated.models.single { it.id == textModel.id })
+                assertEquals(textModel.id, migrated.assignedModelId(AiFeature.TEXT_TOOLS))
+                assertEquals(listOf(AiCustomStyle("00000000-0000-0000-0000-000000000027", "Friendly", "Use a friendly tone.")), migrated.customStyles)
+                assertEquals(AiTranslationTarget("fr", "French"), migrated.translationTarget)
+
+                fixture.repository.reconcile().getOrThrow()
+                val persisted = fixture.store.data.first()[stringPreferencesKey("state_v1")]!!
+                assertEquals(migrated, Json.decodeFromString<AiLabsState>(persisted))
+                fixture.repository.reconcile().getOrThrow()
+                assertEquals(before, fixture.diskSnapshot())
+                assertEquals(androidProfile, androidPrefs.systemConfig.first())
+                assertTrue(retiredDirectory.isDirectory)
+            } finally {
+                androidPrefs.replaceSystem(originalProfile)
             }
-
-            val migrated = fixture.repository.state.first { it.models.singleOrNull()?.id == voiceId }
-            assertEquals(setOf(AiFeature.TRANSCRIPTION), migrated.enabledFeatures)
-            assertEquals(voiceId, migrated.assignedModelId(AiFeature.TRANSCRIPTION))
-            assertEquals(
-                TranscriptionSettings(language = "ja", initialPrompt = "nicknames", cpuThreads = 1),
-                migrated.transcriptionSettingsFor(voiceId),
-            )
-            assertEquals("Whisper Japanese", migrated.models.single().displayName)
-            assertEquals(2000L, migrated.models.single().importedAtEpochMillis)
-
-            fixture.repository.reconcile().getOrThrow()
-            val persisted = fixture.store.data.first()[stringPreferencesKey("state_v1")]!!
-            assertEquals(migrated, Json.decodeFromString<AiLabsState>(persisted))
-            fixture.repository.reconcile().getOrThrow()
-            assertEquals(before, fixture.diskSnapshot())
         }
 
     @Test
@@ -807,208 +857,12 @@ class AiLabsRepositoryTest {
             assertTrue(committing.temporaryFiles().isEmpty())
         }
 
-    @Test
-    fun kokoroFinalAssetFailureCancellationAndMetadataFailureAreAtomic() =
-        runTest {
-            val contents = linkedMapOf("model.int8.onnx" to byteArrayOf(1, 2, 3, 4), "voices.bin" to byteArrayOf(5, 6, 7, 8), "data/last.txt" to byteArrayOf(9, 10, 11, 12))
-            val bundle = fixtureBundle(contents)
-            var corrupt = false
-            val f =
-                fixture(kokoroBundle = bundle, kokoroOpener = { asset, _ ->
-                    val bytes = contents.getValue(asset.path)
-                    (if (corrupt && asset.path == "data/last.txt") bytes.copyOf().also { it[0] = 99 } else bytes).inputStream()
-                })
-            val whisper = f.repository.importModel(f.source.add(whisper(31)), AiModelCapability.TRANSCRIPTION).getOrThrow()
-            f.repository.assignModel(AiFeature.TRANSCRIPTION, whisper.id).getOrThrow()
-            f.repository.setFeatureEnabled(AiFeature.TRANSCRIPTION, true).getOrThrow()
-            val before = f.repository.state.first { AiFeature.TRANSCRIPTION in it.enabledFeatures }
-            val disk = f.diskSnapshot()
-            corrupt = true
-            assertEquals(AiLabsFailureKind.CHECKSUM_MISMATCH, f.repository.downloadKokoroAndUse().failureKind())
-            f.assertUnchanged(before, disk)
-            corrupt = false
-            val cancelled =
-                async {
-                    val owner = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]!!
-                    f.repository.downloadKokoroAndUse { copied, total -> if (copied == total) owner.cancel() }
-                }
-            cancelled.join()
-            assertTrue(cancelled.isCancelled)
-            f.assertUnchanged(before, disk)
-            f.store.failUpdates = true
-            assertEquals(AiLabsFailureKind.PERSISTENCE, f.repository.downloadKokoroAndUse().failureKind())
-            f.store.failUpdates = false
-            f.assertUnchanged(before, disk)
-            assertTrue(f.temporaryFiles().isEmpty())
-        }
-
-    @Test
-    fun kokoroSetupCommitsOnceReusesVerifiedDirectoryAndPreservesProfileAcrossRestartAndCorruption() =
-        runTest {
-            val contents = linkedMapOf("model.int8.onnx" to byteArrayOf(1, 2, 3, 4), "voices.bin" to byteArrayOf(5, 6, 7, 8), "data/last.txt" to byteArrayOf(9, 10, 11, 12))
-            val bundle = fixtureBundle(contents)
-            var opens = 0
-            val opener: (KokoroAsset, CancellationSignal) -> InputStream = { asset, _ ->
-                opens++
-                contents.getValue(asset.path).inputStream()
-            }
-            val f = fixture(kokoroBundle = bundle, kokoroOpener = opener)
-            var commits = 0
-            f.store.beforeUpdate = { commits++ }
-            val progress = mutableListOf<Long>()
-            val model =
-                f.repository
-                    .downloadKokoroAndUse { copied, total ->
-                        assertEquals(bundle.sizeBytes, total)
-                        progress += copied
-                    }.getOrThrow()
-            assertEquals(1, commits)
-            assertEquals(progress.sorted(), progress)
-            assertEquals(bundle.sizeBytes, progress.last())
-            assertTrue(f.repository.modelFile(model.id).isDirectory)
-            val selected = f.repository.readAloudConfiguration()!!
-            assertTrue(selected.localEnabled && selected.localReady)
-            f.repository
-                .updateReadAloudConfig(
-                    io.github.trevarj.motd.audio
-                        .ReadAloudConfig(voice = "26", rate = 1.2f, pitch = .7f, gapMs = 600),
-                    selected.localVersion,
-                ).getOrThrow()
-            f.repository.setFeatureEnabled(AiFeature.READ_ALOUD, false).getOrThrow()
-            f.repository.assignModel(AiFeature.READ_ALOUD, model.id).getOrThrow()
-            assertFalse(f.repository.readAloudConfiguration()!!.localEnabled)
-            f.repository.downloadKokoroAndUse().getOrThrow()
-            assertEquals(contents.size, opens)
-            assertEquals(
-                "26",
-                f.repository
-                    .readAloudConfiguration()!!
-                    .options.voice,
-            )
-            val restart =
-                AiLabsRepository(
-                    f.store,
-                    f.modelDirectory,
-                    f.source,
-                    f.runtime,
-                    backgroundScope,
-                    ioDispatcher = StandardTestDispatcher(testScheduler),
-                    availableBytes = { Long.MAX_VALUE },
-                    allocateBytes = { _, _ -> },
-                    kokoroBundle = bundle,
-                    kokoroOpener = opener,
-                )
-            restart.reconcile().getOrThrow()
-            val restored = restart.readAloudConfiguration()!!
-            assertTrue(restored.localEnabled && restored.localReady)
-            assertEquals("26", restored.options.voice)
-            assertEquals(1f, restored.options.pitch, 0f)
-            restart.modelFile(model.id).resolve("data/last.txt").writeBytes(byteArrayOf(0, 0, 0, 0))
-            restart.reconcile().getOrThrow()
-            val unavailable = restart.readAloudConfiguration()!!
-            assertTrue(unavailable.localEnabled)
-            assertFalse(unavailable.localReady)
-            assertEquals(model.id, unavailable.modelId)
-            restart.setFeatureEnabled(AiFeature.READ_ALOUD, false).getOrThrow()
-            assertFalse(restart.readAloudConfiguration()!!.localEnabled)
-        }
-
-    @Test
-    fun kokoroDeletionRollbackAndRestartRecoveryNeverExposePartialBundle() =
-        runTest {
-            val contents = linkedMapOf("model.int8.onnx" to byteArrayOf(1, 2, 3, 4), "voices.bin" to byteArrayOf(5, 6, 7, 8))
-            val bundle = fixtureBundle(contents)
-            val f = fixture(kokoroBundle = bundle, kokoroOpener = { asset, _ -> contents.getValue(asset.path).inputStream() })
-            val model = f.repository.downloadKokoroAndUse().getOrThrow()
-            val disk = f.diskSnapshot()
-            var edits = 0
-            f.store.beforeUpdate = { if (++edits == 2) throw IOException("metadata commit failure") }
-            assertEquals(AiLabsFailureKind.PERSISTENCE, f.repository.deleteModel(model.id).failureKind())
-            f.store.beforeUpdate = {}
-            assertEquals(disk, f.diskSnapshot())
-            assertTrue(f.repository.readAloudConfiguration()!!.localEnabled)
-            val staged = File(f.modelDirectory, ".delete-${model.id}.tmp")
-            java.nio.file.Files
-                .move(f.repository.modelFile(model.id).toPath(), staged.toPath())
-            f.repository.reconcile().getOrThrow()
-            assertTrue(f.repository.readAloudConfiguration()!!.localReady)
-            f.runtime.onUnload = { id -> if (id == model.id) assertTrue(f.repository.modelFile(id).isDirectory) }
-            f.repository.deleteModel(model.id).getOrThrow()
-            assertFalse(f.repository.readAloudConfiguration()!!.localEnabled)
-            assertEquals(null, f.repository.readAloudConfiguration()!!.modelId)
-            assertFalse(f.repository.modelFile(model.id).exists())
-            // Post-commit cleanup leftovers are retired, not restored, even if only some assets remain.
-            staged.mkdirs()
-            staged.resolve("voices.bin").writeBytes(contents.getValue("voices.bin"))
-            f.repository.reconcile().getOrThrow()
-            assertFalse(staged.exists())
-            assertFalse(f.repository.modelFile(model.id).exists())
-        }
-
-    @Test
-    fun kokoroSpaceAndSingleFileImportCannotReplaceReadyState() =
-        runTest {
-            val contents = linkedMapOf("model.int8.onnx" to byteArrayOf(1, 2, 3, 4), "voices.bin" to byteArrayOf(5, 6, 7, 8))
-            val f = fixture(kokoroBundle = fixtureBundle(contents), kokoroOpener = { asset, _ -> contents.getValue(asset.path).inputStream() })
-            f.space.bytes = 4
-            assertEquals(AiLabsFailureKind.INSUFFICIENT_SPACE, f.repository.downloadKokoroAndUse().failureKind())
-            assertTrue(f.modelFiles().isEmpty())
-            assertEquals(AiLabsFailureKind.UNSUPPORTED_ROLE, f.repository.importModel(f.source.add(byteArrayOf(1, 2, 3, 4)), AiModelCapability.SPEECH_SYNTHESIS).failureKind())
-            assertFalse(f.repository.readAloudConfiguration()!!.localEnabled)
-        }
-
-    @Test
-    fun kokoroRejectsTruncatedExtraAndSymlinkAssetsWithoutEscapingOwnedCleanup() =
-        runTest {
-            val contents = linkedMapOf("model.int8.onnx" to byteArrayOf(1, 2, 3, 4), "voices.bin" to byteArrayOf(5, 6, 7, 8))
-            val bundle = fixtureBundle(contents)
-            for (delta in listOf(-1, 1)) {
-                val f =
-                    fixture(kokoroBundle = bundle, kokoroOpener = { asset, _ ->
-                        val bytes = contents.getValue(asset.path)
-                        (if (asset.path == "voices.bin") bytes.copyOf(bytes.size + delta) else bytes).inputStream()
-                    })
-                assertEquals(AiLabsFailureKind.CHECKSUM_MISMATCH, f.repository.downloadKokoroAndUse().failureKind())
-                assertTrue(f.modelFiles().isEmpty() && f.temporaryFiles().isEmpty())
-                assertFalse(f.repository.readAloudConfiguration()!!.localEnabled)
-            }
-            val f = fixture(kokoroBundle = bundle, kokoroOpener = { asset, _ -> contents.getValue(asset.path).inputStream() })
-            val model = f.repository.downloadKokoroAndUse().getOrThrow()
-            val external = temporaryFolder.newFile("outside-model.bin").apply { writeBytes(contents.getValue("voices.bin")) }
-            val voice = f.repository.modelFile(model.id).resolve("voices.bin")
-            assertTrue(voice.delete())
-            java.nio.file.Files
-                .createSymbolicLink(voice.toPath(), external.toPath())
-            f.repository.reconcile().getOrThrow()
-            assertTrue(external.readBytes().contentEquals(contents.getValue("voices.bin")))
-            assertTrue(f.repository.readAloudConfiguration()!!.localEnabled)
-            assertFalse(f.repository.readAloudConfiguration()!!.localReady)
-            f.repository.downloadKokoroAndUse().getOrThrow()
-            val staged = File(f.modelDirectory, ".delete-${model.id}.tmp")
-            java.nio.file.Files
-                .move(f.repository.modelFile(model.id).toPath(), staged.toPath())
-            assertTrue(staged.resolve("voices.bin").delete())
-            f.repository.reconcile().getOrThrow()
-            assertTrue(f.repository.readAloudConfiguration()!!.localEnabled)
-            assertFalse(f.repository.readAloudConfiguration()!!.localReady)
-            assertEquals(model.id, f.repository.readAloudConfiguration()!!.modelId)
-        }
-
-    private fun fixtureBundle(contents: Map<String, ByteArray>) =
-        KokoroBundle(
-            "fixture/english",
-            "checked-revision",
-            contents.map { (path, bytes) -> KokoroAsset(path, bytes.size.toLong(), bytes.sha256()) },
-        )
-
     private fun TestScope.fixture(
         now: Long = 9_876L,
         maximumBytes: Long = 128L,
         availableProcessors: Int = 8,
         ioDispatcher: CoroutineDispatcher = StandardTestDispatcher(testScheduler),
         textArtifact: TextModelArtifact = TextModelArtifact.Pinned,
-        kokoroBundle: KokoroBundle = KokoroBundle.Pinned,
-        kokoroOpener: (KokoroAsset, CancellationSignal) -> InputStream = { _, _ -> error("implicit Kokoro download") },
     ): Fixture {
         val root = temporaryFolder.newFolder("repository-${names.incrementAndGet()}")
         val delegate =
@@ -1037,8 +891,6 @@ class AiLabsRepositoryTest {
                 freeSpaceReserveBytes = 4,
                 copyBufferBytes = 4,
                 textArtifact = textArtifact,
-                kokoroBundle = kokoroBundle,
-                kokoroOpener = kokoroOpener,
             )
         return Fixture(repository, store, source, runtime, directory, space)
     }
@@ -1159,6 +1011,7 @@ class AiLabsRepositoryTest {
 
     private class FakeRuntime : AiLabsRuntimeBoundary {
         var inspectFailure: Throwable? = null
+        var onInspect: suspend (File, AiModelCapability) -> Unit = { _, _ -> }
         var isMultilingual = true
         var unloadFailure: Throwable? = null
         var onUnload: (String) -> Unit = {}
@@ -1168,8 +1021,8 @@ class AiLabsRepositoryTest {
             modelFile: File,
             capability: AiModelCapability,
         ): AiModelMetadata {
+            onInspect(modelFile, capability)
             inspectFailure?.let { throw it }
-            if (capability == AiModelCapability.SPEECH_SYNTHESIS) return AiModelMetadata("kokoro", "int8", sampleRateHz = 24_000, voiceCount = 54)
             if (capability == AiModelCapability.TEXT_TOOLS) {
                 return AiModelMetadata(
                     architecture = "qwen35",
@@ -1194,8 +1047,6 @@ class AiLabsRepositoryTest {
         }
 
         override suspend fun cancelTextTools(unload: Boolean) {}
-
-        override suspend fun cancelReadAloud(unload: Boolean) {}
     }
 
     private fun Result<*>.failureKind(): AiLabsFailureKind = (exceptionOrNull() as AiLabsException).kind

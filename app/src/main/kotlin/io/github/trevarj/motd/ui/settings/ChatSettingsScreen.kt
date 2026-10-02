@@ -21,6 +21,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,8 +34,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.audio.ReadAloudSelection
+import io.github.trevarj.motd.audio.ReadAloudState
+import io.github.trevarj.motd.audio.ReadAloudVoices
 import io.github.trevarj.motd.audio.VoiceConfig
 import io.github.trevarj.motd.audio.VoiceRecordingQuality
 import io.github.trevarj.motd.avatar.AvatarConfig
@@ -49,6 +56,7 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.service.autoAwayText
 import io.github.trevarj.motd.ui.chat.presenceModeDescription
 import io.github.trevarj.motd.ui.chat.presenceModeLabel
+import io.github.trevarj.motd.ui.components.ReadAloudVoiceOptions
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
@@ -65,6 +73,9 @@ fun ChatSettingsScreen(
     viewModel: ChatSettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val readerConfig by viewModel.readAloudConfig.collectAsStateWithLifecycle()
+    val readerState by viewModel.readAloudState.collectAsStateWithLifecycle()
+    val readerVoices by viewModel.readAloudVoices.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val audioCacheCleared = stringResource(R.string.settings_audio_cache_cleared)
     val audioCacheClearFailed = stringResource(R.string.settings_audio_cache_clear_failed)
@@ -112,6 +123,13 @@ fun ChatSettingsScreen(
         onVoiceQuality = viewModel::setVoiceQuality,
         onVoiceNoiseReduction = viewModel::setVoiceNoiseReduction,
         onClearAudioCache = viewModel::clearAudioCache,
+        readerConfig = readerConfig,
+        readerState = readerState,
+        readerVoices = readerVoices,
+        onOpenReadAloudOptions = viewModel::openReadAloudOptions,
+        onSaveReadAloudOptions = viewModel::saveReadAloudOptions,
+        onPreviewReadAloud = viewModel::previewReadAloud,
+        onStopReadAloudPreview = viewModel::stopReadAloudPreview,
         target = target,
         snackbarHostState = snackbarHostState,
     )
@@ -152,6 +170,13 @@ fun ChatSettingsContent(
     onVoiceQuality: (VoiceRecordingQuality) -> Unit,
     onVoiceNoiseReduction: (Boolean) -> Unit,
     onClearAudioCache: () -> Unit,
+    readerConfig: ReadAloudSelection,
+    readerState: ReadAloudState,
+    readerVoices: ReadAloudVoices,
+    onOpenReadAloudOptions: () -> Unit,
+    onSaveReadAloudOptions: (ReadAloudSelection) -> Unit,
+    onPreviewReadAloud: (ReadAloudSelection) -> Unit,
+    onStopReadAloudPreview: () -> Unit,
     target: SettingsTarget? = null,
     snackbarHostState: SnackbarHostState? = null,
 ) {
@@ -162,6 +187,19 @@ fun ChatSettingsContent(
     var awayDelaySheetOpen by remember { mutableStateOf(false) }
     var foolsSheetOpen by remember { mutableStateOf(false) }
     var awayMessageDialogOpen by remember { mutableStateOf(false) }
+    var readAloudOptionsOpen by remember { mutableStateOf(false) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, onStopReadAloudPreview) {
+        val observer =
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) onStopReadAloudPreview()
+            }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            onStopReadAloudPreview()
+        }
+    }
     val defaultAwayMessage = stringResource(R.string.auto_away_default_message)
     SettingsScaffold(
         title = stringResource(R.string.settings_chat),
@@ -321,6 +359,19 @@ fun ChatSettingsContent(
         }
         SettingsGroup(title = stringResource(R.string.settings_voice_audio_section)) {
             SettingsNavigationRow(
+                title = stringResource(R.string.read_aloud_title),
+                summary = stringResource(R.string.read_aloud_settings_summary),
+                value = stringResource(R.string.read_aloud_rate, (readerConfig.options.rate * 100).toInt()),
+                modifier = Modifier.testTag("settings_read_aloud_options"),
+                requestedTarget = target?.name,
+                targetName = SettingsTarget.READ_ALOUD.name,
+                onClick = {
+                    onOpenReadAloudOptions()
+                    readAloudOptionsOpen = true
+                },
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsNavigationRow(
                 title = stringResource(R.string.settings_voice_quality),
                 value = voiceQualityLabel(voice.quality),
                 summary = voiceQualityDescription(voice.quality),
@@ -378,6 +429,22 @@ fun ChatSettingsContent(
                 onClick = { foolsSheetOpen = true },
             )
         }
+    }
+    if (readAloudOptionsOpen) {
+        ReadAloudVoiceOptions(
+            config = readerConfig,
+            voices = readerVoices,
+            onSave = onSaveReadAloudOptions,
+            onPreview = onPreviewReadAloud,
+            onDismiss = {
+                readAloudOptionsOpen = false
+                onStopReadAloudPreview()
+            },
+            onStopPreview = onStopReadAloudPreview,
+            onReloadVoices = onOpenReadAloudOptions,
+            previewing = readerState.previewing,
+            error = readerState.error,
+        )
     }
     if (awayMessageDialogOpen) {
         AutoAwayMessageDialog(
@@ -626,6 +693,13 @@ private fun ChatSettingsPreview() {
             onClearAudioCache = {},
             onVoiceQuality = {},
             onVoiceNoiseReduction = {},
+            readerConfig = ReadAloudSelection(),
+            readerState = ReadAloudState(),
+            readerVoices = ReadAloudVoices(),
+            onOpenReadAloudOptions = {},
+            onSaveReadAloudOptions = {},
+            onPreviewReadAloud = {},
+            onStopReadAloudPreview = {},
         )
     }
 }

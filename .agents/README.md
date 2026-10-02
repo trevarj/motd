@@ -37,7 +37,7 @@ connection ownership, or module boundaries.
    execution, not compilation of test sources and dependencies; humans may
    enter `nix develop` once. Run each changed module's existing
    `:app:ktlintCheck`, `:irc:ktlintCheck`, `:ai-whisper:ktlintCheck`,
-   `:ai-text:ktlintCheck`, or `:ai-tts:ktlintCheck` once before handoff; root
+   or `:ai-text:ktlintCheck` once before handoff; root
    Gradle/style configuration changes still require root `ktlintCheck`.
    Keep the nearest database regression and review/commit of
    generated `app/schemas`, `:app:compileE2eAndroidTestKotlin` for affected

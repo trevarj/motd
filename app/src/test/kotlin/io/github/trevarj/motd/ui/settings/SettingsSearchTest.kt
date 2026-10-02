@@ -103,8 +103,7 @@ class SettingsSearchTest {
             "GGUF" to SettingsSearchDestination.Page(SettingsSearchPage.LABS, SettingsTarget.AI),
             "Qwen" to SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_MODELS),
             "grammar spelling" to SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_TEXT_TOOLS),
-            "Kokoro" to SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_READ_ALOUD),
-            "male female" to SettingsSearchDestination.Page(SettingsSearchPage.AI_LABS, SettingsTarget.AI_READ_ALOUD),
+            "speed" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.READ_ALOUD),
         ).forEach { (query, destination) ->
             assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
         }

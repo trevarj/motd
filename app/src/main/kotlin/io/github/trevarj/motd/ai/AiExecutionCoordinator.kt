@@ -37,7 +37,6 @@ class AiExecutionCoordinator
     constructor(
         private val speechRuntime: SpeechModelRuntime,
         private val textRuntime: TextModelRuntime,
-        private val kokoroRuntime: KokoroModelRuntime,
         private val appVisibility: AppVisibility,
         @DefaultDispatcher private val unloadDispatcher: CoroutineDispatcher,
         @ApplicationScope private val applicationScope: CoroutineScope,
@@ -55,7 +54,6 @@ class AiExecutionCoordinator
         private val operations = mutableSetOf<Operation>()
 
         private var acceptingOperations = false
-        private var activeOperation: Job? = null
         private var residentModelId: String? = null
 
         @Volatile private var residentCapability: AiModelCapability? = null
@@ -94,7 +92,6 @@ class AiExecutionCoordinator
                         when (capability) {
                             AiModelCapability.TRANSCRIPTION -> speechRuntime.inspect(modelFile, capability)
                             AiModelCapability.TEXT_TOOLS -> textRuntime.inspect(modelFile)
-                            AiModelCapability.SPEECH_SYNTHESIS -> loadKokoro(modelFile)
                         }
                     currentCoroutineContext().ensureActive()
                     metadata
@@ -148,44 +145,6 @@ class AiExecutionCoordinator
             }
         }
 
-        suspend fun synthesize(
-            modelId: String,
-            modelDirectory: File,
-            text: String,
-            config: io.github.trevarj.motd.audio.ReadAloudConfig,
-            output: File,
-            isAuthorized: () -> Boolean,
-        ) {
-            requireModelId(modelId)
-            withRegisteredExecution(modelId, AiModelCapability.SPEECH_SYNTHESIS, isAuthorized) {
-                ensureResident(modelId, modelDirectory, AiModelCapability.SPEECH_SYNTHESIS)
-                val operation = currentCoroutineContext()[Job]!!
-                if (!isAuthorized()) throw CancellationException("Reading configuration changed")
-                // Keep the registered operation and residency lock until blocking JNI and WAV writes return.
-                withContext(NonCancellable + unloadDispatcher) {
-                    kokoroRuntime.generate(text, config, output) { !operation.isActive || !isAuthorized() }
-                }
-                operation.ensureActive()
-                if (!isAuthorized()) throw CancellationException("Reading configuration changed")
-            }
-        }
-
-        /** Capture/cancel only requests already registered; never cancel a later replacement. */
-        fun requestReadAloudCancellation() {
-            synchronized(registryLock) {
-                val registered = operations.filter { it.capability == AiModelCapability.SPEECH_SYNTHESIS }
-                registered.forEach { it.job.cancel(CancellationException("Reading cancelled")) }
-                if (registered.any { it.job === activeOperation }) kokoroRuntime.cancel()
-            }
-        }
-
-        suspend fun cancelReadAloud(unload: Boolean = false) {
-            requestReadAloudCancellation()
-            drain({ it.capability == AiModelCapability.SPEECH_SYNTHESIS }) {
-                if (unload && residentCapability == AiModelCapability.SPEECH_SYNTHESIS) unloadResident()
-            }
-        }
-
         suspend fun cancelTextTools(unload: Boolean = false) {
             drain({ it.capability == AiModelCapability.TEXT_TOOLS }) {
                 if (unload && residentCapability == AiModelCapability.TEXT_TOOLS) unloadResident()
@@ -208,9 +167,6 @@ class AiExecutionCoordinator
             withContext(NonCancellable) {
                 val registered = synchronized(registryLock) { operations.filter(matches).map { it.job }.filter { it !== self } }
                 registered.forEach { it.cancel(CancellationException("AI execution cancelled")) }
-                synchronized(registryLock) {
-                    if (registered.any { it === activeOperation } && residentCapability == AiModelCapability.SPEECH_SYNTHESIS) kokoroRuntime.cancel()
-                }
                 registered.joinAll()
                 executionMutex.withLock { cleanup() }
             }
@@ -236,7 +192,6 @@ class AiExecutionCoordinator
                 when (capability) {
                     AiModelCapability.TRANSCRIPTION -> speechRuntime.load(modelFile, capability)
                     AiModelCapability.TEXT_TOOLS -> textRuntime.load(modelFile)
-                    AiModelCapability.SPEECH_SYNTHESIS -> loadKokoro(modelFile)
                 }
                 residentReady = true
                 currentCoroutineContext().ensureActive()
@@ -251,23 +206,12 @@ class AiExecutionCoordinator
             }
         }
 
-        private suspend fun loadKokoro(modelDirectory: File): AiModelMetadata {
-            val operation = currentCoroutineContext()[Job]!!
-            // Persisted metadata is not a trust boundary. Hash once per cold residency, on a worker.
-            withContext(unloadDispatcher) { kokoroRuntime.validate(modelDirectory) }
-            return withContext(NonCancellable + unloadDispatcher) {
-                operation.ensureActive()
-                kokoroRuntime.load(modelDirectory)
-            }
-        }
-
         private suspend fun unloadResident() {
             if (residentModelId == null) return
             withContext(NonCancellable + unloadDispatcher) {
                 when (residentCapability) {
                     AiModelCapability.TRANSCRIPTION -> speechRuntime.unload()
                     AiModelCapability.TEXT_TOOLS -> textRuntime.unload()
-                    AiModelCapability.SPEECH_SYNTHESIS -> kokoroRuntime.unload()
                     null -> Unit
                 }
                 residentModelId = null
@@ -286,17 +230,9 @@ class AiExecutionCoordinator
                 val operation =
                     async(start = CoroutineStart.LAZY) {
                         executionMutex.withLock {
-                            val job = currentCoroutineContext()[Job]!!
-                            synchronized(registryLock) { activeOperation = job }
-                            try {
-                                currentCoroutineContext().ensureActive()
-                                if (!isAuthorized()) throw CancellationException("Text configuration changed")
-                                block()
-                            } finally {
-                                synchronized(registryLock) {
-                                    if (activeOperation === job) activeOperation = null
-                                }
-                            }
+                            currentCoroutineContext().ensureActive()
+                            if (!isAuthorized()) throw CancellationException("Text configuration changed")
+                            block()
                         }
                     }
                 val accepted =

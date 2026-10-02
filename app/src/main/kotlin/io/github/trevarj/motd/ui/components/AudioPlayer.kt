@@ -106,6 +106,8 @@ fun AudioAttachmentPlayers(
     failed: Boolean = false,
     onInspectCache: (AudioAttachment) -> Unit = {},
     onLongPress: (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
+    onClickLabel: String? = null,
     reactions: List<ReactionChip> = emptyList(),
     onReact: (String) -> Unit = {},
     transcripts: Map<String, VoiceTranscriptState> = emptyMap(),
@@ -152,6 +154,8 @@ fun AudioAttachmentPlayers(
                         onToggle = onToggle,
                         onSeek = onSeek,
                         onLongPress = onLongPress,
+                        onClick = onClick,
+                        onClickLabel = onClickLabel,
                         modifier =
                             Modifier
                                 .fillMaxWidth(0.82f)
@@ -191,6 +195,8 @@ private fun AudioAttachmentPlayer(
     onToggle: (AudioAttachment, Long?) -> Unit,
     onSeek: (AudioAttachment, Long) -> Unit,
     onLongPress: (() -> Unit)?,
+    onClick: (() -> Unit)?,
+    onClickLabel: String?,
     modifier: Modifier = Modifier,
     transcript: VoiceTranscriptState?,
     transcriptionEnabled: Boolean,
@@ -229,7 +235,8 @@ private fun AudioAttachmentPlayer(
     Surface(
         modifier =
             modifier.combinedClickable(
-                onClick = {},
+                onClick = onClick ?: {},
+                onClickLabel = onClickLabel,
                 onLongClick = onLongPress ?: { showDetails = true },
             ),
         shape = MotdShapes.card,

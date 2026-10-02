@@ -337,6 +337,10 @@ class ChatViewModel
 
         fun readAloudLatest() = readAloudController.latest()
 
+        fun readAloudMessage(message: MessageEntity) {
+            if (message.bufferId == operationalBufferId.value) readAloudController.readMessage(message)
+        }
+
         fun stopReadAloud() = readAloudController.stop()
 
         fun openReadAloudOptions() = readAloudController.openVoiceOptions()

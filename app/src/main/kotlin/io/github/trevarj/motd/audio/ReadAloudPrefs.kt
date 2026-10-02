@@ -25,8 +25,6 @@ data class ReadAloudConfig(
             pitch = pitch.takeIf(Float::isFinite)?.coerceIn(.7f, 1.3f) ?: 1f,
             gapMs = gapMs.coerceIn(0, 1_000),
         )
-
-    fun normalizedLocal(): ReadAloudConfig = normalized().copy(pitch = 1f)
 }
 
 private val Context.readAloudDataStore by preferencesDataStore("read_aloud")
@@ -45,14 +43,22 @@ class ReadAloudPrefs
                 ignoreUnknownKeys = true
                 encodeDefaults = true
             }
-        val systemConfig: Flow<ReadAloudConfig> =
-            store.data.map { prefs ->
-                prefs[CONFIG]
-                    ?.let { runCatching { json.decodeFromString<ReadAloudConfig>(it) }.getOrNull() }
-                    ?.normalized() ?: ReadAloudConfig()
-            }
+        val systemConfig: Flow<ReadAloudConfig> = store.data.map { decode(it[CONFIG]) }
 
-        suspend fun replaceSystem(config: ReadAloudConfig) {
-            store.edit { it[CONFIG] = json.encodeToString(config.normalized()) }
+        suspend fun replaceSystem(
+            config: ReadAloudConfig,
+            expectedConfig: ReadAloudConfig? = null,
+        ) {
+            store.edit {
+                check(expectedConfig == null || decode(it[CONFIG]) == expectedConfig) {
+                    "Voice options changed. Open them again."
+                }
+                it[CONFIG] = json.encodeToString(config.normalized())
+            }
         }
+
+        private fun decode(raw: String?): ReadAloudConfig =
+            raw
+                ?.let { runCatching { json.decodeFromString<ReadAloudConfig>(it) }.getOrNull() }
+                ?.normalized() ?: ReadAloudConfig()
     }

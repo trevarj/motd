@@ -23,7 +23,6 @@ internal fun openModelDownload(
     url: String,
     cancellationSignal: CancellationSignal = CancellationSignal(),
     onHop: (String) -> Unit = {},
-    allowedMimeTypes: Set<String> = setOf("application/octet-stream", "binary/octet-stream", "application/gguf", "application/x-gguf"),
 ): InputStream {
     var next = url
     try {
@@ -60,7 +59,7 @@ internal fun openModelDownload(
                             ?.substringBefore(';')
                             ?.trim()
                             ?.lowercase()
-                    if (mime != null && mime !in allowedMimeTypes) {
+                    if (mime != null && mime !in setOf("application/octet-stream", "binary/octet-stream", "application/gguf", "application/x-gguf")) {
                         throw AiLabsException(AiLabsFailureKind.NETWORK)
                     }
                     val encoding = connection.contentEncoding

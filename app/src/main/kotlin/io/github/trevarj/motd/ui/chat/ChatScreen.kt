@@ -74,6 +74,7 @@ import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.PeopleOutline
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.ViewAgenda
@@ -746,6 +747,7 @@ fun ChatScreen(
         onReadAloudPauseResume = viewModel::readAloudPauseResume,
         onReadAloudSkip = viewModel::readAloudSkip,
         onReadAloudLatest = viewModel::readAloudLatest,
+        onReadAloudMessage = viewModel::readAloudMessage,
         onReadAloudStop = viewModel::stopReadAloud,
         onReadAloudOptions = viewModel::openReadAloudOptions,
         onReadAloudSaveOptions = viewModel::saveReadAloudOptions,
@@ -1149,6 +1151,7 @@ fun ChatContent(
     onReadAloudPauseResume: () -> Unit = {},
     onReadAloudSkip: () -> Unit = {},
     onReadAloudLatest: () -> Unit = {},
+    onReadAloudMessage: ((MessageEntity) -> Unit)? = null,
     onReadAloudStop: () -> Unit = {},
     onReadAloudOptions: () -> Unit = {},
     onReadAloudSaveOptions: (ReadAloudSelection) -> Unit = {},
@@ -2831,7 +2834,7 @@ fun ChatContent(
                                 DropdownMenuItem(
                                     modifier = Modifier.testTag("chat_read_aloud_toggle").semantics { selected = readAloudState.enabled },
                                     text = { Text(stringResource(if (readAloudState.enabled) R.string.read_aloud_stop else R.string.read_aloud_start)) },
-                                    leadingIcon = { Icon(Icons.Outlined.Mic, null) },
+                                    leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null) },
                                     onClick = {
                                         overflowOpen = false
                                         onReadAloudToggle()
@@ -3119,6 +3122,11 @@ fun ChatContent(
                                             replyPreview = replyPreview,
                                             onReplyPreviewClick = onReplyPreviewClick,
                                             onLongPress = onTimelineLongPress,
+                                            onReadMessage =
+                                                onReadAloudMessage.takeIf {
+                                                    readAloudState.enabled && !readAloudState.previewing &&
+                                                        readAloudState.roomId == buffer?.id
+                                                },
                                             onReply = timelineReply,
                                             swipeToReplyEnabled = swipeToReplyEnabled,
                                             onReact = onReact,

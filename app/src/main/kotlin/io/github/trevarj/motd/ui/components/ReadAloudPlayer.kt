@@ -49,7 +49,6 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.audio.ReadAloudSelection
 import io.github.trevarj.motd.audio.ReadAloudState
 import io.github.trevarj.motd.audio.ReadAloudStatus
-import io.github.trevarj.motd.audio.ReadAloudVoiceGender
 import io.github.trevarj.motd.audio.ReadAloudVoices
 import io.github.trevarj.motd.audio.readAloudBody
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
@@ -146,13 +145,7 @@ fun ReadAloudVoiceOptions(
 ) {
     var draft by remember(config) { mutableStateOf(config.options) }
     var voiceMenu by remember { mutableStateOf(false) }
-    var loadedVersion by remember { mutableStateOf(config.profileVersion) }
-    LaunchedEffect(config.profileVersion) {
-        if (loadedVersion != config.profileVersion) {
-            loadedVersion = config.profileVersion
-            onReloadVoices()
-        }
-    }
+    LaunchedEffect(config) { onReloadVoices() }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         SheetSystemBars()
         Column(
@@ -163,7 +156,7 @@ fun ReadAloudVoiceOptions(
                 .testTag("read_aloud_voice_options"),
         ) {
             Text(stringResource(R.string.read_aloud_options), style = MaterialTheme.typography.titleLarge)
-            Text(stringResource(if (config.localEnabled) R.string.ai_read_aloud_disclosure else R.string.read_aloud_voice_disclosure), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 12.dp))
+            Text(stringResource(R.string.read_aloud_voice_disclosure), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 12.dp))
             Text(stringResource(R.string.read_aloud_voice), style = MaterialTheme.typography.labelLarge)
             OutlinedButton(onClick = { voiceMenu = true }, enabled = !voices.loading && voices.voices.isNotEmpty(), modifier = Modifier.fillMaxWidth().testTag("read_aloud_voice")) {
                 val selected = voices.voices.firstOrNull { it.id == draft.voice }
@@ -171,7 +164,6 @@ fun ReadAloudVoiceOptions(
                     selected?.let { voiceLabel(it) } ?: stringResource(
                         when {
                             draft.voice != null -> R.string.read_aloud_unavailable_voice
-                            config.localEnabled -> R.string.ai_read_aloud_default_voice
                             else -> R.string.read_aloud_default_voice
                         },
                     ),
@@ -187,20 +179,17 @@ fun ReadAloudVoiceOptions(
                     }
                 }
             }
-            if (!config.localEnabled) Text(stringResource(R.string.read_aloud_gender_disclosure), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+            Text(stringResource(R.string.read_aloud_gender_disclosure), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
             Text(stringResource(R.string.read_aloud_rate, (draft.rate * 100).roundToInt()))
             Slider(value = draft.rate, onValueChange = { draft = draft.copy(rate = it) }, valueRange = .7f..1.3f, modifier = Modifier.testTag("read_aloud_rate"))
-            if (!config.localEnabled) {
-                Text(stringResource(R.string.read_aloud_pitch, (draft.pitch * 100).roundToInt()))
-                Slider(value = draft.pitch, onValueChange = { draft = draft.copy(pitch = it) }, valueRange = .7f..1.3f, modifier = Modifier.testTag("read_aloud_pitch"))
-            }
+            Text(stringResource(R.string.read_aloud_pitch, (draft.pitch * 100).roundToInt()))
+            Slider(value = draft.pitch, onValueChange = { draft = draft.copy(pitch = it) }, valueRange = .7f..1.3f, modifier = Modifier.testTag("read_aloud_pitch"))
             Text(stringResource(R.string.read_aloud_gap_option, draft.gapMs))
             Slider(value = draft.gapMs.toFloat(), onValueChange = { draft = draft.copy(gapMs = it.roundToInt()) }, valueRange = 0f..1_000f, modifier = Modifier.testTag("read_aloud_gap"))
             if (voices.loading) Text(stringResource(R.string.read_aloud_preparing))
             (error ?: voices.error)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            if (config.localEnabled && !config.localReady) Text(stringResource(R.string.ai_read_aloud_unavailable), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { if (previewing) onStopPreview() else onPreview(config.copy(options = draft)) }, enabled = previewing || (!config.localEnabled || config.localReady) && !voices.loading && voices.voices.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("read_aloud_preview")) {
+                TextButton(onClick = { if (previewing) onStopPreview() else onPreview(config.copy(options = draft)) }, enabled = previewing || !voices.loading && voices.voices.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("read_aloud_preview")) {
                     Text(stringResource(if (previewing) R.string.read_aloud_stop_preview else R.string.read_aloud_preview))
                 }
                 Button(onClick = {
@@ -218,6 +207,5 @@ fun ReadAloudVoiceOptions(
 private fun voiceLabel(voice: io.github.trevarj.motd.audio.ReadAloudVoice): String =
     listOfNotNull(
         voice.name,
-        voice.gender?.let { stringResource(if (it == ReadAloudVoiceGender.FEMALE) R.string.ai_voice_female else R.string.ai_voice_male) },
         voice.locale,
     ).joinToString(" · ")

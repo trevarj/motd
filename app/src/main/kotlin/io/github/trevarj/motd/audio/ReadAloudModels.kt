@@ -6,25 +6,18 @@ import io.github.trevarj.motd.ui.chat.trimUrl
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
-enum class ReadAloudVoiceGender { FEMALE, MALE }
-
 data class ReadAloudVoice(
     val id: String,
     val name: String,
     val locale: String,
-    val gender: ReadAloudVoiceGender? = null,
 )
 
-/** Captured effective backend, independent saved profile, and local acquisition authorization. */
+/** Draft options retain the saved profile they were opened from to reject stale saves/previews. */
 data class ReadAloudSelection(
-    val localEnabled: Boolean = false,
-    val modelId: String? = null,
-    val localReady: Boolean = false,
     val options: ReadAloudConfig = ReadAloudConfig(),
-    val localVersion: Long = 0,
-    val profileVersion: Long = 0,
+    val savedOptions: ReadAloudConfig = options,
 ) {
-    fun normalized(): ReadAloudSelection = copy(options = if (localEnabled) options.normalizedLocal() else options.normalized())
+    fun normalized(): ReadAloudSelection = copy(options = options.normalized())
 }
 
 data class ReadAloudVoices(
@@ -54,10 +47,9 @@ data class ReadAloudState(
 )
 
 /**
- * Both installed and local-model synthesis produce a caller-owned ephemeral local file.
- * Return only after the file is complete; never start playback. On cancellation stop synthesis and
- * release its resources. In-process backends must drain writes. Android requests engine stop/shutdown
- * and removes any late callback output; it cannot sandbox an independently installed engine.
+ * Installed Android synthesis produces a caller-owned ephemeral local file.
+ * Return only after the file is complete; never start playback. On cancellation Android requests
+ * engine stop/shutdown and removes any late callback output; it cannot sandbox an installed engine.
  * The controller rejects stale generations and deletes output on every terminal path.
  */
 interface ReadAloudSynthesizer {

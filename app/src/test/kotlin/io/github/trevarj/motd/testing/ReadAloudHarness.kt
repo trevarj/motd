@@ -1,16 +1,6 @@
 package io.github.trevarj.motd.testing
 
 import android.content.Context
-import android.net.Uri
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
-import io.github.trevarj.motd.ai.AiLabsRepository
-import io.github.trevarj.motd.ai.AiLabsRuntimeBoundary
-import io.github.trevarj.motd.ai.AiModelCapability
-import io.github.trevarj.motd.ai.AiModelMetadata
-import io.github.trevarj.motd.ai.AiModelSource
-import io.github.trevarj.motd.ai.AiModelSourceMetadata
-import io.github.trevarj.motd.ai.KokoroAsset
-import io.github.trevarj.motd.ai.KokoroBundle
 import io.github.trevarj.motd.audio.AudioActivityTracker
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
@@ -34,8 +24,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.File
-import java.io.InputStream
-import java.security.MessageDigest
 
 /** Real controller and Room policy; only Android synthesis/media boundaries are controllable. */
 internal class ReadAloudHarness(
@@ -53,47 +41,11 @@ internal class ReadAloudHarness(
     val synth = Synthesizer()
     val output = Output()
     val prefs = ReadAloudPrefs(context)
-    private val root =
-        java.nio.file.Files
-            .createTempDirectory(context.cacheDir.toPath(), "reader-labs-")
-            .toFile()
-    private val bytes = "checked speech fixture".toByteArray()
-    private val bundle = KokoroBundle("test/english", "fixture", listOf(KokoroAsset("model.int8.onnx", bytes.size.toLong(), MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) })))
-    val labs =
-        AiLabsRepository(
-            PreferenceDataStoreFactory.create(scope = scope, produceFile = { File(root, "state.preferences_pb") }),
-            File(root, "models"),
-            object : AiModelSource {
-                override fun metadata(uri: Uri) = AiModelSourceMetadata()
-
-                override fun open(uri: Uri): InputStream = error("SAF not used by reader fixture")
-            },
-            object : AiLabsRuntimeBoundary {
-                override suspend fun inspect(
-                    modelId: String,
-                    modelFile: File,
-                    capability: AiModelCapability,
-                ) = AiModelMetadata("kokoro", "int8", sampleRateHz = 24_000, voiceCount = 54)
-
-                override suspend fun unloadForDeletion(modelId: String) = Unit
-
-                override suspend fun cancelTextTools(unload: Boolean) = Unit
-
-                override suspend fun cancelReadAloud(unload: Boolean) = Unit
-            },
-            scope,
-            ioDispatcher = kotlinx.coroutines.Dispatchers.Unconfined,
-            availableBytes = { Long.MAX_VALUE },
-            allocateBytes = { _, _ -> },
-            kokoroBundle = bundle,
-            kokoroOpener = { _, _ -> bytes.inputStream() },
-        )
     val controller =
         ReadAloudController(
             context,
             db,
             prefs,
-            labs,
             foreground,
             object : AppVisibility {
                 override val onScreen = visible
@@ -126,7 +78,6 @@ internal class ReadAloudHarness(
         var onCancel: (() -> Unit)? = null
 
         override suspend fun loadVoices(config: ReadAloudSelection) {
-            if (config.localEnabled && !config.localReady) error("Local model unavailable")
             failure?.let { error(it) }
         }
 

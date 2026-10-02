@@ -334,11 +334,11 @@
     <string name="labs_global_feed">Global Feed</string>
     <string name="labs_global_feed_desc">Merge every channel and DM into one stream, opened from the drawer or the chat list. Off by default.</string>
     <string name="labs_ai">AI</string>
-    <string name="labs_ai_desc">Local transcription, text tools and Kokoro chat read-aloud. Off by default.</string>
+    <string name="labs_ai_desc">Local transcription and text tools. Off by default.</string>
     <string name="ai_labs_title">AI</string>
-    <string name="ai_local_disclosure">Transcription, text tools and local read-aloud run on this device. Audio, drafts and messages are not uploaded for AI processing. Model setup contacts Hugging Face only when you explicitly download.</string>
+    <string name="ai_local_disclosure">Transcription and text tools run on this device. Audio and drafts are not uploaded for AI processing. Model setup contacts Hugging Face only when you explicitly download.</string>
     <string name="ai_model_library">Model Library</string>
-    <string name="ai_model_library_summary">Set up local Whisper transcription, Qwen text tools and Kokoro read-aloud models.</string>
+    <string name="ai_model_library_summary">Set up local Whisper transcription and Qwen text tools.</string>
     <plurals name="ai_model_count">
         <item quantity="one">%1$d model imported</item>
         <item quantity="other">%1$d models imported</item>
@@ -430,7 +430,7 @@
     <string name="ai_import_progress_of">Importing %1$s of %2$s</string>
     <string name="ai_import_progress_unknown">Importing %1$s</string>
     <string name="ai_model_library_empty">No local models installed. Import a transcription model or download a supported model.</string>
-    <string name="ai_model_responsibility">Imported weights remain your responsibility. Supported downloads are checked against pinned sizes and SHA-256 digests; this does not guarantee model safety. Kokoro weights are Apache-2.0 and its eSpeak pronunciation data is GPL-3.0.</string>
+    <string name="ai_model_responsibility">Imported weights remain your responsibility. Supported downloads are checked against pinned sizes and SHA-256 digests; this does not guarantee model safety.</string>
     <string name="ai_model_imported">Model installed. Assign it and explicitly enable the feature to use it.</string>
     <string name="ai_model_assigned">Active model assigned. Enable the feature when ready.</string>
     <string name="ai_settings_saved">Model settings saved.</string>
@@ -442,7 +442,7 @@
     <string name="ai_delete_model">Delete model</string>
     <string name="ai_delete_model_summary">Remove this model from local storage.</string>
     <string name="ai_delete_model_title">Delete model?</string>
-    <string name="ai_delete_model_message">Delete “%1$s”? Features using this model, including the local speech override, will be turned off. This cannot be undone.</string>
+    <string name="ai_delete_model_message">Delete “%1$s”? Features using this model will be turned off. This cannot be undone.</string>
     <string name="ai_transcription_settings">Transcription settings</string>
     <string name="ai_transcription_settings_summary">Language %1$s · Threads %2$d</string>
     <string name="ai_cpu_threads">CPU threads</string>
@@ -2233,10 +2233,11 @@
     <string name="ai_text_preferences">Text preferences</string>
     <string name="ai_text_model_license">Apache-2.0 license</string>
     <string name="ai_text_model_license_url" translatable="false">https://www.apache.org/licenses/LICENSE-2.0</string>
-    <string name="read_aloud_title">Reading incoming messages</string>
-    <string name="read_aloud_start">Start reading incoming messages</string>
-    <string name="read_aloud_stop">Stop reading incoming messages</string>
+    <string name="read_aloud_title">TTS Reader</string>
+    <string name="read_aloud_start">TTS Reader</string>
+    <string name="read_aloud_stop">Stop TTS Reader</string>
     <string name="read_aloud_options">Voice options</string>
+    <string name="read_aloud_settings_summary">Choose an installed Android voice, speed, pitch, and message gap. Preview does not enable chat reading.</string>
     <string name="read_aloud_waiting">Waiting for new messages</string>
     <string name="read_aloud_preparing">Preparing offline speech…</string>
     <string name="read_aloud_playing">Reading aloud</string>
@@ -2247,11 +2248,12 @@
     <string name="read_aloud_previous">Replay previous session message</string>
     <string name="read_aloud_skip">Skip message</string>
     <string name="read_aloud_latest">Read latest session message</string>
+    <string name="read_aloud_message">Read this message aloud</string>
     <string name="read_aloud_pause">Pause reading</string>
     <string name="read_aloud_resume">Resume reading</string>
     <string name="read_aloud_voice">Voice and language</string>
     <string name="read_aloud_default_voice">Device language voice</string>
-    <string name="read_aloud_voice_disclosure">Only new messages in this resumed chat are read. Leaving or backgrounding stops and clears the session. Android manages the installed speech engine; choose the engine in Android settings. The engine receives message text; an offline-reported voice is not a privacy sandbox. No cloud voice, download, or installation fallback is used.</string>
+    <string name="read_aloud_voice_disclosure">New incoming messages in this resumed chat are read automatically. While reading is on, tap a visible message to read it immediately, including your own or earlier messages. Only the tapped message joins the session, not surrounding history. Leaving or backgrounding stops and clears the session. Android manages the installed speech engine; choose the engine in Android settings. The engine receives message text; an offline-reported voice is not a privacy sandbox. No cloud voice, download, or installation fallback is used.</string>
     <string name="read_aloud_gender_disclosure">Android voices have no reliable gender metadata. Preview the actual named voices to choose a masculine or feminine sound.</string>
     <string name="read_aloud_rate">Speed · %1$d%%</string>
     <string name="read_aloud_pitch">Pitch · %1$d%%</string>
@@ -2259,15 +2261,5 @@
     <string name="read_aloud_preview">Preview voice</string>
     <string name="read_aloud_stop_preview">Stop preview</string>
     <string name="read_aloud_save">Save voice options</string>
-    <string name="ai_read_aloud">Local read-aloud</string>
-    <string name="ai_read_aloud_summary">Override installed Android speech with Kokoro for incoming chat messages. Enabling this does not start reading a chat.</string>
-    <string name="ai_read_aloud_disclosure">Kokoro synthesizes on this device after an explicit 149 MiB Hugging Face download. No messages are uploaded. English voices use eSpeak pronunciation; voice gender and dialect come from the model catalog. Bystanders can hear spoken messages.</string>
-    <string name="ai_read_aloud_download">Download and use Kokoro</string>
-    <string name="ai_read_aloud_setup_complete">Kokoro is ready and the local override is enabled. Start reading from a chat menu.</string>
-    <string name="ai_read_aloud_unavailable">The local override is enabled but its model is unavailable. Download Kokoro or turn off the override. Installed speech is not used as a fallback.</string>
-    <string name="ai_read_aloud_preview_requires_enable">Enable a ready local override before previewing. Preview never enables chat reading.</string>
-    <string name="ai_read_aloud_default_voice">Heart · Female · en-US</string>
-    <string name="ai_voice_female">Female</string>
-    <string name="ai_voice_male">Male</string>
     <string name="read_aloud_unavailable_voice">Selected voice unavailable</string>
 </resources>

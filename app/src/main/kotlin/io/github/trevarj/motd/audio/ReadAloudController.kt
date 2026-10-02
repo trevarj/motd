@@ -6,8 +6,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioManager
 import androidx.core.content.ContextCompat
+import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
-import io.github.trevarj.motd.ai.AiLabsRepository
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -38,7 +38,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -61,7 +60,6 @@ class ReadAloudController
         @ApplicationContext private val context: Context,
         private val db: MotdDatabase,
         private val prefs: ReadAloudPrefs,
-        private val labs: AiLabsRepository,
         private val foreground: ForegroundBufferTracker,
         private val visibility: AppVisibility,
         settings: SettingsRepository,
@@ -118,25 +116,13 @@ class ReadAloudController
             activity.stopIncomingReading = ::stop
             scope.launch(Dispatchers.Main.immediate) {
                 try {
-                    combine(prefs.systemConfig, labs.readAloudVersion, labs.state) { system, version, _ -> system to version }.collectLatest { (system, version) ->
+                    prefs.systemConfig.distinctUntilChanged().collect { options ->
                         synchronized(lock) {
-                            if (!selectionReady.value || version != _config.value.localVersion ||
-                                (!_config.value.localEnabled && system != _config.value.options)
-                            ) {
+                            if (selectionReady.value && options != _config.value.options) {
                                 selectionReady.value = false
                                 invalidateConfiguration()
                             }
-                        }
-                        val local = labs.readAloudConfiguration() ?: return@collectLatest
-                        val effective = if (local.localEnabled) local else local.copy(options = prefs.systemConfig.first())
-                        if (!labs.isReadAloudVersionCurrent(local.localVersion)) return@collectLatest
-                        synchronized(lock) {
-                            if (_config.value.copy(profileVersion = 0) != effective && selectionReady.value) {
-                                invalidateConfiguration()
-                            }
-                            if (_config.value.copy(profileVersion = 0) != effective) {
-                                _config.value = effective.copy(profileVersion = _config.value.profileVersion + 1)
-                            }
+                            _config.value = ReadAloudSelection(options)
                             selectionReady.value = true
                             preferencesReady.complete(Unit)
                             if (configurationCutoverPending) {
@@ -226,21 +212,101 @@ class ReadAloudController
                 if (room?.let { !eligibleRoom(it, message.bufferId) } == true) return@synchronized
                 // Sender policy needs this room's current IRC rules, loaded by the pre-synthesis check.
                 entries += message
-                var skipped = _state.value.skipped
-                if (entries.size > SESSION_LIMIT) {
-                    if (cursor > 0) {
-                        entries.removeAt(0)
-                        cursor--
-                    } else {
-                        // Keep the current utterance stable; drop the oldest pending item, not arbitrary history.
-                        entries.removeAt(1)
-                        skipped++
-                    }
-                }
-                _state.value = _state.value.copy(skipped = skipped)
+                trimSession()
                 publish()
                 if (work?.isActive != true) restart()
             }
+
+        /** A visible-row tap authorizes only this message, never surrounding history. */
+        fun readMessage(message: MessageEntity) =
+            synchronized(lock) {
+                val state = _state.value
+                if (!state.enabled || state.previewing || state.roomId != message.bufferId ||
+                    foreground.foregroundBufferId.value != message.bufferId || !audioEligible() ||
+                    (message.kind != MessageKind.PRIVMSG && message.kind != MessageKind.NOTICE && message.kind != MessageKind.ACTION) ||
+                    readAloudBody(message.text).isBlank() || (room != null && !eligibleCached(message))
+                ) {
+                    return@synchronized
+                }
+                _state.value = state.copy(paused = false, error = null, status = ReadAloudStatus.PREPARING)
+                restart(message)
+            }
+
+        private suspend fun selectMessage(
+            message: MessageEntity,
+            token: Long,
+        ): Boolean {
+            val retained = synchronized(lock) { entries.toList() }
+            val refreshed = HashMap<Long, MessageEntity>(retained.size + 1)
+            val selected =
+                db.withTransaction {
+                    for (entry in retained) {
+                        refreshed[entry.id] = db.messageDao().byCanonicalId(entry.id) ?: entry
+                    }
+                    val selected = db.messageDao().byCanonicalId(message.id) ?: message
+                    refreshed[message.id] = selected
+                    for (alias in db.canonicalTimelineDao().losingEventIds(selected.id)) {
+                        refreshed[alias] = selected
+                    }
+                    selected
+                }
+            if (selected.bufferId != message.bufferId ||
+                (selected.kind != MessageKind.PRIVMSG && selected.kind != MessageKind.NOTICE && selected.kind != MessageKind.ACTION) ||
+                readAloudBody(selected.text).isBlank() || !eligible(selected)
+            ) {
+                return false
+            }
+            return synchronized(lock) {
+                if (!current(token, message.bufferId) || !_state.value.enabled || _state.value.previewing) return@synchronized false
+                // Merge only retained identities; arrivals during the lookup keep their place and snapshot.
+                val seen = HashSet<Long>(entries.size)
+                var index = 0
+                while (index < entries.size) {
+                    val entry = refreshed[entries[index].id] ?: entries[index]
+                    if (seen.add(entry.id)) {
+                        entries[index] = entry
+                        index++
+                    } else {
+                        entries.removeAt(index)
+                    }
+                }
+                val queued = entries.indexOfFirst { it.id == selected.id }
+                if (queued >= 0) {
+                    entries[queued] = selected
+                    cursor = queued
+                } else {
+                    // ponytail: linear insertion into the bounded 50-message session; preserve arrival order.
+                    val next =
+                        entries.indexOfFirst {
+                            it.serverTime > selected.serverTime ||
+                                (
+                                    it.serverTime == selected.serverTime &&
+                                        (
+                                            it.timelineOrder > selected.timelineOrder ||
+                                                (it.timelineOrder == selected.timelineOrder && it.id > selected.id)
+                                        )
+                                )
+                        }
+                    cursor = if (next < 0) entries.size else next
+                    entries.add(cursor, selected)
+                }
+                trimSession()
+                publish()
+                true
+            }
+        }
+
+        private fun trimSession() {
+            if (entries.size <= SESSION_LIMIT) return
+            if (cursor > 0) {
+                entries.removeAt(0)
+                cursor--
+            } else {
+                // Keep the selected utterance stable; drop the oldest pending item.
+                entries.removeAt(1)
+                _state.value = _state.value.copy(skipped = _state.value.skipped + 1)
+            }
+        }
 
         fun previous() =
             synchronized(lock) {
@@ -293,16 +359,10 @@ class ReadAloudController
             scope.launch(Dispatchers.Main.immediate) {
                 try {
                     preferencesReady.await()
-                    check(
-                        selectionReady.value && value.profileVersion == config.value.profileVersion &&
-                            value.localVersion == config.value.localVersion && value.localEnabled == config.value.localEnabled &&
-                            value.modelId == config.value.modelId && labs.isReadAloudVersionCurrent(value.localVersion),
-                    ) { "Voice options changed. Open them again." }
-                    if (value.localEnabled) {
-                        labs.updateReadAloudConfig(value.options, value.localVersion).getOrThrow()
-                    } else {
-                        labs.saveSystemReadAloudConfig(value.options, value.localVersion, prefs).getOrThrow()
+                    check(selectionReady.value && value.savedOptions == config.value.options) {
+                        "Voice options changed. Open them again."
                     }
+                    prefs.replaceSystem(value.options, value.savedOptions)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -329,13 +389,9 @@ class ReadAloudController
         }
 
         fun preview(
-            roomId: Long,
+            roomId: Long?,
             value: ReadAloudSelection,
         ) = startPreview(roomId, value)
-
-        fun previewLocal(value: ReadAloudSelection) {
-            if (value.localEnabled && value.localReady) startPreview(null, value)
-        }
 
         fun stopPreview() = synchronized(lock) { if (_state.value.previewing) clear() }
 
@@ -345,9 +401,7 @@ class ReadAloudController
             value: ReadAloudSelection,
         ) = synchronized(lock) {
             if ((roomId != null && foreground.foregroundBufferId.value != roomId) || !audioEligible() ||
-                !selectionReady.value || value.profileVersion != config.value.profileVersion || value.localVersion != config.value.localVersion ||
-                value.localEnabled != config.value.localEnabled || value.modelId != config.value.modelId ||
-                !labs.isReadAloudVersionCurrent(value.localVersion) || (value.localEnabled && !value.localReady)
+                !selectionReady.value || value.savedOptions != config.value.options
             ) {
                 return@synchronized
             }
@@ -390,7 +444,7 @@ class ReadAloudController
         }
 
         @OptIn(DelicateCoroutinesApi::class)
-        private fun restart() {
+        private fun restart(selectedMessage: MessageEntity? = null) {
             val previous = work
             val token = ++generation
             previous?.cancel()
@@ -411,6 +465,15 @@ class ReadAloudController
                         activeRules = db.networkIdentityDao().byNetwork(checkNotNull(resolved).networkId)?.identityRules ?: IrcIdentityRules()
                         preferencesReady.await()
                         selectionReady.first { it }
+                        if (selectedMessage != null && !selectMessage(selectedMessage, token)) {
+                            synchronized(lock) {
+                                if (current(token, id)) {
+                                    work = null
+                                    setStatus(token, ReadAloudStatus.WAITING)
+                                }
+                            }
+                            return@launch
+                        }
                         val selection = config.value
                         synthesizer.loadVoices(selection)
                         while (current(token, id)) {
@@ -518,7 +581,7 @@ class ReadAloudController
         ): Boolean =
             synchronized(lock) {
                 generation == token && _state.value.roomId == roomId && (roomId == null || foreground.foregroundBufferId.value == roomId) &&
-                    audioEligible() && selectionReady.value && labs.isReadAloudVersionCurrent(config.value.localVersion)
+                    audioEligible() && selectionReady.value
             }
 
         private fun setStatus(

@@ -22,14 +22,13 @@ fail() {
 [[ "$release_tag" =~ ^[A-Za-z0-9._-]+$ ]] || fail "invalid release tag"
 [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail "invalid repository slug"
 
-for required in awk find git grep gzip install mkdir mktemp mv python3 rm sha256sum tar; do
+for required in awk find git grep gzip install mkdir mktemp mv rm sha256sum tar; do
   command -v "$required" >/dev/null || fail "missing required command: $required"
 done
 
 root_inputs=(
   ai-whisper
   ai-text
-  ai-tts
   third_party/ai
   settings.gradle.kts
   build.gradle.kts
@@ -50,9 +49,7 @@ git -C "$root_dir" diff --cached --quiet HEAD -- "${root_inputs[@]}" || fail "AI
 source "$lock_file"
 for required in WHISPER_REPOSITORY WHISPER_COMMIT WHISPER_LICENSE WHISPER_LICENSE_FILE \
   ANDROID_NDK_VERSION CMAKE_VERSION LLAMA_REPOSITORY LLAMA_COMMIT LLAMA_LICENSE LLAMA_LICENSE_FILE \
-  TEXT_MODEL_REPOSITORY TEXT_MODEL_REVISION TEXT_MODEL_FILE TEXT_MODEL_BYTES TEXT_MODEL_SHA256 TEXT_MODEL_LICENSE \
-  SHERPA_ONNX_REPOSITORY SHERPA_ONNX_COMMIT SHERPA_ONNX_LICENSE ONNXRUNTIME_REPOSITORY ONNXRUNTIME_COMMIT ONNXRUNTIME_LICENSE \
-  TTS_SOURCE_LOCK TTS_LICENSE_LOCK TTS_MODEL_REPOSITORY TTS_MODEL_REVISION TTS_MODEL_LICENSE TTS_PHONEMIZER_LICENSE; do
+  TEXT_MODEL_REPOSITORY TEXT_MODEL_REVISION TEXT_MODEL_FILE TEXT_MODEL_BYTES TEXT_MODEL_SHA256 TEXT_MODEL_LICENSE; do
   [[ -n "${!required:-}" ]] || fail "source.lock does not define $required"
 done
 [[ "$WHISPER_COMMIT" =~ ^[0-9a-f]{40}$ ]] || fail "source.lock contains an invalid commit"
@@ -61,11 +58,6 @@ done
   fail "unexpected whisper.cpp license path"
 [[ "$LLAMA_COMMIT" =~ ^[0-9a-f]{40}$ && "$LLAMA_LICENSE" == MIT ]] || fail "invalid llama.cpp pin"
 [[ "$LLAMA_LICENSE_FILE" == third_party/llama.cpp/source/LICENSE ]] || fail "unexpected llama.cpp license path"
-[[ "$SHERPA_ONNX_COMMIT" =~ ^[0-9a-f]{40}$ && "$SHERPA_ONNX_LICENSE" == Apache-2.0 ]] || fail "invalid Sherpa source/license pin"
-[[ "$ONNXRUNTIME_COMMIT" =~ ^[0-9a-f]{40}$ && "$ONNXRUNTIME_LICENSE" == MIT ]] || fail "invalid ONNX Runtime source/license pin"
-[[ "$TTS_PHONEMIZER_LICENSE" == GPL-3.0-or-later ]] || fail "eSpeak GPL license must be retained"
-python3 "$root_dir/third_party/ai/prepare-tts-sources.py"
-
 verify_source() {
   local name="$1" relative="$2" expected_commit="$3" expected_repository="$4" license_file="$5"
   local source_dir="$root_dir/$relative" actual_commit parent_commit configured_repository first_line
@@ -123,11 +115,10 @@ copy_tracked() {
 }
 
 copy_tracked "$root_dir" "$package_dir" \
-  ai-whisper ai-text ai-tts third_party/ai THIRD_PARTY_NOTICES.md docs/fdroid.md \
+  ai-whisper ai-text third_party/ai THIRD_PARTY_NOTICES.md docs/fdroid.md \
   settings.gradle.kts build.gradle.kts app/build.gradle.kts gradle/libs.versions.toml gradle.properties flake.nix flake.lock
 copy_tracked "$root_dir/third_party/whisper.cpp/source" "$package_dir/third_party/whisper.cpp/source" .
 copy_tracked "$root_dir/third_party/llama.cpp/source" "$package_dir/third_party/llama.cpp/source" .
-python3 "$root_dir/third_party/ai/package-tts-sources.py" "$package_dir/third_party/ai/tts/source"
 
 whisper_license_sha256="$(sha256sum "$root_dir/$WHISPER_LICENSE_FILE" | awk '{ print $1 }')"
 llama_license_sha256="$(sha256sum "$root_dir/$LLAMA_LICENSE_FILE" | awk '{ print $1 }')"
@@ -149,21 +140,6 @@ text-model-sha256=${TEXT_MODEL_SHA256}
 text-model-license=${TEXT_MODEL_LICENSE}
 android-ndk-version=${ANDROID_NDK_VERSION}
 cmake-version=${CMAKE_VERSION}
-sherpa-repository=${SHERPA_ONNX_REPOSITORY}
-sherpa-commit=${SHERPA_ONNX_COMMIT}
-sherpa-license=${SHERPA_ONNX_LICENSE}
-onnxruntime-repository=${ONNXRUNTIME_REPOSITORY}
-onnxruntime-commit=${ONNXRUNTIME_COMMIT}
-onnxruntime-license=${ONNXRUNTIME_LICENSE}
-tts-source-lock=${TTS_SOURCE_LOCK}
-tts-source-lock-sha256=$(sha256sum "$root_dir/$TTS_SOURCE_LOCK" | awk '{ print $1 }')
-tts-license-lock=${TTS_LICENSE_LOCK}
-tts-license-lock-sha256=$(sha256sum "$root_dir/$TTS_LICENSE_LOCK" | awk '{ print $1 }')
-tts-enabled-source-archives=24
-tts-phonemizer-license=${TTS_PHONEMIZER_LICENSE}
-tts-model-repository=${TTS_MODEL_REPOSITORY}
-tts-model-revision=${TTS_MODEL_REVISION}
-tts-model-license=${TTS_MODEL_LICENSE}
 model-weights=excluded
 EOF
 
@@ -200,27 +176,6 @@ done < "$work_dir/archive-entries.txt"
 for required_entry in \
   "$package_name/SOURCE-MANIFEST.txt" \
   "$package_name/third_party/ai/source.lock" \
-  "$package_name/third_party/ai/tts-sources.lock.json" \
-  "$package_name/third_party/ai/tts-licenses.lock.json" \
-  "$package_name/third_party/ai/build-tts.py" \
-  "$package_name/third_party/ai/prepare-tts-sources.py" \
-  "$package_name/third_party/ai/package-tts-sources.py" \
-  "$package_name/third_party/ai/verify-tts-native.py" \
-  "$package_name/third_party/ai/smoke-tts.py" \
-  "$package_name/third_party/ai/tts-host/CMakeLists.txt" \
-  "$package_name/third_party/ai/tts-host/kokoro-smoke.cc" \
-  "$package_name/third_party/ai/tts-host/KokoroJniSmoke.java" \
-  "$package_name/third_party/ai/patches/ort-android-soname.cmake" \
-  "$package_name/third_party/ai/patches/sherpa-tts-jni-errors.patch" \
-  "$package_name/third_party/ai/licenses/BSL-1.0.txt" \
-  "$package_name/third_party/ai/tts/source/top/sherpa-onnx/LICENSE" \
-  "$package_name/third_party/ai/tts/source/top/sherpa-onnx/sherpa-onnx/kotlin-api/Tts.kt" \
-  "$package_name/third_party/ai/tts/source/top/onnxruntime/LICENSE" \
-  "$package_name/third_party/ai/tts/source/sherpa/espeak_ng/COPYING" \
-  "$package_name/third_party/ai/tts/source/sherpa/simple-sentencepiece/ssentencepiece/csrc/darts.h" \
-  "$package_name/ai-tts/build.gradle.kts" \
-  "$package_name/ai-tts/consumer-rules.pro" \
-  "$package_name/ai-tts/src/main/kotlin/io/github/trevarj/motd/ai/tts/KokoroEngine.kt" \
   "$package_name/third_party/whisper.cpp/source/LICENSE" \
   "$package_name/third_party/whisper.cpp/source/include/whisper.h" \
   "$package_name/ai-whisper/build.gradle.kts" \
@@ -250,26 +205,24 @@ cat >> "$notice_path" <<EOF
 
 ## Release-specific AI source provenance: ${release_tag}
 
-- Pinned Whisper, llama/GGML, Sherpa, ONNX Runtime and enabled dependency sources: [${archive_name}](${source_url})
+- Pinned Whisper and llama/GGML sources: [${archive_name}](${source_url})
 - AI source archive SHA-256: \`${source_sha256}\`
 
-The archive contains every enabled runtime source tree, GPL-3.0-or-later eSpeak,
-Apache-2.0/MIT/BSD/Boost/MPL/Unicode and retained vendor license grants, the
-JNI/Kotlin/CMake/Gradle wrappers, checked source archive and license locks, and
-the pinned source-only rebuild scripts. Optional model/test/binary fixtures are
-excluded; no imported/downloaded model weights or precompiled runtime/tool fallback
-are redistributed. Model retraining or regeneration is not claimed.
+The archive contains the enabled runtime sources and retained upstream/vendor
+license grants, JNI/Kotlin/CMake/Gradle wrappers and pinned source-only rebuild
+settings. Optional model/test/binary fixtures are excluded; no imported/downloaded
+model weights or precompiled runtime fallback are redistributed.
+Model retraining or regeneration is not claimed.
 EOF
 
 cat >> "$compliance_path" <<EOF
 
-The optional local AI runtimes use source-built Whisper, llama/GGML, Sherpa and
-ONNX Runtime. Their [source archive](${source_url}) (SHA-256: \`${source_sha256}\`)
-includes every enabled dependency source and upstream license, including statically
-linked GPL-3.0-or-later eSpeak, wrappers and pinned build settings. It contains no
-model weights; Qwen and Kokoro artifact identities and Apache-2.0 provenance are
-recorded separately. Downloaded model retraining/regeneration is not part of this
-native-runtime corresponding-source claim.
+The optional local AI runtimes use source-built Whisper and llama/GGML.
+Their [source archive](${source_url}) (SHA-256: \`${source_sha256}\`) includes
+enabled sources and upstream licenses, wrappers and pinned build settings.
+It contains no model weights; the Qwen artifact identity and Apache-2.0 provenance
+are recorded separately. Downloaded model retraining/regeneration is not part of
+this native-runtime corresponding-source claim.
 EOF
 
 checksums_tmp="$work_dir/SHA256SUMS"

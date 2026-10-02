@@ -206,8 +206,8 @@ internal fun Modifier.chatBubbleWidth(): Modifier =
     }
 
 /**
- * Tap + long-press shared by every message density. Indication follows [onClick]: a real tap target
- * (the global feed jump) ripples; an inert chat row keeps none, since its tap does nothing.
+ * Tap + long-press shared by every message density. A feed jump or active-reader selection ripples;
+ * a row without a tap action keeps no indication.
  */
 @Composable
 internal fun Modifier.messageRowClicks(
@@ -295,8 +295,7 @@ fun MessageBubble(
     knownNicks: Set<String> = emptySet(),
     identityRules: IrcIdentityRules = IrcIdentityRules(),
     onLongPress: () -> Unit = {},
-    // Plain tap; null (chat) = inert and no press feedback, non-null (global feed) = a jump target
-    // that ripples. Label it so TalkBack names the destination.
+    // Null keeps plain taps inert; feed jumps and active-reader selections supply accessible labels.
     onClick: (() -> Unit)? = null,
     onClickLabel: String? = null,
     onLongPressLabel: String? = null,

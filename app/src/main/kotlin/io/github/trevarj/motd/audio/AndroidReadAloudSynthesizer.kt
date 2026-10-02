@@ -37,7 +37,6 @@ class AndroidReadAloudSynthesizer
 
         override suspend fun loadVoices(config: ReadAloudSelection): Unit =
             withContext(Dispatchers.Main.immediate) {
-                check(!config.localEnabled) { "Local speech cannot use installed speech." }
                 lock.withLock {
                     _voices.value = _voices.value.copy(loading = true, error = null)
                     try {
@@ -96,7 +95,6 @@ class AndroidReadAloudSynthesizer
             config: ReadAloudSelection,
             output: File,
         ) = withContext(Dispatchers.Main.immediate) {
-            check(!config.localEnabled) { "Local speech cannot use installed speech." }
             lock.withLock {
                 val active = prepare(config.options.normalized())
                 check(text.length <= TextToSpeech.getMaxSpeechInputLength()) { "This message is too long for the installed speech engine." }

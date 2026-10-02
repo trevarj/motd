@@ -91,6 +91,7 @@ import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.CachedAudioMetadata
 import io.github.trevarj.motd.audio.displayTextForAudioMessage
 import io.github.trevarj.motd.audio.extensionlessAudioCandidates
+import io.github.trevarj.motd.audio.readAloudBody
 import io.github.trevarj.motd.audio.toAttachment
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.DccDirection
@@ -308,6 +309,7 @@ fun MessageList(
     modifier: Modifier = Modifier,
     readMarkerLabel: String? = null,
     onLongPress: (MessageEntity) -> Unit,
+    onReadMessage: ((MessageEntity) -> Unit)? = null,
     onReply: (MessageEntity) -> Unit,
     swipeToReplyEnabled: Boolean = true,
     // React to a message; the whole entity is passed so a still-pending own row (msgid == null) is
@@ -679,6 +681,7 @@ fun MessageList(
                         knownNicks = knownNicks,
                         identityRules = identityRules,
                         onLongPress = onLongPress,
+                        onReadMessage = onReadMessage,
                         onReply = onReply,
                         swipeToReplyEnabled = swipeToReplyEnabled,
                         onReact = onReact,
@@ -1535,6 +1538,7 @@ private fun MessageRow(
     knownNicks: Set<String>,
     identityRules: IrcIdentityRules,
     onLongPress: (MessageEntity) -> Unit,
+    onReadMessage: ((MessageEntity) -> Unit)?,
     onReply: (MessageEntity) -> Unit,
     swipeToReplyEnabled: Boolean,
     onReact: (MessageEntity, String) -> Unit,
@@ -1775,6 +1779,17 @@ private fun MessageRow(
         } else {
             null
         }
+    val readMessage =
+        if (onReadMessage != null &&
+            remember(msg.kind, msg.text) {
+                (msg.kind == MessageKind.PRIVMSG || msg.kind == MessageKind.NOTICE || msg.kind == MessageKind.ACTION) &&
+                    readAloudBody(msg.text).isNotBlank()
+            }
+        ) {
+            onReadMessage
+        } else {
+            null
+        }
 
     // Gap sits on the older-neighbor side (before the bubble) so it separates this row from the
     // previous burst; day separators and read markers live on the newer side (after the bubble), so
@@ -1843,6 +1858,8 @@ private fun MessageRow(
                         knownNicks = knownNicks,
                         identityRules = identityRules,
                         onLongPress = { onLongPress(msg) },
+                        onClick = readMessage?.let { read -> { read(msg) } },
+                        onClickLabel = if (readMessage != null) stringResource(R.string.read_aloud_message) else null,
                         // Pass the entity, not just msgid: the VM handles pending reactions uniformly.
                         onReact = { emoji -> onReact(msg, emoji) },
                         onImageClick = onImageClick,
@@ -1935,6 +1952,8 @@ private fun MessageRow(
                 onInspectCache = onAudioCacheInspect,
                 onSeek = onAudioSeek,
                 onLongPress = { onLongPress(msg) },
+                onClick = if (standaloneAudio) readMessage?.let { read -> { read(msg) } } else null,
+                onClickLabel = if (standaloneAudio && readMessage != null) stringResource(R.string.read_aloud_message) else null,
                 reactions = if (standaloneAudio) reactions else emptyList(),
                 onReact = { emoji -> onReact(msg, emoji) },
             )

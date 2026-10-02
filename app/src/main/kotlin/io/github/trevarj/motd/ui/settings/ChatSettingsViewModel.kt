@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.audio.AudioCacheStore
+import io.github.trevarj.motd.audio.ReadAloudController
+import io.github.trevarj.motd.audio.ReadAloudSelection
 import io.github.trevarj.motd.audio.VoiceConfig
 import io.github.trevarj.motd.audio.VoicePrefs
 import io.github.trevarj.motd.audio.VoiceRecordingQuality
@@ -60,6 +62,7 @@ class ChatSettingsViewModel
         private val audioCacheStore: AudioCacheStore,
         private val avatarPrefs: AvatarPrefs,
         private val avatarController: AvatarController,
+        private val reader: ReadAloudController,
     ) : ViewModel() {
         private val _audioCacheClearEvents = MutableSharedFlow<AudioCacheClearEvent>()
         val audioCacheClearEvents = _audioCacheClearEvents.asSharedFlow()
@@ -73,6 +76,18 @@ class ChatSettingsViewModel
                 avatarPrefs.config,
                 ::ChatSettingsUiState,
             ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatSettingsUiState())
+
+        val readAloudConfig = reader.config
+        val readAloudState = reader.state
+        val readAloudVoices = reader.voices
+
+        fun openReadAloudOptions() = reader.openVoiceOptions()
+
+        fun saveReadAloudOptions(value: ReadAloudSelection) = reader.saveVoiceOptions(value)
+
+        fun previewReadAloud(value: ReadAloudSelection) = reader.preview(null, value)
+
+        fun stopReadAloudPreview() = reader.stopPreview()
 
         fun setPresenceMode(value: PresenceMode) = launch { settingsRepository.setPresenceMode(value) }
 
