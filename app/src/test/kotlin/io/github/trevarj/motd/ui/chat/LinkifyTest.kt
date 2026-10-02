@@ -30,10 +30,19 @@ class LinkifyTest {
     @Test fun resolves_image_and_preview_link_in_one_result() {
         assertEquals(
             MessageUrls(
-                imageUrl = "https://example.com/photo.webp",
+                mediaUrls =
+                    listOf(
+                        "https://example.com/photo.webp",
+                        "https://example.com/second.PNG?size=large#photo",
+                        "https://example.com/photo.webp",
+                    ),
                 linkUrl = "https://example.com/article",
             ),
-            messageUrls("read https://example.com/article then https://example.com/photo.webp"),
+            messageUrls(
+                "read https://example.com/article then https://example.com/photo.webp, " +
+                    "`https://example.com/code.png` https://example.com/second.PNG?size=large#photo " +
+                    "https://example.com/photo.webp https://example.com/another-article",
+            ),
         )
         assertEquals(MessageUrls.Empty, messageUrls("ordinary IRC line"))
     }
@@ -41,10 +50,13 @@ class LinkifyTest {
     @Test fun resolves_direct_videos_as_inline_media() {
         assertEquals(
             MessageUrls(
-                imageUrl = "https://cdn.example.com/clip.webm?quality=high",
+                mediaUrls = listOf("https://cdn.example.com/clip.webm?quality=high", "https://cdn.example.com/photo.jpg"),
                 linkUrl = "https://example.com/article",
             ),
-            messageUrls("watch https://cdn.example.com/clip.webm?quality=high then https://example.com/article"),
+            messageUrls(
+                "watch https://cdn.example.com/clip.webm?quality=high then " +
+                    "https://example.com/article and https://cdn.example.com/photo.jpg",
+            ),
         )
         assertTrue(isVideoUrl("https://cdn.example.com/clip.MP4#start"))
         assertFalse(isVideoUrl("https://cdn.example.com/clip.mp4.txt"))

@@ -229,17 +229,57 @@ class RemoteMediaTimelineTest {
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     @Config(qualifiers = "w411dp-h891dp")
+    fun automaticImagesAfterArticleLoadBothAndOpenTheirOwnViewer() {
+        RoutedInlineMediaFixture().use { fixture ->
+            fixture.server.enqueue(imageResponse())
+            fixture.server.enqueue(imageResponse())
+            val prefix = "http://media.invalid/${UUID.randomUUID()}"
+            val images = listOf("$prefix/one.png", "$prefix/two.webp")
+            val openedImages = mutableListOf<String>()
+            render(
+                automatic = true,
+                networkId = fixture.networkId,
+                networkMediaHttp = fixture.http,
+                text = "$LINK/article ${images.joinToString(" ")}",
+                loadPreview = { _, _ -> null },
+                onImageClick = openedImages::add,
+            )
+
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithTag("inline_media_loaded", useUnmergedTree = true).fetchSemanticsNodes().size == 2
+            }
+            val loaded = compose.onAllNodesWithTag("inline_media_loaded", useUnmergedTree = true)
+            images.indices.forEach { index ->
+                loaded[index].assertIsDisplayed().performTouchInput { click() }
+            }
+            compose.runOnIdle {
+                assertEquals(images, openedImages)
+                assertEquals(2, fixture.server.requestCount)
+                assertEquals(listOf(fixture.networkId, fixture.networkId), fixture.selectedNetworks.toList())
+            }
+            val requestedUrls = List(2) { checkNotNull(fixture.server.takeRequest().path) }
+            assertEquals(images.toSet(), requestedUrls.toSet())
+        }
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Config(qualifiers = "w411dp-h891dp")
     fun mediaOriginPreservesTextAndPrivacyAcrossLayouts() {
         RoutedInlineMediaFixture().use { fixture ->
             fixture.server.enqueue(MockResponse().setResponseCode(503))
+            fixture.server.enqueue(imageResponse())
+            fixture.server.enqueue(imageResponse())
             val url = "http://media.invalid/a-long-attachment-name-${UUID.randomUUID()}.png?token=keep%2Fexact#original"
-            val text = "Before the attachment $url after the attachment"
+            val second = "http://media.invalid/second-${UUID.randomUUID()}.webp"
+            val images = listOf(url, second)
+            val text = "Before the attachment $url then $second after the attachment"
             val density = mutableStateOf(LayoutDensity.COMFORTABLE)
             val kind = mutableStateOf(MessageKind.PRIVMSG)
             val showImages = mutableStateOf(true)
             val opened = mutableListOf<String>()
+            val openedImages = mutableListOf<String>()
             val longPressed = mutableListOf<MessageEntity>()
-            var linkLoads = 0
             render(
                 automatic = false,
                 networkId = fixture.networkId,
@@ -249,60 +289,84 @@ class RemoteMediaTimelineTest {
                 layoutDensity = { density.value },
                 messageKind = { kind.value },
                 onLongPress = longPressed::add,
+                onImageClick = openedImages::add,
                 uriHandler =
                     object : UriHandler {
                         override fun openUri(uri: String) {
                             opened.add(uri)
                         }
                     },
-                loadPreview = { _, _ ->
-                    linkLoads++
-                    null
-                },
+                loadPreview = { _, _ -> null },
             )
 
             for (layout in LayoutDensity.entries) {
-                for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION)) {
+                for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)) {
                     compose.runOnIdle {
                         density.value = layout
                         kind.value = messageKind
                         showImages.value = true
                     }
-                    awaitTag("inline_media_awaiting")
-                    val media = compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).assertIsDisplayed()
-                    val caption = compose.onNodeWithTag("media_origin_caption", useUnmergedTree = true)
-                    caption.assertIsDisplayed().assertTextContains("media.invalid")
+                    awaitTag("inline_media_awaiting", count = 2)
+                    val media = compose.onAllNodesWithTag("inline_media_awaiting", useUnmergedTree = true)
+                    val captions = compose.onAllNodesWithTag("media_origin_caption", useUnmergedTree = true)
                     val prose = compose.onNodeWithText("Before the attachment", substring = true, useUnmergedTree = true)
-                    prose.assertIsDisplayed().assertTextContains("after the attachment", substring = true)
-                    compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertDoesNotExist()
-                    assertTrue(prose.fetchSemanticsNode().boundsInRoot.bottom <= media.fetchSemanticsNode().boundsInRoot.top)
-                    assertTrue(media.fetchSemanticsNode().boundsInRoot.bottom <= caption.fetchSemanticsNode().boundsInRoot.top)
+                    prose
+                        .assertIsDisplayed()
+                        .assertTextContains("after the attachment", substring = true)
+                    for (index in images.indices) {
+                        compose.onNodeWithText(images[index], substring = true, useUnmergedTree = true).assertDoesNotExist()
+                        val preview = media[index].assertIsDisplayed()
+                        val caption = captions[index].assertIsDisplayed().assertTextContains("media.invalid")
+                        val preceding = if (index == 0) prose else captions[index - 1]
+                        assertTrue(preceding.fetchSemanticsNode().boundsInRoot.bottom <= preview.fetchSemanticsNode().boundsInRoot.top)
+                        assertTrue(preview.fetchSemanticsNode().boundsInRoot.bottom <= caption.fetchSemanticsNode().boundsInRoot.top)
 
-                    caption.performTouchInput { click() }
-                    compose.runOnIdle {
-                        assertEquals(url, opened.last())
-                        assertEquals(0, fixture.server.requestCount)
-                        assertEquals(emptyList<Long>(), fixture.selectedNetworks.toList())
-                        assertEquals(0, linkLoads)
+                        caption.performTouchInput { click() }
+                        compose.runOnIdle {
+                            assertEquals(images[index], opened.last())
+                            assertEquals(0, fixture.server.requestCount)
+                            assertEquals(emptyList<Long>(), fixture.selectedNetworks.toList())
+                            assertEquals(emptyList<String>(), openedImages)
+                        }
+                        preview.assertIsDisplayed()
                     }
-                    media.assertIsDisplayed()
                     prose.performTouchInput { longClick() }
                     compose.runOnIdle { assertEquals(message(text).copy(kind = messageKind), longPressed.last()) }
 
                     compose.runOnIdle { showImages.value = false }
-                    compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertIsDisplayed()
-                    caption.assertDoesNotExist()
-                    media.assertDoesNotExist()
+                    for (image in images) {
+                        compose.onNodeWithText(image, substring = true, useUnmergedTree = true).assertIsDisplayed()
+                    }
+                    assertTrue(captions.fetchSemanticsNodes().isEmpty())
+                    assertTrue(media.fetchSemanticsNodes().isEmpty())
                 }
             }
 
             compose.runOnIdle { showImages.value = true }
-            awaitTag("inline_media_awaiting")
-            compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).performTouchInput { click() }
+            awaitTag("inline_media_awaiting", count = 2)
+            compose.onAllNodesWithTag("inline_media_awaiting", useUnmergedTree = true)[0].performTouchInput { click() }
             awaitTag("inline_media_failed")
-            compose.onNodeWithTag("media_origin_caption", useUnmergedTree = true).assertIsDisplayed().assertTextContains("media.invalid")
-            compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).assertIsDisplayed()
             assertEquals(1, fixture.server.requestCount)
+            assertEquals(url, fixture.server.takeRequest().path)
+
+            compose.onNodeWithTag("inline_media_failed", useUnmergedTree = true).performTouchInput { click() }
+            awaitTag("inline_media_loaded")
+            compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).assertIsDisplayed()
+            assertEquals(2, fixture.server.requestCount)
+            assertEquals(url, fixture.server.takeRequest().path)
+            compose.onNodeWithTag("inline_media_loaded", useUnmergedTree = true).performTouchInput { click() }
+            compose.runOnIdle { assertEquals(listOf(url), openedImages) }
+
+            compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).performTouchInput { click() }
+            awaitTag("inline_media_loaded", count = 2)
+            compose.onAllNodesWithTag("inline_media_loaded", useUnmergedTree = true)[1].performTouchInput { click() }
+            compose.runOnIdle {
+                assertEquals(images, openedImages)
+                assertEquals(3, fixture.server.requestCount)
+                assertEquals(List(3) { fixture.networkId }, fixture.selectedNetworks.toList())
+            }
+            assertEquals(second, fixture.server.takeRequest().path)
         }
     }
 
@@ -447,9 +511,12 @@ class RemoteMediaTimelineTest {
         }
     }
 
-    private fun awaitTag(tag: String) {
+    private fun awaitTag(
+        tag: String,
+        count: Int = 1,
+    ) {
         compose.waitUntil(10_000) {
-            compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().size >= count
         }
     }
 

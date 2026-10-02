@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,7 +78,7 @@ internal fun CompactMessageRow(
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
     onReplyClick: (() -> Unit)? = null,
-    imageUrl: String? = null,
+    mediaUrls: List<String> = emptyList(),
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     linkPreviewResolved: Boolean = false,
@@ -124,7 +125,7 @@ internal fun CompactMessageRow(
     val line =
         remember(
             displaySender,
-            imageUrl,
+            mediaUrls,
             text,
             kind,
             isBot,
@@ -155,7 +156,7 @@ internal fun CompactMessageRow(
                 codeColor,
                 nickFontSize = nickFontSize,
                 containerColor = paintedRow,
-            ).withoutMediaPreviewUrl(imageUrl)
+            ).withoutMediaPreviewUrls(mediaUrls)
         }
 
     Column(
@@ -204,21 +205,23 @@ internal fun CompactMessageRow(
             }
         }
 
-        imageUrl?.let { url ->
-            InlineMediaPreview(
-                url = url,
-                networkId = networkId,
-                onImageClick = onImageClick,
-                onLongPress = onLongPress,
-                modifier =
-                    Modifier
-                        .padding(top = 2.dp)
-                        .widthIn(max = 280.dp)
-                        .heightIn(max = 200.dp)
-                        .aspectRatio(4f / 3f)
-                        .clip(RoundedCornerShape(8.dp)),
-            )
-            MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
+        mediaUrls.forEachIndexed { index, url ->
+            key(index, url) {
+                InlineMediaPreview(
+                    url = url,
+                    networkId = networkId,
+                    onImageClick = onImageClick,
+                    onLongPress = onLongPress,
+                    modifier =
+                        Modifier
+                            .padding(top = 2.dp)
+                            .widthIn(max = 280.dp)
+                            .heightIn(max = 200.dp)
+                            .aspectRatio(4f / 3f)
+                            .clip(RoundedCornerShape(8.dp)),
+                )
+                MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
+            }
         }
 
         if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {

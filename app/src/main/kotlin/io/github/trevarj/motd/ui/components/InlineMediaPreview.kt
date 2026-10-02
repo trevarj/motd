@@ -108,12 +108,13 @@ internal fun InlineMediaPreview(
     onLongPress: () -> Unit,
 ) {
     val automatic = LocalAutomaticRemoteMedia.current
-    val consent = LocalInlineMediaConsent.current
-    val networkAllowed = automatic || consent.granted
+    var consent by rememberSaveable(url, networkId) { mutableStateOf(false) }
+    val networkAllowed = automatic || consent
+    val requestNetwork = { consent = true }
     if (isVideoUrl(url)) {
-        InlineVideoPreview(url, networkId, networkAllowed, consent.grant, modifier, onLongPress)
+        InlineVideoPreview(url, networkId, networkAllowed, requestNetwork, modifier, onLongPress)
     } else {
-        InlineImagePreview(url, networkId, networkAllowed, consent.grant, modifier, onImageClick, onLongPress)
+        InlineImagePreview(url, networkId, networkAllowed, requestNetwork, modifier, onImageClick, onLongPress)
     }
 }
 

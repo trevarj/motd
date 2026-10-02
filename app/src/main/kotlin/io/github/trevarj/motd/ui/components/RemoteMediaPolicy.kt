@@ -96,7 +96,6 @@ internal data class RemoteMediaConsent(
     val grant: () -> Unit = {},
 )
 
-internal val LocalInlineMediaConsent = staticCompositionLocalOf { RemoteMediaConsent() }
 internal val LocalLinkMediaConsent = staticCompositionLocalOf { RemoteMediaConsent() }
 
 internal fun ImageRequest.Builder.routedRemoteMediaData(

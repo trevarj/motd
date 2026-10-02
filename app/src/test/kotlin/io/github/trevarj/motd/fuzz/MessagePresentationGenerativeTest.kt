@@ -57,7 +57,7 @@ class MessagePresentationGenerativeTest {
                 assertTrue("URL order changed for $url", next >= previous)
                 previous = next
             }
-            assertEquals(urls.firstOrNull { isImageUrl(it) || isVideoUrl(it) }, classified.imageUrl)
+            assertEquals(urls.filter { isImageUrl(it) || isVideoUrl(it) }, classified.mediaUrls)
             assertEquals(urls.firstOrNull { !isImageUrl(it) && !isVideoUrl(it) }, classified.linkUrl)
 
             body.spanStyles.forEach { range ->

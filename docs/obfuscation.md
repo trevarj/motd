@@ -209,10 +209,14 @@ Global avatar views use a shared avatar only when its source network is
 unambiguous; otherwise they retain the generated avatar rather than choosing
 an arbitrary route. Imported local avatar files remain local.
 
+When **Show images and videos** is enabled, every direct image or video URL in a
+message gets an inline preview in message order, including repeated URLs.
+
 Image/link-preview visibility and automatic-loading settings for metered and
 unmetered connections still apply. When automatic loading is disabled, the
-download icon requests that preview; it does not grant permission to bypass a
-proxy. Failed link previews can be retried after the route is repaired.
+download icon requests only that preview, not sibling images or link cards; it
+does not grant permission to bypass a proxy. Failed link previews can be retried
+after the route is repaired.
 Explicitly opening a link in a browser or another app does not give that app
 motd's embedded proxy. Audio **Save** uses Android's DownloadManager, not the
 routed image-save path.

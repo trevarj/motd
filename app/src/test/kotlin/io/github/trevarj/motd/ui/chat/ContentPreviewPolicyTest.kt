@@ -9,7 +9,7 @@ import org.junit.Test
 class ContentPreviewPolicyTest {
     private val urls =
         MessageUrls(
-            imageUrl = "https://example.test/image.png",
+            mediaUrls = listOf("https://example.test/image.png", "https://example.test/second.webp"),
             linkUrl = "https://example.test/article",
         )
 
@@ -17,11 +17,11 @@ class ContentPreviewPolicyTest {
     fun image_and_link_gates_form_an_independent_matrix() {
         assertEquals(urls, urls.gated(showImages = true, showLinkPreviews = true))
         assertEquals(
-            MessageUrls(imageUrl = null, linkUrl = urls.linkUrl),
+            MessageUrls(mediaUrls = emptyList(), linkUrl = urls.linkUrl),
             urls.gated(showImages = false, showLinkPreviews = true),
         )
         assertEquals(
-            MessageUrls(imageUrl = urls.imageUrl, linkUrl = null),
+            MessageUrls(mediaUrls = urls.mediaUrls, linkUrl = null),
             urls.gated(showImages = true, showLinkPreviews = false),
         )
         assertEquals(
@@ -37,7 +37,7 @@ class ContentPreviewPolicyTest {
                 url = urls.linkUrl!!,
                 title = "Article",
                 description = "Description",
-                imageUrl = urls.imageUrl,
+                imageUrl = urls.mediaUrls.first(),
                 siteName = "Example",
                 kind = LinkPreviewKind.TEXT,
             )

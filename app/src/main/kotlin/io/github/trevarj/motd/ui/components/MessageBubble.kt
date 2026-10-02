@@ -285,7 +285,7 @@ fun MessageBubble(
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
     onReplyClick: (() -> Unit)? = null,
-    imageUrl: String? = null,
+    mediaUrls: List<String> = emptyList(),
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     linkPreviewResolved: Boolean = false,
@@ -344,7 +344,7 @@ fun MessageBubble(
                 pending = pending,
                 reply = reply,
                 onReplyClick = onReplyClick,
-                imageUrl = imageUrl,
+                mediaUrls = mediaUrls,
                 linkPreview = linkPreview,
                 linkPreviewLoading = linkPreviewLoading,
                 linkPreviewResolved = linkPreviewResolved,
@@ -380,7 +380,7 @@ fun MessageBubble(
                 pending = pending,
                 reply = reply,
                 onReplyClick = onReplyClick,
-                imageUrl = imageUrl,
+                mediaUrls = mediaUrls,
                 linkPreview = linkPreview,
                 linkPreviewLoading = linkPreviewLoading,
                 linkPreviewResolved = linkPreviewResolved,
@@ -420,7 +420,7 @@ fun MessageBubble(
             pending = pending,
             reply = reply,
             onReplyClick = onReplyClick,
-            imageUrl = imageUrl,
+            mediaUrls = mediaUrls,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
             linkPreviewResolved = linkPreviewResolved,
@@ -462,7 +462,7 @@ fun MessageBubble(
             pending = pending,
             reply = reply,
             onReplyClick = onReplyClick,
-            imageUrl = imageUrl,
+            mediaUrls = mediaUrls,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
             linkPreviewResolved = linkPreviewResolved,
@@ -625,7 +625,7 @@ fun MessageBubble(
                 val body =
                     remember(
                         text,
-                        imageUrl,
+                        mediaUrls,
                         linkColor,
                         mentionsActive,
                         mentionColor,
@@ -643,7 +643,7 @@ fun MessageBubble(
                             codeColor,
                             bubbleColor,
                             textColor,
-                        ).withoutMediaPreviewUrl(imageUrl)
+                        ).withoutMediaPreviewUrls(mediaUrls)
                     }
                 if (body.isNotBlank()) {
                     Text(
@@ -653,25 +653,27 @@ fun MessageBubble(
                     )
                 }
             }
-            imageUrl?.let { url ->
-                InlineMediaPreview(
-                    url = url,
-                    networkId = networkId,
-                    onImageClick = onImageClick,
-                    onLongPress = onLongPress,
-                    // Reserve a 4:3 box until the bitmap lands so rows don't jump the reversed-list
-                    // anchor.
-                    modifier =
-                        Modifier
-                            .padding(vertical = 2.dp)
-                            .heightIn(max = 280.dp)
-                            .aspectRatio(4f / 3f)
-                            .clip(RoundedCornerShape(12.dp)),
-                )
-                MediaOriginCaption(
-                    url,
-                    color = textColor,
-                )
+            mediaUrls.forEachIndexed { index, url ->
+                key(index, url) {
+                    InlineMediaPreview(
+                        url = url,
+                        networkId = networkId,
+                        onImageClick = onImageClick,
+                        onLongPress = onLongPress,
+                        // Reserve a 4:3 box until the bitmap lands so rows don't jump the reversed-list
+                        // anchor.
+                        modifier =
+                            Modifier
+                                .padding(vertical = 2.dp)
+                                .heightIn(max = 280.dp)
+                                .aspectRatio(4f / 3f)
+                                .clip(RoundedCornerShape(12.dp)),
+                    )
+                    MediaOriginCaption(
+                        url,
+                        color = textColor,
+                    )
+                }
             }
 
             if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
@@ -752,7 +754,7 @@ private fun ComfortableActionBubble(
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
     onReplyClick: (() -> Unit)? = null,
-    imageUrl: String? = null,
+    mediaUrls: List<String> = emptyList(),
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     linkPreviewResolved: Boolean = false,
@@ -821,7 +823,7 @@ private fun ComfortableActionBubble(
             displaySender,
             isBot,
             text,
-            imageUrl,
+            mediaUrls,
             nameColor,
             bodyColor,
             linkColor,
@@ -849,7 +851,7 @@ private fun ComfortableActionBubble(
                 senderLink = senderLink,
                 includeStar = hideAvatar,
                 containerColor = rowColor,
-            ).withoutMediaPreviewUrl(imageUrl)
+            ).withoutMediaPreviewUrls(mediaUrls)
         }
 
     Row(
@@ -934,21 +936,23 @@ private fun ComfortableActionBubble(
                 }
             }
 
-            imageUrl?.let { url ->
-                InlineMediaPreview(
-                    url = url,
-                    networkId = networkId,
-                    onImageClick = onImageClick,
-                    onLongPress = onLongPress,
-                    modifier =
-                        Modifier
-                            .padding(top = 2.dp)
-                            .widthIn(max = 280.dp)
-                            .heightIn(max = 240.dp)
-                            .aspectRatio(4f / 3f)
-                            .clip(RoundedCornerShape(10.dp)),
-                )
-                MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
+            mediaUrls.forEachIndexed { index, url ->
+                key(index, url) {
+                    InlineMediaPreview(
+                        url = url,
+                        networkId = networkId,
+                        onImageClick = onImageClick,
+                        onLongPress = onLongPress,
+                        modifier =
+                            Modifier
+                                .padding(top = 2.dp)
+                                .widthIn(max = 280.dp)
+                                .heightIn(max = 240.dp)
+                                .aspectRatio(4f / 3f)
+                                .clip(RoundedCornerShape(10.dp)),
+                    )
+                    MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
+                }
             }
 
             if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
@@ -989,7 +993,7 @@ private fun ActionMessageRow(
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
     onReplyClick: (() -> Unit)? = null,
-    imageUrl: String? = null,
+    mediaUrls: List<String> = emptyList(),
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     linkPreviewResolved: Boolean = false,
@@ -1051,7 +1055,7 @@ private fun ActionMessageRow(
             displaySender,
             isBot,
             text,
-            imageUrl,
+            mediaUrls,
             accent,
             nameColor,
             bodyColor,
@@ -1078,7 +1082,7 @@ private fun ActionMessageRow(
                 codeColor = codeColor,
                 senderLink = senderLink,
                 containerColor = paintedRow,
-            ).withoutMediaPreviewUrl(imageUrl)
+            ).withoutMediaPreviewUrls(mediaUrls)
         }
 
     // The caller's modifier carries the stable per-message semantics. Keep the ACTION-specific
@@ -1138,21 +1142,23 @@ private fun ActionMessageRow(
                 }
             }
 
-            imageUrl?.let { url ->
-                InlineMediaPreview(
-                    url = url,
-                    networkId = networkId,
-                    onImageClick = onImageClick,
-                    onLongPress = onLongPress,
-                    modifier =
-                        Modifier
-                            .padding(top = 2.dp)
-                            .widthIn(max = 280.dp)
-                            .heightIn(max = 240.dp)
-                            .aspectRatio(4f / 3f)
-                            .clip(RoundedCornerShape(10.dp)),
-                )
-                MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
+            mediaUrls.forEachIndexed { index, url ->
+                key(index, url) {
+                    InlineMediaPreview(
+                        url = url,
+                        networkId = networkId,
+                        onImageClick = onImageClick,
+                        onLongPress = onLongPress,
+                        modifier =
+                            Modifier
+                                .padding(top = 2.dp)
+                                .widthIn(max = 280.dp)
+                                .heightIn(max = 240.dp)
+                                .aspectRatio(4f / 3f)
+                                .clip(RoundedCornerShape(10.dp)),
+                    )
+                    MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
+                }
             }
 
             if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
@@ -1323,7 +1329,7 @@ private fun TwoLineMessageRow(
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
     onReplyClick: (() -> Unit)? = null,
-    imageUrl: String? = null,
+    mediaUrls: List<String> = emptyList(),
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     linkPreviewResolved: Boolean = false,
@@ -1470,7 +1476,7 @@ private fun TwoLineMessageRow(
                 val richBody =
                     remember(
                         text,
-                        imageUrl,
+                        mediaUrls,
                         linkColor,
                         mentionsActive,
                         mentionColor,
@@ -1488,7 +1494,7 @@ private fun TwoLineMessageRow(
                             codeColor,
                             paintedRow,
                             bodyColor,
-                        ).withoutMediaPreviewUrl(imageUrl)
+                        ).withoutMediaPreviewUrls(mediaUrls)
                     }
                 if (richBody.isNotBlank()) {
                     Text(
@@ -1498,21 +1504,23 @@ private fun TwoLineMessageRow(
                     )
                 }
             }
-            imageUrl?.let { url ->
-                InlineMediaPreview(
-                    url = url,
-                    networkId = networkId,
-                    onImageClick = onImageClick,
-                    onLongPress = onLongPress,
-                    modifier =
-                        Modifier
-                            .padding(vertical = 2.dp)
-                            .widthIn(max = 280.dp)
-                            .heightIn(max = 240.dp)
-                            .aspectRatio(4f / 3f)
-                            .clip(RoundedCornerShape(10.dp)),
-                )
-                MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
+            mediaUrls.forEachIndexed { index, url ->
+                key(index, url) {
+                    InlineMediaPreview(
+                        url = url,
+                        networkId = networkId,
+                        onImageClick = onImageClick,
+                        onLongPress = onLongPress,
+                        modifier =
+                            Modifier
+                                .padding(vertical = 2.dp)
+                                .widthIn(max = 280.dp)
+                                .heightIn(max = 240.dp)
+                                .aspectRatio(4f / 3f)
+                                .clip(RoundedCornerShape(10.dp)),
+                    )
+                    MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
+                }
             }
 
             if (shouldShowLinkPreview(linkPreview, linkPreviewLoading, linkPreviewResolved)) {
@@ -1788,20 +1796,35 @@ internal fun FailedIcon() {
     )
 }
 
-/** Remove only the preview's linked occurrence; code, formatting and the stored message stay intact. */
-internal fun AnnotatedString.withoutMediaPreviewUrl(url: String?): AnnotatedString {
-    if (url == null) return this
-    val link = getLinkAnnotations(0, length).firstOrNull { (it.item as? LinkAnnotation.Url)?.url == url } ?: return this
-    if (mediaOriginLabel(url) == null) return this
-    var end = link.end
-    if (link.start > 0 && this[link.start - 1] == ' ') {
-        while (end < length && this[end] == ' ') end++
-    }
-    val remaining =
-        buildAnnotatedString {
-            append(this@withoutMediaPreviewUrl.subSequence(0, link.start))
-            append(this@withoutMediaPreviewUrl.subSequence(end, this@withoutMediaPreviewUrl.length))
+/** Remove rendered linked occurrences in one pass; code, formatting and the stored message stay intact. */
+internal fun AnnotatedString.withoutMediaPreviewUrls(urls: List<String>): AnnotatedString {
+    if (urls.isEmpty()) return this
+    val counts = mutableMapOf<String, Int>()
+    for (url in urls) {
+        val count = counts[url]
+        if (count != null) {
+            counts[url] = count + 1
+        } else if (mediaOriginLabel(url) != null) {
+            counts[url] = 1
         }
+    }
+    var builder: AnnotatedString.Builder? = null
+    var cursor = 0
+    for (link in getLinkAnnotations(0, length)) {
+        val url = (link.item as? LinkAnnotation.Url)?.url ?: continue
+        val count = counts[url] ?: continue
+        if (count == 0) continue
+        counts[url] = count - 1
+        val output = builder ?: AnnotatedString.Builder().also { builder = it }
+        output.append(subSequence(cursor, link.start))
+        cursor = link.end
+        if (link.start > 0 && this[link.start - 1] == ' ') {
+            while (cursor < length && this[cursor] == ' ') cursor++
+        }
+    }
+    val output = builder ?: return this
+    output.append(subSequence(cursor, length))
+    val remaining = output.toAnnotatedString()
     val first = remaining.indexOfFirst { !it.isWhitespace() }
     if (first < 0) return AnnotatedString("")
     return remaining.subSequence(first, remaining.indexOfLast { !it.isWhitespace() } + 1)
@@ -2342,7 +2365,7 @@ private fun MessageBubbleTwoLinePreview() {
                     showSender = true,
                     hasMention = true,
                     reply = ReplyPreviewData("bob", "Earlier message"),
-                    imageUrl = "https://example.com/image.png",
+                    mediaUrls = listOf("https://example.com/image.png"),
                     linkPreview =
                         LinkPreview(
                             url = "https://example.com",

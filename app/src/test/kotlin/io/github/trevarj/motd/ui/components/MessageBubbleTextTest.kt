@@ -161,17 +161,18 @@ class MessageBubbleTextTest {
     }
 
     @Test
-    fun media_caption_removes_only_its_link_and_preserves_code_styles_and_other_links() {
+    fun media_captions_remove_their_links_and_preserve_code_styles_and_other_links() {
         val media = "https://cdn.example/photo.png"
+        val second = "https://cdn.example/second.webp"
         val other = "https://other.example/page"
         val body =
             linkifiedBody(
-                text = "`$media` ${IRC_BOLD}caption$IRC_BOLD $media and $other",
+                text = "`$media` ${IRC_BOLD}caption$IRC_BOLD $media and $second then $other",
                 linkColor = Color.Blue,
                 codeColor = Color.White,
-            ).withoutMediaPreviewUrl(media)
+            ).withoutMediaPreviewUrls(listOf(media, second))
 
-        assertEquals("$media caption and $other", body.text)
+        assertEquals("$media caption and then $other", body.text)
         assertEquals(
             listOf(other),
             body.getLinkAnnotations(0, body.length).map { (it.item as LinkAnnotation.Url).url },
@@ -189,12 +190,14 @@ class MessageBubbleTextTest {
     }
 
     @Test
-    fun media_only_body_disappears_but_another_occurrence_stays_linked() {
+    fun media_only_body_disappears_and_repeated_previews_remove_each_linked_occurrence() {
         val media = "https://cdn.example/photo.png"
-        assertEquals("", linkifiedBody("  $media  ", Color.Blue).withoutMediaPreviewUrl(media).text)
-        val repeated = linkifiedBody("$media $media", Color.Blue).withoutMediaPreviewUrl(media)
-        assertEquals(media, repeated.text)
-        assertEquals(media, (repeated.getLinkAnnotations(0, repeated.length).single().item as LinkAnnotation.Url).url)
+        assertEquals("", linkifiedBody("  $media  ", Color.Blue).withoutMediaPreviewUrls(listOf(media)).text)
+        val repeated = linkifiedBody("$media $media", Color.Blue).withoutMediaPreviewUrls(listOf(media, media))
+        assertEquals("", repeated.text)
+        val singlePreview = linkifiedBody("$media $media", Color.Blue).withoutMediaPreviewUrls(listOf(media))
+        assertEquals(media, singlePreview.text)
+        assertEquals(media, (singlePreview.getLinkAnnotations(0, singlePreview.length).single().item as LinkAnnotation.Url).url)
     }
 
     @Test

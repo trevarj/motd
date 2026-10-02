@@ -3,10 +3,6 @@ package io.github.trevarj.motd.ui.components
 import android.content.Context
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -56,19 +52,12 @@ class InlineMediaPreviewTest {
         RoutedInlineMediaFixture().use { fixture ->
             fixture.server.enqueue(imageResponse())
             val url = "http://media.invalid/${UUID.randomUUID()}.png"
-            var grants = 0
             var opens = 0
             compose.setContent {
-                var consent by remember { mutableStateOf(false) }
                 MotdTheme(dynamicColor = false) {
                     CompositionLocalProvider(
                         LocalAutomaticRemoteMedia provides false,
                         LocalNetworkMediaHttp provides fixture.http,
-                        LocalInlineMediaConsent provides
-                            RemoteMediaConsent(consent) {
-                                grants++
-                                consent = true
-                            },
                     ) {
                         InlineMediaPreview(
                             url = url,
@@ -95,7 +84,6 @@ class InlineMediaPreviewTest {
             compose.onNodeWithTag("inline_media_loaded", useUnmergedTree = true).performTouchInput { click() }
 
             compose.runOnIdle {
-                assertEquals(1, grants)
                 assertEquals(1, opens)
                 assertEquals(1, fixture.server.requestCount)
                 assertEquals(listOf(fixture.networkId), fixture.selectedNetworks.toList())
@@ -110,12 +98,10 @@ class InlineMediaPreviewTest {
             fixture.server.enqueue(imageResponse())
             val url = "http://media.invalid/${UUID.randomUUID()}.png"
             compose.setContent {
-                var consent by remember { mutableStateOf(false) }
                 MotdTheme(dynamicColor = false) {
                     CompositionLocalProvider(
                         LocalAutomaticRemoteMedia provides false,
                         LocalNetworkMediaHttp provides fixture.http,
-                        LocalInlineMediaConsent provides RemoteMediaConsent(consent) { consent = true },
                     ) {
                         InlineMediaPreview(
                             url = url,

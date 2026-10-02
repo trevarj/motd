@@ -11,14 +11,14 @@ private val URL_REGEX = Regex("""https?://[^\s<>]+""")
 private val IMAGE_EXT = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
 private val VIDEO_EXT = setOf("mp4", "webm", "m4v", "mov")
 
-/** First inline-image, first previewable link, and audio links discovered in one URL-regex pass. */
+/** Ordered inline-media URLs, first previewable link, and audio links discovered in one URL-regex pass. */
 data class MessageUrls(
-    val imageUrl: String?,
+    val mediaUrls: List<String>,
     val linkUrl: String?,
     val audio: List<AudioAttachment> = emptyList(),
 ) {
     companion object {
-        val Empty = MessageUrls(imageUrl = null, linkUrl = null, audio = emptyList())
+        val Empty = MessageUrls(mediaUrls = emptyList(), linkUrl = null, audio = emptyList())
     }
 }
 
@@ -95,18 +95,15 @@ private fun urlExtension(url: String): String =
         .substringAfterLast('.', "")
         .lowercase()
 
-/** First inline image or direct video URL in [text], or null. */
-fun firstImageUrl(text: String): String? = messageUrls(text).imageUrl
-
 /** First non-inline-media URL in [text], or null (used for the link preview card). */
 fun firstLinkUrl(text: String): String? = messageUrls(text).linkUrl
 
 /**
- * Resolve both rich-content URLs in one pass. Chat rows call this off the UI thread once scrolling
- * is idle, avoiding two regex walks for every row first composed during a fling.
+ * Resolve rich-content URLs in one pass. Chat rows call this off the UI thread once scrolling
+ * is idle, avoiding separate regex walks for every row first composed during a fling.
  */
 fun messageUrls(text: String): MessageUrls {
-    var image: String? = null
+    val media = mutableListOf<String>()
     var link: String? = null
     // WebM can carry either format. An explicit video suffix belongs to the inline video preview,
     // rather than creating competing audio and video controls for the same attachment.
@@ -114,15 +111,14 @@ fun messageUrls(text: String): MessageUrls {
     val audioUrls = audio.asSequence().map { it.url }.toSet()
     for (url in extractUrls(text)) {
         if (isImageUrl(url) || isVideoUrl(url)) {
-            if (image == null) image = url
+            media.add(url)
         } else if (link == null && url !in audioUrls && !isImmediateAudioUrl(url)) {
             link = url
         }
-        if (image != null && link != null) break
     }
-    return if (image == null && link == null && audio.isEmpty()) {
+    return if (media.isEmpty() && link == null && audio.isEmpty()) {
         MessageUrls.Empty
     } else {
-        MessageUrls(image, link, audio)
+        MessageUrls(media, link, audio)
     }
 }

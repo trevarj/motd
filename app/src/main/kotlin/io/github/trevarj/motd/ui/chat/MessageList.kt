@@ -118,7 +118,6 @@ import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.DaySeparator
 import io.github.trevarj.motd.ui.components.HistoryGapDivider
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
-import io.github.trevarj.motd.ui.components.LocalInlineMediaConsent
 import io.github.trevarj.motd.ui.components.LocalLinkMediaConsent
 import io.github.trevarj.motd.ui.components.LocalLinkPreviewAwaiting
 import io.github.trevarj.motd.ui.components.LocalLinkPreviewFailed
@@ -1665,17 +1664,12 @@ private fun MessageRow(
         richUrls = parsed
     }
     val visibleUrls = richUrls?.gated(showImages, showLinkPreviews)
-    val imageUrl = visibleUrls?.imageUrl
+    val mediaUrls = visibleUrls?.mediaUrls.orEmpty()
     val linkUrl = visibleUrls?.linkUrl
     val immediateAudio = visibleUrls?.audio.orEmpty()
     val automaticRemoteMedia = LocalAutomaticRemoteMedia.current
-    var manualInlineMediaConsent by rememberSaveable(msg.id, imageUrl, networkId) { mutableStateOf(false) }
     var manualLinkMediaConsent by rememberSaveable(msg.id, linkUrl, networkId) { mutableStateOf(false) }
     val linkMediaAllowed = automaticRemoteMedia || manualLinkMediaConsent
-    val inlineMediaConsent =
-        remember(msg.id, imageUrl, networkId, manualInlineMediaConsent) {
-            RemoteMediaConsent(manualInlineMediaConsent) { manualInlineMediaConsent = true }
-        }
     val linkMediaConsent =
         remember(msg.id, linkUrl, networkId, manualLinkMediaConsent) {
             RemoteMediaConsent(manualLinkMediaConsent) { manualLinkMediaConsent = true }
@@ -1810,7 +1804,6 @@ private fun MessageRow(
         Column(modifier = rowModifier.fillMaxWidth()) {
             val messageBubble: @Composable () -> Unit = {
                 CompositionLocalProvider(
-                    LocalInlineMediaConsent provides inlineMediaConsent,
                     LocalLinkMediaConsent provides linkMediaConsent,
                     LocalLinkPreviewAwaiting provides previewAwaiting,
                     LocalLinkPreviewFailed provides previewFailed,
@@ -1842,7 +1835,7 @@ private fun MessageRow(
                             } else {
                                 null
                             },
-                        imageUrl = imageUrl,
+                        mediaUrls = mediaUrls,
                         linkPreview = preview,
                         linkPreviewLoading = previewLoading,
                         linkPreviewResolved = previewResolved || previewAwaiting,

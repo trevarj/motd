@@ -8,7 +8,7 @@ internal fun MessageUrls.gated(
     showLinkPreviews: Boolean,
 ): MessageUrls =
     MessageUrls(
-        imageUrl = imageUrl.takeIf { showImages },
+        mediaUrls = if (showImages) mediaUrls else emptyList(),
         linkUrl = linkUrl.takeIf { showLinkPreviews },
         audio = audio,
     )
