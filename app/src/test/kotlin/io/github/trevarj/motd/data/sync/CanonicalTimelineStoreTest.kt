@@ -935,13 +935,15 @@ class CanonicalTimelineStoreTest {
     private suspend fun rows(
         db: MotdDatabase,
         roomId: Long,
-    ): List<MessageEntity> =
-        db
-            .messageDao()
-            .pagingSource(roomId)
-            .load(
-                PagingSource.LoadParams.Refresh(null, 100, false),
-            ).let { (it as PagingSource.LoadResult.Page).data }
+    ): List<MessageEntity> {
+        val source = db.messageDao().pagingSource(roomId)
+        return try {
+            val result = source.load(PagingSource.LoadParams.Refresh(null, 100, false))
+            (result as PagingSource.LoadResult.Page).data
+        } finally {
+            source.invalidate()
+        }
+    }
 
     private fun scalar(
         db: MotdDatabase,

@@ -1,4 +1,4 @@
 - Improved text contrast, headers, and avatars.
 - Added Android Auto messaging.
 - Added clipboard image paste and previews for multiple images.
-- Added a message reader using installed Android text-to-speech engines, with tap-to-select messages and native voice and speed settings.
+- Added a message reader using installed Android text-to-speech engines, with tap-to-select messages, native voice and speed settings, and clear message counts.

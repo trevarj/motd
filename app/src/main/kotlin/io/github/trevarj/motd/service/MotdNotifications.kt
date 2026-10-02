@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
+import androidx.core.net.toUri
 import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.MainActivity
@@ -619,7 +620,7 @@ class MotdNotifications
             val bufferId = thread.bufferId
             val automotiveMessaging = type == BufferType.QUERY || thread.channelMentions
 
-            fun destination(action: String): Uri = Uri.parse("motd://notification/$bufferId/${if (thread.channelMentions) CHANNEL_MENTION_TAG else "default"}/$action")
+            fun destination(action: String): Uri = "motd://notification/$bufferId/${if (thread.channelMentions) CHANNEL_MENTION_TAG else "default"}/$action".toUri()
             val replyIntent =
                 PendingIntent.getBroadcast(
                     context,

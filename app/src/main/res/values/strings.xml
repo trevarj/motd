@@ -2243,8 +2243,18 @@
     <string name="read_aloud_playing">Reading aloud</string>
     <string name="read_aloud_paused">Reading paused</string>
     <string name="read_aloud_gap">Between messages</string>
-    <string name="read_aloud_position">%1$d of %2$d · %3$d pending</string>
-    <string name="read_aloud_skipped">%1$d skipped</string>
+    <plurals name="read_aloud_position">
+        <item quantity="one">%1$d of %2$d message · %3$s</item>
+        <item quantity="other">%1$d of %2$d messages · %3$s</item>
+    </plurals>
+    <plurals name="read_aloud_pending">
+        <item quantity="one">%1$d pending message</item>
+        <item quantity="other">%1$d pending messages</item>
+    </plurals>
+    <plurals name="read_aloud_skipped">
+        <item quantity="one">%1$d skipped message</item>
+        <item quantity="other">%1$d skipped messages</item>
+    </plurals>
     <string name="read_aloud_previous">Replay previous session message</string>
     <string name="read_aloud_skip">Skip message</string>
     <string name="read_aloud_latest">Read latest session message</string>

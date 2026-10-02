@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -96,8 +97,14 @@ fun ReadAloudPlayer(
                     Text(status, style = MaterialTheme.typography.labelSmall, color = if (state.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                     if (state.total > 0) {
                         Text(
-                            stringResource(R.string.read_aloud_position, state.position, state.total, state.pending) +
-                                if (state.skipped > 0) " · " + stringResource(R.string.read_aloud_skipped, state.skipped) else "",
+                            pluralStringResource(
+                                R.plurals.read_aloud_position,
+                                state.total,
+                                state.position,
+                                state.total,
+                                pluralStringResource(R.plurals.read_aloud_pending, state.pending, state.pending),
+                            ) +
+                                if (state.skipped > 0) " · " + pluralStringResource(R.plurals.read_aloud_skipped, state.skipped, state.skipped) else "",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
