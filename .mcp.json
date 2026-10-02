@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "gradle": {
+      "command": "nix",
+      "args": ["develop", ".#mcp", "-c", "gradle-mcp", "stdio"],
+      "instructions": false,
+      "timeout": 120000
+    }
+  }
+}

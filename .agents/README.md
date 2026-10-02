@@ -43,15 +43,60 @@ connection ownership, or module boundaries.
    generated `app/schemas`, `:app:compileE2eAndroidTestKotlin` for affected
    instrumentation journeys, and `:app:assembleDebug` when resources, manifest,
    packaging, or an actual APK require it. Do not automatically append an
-   unfiltered suite, Android lint, APK assembly, or a full pre-push gate; no
-   routine local emulator/device runs. `./tools/prepush.sh` is only an explicitly
-   requested diagnostic for broader failures, requires a clean committed tree,
-   and accepts `MOTD_PREFLIGHT_BASE=<ref>` to override `origin/main`; it is not a
-   handoff/push prerequisite or a substitute for hosted CI. Require all
+   unfiltered suite, Android lint, APK assembly, or a full pre-push gate.
+   UI changes require focused actual-emulator visual checks before handoff:
+   inspect fresh current-surface PNGs, exercise the changed interaction, and
+   capture/inspect a short MP4 for interaction/navigation transitions. Reuse the
+   owned warm session in [`../test/e2e/README.md`](../test/e2e/README.md).
+   Non-UI changes need no emulator; full local E2E suites remain non-routine,
+   and physical-device validation requires explicit maintainer authorization.
+   `./tools/prepush.sh` is only an explicitly requested diagnostic for broader
+   failures, requires a clean committed tree, and accepts
+   `MOTD_PREFLIGHT_BASE=<ref>` to override `origin/main`; it is not a handoff/push
+   prerequisite or a substitute for hosted CI. Require all
    applicable hosted `Required CI / gate` checks before merge. Inspect an
    individual failed job's existing diagnostics and start its fix immediately,
    without waiting for aggregate `gate`; remaining coverage continues normally.
    Inspect the diff and report any verification that could not be performed.
+
+## Gradle and Kotlin agent tools
+
+Root [`.mcp.json`](../.mcp.json) exposes the `gradle` stdio server to project-local
+clients. From the repository root, start/discover it through the client's MCP
+support (OMP reads this file), or launch `nix develop .#mcp -c gradle-mcp stdio`
+for a client-managed initialize → `tools/list` exchange. The opt-in shell extends
+the ordinary Android/JDK 21 environment; ordinary shells do not fetch the JAR.
+It pins [rnett/gradle-mcp 0.0.15](https://github.com/rnett/gradle-mcp/releases/tag/0.0.15),
+Apache-2.0, at source revision
+[`9ccea8cf2582032e7e72f546bfe4fdfdc733683d`](https://github.com/rnett/gradle-mcp/tree/9ccea8cf2582032e7e72f546bfe4fdfdc733683d),
+with the Maven Central JAR's fixed SHA-256 in `flake.nix`. Client
+`instructions: false` avoids importing third-party server guidance as policy.
+
+Use the connected server's actual schemas: `gradle_docs` for this project's
+Gradle **9.8.0** (set `version: "9.8.0"`), `inspect_dependencies` for a narrow
+module/configuration (`checkUpdates: false` unless requested), and
+`read_dependency_sources` / `search_dependency_sources` for library APIs.
+Supply the absolute repository `projectRoot` explicitly; the launcher also sets
+`GRADLE_MCP_PROJECT_ROOT` from its working directory when unset. `gradle` can run
+scoped tasks, with `query_build` / `wait_build` for results. Build/model tools
+execute Gradle configuration and may download dependencies: they are not
+read-only by default. Do not publish public Build Scans, automatically run full
+builds/suites, install server skills, or change global client configuration.
+[`testing.md`](testing.md) and all existing Required CI rules still govern checks.
+
+Verified with Gradle 9.8.0: version-specific docs, all five project modules,
+`:irc` dependency resolution, and resolved Okio source access. This does not
+establish IDE-style Kotlin reference/refactoring support.
+
+For Kotlin semantics, prefer a working native LSP or the
+[JetBrains IDE MCP](https://www.jetbrains.com/help/idea/mcp-server.html) when a
+compatible running IDE has imported/indexed this project and supplies its real
+copied local client configuration; never invent an endpoint. Keep access approval
+enabled and brave mode off; start with analysis/navigation tools.
+Skip [official Kotlin skills](https://kotlinlang.org/docs/ai-for-development.html#kotlin-ai-skills)
+for now: their current backend/KMP/migration triggers do not match this task.
+Skip the [MCP Kotlin SDK](https://kotlinlang.org/docs/kotlin-ai-apps-development-overview.html#model-context-protocol-mcp-kotlin-sdk):
+it implements clients/servers, not Kotlin code intelligence; no app dependency is needed.
 
 ## Task guides
 

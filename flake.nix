@@ -62,6 +62,19 @@
         };
         emulatorSdk = emulatorComposition.androidsdk;
         emulatorSdkRoot = "${emulatorSdk}/libexec/android-sdk";
+        # Pinned, opt-in agent tooling; the ordinary Android shell does not fetch this JAR.
+        gradleMcpJar = pkgs.fetchurl {
+          url = "https://repo.maven.apache.org/maven2/dev/rnett/gradle-mcp/gradle-mcp/0.0.15/gradle-mcp-0.0.15.jar";
+          sha256 = "51ea00fda38d795045954c1fcaa2f9db4b04487fc1ee55af6fe6778386f84772";
+        };
+        gradleMcp = pkgs.writeShellApplication {
+          name = "gradle-mcp";
+          runtimeInputs = [ pkgs.jdk21 ];
+          text = ''
+            export GRADLE_MCP_PROJECT_ROOT="''${GRADLE_MCP_PROJECT_ROOT:-$PWD}"
+            exec java -jar ${gradleMcpJar} "$@"
+          '';
+        };
       in {
         devShells.default = pkgs.mkShell {
           # imagemagick: test/e2e/showcase-composite.sh merges the light/dark
@@ -77,6 +90,9 @@
           # point Gradle at the Nix-provided one instead.
           GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2 -Dorg.gradle.workers.max=2";
         };
+        devShells.mcp = self.devShells.${system}.default.overrideAttrs (previous: {
+          nativeBuildInputs = previous.nativeBuildInputs ++ [ gradleMcp ];
+        });
         devShells.native = pkgs.mkShell {
           packages = [ pkgs.jdk21 pkgs.ninja pkgs.stdenv.cc pkgs.curl androidSdk ];
           JAVA_HOME = pkgs.jdk21.home;

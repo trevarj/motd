@@ -11,10 +11,11 @@ setup and teardown deliberately clear application data.
 
 | Mode | Best for | Entry point |
 | --- | --- | --- |
+| Focused visual warm loop | Required local visual verification for UI changes | Persistent owned emulator; commands below |
 | Fast headless emulator | CI failure reproduction when lower-level checks cannot validate behavior | `./test/e2e/headless.sh fast` |
 | Full headless emulator | Local A-H, J, R, then teardown shell-runbook sweep | `./test/e2e/headless.sh full` |
-| Public screenshot showcase | Deterministic chat list, conversation, and attachment-sheet captures | `./test/e2e/headless.sh showcase` |
-| Native local stack + USB device | Manual feature work, physical-device checks, quick iteration | `./test/e2e/local-stack.sh` |
+| Public screenshot showcase | Public asset capture attempt; current setup caveats below | `./test/e2e/headless.sh showcase` |
+| Native local stack + USB device | Explicitly authorized physical-device validation | `./test/e2e/local-stack.sh` |
 | Native ZNC + Ergo stack | Scheduled ZNC playback, reconnect, SASL, and capability degradation | `./test/e2e/znc-stack.sh` |
 | Host-driven runbook | Broad UI interaction and crash sweep on a device or emulator | `./test/e2e/runbook.sh` |
 | Required hosted suites | Fast real-stack journeys and Robolectric component tests | `.github/workflows/ci.yml` |
@@ -37,9 +38,13 @@ keeping UI-state coverage continuous without coupling those cases to Soju or an 
 - The local headless commands require Linux KVM access. Their first run enters
   the opt-in `.#emulator` shell and fetches the pinned API 34 AOSP image; normal
   builds do not carry that large closure.
-- For physical-device modes, connect and authorize a device. `adb devices` must
-  show it as `device`; set `SERIAL` when more than one device is attached. The
-  headless lifecycle wrapper creates and pins its own emulator serial.
+- Physical-device validation requires explicit maintainer authorization. Connect
+  and authorize that device, verify its `adb devices` entry, and always set its
+  explicit `SERIAL`; never auto-select an attached phone. The headless lifecycle
+  wrapper creates and pins its own emulator serial.
+- Script entry points require `/usr/bin/env` and `/bin/sh`. A restricted host
+  sandbox lacking those paths needed temporary mount-namespace bindings during
+  the live visual proof; that was environment setup, not a harness change.
 - Build the appropriate APK:
 
   ```sh
@@ -50,6 +55,127 @@ keeping UI-state coverage continuous without coupling those cases to Soju or an 
   `app/build/outputs/apk/debug/app-debug.apk`. The x86_64 hermetic
   emulator uses `app/build/outputs/apk/e2e/app-e2e.apk`, which omits
   the arm64-only libbox core.
+
+## Focused visual warm loop
+
+For UI changes, before handoff inspect fresh current-surface PNGs, exercise the
+changed interaction, and capture/inspect a short MP4 for interaction/navigation
+transitions. Nearest behavior tests still apply. Non-UI changes need no emulator;
+local `fast`/`full` suites are not routine and hosted CI is unchanged.
+
+Start one owned session from the repository root. Keep these exports for its
+whole lifecycle; use unoccupied ports, never kill another session to free them.
+The fresh temporary namespace avoids existing AVD/app state and tracked artwork.
+The wrapper enters the separate opt-in `.#emulator` runtime only when needed.
+
+```sh
+export UI_SESSION="$(mktemp -d /tmp/motd-ui-dev.XXXXXX)"
+export MOTD_HEADLESS_STATE_DIR="$UI_SESSION/state"
+export MOTD_HEADLESS_STACK_DIR="$UI_SESSION/stack"
+export MOTD_HEADLESS_AVD_HOME="$UI_SESSION/avd"
+export MOTD_HEADLESS_AVD_NAME=motd-ui-dev-api34
+export MOTD_HEADLESS_EMULATOR_PORT=5558
+export MOTD_HEADLESS_ERGO_PORT=17667
+export MOTD_HEADLESS_SOJU_PORT=17697
+export MOTD_HEADLESS_SOJU_HTTP_PORT=17698
+export MOTD_STACK_PROFILE=showcase
+export MOTD_SHOWCASE_SCREENSHOT_DIR="$UI_SESSION/captures"
+nix develop -c ./test/e2e/headless.sh up
+nix develop
+```
+
+In that Nix shell, pin the owned emulator before sourcing only `lib.sh`, not the
+credential-bearing `.envrc`. Repeat the build/install/resume commands after
+edits; keep onboarding and app data, with no `pm clear` or reseeding unless the
+changed scenario needs a reset.
+
+```sh
+set -euo pipefail
+export SERIAL="$(cat "$MOTD_HEADLESS_STATE_DIR/emulator.serial")"
+test "$SERIAL" = emulator-5558
+adb -s "$SERIAL" get-state
+export MOTD_PKG=io.github.trevarj.motd.debug
+export E2E_OUT_DIR="$MOTD_SHOWCASE_SCREENSHOT_DIR"
+. ./test/e2e/lib.sh
+ensure_device
+./gradlew :app:assembleE2e --stacktrace --max-workers=2
+adb_ install -r app/build/outputs/apk/e2e/app-e2e.apk
+adb_shell am start -n "$MOTD_PKG/io.github.trevarj.motd.MainActivity"
+dump
+```
+
+On first launch use the existing soju onboarding/import UI: fixture host
+`127.0.0.1`, port `$MOTD_HEADLESS_SOJU_PORT`, TLS, nickname `motdadb`, and fictional
+account `motd` / `motdtest`. Verify the fixture certificate with
+`MOTD_STACK_DIR="$MOTD_HEADLESS_STACK_DIR" MOTD_SOJU_PORT="$MOTD_HEADLESS_SOJU_PORT" ./test/e2e/local-stack.sh tls-fingerprint`
+before trusting it. Observe the network switch and leave it selected for import;
+do not blindly toggle it. The current showcase run failed setup assumptions, so
+it is not a proven successful bootstrap: its import toggle deselected an already
+selected network, Settings required drawer/overflow navigation, and a nonempty
+draft hid `chat_composer_attachment`.
+
+If recovering that state, use `tap_desc 'Open navigation drawer'`, then
+`long_press_tag_prefix_containing_text drawer_network_row_ '127.0.0.1'`,
+`tap_text 'Bouncer Settings'`, and `tap_tag bouncer_overview_networks`. Inspect
+the fresh dump; tap `bouncer_switch_1` only if it is enabled and unchecked.
+Back twice returns to chats. Open `#guix` and empty only your fixture draft to
+expose the attachment button. Reuse existing dump/text/description/tag helpers;
+never guess tap coordinates. Navigate to the actual changed surface rather than
+assuming showcase left it open.
+
+From the actual chat list, this exercised attachment example illustrates fresh
+before/after captures and a transition clip. Substitute the changed interaction
+and its real selectors; confirm the current surface with a fresh dump first.
+
+```sh
+dump
+tap_text '#guix'
+wait_for_tag chat_composer_attachment 8
+tap_tag chat_composer_attachment
+wait_for_text 'Share something' 8
+adb_shell screencap -p /sdcard/motd-ui-dev.png
+adb_ pull /sdcard/motd-ui-dev.png "$E2E_OUT_DIR/before.png"
+# Inspect before.png now: require the actual sheet, not a dialog or launcher.
+adb_shell screenrecord --time-limit 30 /sdcard/motd-ui-dev.mp4 &
+recorder=$!
+sleep 1
+adb_shell input keyevent 4
+wait_for_tag chat_composer_attachment 8
+adb_shell screencap -p /sdcard/motd-ui-dev.png
+adb_ pull /sdcard/motd-ui-dev.png "$E2E_OUT_DIR/after-back.png"
+tap_tag chat_composer_attachment
+wait_for_text 'Share something' 8
+adb_shell screencap -p /sdcard/motd-ui-dev.png
+adb_ pull /sdcard/motd-ui-dev.png "$E2E_OUT_DIR/after-open.png"
+wait "$recorder"
+adb_ pull /sdcard/motd-ui-dev.mp4 "$E2E_OUT_DIR/interaction.mp4"
+```
+
+Inspect all fresh PNGs and the clip, not just successful command exits. Require
+the intended rendered states and both sides of the transition. Native recording
+has no audio; if native resolution fails, retry with `--size 720x1280`. Probe for
+a decodable stream and positive duration. Use available lockfile-backed FFmpeg
+tools, or the pinned shell below; if direct video inspection is unavailable,
+decode frames and inspect frames showing both states:
+
+```sh
+nix shell github:NixOS/nixpkgs/767b0d3ec98a143ad9ed7dfc0d5553510ac27133#ffmpeg-headless \
+  -c ffprobe -v error -show_entries format=duration:stream=codec_name,width,height \
+  -of json "$E2E_OUT_DIR/interaction.mp4"
+nix shell github:NixOS/nixpkgs/767b0d3ec98a143ad9ed7dfc0d5553510ac27133#ffmpeg-headless \
+  -c ffmpeg -i "$E2E_OUT_DIR/interaction.mp4" -vf fps=1 -frames:v 30 \
+  "$E2E_OUT_DIR/frame-%02d.png"
+```
+
+Captures and XML may expose credentials, server details, and conversation text:
+use fictional fixture data, keep artifacts private in the temporary directory,
+and do not upload raw dumps/logcat or overwrite tracked `screenshots/`.
+Report what was visibly checked, artifact paths, and any blocker/unverified
+behavior. A recording failure is not completed transition verification.
+Keep the session alive for warm edits; when finished, exit the Nix shell and run
+`nix develop -c ./test/e2e/headless.sh down` with the same exports. This stops
+only the owned emulator/stack and preserves its AVD and capture artifacts;
+do not use `reset` for the warm loop.
 
 ## Fast local headless loop
 
@@ -125,12 +251,12 @@ viewport at the oldest history boundary instead of observing the newest row.
 
 ## Public screenshot showcase
 
-The showcase command provisions a separate local fixture with believable
-`#guix`, `#debian`, `#emacs`, and `#rust` channels, fictional nicks, and seeded
-messages. It drives the production Compose screens through the existing
-headless emulator, selects the dark Modus Vivendi preset, comfortable bubbles,
-and deterministic IRC sprites, then writes these tracked assets at the
-repository root:
+The showcase command attempts to provision a separate local fixture with
+believable `#guix`, `#debian`, `#emacs`, and `#rust` channels, fictional nicks,
+and seeded messages. It drives the production Compose screens through the
+existing headless emulator, selects Ayu Light/Ayu Dark, and composites captures
+into these tracked assets by default. See the warm-loop setup caveats above:
+the latest local attempt failed, so do not assume a successful initial setup.
 
 - `screenshots/chat-list.png` — the multi-channel chat list;
 - `screenshots/chat.png` — a seeded `#guix` conversation; and

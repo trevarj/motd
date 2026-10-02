@@ -23,10 +23,10 @@ apply enforced style.
 | IRC parser/client/transport | Nearest `:irc:test` method while editing; its class once before handoff/push |
 | Android repositories, services, preferences, or ViewModels | Nearest `:app` test method while editing; its class once before handoff/push |
 | Room entities/schema/migrations | Nearest database regression method, then its class before handoff/push; review and commit generated `app/schemas` changes |
-| Compose Kotlin | Nearest Robolectric behavior method in `testDebug`, then its class before handoff/push; its Gradle task already compiles the app |
-| Resources/manifest/packaging | Nearest test when behavior changed, then `:app:assembleDebug` |
-| Instrumentation source or affected journey | `:app:compileE2eAndroidTestKotlin`; no routine local emulator/device run |
-| Ordinary app user journey | Nearest unit/integration method, then its class before handoff/push; assemble only when an APK is needed |
+| Compose Kotlin | Nearest Robolectric behavior method in `testDebug`, then its class before handoff/push; focused emulator visual checks below |
+| Resources/manifest/packaging | Nearest test when behavior changed, then `:app:assembleDebug`; focused emulator visual checks when UI changed |
+| Instrumentation source or affected journey | `:app:compileE2eAndroidTestKotlin`; focused visual checks for UI changes, not a routine full E2E suite |
+| Ordinary app user journey | Nearest unit/integration method, then its class before handoff/push; focused emulator visual checks when UI changed |
 | Cross-module or release-sensitive work | Nearest affected methods in each module while editing; their classes once before handoff/push |
 
 Target one method while editing, then use the class filter once before
@@ -39,8 +39,8 @@ nix develop -c ./gradlew :app:testDebugUnitTest \
 
 Use `:irc:test` instead for protocol tests. These filters narrow execution, not
 compilation of the test source set and its dependencies. Run `:app:assembleDebug`
-only when resources, manifest, packaging, or an actual APK require it. No routine
-local emulator or physical-device runs.
+only when resources, manifest, packaging, or an actual APK require it. UI visual
+checks use the x86_64 `:app:assembleE2e` APK instead.
 
 ## Behavior-test arrangements
 
@@ -129,9 +129,16 @@ version, seed, case, and fixture in that module's
 
 ## Device and E2E selection
 
-- Do not run the headless emulator suite during routine local development. It
-  materially slows the maintainer's workstation. Local verification stops at
-  nearest unit/integration tests and assembly only when the matrix requires it.
+- For UI changes, focused actual-emulator visual verification is required before
+  handoff, alongside the nearest tests: inspect fresh current-surface PNGs,
+  exercise the changed interaction, and capture/inspect a short MP4 for
+  interaction/navigation transitions. Check the actual rendered result, not
+  merely that capture files exist. Use the persistent owned-session warm loop in
+  [`../test/e2e/README.md`](../test/e2e/README.md); keep captures private and
+  outside tracked screenshots. Report concrete blockers and unverified behavior.
+- Non-UI changes do not require an emulator. Full local `fast`/`full` E2E suites
+  remain non-routine because of workstation cost; focused visual checks do not
+  run those suites or replace hosted CI.
 - `.github/workflows/ci.yml` owns the complete required gate. Its `headless` job runs exactly
   four isolated `@FastHeadlessE2e` methods on API34 Pixel 6 AOSP, while the parallel
   component tier runs fixture-free Compose/UI tests through `:app:testDebugUnitTest` under
@@ -160,6 +167,6 @@ version, seed, case, and fixture in that module's
   excludes the arm64-only embedded libbox core and is not representative of
   obfuscation support.
 
-When explicitly debugging CI E2E, follow
-[`../test/e2e/README.md`](../test/e2e/README.md) for setup and teardown.
+For focused visual checks or explicitly debugging CI E2E, follow
+[`../test/e2e/README.md`](../test/e2e/README.md) for setup and owned-session teardown.
 Never point the destructive E2E reset flow at the release application id.

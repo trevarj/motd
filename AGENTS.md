@@ -14,6 +14,10 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
 3. Read [`ARCHITECTURE.md`](ARCHITECTURE.md) and the task-specific guide linked
    from [`.agents/README.md`](.agents/README.md). Prefer `rg`/`rg --files` when
    locating code.
+4. When connected, use the [project Gradle MCP](.agents/README.md#gradle-and-kotlin-agent-tools)
+   for Gradle project/dependency documentation and source queries. Use a working
+   native Kotlin LSP or IDE MCP for semantic navigation, references, and
+   refactoring—not regex as a semantic substitute.
 
 ## Architecture and implementation rules
 
@@ -82,14 +86,18 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
   an individual job fails, inspect its existing diagnostics and begin fixing it
   immediately rather than waiting for aggregate `gate`; remaining coverage
   continues normally.
-- Do not run emulator/device E2E as part of routine local development. Before
-  committing a change that affects a journey covered by `RequiredHeadlessE2eTest`,
-  inspect and update that journey in the same commit and run
-  `:app:compileE2eAndroidTestKotlin`. Reserve
-  `nix develop -c ./test/e2e/headless.sh fast` for
-  behavior that cannot be validated below E2E; do not defer a known required-gate
-  mismatch until after push. Use a physical device only when the maintainer
-  explicitly requests hardware/OS validation.
+- For UI changes, focused actual-emulator visual verification is required before
+  handoff: inspect fresh PNGs of the changed surface, exercise its interaction,
+  and capture/inspect a short MP4 for interaction or navigation transitions.
+  Reuse a persistent owned emulator and app data; follow the warm loop in
+  [`test/e2e/README.md`](test/e2e/README.md). Nearest tests remain required;
+  non-UI changes do not require an emulator.
+- Full local emulator E2E suites are not routine. Before committing a change
+  that affects a journey covered by `RequiredHeadlessE2eTest`, inspect and update
+  that journey in the same commit and run `:app:compileE2eAndroidTestKotlin`.
+  Reserve `nix develop -c ./test/e2e/headless.sh fast` for behavior that cannot
+  be validated below E2E; do not defer a known required-gate mismatch until
+  after push. Physical-device validation requires explicit maintainer authorization.
 - Use `test/e2e/znc-stack.sh` for ZNC-specific SASL, two-client, reconnect-gap,
   and native-playback work. Its TLS endpoint is adb-reversed at
   `127.0.0.1:6698`; exact credentials, commands, and the observed degradation
