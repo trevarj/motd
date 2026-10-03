@@ -576,6 +576,7 @@ fun ChatScreen(
         onAcceptDccTransfer = viewModel::acceptDccTransfer,
         onRejectDccTransfer = viewModel::rejectDccTransfer,
         onRemoveDccTransfer = viewModel::removeDccTransfer,
+        onSaveDccToDownloads = viewModel::saveDccToDownloads,
         onSendDccFile = viewModel::sendDccFile,
         memberNicks = memberNicks,
         knownNicks = knownNicks,
@@ -1021,6 +1022,7 @@ fun ChatContent(
     onAcceptDccTransfer: (Long, Uri, Boolean) -> Unit = { _, _, _ -> },
     onRejectDccTransfer: (Long) -> Unit = {},
     onRemoveDccTransfer: (Long) -> Unit = {},
+    onSaveDccToDownloads: (suspend (Long) -> Unit)? = null,
     onSendDccFile: (Uri) -> Unit = {},
     memberNicks: List<String> = emptyList(),
     knownNicks: Set<String> = emptySet(),
@@ -3140,6 +3142,7 @@ fun ChatContent(
                                             onAcceptDccTransfer = onAcceptDccTransferRequest,
                                             onRejectDccTransfer = onRejectDccTransfer,
                                             onRemoveDccTransfer = onRemoveDccTransfer,
+                                            onSaveDccToDownloads = onSaveDccToDownloads,
                                             loadPreview = loadPreview,
                                             richContentReady = initialPositionSettled,
                                             showImages = showImages,
@@ -3579,6 +3582,7 @@ fun ChatContent(
                                 },
                                 onReject = onRejectDccTransfer,
                                 onRemove = onRemoveDccTransfer,
+                                onSaveToDownloads = onSaveDccToDownloads,
                                 onViewResults = { completed ->
                                     val uri = completed.destinationUri
                                     if (completed in visibleEbooksOffers && completed.state == DccTransferState.COMPLETED &&

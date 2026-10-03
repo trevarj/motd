@@ -286,6 +286,11 @@
     <string name="dcc_direction_incoming">Incoming</string>
     <string name="dcc_direction_outgoing">Outgoing</string>
     <string name="dcc_remove_record">Remove record</string>
+    <string name="dcc_file_options">File options</string>
+    <string name="dcc_save_to_downloads">Save to Downloads</string>
+    <string name="dcc_saved_to_downloads">Saved to Downloads</string>
+    <string name="dcc_save_to_downloads_failed">Couldn\'t save file to Downloads. The original file is unchanged.</string>
+    <string name="dcc_downloads_permission_required">Storage permission is needed to save to Downloads on this Android version.</string>
     <string name="settings_composer_section">Composer</string>
     <string name="settings_delivery_summary">Choose how messages arrive and keep background delivery reliable.</string>
     <string name="settings_networks_summary">Add and manage IRC networks, bouncers, and connection details.</string>

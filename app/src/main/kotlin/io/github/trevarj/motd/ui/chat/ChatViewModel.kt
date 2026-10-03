@@ -1356,6 +1356,10 @@ class ChatViewModel
             viewModelScope.launch { dccTransferController.removeRecord(transferId) }
         }
 
+        suspend fun saveDccToDownloads(transferId: Long) {
+            dccTransferController.saveToDownloads(transferId)
+        }
+
         fun sendDccFile(source: Uri) {
             viewModelScope.launch {
                 dccTransferController.sendFile(operationalBufferId.value, source)

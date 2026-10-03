@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.HorizontalDivider
@@ -25,6 +26,7 @@ import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.DccTransferProtocol
 import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.dcc.DccTransferController
+import io.github.trevarj.motd.ui.components.DccDownloadMenu
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -41,6 +43,7 @@ fun DirectConnectionsScreen(
         transfers = transfers,
         onBack = onBack,
         onRemove = viewModel::remove,
+        onSaveToDownloads = viewModel::saveToDownloads,
     )
 }
 
@@ -49,6 +52,7 @@ fun DirectConnectionsContent(
     transfers: List<DccTransferEntity>,
     onBack: () -> Unit,
     onRemove: (Long) -> Unit,
+    onSaveToDownloads: suspend (Long) -> Unit,
 ) {
     SettingsScaffold(title = stringResource(R.string.settings_direct_connections), onBack = onBack) {
         Column(Modifier.fillMaxWidth()) {
@@ -77,7 +81,7 @@ fun DirectConnectionsContent(
                 )
             } else {
                 transfers.forEach { transfer ->
-                    DirectConnectionTransferRow(transfer, onRemove)
+                    DirectConnectionTransferRow(transfer, onRemove, onSaveToDownloads)
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                 }
             }
@@ -89,6 +93,7 @@ fun DirectConnectionsContent(
 private fun DirectConnectionTransferRow(
     transfer: DccTransferEntity,
     onRemove: (Long) -> Unit,
+    onSaveToDownloads: suspend (Long) -> Unit,
 ) {
     val direction =
         if (transfer.direction == DccDirection.INCOMING) {
@@ -120,10 +125,13 @@ private fun DirectConnectionTransferRow(
             Text(stringResource(R.string.settings_direct_transfer_summary, direction, protocol, state))
         },
         trailingContent = {
-            if (transfer.state in TERMINAL_TRANSFER_STATES) {
-                TextButton(onClick = { onRemove(transfer.id) }) {
-                    Text(stringResource(R.string.dcc_remove_record))
+            Row {
+                if (transfer.state in TERMINAL_TRANSFER_STATES) {
+                    TextButton(onClick = { onRemove(transfer.id) }) {
+                        Text(stringResource(R.string.dcc_remove_record))
+                    }
                 }
+                DccDownloadMenu(transfer, onSaveToDownloads)
             }
         },
         modifier = Modifier.testTag("settings_direct_transfer_${transfer.id}"),
@@ -143,6 +151,10 @@ class DirectConnectionsViewModel
 
         fun remove(transferId: Long) {
             viewModelScope.launch { controller.removeRecord(transferId) }
+        }
+
+        suspend fun saveToDownloads(transferId: Long) {
+            controller.saveToDownloads(transferId)
         }
     }
 

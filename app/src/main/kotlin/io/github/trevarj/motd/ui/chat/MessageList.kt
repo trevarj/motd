@@ -117,6 +117,7 @@ import io.github.trevarj.motd.dickord.isDickordPortalConversation
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.DaySeparator
+import io.github.trevarj.motd.ui.components.DccDownloadMenu
 import io.github.trevarj.motd.ui.components.HistoryGapDivider
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
 import io.github.trevarj.motd.ui.components.LocalLinkMediaConsent
@@ -366,6 +367,7 @@ fun MessageList(
     onAcceptDccTransfer: (Long, String, Boolean) -> Unit = { _, _, _ -> },
     onRejectDccTransfer: (Long) -> Unit = {},
     onRemoveDccTransfer: (Long) -> Unit = {},
+    onSaveDccToDownloads: (suspend (Long) -> Unit)? = null,
     // Normalized nicks known in the current buffer (member list). Drives @mention coloring in the
     // message bodies; passed straight through to each MessageBubble.
     knownNicks: Set<String> = emptySet(),
@@ -539,6 +541,7 @@ fun MessageList(
                             onAccept = onAcceptDccTransfer,
                             onReject = onRejectDccTransfer,
                             onRemove = onRemoveDccTransfer,
+                            onSaveToDownloads = onSaveDccToDownloads,
                             onLongPress = translationHold?.let { { it(msg) } },
                         )
                     }
@@ -772,6 +775,7 @@ private fun DccTransferCard(
     onAccept: (Long, String, Boolean) -> Unit,
     onReject: (Long) -> Unit,
     onRemove: (Long) -> Unit,
+    onSaveToDownloads: (suspend (Long) -> Unit)?,
     onLongPress: (() -> Unit)? = null,
 ) {
     // Latch the outgoing entity: by the time the card collapses into the compact pill the entity
@@ -802,6 +806,7 @@ private fun DccTransferCard(
                 onAccept = { id, name, resume -> if (current) onAccept(id, name, resume) },
                 onReject = { id -> if (current) onReject(id) },
                 onRemove = { id -> if (current) onRemove(id) },
+                onSaveToDownloads = onSaveToDownloads.takeIf { current },
                 onLongPress = onLongPress,
             )
         }
@@ -814,6 +819,7 @@ internal fun ActiveDccTransferCard(
     onAccept: (Long, String, Boolean) -> Unit,
     onReject: (Long) -> Unit,
     onRemove: (Long) -> Unit,
+    onSaveToDownloads: (suspend (Long) -> Unit)? = null,
     onReceiveResultsPrivately: ((DccTransferEntity, Boolean) -> Unit)? = null,
     onViewResults: ((DccTransferEntity) -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
@@ -852,11 +858,15 @@ internal fun ActiveDccTransferCard(
                 ),
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = "$direction file",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "$direction file",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                DccDownloadMenu(transfer, onSaveToDownloads)
+            }
             Text(transfer.displayFilename, style = MaterialTheme.typography.titleMedium)
             Text(
                 text =

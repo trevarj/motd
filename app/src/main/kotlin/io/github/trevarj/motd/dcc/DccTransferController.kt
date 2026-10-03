@@ -63,6 +63,8 @@ interface DccTransferController {
 
     suspend fun removeRecord(transferId: Long)
 
+    suspend fun saveToDownloads(transferId: Long)
+
     suspend fun sendFile(
         bufferId: Long,
         sourceUri: Uri,
@@ -163,6 +165,13 @@ class DccTransferControllerImpl
                         updatedAt = now,
                     )
                 }
+            }
+        }
+
+        override suspend fun saveToDownloads(transferId: Long) {
+            stateLock.withLock {
+                val transfer = transfers.byId(transferId) ?: error("Transfer record is unavailable")
+                saveDccToDownloads(context, transfer)
             }
         }
 

@@ -4567,6 +4567,8 @@ class ChatViewModelTest {
 
         override suspend fun removeRecord(transferId: Long) = Unit
 
+        override suspend fun saveToDownloads(transferId: Long) = Unit
+
         override suspend fun sendFile(
             bufferId: Long,
             sourceUri: Uri,

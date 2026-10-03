@@ -213,6 +213,7 @@ class ComposerSendClearUiTest {
         onAcceptDccTransfer: (Long, Uri, Boolean) -> Unit = { _, _, _ -> },
         onRejectDccTransfer: (Long) -> Unit = {},
         onRemoveDccTransfer: (Long) -> Unit = {},
+        onSaveDccToDownloads: (suspend (Long) -> Unit)? = null,
         activityResults: ActivityResultRegistryOwner? = null,
         onDraftChanged: (String) -> Unit = {},
         aiEnabled: () -> Boolean = { false },
@@ -244,6 +245,7 @@ class ComposerSendClearUiTest {
                         onAcceptDccTransfer = onAcceptDccTransfer,
                         onRejectDccTransfer = onRejectDccTransfer,
                         onRemoveDccTransfer = onRemoveDccTransfer,
+                        onSaveDccToDownloads = onSaveDccToDownloads,
                         onOpenSearch = {},
                         onOpenImage = {},
                         onInviteUser = onInviteUser,
@@ -881,6 +883,7 @@ class ComposerSendClearUiTest {
             var offers by mutableStateOf(emptyList<DccTransferEntity>())
             val accepted = mutableListOf<Triple<Long, Uri, Boolean>>()
             val submitted = mutableListOf<String>()
+            val exported = mutableListOf<Long>()
             setContent(
                 chatBuffer = { ebooksBuffer },
                 ebooksHelperRoomId = { ebooksBuffer.id },
@@ -889,6 +892,7 @@ class ComposerSendClearUiTest {
                 draft = { draft },
                 onDraftChanged = { draft = draft.copy(text = it, revision = draft.revision + 1) },
                 onAcceptDccTransfer = { id, uri, allowPrivate -> accepted += Triple(id, uri, allowPrivate) },
+                onSaveDccToDownloads = { exported += it },
                 onSubmit = { submitted += it },
             )
 
@@ -901,6 +905,7 @@ class ComposerSendClearUiTest {
             compose.onNodeWithText("From books_bot").assertIsDisplayed()
             compose.onNodeWithTag("chat_dcc_accept_7").assertDoesNotExist()
             compose.onNodeWithTag("chat_ebooks_receive_results_7").assertIsDisplayed().performClick()
+            compose.onNodeWithTag("dcc_download_menu_7").assertDoesNotExist()
             compose.runOnIdle {
                 val destination = accepted.single()
                 assertEquals(7L, destination.first)
@@ -917,11 +922,19 @@ class ComposerSendClearUiTest {
             compose.onNodeWithTag("chat_ebooks_receive_results_7").assertDoesNotExist()
             compose.onNodeWithText("100 B · Plain DCC SEND · Transferring").assertExists()
             compose.onNodeWithTag("chat_ebooks_view_results_7").assertDoesNotExist()
+            compose.onNodeWithTag("dcc_download_menu_7").assertDoesNotExist()
             compose.runOnIdle {
                 offers = listOf(incomingOffer(state = DccTransferState.COMPLETED, destinationUri = accepted.single().second.toString()))
             }
             compose.onNodeWithText("100 B · Plain DCC SEND · Complete").assertExists()
             compose.onNodeWithTag("chat_ebooks_receive_results_7").assertDoesNotExist()
+            compose.onNodeWithTag("dcc_download_menu_7").assertIsDisplayed().performClick()
+            compose.onNodeWithTag("dcc_save_to_downloads_7").assertIsDisplayed().performClick()
+            compose.runOnIdle {
+                assertEquals(listOf(7L), exported)
+                assertEquals(-1, pickerRequestCode)
+                assertTrue(File(requireNotNull(accepted.single().second.path)).exists())
+            }
             compose.onNodeWithTag("chat_ebooks_view_results_7").assertIsDisplayed().performClick()
             compose.waitUntil(5_000) {
                 compose.onAllNodesWithTag("chat_ebooks_results").fetchSemanticsNodes().isNotEmpty()

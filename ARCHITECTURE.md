@@ -106,9 +106,15 @@ flowchart TD
   offers from the same network. Review sender, endpoint risk, and transfer status there.
   Receive results privately accepts an offered ZIP into app-private cache (16 MiB compressed cap,
   including unknown-size transfers); Save still selects a SAF destination for other files.
+  Completed incoming records in chat, DCC offers and Direct Connections have a file overflow →
+  Save to Downloads action. It copies the retained original bytes (including unsupported results
+  ZIPs) to public Downloads without a picker or changing the source. API 29+ publishes a pending
+  MediaStore download only after the copy closes; API 26–28 requests legacy storage write access
+  and publishes a completed temporary file without replacing an existing download.
   Private/local endpoints require explicit Allow once consent. Completed ZIPs have View results;
   Open results ZIP remains available for manual selection. Removing a record discards only owned
-  cached files; generic SAF destinations are never deleted. Bounded text-entry parsing displays
+  cached files; generic SAF destinations and exported Downloads copies are never deleted.
+  Bounded text-entry parsing displays
   validated requests. Request sends the selected exact channel message immediately through the
   ordinary composer draft/submit path, only in the eligible joined, ready room with an unoccupied
   draft and no reply. Rejected sends restore the draft. Offers are not correlated to searches and
