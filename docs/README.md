@@ -51,6 +51,10 @@ message styles retain their ordinary send-flight presentation.
 A chat-list swipe acts only after release at least 60% across the row width. Short
 flicks spring back without flying offscreen; right swipes do not dismiss chats.
 
+Reading older messages animates the chat header from 64dp to a compact 48dp bar.
+The title, status and actions stay available; returning to latest expands it again.
+Large accessibility text can grow the bar rather than being clipped.
+
 ## Local composer text tools
 
 Labs → AI → Composer text tools is default-off. Set up the exact Qwen artifact

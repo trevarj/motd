@@ -7,8 +7,10 @@ import android.app.RemoteInput
 import android.content.Intent
 import android.os.Bundle
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.core.app.NotificationCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -578,8 +580,16 @@ class RequiredHeadlessE2eTest {
         assertTrue(firstUnread.anchor() < secondUnread.anchor())
         assertTrue(secondUnread.anchor() < newest.anchor())
         timeline.assertMessageVisible(firstUnread.tag())
+        timeline.assertNotAtConversationBottom()
+        val compactHeader = compose.onNodeWithTag("chat_top_app_bar", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val compactTitle = compose.onNodeWithTag("chat_title", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        // Compare the real bar with its title target, so status-bar insets stay device-owned.
+        assertEquals("Older history must keep the thin title bar", 48f, (compactTitle.bottom - compactTitle.top).value, 1f)
+        assertEquals("Older history retained expanded title padding", compactTitle.bottom.value, compactHeader.bottom.value, 1f)
 
         timeline.scrollToBottom()
+        val expandedHeader = compose.onNodeWithTag("chat_top_app_bar", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertEquals("Returning to actual latest must restore the bar", 16f, (expandedHeader.bottom - expandedHeader.top).value - (compactHeader.bottom - compactHeader.top).value, 1f)
         // The write this waits for is issued by the viewport mark-read effect off the rendered
         // newest anchor — both composition-scoped — so the thread that would block here is the same
         // one that has to keep frames coming. Budget matches the helper's own withTimeout.

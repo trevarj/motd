@@ -11,6 +11,9 @@ import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
@@ -20,8 +23,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -49,11 +56,13 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityOptionsCompat
 import androidx.paging.PagingData
@@ -223,6 +232,11 @@ class ComposerSendClearUiTest {
         onFlightSettled: (Long) -> Unit = {},
         chatBuffer: () -> BufferEntity = { buffer },
         connectionState: IrcClientState? = IrcClientState.Ready("me", emptySet(), emptyMap()),
+        memberCount: Int? = null,
+        fontScale: Float? = null,
+        onBack: () -> Unit = {},
+        onOpenChannelInfo: (Long) -> Unit = {},
+        onOpenSearch: (Long) -> Unit = {},
         parted: Boolean = false,
         onInviteUser: () -> Unit = {},
         replyTo: () -> MessageEntity? = { null },
@@ -244,27 +258,31 @@ class ComposerSendClearUiTest {
         compose.setContent {
             backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
             val items = pages.collectAsLazyPagingItems()
-            CompositionLocalProvider(LocalActivityResultRegistryOwner provides (activityResults ?: checkNotNull(LocalActivityResultRegistryOwner.current))) {
+            CompositionLocalProvider(
+                LocalActivityResultRegistryOwner provides (activityResults ?: checkNotNull(LocalActivityResultRegistryOwner.current)),
+                LocalDensity provides (fontScale?.let { Density(LocalDensity.current.density, it) } ?: LocalDensity.current),
+            ) {
                 MotdTheme {
                     ChatContent(
                         state =
                             ChatState(
                                 buffer = chatBuffer(),
                                 connState = liveConnection?.invoke() ?: connectionState,
+                                memberCount = memberCount,
                                 replyTo = replyTo(),
                                 parted = parted,
                             ),
                         items = items,
                         composerEnabled = true,
-                        onBack = {},
-                        onOpenChannelInfo = {},
+                        onBack = onBack,
+                        onOpenChannelInfo = onOpenChannelInfo,
                         ebooksHelperRoomId = ebooksHelperRoomId(),
                         ebooksDccOffers = ebooksDccOffers(),
                         onAcceptDccTransfer = onAcceptDccTransfer,
                         onRejectDccTransfer = onRejectDccTransfer,
                         onRemoveDccTransfer = onRemoveDccTransfer,
                         onSaveDccToDownloads = onSaveDccToDownloads,
-                        onOpenSearch = {},
+                        onOpenSearch = onOpenSearch,
                         onOpenImage = {},
                         onInviteUser = onInviteUser,
                         nickNormalizer = { it.lowercase() },
@@ -658,6 +676,169 @@ class ComposerSendClearUiTest {
         compose.onNodeWithTag("ai_text_translate").assertDoesNotExist()
         compose.onNodeWithTag("ai_text_close").performClick()
         compose.runOnIdle { assertEquals(false, applied) }
+    }
+
+    private fun headerHistory(): List<MessageEntity> =
+        (100L downTo 1L).map { id ->
+            MessageEntity(
+                id = id,
+                bufferId = buffer.id,
+                msgid = "header-$id",
+                serverTime = id * 1_000,
+                sender = "alice",
+                kind = MessageKind.PRIVMSG,
+                text = "History message $id",
+                dedupKey = "header-$id",
+                timelineOrder = id,
+            )
+        }
+
+    @Test
+    fun historyHeaderAnimatesPreservesItsAnchorAndRestoresOnlyAtLatest() {
+        val history = headerHistory()
+        val pages = MutableStateFlow(PagingData.from(history))
+        var connection by mutableStateOf<IrcClientState>(IrcClientState.Ready("me", emptySet(), emptyMap()))
+        var backs = 0
+        var details = 0
+        var searches = 0
+        var invites = 0
+        setContent(
+            liveConnection = { connection },
+            draft = { ComposerDraftState(hydrated = true) },
+            pages = pages,
+            memberCount = 42,
+            onBack = { backs++ },
+            onOpenChannelInfo = {
+                assertEquals(buffer.id, it)
+                details++
+            },
+            onOpenSearch = {
+                assertEquals(buffer.id, it)
+                searches++
+            },
+            onInviteUser = { invites++ },
+            onSubmit = {},
+        )
+        val bar = compose.onNodeWithTag("chat_top_app_bar", useUnmergedTree = true)
+
+        fun headerHeight(): Float {
+            val bounds = bar.getUnclippedBoundsInRoot()
+            return (bounds.bottom - bounds.top).value
+        }
+        val title = compose.onNodeWithTag("chat_title")
+        val timeline = compose.onNodeWithTag("chat_timeline")
+        val resources = RuntimeEnvironment.getApplication().resources
+        val back = compose.onNodeWithContentDescription(resources.getString(R.string.chat_back))
+        val search = compose.onNodeWithContentDescription(resources.getString(R.string.chat_search))
+        val expandedHeight = headerHeight()
+        title.assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithText("#kotlin", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("42 members", useUnmergedTree = true).assertIsDisplayed()
+        compose.mainClock.autoAdvance = false
+        timeline.performScrollToIndex(50)
+        compose.waitForIdle()
+        val anchor = compose.onNodeWithTag("chat_message_header-50", useUnmergedTree = true)
+        anchor.assertIsDisplayed()
+        val anchorBottom = anchor.getUnclippedBoundsInRoot().bottom.value
+        compose.mainClock.advanceTimeBy(64)
+        compose.waitForIdle()
+        val intermediateHeight = headerHeight()
+        assertTrue("The actual bar must have an intermediate layout height", intermediateHeight < expandedHeight - 1f && intermediateHeight > expandedHeight - 15f)
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        val compactHeight = headerHeight()
+        assertEquals(16f, expandedHeight - compactHeight, 1f)
+        assertEquals("Header resizing moved the canonical history row", anchorBottom, anchor.getUnclippedBoundsInRoot().bottom.value, 0.5f)
+        compose.mainClock.autoAdvance = true
+        title.assertHeightIsAtLeast(48.dp).performClick()
+        back.assertHeightIsAtLeast(48.dp).performClick()
+        search.assertHeightIsAtLeast(48.dp).performClick()
+        compose.onNodeWithTag("chat_overflow").assertHeightIsAtLeast(48.dp).performClick()
+        compose.onNodeWithTag("chat_overflow_menu").assertIsDisplayed()
+        compose.onNodeWithTag("chat_invite_user").performClick()
+        compose.runOnIdle {
+            assertEquals(1, backs)
+            assertEquals(1, details)
+            assertEquals(1, searches)
+            assertEquals(1, invites)
+        }
+
+        // A real drag retires auto-follow before the live presentation; no test-only follow state.
+        timeline.performTouchInput {
+            down(center)
+            moveBy(Offset(0f, 80f))
+            advanceEventTime(200)
+            up()
+        }
+        compose.waitForIdle()
+        val parkedRow = compose.onNodeWithTag("chat_message_header-45", useUnmergedTree = true)
+        parkedRow.assertIsDisplayed()
+        val parkedBottom = parkedRow.getUnclippedBoundsInRoot().bottom.value
+        compose.runOnIdle {
+            pages.value =
+                PagingData.from(
+                    listOf(history.first().copy(id = 101, msgid = "header-101", serverTime = 101_000, dedupKey = "header-101", timelineOrder = 101)) + history,
+                )
+        }
+        compose.waitForIdle()
+        parkedRow.assertIsDisplayed()
+        assertEquals("Live arrival moved the parked canonical row", parkedBottom, parkedRow.getUnclippedBoundsInRoot().bottom.value, 0.5f)
+        assertEquals("A live arrival must not expand parked history", compactHeight, headerHeight(), 0.5f)
+        compose.runOnIdle { connection = IrcClientState.Failed("SASL authentication failed", fatal = true) }
+        compose.onNodeWithText("SASL authentication failed", useUnmergedTree = true).assertIsDisplayed()
+        assertEquals(compactHeight, headerHeight(), 0.5f)
+
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithTag("chat_scroll_to_bottom_fab").performClick()
+        compose.waitForIdle()
+        assertEquals("Arming follow must not expand before reaching latest", compactHeight, headerHeight(), 0.5f)
+        compose.mainClock.advanceTimeBy(5_000)
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_message_header-101", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertDoesNotExist()
+        assertEquals(expandedHeight, headerHeight(), 0.5f)
+        compose.mainClock.autoAdvance = true
+        timeline.performScrollToIndex(50)
+        assertEquals(compactHeight, headerHeight(), 0.5f)
+        compose.mainClock.autoAdvance = false
+        timeline.performScrollToIndex(0)
+        compose.mainClock.advanceTimeBy(64)
+        compose.waitForIdle()
+        val expandingHeight = headerHeight()
+        assertTrue("Returning to latest must animate the actual bar", expandingHeight > compactHeight + 1f && expandingHeight < expandedHeight - 1f)
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        assertEquals("Manual return must restore the same expanded bar", expandedHeight, headerHeight(), 0.5f)
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h640dp")
+    fun compactHeaderKeepsLargeTextAndActionsInsideTheActualBar() {
+        val longTitle = "#a-long-conversation-title-that-must-remain-readable-to-accessibility"
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            pages = flowOf(PagingData.from(headerHistory())),
+            chatBuffer = { buffer.copy(displayName = longTitle) },
+            connectionState = IrcClientState.Failed("SASL authentication failed", fatal = true),
+            fontScale = 2f,
+            onSubmit = {},
+        )
+        compose.onNodeWithTag("chat_timeline").performScrollToIndex(50)
+        compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertIsDisplayed()
+        val bar = compose.onNodeWithTag("chat_top_app_bar", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val title = compose.onNodeWithTag("chat_title").assertHeightIsAtLeast(64.dp).getUnclippedBoundsInRoot()
+        assertTrue("Accessibility text must grow the bar instead of being clipped", title.top >= bar.top && title.bottom <= bar.bottom)
+        compose.onNodeWithText(longTitle, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("SASL authentication failed", useUnmergedTree = true).assertIsDisplayed()
+        val resources = RuntimeEnvironment.getApplication().resources
+        listOf(
+            compose.onNodeWithContentDescription(resources.getString(R.string.chat_back)),
+            compose.onNodeWithContentDescription(resources.getString(R.string.chat_search)),
+            compose.onNodeWithTag("chat_overflow"),
+        ).forEach { action ->
+            val bounds = action.assertIsDisplayed().assertHeightIsAtLeast(48.dp).getUnclippedBoundsInRoot()
+            assertTrue("An essential action escaped the bar", bounds.top >= bar.top && bounds.bottom <= bar.bottom)
+        }
     }
 
     @Test
@@ -1358,7 +1539,13 @@ class ComposerSendClearUiTest {
             MotdTheme(dynamicColor = false) {
                 val formatTime = rememberMessageTimeFormatter()
                 // Compare at the same window origin, not two separately rasterized stacked rows.
-                Box(Modifier.width(380.dp).height(120.dp).background(MaterialTheme.colorScheme.background).testTag("bubble_sample")) {
+                Box(
+                    Modifier
+                        .width(380.dp)
+                        .height(120.dp)
+                        .background(MaterialTheme.colorScheme.background)
+                        .testTag("bubble_sample"),
+                ) {
                     if (!renderFlight) {
                         MessageBubble(
                             sender = nick,
@@ -1397,6 +1584,74 @@ class ComposerSendClearUiTest {
         assertTrue("A completed delayed morph must match the real formatted bubble", real.sameAs(airborne))
         // The merged accessibility tree excludes the overlay's cleared semantics subtree.
         compose.onAllNodesWithText("hi").assertCountEquals(0)
+        assertEquals(0f, motion.progress.value, 0.001f)
+    }
+
+    @Test
+    fun completedMorph_keepsWindowLaunchPositionWhenHeaderMovesOverlayHost() {
+        val flight = OutgoingFlight(token = 7, text = "\u0002hi\u0002", launchedAtMs = 1_000)
+        val anchors = SendFlightAnchors()
+        val motion = SendFlightMotion(morphEnabled = true)
+        runBlocking { motion.morph.snapTo(1f) }
+        var headerHeight by mutableStateOf(54.dp)
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                val density = LocalDensity.current
+                Column(
+                    Modifier
+                        .width(380.dp)
+                        .height(400.dp)
+                        .background(MaterialTheme.colorScheme.background)
+                        .testTag("flight_panel")
+                        .onGloballyPositioned {
+                            if (anchors.launchField == null) {
+                                val origin = it.positionInWindow()
+                                anchors.launchField =
+                                    with(density) {
+                                        Rect(
+                                            origin.x,
+                                            origin.y + 200.dp.toPx(),
+                                            origin.x + 380.dp.toPx(),
+                                            origin.y + 248.dp.toPx(),
+                                        )
+                                    }
+                            }
+                        },
+                ) {
+                    Spacer(Modifier.height(headerHeight))
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxSize()
+                            .onGloballyPositioned { anchors.hostOrigin = it.positionInWindow() },
+                    ) {
+                        SendFlightOverlay(
+                            flight = flight,
+                            anchors = anchors,
+                            motion = motion,
+                            listShift = { 0f },
+                            selfNick = "metadata-wider-than-body",
+                            showSender = true,
+                            networkId = null,
+                            knownNicks = emptySet(),
+                            identityRules = IrcIdentityRules(),
+                        )
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+
+        assertTrue("The flight must be rendered before comparing pixels", anchors.ghostHeight > 0f)
+        val panel = compose.onNodeWithTag("flight_panel")
+        val before = panel.captureToImage().asAndroidBitmap()
+        val initialHostY = anchors.hostOrigin.y
+        compose.runOnIdle { headerHeight = 96.dp }
+        compose.waitForIdle()
+        assertTrue("Header expansion must move the overlay host", anchors.hostOrigin.y > initialHostY)
+        val after = panel.captureToImage().asAndroidBitmap()
+        assertTrue("The ghost must stay at its window launch position when the host moves", before.sameAs(after))
+        assertEquals(0f, motion.lift.value, 0.001f)
         assertEquals(0f, motion.progress.value, 0.001f)
     }
 

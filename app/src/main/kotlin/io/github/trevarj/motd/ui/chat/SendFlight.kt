@@ -257,7 +257,7 @@ internal fun BoxScope.SendFlightOverlay(
     // on every composer layout pass for the whole life of the screen.
     if (flight == null) return
     val field = anchors.launchField ?: anchors.composerField ?: return
-    val start = remember(flight.token) { anchors.local(field) }
+    val start = remember(flight.token) { field }
     // The row shows its Room timestamp; the ghost shows the clock for the moment it launched, built
     // with the timeline's own formatter so 12/24-hour and locale can never disagree. The launch
     // instant comes from the flight, which is also what row matching and grouping are decided by.
@@ -276,12 +276,12 @@ internal fun BoxScope.SendFlightOverlay(
                 // Layout-phase write: sizes the runway the timeline opens under this flight.
                 .onSizeChanged { anchors.ghostHeight = it.height.toFloat() }
                 .graphicsLayer {
-                    // Re-read the landing every frame rather than snapshotting it: the row's rect
-                    // moves while the keyboard and the list settle, and a stale target lands crooked.
+                    // Launch stays pinned in window space as the header moves this host; landing
+                    // stays live while the keyboard and list settle.
                     val landing = anchors.landingRow?.second?.let(anchors::local)
                     translationY =
                         sendFlightGhostTop(
-                            startTop = start.top,
+                            startTop = start.top - anchors.hostOrigin.y,
                             ghostHeight = size.height,
                             listShift = listShift(),
                             landingTop = landing?.top,
@@ -338,4 +338,3 @@ internal fun BoxScope.SendFlightOverlay(
         )
     }
 }
-

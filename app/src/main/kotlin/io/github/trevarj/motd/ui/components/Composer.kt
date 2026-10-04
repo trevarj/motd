@@ -88,6 +88,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -461,7 +462,8 @@ fun Composer(
             }
         }
 
-    LaunchedEffect(value.text, value.selection) {
+    // Apply presentation clears before drawing the send flight, not on a later coroutine frame.
+    DisposableEffect(value.text, value.selection) {
         if (value.text != lastEmittedRaw) {
             val external = IrcEditorDocument.fromRaw(value.text, value.selection.start, value.selection.end)
             editorDocument = external.first
@@ -471,6 +473,7 @@ fun Composer(
                 selection = TextRange(external.second.first, external.second.last)
             }
         }
+        onDispose {}
     }
     LaunchedEffect(textFieldState) {
         var previous = TextFieldValue(textFieldState.text.toString(), textFieldState.selection)

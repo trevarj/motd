@@ -2640,7 +2640,16 @@ fun ChatContent(
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
         topBar = {
             Column {
+                // ponytail: the existing latest-edge predicate owns chrome too, even while parked.
+                val headerExpansion by animateFloatAsState(
+                    targetValue = if (initialPositionSettled && !atBottom) 0f else 1f,
+                    animationSpec = MotdMotion.fadeIn,
+                    label = "chat_header_expansion",
+                )
                 TopAppBar(
+                    modifier = Modifier.testTag("chat_top_app_bar"),
+                    // Material grows beyond this minimum when accessibility text needs more room.
+                    expandedHeight = 48.dp + (TopAppBarDefaults.TopAppBarExpandedHeight - 48.dp) * headerExpansion,
                     colors =
                         TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -2674,7 +2683,7 @@ fun ChatContent(
                                 ) {
                                     Avatar(
                                         name = if (dickordDirectMessage) conversationLabel.orEmpty() else buffer?.displayName.orEmpty(),
-                                        size = MotdSizes.headerAvatar,
+                                        size = 24.dp + (MotdSizes.headerAvatar - 24.dp) * headerExpansion,
                                         isChannel = !dickordDirectMessage && buffer?.type == BufferType.CHANNEL,
                                         networkId = buffer?.networkId,
                                         conversationModel =
@@ -2730,7 +2739,7 @@ fun ChatContent(
                     },
                     navigationIcon = {
                         if (showBack) {
-                            IconButton(onClick = onBack) {
+                            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = stringResource(R.string.chat_back),
@@ -2742,12 +2751,12 @@ fun ChatContent(
                         onOpenConversationList?.let { openConversationList ->
                             TextButton(
                                 onClick = openConversationList,
-                                modifier = Modifier.testTag("chat_open_conversation_list"),
+                                modifier = Modifier.heightIn(min = 48.dp).testTag("chat_open_conversation_list"),
                             ) {
                                 Text(stringResource(R.string.dickord_portal_channels))
                             }
                         }
-                        IconButton(onClick = { buffer?.let { onOpenSearch(it.id) } }) {
+                        IconButton(onClick = { buffer?.let { onOpenSearch(it.id) } }, modifier = Modifier.size(48.dp)) {
                             Icon(
                                 Icons.Outlined.Search,
                                 contentDescription = stringResource(R.string.chat_search),
@@ -2755,7 +2764,7 @@ fun ChatContent(
                         }
                         IconButton(
                             onClick = { overflowOpen = true },
-                            modifier = Modifier.testTag("chat_overflow"),
+                            modifier = Modifier.size(48.dp).testTag("chat_overflow"),
                         ) {
                             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
                         }
@@ -3409,12 +3418,12 @@ fun ChatContent(
                                             "long_draft=false"
                                         }
                                         flightAnchors.captureLaunch()
-                                        onSubmit(text)
                                         // Empty the field on the tap frame. The ViewModel still owns the
                                         // durable draft and republishes it if the send never lands, so this
                                         // is presentation only -- notifying onDraftChanged here would count
                                         // as an edit and make the submission itself stale.
                                         composerText = TextFieldValue("")
+                                        onSubmit(text)
                                         scope.launch {
                                             scrollToNewest(animate = true, reason = "composer_send_action")
                                         }
