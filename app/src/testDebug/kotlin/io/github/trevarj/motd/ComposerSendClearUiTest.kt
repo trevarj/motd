@@ -37,16 +37,21 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.assertTouchHeightIsEqualTo
+import androidx.compose.ui.test.assertTouchWidthIsEqualTo
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -91,12 +96,14 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.dcc.EbooksResultCache
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.ai.AiComposerDraftSnapshot
 import io.github.trevarj.motd.ui.ai.AiTextAction
 import io.github.trevarj.motd.ui.ai.AiTextSheet
 import io.github.trevarj.motd.ui.ai.AiTextSource
 import io.github.trevarj.motd.ui.ai.AiTextUiState
 import io.github.trevarj.motd.ui.ai.source
+import io.github.trevarj.motd.ui.chat.CHAT_TITLE_SYNC_SPINNER_TAG
 import io.github.trevarj.motd.ui.chat.ChatContent
 import io.github.trevarj.motd.ui.chat.ChatState
 import io.github.trevarj.motd.ui.chat.ComposerDraftState
@@ -238,6 +245,9 @@ class ComposerSendClearUiTest {
         memberCount: Int? = null,
         fontScale: Float? = null,
         onBack: () -> Unit = {},
+        showBack: Boolean = true,
+        onOpenConversationList: (() -> Unit)? = null,
+        historySyncStatus: HistorySyncStatus = HistorySyncStatus.Idle,
         onOpenChannelInfo: (Long) -> Unit = {},
         onOpenSearch: (Long) -> Unit = {},
         parted: Boolean = false,
@@ -278,6 +288,9 @@ class ComposerSendClearUiTest {
                         items = items,
                         composerEnabled = true,
                         onBack = onBack,
+                        showBack = showBack,
+                        onOpenConversationList = onOpenConversationList,
+                        historySyncStatus = historySyncStatus,
                         onOpenChannelInfo = onOpenChannelInfo,
                         ebooksHelperRoomId = ebooksHelperRoomId(),
                         ebooksDccOffers = ebooksDccOffers(),
@@ -735,6 +748,10 @@ class ComposerSendClearUiTest {
         val search = compose.onNodeWithContentDescription(resources.getString(R.string.chat_search))
         val expandedHeight = headerHeight()
         title.assertHeightIsAtLeast(48.dp)
+        back.assertHeightIsAtLeast(48.dp)
+        search.assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag("chat_overflow").assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag("chat_compact_actions").assertDoesNotExist()
         compose.onNodeWithText("#kotlin", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("42 members", useUnmergedTree = true).assertIsDisplayed()
         compose.mainClock.autoAdvance = false
@@ -746,19 +763,29 @@ class ComposerSendClearUiTest {
         compose.mainClock.advanceTimeBy(64)
         compose.waitForIdle()
         val intermediateHeight = headerHeight()
-        assertTrue("The actual bar must have an intermediate layout height", intermediateHeight < expandedHeight - 1f && intermediateHeight > expandedHeight - 15f)
+        assertTrue("The actual bar must have an intermediate layout height", intermediateHeight < expandedHeight - 1f && intermediateHeight > expandedHeight - 27f)
         compose.mainClock.advanceTimeBy(500)
         compose.waitForIdle()
         val compactHeight = headerHeight()
-        assertEquals(16f, expandedHeight - compactHeight, 1f)
+        assertEquals(28f, expandedHeight - compactHeight, 1f)
         assertEquals("Header resizing moved the canonical history row", anchorBottom, anchor.getUnclippedBoundsInRoot().bottom.value, 0.5f)
         compose.mainClock.autoAdvance = true
-        title.assertHeightIsAtLeast(48.dp).performClick()
-        back.assertHeightIsAtLeast(48.dp).performClick()
-        search.assertHeightIsAtLeast(48.dp).performClick()
-        compose.onNodeWithTag("chat_overflow").assertHeightIsAtLeast(48.dp).performClick()
-        compose.onNodeWithTag("chat_overflow_menu").assertIsDisplayed()
-        compose.onNodeWithTag("chat_invite_user").performClick()
+        title.assertHeightIsEqualTo(36.dp).assertHasNoClickAction()
+        compose.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag("chat_top_app_bar")), useUnmergedTree = true).assertCountEquals(0)
+        back.assertDoesNotExist()
+        search.assertDoesNotExist()
+        compose.onNodeWithTag("chat_overflow").assertDoesNotExist()
+        val actions = compose.onNodeWithTag("chat_compact_actions")
+        actions.assertTouchHeightIsEqualTo(48.dp).assertTouchWidthIsEqualTo(48.dp)
+        actions.performClick()
+        compose.onAllNodesWithTag("chat_overflow_menu").assertCountEquals(1)
+        compose.onNodeWithTag("chat_compact_details").assertHeightIsAtLeast(48.dp).performClick()
+        actions.performClick()
+        compose.onNodeWithTag("chat_compact_back").assertHeightIsAtLeast(48.dp).performClick()
+        actions.performClick()
+        compose.onNodeWithTag("chat_compact_search").assertHeightIsAtLeast(48.dp).performClick()
+        actions.performClick()
+        compose.onNodeWithTag("chat_invite_user").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals(1, backs)
             assertEquals(1, details)
@@ -800,6 +827,11 @@ class ComposerSendClearUiTest {
         compose.onNodeWithTag("chat_message_header-101", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertDoesNotExist()
         assertEquals(expandedHeight, headerHeight(), 0.5f)
+        actions.assertDoesNotExist()
+        title.assertHeightIsAtLeast(48.dp)
+        back.assertHeightIsAtLeast(48.dp)
+        search.assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag("chat_overflow").assertHeightIsAtLeast(48.dp)
         compose.mainClock.autoAdvance = true
         timeline.performScrollToIndex(50)
         assertEquals(compactHeight, headerHeight(), 0.5f)
@@ -816,7 +848,7 @@ class ComposerSendClearUiTest {
 
     @Test
     @Config(qualifiers = "w320dp-h640dp")
-    fun compactHeaderKeepsLargeTextAndActionsInsideTheActualBar() {
+    fun compactHeaderGrowsForLargeTextAndKeepsFloatingActionsAccessible() {
         val longTitle = "#a-long-conversation-title-that-must-remain-readable-to-accessibility"
         setContent(
             draft = { ComposerDraftState(hydrated = true) },
@@ -833,15 +865,105 @@ class ComposerSendClearUiTest {
         assertTrue("Accessibility text must grow the bar instead of being clipped", title.top >= bar.top && title.bottom <= bar.bottom)
         compose.onNodeWithText(longTitle, useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("SASL authentication failed", useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag("chat_top_app_bar")), useUnmergedTree = true).assertCountEquals(0)
         val resources = RuntimeEnvironment.getApplication().resources
+        val actions =
+            compose
+                .onNodeWithTag("chat_compact_actions")
+                .assertIsDisplayed()
+                .assertTouchHeightIsEqualTo(48.dp)
+                .assertTouchWidthIsEqualTo(48.dp)
+        compose.onNodeWithContentDescription(resources.getString(R.string.action_more)).assertIsDisplayed()
+        val actionsBounds = actions.getUnclippedBoundsInRoot()
+        val latestBounds = compose.onNodeWithTag("chat_scroll_to_bottom_fab").getUnclippedBoundsInRoot()
+        val composerBounds = compose.onNodeWithTag("chat_composer_field").getUnclippedBoundsInRoot()
+        assertTrue("Conversation and latest targets overlap", actionsBounds.right < latestBounds.left)
+        assertTrue("Conversation actions escaped the safe message pane", actionsBounds.top > bar.bottom && actionsBounds.bottom <= composerBounds.top)
+        actions.performClick()
+        compose.onAllNodesWithTag("chat_overflow_menu").assertCountEquals(1)
+        compose.onNodeWithTag("chat_compact_back").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag("chat_compact_details").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+        compose
+            .onNodeWithTag("chat_compact_search")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag("chat_invite_user").performScrollTo().assertIsNotEnabled()
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h640dp")
+    fun compactPortalActionsRetainConversationListAndExistingOverflowInOneMenu() {
+        var conversationLists = 0
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            pages = flowOf(PagingData.from(headerHistory())),
+            showBack = false,
+            onOpenConversationList = { conversationLists++ },
+            historySyncStatus = HistorySyncStatus.Syncing,
+            onSubmit = {},
+        )
+        compose.onNodeWithTag("chat_open_conversation_list").assertIsDisplayed()
+        compose.onNodeWithTag("chat_timeline").performScrollToIndex(50)
+        compose.onNodeWithTag("chat_title").assertHeightIsEqualTo(36.dp).assertHasNoClickAction()
+        compose.onNodeWithTag(CHAT_TITLE_SYNC_SPINNER_TAG).assertIsDisplayed()
+        compose.onNodeWithTag("chat_open_conversation_list").assertDoesNotExist()
+        val actions = compose.onNodeWithTag("chat_compact_actions")
+        actions.assertTouchHeightIsEqualTo(48.dp).assertTouchWidthIsEqualTo(48.dp).performClick()
+        compose.onAllNodesWithTag("chat_overflow_menu").assertCountEquals(1)
+        compose.onNodeWithTag("chat_compact_back").assertDoesNotExist()
+        compose.onNodeWithTag("chat_open_conversation_list").assertHeightIsAtLeast(48.dp).performClick()
+        compose.runOnIdle { assertEquals(1, conversationLists) }
+        compose.onNodeWithTag("chat_overflow_menu").assertDoesNotExist()
+        actions.performClick()
         listOf(
-            compose.onNodeWithContentDescription(resources.getString(R.string.chat_back)),
-            compose.onNodeWithContentDescription(resources.getString(R.string.chat_search)),
-            compose.onNodeWithTag("chat_overflow"),
-        ).forEach { action ->
-            val bounds = action.assertIsDisplayed().assertHeightIsAtLeast(48.dp).getUnclippedBoundsInRoot()
-            assertTrue("An essential action escaped the bar", bounds.top >= bar.top && bounds.bottom <= bar.bottom)
+            "chat_invite_user",
+            "chat_watch",
+            "chat_layout_menu",
+            "chat_read_aloud_toggle",
+            "chat_read_aloud_options",
+            "chat_history_sync_menu",
+            "chat_presence_menu",
+        ).forEach { tag ->
+            compose.onAllNodesWithTag(tag).assertCountEquals(1)
+            compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed()
         }
+    }
+
+    @Test
+    fun compactQueryDetailsKeepTheirRouteAndServerTitlesRemainInformational() {
+        var currentBuffer by mutableStateOf(buffer.copy(name = "alice", displayName = "alice", type = BufferType.QUERY))
+        var details = 0
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            pages = flowOf(PagingData.from(headerHistory())),
+            chatBuffer = { currentBuffer },
+            onOpenChannelInfo = {
+                assertEquals(buffer.id, it)
+                details++
+            },
+            onSubmit = {},
+        )
+        compose.onNodeWithTag("chat_timeline").performScrollToIndex(50)
+        val actions = compose.onNodeWithTag("chat_compact_actions")
+        actions.performClick()
+        compose.onNodeWithTag("chat_invite_user").assertDoesNotExist()
+        compose
+            .onNodeWithTag("chat_compact_details")
+            .assertTextEquals(RuntimeEnvironment.getApplication().getString(R.string.chat_open_nick_details))
+            .performClick()
+        compose.runOnIdle {
+            assertEquals(1, details)
+            currentBuffer = buffer.copy(name = "server", displayName = "server", type = BufferType.SERVER)
+        }
+        compose.onNodeWithTag("chat_title").assertHeightIsEqualTo(36.dp).assertHasNoClickAction()
+        actions.performClick()
+        compose.onAllNodesWithTag("chat_overflow_menu").assertCountEquals(1)
+        compose.onNodeWithTag("chat_compact_details").assertDoesNotExist()
+        compose.onNodeWithTag("chat_invite_user").assertDoesNotExist()
+        compose.onNodeWithTag("chat_read_aloud_toggle").assertDoesNotExist()
+        compose.onNodeWithTag("chat_history_sync_menu").assertDoesNotExist()
+        compose.onNodeWithTag("chat_compact_search").assertIsDisplayed()
     }
 
     @Test

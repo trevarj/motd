@@ -51,9 +51,10 @@ Replies and denser message styles retain their ordinary send-flight presentation
 A chat-list swipe acts only after release at least 60% across the row width. Short
 flicks spring back without flying offscreen; right swipes do not dismiss chats.
 
-Reading older messages animates the chat header from 64dp to a compact 48dp bar.
-The title, status and actions stay available; returning to latest expands it again.
-Large accessibility text can grow the bar rather than being clipped.
+Reading older messages animates the chat header from 64dp to a 36dp informational
+strip. Its controls move to a 48dp conversation-actions floating button; the
+separate latest button restores the full toolbar. Large accessibility text can
+grow the strip rather than being clipped.
 
 Chat-list tabs use the same theme surface as the title bar and chat rows.
 The selected tab retains its distinct pill highlight.

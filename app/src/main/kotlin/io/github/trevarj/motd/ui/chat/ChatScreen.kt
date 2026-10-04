@@ -2635,21 +2635,260 @@ fun ChatContent(
                 .filterNot { isSystemKind(it.kind) || it.isSelf }
                 .map { it.sender }
         }
+    // ponytail: the existing latest-edge predicate owns chrome too, even while parked.
+    val headerExpansion =
+        animateFloatAsState(
+            targetValue = if (initialPositionSettled && !atBottom) 0f else 1f,
+            animationSpec = MotdMotion.fadeIn,
+            label = "chat_header_expansion",
+        )
+    val compactHeader by remember {
+        derivedStateOf {
+            // Keep 48dp controls out until the animated bar can contain them without jumping.
+            36.dp + (TopAppBarDefaults.TopAppBarExpandedHeight - 36.dp) * headerExpansion.value < 48.dp
+        }
+    }
+    val conversationActionsMenu: @Composable () -> Unit = {
+        DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, modifier = Modifier.testTag("chat_overflow_menu")) {
+            if (compactHeader) {
+                if (showBack) {
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_compact_back"),
+                        text = { Text(stringResource(R.string.chat_back)) },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null) },
+                        onClick = {
+                            overflowOpen = false
+                            onBack()
+                        },
+                    )
+                }
+                if (titleClickLabel != null) {
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_compact_details"),
+                        text = { Text(titleClickLabel) },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null) },
+                        onClick = {
+                            overflowOpen = false
+                            buffer?.let { onOpenChannelInfo(it.id) }
+                        },
+                    )
+                }
+                onOpenConversationList?.let { openConversationList ->
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_open_conversation_list"),
+                        text = { Text(stringResource(R.string.dickord_portal_channels)) },
+                        onClick = {
+                            overflowOpen = false
+                            openConversationList()
+                        },
+                    )
+                }
+                DropdownMenuItem(
+                    modifier = Modifier.testTag("chat_compact_search"),
+                    text = { Text(stringResource(R.string.chat_search)) },
+                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                    onClick = {
+                        overflowOpen = false
+                        buffer?.let { onOpenSearch(it.id) }
+                    },
+                )
+                HorizontalDivider()
+            }
+            if (buffer?.type == BufferType.CHANNEL && buffer.joined) {
+                val inviteEnabled = state.connState is IrcClientState.Ready
+                DropdownMenuItem(
+                    modifier = Modifier.testTag("chat_invite_user"),
+                    text = {
+                        Column {
+                            Text(stringResource(R.string.irc_invite_user_title))
+                            if (!inviteEnabled) {
+                                Text(
+                                    stringResource(R.string.irc_invite_disconnected),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    },
+                    leadingIcon = { Icon(Icons.Outlined.GroupAdd, contentDescription = null) },
+                    enabled = inviteEnabled,
+                    onClick = {
+                        overflowOpen = false
+                        onInviteUser()
+                    },
+                )
+            }
+            if (canPrepareCatchUpContext(agentwireEnabled, isServerBuffer, unreadEntrySnapshot)) {
+                DropdownMenuItem(
+                    modifier = Modifier.testTag("chat_catch_up"),
+                    text = { Text(stringResource(R.string.agent_context_catch_up)) },
+                    leadingIcon = { Icon(Icons.Outlined.AutoAwesome, contentDescription = null) },
+                    enabled = !contextPreparing,
+                    onClick = {
+                        overflowOpen = false
+                        onPrepareCatchUpContext()
+                    },
+                )
+            }
+            if (buffer?.type == BufferType.CHANNEL) {
+                val notificationOverride = channelNotifications.channelOverride != null || channelNotifications.watch != null
+                DropdownMenuItem(
+                    modifier = Modifier.testTag("chat_watch").semantics { selected = notificationOverride },
+                    text = {
+                        Column {
+                            Text(stringResource(R.string.channelinfo_notifications))
+                            Text(channelNotifications.summary(), style = MaterialTheme.typography.bodySmall)
+                        }
+                    },
+                    leadingIcon = {
+                        Icon(
+                            if (notificationOverride) {
+                                Icons.Outlined.NotificationsActive
+                            } else {
+                                Icons.Outlined.Notifications
+                            },
+                            contentDescription = null,
+                        )
+                    },
+                    onClick = {
+                        overflowOpen = false
+                        notificationSheetOpen = true
+                    },
+                )
+            }
+            DropdownMenuItem(
+                modifier = Modifier.testTag("chat_layout_menu"),
+                text = {
+                    Column {
+                        Text(stringResource(R.string.chat_layout_title))
+                        Text(
+                            stringResource(
+                                R.string.chat_layout_overflow_summary,
+                                densityLabel(conversationLayout.effective),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                },
+                leadingIcon = { Icon(Icons.Outlined.ViewAgenda, contentDescription = null) },
+                onClick = {
+                    overflowOpen = false
+                    conversationLayoutSheetOpen = true
+                },
+            )
+            if (buffer?.type == BufferType.CHANNEL || buffer?.type == BufferType.QUERY) {
+                DropdownMenuItem(
+                    modifier = Modifier.testTag("chat_read_aloud_toggle").semantics { selected = readAloudState.enabled },
+                    text = { Text(stringResource(if (readAloudState.enabled) R.string.read_aloud_stop else R.string.read_aloud_start)) },
+                    leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null) },
+                    onClick = {
+                        overflowOpen = false
+                        onReadAloudToggle()
+                    },
+                )
+                DropdownMenuItem(
+                    modifier = Modifier.testTag("chat_read_aloud_options"),
+                    text = { Text(stringResource(R.string.read_aloud_options)) },
+                    onClick = {
+                        overflowOpen = false
+                        onReadAloudOptions()
+                        readAloudOptionsOpen = true
+                    },
+                )
+                val historySync = state.conversationHistorySync
+                DropdownMenuItem(
+                    modifier = Modifier.testTag("chat_history_sync_menu"),
+                    text = {
+                        Column {
+                            Text(stringResource(R.string.settings_history_sync_mode))
+                            Text(
+                                if (historySync.override == null) {
+                                    stringResource(
+                                        R.string.chat_history_sync_inherit,
+                                        stringResource(historySyncModeLabel(historySync.global)),
+                                    )
+                                } else {
+                                    stringResource(historySyncModeLabel(historySync.effective))
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    },
+                    leadingIcon = { Icon(Icons.Outlined.Sync, contentDescription = null) },
+                    onClick = {
+                        overflowOpen = false
+                        historySyncModeSheetOpen = true
+                    },
+                )
+            }
+            DropdownMenuItem(
+                modifier = Modifier.testTag("chat_presence_menu"),
+                text = {
+                    Column {
+                        Text(stringResource(R.string.chat_presence_title))
+                        Text(
+                            stringResource(
+                                R.string.chat_presence_overflow_summary,
+                                stringResource(presenceModeLabel(presenceMode)),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                },
+                leadingIcon = { Icon(Icons.Outlined.PeopleOutline, contentDescription = null) },
+                onClick = {
+                    overflowOpen = false
+                    presenceModeSheetOpen = true
+                },
+            )
+            if (fools.isNotEmpty()) {
+                val foolsShown =
+                    if (foolsMode == FoolsMode.HIDE) {
+                        hiddenFoolsRevealed
+                    } else {
+                        expandAllFools
+                    }
+                DropdownMenuItem(
+                    modifier = Modifier.testTag("chat_toggle_fools_visibility"),
+                    text = {
+                        Text(
+                            stringResource(
+                                if (foolsShown) {
+                                    R.string.chat_fool_collapse_all
+                                } else {
+                                    R.string.chat_fool_expand_all
+                                },
+                            ),
+                        )
+                    },
+                    onClick = {
+                        overflowOpen = false
+                        if (foolsMode == FoolsMode.HIDE) {
+                            onHiddenFoolsRevealedChange(!hiddenFoolsRevealed)
+                        } else {
+                            expandAllFools = !expandAllFools
+                            expandedFools = emptySet()
+                            collapsedFools = emptySet()
+                        }
+                    },
+                    leadingIcon = {
+                        Icon(
+                            if (foolsShown) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                            contentDescription = null,
+                        )
+                    },
+                )
+            }
+        }
+    }
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
         topBar = {
             Column {
-                // ponytail: the existing latest-edge predicate owns chrome too, even while parked.
-                val headerExpansion by animateFloatAsState(
-                    targetValue = if (initialPositionSettled && !atBottom) 0f else 1f,
-                    animationSpec = MotdMotion.fadeIn,
-                    label = "chat_header_expansion",
-                )
                 TopAppBar(
                     modifier = Modifier.testTag("chat_top_app_bar"),
                     // Material grows beyond this minimum when accessibility text needs more room.
-                    expandedHeight = 48.dp + (TopAppBarDefaults.TopAppBarExpandedHeight - 48.dp) * headerExpansion,
+                    expandedHeight = 36.dp + (TopAppBarDefaults.TopAppBarExpandedHeight - 36.dp) * headerExpansion.value,
                     colors =
                         TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -2660,9 +2899,9 @@ fun ChatContent(
                             modifier =
                                 Modifier
                                     .fillMaxWidth()
-                                    .heightIn(min = 48.dp)
+                                    .heightIn(min = if (compactHeader) 36.dp else 48.dp)
                                     .then(
-                                        if (titleClickLabel != null) {
+                                        if (!compactHeader && titleClickLabel != null) {
                                             Modifier.clickable(onClickLabel = titleClickLabel) {
                                                 buffer?.let { onOpenChannelInfo(it.id) }
                                             }
@@ -2683,7 +2922,7 @@ fun ChatContent(
                                 ) {
                                     Avatar(
                                         name = if (dickordDirectMessage) conversationLabel.orEmpty() else buffer?.displayName.orEmpty(),
-                                        size = 24.dp + (MotdSizes.headerAvatar - 24.dp) * headerExpansion,
+                                        size = 20.dp + (MotdSizes.headerAvatar - 20.dp) * headerExpansion.value,
                                         isChannel = !dickordDirectMessage && buffer?.type == BufferType.CHANNEL,
                                         networkId = buffer?.networkId,
                                         conversationModel =
@@ -2699,7 +2938,7 @@ fun ChatContent(
                             Column(modifier = Modifier.padding(start = if (hideAvatar) 0.dp else 10.dp).weight(1f)) {
                                 Text(
                                     text = conversationLabel.orEmpty(),
-                                    style = MaterialTheme.typography.titleMedium,
+                                    style = if (compactHeader) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -2727,7 +2966,7 @@ fun ChatContent(
                                 }
                             }
                             ChatTitleSyncSpinner(timelineHistoryStatus)
-                            if (titleTarget != ChatTitleTarget.NONE) {
+                            if (!compactHeader && titleTarget != ChatTitleTarget.NONE) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
                                     contentDescription = null,
@@ -2738,7 +2977,7 @@ fun ChatContent(
                         }
                     },
                     navigationIcon = {
-                        if (showBack) {
+                        if (!compactHeader && showBack) {
                             IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.ArrowBack,
@@ -2748,211 +2987,28 @@ fun ChatContent(
                         }
                     },
                     actions = {
-                        onOpenConversationList?.let { openConversationList ->
-                            TextButton(
-                                onClick = openConversationList,
-                                modifier = Modifier.heightIn(min = 48.dp).testTag("chat_open_conversation_list"),
+                        if (!compactHeader) {
+                            onOpenConversationList?.let { openConversationList ->
+                                TextButton(
+                                    onClick = openConversationList,
+                                    modifier = Modifier.heightIn(min = 48.dp).testTag("chat_open_conversation_list"),
+                                ) {
+                                    Text(stringResource(R.string.dickord_portal_channels))
+                                }
+                            }
+                            IconButton(onClick = { buffer?.let { onOpenSearch(it.id) } }, modifier = Modifier.size(48.dp)) {
+                                Icon(
+                                    Icons.Outlined.Search,
+                                    contentDescription = stringResource(R.string.chat_search),
+                                )
+                            }
+                            IconButton(
+                                onClick = { overflowOpen = true },
+                                modifier = Modifier.size(48.dp).testTag("chat_overflow"),
                             ) {
-                                Text(stringResource(R.string.dickord_portal_channels))
+                                Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
                             }
-                        }
-                        IconButton(onClick = { buffer?.let { onOpenSearch(it.id) } }, modifier = Modifier.size(48.dp)) {
-                            Icon(
-                                Icons.Outlined.Search,
-                                contentDescription = stringResource(R.string.chat_search),
-                            )
-                        }
-                        IconButton(
-                            onClick = { overflowOpen = true },
-                            modifier = Modifier.size(48.dp).testTag("chat_overflow"),
-                        ) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
-                        }
-                        DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, modifier = Modifier.testTag("chat_overflow_menu")) {
-                            if (buffer?.type == BufferType.CHANNEL && buffer.joined) {
-                                val inviteEnabled = state.connState is IrcClientState.Ready
-                                DropdownMenuItem(
-                                    modifier = Modifier.testTag("chat_invite_user"),
-                                    text = {
-                                        Column {
-                                            Text(stringResource(R.string.irc_invite_user_title))
-                                            if (!inviteEnabled) {
-                                                Text(
-                                                    stringResource(R.string.irc_invite_disconnected),
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                )
-                                            }
-                                        }
-                                    },
-                                    leadingIcon = { Icon(Icons.Outlined.GroupAdd, contentDescription = null) },
-                                    enabled = inviteEnabled,
-                                    onClick = {
-                                        overflowOpen = false
-                                        onInviteUser()
-                                    },
-                                )
-                            }
-                            if (canPrepareCatchUpContext(agentwireEnabled, isServerBuffer, unreadEntrySnapshot)) {
-                                DropdownMenuItem(
-                                    modifier = Modifier.testTag("chat_catch_up"),
-                                    text = { Text(stringResource(R.string.agent_context_catch_up)) },
-                                    leadingIcon = { Icon(Icons.Outlined.AutoAwesome, contentDescription = null) },
-                                    enabled = !contextPreparing,
-                                    onClick = {
-                                        overflowOpen = false
-                                        onPrepareCatchUpContext()
-                                    },
-                                )
-                            }
-                            if (buffer?.type == BufferType.CHANNEL) {
-                                val notificationOverride = channelNotifications.channelOverride != null || channelNotifications.watch != null
-                                DropdownMenuItem(
-                                    modifier = Modifier.testTag("chat_watch").semantics { selected = notificationOverride },
-                                    text = {
-                                        Column {
-                                            Text(stringResource(R.string.channelinfo_notifications))
-                                            Text(channelNotifications.summary(), style = MaterialTheme.typography.bodySmall)
-                                        }
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            if (notificationOverride) {
-                                                Icons.Outlined.NotificationsActive
-                                            } else {
-                                                Icons.Outlined.Notifications
-                                            },
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    onClick = {
-                                        overflowOpen = false
-                                        notificationSheetOpen = true
-                                    },
-                                )
-                            }
-                            DropdownMenuItem(
-                                modifier = Modifier.testTag("chat_layout_menu"),
-                                text = {
-                                    Column {
-                                        Text(stringResource(R.string.chat_layout_title))
-                                        Text(
-                                            stringResource(
-                                                R.string.chat_layout_overflow_summary,
-                                                densityLabel(conversationLayout.effective),
-                                            ),
-                                            style = MaterialTheme.typography.bodySmall,
-                                        )
-                                    }
-                                },
-                                leadingIcon = { Icon(Icons.Outlined.ViewAgenda, contentDescription = null) },
-                                onClick = {
-                                    overflowOpen = false
-                                    conversationLayoutSheetOpen = true
-                                },
-                            )
-                            if (buffer?.type == BufferType.CHANNEL || buffer?.type == BufferType.QUERY) {
-                                DropdownMenuItem(
-                                    modifier = Modifier.testTag("chat_read_aloud_toggle").semantics { selected = readAloudState.enabled },
-                                    text = { Text(stringResource(if (readAloudState.enabled) R.string.read_aloud_stop else R.string.read_aloud_start)) },
-                                    leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null) },
-                                    onClick = {
-                                        overflowOpen = false
-                                        onReadAloudToggle()
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    modifier = Modifier.testTag("chat_read_aloud_options"),
-                                    text = { Text(stringResource(R.string.read_aloud_options)) },
-                                    onClick = {
-                                        overflowOpen = false
-                                        onReadAloudOptions()
-                                        readAloudOptionsOpen = true
-                                    },
-                                )
-                                val historySync = state.conversationHistorySync
-                                DropdownMenuItem(
-                                    modifier = Modifier.testTag("chat_history_sync_menu"),
-                                    text = {
-                                        Column {
-                                            Text(stringResource(R.string.settings_history_sync_mode))
-                                            Text(
-                                                if (historySync.override == null) {
-                                                    stringResource(
-                                                        R.string.chat_history_sync_inherit,
-                                                        stringResource(historySyncModeLabel(historySync.global)),
-                                                    )
-                                                } else {
-                                                    stringResource(historySyncModeLabel(historySync.effective))
-                                                },
-                                                style = MaterialTheme.typography.bodySmall,
-                                            )
-                                        }
-                                    },
-                                    leadingIcon = { Icon(Icons.Outlined.Sync, contentDescription = null) },
-                                    onClick = {
-                                        overflowOpen = false
-                                        historySyncModeSheetOpen = true
-                                    },
-                                )
-                            }
-                            DropdownMenuItem(
-                                modifier = Modifier.testTag("chat_presence_menu"),
-                                text = {
-                                    Column {
-                                        Text(stringResource(R.string.chat_presence_title))
-                                        Text(
-                                            stringResource(
-                                                R.string.chat_presence_overflow_summary,
-                                                stringResource(presenceModeLabel(presenceMode)),
-                                            ),
-                                            style = MaterialTheme.typography.bodySmall,
-                                        )
-                                    }
-                                },
-                                leadingIcon = { Icon(Icons.Outlined.PeopleOutline, contentDescription = null) },
-                                onClick = {
-                                    overflowOpen = false
-                                    presenceModeSheetOpen = true
-                                },
-                            )
-                            if (fools.isNotEmpty()) {
-                                val foolsShown =
-                                    if (foolsMode == FoolsMode.HIDE) {
-                                        hiddenFoolsRevealed
-                                    } else {
-                                        expandAllFools
-                                    }
-                                DropdownMenuItem(
-                                    modifier = Modifier.testTag("chat_toggle_fools_visibility"),
-                                    text = {
-                                        Text(
-                                            stringResource(
-                                                if (foolsShown) {
-                                                    R.string.chat_fool_collapse_all
-                                                } else {
-                                                    R.string.chat_fool_expand_all
-                                                },
-                                            ),
-                                        )
-                                    },
-                                    onClick = {
-                                        overflowOpen = false
-                                        if (foolsMode == FoolsMode.HIDE) {
-                                            onHiddenFoolsRevealedChange(!hiddenFoolsRevealed)
-                                        } else {
-                                            expandAllFools = !expandAllFools
-                                            expandedFools = emptySet()
-                                            collapsedFools = emptySet()
-                                        }
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            if (foolsShown) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                )
-                            }
+                            conversationActionsMenu()
                         }
                     },
                 )
@@ -3250,6 +3306,18 @@ fun ChatContent(
                                 },
                                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                             )
+
+                            if (compactHeader) {
+                                Box(modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)) {
+                                    FloatingActionButton(
+                                        onClick = { overflowOpen = true },
+                                        modifier = Modifier.size(48.dp).testTag("chat_compact_actions"),
+                                    ) {
+                                        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+                                    }
+                                    conversationActionsMenu()
+                                }
+                            }
 
                             val stagedVoicePlaybackId = voiceState.staged?.let { "voice:${it.file.toURI()}" }
                             TimelineTopOverlays(
