@@ -2922,6 +2922,7 @@ fun ChatContent(
                                 ) {
                                     Avatar(
                                         name = if (dickordDirectMessage) conversationLabel.orEmpty() else buffer?.displayName.orEmpty(),
+                                        modifier = Modifier.testTag("chat_header_avatar"),
                                         size = 20.dp + (MotdSizes.headerAvatar - 20.dp) * headerExpansion.value,
                                         isChannel = !dickordDirectMessage && buffer?.type == BufferType.CHANNEL,
                                         networkId = buffer?.networkId,
@@ -3310,7 +3311,12 @@ fun ChatContent(
                             )
 
                             if (compactHeader) {
-                                Box(modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)) {
+                                Box(
+                                    modifier =
+                                        Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .padding(end = 16.dp, bottom = 16.dp + MotdSizes.floatingActionButton + 8.dp),
+                                ) {
                                     FloatingActionButton(
                                         onClick = { overflowOpen = true },
                                         modifier = Modifier.size(48.dp).testTag("chat_compact_actions"),

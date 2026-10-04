@@ -52,9 +52,9 @@ A chat-list swipe acts only after release at least 60% across the row width. Sho
 flicks spring back without flying offscreen; right swipes do not dismiss chats.
 
 Reading older messages animates the chat header from 64dp to a 36dp informational
-strip. Its controls move to a 48dp conversation-actions floating button; the
-separate latest button restores the full toolbar. Large accessibility text can
-grow the strip rather than being clipped.
+strip. Its controls move to a 48dp conversation-actions floating button above the
+latest button on the right. Latest restores the full toolbar. Large accessibility
+text can grow the strip rather than being clipped.
 
 Chat-list tabs use the same theme surface as the title bar and chat rows.
 The selected tab retains its distinct pill highlight.

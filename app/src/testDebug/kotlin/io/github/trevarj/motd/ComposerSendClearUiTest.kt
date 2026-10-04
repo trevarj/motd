@@ -977,12 +977,23 @@ class ComposerSendClearUiTest {
         assertEquals("Header resizing moved the canonical history row", anchorBottom, anchor.getUnclippedBoundsInRoot().bottom.value, 0.5f)
         compose.mainClock.autoAdvance = true
         title.assertHeightIsEqualTo(36.dp).assertHasNoClickAction()
+        val avatarBounds = compose.onNodeWithTag("chat_header_avatar", useUnmergedTree = true).assertHeightIsEqualTo(20.dp).getUnclippedBoundsInRoot()
+        assertEquals(
+            "The compact avatar must be centered below the status-bar inset",
+            bar.getUnclippedBoundsInRoot().bottom.value - 18f,
+            (avatarBounds.top.value + avatarBounds.bottom.value) / 2f,
+            0.5f,
+        )
         compose.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag("chat_top_app_bar")), useUnmergedTree = true).assertCountEquals(0)
         back.assertDoesNotExist()
         search.assertDoesNotExist()
         compose.onNodeWithTag("chat_overflow").assertDoesNotExist()
         val actions = compose.onNodeWithTag("chat_compact_actions")
         actions.assertTouchHeightIsEqualTo(48.dp).assertTouchWidthIsEqualTo(48.dp)
+        val actionsBounds = actions.getUnclippedBoundsInRoot()
+        val latestBounds = compose.onNodeWithTag("chat_scroll_to_bottom_fab").getUnclippedBoundsInRoot()
+        assertEquals("Conversation actions must align with latest on the right", latestBounds.right.value, actionsBounds.right.value, 0.5f)
+        assertEquals("Conversation actions must sit above latest with a gap", 8f, (latestBounds.top - actionsBounds.bottom).value, 0.5f)
         actions.performClick()
         compose.onAllNodesWithTag("chat_overflow_menu").assertCountEquals(1)
         compose.onNodeWithTag("chat_compact_details").assertHeightIsAtLeast(48.dp).performClick()
@@ -1069,6 +1080,16 @@ class ComposerSendClearUiTest {
         val bar = compose.onNodeWithTag("chat_top_app_bar", useUnmergedTree = true).getUnclippedBoundsInRoot()
         val title = compose.onNodeWithTag("chat_title").assertHeightIsAtLeast(64.dp).getUnclippedBoundsInRoot()
         assertTrue("Accessibility text must grow the bar instead of being clipped", title.top >= bar.top && title.bottom <= bar.bottom)
+        val avatarBounds = compose.onNodeWithTag("chat_header_avatar", useUnmergedTree = true).assertHeightIsEqualTo(20.dp).getUnclippedBoundsInRoot()
+        assertEquals(
+            "The avatar must remain centered when accessibility text grows the content bar",
+            bar.bottom.value - (title.bottom - title.top).value / 2f,
+            (avatarBounds.top.value + avatarBounds.bottom.value) / 2f,
+            0.5f,
+        )
+        val glyphBounds = compose.onNodeWithText("#", useUnmergedTree = true).assertIsDisplayed().getUnclippedBoundsInRoot()
+        assertTrue("The glyph must not inherit the header's oversized line height", glyphBounds.bottom - glyphBounds.top < avatarBounds.bottom - avatarBounds.top)
+        assertEquals("The glyph must be centered in its tile", (avatarBounds.top.value + avatarBounds.bottom.value) / 2f, (glyphBounds.top.value + glyphBounds.bottom.value) / 2f, 0.5f)
         compose.onNodeWithText(longTitle, useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("SASL authentication failed", useUnmergedTree = true).assertIsDisplayed()
         compose.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag("chat_top_app_bar")), useUnmergedTree = true).assertCountEquals(0)
@@ -1083,7 +1104,8 @@ class ComposerSendClearUiTest {
         val actionsBounds = actions.getUnclippedBoundsInRoot()
         val latestBounds = compose.onNodeWithTag("chat_scroll_to_bottom_fab").getUnclippedBoundsInRoot()
         val composerBounds = compose.onNodeWithTag("chat_composer_field").getUnclippedBoundsInRoot()
-        assertTrue("Conversation and latest targets overlap", actionsBounds.right < latestBounds.left)
+        assertEquals("Conversation actions must align with latest on the right", latestBounds.right.value, actionsBounds.right.value, 0.5f)
+        assertEquals("Conversation actions must sit above latest with a gap", 8f, (latestBounds.top - actionsBounds.bottom).value, 0.5f)
         assertTrue("Conversation actions escaped the safe message pane", actionsBounds.top > bar.bottom && actionsBounds.bottom <= composerBounds.top)
         actions.performClick()
         compose.onAllNodesWithTag("chat_overflow_menu").assertCountEquals(1)
