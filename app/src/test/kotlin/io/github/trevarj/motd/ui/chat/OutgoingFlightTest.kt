@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.service.SendAcceptance
@@ -208,14 +210,62 @@ class OutgoingFlightTest {
     }
 
     @Test
-    fun `the morph swap dissolves the stand-in across the flight's back half`() {
-        // The stand-in carries the visible transformation, so it must survive the flight's first
-        // half; the replica must still be whole (swap = 1) before the landing handoff at 1.0.
-        assertEquals(0f, sendFlightMorphSwap(0f), 0.001f)
-        assertEquals(0f, sendFlightMorphSwap(0.45f), 0.001f)
-        assertEquals(0.5f, sendFlightMorphSwap(0.65f), 0.001f)
-        assertEquals(1f, sendFlightMorphSwap(0.85f), 0.001f)
-        assertEquals(1f, sendFlightMorphSwap(1.1f), 0.001f)
+    fun `launch geometry survives the field clearing before the flight composes`() {
+        val anchors = SendFlightAnchors()
+        val field = Rect(20f, 900f, 380f, 980f)
+        val textOrigin = Offset(32f, 912f)
+        anchors.composerField = field
+        anchors.composerTextOrigin = textOrigin
+        anchors.captureLaunch()
+
+        anchors.composerField = Rect(20f, 940f, 380f, 980f)
+        anchors.composerTextOrigin = Offset(32f, 952f)
+        anchors.beginFlight()
+
+        assertEquals(field, anchors.launchField)
+        assertEquals(textOrigin, anchors.launchTextOrigin)
+        assertEquals(40f, anchors.composerShrink(), 0.001f)
+        // An externally launched next flight cannot reuse the previous tap's pinned geometry.
+        anchors.beginFlight()
+        assertEquals(anchors.composerField, anchors.launchField)
+        assertEquals(anchors.composerTextOrigin, anchors.launchTextOrigin)
+    }
+
+    @Test
+    fun `a submission without a new flight does not move the hovering bubble`() {
+        val anchors = SendFlightAnchors()
+        val field = Rect(20f, 900f, 380f, 980f)
+        val textOrigin = Offset(32f, 912f)
+        anchors.composerField = field
+        anchors.composerTextOrigin = textOrigin
+        anchors.captureLaunch()
+        anchors.composerField = Rect(20f, 940f, 380f, 980f)
+        anchors.composerTextOrigin = Offset(32f, 952f)
+        anchors.beginFlight()
+
+        fun hoverTop() =
+            sendFlightGhostTop(
+                anchors.launchField!!.top, 200f, 206f, null, null, 0f, 1f,
+                footDrop = anchors.composerShrink(),
+            )
+        assertEquals(740f, hoverTop(), 0.001f)
+
+        // An emote/command is submitted from the collapsed field but creates no new flight.
+        anchors.captureLaunch()
+        assertEquals(field, anchors.launchField)
+        assertEquals(textOrigin, anchors.launchTextOrigin)
+        assertEquals(40f, anchors.composerShrink(), 0.001f)
+        assertEquals(740f, hoverTop(), 0.001f)
+
+        // A subsequent actual flight adopts its own tap geometry, not the previous command's.
+        anchors.composerField = Rect(20f, 920f, 380f, 980f)
+        anchors.composerTextOrigin = Offset(32f, 932f)
+        anchors.captureLaunch()
+        anchors.beginFlight()
+        assertEquals(920f, anchors.launchField!!.top, 0.001f)
+        assertEquals(Offset(32f, 932f), anchors.launchTextOrigin)
+        assertEquals(0f, anchors.composerShrink(), 0.001f)
+        assertEquals(720f, hoverTop(), 0.001f)
     }
 
     private fun accepted(

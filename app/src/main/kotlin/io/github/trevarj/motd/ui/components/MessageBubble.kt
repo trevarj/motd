@@ -42,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -49,6 +50,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.layout
@@ -304,6 +308,10 @@ fun MessageBubble(
     onLinkPreviewClick: () -> Unit = {},
     // Tapping the sender name/avatar opens the nick sheet; null (self / non-first bubbles) = inert.
     onSenderClick: (() -> Unit)? = null,
+    // Send-flight-only presentation; ordinary rows keep their existing surface and modifiers.
+    sendMorphProgress: (() -> Float)? = null,
+    bubbleModifier: Modifier = Modifier,
+    bodyModifier: Modifier = Modifier,
 ) {
     // Production timelines pass a string from one list-scoped formatter. The fallback keeps
     // previews/direct callers source-compatible without making every real row query system time
@@ -514,6 +522,31 @@ fun MessageBubble(
         } else {
             RoundedCornerShape(topStart = topCorner, topEnd = spacing.bubbleCorner, bottomEnd = spacing.bubbleCorner, bottomStart = groupedCorner)
         }
+    val elevation = comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION)
+    val surfaceModifier =
+        if (sendMorphProgress == null) {
+            Modifier.shadow(elevation, shape).clip(shape).background(bubbleColor)
+        } else {
+            Modifier
+                .graphicsLayer {
+                    shadowElevation = elevation.toPx() * sendMorphProgress().coerceIn(0f, 1f)
+                    this.shape = shape
+                }.clip(shape)
+                .drawWithCache {
+                    val outline = shape.createOutline(size, layoutDirection, this)
+                    onDrawBehind {
+                        val progress = sendMorphProgress().coerceIn(0f, 1f)
+                        if (progress == 1f) {
+                            // Match the ordinary background: only the outer clip shapes the fill.
+                            drawRect(bubbleColor)
+                        } else {
+                            scale(0.85f + 0.15f * progress) {
+                                drawOutline(outline, bubbleColor, alpha = (progress * 1.6f).coerceAtMost(1f))
+                            }
+                        }
+                    }
+                }
+        }
 
     Row(
         modifier =
@@ -547,12 +580,9 @@ fun MessageBubble(
 
         Column(
             modifier =
-                Modifier
+                bubbleModifier
                     .chatBubbleWidth()
-                    // Lift only the comfortable bubble, using its grouped corner shape.
-                    .shadow(comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION), shape)
-                    .clip(shape)
-                    .background(bubbleColor)
+                    .then(surfaceModifier)
                     .messageRowClicks(
                         onClick = onClick,
                         onClickLabel = onClickLabel,
@@ -649,6 +679,7 @@ fun MessageBubble(
                         text = body,
                         color = textColor,
                         style = MaterialTheme.typography.bodyLarge,
+                        modifier = bodyModifier,
                     )
                 }
             }
@@ -687,7 +718,13 @@ fun MessageBubble(
             }
 
             Row(
-                modifier = Modifier.align(Alignment.End).testTag("message_metadata"),
+                modifier =
+                    Modifier
+                        .align(Alignment.End)
+                        .testTag("message_metadata")
+                        .let {
+                            if (sendMorphProgress == null) it else it.graphicsLayer { alpha = sendMorphProgress().coerceIn(0f, 1f) }
+                        },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val metadataInk = if (failed) MaterialTheme.colorScheme.error else textColor

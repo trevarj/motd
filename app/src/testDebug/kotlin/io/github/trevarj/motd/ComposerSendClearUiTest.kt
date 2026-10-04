@@ -9,20 +9,31 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.activity.result.contract.ActivityResultContract
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
@@ -32,6 +43,7 @@ import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -67,6 +79,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.dcc.EbooksResultCache
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.ai.AiComposerDraftSnapshot
 import io.github.trevarj.motd.ui.ai.AiTextAction
 import io.github.trevarj.motd.ui.ai.AiTextSheet
@@ -79,6 +92,11 @@ import io.github.trevarj.motd.ui.chat.ComposerDraftState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.EntryPositionState
 import io.github.trevarj.motd.ui.chat.OutgoingFlight
+import io.github.trevarj.motd.ui.chat.SendFlightAnchors
+import io.github.trevarj.motd.ui.chat.SendFlightMotion
+import io.github.trevarj.motd.ui.chat.SendFlightOverlay
+import io.github.trevarj.motd.ui.components.MessageBubble
+import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1326,6 +1344,121 @@ class ComposerSendClearUiTest {
         compose.waitForIdle()
 
         compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+    }
+
+    @Test
+    fun completedMorph_matchesTheRealBubbleWhileLandingIsStillDelayed() {
+        val nick = "metadata-wider-than-body"
+        val flight = OutgoingFlight(token = 7, text = "\u0002hi\u0002", launchedAtMs = 1_000)
+        val anchors = SendFlightAnchors().apply { composerField = Rect(0f, 0f, 380f, 48f) }
+        val motion = SendFlightMotion(morphEnabled = true)
+        runBlocking { motion.morph.snapTo(1f) }
+        var renderFlight by mutableStateOf(false)
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                val formatTime = rememberMessageTimeFormatter()
+                // Compare at the same window origin, not two separately rasterized stacked rows.
+                Box(Modifier.width(380.dp).height(120.dp).background(MaterialTheme.colorScheme.background).testTag("bubble_sample")) {
+                    if (!renderFlight) {
+                        MessageBubble(
+                            sender = nick,
+                            text = flight.text,
+                            timeMs = flight.launchedAtMs,
+                            isSelf = true,
+                            kind = MessageKind.PRIVMSG,
+                            showSender = true,
+                            formattedTime = formatTime(flight.launchedAtMs),
+                            pending = true,
+                        )
+                    } else {
+                        SendFlightOverlay(
+                            flight = flight,
+                            anchors = anchors,
+                            motion = motion,
+                            listShift = { 0f },
+                            selfNick = nick,
+                            showSender = true,
+                            networkId = null,
+                            knownNicks = emptySet(),
+                            identityRules = IrcIdentityRules(),
+                        )
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+
+        val sample = compose.onNodeWithTag("bubble_sample")
+        val real = sample.captureToImage().asAndroidBitmap()
+        compose.onAllNodesWithText("hi", useUnmergedTree = true).assertCountEquals(1)
+        compose.runOnIdle { renderFlight = true }
+        compose.waitForIdle()
+        val airborne = sample.captureToImage().asAndroidBitmap()
+        assertTrue("A completed delayed morph must match the real formatted bubble", real.sameAs(airborne))
+        // The merged accessibility tree excludes the overlay's cleared semantics subtree.
+        compose.onAllNodesWithText("hi").assertCountEquals(0)
+        assertEquals(0f, motion.progress.value, 0.001f)
+    }
+
+    @Test
+    fun quickLanding_doesNotHandOffBeforeTheMorphCompletes() {
+        val launchedAt = 1_000L
+        val pages = MutableStateFlow(PagingData.from(emptyList<MessageEntity>()))
+        var flight by mutableStateOf<OutgoingFlight?>(null)
+        var settled = 0
+        var startedAt = 0L
+        var settledAt = 0L
+        setContent(
+            draft = { ComposerDraftState("hello", hydrated = true, revision = 1) },
+            pages = pages,
+            outgoingFlight = { flight },
+            onFlightSettled = { token ->
+                assertEquals(7L, token)
+                settled++
+                settledAt = compose.mainClock.currentTime
+                flight = null
+            },
+            onSubmit = { text ->
+                startedAt = compose.mainClock.currentTime
+                flight = OutgoingFlight(token = 7, text = text, launchedAtMs = launchedAt)
+                pages.value =
+                    PagingData.from(
+                        listOf(
+                            MessageEntity(
+                                id = 42,
+                                bufferId = buffer.id,
+                                serverTime = launchedAt + 1,
+                                sender = "me",
+                                kind = MessageKind.PRIVMSG,
+                                text = text,
+                                isSelf = true,
+                                pendingLabel = "pending-42",
+                                dedupKey = "pending-42",
+                                serverTimeAuthoritative = false,
+                                timelineOrder = 42,
+                            ),
+                        ),
+                    )
+            },
+        )
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithTag("chat_composer_send").performClick()
+        compose.mainClock.advanceTimeBy(320)
+        compose.waitForIdle()
+
+        compose.runOnIdle { assertEquals(0, settled) }
+        compose
+            .onNodeWithTag("chat_composer_field")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
+        compose.onAllNodesWithText("hello", useUnmergedTree = true).assertCountEquals(1)
+        compose.mainClock.advanceTimeBy(2_000)
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(1, settled)
+            assertTrue("quick persistence must not truncate the 420ms morph", settledAt - startedAt >= 420)
+        }
+        compose.onNodeWithContentDescription("Sending…").assertIsDisplayed()
     }
 
     @Test

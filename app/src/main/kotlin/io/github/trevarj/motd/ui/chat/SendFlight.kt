@@ -1,17 +1,10 @@
 package io.github.trevarj.motd.ui.chat
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,36 +12,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.drawOutline
-import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import io.github.trevarj.motd.data.db.MessageKind
-import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
-import io.github.trevarj.motd.ui.components.chatBubbleWidth
-import io.github.trevarj.motd.ui.components.messageBubbleRoleColors
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
-import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
-import io.github.trevarj.motd.ui.theme.LocalSpacing
-import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlin.math.max
 import kotlin.math.min
 
 /*
- * How a sent message reaches the timeline: the finished bubble rises from the composer into its
- * slot, and over the first part of that flight the typed line stays put while a bubble grows
- * around it (the morph). The morph is a presentation layer on the same flight transport, not an
- * alternative to it. It needs a bare line of text to grow around, so the layouts that have none
- * skip it (see SendFlightOverlay) and show the plain bubble ghost riding the identical flight.
+ * The real outgoing bubble rises from the composer into its slot. Its body starts at the pinned
+ * draft-text origin while its own surface and metadata grow in, then the same renderer lands.
+ * Reply, compact and two-line layouts keep the ordinary bubble flight.
  */
 
 /**
@@ -93,6 +75,30 @@ internal class SendFlightAnchors {
      * that drop into the runway and hover so the vacated-space math survives the collapse.
      */
     var launchFieldHeight by mutableStateOf(0f)
+    var launchField by mutableStateOf<Rect?>(null)
+    var launchTextOrigin by mutableStateOf<Offset?>(null)
+    private var pendingLaunchField: Rect? = null
+    private var pendingLaunchTextOrigin: Offset? = null
+    private var launchCaptured = false
+
+    /** Stage submit geometry; a command that launches no flight must not move the active ghost. */
+    fun captureLaunch() {
+        pendingLaunchField = composerField
+        pendingLaunchTextOrigin = composerTextOrigin
+        launchCaptured = true
+    }
+
+    fun beginFlight() {
+        // Promote only when a new flight starts; external launches use the latest geometry.
+        launchField = if (launchCaptured) pendingLaunchField else composerField
+        launchTextOrigin = if (launchCaptured) pendingLaunchTextOrigin else composerTextOrigin
+        launchFieldHeight = launchField?.height ?: 0f
+        launchCaptured = false
+        pendingLaunchField = null
+        pendingLaunchTextOrigin = null
+        landingRow = null
+        ghostHeight = 0f
+    }
 
     /** How much the composer has shrunk since the tap frame (0 while it has not). */
     fun composerShrink(): Float {
@@ -119,7 +125,9 @@ internal class SendFlightAnchors {
  * one layer and one row's layout per frame and never recomposes the timeline.
  */
 @Stable
-internal class SendFlightMotion {
+internal class SendFlightMotion(
+    val morphEnabled: Boolean = false,
+) {
     /** The flight proper: the bubble's travel into its slot and the gap opening beneath it. */
     val progress = Animatable(0f)
 
@@ -131,6 +139,9 @@ internal class SendFlightMotion {
      * blends with [progress].
      */
     val lift = Animatable(0f)
+
+    /** The launch-time transformation; row ownership waits for this as well as the flight. */
+    val morph = Animatable(0f)
 }
 
 /**
@@ -221,26 +232,14 @@ internal fun sendFlightGhostTop(
  * and status/time line, so the replica cannot drift from its landing row by construction. A
  * hand-copied bubble had already drifted on three of those axes.
  *
- * The replica animates `translationY` and a birth fade only. Nothing scales, so the text is
- * rasterised once and never distorts, and the handoff to the real row is a swap between
- * identical pixels.
+ * The body is drawn once, unscaled, inside the real bubble throughout the morph. Only the surface
+ * grows; translating the whole bubble from its measured body origin avoids a second layout or
+ * crossfade of text. At completion its pixels match the ordinary row.
  *
  * The ghost is invisible to the semantics tree ([clearAndSetSemantics], which clears the whole
  * subtree including the bubble's own click semantics). Its text duplicates a real row's, and a
  * second match would make every `onNodeWithText` assertion in chat ambiguous.
  */
-
-/**
- * How much of the morph stand-in has been replaced by the real bubble replica, from the flight
- * fraction. Smoothstepped over the flight's BACK half: the stand-in is where the transformation
- * plays out, and an earlier window dissolved it before the growth registered as a transformation
- * at all. Complete by 0.85 so the replica is whole before it must pixel-match the landing row,
- * with the still-moving bubble masking the metadata line's arrival.
- */
-internal fun sendFlightMorphSwap(flightFraction: Float): Float {
-    val t = ((flightFraction - 0.45f) / 0.4f).coerceIn(0f, 1f)
-    return t * t * (3f - 2f * t)
-}
 
 @Composable
 internal fun BoxScope.SendFlightOverlay(
@@ -257,21 +256,17 @@ internal fun BoxScope.SendFlightOverlay(
     // Read nothing while idle: an overlay that sampled the anchors unconditionally would recompose
     // on every composer layout pass for the whole life of the screen.
     if (flight == null) return
-    val field = anchors.composerField?.let(anchors::local) ?: return
-    // Pinned for the life of the tap. The composer empties on the same frame the flight launches,
-    // so a live rect would shrink under the ghost and make it jump on its first step.
-    val start = remember(flight.token) { field }
+    val field = anchors.launchField ?: anchors.composerField ?: return
+    val start = remember(flight.token) { anchors.local(field) }
     // The row shows its Room timestamp; the ghost shows the clock for the moment it launched, built
     // with the timeline's own formatter so 12/24-hour and locale can never disagree. The launch
     // instant comes from the flight, which is also what row matching and grouping are decided by.
     val formatTime = rememberMessageTimeFormatter()
     val launchedAt = flight.launchedAtMs
     val time = remember(flight.token, formatTime) { formatTime(launchedAt) }
-    val spacing = LocalSpacing.current
-    // The morph needs a bubble to grow around a bare line of text: COMPACT and TWO_LINE render
-    // text rows rather than bubbles, and a reply puts a quote block above the body that the
-    // stand-in cannot represent. Those flights show the plain bubble ghost instead.
-    val morph = !spacing.compact && !spacing.twoLine && flight.replyText == null
+    val morph = motion.morphEnabled
+    val morphProgress = remember(motion) { { motion.morph.value } }
+    var textDelta by remember(flight.token) { mutableStateOf<Offset?>(null) }
 
     Box(
         modifier =
@@ -297,157 +292,50 @@ internal fun BoxScope.SendFlightOverlay(
                         )
                 }.clearAndSetSemantics {},
     ) {
-        // The real row's replica. Under the morph it dissolves in mid-flight over the stand-in;
-        // under the plain flight it materializes over the composer on the lift's first stretch.
-        // It is always the layer that lands, so the handoff to the real row stays a swap
-        // between identical pixels in both presentations.
-        Box(
-            modifier =
-                if (morph) {
-                    Modifier.graphicsLayer { alpha = sendFlightMorphSwap(motion.progress.value) }
-                } else {
-                    Modifier.graphicsLayer { alpha = sendFlightEntryFade(motion.lift.value) }
+        MessageBubble(
+            sender = selfNick,
+            text = flight.text,
+            timeMs = launchedAt,
+            isSelf = true,
+            kind = MessageKind.PRIVMSG,
+            showSender = showSender,
+            networkId = networkId,
+            formattedTime = time,
+            pending = true,
+            reply =
+                flight.replyText?.let {
+                    ReplyPreviewData(flight.replySender.orEmpty(), it, flight.replyIrcFormattedText)
                 },
-        ) {
-            MessageBubble(
-                sender = selfNick,
-                text = flight.text,
-                timeMs = launchedAt,
-                isSelf = true,
-                kind = MessageKind.PRIVMSG,
-                showSender = showSender,
-                networkId = networkId,
-                formattedTime = time,
-                pending = true,
-                reply =
-                    flight.replyText?.let {
-                        ReplyPreviewData(flight.replySender.orEmpty(), it, flight.replyIrcFormattedText)
-                    },
-                knownNicks = knownNicks,
-                identityRules = identityRules,
-            )
-        }
-        if (morph) {
-            MorphingGhost(
-                flight = flight,
-                anchors = anchors,
-                motion = motion,
-                showSender = showSender,
-            )
-        }
-    }
-}
-
-/**
- * The morph presentation's stand-in: the typed line itself, with the bubble growing around it.
- *
- * On the tap frame the stand-in's text is pinned glyph-for-glyph over the composer field's text
- * (both render the same `bodyLarge` under [ConversationTypography]), so clearing the field does
- * not visibly remove the line -- ownership just changes. The transformation runs on its own
- * clock ([MotdMotion.sendMorphGrow], slower than the flight springs): the text slides from the
- * field's left-aligned origin to the bubble's resting alignment while the bubble surface
- * inflates in beneath it (alpha leading scale, so the growth is visible rather than a plain
- * fade) and the text color crossfades from field ink to bubble ink. In the flight's back half
- * the whole stand-in dissolves into the real [MessageBubble] replica ([sendFlightMorphSwap]),
- * which brings the metadata line and linkified body and owns the landing.
- *
- * Every animated value is read in a draw-phase lambda; the stand-in never recomposes per frame.
- * A multi-line draft may re-wrap where the bubble is narrower than the field; the first glyph
- * stays pinned, which keeps the illusion for the dominant single-line send.
- */
-@Composable
-private fun MorphingGhost(
-    flight: OutgoingFlight,
-    anchors: SendFlightAnchors,
-    motion: SendFlightMotion,
-    showSender: Boolean,
-) {
-    val spacing = LocalSpacing.current
-    // The transformation's own clock, started on the tap frame like the lift. Riding the lift
-    // spring compressed slide, tint, and growth into ~300ms alongside the rise, which read as
-    // "the bubble flies" rather than "the text becomes a bubble".
-    val morph = remember(flight.token) { Animatable(0f) }
-    LaunchedEffect(flight.token) {
-        morph.animateTo(1f, MotdMotion.sendMorphGrow)
-    }
-    val scheme = MaterialTheme.colorScheme
-    val semantic = LocalMotdSemanticColors.current
-    // Keyed by color value, not scheme identity: Material3 mutates its retained ColorScheme in place.
-    val roles =
-        remember(scheme.primaryContainer, scheme.primary, scheme.onPrimaryContainer, semantic) {
-            messageBubbleRoleColors(scheme, isSelf = true, mentionHighlighted = false, kind = MessageKind.PRIVMSG, semantic = semantic)
-        }
-    val fieldInk = MaterialTheme.colorScheme.onSurface
-    val plainText = remember(flight.text) { plainIrcText(flight.text) }
-    val topCorner = if (showSender) spacing.bubbleCorner else spacing.bubbleGroupedCorner
-    val shape =
-        RoundedCornerShape(
-            topStart = spacing.bubbleCorner,
-            topEnd = topCorner,
-            bottomEnd = spacing.bubbleGroupedCorner,
-            bottomStart = spacing.bubbleCorner,
-        )
-    // Field-text origin minus the stand-in text's own untranslated origin, pinned on the first
-    // laid-out frame (the slide layer is still at identity then, so the measurement is clean).
-    var textDelta by remember(flight.token) { mutableStateOf<Offset?>(null) }
-
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = spacing.messageOuterHPad, vertical = spacing.bubbleRowVPad)
-                .graphicsLayer { alpha = 1f - sendFlightMorphSwap(motion.progress.value) },
-        horizontalArrangement = Arrangement.End,
-    ) {
-        Box(
-            modifier =
-                Modifier
-                    .chatBubbleWidth()
-                    .graphicsLayer {
-                        // Slide from the field's text origin to the bubble's natural alignment.
+            knownNicks = knownNicks,
+            identityRules = identityRules,
+            modifier = if (morph) Modifier else Modifier.graphicsLayer { alpha = sendFlightEntryFade(motion.lift.value) },
+            sendMorphProgress = if (morph) morphProgress else null,
+            bubbleModifier =
+                if (morph) {
+                    Modifier.graphicsLayer {
                         val delta = textDelta
                         if (delta != null) {
-                            val remaining = 1f - min(1f, morph.value)
+                            val remaining = 1f - motion.morph.value.coerceIn(0f, 1f)
                             translationX = delta.x * remaining
                             translationY = delta.y * remaining
                         }
-                    }.drawBehind {
-                        // The bubble surface inflating around the line; drawn, not composed, so a
-                        // frame costs one layer invalidation. Alpha leads the scale (fully opaque by
-                        // ~60% of the morph) so the eye reads a surface GROWING to its final size,
-                        // not a finished bubble fading in.
-                        val m = min(1f, morph.value)
-                        scale(0.85f + 0.15f * m) {
-                            drawOutline(
-                                outline = shape.createOutline(size, layoutDirection, this@drawBehind),
-                                color = roles.container,
-                                alpha = min(1f, m * 1.6f),
-                            )
-                        }
-                    }.padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
-        ) {
-            // Two identical layouts crossfading ink: text cannot recolor in the draw phase, and
-            // the pair keeps the glyphs themselves perfectly still while the color transfers.
-            Text(
-                text = plainText,
-                style = MaterialTheme.typography.bodyLarge,
-                color = fieldInk,
-                modifier =
+                    }
+                } else {
                     Modifier
-                        .onGloballyPositioned {
-                            if (textDelta == null) {
-                                anchors.composerTextOrigin?.let { origin ->
-                                    textDelta = origin - it.positionInWindow()
-                                }
+                },
+            bodyModifier =
+                if (morph) {
+                    Modifier.onGloballyPositioned {
+                        if (textDelta == null) {
+                            anchors.launchTextOrigin?.let { origin ->
+                                textDelta = origin - it.positionInWindow()
                             }
-                        }.graphicsLayer { alpha = 1f - min(1f, morph.value) },
-            )
-            Text(
-                text = plainText,
-                style = MaterialTheme.typography.bodyLarge,
-                color = roles.content,
-                modifier = Modifier.graphicsLayer { alpha = min(1f, morph.value) },
-            )
-        }
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+        )
     }
 }
+

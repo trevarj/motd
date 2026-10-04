@@ -198,6 +198,7 @@ import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
@@ -1383,13 +1384,13 @@ fun ChatContent(
             // Reset here rather than in the effect below: effects are dispatched on the frame clock
             // and can run after the new tap's first draw, which would then read the previous flight's
             // landing rect and start the ghost mid-timeline instead of at the composer.
-            flightAnchors.landingRow = null
-            flightAnchors.ghostHeight = 0f
-            // The field still holds its pre-clear (possibly multi-line) rect during this
-            // composition; layout shrinks it afterwards, and composerShrink() measures against
-            // this pinned height.
-            flightAnchors.launchFieldHeight = flightAnchors.composerField?.height ?: 0f
-            SendFlightMotion()
+            if (outgoingFlight != null) flightAnchors.beginFlight()
+            SendFlightMotion(
+                morphEnabled =
+                    outgoingFlight != null &&
+                        outgoingFlight.replyText == null &&
+                        conversationLayout.effective == LayoutDensity.COMFORTABLE,
+            )
         }
     val flightProgress = remember(flightMotion) { { flightMotion.progress.value } }
     // Driven here rather than inside the overlay: the landing row's reveal must complete even if
@@ -1402,9 +1403,17 @@ fun ChatContent(
             // visibly in flight. The flight spring itself still waits for the landing report,
             // because the gap must open from zero on the frame the row first composes.
             val liftJob = launch { flightMotion.lift.animateTo(1f, MotdMotion.sendFlightSpring) }
+            val morphJob =
+                if (flightMotion.morphEnabled) {
+                    launch { flightMotion.morph.animateTo(1f, MotdMotion.sendMorphGrow) }
+                } else {
+                    null
+                }
             snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
             flightMotion.progress.animateTo(1f, MotdMotion.sendFlightSpring)
             liftJob.join()
+            // A quick Room write must not reveal the row while its body is still leaving the field.
+            morphJob?.join()
         } finally {
             // Also runs when this effect dies with the screen. A flight that outlived its UI would
             // hide its row again and fly a ghost of a minutes-old message on the next visit.
@@ -3399,6 +3408,7 @@ fun ChatContent(
                                         AutoFollowTrace.record("composer_submit", traceBufferId, traceSessionId) {
                                             "long_draft=false"
                                         }
+                                        flightAnchors.captureLaunch()
                                         onSubmit(text)
                                         // Empty the field on the tap frame. The ViewModel still owns the
                                         // durable draft and republishes it if the send never lands, so this
@@ -3500,7 +3510,7 @@ fun ChatContent(
                         )
                     }
                     // The ghost overlay draws ABOVE the composer layer: a sent bubble materializes over
-                    // the input box -- the morph pins its stand-in text to the still-warm field text --
+                    // the input box -- the morph pins its real body to the still-warm field text --
                     // and then rides up into the timeline, instead of being born occluded behind the
                     // input bar. The clip and the coordinate origin sit on this stationary wrapper:
                     // clipping the ghost itself would clip nothing, since its layer translation carries
@@ -3658,6 +3668,7 @@ fun ChatContent(
                                             ebooksResults = null
                                             pendingEbooksRequestRevision = composerDraft.revision + 1
                                             onDraftChanged(result.request)
+                                            flightAnchors.captureLaunch()
                                             onSubmit(result.request)
                                             // Only the ViewModel clears the durable draft after acceptance;
                                             // a rejected send republishes it to restore this optimistic clear.
@@ -3748,6 +3759,7 @@ fun ChatContent(
                     androidx.compose.material3.TextButton(onClick = {
                         AutoFollowTrace.record("long_draft_send_messages", traceBufferId, traceSessionId)
                         if (!isEbooksSearchOnly(composerText.text)) {
+                            flightAnchors.captureLaunch()
                             onSubmit(composerText.text)
                             composerText = TextFieldValue("")
                             scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }

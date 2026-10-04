@@ -44,6 +44,10 @@ and the same 25 MiB streaming limit as Save; Share still shares the URL.
 The drawer's Networks header shows total mentions, not total unread messages.
 Per-network unread badges and the scoped Mark all as read action remain available.
 
+Comfortable chat sends grow the actual formatted message bubble from the composer,
+keeping its body and metadata aligned through the landing. Replies and denser
+message styles retain their ordinary send-flight presentation.
+
 ## Local composer text tools
 
 Labs → AI → Composer text tools is default-off. Set up the exact Qwen artifact
