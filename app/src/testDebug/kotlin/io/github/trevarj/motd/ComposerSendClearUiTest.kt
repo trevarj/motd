@@ -9,6 +9,8 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.activity.result.contract.ActivityResultContract
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.VectorConverter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -106,6 +108,7 @@ import io.github.trevarj.motd.ui.chat.SendFlightMotion
 import io.github.trevarj.motd.ui.chat.SendFlightOverlay
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1658,6 +1661,12 @@ class ComposerSendClearUiTest {
     @Test
     fun quickLanding_doesNotHandOffBeforeTheMorphCompletes() {
         val launchedAt = 1_000L
+        val morphDurationMs =
+            MotdMotion.sendMorphGrow.vectorize(Float.VectorConverter).getDurationNanos(
+                AnimationVector1D(0f),
+                AnimationVector1D(1f),
+                AnimationVector1D(0f),
+            ) / 1_000_000
         val pages = MutableStateFlow(PagingData.from(emptyList<MessageEntity>()))
         var flight by mutableStateOf<OutgoingFlight?>(null)
         var settled = 0
@@ -1699,7 +1708,7 @@ class ComposerSendClearUiTest {
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
         compose.onNodeWithTag("chat_composer_send").performClick()
-        compose.mainClock.advanceTimeBy(320)
+        compose.mainClock.advanceTimeBy(morphDurationMs * 3 / 4)
         compose.waitForIdle()
 
         compose.runOnIdle { assertEquals(0, settled) }
@@ -1711,7 +1720,7 @@ class ComposerSendClearUiTest {
         compose.waitForIdle()
         compose.runOnIdle {
             assertEquals(1, settled)
-            assertTrue("quick persistence must not truncate the 420ms morph", settledAt - startedAt >= 420)
+            assertTrue("Quick persistence must not truncate the running morph", settledAt - startedAt >= morphDurationMs)
         }
         compose.onNodeWithContentDescription("Sending…").assertIsDisplayed()
     }

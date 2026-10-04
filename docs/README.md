@@ -44,9 +44,9 @@ and the same 25 MiB streaming limit as Save; Share still shares the URL.
 The drawer's Networks header shows total mentions, not total unread messages.
 Per-network unread badges and the scoped Mark all as read action remain available.
 
-Comfortable chat sends grow the actual formatted message bubble from the composer,
-keeping its body and metadata aligned through the landing. Replies and denser
-message styles retain their ordinary send-flight presentation.
+Comfortable chat sends grow the actual formatted message bubble from the composer
+over a 500ms morph, keeping its body and metadata aligned through the landing.
+Replies and denser message styles retain their ordinary send-flight presentation.
 
 A chat-list swipe acts only after release at least 60% across the row width. Short
 flicks spring back without flying offscreen; right swipes do not dismiss chats.

@@ -119,24 +119,24 @@ object MotdMotion {
      *
      * Deliberately underdamped, unlike [softSpring]: a send should read as launched, so the bubble
      * rises a few pixels past its slot and settles back. The gap clamps the same progress at 1,
-     * which is what leaves the overshoot visible on the bubble alone. Settles in roughly 300ms --
-     * quicker than iOS, to sit alongside this app's existing 140/210ms tempo rather than beside it.
+     * which is what leaves the overshoot visible on the bubble alone. A softer stiffness gives
+     * the launch and settle a little more breathing room.
      */
     val sendFlightSpring: FiniteAnimationSpec<Float> =
         spring(
             dampingRatio = 0.8f,
-            stiffness = 380f,
+            stiffness = 260f,
         )
 
     /**
      * The send morph's transformation: field text into the real bubble (surface growth and
      * alignment transfer). Deliberately slower than [sendFlightSpring] and a bounded tween, not
-     * a spring: riding the flight's own 300ms spring compressed the transformation too far.
+     * a spring: riding the flight's spring compressed the transformation too far.
      * The row handoff waits for both animations, even when persistence finishes immediately.
      */
     val sendMorphGrow: FiniteAnimationSpec<Float> =
         tween(
-            durationMillis = 420,
+            durationMillis = 500,
             easing = StandardEasing,
         )
 
