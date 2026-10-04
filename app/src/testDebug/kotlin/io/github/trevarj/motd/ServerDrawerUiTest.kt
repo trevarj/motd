@@ -22,6 +22,9 @@ import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -59,6 +62,81 @@ class ServerDrawerUiTest {
     val compose = createComposeRule()
 
     @Test
+    fun network_badges_and_scoped_mark_all_read_remain_without_header_unread_total() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val ready = IrcClientState.Ready("alice", emptySet(), emptyMap())
+        val rows =
+            listOf(
+                drawerRow(1, ready).copy(unread = 3, mentions = 1),
+                drawerRow(2, ready).copy(unread = 5, mentions = 2, unreadIncomplete = true, mentionsIncomplete = true),
+            )
+        val selectedNetworkId = mutableStateOf<Long?>(null)
+        val totalMentions = mutableStateOf(3)
+        val scopedUnread = mutableStateOf(8)
+        val markedScopes = mutableListOf<Long?>()
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ServerDrawerContent(
+                    drawerRows = rows,
+                    selectedNetworkId = selectedNetworkId.value,
+                    allMentions = totalMentions.value,
+                    allMentionsIncomplete = true,
+                    scopedUnreadCount = scopedUnread.value,
+                    allOffline = false,
+                    onSelectNetwork = {
+                        selectedNetworkId.value = it
+                        scopedUnread.value = if (it == 1L) 3 else 8
+                    },
+                    onConnect = {},
+                    onDisconnect = {},
+                    onServerMessages = {},
+                    onOpenNetworkSettings = {},
+                    onAddNetwork = {},
+                    onToggleOffline = {},
+                    onOpenSettings = {},
+                    onMarkAllRead = { markedScopes += selectedNetworkId.value },
+                )
+            }
+        }
+
+        fun badgeDescription(
+            resource: Int,
+            count: Int,
+        ) = context.resources.getQuantityString(resource, count, count)
+
+        for ((id, unread, mentions) in listOf(Triple(1L, 3, 1), Triple(2L, 5, 2))) {
+            val withinNetwork = hasAnyAncestor(hasTestTag("drawer_network_row_$id"))
+            val unreadResource = if (id == 1L) R.plurals.badge_unread else R.plurals.badge_unread_at_least
+            val mentionResource = if (id == 1L) R.plurals.badge_mention else R.plurals.badge_mention_at_least
+            compose
+                .onNode(hasContentDescription(badgeDescription(unreadResource, unread)) and withinNetwork, useUnmergedTree = true)
+                .assertIsDisplayed()
+            compose
+                .onNode(hasContentDescription(badgeDescription(mentionResource, mentions)) and withinNetwork, useUnmergedTree = true)
+                .assertIsDisplayed()
+        }
+        for (resource in listOf(R.plurals.badge_unread, R.plurals.badge_unread_at_least)) {
+            compose.onAllNodesWithContentDescription(badgeDescription(resource, 8), useUnmergedTree = true).assertCountEquals(0)
+        }
+        val mentionTotal = badgeDescription(R.plurals.badge_mention_at_least, 3)
+        compose.onAllNodesWithContentDescription(mentionTotal, useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithTag("drawer_mark_all_read").assertIsDisplayed().performClick()
+
+        compose.onNodeWithTag("drawer_network_row_1").performClick()
+        compose.onAllNodesWithContentDescription(mentionTotal, useUnmergedTree = true).assertCountEquals(0)
+        compose.onNodeWithTag("drawer_mark_all_read").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("drawer_clear_filter").performClick()
+        compose.runOnIdle { totalMentions.value = 0 }
+        compose.onAllNodesWithContentDescription(mentionTotal, useUnmergedTree = true).assertCountEquals(0)
+        compose.onNodeWithTag("drawer_mark_all_read").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(null, 1L, null), markedScopes)
+            scopedUnread.value = 0
+        }
+        compose.onNodeWithTag("drawer_mark_all_read").assertDoesNotExist()
+    }
+
+    @Test
     fun ircNetworkIcons_showIdenticalNeutralCirclesWithOnlineAndOfflineDotsAcrossThemes() {
         var scanned = false
         var contactInviteNetworkId: Long? = null
@@ -83,7 +161,6 @@ class ServerDrawerUiTest {
                             drawerRow(3, IrcClientState.Disconnected),
                         ),
                     selectedNetworkId = 1,
-                    allUnread = 0,
                     allMentions = 0,
                     scopedUnreadCount = 0,
                     allOffline = false,
@@ -193,7 +270,6 @@ class ServerDrawerUiTest {
                 ServerDrawerContent(
                     drawerRows = rows,
                     selectedNetworkId = null,
-                    allUnread = 0,
                     allMentions = 0,
                     scopedUnreadCount = 0,
                     allOffline = false,
@@ -284,7 +360,6 @@ class ServerDrawerUiTest {
                 ServerDrawerContent(
                     drawerRows = rows,
                     selectedNetworkId = selectedNetworkId.value,
-                    allUnread = 0,
                     allMentions = 0,
                     scopedUnreadCount = 0,
                     allOffline = false,
@@ -339,7 +414,6 @@ class ServerDrawerUiTest {
                 ServerDrawerContent(
                     drawerRows = rows,
                     selectedNetworkId = selectedNetworkId.value,
-                    allUnread = 3,
                     allMentions = 2,
                     scopedUnreadCount = scopedUnread.value,
                     allOffline = allOffline.value,
@@ -556,7 +630,6 @@ class ServerDrawerUiTest {
                 ServerDrawerContent(
                     drawerRows = listOf(drawerRow(1, IrcClientState.Ready("alice", emptySet(), emptyMap()))),
                     selectedNetworkId = null,
-                    allUnread = 0,
                     allMentions = 0,
                     scopedUnreadCount = 0,
                     allOffline = false,
@@ -586,7 +659,6 @@ class ServerDrawerUiTest {
                 ServerDrawerContent(
                     drawerRows = emptyList(),
                     selectedNetworkId = null,
-                    allUnread = 0,
                     allMentions = 0,
                     scopedUnreadCount = 0,
                     allOffline = false,

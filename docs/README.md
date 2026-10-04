@@ -39,6 +39,11 @@ In the full-screen image viewer, Copy image copies the original image bytes as
 a readable image URI, not its URL. Copy uses the image's owning network route
 and the same 25 MiB streaming limit as Save; Share still shares the URL.
 
+## Chat navigation
+
+The drawer's Networks header shows total mentions, not total unread messages.
+Per-network unread badges and the scoped Mark all as read action remain available.
+
 ## Local composer text tools
 
 Labs → AI → Composer text tools is default-off. Set up the exact Qwen artifact

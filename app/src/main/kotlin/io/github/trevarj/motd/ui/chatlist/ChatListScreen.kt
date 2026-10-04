@@ -516,9 +516,7 @@ fun ChatListContent(
             ServerDrawerContent(
                 drawerRows = state.drawerRows,
                 selectedNetworkId = state.selectedNetworkId,
-                allUnread = state.allUnread,
                 allMentions = state.allMentions,
-                allUnreadIncomplete = state.allUnreadIncomplete,
                 allMentionsIncomplete = state.allMentionsIncomplete,
                 scopedUnreadCount = state.scopedUnreadCount,
                 allOffline = state.allOffline,

@@ -410,7 +410,7 @@ class ChatListReadFreshnessTest {
             assertEquals(listOf(portal.bufferId), active.invitations.map(ChatListInvitation::bufferId))
             assertEquals(1, active.dickordUnreadSummary?.visibleCount)
             assertEquals(4, active.dickordUnreadSummary?.unreadCount)
-            assertEquals(7, active.allUnread)
+            assertEquals(3, active.scopedUnreadCount)
             assertEquals(true, portal.pinned)
             assertEquals(9L, portal.folderId)
             assertEquals("#DiScOrD.guild.general", portal.displayName)

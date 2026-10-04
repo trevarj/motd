@@ -112,9 +112,7 @@ import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
 fun ServerDrawerContent(
     drawerRows: List<DrawerRow>,
     selectedNetworkId: Long?,
-    allUnread: Int,
     allMentions: Int,
-    allUnreadIncomplete: Boolean = false,
     allMentionsIncomplete: Boolean = false,
     scopedUnreadCount: Int,
     allOffline: Boolean,
@@ -253,9 +251,7 @@ fun ServerDrawerContent(
             }
 
             NetworksHeader(
-                totalUnread = allUnread,
                 totalMentions = allMentions,
-                unreadIncomplete = allUnreadIncomplete,
                 mentionsIncomplete = allMentionsIncomplete,
                 scoped = selectedNetworkId != null,
                 allOffline = allOffline,
@@ -371,9 +367,7 @@ private fun DrawerActionTile(
  */
 @Composable
 private fun NetworksHeader(
-    totalUnread: Int,
     totalMentions: Int,
-    unreadIncomplete: Boolean,
     mentionsIncomplete: Boolean,
     scoped: Boolean,
     allOffline: Boolean,
@@ -430,14 +424,13 @@ private fun NetworksHeader(
                     Text(stringResource(R.string.drawer_clear_filter))
                 }
             }
-        } else if (totalMentions > 0 || totalUnread > 0) {
+        } else if (totalMentions > 0) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (totalMentions > 0) MentionBadge(totalMentions, lowerBound = mentionsIncomplete)
-                if (totalUnread > 0) UnreadBadge(totalUnread, lowerBound = unreadIncomplete)
+                MentionBadge(totalMentions, lowerBound = mentionsIncomplete)
             }
         }
     }
@@ -809,7 +802,6 @@ private fun ServerDrawerPreview() {
                     ),
                 ),
             selectedNetworkId = 1,
-            allUnread = 8,
             allMentions = 1,
             allOffline = false,
             scopedUnreadCount = 8,

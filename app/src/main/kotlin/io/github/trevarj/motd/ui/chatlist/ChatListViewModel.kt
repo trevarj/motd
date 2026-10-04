@@ -149,7 +149,6 @@ data class ChatListState(
     // Round 5: drawer server selector + scoping.
     val selectedNetworkId: Long? = null,
     val drawerRows: List<DrawerRow> = emptyList(),
-    val allUnread: Int = 0, // "All chats" unread rollup (non-muted)
     val allMentions: Int = 0, // "All chats" mention rollup
     /** Global Feed lab flag; off hides both entry points into the feed. */
     val globalFeedEnabled: Boolean = false,
@@ -159,10 +158,6 @@ data class ChatListState(
     val dickordEnabled: Boolean = false,
     val dickordUnreadSummary: ChatFolderSummary? = null,
 ) {
-    val allUnreadIncomplete: Boolean
-        get() =
-            drawerRows.takeIf(List<DrawerRow>::isNotEmpty)?.any(DrawerRow::unreadIncomplete)
-                ?: rows.any { !it.muted && it.unreadCountIncomplete }
     val allMentionsIncomplete: Boolean
         get() =
             drawerRows.takeIf(List<DrawerRow>::isNotEmpty)?.any(DrawerRow::mentionsIncomplete)
@@ -375,7 +370,6 @@ class ChatListViewModel
                     fools = settings.fools,
                     selectedNetworkId = validSelection,
                     drawerRows = applyDrawerOrder(storedDrawerRows, pending),
-                    allUnread = rows.filterNot { it.muted || it.archived }.sumOf { it.unreadCount },
                     allMentions = rows.filterNot { it.muted || it.archived }.sumOf { it.mentionCount },
                     globalFeedEnabled = globalFeedEnabled,
                     mentionsEnabled = settings.mentionsEnabled,

@@ -586,7 +586,6 @@ class AvatarRoutingTest {
                     ),
                 ),
             selectedNetworkId = networkId,
-            allUnread = 0,
             allMentions = 0,
             scopedUnreadCount = 0,
             allOffline = false,

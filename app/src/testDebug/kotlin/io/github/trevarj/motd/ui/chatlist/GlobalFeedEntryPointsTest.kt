@@ -63,7 +63,6 @@ class GlobalFeedEntryPointsTest {
                 ServerDrawerContent(
                     drawerRows = listOf(drawerRow()),
                     selectedNetworkId = null,
-                    allUnread = 0,
                     allMentions = 0,
                     scopedUnreadCount = 0,
                     allOffline = false,
