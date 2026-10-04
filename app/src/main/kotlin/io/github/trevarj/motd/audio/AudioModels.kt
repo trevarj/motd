@@ -101,11 +101,9 @@ fun extensionlessAudioCandidates(text: String): List<String> = extractUrls(text)
 fun displayTextForAudioMessage(
     text: String,
     attachments: List<AudioAttachment>,
-    suppressStandaloneUrl: Boolean = false,
 ): String {
     if (attachments.size != 1) return text
     val attachment = attachments.single()
-    if (suppressStandaloneUrl && text.trim().removeSurrounding("<", ">") == attachment.url) return ""
     if (!attachment.voice) return text
     for (segment in parseInlineCode(text)) {
         if (segment !is InlineTextSegment.Plain) return text

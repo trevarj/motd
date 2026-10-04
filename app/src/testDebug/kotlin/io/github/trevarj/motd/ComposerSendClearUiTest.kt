@@ -69,6 +69,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityOptionsCompat
@@ -81,6 +82,7 @@ import io.github.trevarj.motd.ai.AiTranslationTarget
 import io.github.trevarj.motd.ai.text.TextOperation
 import io.github.trevarj.motd.ai.text.TextTermination
 import io.github.trevarj.motd.ai.text.TextTransformResult
+import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.DccAddressKind
@@ -93,7 +95,10 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.dcc.EbooksResultCache
+import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistorySyncStatus
@@ -109,6 +114,7 @@ import io.github.trevarj.motd.ui.chat.ChatState
 import io.github.trevarj.motd.ui.chat.ComposerDraftState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.EntryPositionState
+import io.github.trevarj.motd.ui.chat.MessageUrlCache
 import io.github.trevarj.motd.ui.chat.OutgoingFlight
 import io.github.trevarj.motd.ui.chat.SendFlightAnchors
 import io.github.trevarj.motd.ui.chat.SendFlightMotion
@@ -265,6 +271,15 @@ class ComposerSendClearUiTest {
         aiState: () -> AiTextUiState = { AiTextUiState.Closed },
         onAi: () -> Unit = {},
         aiSheet: @Composable () -> Unit = {},
+        dickordEnabled: () -> Boolean = { false },
+        layoutDensity: () -> LayoutDensity = { LayoutDensity.COMFORTABLE },
+        onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
+        entryState: EntryPositionState = EntryPositionState.Settled,
+        onInitialPositionHandled: () -> Unit = {},
+        rawNewestAnchor: TimelineAnchor? = null,
+        onMarkRead: (TimelineAnchor) -> Unit = {},
+        showImages: Boolean = true,
+        showLinkPreviews: Boolean = true,
         onTranslateMessage: ((MessageEntity) -> Unit)? = null,
         onSubmit: (String) -> Unit,
     ) {
@@ -274,8 +289,9 @@ class ComposerSendClearUiTest {
             CompositionLocalProvider(
                 LocalActivityResultRegistryOwner provides (activityResults ?: checkNotNull(LocalActivityResultRegistryOwner.current)),
                 LocalDensity provides (fontScale?.let { Density(LocalDensity.current.density, it) } ?: LocalDensity.current),
+                LocalDickordLabsEnabled provides dickordEnabled(),
             ) {
-                MotdTheme {
+                MotdTheme(layoutDensity = layoutDensity()) {
                     ChatContent(
                         state =
                             ChatState(
@@ -308,6 +324,7 @@ class ComposerSendClearUiTest {
                         onReact = { _, _ -> },
                         onRetry = {},
                         loadPreview = { _, _ -> null },
+                        onAudioToggle = onAudioToggle,
                         composerDraft = draft(),
                         aiTextEnabled = aiEnabled(),
                         aiTextState = aiState(),
@@ -316,11 +333,200 @@ class ComposerSendClearUiTest {
                         outgoingFlight = outgoingFlight(),
                         onDraftChanged = onDraftChanged,
                         onFlightSettled = onFlightSettled,
-                        entryState = EntryPositionState.Settled,
+                        entryState = entryState,
+                        onInitialPositionHandled = onInitialPositionHandled,
+                        rawNewestAnchor = rawNewestAnchor,
+                        onMarkRead = onMarkRead,
+                        showImages = showImages,
+                        showLinkPreviews = showLinkPreviews,
                     )
                     aiSheet()
                 }
             }
+        }
+    }
+
+    @Test
+    fun dickordAudioUsesRawIdentityInsteadOfCleanOrPendingChatTitle() {
+        val url = "https://files.example/voice.ogg?ex=abc&is=def&hm=123"
+        var currentBuffer by mutableStateOf(
+            buffer.copy(
+                name = "#discord.me.chat.alice",
+                displayName = "#discord.me.chat.alice",
+                dickordChannelJson = """{"v":1,"guild_id":null,"guild_name":null,"channel_id":"456","channel_type":1,"parent_id":null,"channel_name":"Alice Smith"}""",
+            ),
+        )
+        var enabled by mutableStateOf(true)
+        val row = MessageEntity(id = 91, bufferId = buffer.id, serverTime = 100, sender = "Alice/discord", kind = MessageKind.PRIVMSG, text = url, dedupKey = "audio")
+        val pages = MutableStateFlow(PagingData.from(listOf(row)))
+        var played: AudioPlaybackRequest? = null
+        setContent(
+            draft = { ComposerDraftState("", hydrated = true, revision = 1) },
+            pages = pages,
+            chatBuffer = { currentBuffer },
+            dickordEnabled = { enabled },
+            onAudioToggle = { played = it },
+        ) {}
+
+        compose.onNodeWithText("Alice Smith", useUnmergedTree = true).assertIsDisplayed()
+        for (body in listOf(url, "<$url>")) {
+            compose.runOnIdle { pages.value = PagingData.from(listOf(row.copy(text = body))) }
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().size == 1
+            }
+            compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).assertCountEquals(1)
+            compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithText("<>", useUnmergedTree = true).assertDoesNotExist()
+        }
+        compose.onNodeWithContentDescription("Download audio", useUnmergedTree = true).performClick()
+        compose.runOnIdle {
+            assertEquals("Alice Smith", played?.origin?.conversation)
+            assertEquals(url, played?.attachment?.url)
+            assertEquals(url, played?.attachment?.displayUrl)
+            assertEquals(false, played?.attachment?.voice)
+        }
+
+        compose.runOnIdle { currentBuffer = currentBuffer.copy(dickordChannelJson = null) }
+        compose.onNodeWithText(RuntimeEnvironment.getApplication().getString(R.string.dickord_portal_conversation_pending, buffer.id), useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertDoesNotExist()
+        compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).assertCountEquals(1)
+
+        compose.runOnIdle { enabled = false }
+        compose.onNodeWithText("<$url>", useUnmergedTree = true).assertIsDisplayed()
+        compose.runOnIdle {
+            enabled = true
+            currentBuffer = buffer
+        }
+        compose.onNodeWithText("<$url>", useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).assertCountEquals(1)
+    }
+
+    @Test
+    fun dickordAudioRetainsStyledCaptionAndOtherLinksAcrossChatDensities() {
+        val url = "https://files.example/voice.ogg?ex=abc&is=def&hm=123"
+        val literal = "https://literal.example/code"
+        val other = "https://other.example/page"
+        val body = "caption <$url> `$literal` then $other"
+        val row =
+            MessageEntity(
+                id = 92,
+                bufferId = buffer.id,
+                serverTime = 100,
+                sender = "Alice/discord",
+                kind = MessageKind.PRIVMSG,
+                text = body,
+                ircFormattedText = "\u0002caption\u0002 <$url> `$literal` then $other",
+                dedupKey = "caption-audio",
+            )
+        var density by mutableStateOf(LayoutDensity.COMFORTABLE)
+        setContent(
+            draft = { ComposerDraftState("", hydrated = true, revision = 1) },
+            pages = flowOf(PagingData.from(listOf(row))),
+            chatBuffer = {
+                buffer.copy(
+                    name = "#discord.me.chat.alice",
+                    displayName = "#discord.me.chat.alice",
+                    dickordChannelJson = """{"v":1,"guild_id":null,"guild_name":null,"channel_id":"456","channel_type":1,"parent_id":null,"channel_name":"Alice Smith"}""",
+                )
+            },
+            dickordEnabled = { true },
+            layoutDensity = { density },
+        ) {}
+
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().size == 1
+        }
+        for (layout in LayoutDensity.entries) {
+            compose.runOnIdle { density = layout }
+            val caption = compose.onNodeWithText("caption $literal then $other", substring = true, useUnmergedTree = true)
+            caption.assertIsDisplayed()
+            val annotated = caption.fetchSemanticsNode().config[SemanticsProperties.Text].single()
+            assertTrue(annotated.spanStyles.any { it.item.fontWeight == FontWeight.Bold && annotated.text.substring(it.start, it.end) == "caption" })
+            compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertDoesNotExist()
+            compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).assertCountEquals(1)
+        }
+        compose.onNodeWithTag("audio_player_details", useUnmergedTree = true).performClick()
+        compose.onNodeWithText(url, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Conversation", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun dickordAudioLoadsAfterEntryVeilTimeoutWithoutSettling() {
+        assertDickordAudioOnUnsettledEntry(EntryPositionState.Pending)
+    }
+
+    @Test
+    fun dickordAudioLoadsWhenEntryIsDurablyUnresolved() {
+        assertDickordAudioOnUnsettledEntry(EntryPositionState.Unresolved(messageUnavailable = false))
+    }
+
+    private fun assertDickordAudioOnUnsettledEntry(entryState: EntryPositionState) {
+        MessageUrlCache.clearForTest()
+        val url = "https://cdn.discordapp.com/attachments/123/777/voice-message.ogg?ex=feed&is=bead&hm=fixture"
+        val standalone =
+            MessageEntity(
+                id = 101,
+                bufferId = buffer.id,
+                serverTime = 101_000,
+                sender = "UiDickordFixture",
+                kind = MessageKind.PRIVMSG,
+                text = "<$url>",
+                dedupKey = "unsettled-audio",
+            )
+        val caption =
+            standalone.copy(
+                id = 102,
+                serverTime = 102_000,
+                text = "Caption retained <$url>",
+                ircFormattedText = "\u0002Caption retained\u0002 <$url>",
+                dedupKey = "unsettled-caption",
+            )
+        var positionsHandled = 0
+        var marksRead = 0
+        setContent(
+            draft = { ComposerDraftState("", hydrated = true, revision = 1) },
+            pages = flowOf(PagingData.from(listOf(caption, standalone) + headerHistory())),
+            chatBuffer = {
+                buffer.copy(
+                    name = "#discord.fixture.chat.777",
+                    displayName = "#discord.fixture.chat.777",
+                    dickordChannelJson = """{"v":1,"guild_id":null,"guild_name":null,"channel_id":"777","channel_type":1,"parent_id":null,"channel_name":"Audio fixture"}""",
+                )
+            },
+            dickordEnabled = { true },
+            entryState = entryState,
+            onInitialPositionHandled = { positionsHandled++ },
+            rawNewestAnchor = TimelineAnchor(caption.serverTime, caption.id),
+            onMarkRead = { marksRead++ },
+            showImages = false,
+            showLinkPreviews = false,
+        ) {}
+
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().size == 2
+        }
+        compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).assertCountEquals(2)
+        val body = compose.onNodeWithText("Caption retained", useUnmergedTree = true)
+        body.assertIsDisplayed()
+        val annotated = body.fetchSemanticsNode().config[SemanticsProperties.Text].single()
+        assertTrue(annotated.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+        compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("<>", useUnmergedTree = true).assertDoesNotExist()
+        compose.onAllNodesWithTag("audio_player_details", useUnmergedTree = true).assertCountEquals(2)
+        val timeline = compose.onNodeWithTag("chat_timeline")
+        val title = compose.onNodeWithTag("chat_title")
+        title.assertHeightIsAtLeast(48.dp)
+        timeline.performScrollToIndex(50)
+        title.assertHeightIsEqualTo(36.dp).assertHasNoClickAction()
+        compose.onNodeWithTag("chat_compact_actions").assertIsDisplayed().assertTouchHeightIsEqualTo(48.dp)
+        compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertIsDisplayed()
+        timeline.performScrollToIndex(0)
+        title.assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag("chat_compact_actions").assertDoesNotExist()
+        compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(0, positionsHandled)
+            assertEquals(0, marksRead)
         }
     }
 

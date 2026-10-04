@@ -290,6 +290,7 @@ fun MessageBubble(
     reply: ReplyPreviewData? = null,
     onReplyClick: (() -> Unit)? = null,
     mediaUrls: List<String> = emptyList(),
+    audioPreviewUrls: List<String> = emptyList(),
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     linkPreviewResolved: Boolean = false,
@@ -352,6 +353,7 @@ fun MessageBubble(
                 reply = reply,
                 onReplyClick = onReplyClick,
                 mediaUrls = mediaUrls,
+                audioPreviewUrls = audioPreviewUrls,
                 linkPreview = linkPreview,
                 linkPreviewLoading = linkPreviewLoading,
                 linkPreviewResolved = linkPreviewResolved,
@@ -388,6 +390,7 @@ fun MessageBubble(
                 reply = reply,
                 onReplyClick = onReplyClick,
                 mediaUrls = mediaUrls,
+                audioPreviewUrls = audioPreviewUrls,
                 linkPreview = linkPreview,
                 linkPreviewLoading = linkPreviewLoading,
                 linkPreviewResolved = linkPreviewResolved,
@@ -428,6 +431,7 @@ fun MessageBubble(
             reply = reply,
             onReplyClick = onReplyClick,
             mediaUrls = mediaUrls,
+            audioPreviewUrls = audioPreviewUrls,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
             linkPreviewResolved = linkPreviewResolved,
@@ -470,6 +474,7 @@ fun MessageBubble(
             reply = reply,
             onReplyClick = onReplyClick,
             mediaUrls = mediaUrls,
+            audioPreviewUrls = audioPreviewUrls,
             linkPreview = linkPreview,
             linkPreviewLoading = linkPreviewLoading,
             linkPreviewResolved = linkPreviewResolved,
@@ -655,6 +660,7 @@ fun MessageBubble(
                     remember(
                         text,
                         mediaUrls,
+                        audioPreviewUrls,
                         linkColor,
                         mentionsActive,
                         mentionColor,
@@ -672,7 +678,7 @@ fun MessageBubble(
                             codeColor,
                             bubbleColor,
                             textColor,
-                        ).withoutMediaPreviewUrls(mediaUrls)
+                        ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
                     }
                 if (body.isNotBlank()) {
                     Text(
@@ -791,6 +797,7 @@ private fun ComfortableActionBubble(
     reply: ReplyPreviewData? = null,
     onReplyClick: (() -> Unit)? = null,
     mediaUrls: List<String> = emptyList(),
+    audioPreviewUrls: List<String> = emptyList(),
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     linkPreviewResolved: Boolean = false,
@@ -860,6 +867,7 @@ private fun ComfortableActionBubble(
             isBot,
             text,
             mediaUrls,
+            audioPreviewUrls,
             nameColor,
             bodyColor,
             linkColor,
@@ -887,7 +895,7 @@ private fun ComfortableActionBubble(
                 senderLink = senderLink,
                 includeStar = hideAvatar,
                 containerColor = rowColor,
-            ).withoutMediaPreviewUrls(mediaUrls)
+            ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
         }
 
     Row(
@@ -1030,6 +1038,7 @@ private fun ActionMessageRow(
     reply: ReplyPreviewData? = null,
     onReplyClick: (() -> Unit)? = null,
     mediaUrls: List<String> = emptyList(),
+    audioPreviewUrls: List<String> = emptyList(),
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     linkPreviewResolved: Boolean = false,
@@ -1092,6 +1101,7 @@ private fun ActionMessageRow(
             isBot,
             text,
             mediaUrls,
+            audioPreviewUrls,
             accent,
             nameColor,
             bodyColor,
@@ -1118,7 +1128,7 @@ private fun ActionMessageRow(
                 codeColor = codeColor,
                 senderLink = senderLink,
                 containerColor = paintedRow,
-            ).withoutMediaPreviewUrls(mediaUrls)
+            ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
         }
 
     // The caller's modifier carries the stable per-message semantics. Keep the ACTION-specific
@@ -1366,6 +1376,7 @@ private fun TwoLineMessageRow(
     reply: ReplyPreviewData? = null,
     onReplyClick: (() -> Unit)? = null,
     mediaUrls: List<String> = emptyList(),
+    audioPreviewUrls: List<String> = emptyList(),
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     linkPreviewResolved: Boolean = false,
@@ -1513,6 +1524,7 @@ private fun TwoLineMessageRow(
                     remember(
                         text,
                         mediaUrls,
+                        audioPreviewUrls,
                         linkColor,
                         mentionsActive,
                         mentionColor,
@@ -1530,7 +1542,7 @@ private fun TwoLineMessageRow(
                             codeColor,
                             paintedRow,
                             bodyColor,
-                        ).withoutMediaPreviewUrls(mediaUrls)
+                        ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
                     }
                 if (richBody.isNotBlank()) {
                     Text(
@@ -1833,10 +1845,13 @@ internal fun FailedIcon() {
 }
 
 /** Remove rendered linked occurrences in one pass; code, formatting and the stored message stay intact. */
-internal fun AnnotatedString.withoutMediaPreviewUrls(urls: List<String>): AnnotatedString {
-    if (urls.isEmpty()) return this
+internal fun AnnotatedString.withoutPreviewUrls(
+    mediaUrls: List<String>,
+    audioUrls: List<String> = emptyList(),
+): AnnotatedString {
+    if (mediaUrls.isEmpty() && audioUrls.isEmpty()) return this
     val counts = mutableMapOf<String, Int>()
-    for (url in urls) {
+    for (url in mediaUrls) {
         val count = counts[url]
         if (count != null) {
             counts[url] = count + 1
@@ -1848,13 +1863,20 @@ internal fun AnnotatedString.withoutMediaPreviewUrls(urls: List<String>): Annota
     var cursor = 0
     for (link in getLinkAnnotations(0, length)) {
         val url = (link.item as? LinkAnnotation.Url)?.url ?: continue
-        val count = counts[url] ?: continue
-        if (count == 0) continue
-        counts[url] = count - 1
+        val audio = url in audioUrls
+        if (!audio) {
+            val count = counts[url] ?: continue
+            if (count == 0) continue
+            counts[url] = count - 1
+        }
+        val wrapped =
+            audio && link.start > 0 && link.end < length &&
+                this[link.start - 1] == '<' && this[link.end] == '>'
+        val start = if (wrapped) link.start - 1 else link.start
         val output = builder ?: AnnotatedString.Builder().also { builder = it }
-        output.append(subSequence(cursor, link.start))
-        cursor = link.end
-        if (link.start > 0 && this[link.start - 1] == ' ') {
+        output.append(subSequence(cursor, start))
+        cursor = if (wrapped) link.end + 1 else link.end
+        if (start > 0 && this[start - 1] == ' ') {
             while (cursor < length && this[cursor] == ' ') cursor++
         }
     }

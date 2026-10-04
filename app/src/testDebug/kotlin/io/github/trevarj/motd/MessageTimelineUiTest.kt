@@ -260,12 +260,13 @@ class MessageTimelineUiTest {
 
     @Test
     fun dickordWrappedStandaloneAudioRendersOnlyThePlayer() {
-        val url = "https://files.example/voice.ogg"
+        val url = "https://files.example/voice.ogg?ex=abc&is=def&hm=123"
         val row = message(1, 100, MessageKind.PRIVMSG, "<$url>")
         render(
             flowOf(PagingData.from(listOf(row))),
             dickordEnabled = true,
-            conversationName = "#discord.me.chat.alice",
+            conversationName = "Alice Smith",
+            hideInlineAudioLinks = true,
             directMessage = true,
             richContentReady = true,
         )
@@ -274,6 +275,26 @@ class MessageTimelineUiTest {
         compose.waitUntil(10_000) {
             compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
+        compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun dickordAudioOnlyReplyKeepsItsQuoteWithoutUrlBody() {
+        val url = "https://files.example/voice.ogg?ex=abc&is=def&hm=123"
+        val row = message(1, 100, MessageKind.PRIVMSG, "<$url>").copy(replyToMsgid = "parent")
+        render(
+            flowOf(PagingData.from(listOf(row))),
+            dickordEnabled = true,
+            conversationName = "Alice Smith",
+            hideInlineAudioLinks = true,
+            richContentReady = true,
+        )
+        scrollTo(messageTag(row.id))
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("parent text", useUnmergedTree = true).assertIsDisplayed()
         compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).assertCountEquals(1)
         compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertDoesNotExist()
     }
@@ -313,7 +334,8 @@ class MessageTimelineUiTest {
             flowOf(PagingData.from(listOf(expanded, collapsed))),
             replyPreview = { MutableStateFlow(ReplyPreviewData("Bob/discord", "parent text")) },
             dickordEnabled = true,
-            conversationName = "#discord.me.chat.alice",
+            conversationName = "Alice Smith",
+            hideInlineAudioLinks = true,
             richContentReady = true,
             fools = setOf("Alice/discord", "Carol/discord"),
             foolExpanded = { it == expanded.id },
@@ -333,9 +355,14 @@ class MessageTimelineUiTest {
         compose.waitUntil(10_000) {
             compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText(expanded.text, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("listen", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("https://files.example/clip.mp3", substring = true, useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithContentDescription("Download audio", useUnmergedTree = true).performClick()
-        compose.runOnIdle { assertEquals("Alice", played?.origin?.sender) }
+        compose.runOnIdle {
+            assertEquals("Alice", played?.origin?.sender)
+            assertEquals("Alice Smith", played?.origin?.conversation)
+            assertEquals("https://files.example/clip.mp3", played?.attachment?.url)
+        }
 
         scrollTo(messageTag(collapsed.id))
         compose
@@ -562,6 +589,7 @@ class MessageTimelineUiTest {
         onReplyPreviewClick: (ReplyTarget) -> Unit = {},
         dickordEnabled: Boolean = false,
         conversationName: String? = null,
+        hideInlineAudioLinks: Boolean = false,
         directMessage: Boolean = false,
         richContentReady: Boolean = false,
         fools: Set<String> = emptySet(),
@@ -585,6 +613,7 @@ class MessageTimelineUiTest {
                         ebooksQuietFeed = quietFeed,
                         onToggleFool = onToggleFool,
                         conversationName = conversationName,
+                        hideInlineAudioLinks = hideInlineAudioLinks,
                         directMessage = directMessage,
                         readMarkerTime = marker,
                         onLongPress = { message ->

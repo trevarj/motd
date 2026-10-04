@@ -170,7 +170,7 @@ class MessageBubbleTextTest {
                 text = "`$media` ${IRC_BOLD}caption$IRC_BOLD $media and $second then $other",
                 linkColor = Color.Blue,
                 codeColor = Color.White,
-            ).withoutMediaPreviewUrls(listOf(media, second))
+            ).withoutPreviewUrls(listOf(media, second))
 
         assertEquals("$media caption and then $other", body.text)
         assertEquals(
@@ -192,12 +192,34 @@ class MessageBubbleTextTest {
     @Test
     fun media_only_body_disappears_and_repeated_previews_remove_each_linked_occurrence() {
         val media = "https://cdn.example/photo.png"
-        assertEquals("", linkifiedBody("  $media  ", Color.Blue).withoutMediaPreviewUrls(listOf(media)).text)
-        val repeated = linkifiedBody("$media $media", Color.Blue).withoutMediaPreviewUrls(listOf(media, media))
+        assertEquals("", linkifiedBody("  $media  ", Color.Blue).withoutPreviewUrls(listOf(media)).text)
+        val repeated = linkifiedBody("$media $media", Color.Blue).withoutPreviewUrls(listOf(media, media))
         assertEquals("", repeated.text)
-        val singlePreview = linkifiedBody("$media $media", Color.Blue).withoutMediaPreviewUrls(listOf(media))
+        val singlePreview = linkifiedBody("$media $media", Color.Blue).withoutPreviewUrls(listOf(media))
         assertEquals(media, singlePreview.text)
         assertEquals(media, (singlePreview.getLinkAnnotations(0, singlePreview.length).single().item as LinkAnnotation.Url).url)
+    }
+
+    @Test
+    fun audio_exclusion_preserves_styled_caption_code_and_unrelated_links() {
+        val audio = "https://cdn.example/voice.ogg?ex=abc&is=def&hm=123"
+        val other = "https://other.example/other.ogg"
+        val body =
+            linkifiedBody(
+                text = "${IRC_BOLD}caption$IRC_BOLD <$audio> `$audio` and $audio then $other",
+                linkColor = Color.Blue,
+                codeColor = Color.White,
+            ).withoutPreviewUrls(emptyList(), listOf(audio))
+
+        assertEquals("caption $audio and then $other", body.text)
+        assertEquals(listOf(other), body.getLinkAnnotations(0, body.length).map { (it.item as LinkAnnotation.Url).url })
+        assertTrue(body.spanStyles.any { it.item.fontWeight == FontWeight.Bold && body.text.substring(it.start, it.end) == "caption" })
+        assertTrue(body.spanStyles.any { it.item.fontFamily == FontFamily.Monospace && body.text.substring(it.start, it.end) == audio })
+        listOf(audio, "<$audio>", " \n<$audio> $audio <$audio>\t ").forEach { text ->
+            assertEquals("", linkifiedBody(text, Color.Blue).withoutPreviewUrls(emptyList(), listOf(audio)).text)
+        }
+        assertEquals(audio, linkifiedBody(audio, Color.Blue).withoutPreviewUrls(emptyList()).text)
+        assertEquals("<$other>", linkifiedBody("<$other>", Color.Blue).withoutPreviewUrls(emptyList(), listOf(audio)).text)
     }
 
     @Test

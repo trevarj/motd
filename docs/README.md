@@ -59,6 +59,10 @@ grow the strip rather than being clipped.
 Chat-list tabs use the same theme surface as the title bar and chat rows.
 The selected tab retains its distinct pill highlight.
 
+Dickord audio attachments render one inline player instead of a redundant URL
+bubble. Captions and unrelated links remain; the complete signed audio link and
+conversation details stay available in the player's Details sheet.
+
 ## Local composer text tools
 
 Labs → AI → Composer text tools is default-off. Set up the exact Qwen artifact

@@ -2638,7 +2638,7 @@ fun ChatContent(
     // ponytail: the existing latest-edge predicate owns chrome too, even while parked.
     val headerExpansion =
         animateFloatAsState(
-            targetValue = if (initialPositionSettled && !atBottom) 0f else 1f,
+            targetValue = if ((initialPositionSettled || entryVeilLifted) && !atBottom) 0f else 1f,
             animationSpec = MotdMotion.fadeIn,
             label = "chat_header_expansion",
         )
@@ -3187,6 +3187,7 @@ fun ChatContent(
                                             bufferId = state.buffer?.id,
                                             ebooksQuietFeed = eligibleEbooksRoomId != null,
                                             conversationName = conversationLabel,
+                                            hideInlineAudioLinks = activeDickordChannel,
                                             directMessage = state.buffer?.type == BufferType.QUERY,
                                             collapseSystemEvents = !isServerBuffer,
                                             // Frozen read-marker so the "New messages" divider stays put.
@@ -3218,7 +3219,8 @@ fun ChatContent(
                                             onRemoveDccTransfer = onRemoveDccTransfer,
                                             onSaveDccToDownloads = onSaveDccToDownloads,
                                             loadPreview = loadPreview,
-                                            richContentReady = initialPositionSettled,
+                                            // A visible fallback entry can remain unresolved indefinitely.
+                                            richContentReady = initialPositionSettled || entryVeilLifted,
                                             showImages = showImages,
                                             showLinkPreviews = showLinkPreviews,
                                             cachedPreview = cachedPreview,

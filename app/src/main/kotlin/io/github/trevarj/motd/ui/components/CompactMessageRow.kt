@@ -79,6 +79,7 @@ internal fun CompactMessageRow(
     reply: ReplyPreviewData? = null,
     onReplyClick: (() -> Unit)? = null,
     mediaUrls: List<String> = emptyList(),
+    audioPreviewUrls: List<String> = emptyList(),
     linkPreview: LinkPreview? = null,
     linkPreviewLoading: Boolean = false,
     linkPreviewResolved: Boolean = false,
@@ -126,6 +127,7 @@ internal fun CompactMessageRow(
         remember(
             displaySender,
             mediaUrls,
+            audioPreviewUrls,
             text,
             kind,
             isBot,
@@ -156,7 +158,7 @@ internal fun CompactMessageRow(
                 codeColor,
                 nickFontSize = nickFontSize,
                 containerColor = paintedRow,
-            ).withoutMediaPreviewUrls(mediaUrls)
+            ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
         }
 
     Column(

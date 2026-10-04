@@ -93,7 +93,6 @@ import io.github.trevarj.motd.audio.displayTextForAudioMessage
 import io.github.trevarj.motd.audio.extensionlessAudioCandidates
 import io.github.trevarj.motd.audio.readAloudBody
 import io.github.trevarj.motd.audio.toAttachment
-import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.DccDirection
 import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.DccTransferProtocol
@@ -113,7 +112,6 @@ import io.github.trevarj.motd.dcc.dccEndpointRisk
 import io.github.trevarj.motd.dcc.resolveDccAddress
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.dickord.dickordNickLabel
-import io.github.trevarj.motd.dickord.isDickordPortalConversation
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.DaySeparator
@@ -131,7 +129,9 @@ import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.components.SwipeToReplyContainer
 import io.github.trevarj.motd.ui.components.SystemEventPill
 import io.github.trevarj.motd.ui.components.dayStart
+import io.github.trevarj.motd.ui.components.linkifiedBody
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import io.github.trevarj.motd.ui.components.withoutPreviewUrls
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdSpacing
@@ -321,6 +321,7 @@ fun MessageList(
     bufferId: Long? = null,
     ebooksQuietFeed: Boolean = false,
     conversationName: String? = null,
+    hideInlineAudioLinks: Boolean = false,
     directMessage: Boolean = false,
     collapseSystemEvents: Boolean = true,
     canRetry: (MessageEntity) -> Boolean = { true },
@@ -667,6 +668,7 @@ fun MessageList(
                         networkId = networkId,
                         bufferId = bufferId,
                         conversationName = conversationName,
+                        hideInlineAudioLinks = hideInlineAudioLinks,
                         directMessage = directMessage,
                         fallbackSender = conversationName.takeUnless { collapseSystemEvents },
                         dickordEnabled = dickordEnabled,
@@ -1534,6 +1536,7 @@ private fun MessageRow(
     networkId: Long?,
     bufferId: Long?,
     conversationName: String?,
+    hideInlineAudioLinks: Boolean,
     directMessage: Boolean,
     fallbackSender: String?,
     dickordEnabled: Boolean,
@@ -1725,17 +1728,27 @@ private fun MessageRow(
         remember(immediateAudio, headAudio) {
             (immediateAudio + headAudio).distinctBy { it.url }
         }
-    val suppressStandaloneAudioUrl =
-        dickordEnabled && conversationName != null &&
-            isDickordPortalConversation(BufferType.CHANNEL, conversationName)
+    val audioPreviewUrls =
+        remember(audioAttachments, hideInlineAudioLinks) {
+            if (hideInlineAudioLinks) audioAttachments.map { it.url } else emptyList()
+        }
     val messageText =
-        remember(msg.text, audioAttachments, suppressStandaloneAudioUrl) {
-            displayTextForAudioMessage(msg.text, audioAttachments, suppressStandaloneAudioUrl)
+        remember(msg.text, audioAttachments) {
+            displayTextForAudioMessage(msg.text, audioAttachments)
         }
     val renderedMessageText =
         if (messageText == msg.text) msg.ircFormattedText ?: messageText else messageText
-    val standaloneAudio =
-        audioAttachments.size == 1 && messageText.isBlank() && reply == null
+    val audioBodyBlank =
+        remember(renderedMessageText, audioPreviewUrls) {
+            if (audioPreviewUrls.isEmpty() || renderedMessageText.isBlank()) {
+                renderedMessageText.isBlank()
+            } else {
+                linkifiedBody(renderedMessageText, Color.Unspecified, mentionsActive = false)
+                    .withoutPreviewUrls(emptyList(), audioPreviewUrls)
+                    .isBlank()
+            }
+        }
+    val standaloneAudio = audioAttachments.isNotEmpty() && audioBodyBlank && reply == null
 
     // A cached completion is rendered synchronously even while scrolling. A cache miss waits for
     // idle, then joins the repository's process-owned single-flight fetch. Null is a definitive
@@ -1861,6 +1874,7 @@ private fun MessageRow(
                                 null
                             },
                         mediaUrls = mediaUrls,
+                        audioPreviewUrls = audioPreviewUrls,
                         linkPreview = preview,
                         linkPreviewLoading = previewLoading,
                         linkPreviewResolved = previewResolved || previewAwaiting,
