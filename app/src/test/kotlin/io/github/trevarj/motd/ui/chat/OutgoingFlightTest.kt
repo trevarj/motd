@@ -245,7 +245,13 @@ class OutgoingFlightTest {
 
         fun hoverTop() =
             sendFlightGhostTop(
-                anchors.launchField!!.top, 200f, 206f, null, null, 0f, 1f,
+                anchors.launchField!!.top,
+                200f,
+                206f,
+                null,
+                null,
+                0f,
+                1f,
                 footDrop = anchors.composerShrink(),
             )
         assertEquals(740f, hoverTop(), 0.001f)

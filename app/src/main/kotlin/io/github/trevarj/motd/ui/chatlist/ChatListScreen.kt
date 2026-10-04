@@ -1150,6 +1150,7 @@ private fun FolderTabStrip(
         modifier =
             Modifier
                 .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
                 .horizontalScroll(rememberScrollState())
                 .selectableGroup()
                 .testTag("chatlist_folder_tabs"),

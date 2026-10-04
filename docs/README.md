@@ -55,6 +55,9 @@ Reading older messages animates the chat header from 64dp to a compact 48dp bar.
 The title, status and actions stay available; returning to latest expands it again.
 Large accessibility text can grow the bar rather than being clipped.
 
+Chat-list tabs use the same theme surface as the title bar and chat rows.
+The selected tab retains its distinct pill highlight.
+
 ## Local composer text tools
 
 Labs → AI → Composer text tools is default-off. Set up the exact Qwen artifact

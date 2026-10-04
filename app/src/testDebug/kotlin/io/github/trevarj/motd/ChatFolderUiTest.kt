@@ -1,9 +1,14 @@
 package io.github.trevarj.motd
 
 import android.content.Context
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
@@ -271,6 +276,7 @@ class ChatFolderUiTest {
 
     @Test
     fun folder_tabs_show_only_selected_pill_without_underline_or_separator() {
+        val colors = lightColorScheme(surface = Color(0xFFABCDEF), background = Color(0xFF543210))
         val state =
             mutableStateOf(
                 ChatListState(
@@ -280,7 +286,7 @@ class ChatFolderUiTest {
                     loading = false,
                 ),
             )
-        setContent(state)
+        setContent(state, colorScheme = colors)
 
         fun pillPixel(tag: String): Int {
             val strip = compose.onNodeWithTag("chatlist_folder_tabs")
@@ -298,6 +304,8 @@ class ChatFolderUiTest {
         val selectedFill = pillPixel(allTag)
         val plainFill = pillPixel(folderTag)
         assertNotEquals(plainFill, selectedFill)
+        assertEquals(colors.primaryContainer.toArgb(), selectedFill)
+        assertEquals(colors.surface.toArgb(), plainFill)
 
         val strip = compose.onNodeWithTag("chatlist_folder_tabs")
         val stripBounds = strip.fetchSemanticsNode().boundsInRoot
@@ -306,7 +314,8 @@ class ChatFolderUiTest {
         val left = (pillBounds.left - stripBounds.left).toInt()
         val top = (pillBounds.top - stripBounds.top).toInt()
         val center = ((pillBounds.left + pillBounds.right) / 2 - stripBounds.left).toInt()
-        assertEquals(pixels.getPixel(center, 0), pixels.getPixel(center, pixels.height - 1))
+        assertEquals(colors.surface.toArgb(), pixels.getPixel(center, 0))
+        assertEquals(colors.surface.toArgb(), pixels.getPixel(center, pixels.height - 1))
         val cornerInset = with(compose.density) { 2.dp.toPx().toInt() }
         val shoulderInset = with(compose.density) { 7.dp.toPx().toInt() }
         // The avatar-like corner reaches the top edge sooner than a fully round capsule.
@@ -611,28 +620,31 @@ class ChatFolderUiTest {
 
     private fun setContent(
         state: androidx.compose.runtime.State<ChatListState>,
+        colorScheme: ColorScheme? = null,
         callbacks: Callbacks.() -> Unit = {},
     ) {
         val configured = Callbacks().apply(callbacks)
         compose.setContent {
             MotdTheme(dynamicColor = false) {
-                ChatListContent(
-                    state = state.value,
-                    onOpenBuffer = configured.onOpenBuffer,
-                    onOpenSettings = {},
-                    onOpenSearch = {},
-                    onOpenDickord = configured.onOpenDickord,
-                    onSetPinned = { _, _ -> },
-                    onSetMuted = { _, _ -> },
-                    onSetArchived = configured.onSetArchived,
-                    onJoinChannel = { _, _, _ -> },
-                    onMessageUser = { _, _ -> },
-                    onAssignFolder = configured.onAssignFolder,
-                    onSetFolderExpanded = configured.onSetFolderExpanded,
-                    onOpenFolderEditor = configured.onOpenFolderEditor,
-                    onAcceptInvitation = configured.onAcceptInvitation,
-                    onIgnoreInvitation = configured.onIgnoreInvitation,
-                )
+                MaterialTheme(colorScheme = colorScheme ?: MaterialTheme.colorScheme) {
+                    ChatListContent(
+                        state = state.value,
+                        onOpenBuffer = configured.onOpenBuffer,
+                        onOpenSettings = {},
+                        onOpenSearch = {},
+                        onOpenDickord = configured.onOpenDickord,
+                        onSetPinned = { _, _ -> },
+                        onSetMuted = { _, _ -> },
+                        onSetArchived = configured.onSetArchived,
+                        onJoinChannel = { _, _, _ -> },
+                        onMessageUser = { _, _ -> },
+                        onAssignFolder = configured.onAssignFolder,
+                        onSetFolderExpanded = configured.onSetFolderExpanded,
+                        onOpenFolderEditor = configured.onOpenFolderEditor,
+                        onAcceptInvitation = configured.onAcceptInvitation,
+                        onIgnoreInvitation = configured.onIgnoreInvitation,
+                    )
+                }
             }
         }
     }
