@@ -4918,7 +4918,6 @@ internal fun VoiceComposerPanel(
                             onPreviewSeek(preview, (fraction * previewDurationMs).toLong())
                         },
                         onValueChangeFinished = {},
-                        seed = preview.playbackId,
                         enabled = progress == null && previewActive && !playbackState.loading,
                         waveform = staged.waveform,
                         modifier = Modifier.fillMaxWidth().testTag("voice_preview_scrubber"),

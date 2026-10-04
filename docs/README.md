@@ -63,6 +63,10 @@ Dickord audio attachments render one inline player instead of a redundant URL
 bubble. Captions and unrelated links remain; the complete signed audio link and
 conversation details stay available in the player's Details sheet.
 
+Inline audio uses a play-led action, a flat track until real waveform data is
+available, and a details menu beside the timestamp. Loading can be cancelled;
+seeking is available only for prepared audio. HTTP playback still requires consent.
+
 Long-press a Dickord conversation → Delete chat to confirm local removal. The chat
 hides immediately; leaving waits for reconnect when offline, and local history
 is purged after the server acknowledges the IRC leave. Discord channels and remote

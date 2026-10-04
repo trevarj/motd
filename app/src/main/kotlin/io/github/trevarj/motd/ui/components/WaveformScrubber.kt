@@ -6,13 +6,16 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -22,11 +25,13 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.audio.AudioWaveform
+import io.github.trevarj.motd.ui.theme.MotdSizes
 
 private const val WAVEFORM_SAMPLE_COUNT = 48
 private const val RADIAL_WAVE_POINT_COUNT = 72
@@ -39,41 +44,97 @@ fun WaveformScrubber(
     value: Float,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit,
-    seed: String,
     enabled: Boolean,
     modifier: Modifier = Modifier,
     waveform: AudioWaveform? = null,
 ) {
     val fraction = value.coerceIn(0f, 1f)
+    val displayedFraction = rememberUpdatedState(fraction)
+    val changeValue = rememberUpdatedState(onValueChange)
+    val finishChange = rememberUpdatedState(onValueChangeFinished)
     val samples =
-        remember(seed, waveform) {
+        remember(waveform) {
             normalizeWaveformHeights(
-                waveform
-                    ?.normalized
-                    ?.takeIf { it.isNotEmpty() }
-                    ?.resampleBars(WAVEFORM_SAMPLE_COUNT)
-                    ?: waveformBars(seed, WAVEFORM_SAMPLE_COUNT),
+                waveform?.normalized?.resampleBars(WAVEFORM_SAMPLE_COUNT).orEmpty(),
             )
         }
-    val ribbonPath = remember { Path() }
-    val sampleHeights = remember(samples.size) { FloatArray(samples.size) }
     val playedColor = MaterialTheme.colorScheme.tertiary
     val remainingColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)
     val disabledColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)
+    // ponytail: cache envelope geometry; playback only changes the clipping boundary.
+    val drawing =
+        remember(samples, playedColor, remainingColor, disabledColor, enabled) {
+            Modifier.drawWithCache {
+                val centerY = size.height / 2f
+                val maximumHalfHeight = 10.dp.toPx().coerceAtMost(centerY)
+                val ribbonPath =
+                    if (samples.size >= 2) {
+                        Path().apply {
+                            val lastIndex = samples.lastIndex
+                            var previousX = 0f
+                            var previousY = centerY - maximumHalfHeight * samples[0]
+                            moveTo(previousX, previousY)
+                            for (index in 1..lastIndex) {
+                                val x = size.width * index / lastIndex
+                                val y = centerY - maximumHalfHeight * samples[index]
+                                val controlOffset = (x - previousX) / 2f
+                                cubicTo(previousX + controlOffset, previousY, x - controlOffset, y, x, y)
+                                previousX = x
+                                previousY = y
+                            }
+                            previousX = size.width
+                            previousY = centerY + maximumHalfHeight * samples[lastIndex]
+                            lineTo(previousX, previousY)
+                            for (index in (lastIndex - 1) downTo 0) {
+                                val x = size.width * index / lastIndex
+                                val y = centerY + maximumHalfHeight * samples[index]
+                                val controlOffset = (previousX - x) / 2f
+                                cubicTo(previousX - controlOffset, previousY, x + controlOffset, y, x, y)
+                                previousX = x
+                                previousY = y
+                            }
+                            close()
+                        }
+                    } else {
+                        null
+                    }
+                val trackWidth = 3.dp.toPx()
+                onDrawBehind {
+                    val progress = displayedFraction.value
+                    val background = if (enabled) remainingColor else disabledColor
+                    if (ribbonPath == null) {
+                        drawLine(background, Offset(0f, centerY), Offset(size.width, centerY), trackWidth, StrokeCap.Round)
+                        if (enabled && progress > 0f) {
+                            drawLine(playedColor, Offset(0f, centerY), Offset(size.width * progress, centerY), trackWidth, StrokeCap.Round)
+                        }
+                    } else {
+                        drawPath(ribbonPath, background)
+                        if (enabled && progress > 0f) {
+                            clipRect(right = size.width * progress) {
+                                drawPath(ribbonPath, playedColor)
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
-    Canvas(
+    Spacer(
         modifier =
             modifier
                 .fillMaxWidth()
-                .height(36.dp)
+                .height(MotdSizes.touchTarget)
                 .semantics {
                     contentDescription = "Audio position"
                     progressBarRangeInfo = ProgressBarRangeInfo(fraction, 0f..1f)
-                    setProgress { target ->
-                        if (!enabled) return@setProgress false
-                        onValueChange(target.coerceIn(0f, 1f))
-                        onValueChangeFinished()
-                        true
+                    if (enabled) {
+                        setProgress { target ->
+                            changeValue.value(target.coerceIn(0f, 1f))
+                            finishChange.value()
+                            true
+                        }
+                    } else {
+                        disabled()
                     }
                 }.pointerInput(enabled) {
                     if (!enabled) return@pointerInput
@@ -81,7 +142,7 @@ fun WaveformScrubber(
                         val down = awaitFirstDown(requireUnconsumed = false)
 
                         fun update(x: Float) {
-                            onValueChange((x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f))
+                            changeValue.value((x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f))
                         }
                         update(down.position.x)
                         down.consume()
@@ -93,66 +154,10 @@ fun WaveformScrubber(
                             pressed = change.pressed
                             change.consume()
                         }
-                        onValueChangeFinished()
+                        finishChange.value()
                     }
-                },
-    ) {
-        if (samples.size < 2 || size.width <= 0f || size.height <= 0f) return@Canvas
-
-        val centerY = size.height / 2f
-        val maximumHalfHeight = (centerY - 4.dp.toPx()).coerceAtLeast(0f)
-        val lastIndex = samples.lastIndex
-
-        samples.forEachIndexed { index, sample ->
-            sampleHeights[index] = maximumHalfHeight * sample
-        }
-
-        ribbonPath.reset()
-        var previousX = 0f
-        var previousY = centerY - sampleHeights[0]
-        ribbonPath.moveTo(previousX, previousY)
-        for (index in 1..lastIndex) {
-            val x = size.width * index / lastIndex
-            val y = centerY - sampleHeights[index]
-            val controlOffset = (x - previousX) / 2f
-            ribbonPath.cubicTo(
-                previousX + controlOffset,
-                previousY,
-                x - controlOffset,
-                y,
-                x,
-                y,
-            )
-            previousX = x
-            previousY = y
-        }
-        previousX = size.width
-        previousY = centerY + sampleHeights[lastIndex]
-        ribbonPath.lineTo(previousX, previousY)
-        for (index in (lastIndex - 1) downTo 0) {
-            val x = size.width * index / lastIndex
-            val y = centerY + sampleHeights[index]
-            val controlOffset = (previousX - x) / 2f
-            ribbonPath.cubicTo(
-                previousX - controlOffset,
-                previousY,
-                x + controlOffset,
-                y,
-                x,
-                y,
-            )
-            previousX = x
-            previousY = y
-        }
-        ribbonPath.close()
-
-        drawPath(ribbonPath, if (enabled) remainingColor else disabledColor)
-        if (enabled && fraction > 0f) {
-            clipRect(right = size.width * fraction) {
-                drawPath(ribbonPath, playedColor)
-            }
-        }
-    }
+                }.then(drawing),
+    )
 }
 
 @Composable
@@ -282,18 +287,3 @@ internal fun List<Float>.resampleBars(count: Int): List<Float> {
 }
 
 private fun Float?.orEmptyPeak(): Float = (this ?: 0f).coerceIn(0.08f, 1f)
-
-internal fun waveformBars(
-    seed: String,
-    count: Int,
-): List<Float> {
-    var state = seed.hashCode().takeIf { it != 0 } ?: 0x6d2b79f5
-    return List(count.coerceAtLeast(1)) { index ->
-        state = state xor (state shl 13)
-        state = state xor (state ushr 17)
-        state = state xor (state shl 5)
-        val noise = (state and Int.MAX_VALUE) / Int.MAX_VALUE.toFloat()
-        val envelope = 0.65f + 0.35f * kotlin.math.abs(kotlin.math.sin((index + 1) * 0.72f))
-        (0.2f + noise * 0.65f * envelope).coerceIn(0.2f, 0.9f)
-    }
-}

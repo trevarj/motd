@@ -64,6 +64,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -87,7 +89,7 @@ import io.github.trevarj.motd.ui.theme.SheetSystemBars
 private const val MAX_COLLAPSED_AUDIO_PLAYERS = 3
 
 /** Distinct glyph states for the play-button circle, so state changes crossfade instead of snap. */
-private enum class AudioToggleGlyph { LOADING, ERROR, PLAYING, DOWNLOAD, PLAY }
+private enum class AudioToggleGlyph { LOADING, ERROR, PLAYING, PLAY }
 
 @Composable
 fun AudioAttachmentPlayers(
@@ -212,12 +214,14 @@ private fun AudioAttachmentPlayer(
     val needsDownload = !active && cacheStatus != AudioCacheStatus.CACHED
     val duration = (if (active) playbackState.durationMs else attachment.durationMs) ?: attachment.durationMs
     val position = if (active) playbackState.positionMs else 0L
-    // Do not replace the rendered peaks when playback starts or when analysis completes. The
-    // seeded fallback is deterministic, and a newly available waveform is picked up next time
-    // this message enters composition.
-    val waveform =
-        remember(attachment.playbackId, attachment.waveform) {
-            attachment.waveform ?: derivedWaveform
+    val waveform = attachment.waveform ?: derivedWaveform ?: playbackState.waveform.takeIf { active }
+    val toggleLabel =
+        when {
+            loading -> stringResource(R.string.audio_cancel_loading)
+            error != null -> "Retry audio"
+            playing -> "Pause audio"
+            needsDownload -> stringResource(R.string.audio_download_and_play)
+            else -> "Play audio"
         }
     var showDetails by remember { mutableStateOf(false) }
     var confirmHttp by remember { mutableStateOf(false) }
@@ -240,18 +244,17 @@ private fun AudioAttachmentPlayer(
                 onLongClick = onLongPress ?: { showDetails = true },
             ),
         shape = MotdShapes.card,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
         Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.size(MotdSizes.touchTarget), contentAlignment = Alignment.Center) {
                 if (attachment.voice) {
                     RadialPlaybackWave(
                         playbackId = attachment.playbackId,
-                        waveform = playbackState.waveform ?: waveform,
+                        waveform = waveform,
                         positionMs = position,
                         durationMs = duration,
                         playing = playing,
@@ -262,11 +265,15 @@ private fun AudioAttachmentPlayer(
                     onClick = {
                         if (attachment.cleartextHttp && !active) confirmHttp = true else onToggle(attachment, networkId)
                     },
-                    modifier = Modifier.fillMaxSize(),
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .testTag("audio_player_toggle")
+                            .semantics { contentDescription = toggleLabel },
                 ) {
                     Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
                         Box(
-                            Modifier.size(if (attachment.voice) 32.dp else 40.dp),
+                            Modifier.size(40.dp),
                             contentAlignment = Alignment.Center,
                         ) {
                             val glyph =
@@ -274,7 +281,6 @@ private fun AudioAttachmentPlayer(
                                     loading -> AudioToggleGlyph.LOADING
                                     error != null -> AudioToggleGlyph.ERROR
                                     playing -> AudioToggleGlyph.PLAYING
-                                    needsDownload -> AudioToggleGlyph.DOWNLOAD
                                     else -> AudioToggleGlyph.PLAY
                                 }
                             // Crossfade the glyph under the user's finger; the fixed container needs
@@ -306,16 +312,9 @@ private fun AudioAttachmentPlayer(
                                             when (state) {
                                                 AudioToggleGlyph.ERROR -> Icons.Filled.Refresh
                                                 AudioToggleGlyph.PLAYING -> Icons.Filled.Pause
-                                                AudioToggleGlyph.DOWNLOAD -> Icons.Outlined.Download
                                                 else -> Icons.Filled.PlayArrow
                                             },
-                                        contentDescription =
-                                            when (state) {
-                                                AudioToggleGlyph.ERROR -> "Retry audio"
-                                                AudioToggleGlyph.PLAYING -> "Pause audio"
-                                                AudioToggleGlyph.DOWNLOAD -> "Download audio"
-                                                else -> "Play audio"
-                                            },
+                                        contentDescription = null,
                                         tint = MaterialTheme.colorScheme.onPrimary,
                                     )
                                 }
@@ -326,15 +325,14 @@ private fun AudioAttachmentPlayer(
             }
             Column(
                 modifier = Modifier.weight(1f).padding(start = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 if (!attachment.voice) {
                     Text(
                         text = attachment.title,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 val scrubDuration = (duration ?: 1L).coerceAtLeast(1L)
@@ -348,10 +346,9 @@ private fun AudioAttachmentPlayer(
                         onSeek(attachment, scrubValue.toLong())
                         scrubbing = false
                     },
-                    seed = attachment.playbackId,
-                    enabled = active && !loading && error == null && duration != null && duration > 0,
+                    enabled = active && playbackState.canSeek,
                     waveform = waveform,
-                    modifier = Modifier.testTag("audio_player_scrubber"),
+                    modifier = Modifier.padding(end = 12.dp).testTag("audio_player_scrubber"),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -360,7 +357,7 @@ private fun AudioAttachmentPlayer(
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (error == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
-                        maxLines = 1,
+                        maxLines = if (error == null) 1 else 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (attachment.encrypted) {
@@ -402,6 +399,7 @@ private fun AudioAttachmentPlayer(
                             Icons.Filled.MoreVert,
                             contentDescription = "Audio details",
                             modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }

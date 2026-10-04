@@ -26,6 +26,7 @@ data class AudioPlaybackState(
     val url: String? = null,
     val playing: Boolean = false,
     val loading: Boolean = false,
+    val canSeek: Boolean = false,
     val positionMs: Long = 0,
     val durationMs: Long? = null,
     val bufferedMs: Long = 0,

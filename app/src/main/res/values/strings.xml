@@ -371,6 +371,8 @@
     <string name="agentwire_context_discard">Discard context</string>
     <string name="agentwire_context_placeholder">Review the context, then Send</string>
     <string name="agentwire_context_bytes">%1$d / 65536 UTF-8 bytes</string>
+    <string name="audio_download_and_play">Download and play audio</string>
+    <string name="audio_cancel_loading">Cancel audio loading</string>
     <string name="ai_transcription">Voice transcription</string>
     <string name="ai_transcription_summary">Transcribe voice messages locally when you request it.</string>
     <string name="voice_transcription_title">Local transcription</string>

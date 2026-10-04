@@ -7,16 +7,6 @@ import org.junit.Test
 
 class WaveformScrubberTest {
     @Test
-    fun `waveform is stable bounded and specific to an audio item`() {
-        val first = waveformBars("voice:first", 48)
-
-        assertEquals(first, waveformBars("voice:first", 48))
-        assertNotEquals(first, waveformBars("voice:second", 48))
-        assertEquals(48, first.size)
-        assertTrue(first.all { it in 0.2f..0.9f })
-    }
-
-    @Test
     fun `real waveform is resampled to stable bar count`() {
         val bars = listOf(0.1f, 0.5f, 0.9f).resampleBars(6)
 

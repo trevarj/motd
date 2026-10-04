@@ -405,7 +405,7 @@ class ReadAloudPlayerUiTest {
                 compose.onNodeWithTag("inline_media_loaded", useUnmergedTree = true).performTouchInput { click() }
                 compose.runOnIdle { assertEquals(listOf(image), openedImages) }
                 compose.onNodeWithTag("chat_timeline").performScrollToNode(hasTestTag("chat_message_4"))
-                compose.onNodeWithContentDescription("Download audio", useUnmergedTree = true).performTouchInput { click() }
+                compose.onNodeWithTag("audio_player_toggle", useUnmergedTree = true).performTouchInput { click() }
                 compose.runOnIdle {
                     assertEquals(audio, audioRequests.single().attachment.url)
                     assertEquals(
@@ -461,7 +461,7 @@ class ReadAloudPlayerUiTest {
             }
             awaitSpeech(f, 1, 1, "trev says, hello how are you", "hello how are you")
             compose.onNodeWithTag("chat_timeline").performScrollToNode(hasTestTag("chat_message_2"))
-            compose.onNodeWithContentDescription("Download audio", useUnmergedTree = true).performTouchInput { click() }
+            compose.onNodeWithTag("audio_player_toggle", useUnmergedTree = true).performTouchInput { click() }
             compose.runOnIdle {
                 assertEquals(audio, requests.single().attachment.url)
                 assertEquals(listOf("trev says, hello how are you"), f.synth.utterances)
@@ -474,7 +474,7 @@ class ReadAloudPlayerUiTest {
             player.performTouchInput { click(Offset(width * .5f, height - 2f)) }
             awaitSpeech(f, 2, 3, "me says, voice message", "voice message")
             assertEquals(2, f.controller.state.value.total)
-            compose.onNodeWithContentDescription("Download audio", useUnmergedTree = true).performTouchInput { click() }
+            compose.onNodeWithTag("audio_player_toggle", useUnmergedTree = true).performTouchInput { click() }
             compose.onNodeWithTag("audio_player_details", useUnmergedTree = true).performTouchInput { click() }
             compose.onNodeWithText("Audio", useUnmergedTree = true).assertIsDisplayed()
             compose.runOnIdle {

@@ -357,7 +357,7 @@ class MessageTimelineUiTest {
         }
         compose.onNodeWithText("listen", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("https://files.example/clip.mp3", substring = true, useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithContentDescription("Download audio", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("audio_player_toggle", useUnmergedTree = true).performClick()
         compose.runOnIdle {
             assertEquals("Alice", played?.origin?.sender)
             assertEquals("Alice Smith", played?.origin?.conversation)

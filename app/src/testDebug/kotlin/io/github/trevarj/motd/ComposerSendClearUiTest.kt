@@ -378,7 +378,7 @@ class ComposerSendClearUiTest {
             compose.onNodeWithText(url, substring = true, useUnmergedTree = true).assertDoesNotExist()
             compose.onNodeWithText("<>", useUnmergedTree = true).assertDoesNotExist()
         }
-        compose.onNodeWithContentDescription("Download audio", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("audio_player_toggle", useUnmergedTree = true).performClick()
         compose.runOnIdle {
             assertEquals("Alice Smith", played?.origin?.conversation)
             assertEquals(url, played?.attachment?.url)

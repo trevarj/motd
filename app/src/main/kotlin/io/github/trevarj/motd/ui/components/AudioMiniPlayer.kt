@@ -166,8 +166,7 @@ fun AudioMiniPlayer(
                 value = played,
                 onValueChange = { fraction -> duration?.let { onSeek((fraction * it).toLong()) } },
                 onValueChangeFinished = {},
-                seed = attachment.playbackId,
-                enabled = duration != null && duration > 0 && !state.loading,
+                enabled = state.canSeek,
                 waveform = state.waveform,
                 modifier = Modifier.width(64.dp).testTag("audio_mini_scrubber"),
             )

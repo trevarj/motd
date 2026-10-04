@@ -91,6 +91,7 @@ class AudioPlaybackControllerImpl
                                                         loading = false,
                                                         loadingFraction = null,
                                                         playing = false,
+                                                        canSeek = false,
                                                         error = "Playback failed",
                                                     )
                                                 syncPositionPolling()
@@ -105,6 +106,7 @@ class AudioPlaybackControllerImpl
                             _state.value =
                                 _state.value.copy(
                                     loading = false,
+                                    canSeek = false,
                                     error = "Audio service unavailable",
                                 )
                             syncPositionPolling()
@@ -157,7 +159,7 @@ class AudioPlaybackControllerImpl
                                         total
                                             ?.takeIf { it > 0L }
                                             ?.let { (received.toFloat() / it).coerceIn(0f, 1f) }
-                                    _state.value = _state.value.copy(loading = true, loadingFraction = fraction)
+                                    _state.value = _state.value.copy(loading = true, loadingFraction = fraction, canSeek = false)
                                 }
                             }
                         if (session != generation) throw CancellationException("Playback was replaced.")
@@ -210,6 +212,7 @@ class AudioPlaybackControllerImpl
                                     loading = false,
                                     loadingFraction = null,
                                     playing = false,
+                                    canSeek = false,
                                     error = (error as? AudioInputException)?.message ?: "Playback failed",
                                 )
                             syncPositionPolling()
@@ -306,6 +309,7 @@ class AudioPlaybackControllerImpl
                         loading = false,
                         loadingFraction = null,
                         playing = false,
+                        canSeek = false,
                         positionMs = 0,
                         bufferedMs = 0,
                         error = null,
@@ -389,7 +393,11 @@ class AudioPlaybackControllerImpl
         private fun updateState(mediaController: MediaController) {
             val current = _state.value
             if (current.activeId == null) return
-            val mediaId = mediaController.currentMediaItem?.mediaId ?: return
+            val mediaId = mediaController.currentMediaItem?.mediaId
+            if (mediaId == null) {
+                _state.value = projectAudioPlaybackState(current, mediaController)
+                return
+            }
             // A newly requested encrypted item can spend time downloading while the controller still
             // references the previous item. Ignore those stale callbacks so they cannot clear the new
             // request's download state or progress.
@@ -398,22 +406,7 @@ class AudioPlaybackControllerImpl
                 dismiss(mediaId)
                 return
             }
-            val duration = mediaController.duration.takeIf { it >= 0 }
-            val loading = mediaController.playbackState == Player.STATE_BUFFERING
-            _state.value =
-                current.copy(
-                    activeId = mediaId,
-                    loading = loading,
-                    // Byte progress is sampled from the cache separately. Preserve it across the
-                    // frequent MediaController position updates while buffering.
-                    loadingFraction = current.loadingFraction.takeIf { loading },
-                    playing = mediaController.isPlaying,
-                    positionMs = mediaController.currentPosition.coerceAtLeast(0L),
-                    durationMs = duration ?: current.attachment?.durationMs,
-                    bufferedMs = mediaController.bufferedPosition.coerceAtLeast(0L),
-                    speed = mediaController.playbackParameters.speed,
-                    error = null,
-                )
+            _state.value = projectAudioPlaybackState(current, mediaController)
             syncPositionPolling()
         }
 
@@ -492,6 +485,29 @@ class AudioPlaybackControllerImpl
             const val EXTRA_SERVER_TIME = "motd.audio.server_time"
         }
     }
+
+internal fun projectAudioPlaybackState(
+    current: AudioPlaybackState,
+    player: Player,
+): AudioPlaybackState {
+    if (player.mediaItemCount == 0) return if (current.canSeek) current.copy(canSeek = false) else current
+    val duration = player.duration.takeIf { it >= 0 }
+    val playbackState = player.playbackState
+    val loading = playbackState == Player.STATE_BUFFERING
+    return current.copy(
+        loading = loading,
+        canSeek = playbackState == Player.STATE_READY && duration != null && duration > 0 && player.playerError == null,
+        // Byte progress is sampled from the cache separately. Preserve it across the
+        // frequent MediaController position updates while buffering.
+        loadingFraction = current.loadingFraction.takeIf { loading },
+        playing = player.isPlaying,
+        positionMs = player.currentPosition.coerceAtLeast(0L),
+        durationMs = duration ?: current.attachment?.durationMs,
+        bufferedMs = player.bufferedPosition.coerceAtLeast(0L),
+        speed = player.playbackParameters.speed,
+        error = null,
+    )
+}
 
 internal fun closeAudioLeaseAfterPlayerRelease(
     current: LocalAudioLease?,
