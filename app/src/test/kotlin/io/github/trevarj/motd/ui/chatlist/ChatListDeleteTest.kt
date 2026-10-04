@@ -324,6 +324,34 @@ class ChatListDeleteTest {
         }
 
     @Test
+    fun deleteDickordGuildDmAndPendingOffline_requestChannelCloseWithoutPurging() =
+        runTest {
+            val ops = mutableListOf<String>()
+            val buffers = FakeBufferRepository()
+            val close = FakeChannelCloseCoordinator(ops)
+            val vm = vm(buffers, FakeConnectionManager(ops), close)
+            val guild =
+                row(11, BufferType.CHANNEL, "#discord.example.general_encoded").copy(
+                    dickordChannelJson =
+                        """{"v":1,"guild_id":"100","guild_name":"Example Server","channel_id":"101","channel_type":0,"parent_id":null,"channel_name":"general"}""",
+                )
+            val dm =
+                row(21, BufferType.CHANNEL, "#discord.dm.alice-smith_encoded").copy(
+                    archived = true,
+                    dickordChannelJson =
+                        """{"v":1,"guild_id":null,"guild_name":null,"channel_id":"301","channel_type":1,"parent_id":null,"channel_name":"Alice Smith"}""",
+                )
+            val pending = row(91, BufferType.CHANNEL, "#discord.pending.encoded")
+
+            listOf(guild, dm, pending).forEach(vm::deleteBuffer)
+            runCurrent()
+
+            assertEquals(listOf("pending:11", "pending:21", "pending:91"), ops)
+            assertEquals(emptyList<Long>(), buffers.deleted)
+            assertEquals(true, close.started)
+        }
+
+    @Test
     fun deleteQuery_doesNotPart() =
         runTest {
             val ops = mutableListOf<String>()

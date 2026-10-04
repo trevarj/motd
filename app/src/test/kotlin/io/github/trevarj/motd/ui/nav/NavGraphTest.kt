@@ -215,6 +215,26 @@ class NavGraphTest {
     }
 
     @Test
+    fun `returning after wide portal chat replacement leaves no removed detail on back stack`() {
+        val controller = portalController()
+        controller.navigate(ChatRoute(5))
+        controller.navigate(DickordPortalRoute)
+        controller.openChat(ChatRoute(7), replaceCurrentChat = false)
+        controller.openChat(ChatRoute(9), replaceCurrentChat = true)
+
+        controller.openDickordNavigator()
+
+        assertEquals(DickordPortalRoute, controller.currentBackStackEntry!!.toRoute<DickordPortalRoute>())
+        val remainingChatIds =
+            controller.currentBackStack.value.mapNotNull { entry ->
+                entry.takeIf { isChatRoutePattern(it.destination.route) }?.toRoute<ChatRoute>()?.bufferId
+            }
+        assertEquals(listOf(5L), remainingChatIds)
+        assertTrue(controller.popBackStack())
+        assertEquals(5L, controller.currentBackStackEntry!!.toRoute<ChatRoute>().bufferId)
+    }
+
+    @Test
     fun `opening navigator replaces only current chat across an unrelated source`() {
         val controller = portalController()
         controller.navigate(ChatRoute(5))

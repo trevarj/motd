@@ -1088,7 +1088,11 @@ fun ChatListContent(
             selectedIds = emptyList()
         }
         if (selectedRows.size == 1) {
-            DeleteConfirmDialog(selectedRows.single(), onConfirmRemoval) { confirmRemoval = false }
+            DeleteConfirmDialog(
+                row = selectedRows.single(),
+                onConfirm = onConfirmRemoval,
+                onDismiss = { confirmRemoval = false },
+            )
         } else {
             MultiDeleteConfirmDialog(selectedRows, onConfirmRemoval) { confirmRemoval = false }
         }
@@ -2701,15 +2705,16 @@ internal fun archiveActionIcon(archiveMode: Boolean): ImageVector = if (archiveM
 
 /** Destructive-delete confirmation; channel copy mentions the implicit part/leave. */
 @Composable
-private fun DeleteConfirmDialog(
+internal fun DeleteConfirmDialog(
     row: ChatListRow,
+    displayName: String = row.displayName,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val copy = chatRemovalCopy(row.type)
     val message =
         if (copy.messageFormatsDisplayName) {
-            stringResource(copy.message, row.displayName)
+            stringResource(copy.message, displayName)
         } else {
             stringResource(copy.message)
         }

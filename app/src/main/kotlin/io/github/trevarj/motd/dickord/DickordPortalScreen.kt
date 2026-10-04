@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Info
@@ -84,7 +85,9 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
+import io.github.trevarj.motd.ui.chatlist.DeleteConfirmDialog
 import io.github.trevarj.motd.ui.chatlist.chatListBadgeState
+import io.github.trevarj.motd.ui.chatlist.chatRemovalCopy
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.EmptyState
@@ -111,6 +114,7 @@ internal fun DickordPortalScreen(
     onSetMuted: (Long, Boolean) -> Unit,
     onSetPinned: (Long, Boolean) -> Unit,
     onSetArchived: (Long, Boolean) -> Unit,
+    onDeleteConversation: (ChatListRow) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -136,6 +140,7 @@ internal fun DickordPortalScreen(
         onSetMuted = onSetMuted,
         onSetPinned = onSetPinned,
         onSetArchived = onSetArchived,
+        onDeleteConversation = onDeleteConversation,
     )
 }
 
@@ -157,6 +162,7 @@ internal fun DickordPortalContent(
     onSetMuted: (Long, Boolean) -> Unit = { _, _ -> },
     onSetPinned: (Long, Boolean) -> Unit = { _, _ -> },
     onSetArchived: (Long, Boolean) -> Unit = { _, _ -> },
+    onDeleteConversation: (ChatListRow) -> Unit = {},
 ) {
     val dmsLabel = stringResource(R.string.dickord_dms)
     val pendingLabel = stringResource(R.string.dickord_portal_pending)
@@ -212,6 +218,7 @@ internal fun DickordPortalContent(
                 onSetMuted = onSetMuted,
                 onSetPinned = onSetPinned,
                 onSetArchived = onSetArchived,
+                onDeleteConversation = onDeleteConversation,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -431,6 +438,7 @@ private fun DickordGroupPane(
     onSetMuted: (Long, Boolean) -> Unit,
     onSetPinned: (Long, Boolean) -> Unit,
     onSetArchived: (Long, Boolean) -> Unit,
+    onDeleteConversation: (ChatListRow) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val allConversationCount = state.groups.sumOf { it.conversations.size }
@@ -472,6 +480,7 @@ private fun DickordGroupPane(
                                 onSetMuted = onSetMuted,
                                 onSetPinned = onSetPinned,
                                 onSetArchived = onSetArchived,
+                                onDeleteConversation = onDeleteConversation,
                             )
                         }
                     }
@@ -612,10 +621,12 @@ private fun DickordConversationRow(
     onSetMuted: (Long, Boolean) -> Unit,
     onSetPinned: (Long, Boolean) -> Unit,
     onSetArchived: (Long, Boolean) -> Unit,
+    onDeleteConversation: (ChatListRow) -> Unit,
 ) {
     val row = conversation.row
     val title = conversation.descriptor?.channelName ?: stringResource(R.string.dickord_portal_conversation_pending, row.bufferId)
     var menuOpen by remember(row.bufferId) { mutableStateOf(false) }
+    var confirmRemoval by remember(row.bufferId) { mutableStateOf(false) }
     Box(
         modifier =
             Modifier
@@ -662,6 +673,18 @@ private fun DickordConversationRow(
             onSetPinned = onSetPinned,
             onSetArchived = onSetArchived,
             onConversationInfo = onConversationInfo,
+            onDeleteConversation = { confirmRemoval = true },
+        )
+    }
+    if (confirmRemoval) {
+        DeleteConfirmDialog(
+            row = row,
+            displayName = title,
+            onConfirm = {
+                confirmRemoval = false
+                onDeleteConversation(row)
+            },
+            onDismiss = { confirmRemoval = false },
         )
     }
 }
@@ -740,6 +763,7 @@ private fun DickordConversationMenu(
     onSetPinned: (Long, Boolean) -> Unit,
     onSetArchived: (Long, Boolean) -> Unit,
     onConversationInfo: (Long) -> Unit,
+    onDeleteConversation: (ChatListRow) -> Unit,
 ) {
     fun act(block: () -> Unit) {
         onDismiss()
@@ -779,6 +803,12 @@ private fun DickordConversationMenu(
             leadingIcon = { Icon(Icons.Outlined.Info, contentDescription = null) },
             modifier = Modifier.testTag("dickord_menu_info"),
             onClick = { act { onConversationInfo(row.bufferId) } },
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(chatRemovalCopy(row.type).actionLabel), color = MaterialTheme.colorScheme.error) },
+            leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            modifier = Modifier.testTag("dickord_menu_delete"),
+            onClick = { act { onDeleteConversation(row) } },
         )
     }
 }

@@ -267,6 +267,11 @@ fun MotdNavGraph(
                                 chatListViewModel = chatListViewModel,
                                 selectedBufferId = requireNotNull(foundRow).bufferId,
                                 replaceCurrentChat = true,
+                                onDeleteSelectedConversation = {
+                                    if (navController.currentBackStackEntry == entry) {
+                                        navController.openDickordNavigator()
+                                    }
+                                },
                             )
                         } else {
                             ChatListPane(
@@ -701,6 +706,7 @@ private fun DickordPortalPane(
     chatListViewModel: ChatListViewModel,
     selectedBufferId: Long? = null,
     replaceCurrentChat: Boolean = false,
+    onDeleteSelectedConversation: () -> Unit = {},
 ) {
     DickordPortalScreen(
         viewModel = portalViewModel,
@@ -715,6 +721,11 @@ private fun DickordPortalPane(
         onSetMuted = { bufferId, muted -> chatListViewModel.setMuted(bufferId, muted) },
         onSetPinned = { bufferId, pinned -> chatListViewModel.setPinned(bufferId, pinned) },
         onSetArchived = { bufferId, archived -> chatListViewModel.setArchived(bufferId, archived) },
+        onDeleteConversation = { row ->
+            // Close the canonical selected detail before pending-close hides its list projection.
+            if (row.bufferId == selectedBufferId) onDeleteSelectedConversation()
+            chatListViewModel.deleteBuffer(row)
+        },
     )
 }
 

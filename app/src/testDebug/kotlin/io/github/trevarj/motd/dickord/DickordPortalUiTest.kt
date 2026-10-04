@@ -37,6 +37,7 @@ import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -392,6 +393,7 @@ class DickordPortalUiTest {
                     onSetPinned = { id, value -> calls += "pin:$id:$value" },
                     onSetArchived = { id, value -> calls += "archive:$id:$value" },
                     onConversationInfo = { calls += "info:$it" },
+                    onDeleteConversation = { calls += "delete:${it.bufferId}:${it.displayName}" },
                 )
             }
         }
@@ -406,6 +408,11 @@ class DickordPortalUiTest {
         invokeMenu("dickord_menu_pin")
         invokeMenu("dickord_menu_archive")
         invokeMenu("dickord_menu_info")
+        invokeMenu("dickord_menu_delete")
+        compose.onNodeWithTag("chatlist_delete_cancel").performClick()
+        invokeMenu("dickord_menu_delete")
+        compose.onNodeWithTag("chatlist_delete_confirm").performClick()
+        compose.onNodeWithTag("chatlist_delete_dialog").assertDoesNotExist()
 
         compose.runOnIdle {
             assertEquals(
@@ -418,9 +425,66 @@ class DickordPortalUiTest {
                     "pin:11:false",
                     "archive:11:false",
                     "info:11",
+                    "delete:11:#discord.example.general_encoded",
                 ),
                 calls,
             )
+        }
+    }
+
+    @Test
+    fun deleteUsesSharedConfirmationAndExactRawRowsForGuildDmAndArchivedPendingOffline() {
+        val deleted = mutableListOf<ChatListRow>()
+        val initial = portalState()
+        val pending = row(91, 9, "Bridge C", "#discord.pending.encoded", archived = true)
+        val state =
+            render(
+                initial.copy(groups = initial.groups + pendingGroup(pending)),
+                onDeleteConversation = deleted::add,
+            )
+        val resources = InstrumentationRegistry.getInstrumentation().targetContext.resources
+        val targets =
+            listOf(
+                Triple("guild:7:100", 11L, "general"),
+                Triple(DICKORD_PORTAL_DMS_KEY, 21L, "Alice Smith"),
+                Triple(DICKORD_PORTAL_PENDING_KEY, 91L, "Conversation 91"),
+            )
+        targets.forEachIndexed { index, (groupKey, bufferId, title) ->
+            val rawRow =
+                state.value.groups
+                    .flatMap { it.conversations }
+                    .single { it.row.bufferId == bufferId }
+                    .row
+            compose.runOnIdle {
+                state.value =
+                    state.value.copy(
+                        selectedGroupKey = groupKey,
+                        showArchived = rawRow.archived,
+                        offline = index > 0,
+                    )
+            }
+
+            fun requestDelete() {
+                compose.onNodeWithTag("dickord_conversation_$bufferId").performTouchInput { longClick() }
+                compose.onNodeWithTag("dickord_menu_delete").performClick()
+            }
+            requestDelete()
+            compose.onNodeWithTag("chatlist_delete_dialog").assertIsDisplayed()
+            compose.onNodeWithText(resources.getString(R.string.chatlist_delete_confirm_channel, title)).assertIsDisplayed()
+            compose.onNodeWithText(rawRow.displayName, substring = true).assertDoesNotExist()
+            compose.runOnIdle { assertEquals(index, deleted.size) }
+            compose.onNodeWithTag("chatlist_delete_cancel").performClick()
+            compose.onNodeWithTag("chatlist_delete_dialog").assertDoesNotExist()
+            compose.runOnIdle { assertEquals(index, deleted.size) }
+
+            requestDelete()
+            compose.onNodeWithTag("chatlist_delete_confirm").performClick()
+            compose.onNodeWithTag("chatlist_delete_dialog").assertDoesNotExist()
+            compose.runOnIdle {
+                assertEquals(index + 1, deleted.size)
+                assertSame(rawRow, deleted.last())
+                assertEquals(BufferType.CHANNEL, deleted.last().type)
+            }
         }
     }
 
@@ -435,6 +499,7 @@ class DickordPortalUiTest {
         remoteAvatars: RemoteAvatarState = RemoteAvatarState(),
         onOpenConversation: (Long) -> Unit = {},
         onRefresh: () -> Unit = {},
+        onDeleteConversation: (ChatListRow) -> Unit = {},
     ): MutableState<DickordPortalState> {
         val state = mutableStateOf(initial)
         compose.setContent {
@@ -445,6 +510,7 @@ class DickordPortalUiTest {
                         onSelectGroup = { state.value = state.value.copy(selectedGroupKey = it) },
                         onOpenConversation = onOpenConversation,
                         onRefresh = onRefresh,
+                        onDeleteConversation = onDeleteConversation,
                     )
                 }
             }

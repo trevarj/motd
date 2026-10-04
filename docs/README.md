@@ -63,6 +63,11 @@ Dickord audio attachments render one inline player instead of a redundant URL
 bubble. Captions and unrelated links remain; the complete signed audio link and
 conversation details stay available in the player's Details sheet.
 
+Long-press a Dickord conversation → Delete chat to confirm local removal. The chat
+hides immediately; leaving waits for reconnect when offline, and local history
+is purged after the server acknowledges the IRC leave. Discord channels and remote
+messages remain intact. Bridge refresh/discovery can rediscover a closed chat.
+
 ## Local composer text tools
 
 Labs → AI → Composer text tools is default-off. Set up the exact Qwen artifact
