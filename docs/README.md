@@ -48,6 +48,9 @@ Comfortable chat sends grow the actual formatted message bubble from the compose
 keeping its body and metadata aligned through the landing. Replies and denser
 message styles retain their ordinary send-flight presentation.
 
+A chat-list swipe acts only after release at least 60% across the row width. Short
+flicks spring back without flying offscreen; right swipes do not dismiss chats.
+
 ## Local composer text tools
 
 Labs → AI → Composer text tools is default-off. Set up the exact Qwen artifact

@@ -24,6 +24,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +38,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -97,15 +100,12 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -138,6 +138,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -195,10 +196,12 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** Stateful entry: wires the ViewModel and drives navigation/empty-state. */
 @Composable
@@ -2331,7 +2334,7 @@ private fun ArchiveFolderPullOverlay(
     }
 }
 
-internal const val CHAT_LIST_SWIPE_THRESHOLD_FRACTION = 0.65f
+internal const val CHAT_LIST_SWIPE_THRESHOLD_FRACTION = 0.60f
 
 internal fun chatListSwipePositionalThreshold(totalDistance: Float): Float = totalDistance * CHAT_LIST_SWIPE_THRESHOLD_FRACTION
 
@@ -2468,7 +2471,6 @@ private fun FoolsSectionHeader(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SelectableChatListRow(
     row: ChatListRow,
@@ -2490,53 +2492,75 @@ internal fun SelectableChatListRow(
 ) {
     val currentSwipe by rememberUpdatedState(onSwipe)
     val swipeEnabled = !selectionActive && swipeAction != ChatListSwipeAction.NONE
-    val dismissState = rememberSwipeToDismissBoxState(positionalThreshold = ::chatListSwipePositionalThreshold)
-    val scope = rememberCoroutineScope()
+    var offsetPx by remember(row.bufferId, archiveMode, swipeAction, swipeEnabled) { mutableFloatStateOf(0f) }
     val view = LocalView.current
-    var releasedPastThreshold by remember { mutableStateOf(false) }
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = false,
-        enableDismissFromEndToStart = swipeEnabled,
-        onDismiss = { direction ->
-            val shouldSwipe = releasedPastThreshold
-            releasedPastThreshold = false
-            if (direction == SwipeToDismissBoxValue.EndToStart && swipeEnabled) {
-                scope.launch {
-                    // Lazy items may retain composition after moving between active/archive lists.
-                    // Settle before moving the row so a reused state cannot fire the inverse action.
-                    dismissState.snapTo(SwipeToDismissBoxValue.Settled)
-                    if (shouldSwipe) currentSwipe()
-                }
-            }
-        },
-        backgroundContent = { ChatListSwipeBackground(row, swipeAction, archiveMode) },
+    Box(
         modifier =
             modifier
-                .pointerInput(dismissState, swipeEnabled) {
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        releasedPastThreshold = false
-                        var armed = false
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Final)
-                            if (event.changes.none { it.pressed }) {
-                                // Only the finger's final drag position, never a fling animation, may arm the action.
-                                releasedPastThreshold = event.type == PointerEventType.Release && armed
-                                break
+                .fillMaxWidth()
+                .clipToBounds()
+                .pointerInput(row.bufferId, archiveMode, swipeAction, swipeEnabled) {
+                    if (!swipeEnabled) return@pointerInput
+                    coroutineScope {
+                        val animationScope = this
+                        var settleJob: Job? = null
+                        var dismissing = false
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            if (dismissing) return@awaitEachGesture
+                            val width = size.width.toFloat()
+                            var rawOffset = offsetPx
+                            var armed = false
+                            val drag =
+                                awaitHorizontalTouchSlopOrCancellation(down.id) { change, overSlop ->
+                                    // Claim horizontal drags so a right swipe cannot open the enclosing drawer.
+                                    change.consume()
+                                    rawOffset = offsetPx + overSlop
+                                } ?: return@awaitEachGesture
+                            settleJob?.cancel()
+
+                            fun updateOffset() {
+                                offsetPx = rawOffset.coerceIn(-width, 0f)
+                                val pastThreshold = isChatListSwipePastThreshold(offsetPx, width)
+                                if (pastThreshold && !armed) view.performThresholdHaptic()
+                                armed = pastThreshold
                             }
-                            val pastThreshold =
-                                swipeEnabled && isChatListSwipePastThreshold(dismissState.requireOffset(), size.width.toFloat())
-                            if (pastThreshold && !armed) view.performThresholdHaptic()
-                            armed = pastThreshold
+
+                            updateOffset()
+                            val completed =
+                                horizontalDrag(drag.id) { change ->
+                                    rawOffset += change.positionChange().x
+                                    change.consume()
+                                    updateOffset()
+                                }
+                            val shouldSwipe = completed && isChatListSwipePastThreshold(offsetPx, width)
+                            dismissing = shouldSwipe
+                            val releasedOffset = offsetPx
+                            settleJob =
+                                animationScope.launch {
+                                    // ponytail: choose the target from release distance; fling velocity never dismisses.
+                                    animate(
+                                        releasedOffset,
+                                        if (shouldSwipe) -width else 0f,
+                                        animationSpec = MotdMotion.softSpring,
+                                    ) { value, _ -> offsetPx = value }
+                                    // Reset before the callback can move this lazy item into the archive.
+                                    offsetPx = 0f
+                                    if (shouldSwipe) currentSwipe()
+                                    dismissing = false
+                                }
                         }
                     }
                 }.testTag("chatlist_swipe_${row.bufferId}"),
     ) {
+        Box(Modifier.matchParentSize()) {
+            ChatListSwipeBackground(row, swipeAction, archiveMode)
+        }
         // Keep the normal foreground opaque so the action affordance appears only during drag.
         Box(
             modifier =
                 Modifier
+                    .offset { IntOffset(offsetPx.roundToInt(), 0) }
                     .background(MaterialTheme.colorScheme.surface)
                     .testTag("chatlist_row_surface_${row.bufferId}"),
         ) {

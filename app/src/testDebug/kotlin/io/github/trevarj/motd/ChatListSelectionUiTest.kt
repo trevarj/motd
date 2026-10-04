@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -449,7 +450,10 @@ class ChatListSelectionUiTest {
         }
 
         compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeRight() }
+        compose.onNodeWithTag("drawer_open_settings").assertIsNotDisplayed()
+        compose.runOnIdle { assertEquals(emptyList<Pair<List<Long>, Boolean>>(), archiveCalls) }
         compose.onNodeWithTag("chatlist_row_1").performTouchInput { longClick() }
+        compose.onNodeWithTag("chatlist_selection_close").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeLeft() }
 
         compose.runOnIdle { assertEquals(emptyList<Pair<List<Long>, Boolean>>(), archiveCalls) }
