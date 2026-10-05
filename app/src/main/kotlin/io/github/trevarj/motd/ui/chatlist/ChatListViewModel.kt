@@ -229,6 +229,16 @@ class ChatListViewModel
         private val networkActivityLedger = NetworkActivityLedger()
         private val _networkActivity = MutableStateFlow(NetworkActivityState())
         val networkActivity: StateFlow<NetworkActivityState> = _networkActivity.asStateFlow()
+        private val seenNetworkActivitySequence = MutableStateFlow(0L)
+        val hasUnseenNetworkActivity: StateFlow<Boolean> =
+            combine(networkActivity, seenNetworkActivitySequence) { activity, seen ->
+                activity.active.isNotEmpty() && activity.latestAttentionSequence > seen
+            }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+        fun markNetworkActivitySeen() {
+            seenNetworkActivitySequence.value = networkActivityLedger.latestAttentionSequence
+        }
+
         private val activityBuffers =
             combine(historyResync.syncStatuses, networkActivity) { statuses, activity ->
                 (statuses.keys + activity.active.mapNotNull(NetworkActivityIssue::bufferId) + activity.recent.mapNotNull(NetworkActivityIssue::bufferId)).sorted()

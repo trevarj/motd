@@ -19,6 +19,8 @@
     <string name="chatlist_sync_unavailable">History unavailable for this chat</string>
     <string name="chatlist_sync_error">History sync couldn\'t finish</string>
     <string name="network_activity_title">Network activity</string>
+    <string name="network_activity_title_new">Network activity · New</string>
+    <string name="network_activity_new">New network activity</string>
     <string name="network_activity_open">Open network activity</string>
     <string name="network_activity_hide_banner">Hide network activity banner</string>
     <string name="network_activity_show_banner">Show network activity banner</string>

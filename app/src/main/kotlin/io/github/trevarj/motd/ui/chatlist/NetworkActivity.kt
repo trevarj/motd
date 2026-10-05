@@ -67,6 +67,7 @@ data class NetworkActivityState(
     val networks: List<NetworkActivityNetwork> = emptyList(),
     val active: List<NetworkActivityIssue> = emptyList(),
     val recent: List<NetworkActivityIssue> = emptyList(),
+    val latestAttentionSequence: Long = 0,
 ) {
     /** Acknowledged records remain active and inspectable, but do not promote the banner. */
     val unacknowledgedCount: Int get() = active.count { !it.acknowledged }
@@ -74,6 +75,8 @@ data class NetworkActivityState(
 
 internal class NetworkActivityLedger {
     private var sequence = 0L
+    private var attentionSequence = 0L
+    val latestAttentionSequence: Long get() = attentionSequence
     private var state = NetworkActivityState()
     private var previousConnections = emptyMap<Long, Any?>()
     private var previousHistory = emptyMap<Long, HistorySyncStatus>()
@@ -148,10 +151,13 @@ internal class NetworkActivityLedger {
             // Buffer presence separates history from connection; Failed/Partial are severity changes.
             val index = active.indexOfFirst { it.networkId == network.id && it.bufferId == bufferId && it.reason == reason }
             if (index < 0) {
+                attentionSequence++
                 active += NetworkActivityIssue(++sequence, 0, network.id, bufferId, network.name, buffer?.displayName, kind, reason, fatal, now, now)
             } else if (changed) {
                 val old = active[index]
-                active[index] = old.copy(kind = kind, lastSeen = now, occurrences = old.occurrences + 1, acknowledged = false, fatal = fatal)
+                val updated = old.copy(kind = kind, lastSeen = now, occurrences = old.occurrences + 1, acknowledged = false, fatal = fatal)
+                if (updated.severity > old.severity) attentionSequence++
+                active[index] = updated
             }
         }
         for (network in networks) {
@@ -185,6 +191,7 @@ internal class NetworkActivityLedger {
                         NetworkActivityNetwork(network.id, network.name, connections[network.id], statuses.mapNotNull { (id, status) -> buffers[id]?.takeIf { it.networkId == network.id && !it.dismissed && it.pendingCloseAt == null }?.let { NetworkActivityChat(id, it.displayName, status) } }, network.id in certificatePending)
                     },
                 active = active,
+                latestAttentionSequence = attentionSequence,
                 recent =
                     recent.take(20).map { issue ->
                         val buffer = issue.bufferId?.let(buffers::get)

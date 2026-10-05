@@ -70,6 +70,7 @@ import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Lan
 import androidx.compose.material.icons.outlined.Mail
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsOff
@@ -238,6 +239,7 @@ fun ChatListScreen(
     val titleConnecting by viewModel.titleConnecting.collectAsStateWithLifecycle()
     val recoveringActivityIds by viewModel.recoveringActivityIds.collectAsStateWithLifecycle()
     val networkActivity by viewModel.networkActivity.collectAsStateWithLifecycle()
+    val hasUnseenNetworkActivity by viewModel.hasUnseenNetworkActivity.collectAsStateWithLifecycle()
     val connectionNoticeVisible by viewModel.connectionNoticeVisible.collectAsStateWithLifecycle()
     val connectionOnlyNoticeVisible by viewModel.connectionOnlyNoticeVisible.collectAsStateWithLifecycle()
     val nickSuggestions by viewModel.nickSuggestions.collectAsStateWithLifecycle()
@@ -265,6 +267,8 @@ fun ChatListScreen(
         syncChrome = syncChrome,
         recoveringActivityIds = recoveringActivityIds,
         networkActivity = networkActivity,
+        hasUnseenNetworkActivity = hasUnseenNetworkActivity,
+        onNetworkActivitySeen = viewModel::markNetworkActivitySeen,
         connectionNoticeVisible = connectionNoticeVisible,
         connectionOnlyNoticeVisible = connectionOnlyNoticeVisible,
         onActivityAction = { issue, action -> viewModel.networkActivityAction(issue, action, onOpenBuffer, onOpenNetworkSettings) },
@@ -408,6 +412,8 @@ fun ChatListContent(
     nickSuggestions: NickSuggestions = NickSuggestions(),
     onNickSuggestionQuery: (Long?, String) -> Unit = { _, _ -> },
     networkActivity: NetworkActivityState = NetworkActivityState(),
+    hasUnseenNetworkActivity: Boolean = false,
+    onNetworkActivitySeen: () -> Unit = {},
     connectionNoticeVisible: Boolean = false,
     connectionOnlyNoticeVisible: Boolean = connectionNoticeVisible,
     onActivityAction: (NetworkActivityIssue, NetworkActivityAction) -> Unit = { _, _ -> },
@@ -423,6 +429,14 @@ fun ChatListContent(
     var showActivitySheet by remember { mutableStateOf(false) }
     var bannerVisible by rememberSaveable { mutableStateOf(true) }
     val activitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val showNewNetworkActivity = !bannerVisible && hasUnseenNetworkActivity && networkActivity.active.isNotEmpty()
+    val newNetworkActivityDescription = stringResource(R.string.network_activity_new)
+    val networkActivityMenuTitle = stringResource(if (showNewNetworkActivity) R.string.network_activity_title_new else R.string.network_activity_title)
+
+    fun inspectNetworkActivity() {
+        onNetworkActivitySeen()
+        showActivitySheet = true
+    }
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     // The per-row network tag is redundant once the list is scoped to one network.
@@ -725,17 +739,30 @@ fun ChatListContent(
                                         Box {
                                             IconButton(
                                                 onClick = { overflowOpen = true },
-                                                modifier = Modifier.testTag("chatlist_selection_more"),
+                                                modifier =
+                                                    Modifier.testTag("chatlist_selection_more").semantics {
+                                                        if (showNewNetworkActivity) stateDescription = newNetworkActivityDescription
+                                                    },
                                             ) {
-                                                Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
+                                                BadgedBox(badge = {
+                                                    if (showNewNetworkActivity) {
+                                                        Badge(
+                                                            containerColor = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.testTag("chatlist_selection_network_activity_new_dot"),
+                                                        )
+                                                    }
+                                                }) {
+                                                    Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
+                                                }
                                             }
                                             DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
                                                 DropdownMenuItem(
-                                                    text = { Text(stringResource(R.string.network_activity_title)) },
+                                                    text = { Text(networkActivityMenuTitle) },
+                                                    leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },
                                                     modifier = Modifier.testTag("chatlist_network_activity"),
                                                     onClick = {
                                                         overflowOpen = false
-                                                        showActivitySheet = true
+                                                        inspectNetworkActivity()
                                                     },
                                                 )
                                                 if (!bannerVisible) {
@@ -817,16 +844,32 @@ fun ChatListContent(
                                         }
                                         var moreOpen by remember { mutableStateOf(false) }
                                         Box {
-                                            IconButton(onClick = { moreOpen = true }, modifier = Modifier.testTag("chatlist_more")) {
-                                                Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
+                                            IconButton(
+                                                onClick = { moreOpen = true },
+                                                modifier =
+                                                    Modifier.testTag("chatlist_more").semantics {
+                                                        if (showNewNetworkActivity) stateDescription = newNetworkActivityDescription
+                                                    },
+                                            ) {
+                                                BadgedBox(badge = {
+                                                    if (showNewNetworkActivity) {
+                                                        Badge(
+                                                            containerColor = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.testTag("chatlist_more_network_activity_new_dot"),
+                                                        )
+                                                    }
+                                                }) {
+                                                    Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
+                                                }
                                             }
                                             DropdownMenu(moreOpen, { moreOpen = false }) {
                                                 DropdownMenuItem(
-                                                    text = { Text(stringResource(R.string.network_activity_title)) },
+                                                    text = { Text(networkActivityMenuTitle) },
+                                                    leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },
                                                     modifier = Modifier.testTag("chatlist_network_activity"),
                                                     onClick = {
                                                         moreOpen = false
-                                                        showActivitySheet = true
+                                                        inspectNetworkActivity()
                                                     },
                                                 )
                                                 if (!bannerVisible) {
@@ -874,7 +917,7 @@ fun ChatListContent(
 
                                     ChatListTopBarMode.INVITATIONS, ChatListTopBarMode.ARCHIVE -> {
                                         TextButton(
-                                            onClick = { showActivitySheet = true },
+                                            onClick = ::inspectNetworkActivity,
                                             modifier = Modifier.heightIn(min = 48.dp).testTag("chatlist_network_activity"),
                                         ) { Text(stringResource(R.string.network_activity_title)) }
                                     }
@@ -907,8 +950,11 @@ fun ChatListContent(
                             chrome = syncChrome,
                             connectionNoticeVisible = if (archiveMode || invitationMode) connectionOnlyNoticeVisible else connectionNoticeVisible,
                             includeHistory = !archiveMode && !invitationMode,
-                            onInspect = { showActivitySheet = true },
-                            onHide = { bannerVisible = false },
+                            onInspect = ::inspectNetworkActivity,
+                            onHide = {
+                                onNetworkActivitySeen()
+                                bannerVisible = false
+                            },
                         )
                     }
 

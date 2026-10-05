@@ -55,6 +55,11 @@ flowchart TD
   A separately labeled hide button only changes saveable screen-local banner visibility; new issues,
   progress and mode changes never restore it. Both list and selection overflow menus offer restoration
   while hidden, beside the always-available inspector. Hiding acknowledges nothing or changes source state.
+  While hidden, both overflow buttons show a static theme-accent dot for unseen active issues;
+  both inspector menu entries pair a decorative network icon with `Network activity · New`.
+  Hide and every inspector entry baseline a VM-owned session watermark,
+  without acknowledging or resolving issues. All-active-clear removes the cue even with recent records;
+  showing the banner needs no acknowledgement and never changes source state.
   Connection-only notices retain their three-second grace; presented history waiting bypasses it.
   The existing history anti-flash/minimum-visible presenter also gates per-row queued cues.
 - `ChatListViewModel` eagerly captures observed connection/history failures even without screen
@@ -62,6 +67,9 @@ flowchart TD
   A small in-memory ledger groups target, connection/history family and exact cause, counts failure
   reentry (not duplicate snapshots), retains every active cause through retry, and caps newest-first
   recent activity at 20. Failed/Partial are history severities: switching them updates the same episode.
+  A monotonic attention sequence advances only for new causes/episodes or actual severity increases,
+  not retries, revisions, names, progress, acknowledgement or recovery; recent eviction cannot erase it.
+  The eager unseen derivation requires active issues and resets with the ledger on a new VM session.
   Acknowledgement is explicit, settled-only and episode/revision guarded: it hides promotion and
   the history error badge, never source status or unresolved detail. A later failure reentry surfaces
   again. Closing the inspector acknowledges nothing; actions hide it before navigation.

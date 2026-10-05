@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chatlist
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
@@ -44,6 +45,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -484,51 +486,97 @@ class ChatListReadFreshnessTest {
                     ) = HistoryResyncState.Idle
                 }
             val model = vm(flowOf(emptyList()), FakeAppVisibility(false), connections = connections, networks = networks, buffers = buffers, resync = resync)
-            runCurrent()
-            // No state, chrome or ledger collectors: the retained entry owns capture, not its UI.
-            connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("full connection reason", true))
-            statuses.value = mapOf(7L to HistorySyncStatus.Failed("full history reason"))
-            runCurrent()
-            assertEquals(2, model.networkActivity.value.unacknowledgedCount)
-            backgroundScope.launch { model.syncIndicators.collect {} }
-            runCurrent()
-            assertEquals(ChatListSyncIndicator.ERROR, model.syncIndicators.value[7])
-            val history =
-                model.networkActivity.value.active
-                    .single { it.bufferId == 7L }
-            model.networkActivityAction(history, NetworkActivityAction.ACKNOWLEDGE, {}, {})
-            runCurrent()
-            assertEquals(HistorySyncStatus.Failed("full history reason"), statuses.value[7])
-            assertEquals(
-                "full history reason",
-                model.networkActivity.value.active
-                    .single { it.bufferId == 7L }
-                    .reason,
-            )
-            assertEquals(1, model.networkActivity.value.unacknowledgedCount)
-            assertEquals(null, model.syncIndicators.value[7])
-            statuses.value = mapOf(7L to HistorySyncStatus.Syncing)
-            runCurrent()
-            assertEquals(ChatListSyncIndicator.SYNCING, model.syncIndicators.value[7])
-            statuses.value = mapOf(7L to HistorySyncStatus.Failed("full history reason"))
-            runCurrent()
-            assertEquals(2, model.networkActivity.value.unacknowledgedCount)
-            assertEquals(ChatListSyncIndicator.ERROR, model.syncIndicators.value[7])
-            model.networkActivityAction(history, NetworkActivityAction.ACKNOWLEDGE, {}, {})
-            runCurrent()
-            assertEquals(2, model.networkActivity.value.unacknowledgedCount)
-            connections.connectionStates.value = mapOf(1L to IrcClientState.Ready("me", emptySet(), emptyMap()))
-            statuses.value = emptyMap()
-            runCurrent()
-            assertEquals(
-                setOf(NetworkActivityDisposition.CONNECTED, NetworkActivityDisposition.NO_LONGER_REPORTED),
-                model.networkActivity.value.recent
-                    .map { it.disposition }
-                    .toSet(),
-            )
-            val fresh = vm(flowOf(emptyList()), FakeAppVisibility(false), connections = connections, networks = networks, buffers = buffers, resync = resync)
-            runCurrent()
-            assertEquals(emptyList<NetworkActivityIssue>(), fresh.networkActivity.value.recent)
+            try {
+                runCurrent()
+                // No state, chrome or ledger collectors: the retained entry owns capture, not its UI.
+                assertEquals(false, model.hasUnseenNetworkActivity.value)
+                connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("full connection reason", true))
+                statuses.value = mapOf(7L to HistorySyncStatus.Failed("full history reason"))
+                runCurrent()
+                assertEquals(2, model.networkActivity.value.unacknowledgedCount)
+                assertEquals(true, model.hasUnseenNetworkActivity.value)
+                model.markNetworkActivitySeen()
+                runCurrent()
+                assertEquals(false, model.hasUnseenNetworkActivity.value)
+                assertEquals(2, model.networkActivity.value.unacknowledgedCount)
+                backgroundScope.launch { model.syncIndicators.collect {} }
+                runCurrent()
+                assertEquals(ChatListSyncIndicator.ERROR, model.syncIndicators.value[7])
+                val history =
+                    model.networkActivity.value.active
+                        .single { it.bufferId == 7L }
+                model.networkActivityAction(history, NetworkActivityAction.ACKNOWLEDGE, {}, {})
+                runCurrent()
+                assertEquals(HistorySyncStatus.Failed("full history reason"), statuses.value[7])
+                assertEquals(
+                    "full history reason",
+                    model.networkActivity.value.active
+                        .single { it.bufferId == 7L }
+                        .reason,
+                )
+                assertEquals(1, model.networkActivity.value.unacknowledgedCount)
+                assertEquals(null, model.syncIndicators.value[7])
+                assertEquals(false, model.hasUnseenNetworkActivity.value)
+                statuses.value = mapOf(7L to HistorySyncStatus.Syncing)
+                runCurrent()
+                assertEquals(ChatListSyncIndicator.SYNCING, model.syncIndicators.value[7])
+                statuses.value = mapOf(7L to HistorySyncStatus.Failed("full history reason"))
+                runCurrent()
+                assertEquals(2, model.networkActivity.value.unacknowledgedCount)
+                assertEquals(ChatListSyncIndicator.ERROR, model.syncIndicators.value[7])
+                assertEquals(false, model.hasUnseenNetworkActivity.value)
+                model.networkActivityAction(history, NetworkActivityAction.ACKNOWLEDGE, {}, {})
+                runCurrent()
+                assertEquals(2, model.networkActivity.value.unacknowledgedCount)
+                statuses.value = mapOf(7L to HistorySyncStatus.Partial("full history reason"))
+                runCurrent()
+                assertEquals(false, model.hasUnseenNetworkActivity.value)
+                statuses.value = mapOf(7L to HistorySyncStatus.Failed("full history reason"))
+                runCurrent()
+                assertEquals(true, model.hasUnseenNetworkActivity.value)
+                model.markNetworkActivitySeen()
+                runCurrent()
+                assertEquals(false, model.hasUnseenNetworkActivity.value)
+                statuses.value = mapOf(7L to HistorySyncStatus.Failed("new exact cause"))
+                runCurrent()
+                assertEquals(true, model.hasUnseenNetworkActivity.value)
+                statuses.value = emptyMap()
+                runCurrent()
+                // The new history cause cleared, but the older connection cause still holds attention.
+                assertEquals(1, model.networkActivity.value.active.size)
+                assertEquals(true, model.hasUnseenNetworkActivity.value)
+                connections.connectionStates.value = mapOf(1L to IrcClientState.Ready("me", emptySet(), emptyMap()))
+                statuses.value = emptyMap()
+                runCurrent()
+                assertEquals(false, model.hasUnseenNetworkActivity.value)
+                assertEquals(
+                    setOf(NetworkActivityDisposition.CONNECTED, NetworkActivityDisposition.NO_LONGER_REPORTED),
+                    model.networkActivity.value.recent
+                        .map { it.disposition }
+                        .toSet(),
+                )
+                assertEquals(false, model.hasUnseenNetworkActivity.value)
+                connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("later failure", true))
+                runCurrent()
+                assertEquals(true, model.hasUnseenNetworkActivity.value)
+                model.markNetworkActivitySeen()
+                runCurrent()
+                assertEquals(false, model.hasUnseenNetworkActivity.value)
+                val fresh = vm(flowOf(emptyList()), FakeAppVisibility(false), connections = connections, networks = networks, buffers = buffers, resync = resync)
+                try {
+                    runCurrent()
+                    assertEquals(emptyList<NetworkActivityIssue>(), fresh.networkActivity.value.recent)
+                    assertEquals(1L, fresh.networkActivity.value.latestAttentionSequence)
+                    assertEquals(true, fresh.hasUnseenNetworkActivity.value)
+                    fresh.markNetworkActivitySeen()
+                    runCurrent()
+                    assertEquals(false, fresh.hasUnseenNetworkActivity.value)
+                } finally {
+                    fresh.viewModelScope.cancel()
+                }
+            } finally {
+                model.viewModelScope.cancel()
+            }
         }
 
     @Test

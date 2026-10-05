@@ -33,6 +33,70 @@ class NetworkActivityTest {
 
     private fun ready() = IrcClientState.Ready("me", emptySet(), emptyMap())
 
+    @Test fun attentionSequenceTracksOnlyNewCausesEpisodesAndSeverityRises() {
+        assertEquals(0L, observe().latestAttentionSequence)
+
+        fun history(status: HistorySyncStatus) = observe(history = mapOf(10L to status))
+        val partial = HistorySyncStatus.Partial("same cause")
+        assertEquals(1L, history(partial).latestAttentionSequence)
+        assertEquals(1L, history(partial).latestAttentionSequence)
+        assertEquals(1L, history(HistorySyncStatus.Queued).latestAttentionSequence)
+        assertEquals(1L, history(HistorySyncStatus.AwaitingConnection).latestAttentionSequence)
+        assertEquals(1L, history(HistorySyncStatus.Syncing).latestAttentionSequence)
+        val retried = history(partial)
+        assertEquals(1L, retried.latestAttentionSequence)
+        assertEquals(2, retried.active.single().occurrences)
+        val failed = HistorySyncStatus.Failed("same cause")
+        val upgraded = history(failed)
+        assertEquals(2L, upgraded.latestAttentionSequence)
+        assertEquals(retried.active.single().episodeId, upgraded.active.single().episodeId)
+        assertEquals(2L, history(failed).latestAttentionSequence)
+        assertEquals(
+            2L,
+            observe(
+                history = mapOf(10L to failed),
+                saved = networks.map { it.copy(name = "renamed") },
+                rooms = buffers + (10L to room(99, 1).copy(displayName = "#redirected")),
+            ).latestAttentionSequence,
+        )
+        assertEquals(2L, ledger.acknowledge(upgraded.active.single()).latestAttentionSequence)
+        assertEquals(2L, history(partial).latestAttentionSequence)
+        assertEquals(3L, history(failed).latestAttentionSequence)
+        assertEquals(3L, history(HistorySyncStatus.Idle).latestAttentionSequence)
+        assertEquals(4L, history(partial).latestAttentionSequence)
+        assertEquals(5L, history(HistorySyncStatus.Partial("different cause")).latestAttentionSequence)
+        assertEquals(5L, history(HistorySyncStatus.Unavailable).latestAttentionSequence)
+        assertEquals(6L, history(failed).latestAttentionSequence)
+        assertEquals(6L, observe(history = mapOf(10L to failed), rooms = buffers + (10L to null)).latestAttentionSequence)
+        assertEquals(7L, observe(mapOf(1L to failure())).latestAttentionSequence)
+        assertEquals(8L, observe(mapOf(1L to failure(fatal = true))).latestAttentionSequence)
+        assertEquals(8L, observe(mapOf(1L to IrcClientState.Connecting)).latestAttentionSequence)
+        assertEquals(8L, observe(mapOf(1L to IrcClientState.Registering)).latestAttentionSequence)
+        val fatalRetry = observe(mapOf(1L to failure(fatal = true)))
+        assertEquals(8L, fatalRetry.latestAttentionSequence)
+        assertEquals(8L, ledger.acknowledge(fatalRetry.active.single()).latestAttentionSequence)
+        assertEquals(8L, ledger.stop(1).latestAttentionSequence)
+        assertEquals(8L, observe(mapOf(1L to failure(fatal = true))).latestAttentionSequence)
+        assertEquals(8L, observe(mapOf(1L to ready())).latestAttentionSequence)
+        assertEquals(9L, observe(mapOf(1L to failure(fatal = true))).latestAttentionSequence)
+    }
+
+    @Test fun attentionSequenceSurvivesAllClearReconstructionAndRecentEviction() {
+        repeat(25) { index ->
+            val failed = observe(mapOf(1L to failure("cause $index")))
+            assertEquals(index + 1L, failed.latestAttentionSequence)
+            val cleared = observe(mapOf(1L to ready()))
+            assertTrue(cleared.active.isEmpty())
+            assertEquals(index + 1L, cleared.latestAttentionSequence)
+        }
+        val capped = observe()
+        assertEquals(20, capped.recent.size)
+        assertEquals(25L, capped.latestAttentionSequence)
+        assertEquals(25L, capped.copy(recent = emptyList()).latestAttentionSequence)
+        assertEquals(25L, ledger.stop(1).latestAttentionSequence)
+        assertEquals(26L, observe(mapOf(1L to failure("cause 0"))).latestAttentionSequence)
+    }
+
     @Test fun retriesAndUnknownAbsenceRetainUntilReady() {
         val first = observe(mapOf(1L to failure())).active.single()
         val absent = observe().active.single()

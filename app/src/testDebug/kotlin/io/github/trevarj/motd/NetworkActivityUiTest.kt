@@ -3,20 +3,25 @@ package io.github.trevarj.motd
 import android.content.Context
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.assertTouchHeightIsEqualTo
 import androidx.compose.ui.test.assertTouchWidthIsEqualTo
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
@@ -106,6 +111,152 @@ class NetworkActivityUiTest {
     private fun activity(issues: List<NetworkActivityIssue> = listOf(issue())) = NetworkActivityState(networks = listOf(NetworkActivityNetwork(1, "Libera", if (issues.any { it.bufferId == null }) IrcClientState.Failed("bad certificate", true) else ready)), active = issues)
 
     private fun row(archived: Boolean = false) = ChatListRow(bufferId = 7, networkId = 1, networkName = "Libera", displayName = "#kotlin", type = BufferType.CHANNEL, pinned = false, muted = false, lastMessageText = "hi", lastMessageSender = "alice", lastMessageTime = 1, unreadCount = 0, mentionCount = 0, archived = archived)
+
+    @Test fun hiddenActivityAttentionSmokeUsesVmSessionAcrossModesAllClearAndRestoration() {
+        val connections =
+            object : NoopConnectionManager() {
+                override val connectionStates = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to IrcClientState.Failed("existing cause", false)))
+            }
+        val model = activityModel(connections)
+        val restoration = StateRestorationTester(compose)
+        val chrome = mutableStateOf<ChatListSyncChrome>(ChatListSyncChrome.Hidden)
+        val listState = mutableStateOf(ChatListState(rows = listOf(row()), networks = listOf(network), loading = false))
+        var primary = 0
+        try {
+            restoration.setContent {
+                val activity by model.networkActivity.collectAsState()
+                val unseen by model.hasUnseenNetworkActivity.collectAsState()
+                MotdTheme(dynamicColor = false) {
+                    primary = MaterialTheme.colorScheme.primary.toArgb()
+                    ChatListContent(
+                        state = listState.value,
+                        networkActivity = activity,
+                        hasUnseenNetworkActivity = unseen,
+                        onNetworkActivitySeen = model::markNetworkActivitySeen,
+                        connectionNoticeVisible = true,
+                        syncChrome = chrome.value,
+                        onOpenBuffer = {},
+                        onOpenSettings = {},
+                        onOpenSearch = {},
+                        onSetPinned = { _, _ -> },
+                        onSetMuted = { _, _ -> },
+                        onJoinChannel = { _, _, _ -> },
+                        onMessageUser = { _, _ -> },
+                    )
+                }
+            }
+            compose.waitUntil(5_000) { model.hasUnseenNetworkActivity.value }
+            compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertDoesNotExist()
+            compose.onNodeWithTag("chatlist_status_hide").performClick()
+            compose.waitUntil(5_000) { !model.hasUnseenNetworkActivity.value }
+            compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertDoesNotExist()
+            compose.onNodeWithTag("chatlist_more").performClick()
+            compose.onNodeWithTag("chatlist_network_activity").assertTextEquals("Network activity").performClick()
+            compose.onNodeWithTag("network_activity_close").performClick()
+
+            compose.runOnIdle { connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("new cause", false)) }
+            compose.waitUntil(5_000) { model.networkActivity.value.latestAttentionSequence == 2L && model.hasUnseenNetworkActivity.value }
+            val dot = compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true)
+            dot.assertIsDisplayed()
+            val pixels = dot.captureToImage().asAndroidBitmap()
+            assertEquals(primary, pixels.getPixel(pixels.width / 2, pixels.height / 2))
+            assertFalse(dot.fetchSemanticsNode().config.contains(SemanticsProperties.LiveRegion))
+            compose
+                .onNodeWithContentDescription("More actions")
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "New network activity"))
+                .assertTouchHeightIsEqualTo(48.dp)
+                .assertTouchWidthIsEqualTo(48.dp)
+            compose.runOnIdle { listState.value = listState.value.copy(selectedNetworkId = 1) }
+            compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertIsDisplayed()
+            compose.onNodeWithTag("chatlist_more").performClick()
+            compose.onNodeWithTag("chatlist_network_activity").assertTextEquals("Network activity · New")
+            compose.onNodeWithTag("chatlist_network_activity_icon", true).assertIsDisplayed()
+            compose.onNodeWithTag("chatlist_network_activity").performClick()
+            compose.onNodeWithTag("network_activity_sheet").assertIsDisplayed()
+            compose.waitUntil(5_000) { !model.hasUnseenNetworkActivity.value }
+            compose.runOnIdle {
+                assertEquals(2, model.networkActivity.value.active.size)
+                assertEquals(2, model.networkActivity.value.unacknowledgedCount)
+            }
+            compose.onNodeWithTag("network_activity_close").performClick()
+            compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertDoesNotExist()
+            compose.runOnIdle {
+                connections.connectionStates.value = mapOf(1L to IrcClientState.Connecting)
+                chrome.value = ChatListSyncChrome.Syncing(1, 4)
+            }
+            compose.waitUntil(5_000) {
+                model.networkActivity.value.active
+                    .all { it.retrying }
+            }
+            compose.runOnIdle {
+                connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("new cause", false))
+                chrome.value = ChatListSyncChrome.Syncing(2, 4)
+            }
+            compose.waitUntil(5_000) {
+                model.networkActivity.value.active
+                    .all { it.settled }
+            }
+            compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertDoesNotExist()
+            compose.runOnIdle { assertEquals(2L, model.networkActivity.value.latestAttentionSequence) }
+
+            compose.runOnIdle { connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("new cause", true)) }
+            compose.waitUntil(5_000) { model.networkActivity.value.latestAttentionSequence == 3L && model.hasUnseenNetworkActivity.value }
+            compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertIsDisplayed()
+            compose.onNodeWithTag("chatlist_row_7").performTouchInput { longClick() }
+            compose.onNodeWithTag("chatlist_selection_network_activity_new_dot", true).assertIsDisplayed()
+            compose
+                .onNodeWithTag("chatlist_selection_more")
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "New network activity"))
+                .assertTouchHeightIsEqualTo(48.dp)
+                .assertTouchWidthIsEqualTo(48.dp)
+                .performClick()
+            compose.onNodeWithTag("chatlist_network_activity").assertTextEquals("Network activity · New")
+            compose.onNodeWithTag("chatlist_network_activity_icon", true).assertIsDisplayed()
+            compose.onNodeWithTag("chatlist_network_activity").performClick()
+            compose.onNodeWithTag("network_activity_close").performClick()
+            compose.onNodeWithTag("chatlist_selection_network_activity_new_dot", true).assertDoesNotExist()
+            compose.runOnIdle { assertEquals(2, model.networkActivity.value.unacknowledgedCount) }
+
+            compose.runOnIdle { connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("third cause", true)) }
+            compose.waitUntil(5_000) { model.networkActivity.value.latestAttentionSequence == 4L && model.hasUnseenNetworkActivity.value }
+            compose.onNodeWithTag("chatlist_selection_network_activity_new_dot", true).assertIsDisplayed()
+            compose.runOnIdle { connections.connectionStates.value = mapOf(1L to ready) }
+            compose.waitUntil(5_000) {
+                model.networkActivity.value.active
+                    .isEmpty() && !model.hasUnseenNetworkActivity.value
+            }
+            compose.onNodeWithTag("chatlist_selection_network_activity_new_dot", true).assertDoesNotExist()
+            compose.onNodeWithTag("chatlist_selection_more").performClick()
+            compose.onNodeWithTag("chatlist_network_activity").assertTextEquals("Network activity").performClick()
+            compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_recent_3_reason"))
+            compose.onNodeWithTag("network_activity_recent_3_reason", true).assertTextEquals("third cause")
+            compose.onNodeWithTag("network_activity_close").performClick()
+            compose.runOnIdle { connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("later episode", true)) }
+            compose.waitUntil(5_000) { model.networkActivity.value.latestAttentionSequence == 5L && model.hasUnseenNetworkActivity.value }
+            compose.onNodeWithTag("chatlist_selection_network_activity_new_dot", true).assertIsDisplayed()
+            compose.onNodeWithTag("chatlist_selection_close").performClick()
+            restoration.emulateSavedInstanceStateRestore()
+            compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+            compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertIsDisplayed()
+            compose.onNodeWithTag("chatlist_more").performClick()
+            compose.onNodeWithTag("chatlist_show_network_activity_banner").performClick()
+            compose.onNodeWithTag("chatlist_status_banner").assertIsDisplayed()
+            compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertDoesNotExist()
+            compose.runOnIdle {
+                assertEquals(true, model.hasUnseenNetworkActivity.value)
+                assertEquals(1, model.networkActivity.value.unacknowledgedCount)
+            }
+            compose.onNodeWithTag("chatlist_status_banner").performClick()
+            compose.waitUntil(5_000) { !model.hasUnseenNetworkActivity.value }
+            compose.onNodeWithTag("network_activity_close").performClick()
+            compose.onNodeWithTag("chatlist_status_hide").performClick()
+            restoration.emulateSavedInstanceStateRestore()
+            compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+            compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertDoesNotExist()
+        } finally {
+            compose.runOnIdle { model.viewModelScope.cancel() }
+        }
+    }
 
     @Test fun oneBannerKeepsErrorAndIndependentProgressWithOnlyHeadlineLive() {
         val chrome = mutableStateOf<ChatListSyncChrome>(ChatListSyncChrome.Syncing(12, 42, true))
@@ -258,12 +409,14 @@ class NetworkActivityUiTest {
 
     @Test fun scopedAndSelectionOverflowRestoreWithoutChangingArchiveOrInvitationMode() {
         val calls = mutableListOf<NetworkActivityAction>()
+        var seenCalls = 0
         val invitation = ChatListInvitation(11, 111, 1, "Libera", "alice", "#other", "invite", InviteState.PENDING, 1)
         setList(
             activity = { activity(listOf(issue(), issue("Full history reason in every mode", 7, false, 2))) },
             chrome = { ChatListSyncChrome.Syncing(1, 3) },
             listState = ChatListState(rows = listOf(row()), archivedRows = listOf(row(true).copy(bufferId = 8)), invitations = listOf(invitation), networks = listOf(network), selectedNetworkId = 1, loading = false),
             onAction = { _, action -> calls += action },
+            onSeen = { seenCalls++ },
         )
         compose.onNodeWithTag("chatlist_status_hide").performClick()
         compose.onNodeWithTag("chatlist_more").performClick()
@@ -299,7 +452,9 @@ class NetworkActivityUiTest {
         compose.runOnIdle { check(reveal.action()) }
         compose.onNodeWithTag("chatlist_archived_folder").performClick()
         compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        val beforeArchiveInspection = seenCalls
         compose.onNodeWithTag("chatlist_network_activity").performClick()
+        compose.runOnIdle { assertEquals(beforeArchiveInspection + 1, seenCalls) }
         compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_issue_2_reason"))
         compose.onNodeWithTag("network_activity_issue_2_reason", true).assertTextEquals("Full history reason in every mode")
         compose.onNodeWithTag("network_activity_close").performClick()
@@ -322,7 +477,9 @@ class NetworkActivityUiTest {
         compose.onNodeWithTag("chatlist_selection_close").performClick()
         compose.onNodeWithTag("chatlist_invitations_folder").performClick()
         compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        val beforeInvitationInspection = seenCalls
         compose.onNodeWithTag("chatlist_network_activity").performClick()
+        compose.runOnIdle { assertEquals(beforeInvitationInspection + 1, seenCalls) }
         compose.onNodeWithTag("network_activity_close").performClick()
         compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
         compose.onNodeWithTag("chatlist_selection_close").performClick()
@@ -419,54 +576,7 @@ class NetworkActivityUiTest {
                     connectionStates.value = mapOf(networkId to ready)
                 }
             }
-        val model =
-            ChatListViewModel(
-                bufferRepository = FakeBuffers(),
-                networkRepository = FakeNetworks(listOf(network)),
-                connectionManager = connections,
-                historyResync =
-                    object : HistoryResyncController {
-                        override suspend fun reconcileBuffer(
-                            buffer: BufferEntity,
-                            client: IrcClient,
-                            preserveUnread: Boolean,
-                            isCurrent: () -> Boolean,
-                        ) = HistoryResyncState.Idle
-
-                        override suspend fun reconcilePendingMessage(
-                            buffer: BufferEntity,
-                            client: IrcClient,
-                            isCurrent: () -> Boolean,
-                        ) = HistoryResyncState.Idle
-                    },
-                gapFiller = NoopHistoryGapFiller,
-                channelCloseCoordinator =
-                    object : ChannelCloseCoordinator {
-                        override fun start() = Unit
-
-                        override suspend fun requestClose(bufferId: Long) = Unit
-                    },
-                readMarkerRepository = FakeReadMarkers(),
-                settingsRepository = FakeSettings(),
-                onboardingPrefs =
-                    object : OnboardingPrefs {
-                        override val completed = flowOf(true)
-
-                        override suspend fun markCompleted() = Unit
-                    },
-                globalFeedPrefs =
-                    object : GlobalFeedPrefs {
-                        override val enabled = flowOf(false)
-
-                        override suspend fun setEnabled(enabled: Boolean) = Unit
-                    },
-                dickordLabsPrefs = fakeDickordLabsPrefs(),
-                savedStateHandle = SavedStateHandle(),
-                appVisibility =
-                    object : AppVisibility {
-                        override val onScreen = MutableStateFlow(false)
-                    },
-            )
+        val model = activityModel(connections)
         try {
             compose.setContent {
                 val state by model.state.collectAsState()
@@ -679,15 +789,65 @@ class NetworkActivityUiTest {
         compose.onNodeWithTag("chatlist_status_summary", true).assertTextEquals(ApplicationProvider.getApplicationContext<Context>().getString(R.string.network_activity_queued))
     }
 
+    private fun activityModel(connections: NoopConnectionManager) =
+        ChatListViewModel(
+            bufferRepository = FakeBuffers(),
+            networkRepository = FakeNetworks(listOf(network)),
+            connectionManager = connections,
+            historyResync =
+                object : HistoryResyncController {
+                    override suspend fun reconcileBuffer(
+                        buffer: BufferEntity,
+                        client: IrcClient,
+                        preserveUnread: Boolean,
+                        isCurrent: () -> Boolean,
+                    ) = HistoryResyncState.Idle
+
+                    override suspend fun reconcilePendingMessage(
+                        buffer: BufferEntity,
+                        client: IrcClient,
+                        isCurrent: () -> Boolean,
+                    ) = HistoryResyncState.Idle
+                },
+            gapFiller = NoopHistoryGapFiller,
+            channelCloseCoordinator =
+                object : ChannelCloseCoordinator {
+                    override fun start() = Unit
+
+                    override suspend fun requestClose(bufferId: Long) = Unit
+                },
+            readMarkerRepository = FakeReadMarkers(),
+            settingsRepository = FakeSettings(),
+            onboardingPrefs =
+                object : OnboardingPrefs {
+                    override val completed = flowOf(true)
+
+                    override suspend fun markCompleted() = Unit
+                },
+            globalFeedPrefs =
+                object : GlobalFeedPrefs {
+                    override val enabled = flowOf(false)
+
+                    override suspend fun setEnabled(enabled: Boolean) = Unit
+                },
+            dickordLabsPrefs = fakeDickordLabsPrefs(),
+            savedStateHandle = SavedStateHandle(),
+            appVisibility =
+                object : AppVisibility {
+                    override val onScreen = MutableStateFlow(false)
+                },
+        )
+
     private fun setList(
         activity: () -> NetworkActivityState = { this.activity() },
         chrome: () -> ChatListSyncChrome = { ChatListSyncChrome.Hidden },
         listState: ChatListState = ChatListState(networks = listOf(network), loading = false),
         onAction: (NetworkActivityIssue, NetworkActivityAction) -> Unit = { _, _ -> },
+        onSeen: () -> Unit = {},
     ) {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
-                ChatListContent(state = listState, networkActivity = activity(), connectionNoticeVisible = true, syncChrome = chrome(), onActivityAction = onAction, onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {}, onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> }, onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> })
+                ChatListContent(state = listState, networkActivity = activity(), connectionNoticeVisible = true, syncChrome = chrome(), onActivityAction = onAction, onNetworkActivitySeen = onSeen, onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {}, onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> }, onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> })
             }
         }
     }
