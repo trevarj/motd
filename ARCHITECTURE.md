@@ -114,6 +114,11 @@ flowchart TD
   Large keeps its separate top toolbar.
   Toolbar long-press shows the action name and purpose, with a Markdown example;
   normal taps perform actions. Voice recording retains its separate hold gesture.
+- Chat's positive `placeAtTop` entry snaps compact chrome and waits for its measured
+  viewport before unread-row alignment. A shallow run that clamps at the effective
+  bottom restores expanded chrome and waits for that layout before consuming the target.
+  Target consumption preserves the final header, viewport and unread placement; settled
+  reader scrolls still animate, and latest stays expanded.
 - TLS policy, Android KeyChain integration, proxy selection, and embedded
   obfuscation are injected at the `:app` boundary so `:irc` stays pure JVM.
 - Each saved network owns its own ordered post-connect commands. `ConnectionActor`

@@ -83,6 +83,8 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityOptionsCompat
+import androidx.paging.LoadState
+import androidx.paging.LoadStates
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.room.Room
@@ -120,8 +122,10 @@ import io.github.trevarj.motd.ui.ai.AiTextSheet
 import io.github.trevarj.motd.ui.ai.AiTextSource
 import io.github.trevarj.motd.ui.ai.AiTextUiState
 import io.github.trevarj.motd.ui.ai.source
+import io.github.trevarj.motd.ui.chat.CHAT_ENTRY_VEIL_TAG
 import io.github.trevarj.motd.ui.chat.CHAT_TITLE_SYNC_SPINNER_TAG
 import io.github.trevarj.motd.ui.chat.ChatContent
+import io.github.trevarj.motd.ui.chat.ChatPositionTarget
 import io.github.trevarj.motd.ui.chat.ChatState
 import io.github.trevarj.motd.ui.chat.ComposerDraftState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
@@ -132,6 +136,7 @@ import io.github.trevarj.motd.ui.chat.OutgoingFlight
 import io.github.trevarj.motd.ui.chat.SendFlightAnchors
 import io.github.trevarj.motd.ui.chat.SendFlightMotion
 import io.github.trevarj.motd.ui.chat.SendFlightOverlay
+import io.github.trevarj.motd.ui.chat.UnreadEntrySnapshot
 import io.github.trevarj.motd.ui.chat.VoiceMessageUiState
 import io.github.trevarj.motd.ui.chat.VoiceRecordingUi
 import io.github.trevarj.motd.ui.components.MessageBubble
@@ -254,7 +259,7 @@ class ComposerSendClearUiTest {
         }
     }
 
-    /** Renders the real chat surface over an empty timeline, with the draft under test control. */
+    /** Renders the real chat surface with the draft and optional Paging timeline under test control. */
     private fun setContent(
         liveConnection: (() -> IrcClientState?)? = null,
         draft: () -> ComposerDraftState,
@@ -289,7 +294,9 @@ class ComposerSendClearUiTest {
         dickordEnabled: () -> Boolean = { false },
         layoutDensity: () -> LayoutDensity = { LayoutDensity.COMFORTABLE },
         onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
-        entryState: EntryPositionState = EntryPositionState.Settled,
+        initialTarget: () -> ChatPositionTarget? = { null },
+        entryState: () -> EntryPositionState = { EntryPositionState.Settled },
+        unreadEntrySnapshot: UnreadEntrySnapshot? = null,
         onInitialPositionHandled: () -> Unit = {},
         rawNewestAnchor: TimelineAnchor? = null,
         onMarkRead: (TimelineAnchor) -> Unit = {},
@@ -358,7 +365,9 @@ class ComposerSendClearUiTest {
                             outgoingFlight = outgoingFlight(),
                             onDraftChanged = onDraftChanged,
                             onFlightSettled = onFlightSettled,
-                            entryState = entryState,
+                            initialTarget = initialTarget(),
+                            entryState = entryState(),
+                            unreadEntrySnapshot = unreadEntrySnapshot,
                             onInitialPositionHandled = onInitialPositionHandled,
                             rawNewestAnchor = rawNewestAnchor,
                             onMarkRead = onMarkRead,
@@ -524,7 +533,7 @@ class ComposerSendClearUiTest {
                 )
             },
             dickordEnabled = { true },
-            entryState = entryState,
+            entryState = { entryState },
             onInitialPositionHandled = { positionsHandled++ },
             rawNewestAnchor = TimelineAnchor(caption.serverTime, caption.id),
             onMarkRead = { marksRead++ },
@@ -1206,6 +1215,128 @@ class ComposerSendClearUiTest {
         compose.runOnIdle { contentHeight = 580.dp }
         assertEquals(collapsed, assertNewestAboveHost(), 1f)
         compose.onNodeWithTag("chat_composer_field").assertTextEquals("al")
+    }
+
+    @Test
+    fun unreadEntryUsesFinalHistoryViewportBeforeTargetClears() {
+        assertUnreadEntryUsesFinalViewport(firstUnreadIndex = 50, clampedAtBottom = false)
+    }
+
+    @Test
+    fun shallowUnreadEntryUsesExpandedViewportBeforeTargetClears() {
+        assertUnreadEntryUsesFinalViewport(firstUnreadIndex = 1, clampedAtBottom = true)
+    }
+
+    private fun assertUnreadEntryUsesFinalViewport(
+        firstUnreadIndex: Int,
+        clampedAtBottom: Boolean,
+    ) {
+        val history = headerHistory()
+        val firstUnread = history[firstUnreadIndex]
+        val marker = history[firstUnreadIndex + 1]
+        var target by mutableStateOf<ChatPositionTarget?>(null)
+        var entry by mutableStateOf<EntryPositionState>(EntryPositionState.Pending)
+        var positionsHandled = 0
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            // Static PagingData without source states displays rows but leaves refresh Loading.
+            pages =
+                flowOf(
+                    PagingData.from(
+                        history,
+                        sourceLoadStates =
+                            LoadStates(
+                                refresh = LoadState.NotLoading(endOfPaginationReached = false),
+                                prepend = LoadState.NotLoading(endOfPaginationReached = true),
+                                append = LoadState.NotLoading(endOfPaginationReached = true),
+                            ),
+                    ),
+                ),
+            initialTarget = { target },
+            entryState = { entry },
+            unreadEntrySnapshot =
+                UnreadEntrySnapshot(
+                    marker = TimelineAnchor(marker.serverTime, marker.id, marker.timelineOrder),
+                    loadedCount = firstUnreadIndex + 1,
+                    lowerBound = false,
+                ),
+            // Keep the target until the test observes the completed placement, then consume it
+            // together with Settled as the ViewModel does.
+            onInitialPositionHandled = { positionsHandled++ },
+            onSubmit = {},
+        )
+        compose.onNodeWithTag("chat_message_header-100", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertExists()
+        val bar = compose.onNodeWithTag("chat_top_app_bar", useUnmergedTree = true)
+        val expandedHeight = bar.fetchSemanticsNode().boundsInRoot.height
+        compose.runOnIdle {
+            target =
+                ChatPositionTarget(
+                    index = firstUnreadIndex,
+                    expectedEventId = firstUnread.id,
+                    expectedMsgid = firstUnread.msgid,
+                    serverTime = firstUnread.serverTime,
+                    forceScrollOnEntry = true,
+                    placeAtTop = true,
+                )
+        }
+        // Robolectric's paused main looper is drained by waitForIdle, not waitUntil.
+        compose.waitForIdle()
+        compose.waitUntil(5_000) { positionsHandled == 1 }
+        compose.waitForIdle()
+        val timeline = compose.onNodeWithTag("chat_timeline")
+        val divider = compose.onNodeWithTag("chat_read_marker_divider", useUnmergedTree = true)
+        val first = compose.onNodeWithTag("chat_message_${firstUnread.msgid}", useUnmergedTree = true)
+        val second = compose.onNodeWithTag("chat_message_${history[firstUnreadIndex - 1].msgid}", useUnmergedTree = true)
+        divider.assertIsDisplayed()
+        first.assertIsDisplayed()
+        second.assertIsDisplayed()
+        val placedHeight = bar.fetchSemanticsNode().boundsInRoot.height
+        val firstTop = first.fetchSemanticsNode().boundsInRoot.top
+        val secondTop = second.fetchSemanticsNode().boundsInRoot.top
+        val viewportTop = timeline.fetchSemanticsNode().boundsInRoot.top
+        val dividerTop = divider.fetchSemanticsNode().boundsInRoot.top
+        if (clampedAtBottom) {
+            assertEquals("A shallow positive target must settle with expanded chrome", expandedHeight, placedHeight, 1f)
+            assertTrue("The short unread run must remain clamped below the viewport top", dividerTop > viewportTop + 1f)
+            compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertDoesNotExist()
+        } else {
+            assertTrue("Unread placement must already use history chrome", placedHeight < expandedHeight)
+            assertEquals("The unread boundary must top the final viewport", viewportTop, dividerTop, 1f)
+        }
+        assertTrue(firstTop >= divider.fetchSemanticsNode().boundsInRoot.bottom)
+        assertTrue(firstTop < secondTop)
+
+        fun assertPlacementUnchanged() {
+            first.assertIsDisplayed()
+            second.assertIsDisplayed()
+            assertEquals("Clearing the entry target must not resize the header", placedHeight, bar.fetchSemanticsNode().boundsInRoot.height, 1f)
+            assertEquals("Settlement must not move the final viewport", viewportTop, timeline.fetchSemanticsNode().boundsInRoot.top, 1f)
+            assertEquals("Settlement must not move the unread boundary", dividerTop, divider.fetchSemanticsNode().boundsInRoot.top, 1f)
+            assertEquals("Settlement must not displace the first unread row", firstTop, first.fetchSemanticsNode().boundsInRoot.top, 1f)
+            assertEquals("Settlement must not displace the next canonical row", secondTop, second.fetchSemanticsNode().boundsInRoot.top, 1f)
+        }
+
+        compose.mainClock.autoAdvance = false
+        compose.runOnIdle {
+            target = null
+            entry = EntryPositionState.Settled
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        assertPlacementUnchanged()
+        compose.mainClock.advanceTimeBy(64)
+        compose.waitForIdle()
+        assertPlacementUnchanged()
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertDoesNotExist()
+        assertPlacementUnchanged()
+        compose.runOnIdle {
+            assertEquals(1, positionsHandled)
+            assertEquals(null, target)
+            assertEquals(EntryPositionState.Settled, entry)
+        }
     }
 
     @Test

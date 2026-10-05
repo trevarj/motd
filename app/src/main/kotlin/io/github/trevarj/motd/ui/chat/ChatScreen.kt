@@ -14,6 +14,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -113,6 +114,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1565,6 +1567,43 @@ fun ChatContent(
         }
     }
 
+    // Raw ignored tails do not make the user leave the meaningful bottom of the conversation.
+    val atBottom by remember(listState, items, visibilityPolicy) {
+        derivedStateOf {
+            val layout = listState.layoutInfo
+            val bottomHostHeightPx = readBottomHostHeightPx()
+            // A first/stale measure with no host clearance cannot prove that newest is readable.
+            bottomHostHeightPx > 0 &&
+                layout.beforeContentPadding >= bottomHostHeightPx &&
+                layout.viewportEndOffset > layout.viewportStartOffset + bottomHostHeightPx &&
+                isAtEffectiveBottom(
+                    firstVisibleIndex = listState.firstVisibleItemIndex,
+                    firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                    itemCount = items.itemCount,
+                    peek = items::peek,
+                    policy = visibilityPolicy,
+                )
+        }
+    }
+
+    // ponytail: top-entry alignment needs the final viewport; settled reader transitions still animate.
+    val placingTopEntry = initialTarget?.let { it.placeAtTop && it.index > 0 } == true
+    var topEntryClampedAtBottom by remember(initialTarget) { mutableStateOf(false) }
+    var laidOutEntryHeaderExpansion by remember(initialTarget) { mutableFloatStateOf(-1f) }
+    val headerExpansion =
+        animateFloatAsState(
+            targetValue =
+                if (placingTopEntry) {
+                    if (topEntryClampedAtBottom) 1f else 0f
+                } else if ((initialPositionSettled || entryVeilLifted) && !atBottom) {
+                    0f
+                } else {
+                    1f
+                },
+            animationSpec = if (placingTopEntry) snap() else MotdMotion.fadeIn,
+            label = "chat_header_expansion",
+        )
+
     var prefillConsumed by remember(traceBufferId) { mutableStateOf(false) }
 
     // Apply hydration/accepted-send clears without re-saving the same value from the screen.
@@ -1904,11 +1943,11 @@ fun ChatContent(
         }
         val pageReady =
             withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
-                snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
-                    .first { (refresh, append, count) ->
-                        refresh is LoadState.NotLoading &&
-                            initialPagingPage(count, append) != InitialPagingPage.Pending
-                    }
+                snapshotFlow {
+                    items.loadState.refresh is LoadState.NotLoading &&
+                        initialPagingPage(items.itemCount, items.loadState.append) != InitialPagingPage.Pending &&
+                        (!placingTopEntry || laidOutEntryHeaderExpansion == 0f)
+                }.first { it }
             } != null
         if (!pageReady) {
             AutoFollowTrace.record("initial_position_page_not_ready", traceBufferId, traceSessionId) {
@@ -2011,6 +2050,12 @@ fun ChatContent(
                             // final. A single one may just be a racing presentation frame; retry.
                             unconsumedPasses = if (consumed == 0f) unconsumedPasses + 1 else 0
                             if (unconsumedPasses >= 2) break
+                        }
+                        if (placingTopEntry && atBottom) {
+                            // A short unread run clamps at newest. Restore its expanded viewport
+                            // under the veil, and wait for that layout before consuming the target.
+                            topEntryClampedAtBottom = true
+                            snapshotFlow { laidOutEntryHeaderExpansion }.first { it == 1f }
                         }
                         row
                     } else {
@@ -2303,24 +2348,6 @@ fun ChatContent(
     var redactionTarget by remember { mutableStateOf<MessageEntity?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
-    // Raw ignored tails do not make the user leave the meaningful bottom of the conversation.
-    val atBottom by remember(listState, items, visibilityPolicy) {
-        derivedStateOf {
-            val layout = listState.layoutInfo
-            val bottomHostHeightPx = readBottomHostHeightPx()
-            // A first/stale measure with no host clearance cannot prove that newest is readable.
-            bottomHostHeightPx > 0 &&
-                layout.beforeContentPadding >= bottomHostHeightPx &&
-                layout.viewportEndOffset > layout.viewportStartOffset + bottomHostHeightPx &&
-                isAtEffectiveBottom(
-                    firstVisibleIndex = listState.firstVisibleItemIndex,
-                    firstVisibleOffset = listState.firstVisibleItemScrollOffset,
-                    itemCount = items.itemCount,
-                    peek = items::peek,
-                    policy = visibilityPolicy,
-                )
-        }
-    }
     ReportMessageViewport(
         items = items,
         listState = listState,
@@ -2671,13 +2698,6 @@ fun ChatContent(
                 .filterNot { isSystemKind(it.kind) || it.isSelf }
                 .map { it.sender }
         }
-    // ponytail: the existing latest-edge predicate owns chrome too, even while parked.
-    val headerExpansion =
-        animateFloatAsState(
-            targetValue = if ((initialPositionSettled || entryVeilLifted) && !atBottom) 0f else 1f,
-            animationSpec = MotdMotion.fadeIn,
-            label = "chat_header_expansion",
-        )
     val compactHeader by remember {
         derivedStateOf {
             // Keep 48dp controls out until the animated bar can contain them without jumping.
@@ -2910,10 +2930,18 @@ fun ChatContent(
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
         topBar = {
             Column {
+                val expansion = headerExpansion.value
                 TopAppBar(
-                    modifier = Modifier.testTag("chat_top_app_bar"),
+                    modifier =
+                        Modifier.testTag("chat_top_app_bar").then(
+                            if (placingTopEntry) {
+                                Modifier.onGloballyPositioned { laidOutEntryHeaderExpansion = expansion }
+                            } else {
+                                Modifier
+                            },
+                        ),
                     // Material grows beyond this minimum when accessibility text needs more room.
-                    expandedHeight = 36.dp + (TopAppBarDefaults.TopAppBarExpandedHeight - 36.dp) * headerExpansion.value,
+                    expandedHeight = 36.dp + (TopAppBarDefaults.TopAppBarExpandedHeight - 36.dp) * expansion,
                     colors =
                         TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
