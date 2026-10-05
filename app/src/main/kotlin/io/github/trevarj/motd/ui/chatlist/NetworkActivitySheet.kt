@@ -87,7 +87,7 @@ fun NetworkActivityBanner(
                 // A separate merge boundary keeps progress/count changes out of the live button.
                 Text(headline, modifier = Modifier.weight(1f).testTag("chatlist_status_label").semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (issues.isNotEmpty()) Text(pluralStringResource(R.plurals.network_activity_issue_count, issues.size, issues.size), style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("chatlist_status_issue_count"), maxLines = 1, softWrap = false)
-                IconButton(onClick = onHide, modifier = Modifier.size(48.dp).testTag("chatlist_status_hide")) {
+                IconButton(onClick = onHide, modifier = Modifier.size(24.dp).testTag("chatlist_status_hide")) {
                     Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.network_activity_hide_banner))
                 }
             }
