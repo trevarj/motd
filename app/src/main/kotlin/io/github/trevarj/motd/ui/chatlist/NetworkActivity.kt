@@ -7,15 +7,32 @@ import io.github.trevarj.motd.service.HistorySyncStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.transformLatest
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/** Manual hide lasts for this process, independently of navigation entries and saved state. */
+@Singleton
+class NetworkActivityBannerSession
+    @Inject
+    constructor() {
+        private val _hidden = MutableStateFlow(false)
+        val hidden = _hidden.asStateFlow()
+
+        fun hide() {
+            _hidden.value = true
+        }
+    }
 
 /** Observed failures only, retained by the chat-list entry's ViewModel, never persisted. */
 enum class NetworkActivityKind { CONNECTION, HISTORY_FAILED, HISTORY_PARTIAL }
 
-enum class NetworkActivityDisposition { CONNECTED, STOPPED, REMOVED, NO_LONGER_REPORTED, UNAVAILABLE }
+enum class NetworkActivityDisposition { CONNECTED, STOPPED, REMOVED, NO_LONGER_REPORTED, UNAVAILABLE, SUPERSEDED }
 
 enum class NetworkActivityAction { CONNECT, SETTINGS, SERVER_MESSAGES, OPEN_CHAT, RETRY_HISTORY, ACKNOWLEDGE }
 
@@ -69,7 +86,7 @@ data class NetworkActivityState(
     val recent: List<NetworkActivityIssue> = emptyList(),
     val latestAttentionSequence: Long = 0,
 ) {
-    /** Acknowledged records remain active and inspectable, but do not promote the banner. */
+    /** Acknowledged live episodes are suppression tombstones, not rows or proof of recovery. */
     val unacknowledgedCount: Int get() = active.count { !it.acknowledged }
 }
 
@@ -99,7 +116,7 @@ internal class NetworkActivityLedger {
             issue: NetworkActivityIssue,
             disposition: NetworkActivityDisposition,
         ) {
-            recent.add(0, issue.copy(disposition = disposition, targetAvailable = disposition != NetworkActivityDisposition.REMOVED))
+            if (!issue.acknowledged) recent.add(0, issue.copy(disposition = disposition, targetAvailable = disposition != NetworkActivityDisposition.REMOVED))
         }
         for (issue in state.active) {
             val network = networks.firstOrNull { it.id == issue.networkId }
@@ -149,15 +166,16 @@ internal class NetworkActivityLedger {
             changed: Boolean,
         ) {
             // Buffer presence separates history from connection; Failed/Partial are severity changes.
-            val index = active.indexOfFirst { it.networkId == network.id && it.bufferId == bufferId && it.reason == reason }
-            if (index < 0) {
+            val index = active.indexOfFirst { it.networkId == network.id && it.bufferId == bufferId }
+            if (index < 0 || active[index].reason != reason) {
+                if (index >= 0) finish(active.removeAt(index), NetworkActivityDisposition.SUPERSEDED)
                 attentionSequence++
                 active += NetworkActivityIssue(++sequence, 0, network.id, bufferId, network.name, buffer?.displayName, kind, reason, fatal, now, now)
             } else if (changed) {
                 val old = active[index]
-                val updated = old.copy(kind = kind, lastSeen = now, occurrences = old.occurrences + 1, acknowledged = false, fatal = fatal)
+                val updated = old.copy(kind = kind, lastSeen = now, occurrences = old.occurrences + 1, fatal = fatal)
                 if (updated.severity > old.severity) attentionSequence++
-                active[index] = updated
+                active[index] = updated.copy(acknowledged = old.acknowledged && updated.severity <= old.severity)
             }
         }
         for (network in networks) {
@@ -210,15 +228,20 @@ internal class NetworkActivityLedger {
             ?: state.recent.takeIf { includeRecent }?.firstOrNull { it.targetAvailable && it.episodeId == issue.episodeId && it.revision == issue.revision && it.kind == issue.kind && it.reason == issue.reason }
 
     fun acknowledge(issue: NetworkActivityIssue): NetworkActivityState {
-        val current = current(issue)?.takeIf { it.settled && !it.acknowledged } ?: return state
+        val current = current(issue)?.takeUnless { it.acknowledged } ?: return state
         state = state.copy(active = state.active.map { if (it.episodeId == current.episodeId) it.copy(acknowledged = true, revision = it.revision + 1) else it })
+        return state
+    }
+
+    fun clearRecent(): NetworkActivityState {
+        state = state.copy(recent = emptyList())
         return state
     }
 
     fun stop(networkId: Long): NetworkActivityState {
         stoppedConnections[networkId] = previousConnections[networkId]
         state.active.filter { it.networkId == networkId }.forEach { issue -> issue.bufferId?.let { stoppedHistory[it] = previousHistory[it] } }
-        val stopped = state.active.filter { it.networkId == networkId }.map { it.copy(disposition = NetworkActivityDisposition.STOPPED) }
+        val stopped = state.active.filter { it.networkId == networkId && !it.acknowledged }.map { it.copy(disposition = NetworkActivityDisposition.STOPPED) }
         state = state.copy(active = state.active.filterNot { it.networkId == networkId }, recent = (stopped.asReversed() + state.recent).take(20))
         return state
     }

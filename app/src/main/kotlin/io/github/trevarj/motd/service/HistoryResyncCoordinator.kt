@@ -216,10 +216,11 @@ interface HistoryResyncController {
         work: suspend (Long) -> Unit,
     ) = bufferIds.forEach { work(it) }
 
-    /** [preserveUnread] leaves an empty room's recovered messages unread instead of seeding a backlog floor. */
+    /** [statusOwnerId] owns published status; Room work uses [buffer]. [preserveUnread] keeps recovered rows unread. */
     suspend fun reconcileBuffer(
         buffer: BufferEntity,
         client: IrcClient,
+        statusOwnerId: Long = buffer.id,
         preserveUnread: Boolean = false,
         isCurrent: () -> Boolean,
     ): HistoryResyncState
@@ -299,6 +300,7 @@ class HistoryResyncCoordinator
         private data class ActiveFlight(
             val spec: RequestSpec,
             val deferred: Deferred<HistoryResyncState>,
+            val reconcileStatuses: ReconcileStatusOwners? = null,
         )
 
         private data class FlightRegistration(
@@ -770,9 +772,18 @@ class HistoryResyncCoordinator
              * still-queued buffer is simply dropped, because painting a whole-pass failure on untouched
              * buffers would be a lie.
              */
-            fun finish(result: HistoryResyncState): Unit =
+            fun finish(result: HistoryResyncState) {
+                if (networkId == null) {
+                    // Reconcile holds activeGuard; network retirement must not block its publication.
+                    val verdict = result.toSyncStatus()
+                    synchronized(monitor) {
+                        inFlight.toList().forEach { settleLocked(it, verdict) }
+                        generations.keys.toList().forEach { settleLocked(it, HistorySyncStatus.Idle) }
+                    }
+                    return
+                }
                 synchronized(retireGuard) {
-                    if (retireIfNetworkRetired()) return@synchronized
+                    if (retireIfNetworkRetired()) return
                     val verdict = result.toSyncStatus()
                     synchronized(monitor) {
                         inFlight.toList().forEach { settleLocked(it, verdict) }
@@ -780,6 +791,7 @@ class HistoryResyncCoordinator
                     }
                     releaseProgress()
                 }
+            }
 
             /**
              * The pass failed in a way the catch-up loop will retry. Publish nothing: the statuses this
@@ -904,8 +916,8 @@ class HistoryResyncCoordinator
              * (it owns its key outright) but keeps the guard for the same atomicity.
              */
             private fun publishProgress() {
+                val id = networkId ?: return
                 synchronized(retireGuard) {
-                    val id = networkId ?: return
                     // A backfill owns its key outright — it never took the per-network slot, so no
                     // reconnect pass can evict its header, and it can never delete a live pass's.
                     if (progressKey == null && !ownsNetworkSlot()) return
@@ -928,12 +940,43 @@ class HistoryResyncCoordinator
 
             /** Drop this pass's header, under the same ownership guard as [publishProgress]. */
             private fun releaseProgress() {
+                val id = networkId ?: return
                 synchronized(retireGuard) {
-                    val id = networkId ?: return
                     if (progressKey == null && !ownsNetworkSlot()) return
                     _passProgress.update { it - progressKeyOrNetwork(id) }
                 }
             }
+        }
+
+        /** Reconcile owners share canonical work, but each keeps its own guarded status generation. */
+        private inner class ReconcileStatusOwners {
+            private val session = SyncStatusSession()
+            private val owners = LinkedHashSet<Long>()
+            private var syncing = false
+            private var terminal: HistoryResyncState? = null
+
+            // All attachment, phase replay and settlement use activeGuard in the same order.
+            fun attach(ownerId: Long) =
+                synchronized(activeGuard) {
+                    if (!owners.add(ownerId)) return@synchronized
+                    session.queue(ownerId)
+                    if (syncing) session.syncing(ownerId)
+                    terminal?.let(session::finish)
+                }
+
+            fun syncing() =
+                synchronized(activeGuard) {
+                    if (terminal != null || syncing) return@synchronized
+                    syncing = true
+                    // Publication can synchronously attach another owner; attach replays this phase.
+                    owners.toList().forEach(session::syncing)
+                }
+
+            fun finish(result: HistoryResyncState) =
+                synchronized(activeGuard) {
+                    terminal = result
+                    session.finish(result)
+                }
         }
 
         /**
@@ -946,6 +989,7 @@ class HistoryResyncCoordinator
         override suspend fun reconcileBuffer(
             buffer: BufferEntity,
             client: IrcClient,
+            statusOwnerId: Long,
             preserveUnread: Boolean,
             isCurrent: () -> Boolean,
         ): HistoryResyncState =
@@ -954,6 +998,7 @@ class HistoryResyncCoordinator
                 bufferId = buffer.id,
                 target = buffer.ircTarget,
                 source = ClientHistorySource(client),
+                statusOwnerId = statusOwnerId,
                 preserveUnread = preserveUnread,
                 advertisedLatestTime = buffer.advertisedLatestTime,
                 isCurrent = isCurrent,
@@ -1740,6 +1785,7 @@ class HistoryResyncCoordinator
             bufferId: Long,
             target: String,
             source: HistorySource,
+            statusOwnerId: Long = bufferId,
             preserveUnread: Boolean = false,
             advertisedLatestTime: Long? = null,
             isCurrent: () -> Boolean = { true },
@@ -1756,11 +1802,9 @@ class HistoryResyncCoordinator
                     RequestKey(networkId, bufferId, preserveUnread),
                     source.flightIdentity(),
                 ),
-            ) {
-                // A user retry or JOIN seed is its own single-buffer pass; the generation guard lets it
-                // supersede a stale reconnect-pass entry for the same buffer, and vice versa.
-                val session = SyncStatusSession()
-                session.queue(bufferId)
+                statusOwnerId = statusOwnerId,
+            ) { statuses ->
+                val owners = checkNotNull(statuses)
                 val result =
                     try {
                         val work =
@@ -1771,7 +1815,7 @@ class HistoryResyncCoordinator
                                 source = source,
                                 isCurrent = isCurrent,
                                 discoveredLatestMessageTime = null,
-                                session = session,
+                                onSyncing = owners::syncing,
                                 allowConcurrent = ready.supportsConcurrentRequests,
                                 preserveUnread = preserveUnread,
                             )
@@ -1799,14 +1843,14 @@ class HistoryResyncCoordinator
                         // catch-up pass's fetch, or led one it joined); the pill must read the same either way.
                         HistoryResyncState.Failed("History refresh timed out")
                     } catch (cancelled: CancellationException) {
-                        session.finish(HistoryResyncState.Idle)
+                        owners.finish(HistoryResyncState.Idle)
                         throw cancelled
                     } catch (_: StaleConnectionException) {
                         staleConnection()
                     } catch (error: Exception) {
                         HistoryResyncState.Failed(error.message?.take(160) ?: "History refresh failed")
                     }
-                session.finish(if (isCurrent()) result else HistoryResyncState.Idle)
+                owners.finish(if (isCurrent()) result else HistoryResyncState.Idle)
                 result
             }
         }
@@ -2161,6 +2205,7 @@ class HistoryResyncCoordinator
             session: SyncStatusSession? = null,
             allowConcurrent: Boolean = false,
             preserveUnread: Boolean = false,
+            onSyncing: (() -> Unit)? = null,
         ): WorkResult {
             val room = db.bufferDao().observeById(bufferId) ?: throw StaleConnectionException()
             val referenceTypes = source.referenceTypes()
@@ -2185,6 +2230,7 @@ class HistoryResyncCoordinator
             // Everything above can settle this target without a round trip, so only announce Syncing
             // once a request is genuinely about to go on the wire.
             session?.syncing(bufferId)
+            onSyncing?.invoke()
             val boundedLatest =
                 discardedBoundary
                     ?.takeIf { room.type == BufferType.QUERY }
@@ -2298,23 +2344,28 @@ class HistoryResyncCoordinator
         /** Manual eager recovery retained for explicit Missing/All Available requests. */
         private suspend fun coalesced(
             spec: RequestSpec,
-            block: suspend () -> HistoryResyncState,
+            statusOwnerId: Long? = null,
+            block: suspend (ReconcileStatusOwners?) -> HistoryResyncState,
         ): HistoryResyncState {
             val registration =
                 synchronized(activeGuard) {
                     val joined = activeFlights[spec]
                     if (joined != null) {
+                        statusOwnerId?.let { checkNotNull(joined.reconcileStatuses).attach(it) }
                         FlightRegistration(joined, ownsFlight = false)
                     } else {
+                        val statuses = if (statusOwnerId != null) ReconcileStatusOwners() else null
                         val deferred =
                             scope.async(start = CoroutineStart.LAZY) {
                                 // Wire admission lives in the loader's per-network gate, acquired per fetch
                                 // inside block(); this flight only owns request-level coalescing and
                                 // user-facing status.
-                                block()
+                                block(statuses)
                             }
-                        val created = ActiveFlight(spec, deferred)
+                        val created = ActiveFlight(spec, deferred, statuses)
                         activeFlights[spec] = created
+                        // Store before publication: a Queued observer may immediately join this flight.
+                        statusOwnerId?.let { checkNotNull(statuses).attach(it) }
                         deferred.invokeOnCompletion {
                             removeActiveFlight(created)
                         }

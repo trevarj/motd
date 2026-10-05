@@ -473,6 +473,7 @@ class ChatListHistoryRecoveryTest {
                 override suspend fun reconcileBuffer(
                     buffer: BufferEntity,
                     client: IrcClient,
+                    statusOwnerId: Long,
                     preserveUnread: Boolean,
                     isCurrent: () -> Boolean,
                 ): HistoryResyncState {
@@ -486,6 +487,7 @@ class ChatListHistoryRecoveryTest {
                             buffer.id,
                             buffer.ircTarget,
                             source,
+                            statusOwnerId = statusOwnerId,
                             preserveUnread = preserveUnread,
                             advertisedLatestTime = buffer.advertisedLatestTime,
                             isCurrent = isCurrent,

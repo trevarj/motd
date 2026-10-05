@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.chat
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.room.Room
@@ -118,6 +119,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -1836,7 +1838,33 @@ class ChatViewModelTest {
             // The ordinary reconciliation entry point, so a tap collapses onto any in-flight pass
             // instead of opening a bespoke fetch beside it.
             assertEquals(listOf(channel.id), history.reconciledBuffers)
+            assertEquals(listOf(channel.id), history.reconciledStatusOwners)
             assertTrue(history.pendingReconciledBuffers.isEmpty())
+        }
+
+    @Test
+    fun `redirected history retry publishes to the canonical status consumer not the stale route`() =
+        runTest {
+            val canonical = channel.copy(id = 42)
+            val history = FakeHistoryResyncController()
+            val manager = FakeConnectionManager(network.id, client = testClient())
+            val vm = viewModel(canonical, manager, history, routeBufferId = channel.id)
+            val collector = backgroundScope.launch(StandardTestDispatcher(testScheduler)) { vm.historySyncStatus.collect() }
+            try {
+                vm.state.first { it.buffer?.id == canonical.id }
+                runCurrent()
+                history.setSyncStatus(HistorySyncStatus.Partial("canonical cause"))
+                runCurrent()
+                assertEquals(HistorySyncStatus.Partial("canonical cause"), vm.historySyncStatus.value)
+                assertEquals(canonical.id, history.observedStatusOwners.last())
+                vm.retryHistorySync()
+                runCurrent()
+                assertEquals(listOf(canonical.id), history.reconciledBuffers)
+                assertEquals(listOf(canonical.id), history.reconciledStatusOwners)
+            } finally {
+                collector.cancel()
+                vm.viewModelScope.cancel()
+            }
         }
 
     @Test
@@ -4929,9 +4957,14 @@ class ChatViewModelTest {
     ) : HistoryResyncController {
         private val bufferStatus = MutableStateFlow<HistorySyncStatus>(HistorySyncStatus.Idle)
         val reconciledBuffers = mutableListOf<Long>()
+        val reconciledStatusOwners = mutableListOf<Long>()
+        val observedStatusOwners = mutableListOf<Long>()
         val pendingReconciledBuffers = mutableListOf<Long>()
 
-        override fun syncStatus(bufferId: Long): Flow<HistorySyncStatus> = bufferStatus
+        override fun syncStatus(bufferId: Long): Flow<HistorySyncStatus> {
+            observedStatusOwners += bufferId
+            return bufferStatus
+        }
 
         fun setSyncStatus(status: HistorySyncStatus) {
             bufferStatus.value = status
@@ -4940,11 +4973,13 @@ class ChatViewModelTest {
         override suspend fun reconcileBuffer(
             buffer: BufferEntity,
             client: IrcClient,
+            statusOwnerId: Long,
             preserveUnread: Boolean,
             isCurrent: () -> Boolean,
         ): HistoryResyncState {
             check(isCurrent())
             reconciledBuffers += buffer.id
+            reconciledStatusOwners += statusOwnerId
             onReconcile(reconciledBuffers.size)
             return HistoryResyncState.UpToDate
         }

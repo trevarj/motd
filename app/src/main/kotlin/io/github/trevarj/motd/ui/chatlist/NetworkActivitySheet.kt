@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.chatlist
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -16,6 +17,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,7 +31,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -43,7 +51,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.event.IrcClientState
-import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import java.text.DateFormat
 import java.util.Date
@@ -127,15 +134,15 @@ fun NetworkActivitySheet(
     onConnect: (Long) -> Unit,
     onSettings: (Long) -> Unit,
     onServerMessages: (Long) -> Unit,
+    onClearRecent: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, modifier = Modifier.testTag("network_activity_sheet")) {
         SheetSystemBars()
-        NetworkActivitySheetContent(activity, onDismiss, onIssueAction, onConnect, onSettings, onServerMessages)
+        NetworkActivitySheetContent(activity, onDismiss, onIssueAction, onConnect, onSettings, onServerMessages, onClearRecent)
     }
 }
 
 @Composable
-@OptIn(ExperimentalLayoutApi::class)
 internal fun NetworkActivitySheetContent(
     activity: NetworkActivityState,
     onDismiss: () -> Unit,
@@ -143,38 +150,86 @@ internal fun NetworkActivitySheetContent(
     onConnect: (Long) -> Unit,
     onSettings: (Long) -> Unit,
     onServerMessages: (Long) -> Unit,
+    onClearRecent: () -> Unit,
 ) {
+    var recentExpanded by rememberSaveable { mutableStateOf(false) }
+    val recentToggleLabel = stringResource(if (recentExpanded) R.string.network_activity_hide_recent else R.string.network_activity_show_recent)
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(stringResource(R.string.network_activity_title), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
         TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag("network_activity_close")) { Text(stringResource(R.string.network_activity_close)) }
     }
-    LazyColumn(Modifier.fillMaxWidth().testTag("network_activity_list"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { ActivityHeading(stringResource(R.string.network_activity_current)) }
-        items(activity.networks, key = { "network_${it.id}" }) { network ->
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("network_activity_network_${network.id}"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(network.name, style = MaterialTheme.typography.titleSmall)
-                Text(connectionLabel(network.connection), style = MaterialTheme.typography.bodyMedium)
-                if (network.certificatePending) Text(stringResource(R.string.network_activity_certificate_pending), style = MaterialTheme.typography.bodySmall)
-                if (network.history.isEmpty()) Text(stringResource(R.string.network_activity_no_history_status), style = MaterialTheme.typography.bodySmall)
-                network.history.forEach { chat -> Text(stringResource(R.string.network_activity_chat_status, chat.name, historyLabel(chat.status)), style = MaterialTheme.typography.bodySmall) }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (network.connection !is IrcClientState.Ready && network.connection != IrcClientState.Connecting && network.connection != IrcClientState.Registering) {
-                        ActivityAction(stringResource(R.string.network_activity_connect), stringResource(R.string.network_activity_connect_target, network.name), "network_activity_network_${network.id}_connect", !network.certificatePending) { onConnect(network.id) }
-                    }
-                    ActivityAction(stringResource(R.string.network_activity_settings), stringResource(R.string.network_activity_settings_target, network.name), "network_activity_network_${network.id}_settings") { onSettings(network.id) }
-                    ActivityAction(stringResource(R.string.network_activity_server_messages), stringResource(R.string.network_activity_server_target, network.name), "network_activity_network_${network.id}_server") { onServerMessages(network.id) }
-                }
-            }
-        }
+    LazyColumn(Modifier.fillMaxWidth().testTag("network_activity_list"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { ActivityHeading(stringResource(R.string.network_activity_active, activity.unacknowledgedCount)) }
-        if (activity.active.isEmpty()) item { Text(stringResource(R.string.network_activity_no_issues), modifier = Modifier.padding(horizontal = 16.dp)) }
-        items(activity.active.sortedWith(compareByDescending<NetworkActivityIssue> { it.severity }.thenBy { it.episodeId }), key = { "issue_${it.episodeId}" }) { issue ->
+        if (activity.unacknowledgedCount == 0) item { Text(stringResource(R.string.network_activity_no_issues), modifier = Modifier.padding(horizontal = 16.dp)) }
+        items(activity.active.filterNot { it.acknowledged }.sortedWith(compareByDescending<NetworkActivityIssue> { it.severity }.thenBy { it.episodeId }), key = { "issue_${it.episodeId}" }) { issue ->
             ActivityIssue(issue, activity.networks.firstOrNull { it.id == issue.networkId }, onIssueAction)
         }
-        item { ActivityHeading(stringResource(R.string.network_activity_recent)) }
-        if (activity.recent.isEmpty()) item { Text(stringResource(R.string.network_activity_no_recent), modifier = Modifier.padding(horizontal = 16.dp)) }
-        items(activity.recent, key = { "recent_${it.episodeId}" }) { issue -> ActivityIssue(issue, activity.networks.firstOrNull { it.id == issue.networkId }, onIssueAction) }
+        val acknowledged = activity.active.size - activity.unacknowledgedCount
+        if (acknowledged > 0) {
+            item {
+                Text(pluralStringResource(R.plurals.network_activity_acknowledged_count, acknowledged, acknowledged), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp).testTag("network_activity_acknowledged_summary"))
+            }
+        }
+        item { ActivityHeading(stringResource(R.string.network_activity_current)) }
+        items(activity.networks, key = { "network_${it.id}" }) { network ->
+            ActivityNetwork(network, onConnect, onSettings, onServerMessages)
+        }
+        if (activity.recent.isNotEmpty()) {
+            item {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("network_activity_recent_heading"), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.network_activity_recent, activity.recent.size), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f).semantics { heading() })
+                    TextButton(onClick = { recentExpanded = !recentExpanded }, modifier = Modifier.heightIn(min = 48.dp).testTag("network_activity_recent_toggle").semantics { contentDescription = recentToggleLabel }) {
+                        Text(stringResource(if (recentExpanded) R.string.network_activity_hide else R.string.network_activity_show))
+                    }
+                    ActivityAction(stringResource(R.string.network_activity_clear), stringResource(R.string.network_activity_clear_recent), "network_activity_recent_clear", onClick = onClearRecent)
+                }
+            }
+            if (recentExpanded) {
+                items(activity.recent, key = { "recent_${it.episodeId}" }) { issue -> ActivityIssue(issue, activity.networks.firstOrNull { it.id == issue.networkId }, onIssueAction) }
+            }
+        }
         item { Text(stringResource(R.string.network_activity_session_note), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp)) }
+    }
+}
+
+@Composable
+private fun ActivityNetwork(
+    network: NetworkActivityNetwork,
+    onConnect: (Long) -> Unit,
+    onSettings: (Long) -> Unit,
+    onServerMessages: (Long) -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    val connectLabel = stringResource(R.string.network_activity_connect_target, network.name)
+    val settingsLabel = stringResource(R.string.network_activity_settings_target, network.name)
+    val serverLabel = stringResource(R.string.network_activity_server_target, network.name)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("network_activity_network_${network.id}"), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(network.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(connectionLabel(network.connection), style = MaterialTheme.typography.bodySmall)
+            if (network.certificatePending) Text(stringResource(R.string.network_activity_certificate_pending), style = MaterialTheme.typography.bodySmall)
+        }
+        Box {
+            IconButton(onClick = { menuExpanded = true }, modifier = Modifier.testTag("network_activity_network_${network.id}_more")) {
+                Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.network_activity_more_target, network.name))
+            }
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }, modifier = Modifier.testTag("network_activity_network_${network.id}_menu")) {
+                if (network.connection !is IrcClientState.Ready && network.connection != IrcClientState.Connecting && network.connection != IrcClientState.Registering) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.network_activity_connect)) }, enabled = !network.certificatePending, onClick = {
+                        menuExpanded = false
+                        onConnect(network.id)
+                    }, modifier = Modifier.testTag("network_activity_network_${network.id}_connect").semantics { contentDescription = connectLabel })
+                }
+                DropdownMenuItem(text = { Text(stringResource(R.string.network_activity_settings)) }, onClick = {
+                    menuExpanded = false
+                    onSettings(network.id)
+                }, modifier = Modifier.testTag("network_activity_network_${network.id}_settings").semantics { contentDescription = settingsLabel })
+                DropdownMenuItem(text = { Text(stringResource(R.string.network_activity_server_messages)) }, onClick = {
+                    menuExpanded = false
+                    onServerMessages(network.id)
+                }, modifier = Modifier.testTag("network_activity_network_${network.id}_server").semantics { contentDescription = serverLabel })
+            }
+        }
     }
 }
 
@@ -191,6 +246,7 @@ private fun ActivityIssue(
     onAction: (NetworkActivityIssue, NetworkActivityAction) -> Unit,
 ) {
     val active = issue.disposition == null
+    var detailsExpanded by rememberSaveable(issue.episodeId) { mutableStateOf(false) }
     val tag = "network_activity_${if (active) "issue" else "recent"}_${issue.episodeId}"
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag(tag), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(if (issue.chatName == null) issue.networkName else stringResource(R.string.network_activity_chat_target, issue.chatName, issue.networkName), style = MaterialTheme.typography.titleSmall)
@@ -204,29 +260,32 @@ private fun ActivityIssue(
             ),
             style = MaterialTheme.typography.labelMedium,
         )
-        SelectionContainer { Text(issue.reason, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("${tag}_reason")) }
-        val dateFormat = remember { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM) }
-        Text(stringResource(R.string.network_activity_times, dateFormat.format(Date(issue.firstSeen)), dateFormat.format(Date(issue.lastSeen)), issue.occurrences), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("${tag}_times"))
+        if (detailsExpanded) {
+            SelectionContainer { Text(issue.reason, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("${tag}_reason")) }
+            val dateFormat = remember { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM) }
+            Text(stringResource(R.string.network_activity_times, dateFormat.format(Date(issue.firstSeen)), dateFormat.format(Date(issue.lastSeen)), issue.occurrences), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("${tag}_times"))
+        } else {
+            Text(issue.reason, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("${tag}_reason"))
+        }
         when {
             issue.disposition != null -> Text(dispositionLabel(issue.disposition), style = MaterialTheme.typography.labelMedium)
-            issue.acknowledged -> Text(stringResource(R.string.network_activity_acknowledged_active), style = MaterialTheme.typography.labelMedium)
             issue.retrying -> Text(stringResource(R.string.network_activity_retrying), style = MaterialTheme.typography.labelMedium)
             !issue.settled -> Text(stringResource(R.string.network_activity_unresolved), style = MaterialTheme.typography.labelMedium)
         }
         if (!issue.targetAvailable && issue.disposition != NetworkActivityDisposition.REMOVED) Text(stringResource(R.string.network_activity_removed), style = MaterialTheme.typography.labelMedium)
-        if (active || issue.targetAvailable) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        val target = if (issue.chatName == null) issue.networkName else stringResource(R.string.network_activity_chat_target, issue.chatName, issue.networkName)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            ActivityAction(stringResource(if (detailsExpanded) R.string.network_activity_hide_details else R.string.network_activity_details), stringResource(if (detailsExpanded) R.string.network_activity_hide_details_target else R.string.network_activity_details_target, target), "${tag}_details") { detailsExpanded = !detailsExpanded }
+            if (active || issue.targetAvailable) {
                 if (issue.bufferId == null) {
-                    if (active) ActivityAction(stringResource(R.string.network_activity_connect), stringResource(R.string.network_activity_connect_target, issue.networkName), "${tag}_connect", network != null && !network.certificatePending && !issue.retrying) { onAction(issue, NetworkActivityAction.CONNECT) }
+                    if (active) ActivityAction(stringResource(R.string.network_activity_connect), stringResource(R.string.network_activity_connect_target, issue.networkName), "${tag}_connect", network != null && !network.certificatePending && network.connection !is IrcClientState.Ready && network.connection != IrcClientState.Connecting && network.connection != IrcClientState.Registering) { onAction(issue, NetworkActivityAction.CONNECT) }
                     ActivityAction(stringResource(R.string.network_activity_settings), stringResource(R.string.network_activity_settings_target, issue.networkName), "${tag}_settings", network != null) { onAction(issue, NetworkActivityAction.SETTINGS) }
                     ActivityAction(stringResource(R.string.network_activity_server_messages), stringResource(R.string.network_activity_server_target, issue.networkName), "${tag}_server", network != null) { onAction(issue, NetworkActivityAction.SERVER_MESSAGES) }
                 } else {
-                    val target = stringResource(R.string.network_activity_chat_target, issue.chatName.orEmpty(), issue.networkName)
                     ActivityAction(stringResource(R.string.network_activity_open_chat), stringResource(R.string.network_activity_open_chat_target, target), "${tag}_open", network != null) { onAction(issue, NetworkActivityAction.OPEN_CHAT) }
-                    if (active) ActivityAction(stringResource(R.string.network_activity_retry_history), stringResource(R.string.network_activity_retry_target, target), "${tag}_retry", network?.connection is IrcClientState.Ready && issue.settled) { onAction(issue, NetworkActivityAction.RETRY_HISTORY) }
+                    if (active && network?.connection is IrcClientState.Ready && issue.settled) ActivityAction(stringResource(R.string.network_activity_retry_history), stringResource(R.string.network_activity_retry_target, target), "${tag}_retry") { onAction(issue, NetworkActivityAction.RETRY_HISTORY) }
                 }
-                val acknowledgementTarget = if (issue.chatName == null) issue.networkName else stringResource(R.string.network_activity_chat_target, issue.chatName, issue.networkName)
-                if (active && !issue.acknowledged) ActivityAction(stringResource(R.string.network_activity_acknowledge), stringResource(R.string.network_activity_acknowledge_target, acknowledgementTarget), "${tag}_acknowledge", issue.settled) { onAction(issue, NetworkActivityAction.ACKNOWLEDGE) }
+                if (active && !issue.acknowledged) ActivityAction(stringResource(R.string.network_activity_acknowledge), stringResource(R.string.network_activity_acknowledge_target, target), "${tag}_acknowledge") { onAction(issue, NetworkActivityAction.ACKNOWLEDGE) }
             }
         }
     }
@@ -264,20 +323,6 @@ private fun connectionLabel(state: IrcClientState?): String =
     )
 
 @Composable
-private fun historyLabel(status: HistorySyncStatus): String =
-    stringResource(
-        when (status) {
-            HistorySyncStatus.Queued -> R.string.network_activity_queued
-            HistorySyncStatus.AwaitingConnection -> R.string.network_activity_waiting
-            HistorySyncStatus.Syncing -> R.string.network_activity_syncing
-            HistorySyncStatus.Unavailable -> R.string.network_activity_unavailable
-            is HistorySyncStatus.Failed -> R.string.network_activity_history_failed
-            is HistorySyncStatus.Partial -> R.string.network_activity_history_partial
-            HistorySyncStatus.Idle -> R.string.network_activity_no_history_status
-        },
-    )
-
-@Composable
 private fun dispositionLabel(disposition: NetworkActivityDisposition): String =
     stringResource(
         when (disposition) {
@@ -286,5 +331,6 @@ private fun dispositionLabel(disposition: NetworkActivityDisposition): String =
             NetworkActivityDisposition.REMOVED -> R.string.network_activity_removed
             NetworkActivityDisposition.NO_LONGER_REPORTED -> R.string.network_activity_no_longer_reported
             NetworkActivityDisposition.UNAVAILABLE -> R.string.network_activity_unavailable
+            NetworkActivityDisposition.SUPERSEDED -> R.string.network_activity_superseded
         },
     )

@@ -52,34 +52,55 @@ flowchart TD
   displaces the count; a thin progress bar adds no text row. Full reasons remain in the inspector.
   Only the static headline announces politely. Healthy idle hides; archive/invitations promote
   connection activity only, while the Material inspector remains global and preserves list modes.
-  A separately labeled hide button only changes saveable screen-local banner visibility; new issues,
-  progress and mode changes never restore it. Both list and selection overflow menus offer restoration
-  while hidden, beside the always-available inspector. Hiding acknowledges nothing or changes source state.
+  A separately labeled hide button latches the process-local `NetworkActivityBannerSession` hidden.
+  New issues, navigation entries, progress, rotation and warm Activity relaunch never restore it;
+  a genuinely new process starts unhidden and uses the normal startup/sync eligibility gates.
+  Neither overflow menu offers restoration; the inspector is always available.
+  Hiding acknowledges nothing or changes source state.
   While hidden, both overflow buttons show a static theme-accent dot for unseen active issues;
   both inspector menu entries pair a decorative network icon with `Network activity · New`.
-  Hide and every inspector entry baseline a VM-owned session watermark,
-  without acknowledging or resolving issues. All-active-clear removes the cue even with recent records;
-  showing the banner needs no acknowledgement and never changes source state.
+  Hide and every inspector entry baseline a navigation-entry VM-owned attention watermark,
+  without acknowledging or resolving issues. All-active-clear removes the cue even with recent records.
   Connection-only notices retain their three-second grace; presented history waiting bypasses it.
   The existing history anti-flash/minimum-visible presenter also gates per-row queued cues.
 - `ChatListViewModel` eagerly captures observed connection/history failures even without screen
-  subscribers. Its session is the retained chat-list navigation entry, not process lifetime.
-  A small in-memory ledger groups target, connection/history family and exact cause, counts failure
-  reentry (not duplicate snapshots), retains every active cause through retry, and caps newest-first
-  recent activity at 20. Failed/Partial are history severities: switching them updates the same episode.
+  subscribers. Its issue queue and seen watermark belong to the retained chat-list navigation entry,
+  not the process-wide banner hide latch. A new entry gets a fresh queue/watermark but shares the latch.
+  A small in-memory ledger retains one episode per network connection or history source status-map key.
+  A different exact cause replaces the prior episode, honestly marked Replaced in newest-first recent
+  activity (capped at 20); acknowledged episodes are discarded on replacement or finish.
+  Same-cause retries count reentry, not duplicate snapshots, without undoing acknowledgement.
+  Failed/Partial are history severities: switching them updates the same episode.
   A monotonic attention sequence advances only for new causes/episodes or actual severity increases,
-  not retries, revisions, names, progress, acknowledgement or recovery; recent eviction cannot erase it.
-  The eager unseen derivation requires active issues and resets with the ledger on a new VM session.
-  Acknowledgement is explicit, settled-only and episode/revision guarded: it hides promotion and
-  the history error badge, never source status or unresolved detail. A later failure reentry surfaces
-  again. Closing the inspector acknowledges nothing; actions hide it before navigation.
+  not retries, revisions, names, progress, acknowledgement or recovery; clearing recent cannot erase it.
+  The eager unseen derivation requires unacknowledged current issues and resets on a new VM session.
+  Acknowledgement is explicit and exact episode/revision guarded, including retry and unknown states:
+  it hides promotion, the history error badge and full issue rows, never source status or retries.
+  A compact acknowledged-still-active count avoids claiming recovery. Only severity increases or a
+  different/new episode re-arm acknowledgement; ordinary same-cause retry remains quiet.
+  Current unacknowledged issues precede compact named network/status rows with native action menus.
+  Details explicitly expands selectable full reasons and first/last/occurrence metadata from two-line
+  previews. Recent is collapsed by default; its Clear action only empties recent and invalidates delayed
+  recent navigation, preserving active suppression, source state, attention and the seen watermark.
+  Closing the inspector acknowledges nothing; recovery/navigation actions hide it before dispatch.
   Recent records retain their honest disposition and usable navigation; later target deletion disables
   their actions without rewriting the earlier recovery outcome. The inspector is available in every mode.
   Ready proves Connected; deliberate offline and deletion mean Stopped/Removed. History disappearance
-  means No longer reported, not repaired; Unavailable is not recovery. History Retry reuses canonical
-  buffers and the current-client guarded reconciliation API. Certificate consent stays separate.
+  means No longer reported, not repaired; Unavailable and unknown connection absence are not recovery.
+  History Retry requires the exact current episode and source kind/reason, canonical buffers and the
+  current-client guarded reconciliation API. Connect rejects Ready/Connecting/Registering sockets.
+  Certificate consent stays separate.
   History issue identity follows the source status-map key even when repository observation returns
-  a redirected canonical room; navigation and reconciliation resolve that canonical target at action time.
+  a redirected canonical room; navigation/reconciliation validate that room's network before using
+  the issue network's live client. Reconcile accepts a separate `statusOwnerId`: Room writes, cursors
+  and coalescing remain canonical, while Queued/Syncing/terminal status and its generation belong to
+  the original observed source. Canonical and redirected status owners attach to the same flight,
+  replay its current phase or terminal, and settle through the existing guarded session without
+  duplicate wire work or resurrecting dismissed generations. Ordinary consumers (including chat's
+  operational room, not its stale route) use the canonical room ID as their status owner.
+  Reconcile-only publication never takes the network retirement guard; network sessions retain
+  retirement-before-session locking. Syncing broadcasts snapshot their owners so synchronous
+  observers can attach another owner without invalidating the current iteration.
 - Appearance's input style is an IRC-only preference shared by channel, query,
   and server buffers. Default, Large, and Nickname use one editor/draft path;
   Nickname's network-owned identity is decoration, never submitted text.

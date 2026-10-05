@@ -272,6 +272,7 @@ class ChatListReorderTest {
                 override suspend fun reconcileBuffer(
                     buffer: BufferEntity,
                     client: IrcClient,
+                    statusOwnerId: Long,
                     preserveUnread: Boolean,
                     isCurrent: () -> Boolean,
                 ) = HistoryResyncState.Idle

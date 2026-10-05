@@ -47,6 +47,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -59,10 +60,12 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
@@ -82,6 +85,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -2588,6 +2593,272 @@ class HistoryResyncCoordinatorTest {
             assertEquals(mapOf(bufferId to HistorySyncStatus.Queued), whileQueued)
             assertEquals(mapOf(bufferId to HistorySyncStatus.Syncing), whileSyncing)
             assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+        }
+
+    @Test
+    fun redirectedStatusOwnerWritesCanonicalRoomAndSettlesSourceKey() =
+        runTest {
+            coordinator = HistoryResyncCoordinator(db, processor, scope = backgroundScope, settingsRepository = settingsRepository)
+            val owner = db.bufferDao().insert(BufferEntity(networkId = networkId, name = "#former", displayName = "#former", type = BufferType.CHANNEL, redirectToRoomId = bufferId))
+            val failing = FakeSource { throw IOException("original source failure") }
+            assertTrue(coordinator.reconcileBuffer(networkId, bufferId, "#chan", failing, statusOwnerId = owner) is HistoryResyncState.Failed)
+            assertTrue(coordinator.syncStatuses.value.getValue(owner) is HistorySyncStatus.Failed)
+            assertFalse(coordinator.syncStatuses.value.containsKey(bufferId))
+            var queued: Map<Long, HistorySyncStatus>? = null
+            var syncing: Map<Long, HistorySyncStatus>? = null
+            val recovered =
+                FakeSource {
+                    syncing = coordinator.syncStatuses.value
+                    FakeResponse(listOf(message("redirected-history", 100)), endOfHistory = true)
+                }
+            recovered.onAvailability = {
+                if (coordinator.syncStatuses.value[owner] == HistorySyncStatus.Queued) queued = coordinator.syncStatuses.value
+            }
+            assertEquals(HistoryResyncState.Updated(1), coordinator.reconcileBuffer(networkId, bufferId, "#chan", recovered, statusOwnerId = owner))
+            assertEquals(mapOf(owner to HistorySyncStatus.Queued), queued)
+            assertEquals(mapOf(owner to HistorySyncStatus.Syncing), syncing)
+            assertEquals(listOf("redirected-history"), rows(bufferId).mapNotNull { it.msgid })
+            assertTrue(rows(owner).isEmpty())
+            assertEquals(100L, db.historyCursorDao().byRoom(bufferId)?.newestServerTime)
+            assertNull(db.historyCursorDao().byRoom(owner))
+            assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+            assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(owner).first())
+        }
+
+    @Test
+    fun canonicalAndRedirectedStatusOwnersCoalesceOneReconcileAndBothSettle() =
+        runTest {
+            coordinator = HistoryResyncCoordinator(db, processor, scope = backgroundScope, settingsRepository = settingsRepository)
+            val owner = db.bufferDao().insert(BufferEntity(networkId = networkId, name = "#former", displayName = "#former", type = BufferType.CHANNEL, redirectToRoomId = bufferId))
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val source =
+                FakeSource {
+                    entered.complete(Unit)
+                    release.await()
+                    throw IOException("shared wire failure")
+                }
+            val canonical = async(start = CoroutineStart.UNDISPATCHED) { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source) }
+            val redirected = async(start = CoroutineStart.UNDISPATCHED) { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source, statusOwnerId = owner) }
+            assertEquals(mapOf(bufferId to HistorySyncStatus.Queued, owner to HistorySyncStatus.Queued), coordinator.syncStatuses.value)
+            runCurrent()
+            entered.await()
+            assertEquals(mapOf(bufferId to HistorySyncStatus.Syncing, owner to HistorySyncStatus.Syncing), coordinator.syncStatuses.value)
+            release.complete(Unit)
+            val result = canonical.await()
+            assertTrue(result is HistoryResyncState.Failed)
+            assertEquals(result, redirected.await())
+            assertEquals(setOf(bufferId, owner), coordinator.syncStatuses.value.keys)
+            assertTrue(
+                coordinator.syncStatuses.value.values
+                    .all { it is HistorySyncStatus.Failed },
+            )
+            assertEquals(1, source.requests.size)
+        }
+
+    @Test
+    fun lateCoalescedStatusOwnerJoinsSyncingAndCannotBeStranded() =
+        runTest {
+            coordinator = HistoryResyncCoordinator(db, processor, scope = backgroundScope, settingsRepository = settingsRepository)
+            val owner = db.bufferDao().insert(BufferEntity(networkId = networkId, name = "#former", displayName = "#former", type = BufferType.CHANNEL, redirectToRoomId = bufferId))
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val source =
+                FakeSource {
+                    entered.complete(Unit)
+                    release.await()
+                    FakeResponse(endOfHistory = true)
+                }
+            val first = async(start = CoroutineStart.UNDISPATCHED) { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source, statusOwnerId = owner) }
+            runCurrent()
+            entered.await()
+            assertEquals(mapOf(owner to HistorySyncStatus.Syncing), coordinator.syncStatuses.value)
+            val late = async(start = CoroutineStart.UNDISPATCHED) { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source) }
+            assertEquals(mapOf(owner to HistorySyncStatus.Syncing, bufferId to HistorySyncStatus.Syncing), coordinator.syncStatuses.value)
+            release.complete(Unit)
+            assertEquals(HistoryResyncState.UpToDate, first.await())
+            assertEquals(HistoryResyncState.UpToDate, late.await())
+            assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+            assertEquals(1, source.requests.size)
+        }
+
+    @Test
+    fun dismissedCoalescedOwnerGenerationCannotBeRepublishedBySharedTerminal() =
+        runTest {
+            coordinator = HistoryResyncCoordinator(db, processor, scope = backgroundScope, settingsRepository = settingsRepository)
+            val owner = db.bufferDao().insert(BufferEntity(networkId = networkId, name = "#former", displayName = "#former", type = BufferType.CHANNEL, redirectToRoomId = bufferId))
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val source =
+                FakeSource {
+                    entered.complete(Unit)
+                    release.await()
+                    throw IOException("shared terminal")
+                }
+            val canonical = async(start = CoroutineStart.UNDISPATCHED) { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source) }
+            val redirected = async(start = CoroutineStart.UNDISPATCHED) { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source, statusOwnerId = owner) }
+            runCurrent()
+            entered.await()
+            coordinator.dismissSyncStatus(owner)
+            val sameOwner = async(start = CoroutineStart.UNDISPATCHED) { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source, statusOwnerId = owner) }
+            assertEquals(mapOf(bufferId to HistorySyncStatus.Syncing), coordinator.syncStatuses.value)
+            release.complete(Unit)
+            val result = canonical.await()
+            assertEquals(result, redirected.await())
+            assertEquals(result, sameOwner.await())
+            assertTrue(coordinator.syncStatuses.value.getValue(bufferId) is HistorySyncStatus.Failed)
+            assertFalse(coordinator.syncStatuses.value.containsKey(owner))
+            assertEquals(HistorySyncStatus.Idle, coordinator.syncStatus(owner).first())
+            assertEquals(1, source.requests.size)
+        }
+
+    @Test
+    fun ownerJoiningDuringSharedTerminalReplaysTerminalWithoutAnotherRequest() =
+        runTest {
+            coordinator = HistoryResyncCoordinator(db, processor, scope = backgroundScope, settingsRepository = settingsRepository)
+            val owner = db.bufferDao().insert(BufferEntity(networkId = networkId, name = "#former", displayName = "#former", type = BufferType.CHANNEL, redirectToRoomId = bufferId))
+            val source = FakeSource { throw IOException("shared terminal") }
+            var joining = false
+            var late: Deferred<HistoryResyncState>? = null
+            val collector =
+                backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                    coordinator.syncStatuses.collect { statuses ->
+                        if (!joining && statuses[bufferId] is HistorySyncStatus.Failed) {
+                            joining = true
+                            late = async(start = CoroutineStart.UNDISPATCHED) { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source, statusOwnerId = owner) }
+                        }
+                    }
+                }
+            try {
+                val result = coordinator.reconcileBuffer(networkId, bufferId, "#chan", source)
+                assertTrue(result is HistoryResyncState.Failed)
+                assertEquals(result, checkNotNull(late).await())
+                assertTrue(coordinator.syncStatuses.value.getValue(owner) is HistorySyncStatus.Failed)
+                assertEquals(1, source.requests.size)
+            } finally {
+                collector.cancel()
+            }
+        }
+
+    @Test
+    fun syncingObserverCanAttachThirdOwnerWithoutInterruptingCanonicalWork() =
+        runTest {
+            coordinator = HistoryResyncCoordinator(db, processor, scope = backgroundScope, settingsRepository = settingsRepository)
+            for (id in 7L..9L) {
+                db.bufferDao().insert(BufferEntity(id = id, networkId = networkId, name = "#owner$id", displayName = "#owner$id", type = BufferType.CHANNEL, redirectToRoomId = bufferId))
+            }
+            var duringWire: Map<Long, HistorySyncStatus>? = null
+            val source =
+                FakeSource {
+                    duringWire = coordinator.syncStatuses.value
+                    FakeResponse(endOfHistory = true)
+                }
+            var joining = false
+            var third: Deferred<HistoryResyncState>? = null
+            val collector =
+                backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                    coordinator.syncStatuses.collect { statuses ->
+                        if (!joining && statuses[7L] == HistorySyncStatus.Syncing && statuses[8L] == HistorySyncStatus.Queued) {
+                            joining = true
+                            third = async(start = CoroutineStart.UNDISPATCHED) { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source, statusOwnerId = 9) }
+                        }
+                    }
+                }
+            try {
+                val first = async(start = CoroutineStart.UNDISPATCHED) { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source, statusOwnerId = 7) }
+                val second = async(start = CoroutineStart.UNDISPATCHED) { coordinator.reconcileBuffer(networkId, bufferId, "#chan", source, statusOwnerId = 8) }
+                assertEquals(mapOf(7L to HistorySyncStatus.Queued, 8L to HistorySyncStatus.Queued), coordinator.syncStatuses.value)
+                assertEquals(HistoryResyncState.UpToDate, first.await())
+                assertEquals(HistoryResyncState.UpToDate, second.await())
+                assertEquals(HistoryResyncState.UpToDate, checkNotNull(third).await())
+                assertEquals(mapOf(7L to HistorySyncStatus.Syncing, 8L to HistorySyncStatus.Syncing, 9L to HistorySyncStatus.Syncing), duringWire)
+                assertEquals(1, source.requests.size)
+                assertEquals(emptyMap<Long, HistorySyncStatus>(), coordinator.syncStatuses.value)
+            } finally {
+                collector.cancel()
+            }
+        }
+
+    @Test
+    fun reconcileOwnersQueueJoinAndSettleWhileNetworkTerminalObserverHoldsItsPublication() =
+        runBlocking {
+            val ownedJob = SupervisorJob()
+            val ownedScope = CoroutineScope(ownedJob + Dispatchers.Default)
+            val terminalPublished = CountDownLatch(1)
+            val reconcileOnWire = CountDownLatch(1)
+            val reconcileFinished = CountDownLatch(1)
+            val releaseWire = CompletableDeferred<Unit>()
+            val observerFinished = CompletableDeferred<Unit>()
+            val lateRequest = CompletableDeferred<Deferred<HistoryResyncState>>()
+            var collector: Job? = null
+            try {
+                coordinator = HistoryResyncCoordinator(db, processor, scope = ownedScope, settingsRepository = settingsRepository)
+                db.bufferDao().insert(BufferEntity(id = 8, networkId = networkId, name = "#other", displayName = "#other", type = BufferType.CHANNEL))
+                for (id in listOf(7L, 9L)) {
+                    db.bufferDao().insert(BufferEntity(id = id, networkId = networkId, name = "#owner$id", displayName = "#owner$id", type = BufferType.CHANNEL, redirectToRoomId = 8))
+                }
+                val networkSource =
+                    FakeSource { request ->
+                        if (request.subcommand == ChatHistoryRequest.Subcommand.TARGETS) FakeResponse(endOfHistory = true) else throw IOException("network give-up")
+                    }
+                val networkResult = coordinator.resyncNetwork(networkId, openTargets(bufferId to "#chan"), networkSource)
+                assertTrue(networkResult is HistoryResyncState.Failed)
+                assertEquals(HistorySyncStatus.Syncing, coordinator.syncStatuses.value[bufferId])
+                val source =
+                    FakeSource {
+                        reconcileOnWire.countDown()
+                        releaseWire.await()
+                        FakeResponse(endOfHistory = true)
+                    }
+                val observed = AtomicBoolean()
+                collector =
+                    ownedScope.launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                        coordinator.syncStatuses.collect { statuses ->
+                            if (statuses[bufferId] is HistorySyncStatus.Failed && observed.compareAndSet(false, true)) {
+                                // A real give-up terminal invokes this observer while owning network publication.
+                                terminalPublished.countDown()
+                                try {
+                                    assertTrue("Reconcile queue/progress waited for network publication", reconcileOnWire.await(5, TimeUnit.SECONDS))
+                                    lateRequest.complete(
+                                        ownedScope.async(start = CoroutineStart.UNDISPATCHED) {
+                                            coordinator.reconcileBuffer(networkId, 8, "#other", source, statusOwnerId = 9)
+                                        },
+                                    )
+                                    releaseWire.complete(Unit)
+                                    assertTrue("Reconcile settlement waited for network publication", reconcileFinished.await(5, TimeUnit.SECONDS))
+                                    observerFinished.complete(Unit)
+                                } catch (error: Throwable) {
+                                    // A failed assertion releases the observer instead of leaving a real deadlock.
+                                    observerFinished.completeExceptionally(error)
+                                }
+                            }
+                        }
+                    }
+                val terminal = ownedScope.async { coordinator.settleNetworkPass(networkId, networkResult, networkSource) }
+                assertTrue("Network terminal was not observed", terminalPublished.await(5, TimeUnit.SECONDS))
+                val reconcile =
+                    ownedScope.async {
+                        try {
+                            coordinator.reconcileBuffer(networkId, 8, "#other", source, statusOwnerId = 7)
+                        } finally {
+                            reconcileFinished.countDown()
+                        }
+                    }
+                withTimeout(15_000) {
+                    observerFinished.await()
+                    terminal.await()
+                    assertEquals(HistoryResyncState.UpToDate, reconcile.await())
+                    assertEquals(HistoryResyncState.UpToDate, lateRequest.await().await())
+                }
+                assertEquals(1, source.requests.size)
+                assertEquals(setOf(bufferId), coordinator.syncStatuses.value.keys)
+                assertTrue(coordinator.syncStatuses.value.getValue(bufferId) is HistorySyncStatus.Failed)
+                assertEquals(emptyMap<Long, SyncPassProgress>(), coordinator.passProgress.value)
+            } finally {
+                releaseWire.complete(Unit)
+                collector?.cancel()
+                ownedJob.cancelAndJoin()
+            }
         }
 
     @Test

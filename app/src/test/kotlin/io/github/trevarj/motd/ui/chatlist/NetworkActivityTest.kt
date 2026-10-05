@@ -33,6 +33,16 @@ class NetworkActivityTest {
 
     private fun ready() = IrcClientState.Ready("me", emptySet(), emptyMap())
 
+    @Test fun bannerHideIsOneWayAndFreshProcessOwnerStartsUnhidden() {
+        val session = NetworkActivityBannerSession()
+        assertFalse(session.hidden.value)
+        session.hide()
+        assertTrue(session.hidden.value)
+        session.hide()
+        assertTrue(session.hidden.value)
+        assertFalse(NetworkActivityBannerSession().hidden.value)
+    }
+
     @Test fun attentionSequenceTracksOnlyNewCausesEpisodesAndSeverityRises() {
         assertEquals(0L, observe().latestAttentionSequence)
 
@@ -114,17 +124,25 @@ class NetworkActivityTest {
         assertEquals(recovered.recent, observe(mapOf(1L to ready())).recent)
     }
 
-    @Test fun repeatedSnapshotsDeduplicateDistinctCausesRemainAndReentryCounts() {
+    @Test fun distinctCauseSupersedesPreviousSourceIssueAndSameCauseReentryCounts() {
         val first = observe(mapOf(1L to failure("first"))).active.single()
         assertEquals(first, observe(mapOf(1L to failure("first"))).active.single())
         val distinct = observe(mapOf(1L to failure("second")))
-        assertEquals(listOf("first", "second"), distinct.active.map { it.reason })
+        assertEquals("second", distinct.active.single().reason)
+        assertEquals("first", distinct.recent.single().reason)
+        assertEquals(NetworkActivityDisposition.SUPERSEDED, distinct.recent.single().disposition)
+        assertNull(ledger.current(first))
+        assertEquals(1, ledger.acknowledge(first).unacknowledgedCount)
+        val second = distinct.active.single()
         observe(mapOf(1L to IrcClientState.Connecting))
-        val repeated = observe(mapOf(1L to failure("first"))).active.first()
-        assertEquals(first.episodeId, repeated.episodeId)
-        assertEquals(first.firstSeen, repeated.firstSeen)
+        val repeated = observe(mapOf(1L to failure("second"))).active.single()
+        assertEquals(second.episodeId, repeated.episodeId)
+        assertEquals(second.firstSeen, repeated.firstSeen)
         assertEquals(2, repeated.occurrences)
-        assertTrue(repeated.lastSeen > first.lastSeen)
+        assertTrue(repeated.lastSeen > second.lastSeen)
+        val replacedAgain = observe(mapOf(1L to failure("first"))).active.single()
+        assertNotEquals(first.episodeId, replacedAgain.episodeId)
+        assertEquals(1, replacedAgain.occurrences)
     }
 
     @Test fun acknowledgementHidesPromotionNotRecordAndStaleActionsCannotAcknowledge() {
@@ -136,8 +154,8 @@ class NetworkActivityTest {
         observe(mapOf(1L to IrcClientState.Connecting))
         assertNull(ledger.current(original))
         val retried = observe(mapOf(1L to failure()))
-        assertFalse(retried.active.single().acknowledged)
-        assertEquals(1, ledger.acknowledge(original).unacknowledgedCount)
+        assertTrue(retried.active.single().acknowledged)
+        assertEquals(0, ledger.acknowledge(original).unacknowledgedCount)
         observe(mapOf(1L to ready()))
         val later = observe(mapOf(1L to failure()))
         assertNotEquals(original.episodeId, later.active.single().episodeId)
@@ -173,11 +191,12 @@ class NetworkActivityTest {
         }
         assertEquals(2, observe(history = mapOf(10L to HistorySyncStatus.Failed(full))).active.single().occurrences)
         val partial = observe(history = mapOf(10L to HistorySyncStatus.Partial("partial reason")))
-        assertEquals(2, partial.active.size)
-        assertEquals(NetworkActivityKind.HISTORY_PARTIAL, partial.active.last().kind)
+        assertEquals(1, partial.active.size)
+        assertEquals(NetworkActivityKind.HISTORY_PARTIAL, partial.active.single().kind)
+        assertEquals(NetworkActivityDisposition.SUPERSEDED, partial.recent.single().disposition)
         val unavailable = observe(history = mapOf(10L to HistorySyncStatus.Unavailable))
         assertTrue(unavailable.active.isEmpty())
-        assertTrue(unavailable.recent.all { it.disposition == NetworkActivityDisposition.UNAVAILABLE })
+        assertEquals(NetworkActivityDisposition.UNAVAILABLE, unavailable.recent.first().disposition)
         observe(history = mapOf(20L to HistorySyncStatus.Partial("missing")))
         assertEquals(NetworkActivityDisposition.NO_LONGER_REPORTED, observe().recent.first().disposition)
     }
@@ -202,8 +221,9 @@ class NetworkActivityTest {
         assertNull(ledger.current(failed))
         assertEquals(partialAgain, observe(history = mapOf(10L to HistorySyncStatus.Partial("same cause"))).active.single())
         val distinct = observe(history = mapOf(10L to HistorySyncStatus.Failed("different cause")))
-        assertEquals(2, distinct.active.size)
-        assertTrue(distinct.recent.isEmpty())
+        assertEquals(1, distinct.active.size)
+        assertEquals(NetworkActivityDisposition.SUPERSEDED, distinct.recent.single().disposition)
+        assertNull(ledger.current(partialAgain))
     }
 
     @Test fun redirectMetadataKeepsStatusKeyIdentityAndDoesNotManufactureSettlement() {
@@ -250,7 +270,7 @@ class NetworkActivityTest {
         assertNull(ledger.current(ended, includeRecent = true))
     }
 
-    @Test fun recentIsNewestFirstCappedTwentyAndActiveIsNeverEvicted() {
+    @Test fun recentIsNewestFirstCappedTwentyAndActiveIsBoundedPerSource() {
         observe(mapOf(2L to failure("keep")))
         repeat(25) { index ->
             observe(mapOf(1L to failure("failure $index"), 2L to failure("keep")))
@@ -265,8 +285,73 @@ class NetworkActivityTest {
         assertTrue(NetworkActivityLedger().observe(networks, emptyMap(), emptyMap(), buffers, emptySet(), now).recent.isEmpty())
         repeat(25) { index -> observe(mapOf(1L to ready(), 2L to failure("active cause $index"))) }
         val manyActive = observe(mapOf(1L to ready(), 2L to failure("active cause 24")))
-        assertEquals(26, manyActive.active.size)
+        assertEquals(1, manyActive.active.size)
+        assertEquals("active cause 24", manyActive.active.single().reason)
         assertEquals(20, manyActive.recent.size)
+        assertEquals("active cause 23", manyActive.recent.first().reason)
+    }
+
+    @Test fun acknowledgementDuringRetryAndUnknownAbsenceStaysQuietUntilEscalationOrNewEpisode() {
+        observe(mapOf(1L to failure()), mapOf(10L to HistorySyncStatus.Partial("partial")))
+        val retrying = observe(mapOf(1L to IrcClientState.Connecting), mapOf(10L to HistorySyncStatus.Syncing))
+        retrying.active.filter { it.bufferId != null }.forEach { ledger.acknowledge(it) }
+        val unknown = observe(history = mapOf(10L to HistorySyncStatus.Syncing))
+        val connection = unknown.active.single { it.bufferId == null }
+        assertFalse(connection.settled)
+        val acknowledgedUnknown = ledger.acknowledge(connection)
+        assertEquals(0, acknowledgedUnknown.unacknowledgedCount)
+        assertEquals(unknown.networks, acknowledgedUnknown.networks)
+        assertTrue(acknowledgedUnknown.recent.isEmpty())
+        val retried = observe(mapOf(1L to failure()), mapOf(10L to HistorySyncStatus.Partial("partial")))
+        assertEquals(0, retried.unacknowledgedCount)
+        assertTrue(retried.active.all { it.occurrences == 2 && it.acknowledged })
+        assertEquals(retrying.latestAttentionSequence, retried.latestAttentionSequence)
+        val escalated = observe(mapOf(1L to failure(fatal = true)), mapOf(10L to HistorySyncStatus.Failed("partial")))
+        assertEquals(2, escalated.unacknowledgedCount)
+        assertEquals(retried.latestAttentionSequence + 2, escalated.latestAttentionSequence)
+        escalated.active.forEach { ledger.acknowledge(it) }
+        val replaced = observe(mapOf(1L to failure("new cause")), mapOf(10L to HistorySyncStatus.Failed("new history cause")))
+        assertEquals(2, replaced.unacknowledgedCount)
+        assertTrue(replaced.recent.isEmpty())
+        replaced.active.forEach { ledger.acknowledge(it) }
+        assertTrue(observe(mapOf(1L to ready())).recent.isEmpty())
+        assertEquals(1, observe(mapOf(1L to failure("new cause"))).unacknowledgedCount)
+    }
+
+    @Test fun acknowledgedFinishStopAndRemovalPruneInsteadOfEnteringRecent() {
+        for (terminal in listOf("ready", "stop", "removed", "unavailable", "absent")) {
+            val fresh = NetworkActivityLedger()
+            val connection = terminal == "ready" || terminal == "stop" || terminal == "removed"
+            val state = fresh.observe(networks, if (connection) mapOf(1L to failure()) else emptyMap(), if (connection) emptyMap() else mapOf(10L to HistorySyncStatus.Failed("history")), buffers, emptySet(), now++)
+            fresh.acknowledge(state.active.single())
+            val finished =
+                if (terminal == "stop") {
+                    fresh.stop(1)
+                } else {
+                    fresh.observe(if (terminal == "removed") emptyList() else networks, if (terminal == "ready") mapOf(1L to ready()) else emptyMap(), if (terminal == "unavailable") mapOf(10L to HistorySyncStatus.Unavailable) else emptyMap(), buffers, emptySet(), now++)
+                }
+            assertTrue(terminal, finished.active.isEmpty())
+            assertTrue(terminal, finished.recent.isEmpty())
+            assertEquals(state.latestAttentionSequence, finished.latestAttentionSequence)
+        }
+    }
+
+    @Test fun clearRecentPreservesActiveSuppressionAttentionAndStoppedSources() {
+        val first = observe(mapOf(1L to failure("old"), 2L to failure("stopped")), mapOf(10L to HistorySyncStatus.Partial("history")))
+        ledger.stop(2)
+        val next = observe(mapOf(1L to failure("new"), 2L to failure("stopped")), mapOf(10L to HistorySyncStatus.Syncing))
+        val acknowledged = ledger.acknowledge(next.active.single { it.bufferId == 10L })
+        val recent = acknowledged.recent.first()
+        val cleared = ledger.clearRecent()
+        assertEquals(acknowledged.copy(recent = emptyList()), cleared)
+        assertEquals(first.latestAttentionSequence + 1, cleared.latestAttentionSequence)
+        assertNull(ledger.current(recent, includeRecent = true))
+        val observed = observe(mapOf(1L to failure("new"), 2L to failure("stopped")), mapOf(10L to HistorySyncStatus.Partial("history")))
+        assertTrue(observed.active.none { it.networkId == 2L })
+        assertTrue(observed.active.single { it.bufferId == 10L }.acknowledged)
+        assertEquals(2, observed.active.single { it.bufferId == 10L }.occurrences)
+        assertEquals(cleared.latestAttentionSequence, observed.latestAttentionSequence)
+        assertTrue(observed.recent.isEmpty())
     }
 
     @Test fun connectionGraceSurvivesRepresentationsAndWaitingOpensCombinedEpisode() {

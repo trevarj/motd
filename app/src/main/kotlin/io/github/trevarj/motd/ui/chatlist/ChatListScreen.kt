@@ -240,6 +240,7 @@ fun ChatListScreen(
     val recoveringActivityIds by viewModel.recoveringActivityIds.collectAsStateWithLifecycle()
     val networkActivity by viewModel.networkActivity.collectAsStateWithLifecycle()
     val hasUnseenNetworkActivity by viewModel.hasUnseenNetworkActivity.collectAsStateWithLifecycle()
+    val networkActivityBannerHidden by viewModel.networkActivityBannerHidden.collectAsStateWithLifecycle()
     val connectionNoticeVisible by viewModel.connectionNoticeVisible.collectAsStateWithLifecycle()
     val connectionOnlyNoticeVisible by viewModel.connectionOnlyNoticeVisible.collectAsStateWithLifecycle()
     val nickSuggestions by viewModel.nickSuggestions.collectAsStateWithLifecycle()
@@ -268,7 +269,10 @@ fun ChatListScreen(
         recoveringActivityIds = recoveringActivityIds,
         networkActivity = networkActivity,
         hasUnseenNetworkActivity = hasUnseenNetworkActivity,
+        networkActivityBannerHidden = networkActivityBannerHidden,
+        onHideNetworkActivityBanner = viewModel::hideNetworkActivityBanner,
         onNetworkActivitySeen = viewModel::markNetworkActivitySeen,
+        onClearNetworkActivityHistory = viewModel::clearNetworkActivityHistory,
         connectionNoticeVisible = connectionNoticeVisible,
         connectionOnlyNoticeVisible = connectionOnlyNoticeVisible,
         onActivityAction = { issue, action -> viewModel.networkActivityAction(issue, action, onOpenBuffer, onOpenNetworkSettings) },
@@ -413,7 +417,10 @@ fun ChatListContent(
     onNickSuggestionQuery: (Long?, String) -> Unit = { _, _ -> },
     networkActivity: NetworkActivityState = NetworkActivityState(),
     hasUnseenNetworkActivity: Boolean = false,
+    networkActivityBannerHidden: Boolean = false,
+    onHideNetworkActivityBanner: () -> Unit = {},
     onNetworkActivitySeen: () -> Unit = {},
+    onClearNetworkActivityHistory: () -> Unit = {},
     connectionNoticeVisible: Boolean = false,
     connectionOnlyNoticeVisible: Boolean = connectionNoticeVisible,
     onActivityAction: (NetworkActivityIssue, NetworkActivityAction) -> Unit = { _, _ -> },
@@ -427,9 +434,8 @@ fun ChatListContent(
     var showFolderAssignment by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showActivitySheet by remember { mutableStateOf(false) }
-    var bannerVisible by rememberSaveable { mutableStateOf(true) }
     val activitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val showNewNetworkActivity = !bannerVisible && hasUnseenNetworkActivity && networkActivity.active.isNotEmpty()
+    val showNewNetworkActivity = networkActivityBannerHidden && hasUnseenNetworkActivity && networkActivity.unacknowledgedCount > 0
     val newNetworkActivityDescription = stringResource(R.string.network_activity_new)
     val networkActivityMenuTitle = stringResource(if (showNewNetworkActivity) R.string.network_activity_title_new else R.string.network_activity_title)
 
@@ -765,16 +771,6 @@ fun ChatListContent(
                                                         inspectNetworkActivity()
                                                     },
                                                 )
-                                                if (!bannerVisible) {
-                                                    DropdownMenuItem(
-                                                        text = { Text(stringResource(R.string.network_activity_show_banner)) },
-                                                        modifier = Modifier.testTag("chatlist_show_network_activity_banner"),
-                                                        onClick = {
-                                                            overflowOpen = false
-                                                            bannerVisible = true
-                                                        },
-                                                    )
-                                                }
                                                 if (dottedSelectedRows.isNotEmpty()) {
                                                     DropdownMenuItem(
                                                         text = {
@@ -862,7 +858,7 @@ fun ChatListContent(
                                                     Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
                                                 }
                                             }
-                                            DropdownMenu(moreOpen, { moreOpen = false }) {
+                                            DropdownMenu(moreOpen, { moreOpen = false }, modifier = Modifier.testTag("chatlist_more_menu")) {
                                                 DropdownMenuItem(
                                                     text = { Text(networkActivityMenuTitle) },
                                                     leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },
@@ -872,16 +868,6 @@ fun ChatListContent(
                                                         inspectNetworkActivity()
                                                     },
                                                 )
-                                                if (!bannerVisible) {
-                                                    DropdownMenuItem(
-                                                        text = { Text(stringResource(R.string.network_activity_show_banner)) },
-                                                        modifier = Modifier.testTag("chatlist_show_network_activity_banner"),
-                                                        onClick = {
-                                                            moreOpen = false
-                                                            bannerVisible = true
-                                                        },
-                                                    )
-                                                }
                                                 DropdownMenuItem(
                                                     text = { Text(stringResource(R.string.folders_manage)) },
                                                     leadingIcon = { Icon(Icons.Outlined.FolderOpen, contentDescription = null) },
@@ -944,17 +930,14 @@ fun ChatListContent(
         ) { padding ->
             Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    if (bannerVisible) {
+                    if (!networkActivityBannerHidden) {
                         NetworkActivityBanner(
                             activity = networkActivity,
                             chrome = syncChrome,
                             connectionNoticeVisible = if (archiveMode || invitationMode) connectionOnlyNoticeVisible else connectionNoticeVisible,
                             includeHistory = !archiveMode && !invitationMode,
                             onInspect = ::inspectNetworkActivity,
-                            onHide = {
-                                onNetworkActivitySeen()
-                                bannerVisible = false
-                            },
+                            onHide = onHideNetworkActivityBanner,
                         )
                     }
 
@@ -1116,6 +1099,7 @@ fun ChatListContent(
             onConnect = { id -> closeActivityThen { onActivityNetworkAction(id, NetworkActivityAction.CONNECT) } },
             onSettings = { id -> closeActivityThen { onActivityNetworkAction(id, NetworkActivityAction.SETTINGS) } },
             onServerMessages = { id -> closeActivityThen { onActivityNetworkAction(id, NetworkActivityAction.SERVER_MESSAGES) } },
+            onClearRecent = onClearNetworkActivityHistory,
         )
     }
 

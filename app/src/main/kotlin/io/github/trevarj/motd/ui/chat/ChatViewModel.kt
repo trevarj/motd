@@ -1160,6 +1160,7 @@ class ChatViewModel
                 historyResyncCoordinator.reconcileBuffer(
                     buffer = currentBuffer,
                     client = client,
+                    statusOwnerId = currentBuffer.id,
                     isCurrent = { connectionManager.clientFor(currentBuffer.networkId) === client },
                 )
             }

@@ -212,6 +212,7 @@ class ChatListViewModel
         private val savedStateHandle: SavedStateHandle,
         private val appVisibility: AppVisibility,
         bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
+        private val networkActivityBannerSession: NetworkActivityBannerSession = NetworkActivityBannerSession(),
     ) : ViewModel() {
         init {
             // The coordinator is process-scoped and observes persisted pending closes, so creating a
@@ -229,14 +230,24 @@ class ChatListViewModel
         private val networkActivityLedger = NetworkActivityLedger()
         private val _networkActivity = MutableStateFlow(NetworkActivityState())
         val networkActivity: StateFlow<NetworkActivityState> = _networkActivity.asStateFlow()
+        val networkActivityBannerHidden: StateFlow<Boolean> = networkActivityBannerSession.hidden
         private val seenNetworkActivitySequence = MutableStateFlow(0L)
         val hasUnseenNetworkActivity: StateFlow<Boolean> =
             combine(networkActivity, seenNetworkActivitySequence) { activity, seen ->
-                activity.active.isNotEmpty() && activity.latestAttentionSequence > seen
+                activity.unacknowledgedCount > 0 && activity.latestAttentionSequence > seen
             }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
         fun markNetworkActivitySeen() {
             seenNetworkActivitySequence.value = networkActivityLedger.latestAttentionSequence
+        }
+
+        fun hideNetworkActivityBanner() {
+            markNetworkActivitySeen()
+            networkActivityBannerSession.hide()
+        }
+
+        fun clearNetworkActivityHistory() {
+            _networkActivity.value = networkActivityLedger.clearRecent()
         }
 
         private val activityBuffers =
@@ -271,12 +282,7 @@ class ChatListViewModel
                 syncChrome.map { it != ChatListSyncChrome.Hidden }.distinctUntilChanged(),
                 networkActivity,
             ) { statuses, visible, activity ->
-                val acknowledgedBuffers =
-                    activity.active
-                        .filter { it.bufferId != null }
-                        .groupBy { it.bufferId }
-                        .filterValues { issues -> issues.all { it.acknowledged } }
-                        .keys
+                val acknowledgedBuffers = activity.active.mapNotNullTo(mutableSetOf()) { if (it.acknowledged) it.bufferId else null }
                 chatListSyncIndicators(statuses, visible).filterNot { (id, indicator) -> id in acknowledgedBuffers && indicator == ChatListSyncIndicator.ERROR }
             }.distinctUntilChanged()
                 .stateIn(viewModelScope, WhileSubscribed(5_000), emptyMap())
@@ -736,7 +742,7 @@ class ChatListViewModel
             val current = networkActivityLedger.current(issue, includeRecent = navigation) ?: return@launch
             if (networkRepository.networkById(current.networkId) == null) return@launch
             if (networkActivityLedger.current(issue, includeRecent = navigation) == null) return@launch
-            if (current.disposition == null) {
+            if (current.disposition == null && action != NetworkActivityAction.ACKNOWLEDGE) {
                 val reported = networkActivity.value.networks.firstOrNull { it.id == current.networkId } ?: return@launch
                 if (current.bufferId == null) {
                     if (reported.connection != connectionManager.connectionStates.value[current.networkId]) return@launch
@@ -746,17 +752,14 @@ class ChatListViewModel
             }
             when (action) {
                 NetworkActivityAction.ACKNOWLEDGE -> {
-                    val settled =
-                        if (current.bufferId == null) {
-                            connectionManager.connectionStates.value[current.networkId] is IrcClientState.Failed
-                        } else {
-                            historyResync.syncStatuses.value[current.bufferId].let { it is HistorySyncStatus.Failed || it is HistorySyncStatus.Partial }
-                        }
-                    // Acknowledgement is local presentation, not source dismissal or recovery.
-                    if (settled) _networkActivity.value = networkActivityLedger.acknowledge(issue)
+                    // Acknowledgement is local presentation, including retry/unknown states.
+                    _networkActivity.value = networkActivityLedger.acknowledge(issue)
                 }
 
                 NetworkActivityAction.CONNECT -> {
+                    if (current.bufferId != null) return@launch
+                    val live = connectionManager.connectionStates.value[current.networkId]
+                    if (live is IrcClientState.Ready || live == IrcClientState.Connecting || live == IrcClientState.Registering) return@launch
                     if (connectionManager.certPrompts.value.none { it.networkId == current.networkId }) connectionManager.connect(current.networkId)
                 }
 
@@ -766,24 +769,31 @@ class ChatListViewModel
 
                 NetworkActivityAction.SERVER_MESSAGES -> {
                     val id = connectionManager.ensureServerBuffer(current.networkId)
-                    if (networkActivityLedger.current(issue, includeRecent = true) != null && networkRepository.networkById(current.networkId) != null) onOpenBuffer(id)
+                    if (networkRepository.networkById(current.networkId) != null && networkActivityLedger.current(issue, includeRecent = true) != null) onOpenBuffer(id)
                 }
 
                 NetworkActivityAction.OPEN_CHAT, NetworkActivityAction.RETRY_HISTORY -> {
                     val bufferId = current.bufferId ?: return@launch
                     val id = bufferRepository.canonicalBufferId(bufferId) ?: return@launch
                     val room = bufferRepository.observeBuffer(id).first()?.takeUnless { it.dismissed || it.pendingCloseAt != null } ?: return@launch
+                    if (room.networkId != current.networkId) return@launch
                     if (networkActivityLedger.current(issue, includeRecent = navigation) == null) return@launch
                     if (action == NetworkActivityAction.OPEN_CHAT) {
                         onOpenBuffer(id)
                     } else {
                         val status = historyResync.syncStatuses.value[bufferId]
-                        if (status !is HistorySyncStatus.Failed && status !is HistorySyncStatus.Partial) return@launch
-                        val client = connectionManager.clientFor(room.networkId) ?: return@launch
-                        if (connectionManager.connectionStates.value[room.networkId] !is IrcClientState.Ready) return@launch
+                        val exactCause =
+                            when (status) {
+                                is HistorySyncStatus.Failed -> current.kind == NetworkActivityKind.HISTORY_FAILED && current.reason == status.reason
+                                is HistorySyncStatus.Partial -> current.kind == NetworkActivityKind.HISTORY_PARTIAL && current.reason == status.reason
+                                else -> false
+                            }
+                        if (!exactCause) return@launch
+                        val client = connectionManager.clientFor(current.networkId) ?: return@launch
+                        if (connectionManager.connectionStates.value[current.networkId] !is IrcClientState.Ready) return@launch
                         // The coordinator owns settlement. A return value alone cannot prove the
                         // published status's generation survived dismissal or a superseding pass.
-                        historyResync.reconcileBuffer(room, client, isCurrent = { connectionManager.clientFor(room.networkId) === client })
+                        historyResync.reconcileBuffer(room, client, statusOwnerId = bufferId, isCurrent = { connectionManager.clientFor(current.networkId) === client })
                     }
                 }
             }
