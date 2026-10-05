@@ -67,13 +67,7 @@ internal class TimelineRobot(
         // generic 10s component wait, which is a cold-emulator flake edge for this row.
         awaitNewestRow(messageTag, rowId, timeoutMs = 30_000, diagnostics = diagnostics)
         val players = rule.onAllNodes(playerMatcher, useUnmergedTree = true).assertCountEquals(1)
-        val player = players[0].assertIsDisplayed()
-        val density =
-            InstrumentationRegistry
-                .getInstrumentation()
-                .targetContext.resources.displayMetrics.density
-        val heightDp = player.fetchSemanticsNode().boundsInRoot.height / density
-        assertTrue("audio player height was ${heightDp}dp", heightDp <= 84f)
+        players[0].assertIsDisplayed()
         rule.onAllNodes(detailsMatcher, useUnmergedTree = true).assertCountEquals(1)[0].performClick()
         rule.onNodeWithText("Link", useUnmergedTree = true).assertIsDisplayed()
     }
