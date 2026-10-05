@@ -42,6 +42,10 @@ compilation of the test source set and its dependencies. Run `:app:assembleDebug
 only when resources, manifest, packaging, or an actual APK require it. UI visual
 checks use the x86_64 `:app:assembleE2e` APK instead.
 
+App test JVMs export `java.base/jdk.internal.access` to unnamed modules in
+`app/build.gradle.kts` so Robolectric 4.17's FileDescriptor interceptor can use
+`SharedSecrets` on JDK 21. No broader module opens are needed for this access.
+
 ## Behavior-test arrangements
 
 Arrange the state needed for the behavior under test. Select typed navigation

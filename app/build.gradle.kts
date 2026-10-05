@@ -575,6 +575,8 @@ dependencies {
 
 // Generated JUnit cases are deterministic only for the selected profile/seed/replay inputs.
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    // Robolectric 4.17's FileDescriptor interceptor uses SharedSecrets on JDK 21.
+    jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
     // Native Compose state degrades paging within ten shared Robolectric classes.
     if (name == "testDebugUnitTest") forkEvery = 5
     listOf(
