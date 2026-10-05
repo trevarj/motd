@@ -1,0 +1,6 @@
+- Added network activity details, with a banner you can hide until restarting the app.
+- Added configurable floating message input and easier navigation back from chat history.
+- Improved audio playback controls.
+- Received DCC files now save to Downloads.
+- Added confirmed local Dickord chat deletion.
+- Refreshed folder tabs with a shared rounded background.
